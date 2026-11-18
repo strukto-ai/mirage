@@ -1,11 +1,16 @@
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, TypedDict
 
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.errors.fs import enoent
 
 PATH_TREE_ID = "__path_tree__"
 PAGE_CHUNK_BATCH_SIZE = 100
+
+
+class ChromaChunk(TypedDict):
+    document: str
+    metadata: dict[str, Any]
 
 
 async def fetch_path_tree(
@@ -36,9 +41,9 @@ async def iter_page_chunks(
 async def page_chunks(
     accessor: ChromaAccessor,
     slug: str,
-) -> list[dict[str, Any]]:
+) -> list[ChromaChunk]:
     collection = await accessor.get_collection()
-    chunks: list[dict[str, Any]] = []
+    chunks: list[ChromaChunk] = []
     offset = 0
     while True:
         result = await collection.get(
@@ -70,7 +75,7 @@ async def page_chunks(
 async def pages_chunks(
     accessor: ChromaAccessor,
     slugs: list[str],
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, list[ChromaChunk]]:
     """Fetch every chunk of several pages in one scan.
 
     Args:
@@ -84,7 +89,7 @@ async def pages_chunks(
         return {}
     collection = await accessor.get_collection()
     field = accessor.config.slug_field
-    grouped: dict[str, list[dict[str, Any]]] = {slug: [] for slug in slugs}
+    grouped: dict[str, list[ChromaChunk]] = {slug: [] for slug in slugs}
     offset = 0
     while True:
         result = await collection.get(

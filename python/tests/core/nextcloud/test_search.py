@@ -68,6 +68,17 @@ def test_search_target_rejects_non_nextcloud_url():
     assert search_target("https://cloud.example/webdav/") is None
 
 
+@pytest.mark.parametrize("suffix", ["%", "%2", "%zz", "%ff"])
+def test_search_rejects_malformed_percent_encoding(suffix):
+    url = "https://cloud.example/remote.php/dav/files/alice/"
+    with pytest.raises(ValueError, match="invalid percent-encoding"):
+        search_target(url + suffix)
+    target = search_target(url)
+    assert target is not None
+    with pytest.raises(ValueError, match="invalid percent-encoding"):
+        relative_path(url + suffix, target)
+
+
 def test_relative_path_preserves_literal_percent_in_subroot():
     target = search_target(
         "https://cloud.example/nextcloud/remote.php/dav/files/alice/"

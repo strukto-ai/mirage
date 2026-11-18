@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CacheKey, JobKey, MountKey, StateKey } from './keys.ts'
-import { splitManifestAndBlobs } from './manifest.ts'
+import { resolveManifest, splitManifestAndBlobs } from './manifest.ts'
 import { readSnapshotTar, writeSnapshotTar } from './tar_io.ts'
 import { BLOB_REF_KEY } from './utils.ts'
 
@@ -132,6 +132,25 @@ describe('splitManifestAndBlobs', () => {
 })
 
 describe('splitManifestAndBlobs mount files', () => {
+  it('round-trips all filenames and record keys in a disk snapshot', () => {
+    const state = makeState()
+    state[StateKey.MOUNTS] = [
+      {
+        [MountKey.INDEX]: 0,
+        [MountKey.VFS_STATE]: { type: 'disk', files: { ['__proto__']: '/source' } },
+      },
+    ]
+    const bytes = Uint8Array.of(12)
+    const [manifest, blobs] = splitManifestAndBlobs(state)
+    const restored = resolveManifest(manifest, (path) => {
+      expect(blobs[path]).toBe('/source')
+      return bytes
+    }) as AnyDict
+    const [mount] = restored[StateKey.MOUNTS] as [AnyDict]
+    const vfs = mount[MountKey.VFS_STATE] as AnyDict
+    expect(Object.entries(vfs.files as AnyDict)).toEqual([['__proto__', bytes]])
+  })
+
   it('stashes OPFS bytes as blobs that restore as bytes', async () => {
     const state = makeState()
     const bytes = new TextEncoder().encode('opfs body')

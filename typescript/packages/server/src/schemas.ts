@@ -33,6 +33,18 @@ type WorkspaceStatus = 'running' | 'stopped'
 /** An instant as the API reports every time: RFC 3339 in UTC to the millisecond, from `msToRfc3339`. */
 export type Instant = string
 
+export interface HealthResponse {
+  status: string
+  workspaces: number
+  uptime_ms: number
+}
+
+export interface SnapshotWorkspaceResponse {
+  id: string
+  key: string
+  size: number
+}
+
 export interface WorkspaceBrief {
   id: string
   status: WorkspaceStatus

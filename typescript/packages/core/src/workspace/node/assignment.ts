@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../shell/voice.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import {
@@ -123,7 +123,7 @@ export async function expandArrayItems(
   const session = context.session
   // A bare assignment is no command, but its glob reads listings all the
   // same, so it gets a scope of its own.
-  const resolved = await runInCommandScope(async () => {
+  const resolved = await commandScope(async () => {
     const classified = await expandAndClassify(
       arrayNode.namedChildren,
       context,

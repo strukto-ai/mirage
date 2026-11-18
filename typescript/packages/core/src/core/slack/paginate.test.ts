@@ -26,6 +26,18 @@ class FakeTransport implements SlackTransport {
 }
 
 describe('cursorPages', () => {
+  it('refuses a repeated cursor before fetching a third page', async () => {
+    const t = new FakeTransport((call) => {
+      if (call > 2) throw new Error('unexpected third request')
+      return { ok: true, members: [], response_metadata: { next_cursor: 'loop' } }
+    })
+    const pages = cursorPages(t, 'users.list', {}, 'members')
+    await pages.next()
+    await pages.next()
+    await expect(pages.next()).rejects.toThrow('pagination did not advance')
+    expect(t.calls).toHaveLength(2)
+  })
+
   it('walks until empty cursor', async () => {
     const pages: SlackResponse[] = [
       {

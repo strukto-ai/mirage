@@ -25,7 +25,7 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
+import { PostgresConfig } from '../../vfs/postgres/config.ts'
 import type { ColumnInfo, ForeignKey } from './client.ts'
 import * as client from './client.ts'
 import type { PgDriver } from './_driver.ts'
@@ -60,10 +60,7 @@ const STUB_DRIVER: PgDriver = {
 }
 
 function makeAccessor(): PostgresAccessor {
-  return new PostgresAccessor(
-    STUB_DRIVER,
-    resolvePostgresConfig({ dsn: 'postgres://localhost/db' }),
-  )
+  return new PostgresAccessor(STUB_DRIVER, PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
 }
 
 function primeClient(): void {

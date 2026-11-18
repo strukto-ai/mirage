@@ -201,8 +201,8 @@ export class RAMVFS extends BaseVFS {
     this.store.files.clear()
     for (const [k, v] of Object.entries(state.files ?? {})) this.store.files.set(k, v)
     this.store.dirs.clear()
-    const dirs = state.dirs ?? []
-    for (const d of dirs.length > 0 ? dirs : ['/']) this.store.dirs.add(d)
+    this.store.dirs.add('/')
+    for (const d of state.dirs ?? []) this.store.dirs.add(d)
     this.store.modified.clear()
     for (const [k, v] of Object.entries(state.modified ?? {})) this.store.modified.set(k, v)
     this.store.attrs.clear()

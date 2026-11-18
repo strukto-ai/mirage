@@ -13,11 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.slack.paginate import cursor_pages
+
+
+class SlackChannel(TypedDict):
+    id: str
+    name: NotRequired[str]
+    user: NotRequired[str]
+    is_archived: NotRequired[bool]
+    created: NotRequired[int]
 
 
 def _channel_base_params(types: str, limit: int) -> dict[str, Any]:
@@ -28,7 +36,7 @@ def list_channels_stream(
     accessor: SlackAccessor,
     types: str = "public_channel,private_channel",
     limit: int = 200,
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncIterator[list[SlackChannel]]:
     """Page-streaming variant: yields one Slack page per HTTP round-trip.
 
     Args:
@@ -52,7 +60,7 @@ async def list_channels(
     types: str = "public_channel,private_channel",
     limit: int = 200,
     stop_at: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[SlackChannel]:
     """List channels via conversations.list (eager; collects all pages,
     and none past the one that brings ``stop_at``).
 
@@ -72,7 +80,7 @@ async def list_channels(
 
 async def list_dms(
     accessor: SlackAccessor, limit: int = 200
-) -> list[dict[str, Any]]:
+) -> list[SlackChannel]:
     """List direct messages via conversations.list (eager).
 
     Args:

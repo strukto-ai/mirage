@@ -12,30 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
 import sys
+from unittest.mock import patch
 
-from mirage.machine.daytona import sdk
+import pytest
 
-NAMES = ("AsyncDaytona", "DaytonaConfig", "DaytonaNotFoundError")
-
-
-def test_the_extra_resolves_as_a_unit():
-    """Every name comes from the SDK, or every name is None; never a mix."""
-    present = [getattr(sdk, name) is not None for name in NAMES]
-    assert all(present) or not any(present)
+from mirage.machine.daytona import DaytonaMachine
 
 
-def test_an_absent_extra_reads_as_none():
-    """CI installs every extra, so this is the only run of the except arm."""
-    saved = sys.modules.get("daytona")
-    sys.modules["daytona"] = None
-    try:
-        module = importlib.reload(sdk)
-        assert all(getattr(module, name) is None for name in NAMES)
-    finally:
-        if saved is None:
-            sys.modules.pop("daytona", None)
-        else:
-            sys.modules["daytona"] = saved
-        importlib.reload(sdk)
+def test_the_sdk_loads_on_first_use(monkeypatch):
+    monkeypatch.setitem(sys.modules, "daytona", None)
+    machine = DaytonaMachine("box", config={"sandbox_id": "id"})
+    with pytest.raises(ImportError, match=r"mirage-ai\[daytona\]"):
+        _ = machine._sdk
+
+
+def test_a_broken_dependency_keeps_its_import_error():
+    machine = DaytonaMachine("box", config={"sandbox_id": "id"})
+    failure = ModuleNotFoundError(
+        "missing SDK dependency", name="upstream_dep"
+    )
+    with patch("mirage.machine.handle.import_module", side_effect=failure):
+        with pytest.raises(ModuleNotFoundError) as caught:
+            _ = machine._sdk
+    assert caught.value is failure

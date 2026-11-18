@@ -20,7 +20,11 @@ from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.changes import DELETED, work_changes
-from mirage.commands.cli.builtin.git.constants import GITLINK
+from mirage.commands.cli.builtin.git.constants import (
+    GITLINK,
+    GITLINK_MODE,
+    TREE_MODE,
+)
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     ConfigUsageError,
@@ -96,7 +100,7 @@ def _blob_sizes(
     return {
         oid: str(len(repo.object_store.get_raw(ObjectID(oid.encode()))[1]))
         for _, mode, oid in rows
-        if mode not in ("040000", "160000")
+        if mode not in (TREE_MODE, GITLINK_MODE)
     }
 
 
@@ -485,9 +489,9 @@ async def ls_tree(
         label = relative if nul else quote_path(relative, False, fully)
         kind = (
             "tree"
-            if mode == "040000"
+            if mode == TREE_MODE
             else "commit"
-            if mode == "160000"
+            if mode == GITLINK_MODE
             else "blob"
         )
         shown = oid[: lengths.get(oid, len(oid))]

@@ -29,7 +29,7 @@ import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { shellQuote } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { BASE_CONFIG_FIELDS, checkMountType, type MachineConfig } from './config.ts'
+import { MachineConfig, checkMountType } from './config.ts'
 import {
   CHECK_LINE,
   CHECK_MARK,
@@ -229,7 +229,7 @@ export class ExitLineFilter {
  * against the provider's own key list. Mirrors Python's `MachineHandle`.
  */
 export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
-  static readonly configFields: ConfigFields = BASE_CONFIG_FIELDS
+  static readonly configFields: ConfigFields = MachineConfig
   /** The provider this class reaches machines through, as `machines:` spells it. */
   static readonly provider: string
 
@@ -285,7 +285,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   constructor(
     readonly name: string,
     config?: C,
-    configFields: ConfigFields = BASE_CONFIG_FIELDS,
+    configFields: ConfigFields = MachineConfig,
   ) {
     const coerced = coerceRuntimeConfig(config, Object.keys(configFields), 'machine')
     this.config = { ...coerced, env: { ...coerced.env } }

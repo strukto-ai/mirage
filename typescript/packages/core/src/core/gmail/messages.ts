@@ -16,9 +16,15 @@ import { decodeBase64 } from '../../utils/base64.ts'
 import { type TokenManager, gmailBase, googleGet, googleRequest } from '../google/client.ts'
 import { compactJsonBytes } from '../render/json.ts'
 
+interface GmailBody {
+  data?: string
+  size?: number
+  attachmentId?: string
+}
+
 export interface GmailPayload {
   mimeType?: string
-  body?: { data?: string; size?: number; attachmentId?: string }
+  body?: GmailBody
   headers?: { name?: string; value?: string }[]
   filename?: string
   parts?: GmailPayload[]

@@ -43,7 +43,7 @@ set how much one read of `rows.jsonl` may return.
 <ResponseField name="dsn" type={"string"} required post={["secret"]}>
   Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.
 </ResponseField>
-<ResponseField name="schemas" type={"string[]"}>
+<ResponseField name="schemas" type={"string[]"} default={"null"}>
   Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.
 </ResponseField>
 <ResponseField name="defaultRowLimit" type={"number"} default={"1000"}>

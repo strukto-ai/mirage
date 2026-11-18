@@ -12,16 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from stat import S_IFDIR, S_IFMT, S_IFREG
 from typing import Any
 
-from mirage.runtime.python.monty.loader import StatResult
-from mirage.runtime.types import VFSStat
+from mirage.runtime.python.monty.loader import load_monty_module
+from mirage.runtime.types import VFSEntry, VFSStat
+
+
+def file_type(st: VFSStat | VFSEntry) -> int:
+    """Use the row's declared POSIX type, falling back for permission-only modes."""
+    return S_IFMT(st.mode or 0) or (S_IFDIR if st.is_dir else S_IFREG)
+
+
+def is_regular_row(st: VFSStat | VFSEntry) -> bool:
+    return file_type(st) == S_IFREG
+
+
+def is_dir_row(st: VFSStat | VFSEntry) -> bool:
+    return file_type(st) == S_IFDIR
 
 
 def stat_result(st: VFSStat) -> Any:
     # Monty reads a 0.0 as epoch zero rather than substituting the host
     # clock, so an unknown mtime stays unknown instead of becoming now.
     mtime = (st.mtime_ns or 0) / 1_000_000_000
-    if st.is_dir:
-        return StatResult.dir_stat(mode=st.mode, mtime=mtime)
-    return StatResult.file_stat(size=st.size, mode=st.mode, mtime=mtime)
+    stat = load_monty_module().StatResult
+    if is_dir_row(st):
+        return stat.dir_stat(mode=st.mode, mtime=mtime)
+    return stat.file_stat(size=st.size, mode=st.mode, mtime=mtime)

@@ -156,6 +156,14 @@ def test_kwargs_take_precedence_over_config() -> None:
     assert vfs.accessor.repo == "kw-repo"
     assert vfs.accessor.ref == "kw-ref"
 
+    saved = vfs.get_state()["config"]
+    assert (saved["owner"], saved["repo"], saved["ref"]) == (
+        "kw-owner",
+        "kw-repo",
+        "kw-ref",
+    )
+    assert config.owner == "cfg-owner"
+
 
 def test_missing_owner_repo_raises() -> None:
     with pytest.raises(ValueError, match="requires owner and repo"):

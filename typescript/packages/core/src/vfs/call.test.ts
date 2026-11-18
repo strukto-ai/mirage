@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { enoent } from '../errors/fs.ts'
 import { SessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext } from '../policy/types.ts'
@@ -207,10 +207,10 @@ describe('VFS functions', () => {
     })
     try {
       await expect(
-        runWithSession(session, () => ws.dispatch('shelve', '/shelf/a.txt')),
+        setCurrentSession(session, () => ws.dispatch('shelve', '/shelf/a.txt')),
       ).rejects.toMatchObject({ code: 'EROFS' })
       await expect(
-        runWithSession(session, () =>
+        setCurrentSession(session, () =>
           ws.dispatch('copyTo', '/shelf/b.txt', [PathSpec.fromStrPath('/shelf/a.txt')]),
         ),
       ).rejects.toMatchObject({ code: 'EROFS' })
@@ -252,7 +252,7 @@ describe('VFS functions', () => {
       visibility: { paths: { paths: ['/shelf/c.txt'] } },
     })
     const compare = (other: string): Promise<unknown> =>
-      runWithSession(session, () =>
+      setCurrentSession(session, () =>
         ws.dispatch('compare', '/shelf/a.txt', [PathSpec.fromStrPath(other, undefined, '/')]),
       )
     try {
@@ -317,7 +317,7 @@ describe('custom answers under hides', () => {
       profile: SessionProfile({ paths: { hide: ['/shelf/secret.txt'] } }),
     })
     try {
-      await runWithSession(session, async () => {
+      await setCurrentSession(session, async () => {
         const found = (await ws.dispatch('hits', '/shelf/', ['x'])) as PathSpec[]
         expect(found.map((p) => p.virtual)).toEqual(['/shelf/a.txt'])
         const ranked = (await ws.dispatch('ranked', '/shelf/', ['x'])) as { path: PathSpec }[]

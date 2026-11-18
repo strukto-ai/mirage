@@ -32,12 +32,11 @@ from mirage.runtime.python.execution import main_filename
 from mirage.runtime.python.monty.constants import (
     DEFAULT_PROG,
     LIMITS,
-    MISSING_PACKAGE_HINT,
     POOL_WORKERS,
     REMOTE_REQUEST_TIMEOUT,
 )
 from mirage.runtime.python.monty.fs import MontyFs
-from mirage.runtime.python.monty.loader import pydantic_monty
+from mirage.runtime.python.monty.loader import load_monty_module
 from mirage.runtime.types import OutputFn, Program, RunResult
 from mirage.types import PathSpec
 
@@ -80,7 +79,7 @@ class _SharedPool:
 
     async def _open(self, opened: concurrent.futures.Future[Any]) -> None:
         try:
-            pool = pydantic_monty.AsyncMonty(max_processes=POOL_WORKERS)
+            pool = load_monty_module().AsyncMonty(max_processes=POOL_WORKERS)
             await pool.__aenter__()
         except BaseException as exc:
             with self._lock:
@@ -141,16 +140,15 @@ async def compile_error(code: str) -> CompileError | None:
     Raises:
         ImportError: the ``monty`` extra is not installed.
     """
-    if pydantic_monty is None:
-        raise ImportError(MISSING_PACKAGE_HINT)
+    module = load_monty_module()
     pool = await _shared_pool.acquire()
     try:
         async with pool.checkout(limits=LIMITS) as session:
             try:
                 await session.feed_run(f"raise SystemExit\n{code}")
             except (
-                pydantic_monty.MontySyntaxError,
-                pydantic_monty.MontyRuntimeError,
+                module.MontySyntaxError,
+                module.MontyRuntimeError,
             ) as exc:
                 if isinstance(exc.exception(), SystemExit):
                     return None
@@ -231,10 +229,11 @@ class MontyExecution:
     async def _open_pool(self) -> Any:
         if self._shared:
             return await _shared_pool.acquire()
+        module = load_monty_module()
         pool = (
-            pydantic_monty.AsyncMonty()
+            module.AsyncMonty()
             if self._url is None
-            else pydantic_monty.AsyncMontyRemote(
+            else module.AsyncMontyRemote(
                 self._url,
                 request_timeout=REMOTE_REQUEST_TIMEOUT,
                 metadata=self._metadata(),
@@ -272,16 +271,17 @@ class MontyExecution:
             external_lookup (Mapping[str, Callable[..., Any]] | None):
                 the host functions the program may call by name.
         """
+        module = load_monty_module()
         prints = _Prints(output, errors)
         try:
             code, note = await self._feed(
                 program, cwd, fs, prints, external_lookup
             )
         except (
-            pydantic_monty.MontyRefusedError,
-            pydantic_monty.MontyConnectError,
-            pydantic_monty.MontyDisconnectError,
-            pydantic_monty.MontyShutdown,
+            module.MontyRefusedError,
+            module.MontyConnectError,
+            module.MontyDisconnectError,
+            module.MontyShutdown,
         ) as exc:
             code = 1
             note = f"{self.name}: remote server: {self._error_message(exc)}\n".encode()
@@ -313,6 +313,7 @@ class MontyExecution:
         # with it). feed_run awaits off the event loop, so the loop
         # stays free; a dead or timed-out worker surfaces as
         # MontyCrashedError and the pool replaces it.
+        module = load_monty_module()
         pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
@@ -387,16 +388,16 @@ class MontyExecution:
                     raise
                 finally:
                     let_go()
-        except pydantic_monty.MontySyntaxError as exc:
+        except module.MontySyntaxError as exc:
             return 1, (exc.display(format="traceback") + "\n").encode()
-        except pydantic_monty.MontyRuntimeError as exc:
+        except module.MontyRuntimeError as exc:
             if isinstance(exc.exception(), SystemExit):
                 message = exc.display(format="msg")
                 if message:
                     return 1, (message + "\n").encode()
                 return 0, b""
             return 1, (exc.display(format="traceback") + "\n").encode()
-        except pydantic_monty.MontyCrashedError as exc:
+        except module.MontyCrashedError as exc:
             reason = "timed out" if exc.timed_out else "crashed"
             return 1, f"{self.name}: worker {reason}\n".encode()
         return 0, b""

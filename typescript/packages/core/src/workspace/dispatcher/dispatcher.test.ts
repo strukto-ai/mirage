@@ -23,14 +23,14 @@ import { CommandSpec } from '../../commands/spec/types.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
-import { runWithSession } from '../../context/session_context.ts'
-import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
+import { record, revisionFor, recordingScope, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { SERVED_BY } from '../../mount/changes.ts'
 import { ManualClock } from '../../utils/clock.ts'
@@ -845,7 +845,7 @@ describe('the fenced remnant cascade rides the mount frame', () => {
         sessionId: 'agent',
         visibility: { paths: { paths: ['/ram/d/h.txt'] } },
       })
-      await runWithSession(sess, () => ws.dispatch('rmdir', '/ram/d'))
+      await setCurrentSession(sess, () => ws.dispatch('rmdir', '/ram/d'))
       expect(seen).toBe('r1')
       expect([...mounts]).toEqual(['/ram/'])
     } finally {
@@ -893,7 +893,7 @@ describe('the turf mode gates the node table', () => {
       await ws.shell('echo b > /extra/plain.txt')
       await ws.shell('ln -s plain.txt /extra/lk')
       const sess = ws.createSession('agent', { mounts: { '/extra/': 'read' } })
-      await runWithSession(sess, async () => {
+      await setCurrentSession(sess, async () => {
         await expect(ws.dispatch('unlink', '/extra/lk')).rejects.toMatchObject({
           code: 'EROFS',
         })
@@ -1038,7 +1038,7 @@ describe('the turf mode gates the node table', () => {
       const sess = ws.createSession('agent', {
         mounts: { '/rw/': 'write', '/ro/': 'read' },
       })
-      await runWithSession(sess, async () => {
+      await setCurrentSession(sess, async () => {
         await expect(
           ws.dispatch('rename', '/rw/lk', [PathSpec.fromStrPath('/ro/lk')]),
         ).rejects.toMatchObject({ code: 'EROFS', virtualPath: '/ro/lk' })
@@ -1100,7 +1100,7 @@ describe('a hide answers a create by what its parent answers', () => {
       const sess = ws.createSession('agent', {
         profile: { paths: { hide: ['/ram/vault', '/ram/open/pub.txt'] } },
       })
-      await runWithSession(sess, async () => {
+      await setCurrentSession(sess, async () => {
         await expect(
           ws.dispatch('write', '/ram/vault/new.txt', [ENC.encode('x')]),
         ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -1393,7 +1393,7 @@ describe('links into hidden space', () => {
           line,
         ).toEqual([out, err, code])
       }
-      await runWithSession(bob, async () => {
+      await setCurrentSession(bob, async () => {
         for (const call of [
           () => ws.vfs.read('/data/shared/to_secret'),
           () => ws.vfs.readlink('/data/shared/to_secret'),
@@ -1423,7 +1423,7 @@ describe('rmdir namespace entries', () => {
         const session = ws.createSession('remover', {
           profile: { paths: { hide: hidden ? ['/data/d/link'] : [] } },
         })
-        await runWithSession(session, async () => {
+        await setCurrentSession(session, async () => {
           if (hidden) await ws.vfs.rmdir('/data/d')
           else await expect(ws.vfs.rmdir('/data/d')).rejects.toMatchObject({ code: 'ENOTEMPTY' })
         })
@@ -1443,7 +1443,7 @@ describe('rmdir namespace entries', () => {
       const session = ws.createSession('remover', {
         profile: { paths: { hide: ['/data/secret'] } },
       })
-      await runWithSession(session, () => ws.vfs.rmdir('/data/d'))
+      await setCurrentSession(session, () => ws.vfs.rmdir('/data/d'))
       expect(ws.namespace.isLink('/data/d/l')).toBe(false)
       expect(DEC.decode((await ws.shell('ls /data')).stdout)).toBe('secret\n')
     } finally {
@@ -1465,7 +1465,7 @@ describe('rmdir namespace entries', () => {
       const session = ws.createSession('remover', {
         profile: { paths: { hide: ['/data/d/old'] } },
       })
-      await runWithSession(session, () => ws.vfs.rmdir('/data/d'))
+      await setCurrentSession(session, () => ws.vfs.rmdir('/data/d'))
       expect(ws.namespace.isLink('/data/d/old')).toBe(false)
       expect(ws.namespace.readlink('/data/d/late')).toBe('nowhere')
     } finally {
@@ -1835,7 +1835,7 @@ describe("a command's own op is judged on the paths the dispatcher reaches", () 
         visibility: { paths: { paths: ['/data/hid'] } },
       })
       const { gate, asked } = refusing('/data/real/secret')
-      await runWithSession(session, async () => {
+      await setCurrentSession(session, async () => {
         for (const [op, virtual, args] of [
           ['write', '/data/hid/x', [new TextEncoder().encode('x\n')]],
           ['read', '/data/hlink', []],
@@ -2170,7 +2170,7 @@ describe('a write and the cached bytes', () => {
     const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
     try {
       await ws.dispatch('read', TAPE)
-      await runWithRecording(async () => {
+      await recordingScope(async () => {
         record('copy', TAPE, 'tape', 0, startOp())
         await ws.dispatch('read', TAPE)
       })
@@ -2269,7 +2269,7 @@ describe('a link at the final name', () => {
       const spec = PathSpec.fromStrPath('/data/a.txt')
       const manager = ws.namespace.mountFor('/data/a.txt').cacheManager
       if (manager === null) throw new Error('no cache manager')
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         manager.noteProbed(spec, new FileStat({ name: 'a.txt', size: 9, type: FileType.FILE }))
         const probed = (await ws.dispatch('stat', '/data/a.txt')) as FileStat
         expect([probed.size, probed.dev]).toEqual([9, ident('/data/')])
@@ -2801,7 +2801,9 @@ describe('a hide filters a one-call read', () => {
   it('answers a tree read without the hidden entries', async () => {
     const ws = new Workspace({ '/ram': searched() })
     try {
-      const found = await runWithSession(secretHidden(), () => ws.dispatch('read_tree', '/ram/d'))
+      const found = await setCurrentSession(secretHidden(), () =>
+        ws.dispatch('read_tree', '/ram/d'),
+      )
       expect([...(found as Map<string, FileStat>).keys()]).toEqual(['a.txt'])
     } finally {
       await ws.close()
@@ -2813,7 +2815,7 @@ describe('a hide filters a one-call read', () => {
     const vfs = searched()
     const ws = new Workspace({ '/ram': vfs })
     try {
-      await runWithSession(secretHidden(), async () => {
+      await setCurrentSession(secretHidden(), async () => {
         const hits = (await ws.dispatch('files_containing', '/ram/d', ['a'], {
           whole_word: false,
           ignore_case: false,
@@ -2885,7 +2887,7 @@ describe('a hide filters a one-call read', () => {
       visibility: { paths: { paths: ['/r/secret'] } },
     })
     try {
-      const data = await runWithSession(session, async () => {
+      const data = await setCurrentSession(session, async () => {
         await ws.dispatch('read_many', '/r/a', [], {
           paths: [PathSpec.fromStrPath('/r/b'), PathSpec.fromStrPath('/r/secret/c')],
         })
@@ -2981,7 +2983,7 @@ describe('a hide filters a one-call read', () => {
     const ws = new Workspace({ '/ram': searched() }, { mode: MountMode.WRITE })
     try {
       await expect(
-        runWithSession(secretHidden(), () => ws.dispatch('rm_r', '/ram/d')),
+        setCurrentSession(secretHidden(), () => ws.dispatch('rm_r', '/ram/d')),
       ).rejects.toMatchObject({ declined: true })
     } finally {
       await ws.close()
@@ -2993,7 +2995,7 @@ describe('a hide filters a one-call read', () => {
     const vfs = searched()
     const ws = new Workspace({ '/ram': vfs })
     try {
-      await runWithSession(secretHidden(), () => ws.dispatch('before_full_walk', '/ram/d'))
+      await setCurrentSession(secretHidden(), () => ws.dispatch('before_full_walk', '/ram/d'))
       expect(vfs.counted).toEqual([1])
     } finally {
       await ws.close()
@@ -3010,7 +3012,7 @@ describe('a hide filters a one-call read', () => {
       visibility: { paths: { paths: ['/ram/d/n:12'] } },
     })
     try {
-      const records = (await runWithSession(session, () =>
+      const records = (await setCurrentSession(session, () =>
         ws.dispatch('search', '/ram/d', [{ query: 'n', options: {} }]),
       )) as [string, string][]
       expect(records.map(([hit]) => hit)).not.toContain('/ram/d/n:12')
@@ -3464,7 +3466,7 @@ describe('a hide filters a one-call read', () => {
     async (cls) => {
       const ws = new Workspace({ '/ram': limited(cls, 3) })
       try {
-        const answer = await runWithSession(secretHidden(), () =>
+        const answer = await setCurrentSession(secretHidden(), () =>
           ws.dispatch('before_full_walk', '/ram/d'),
         )
         expect(answer).toBeNull()
@@ -3511,7 +3513,7 @@ describe('a hide filters a one-call read', () => {
     const ws = new Workspace({ '/ram': vfs })
     try {
       const sess = ws.createSession('veiled', { profile: { paths: { hide: ['/ram/d/sec'] } } })
-      const listed = await runWithSession(sess, () =>
+      const listed = await setCurrentSession(sess, () =>
         ws.dispatch('readdir', '/ram/d', [], { limit: 2 }),
       )
       expect(vfs.asked).toEqual([undefined])
@@ -3596,7 +3598,7 @@ describe('hides answer before any policy', () => {
       })
       const stat = vi.spyOn(ram, 'stat')
       asked.length = 0
-      const probe = runWithSession(sess, () =>
+      const probe = setCurrentSession(sess, () =>
         internals.dispatcher.probeRead('stat', [
           ram,
           PathSpec.fromStrPath('/data/hid/x'),
@@ -3678,7 +3680,7 @@ describe('retained reads use the shared policy boundary', () => {
       .spyOn(MountEntry.prototype, 'callKeyed')
       .mockRejectedValue(new Error('unexpected backend call'))
     try {
-      await runWithSession(session, async () => {
+      await setCurrentSession(session, async () => {
         await expect(
           ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }),
         ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -3792,7 +3794,7 @@ it.each(['/data/file', '/unmounted'])(
       .spyOn(MountEntry.prototype, 'callKeyed')
       .mockRejectedValue(new Error('retained stat reached backend'))
     try {
-      await runWithSession(session, async () => {
+      await setCurrentSession(session, async () => {
         for (stage of ['pre', 'post', '']) {
           seen.length = 0
           const result = ws.vfs.dispatch('stat', path, [], { retained: row })

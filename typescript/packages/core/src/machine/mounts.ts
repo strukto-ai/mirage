@@ -15,7 +15,7 @@
 import {
   currentCaller,
   getCurrentSession,
-  runWithCaller,
+  bindCaller,
   type Caller,
 } from '../context/session_context.ts'
 import { strerrorOf } from '../errors/fs.ts'
@@ -511,7 +511,7 @@ export class MachineMounts {
       for (const { server } of [...this.served.values()]) {
         const failed = await runDetached(() =>
           SERVED_BY.run(this.machine, () =>
-            runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+            bindCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
           ),
         )
         for (const [path, err] of failed) lost.push(`${this.provider}: ${path}: ${strerrorOf(err)}`)
@@ -561,7 +561,7 @@ export class MachineMounts {
     })
     line.lent.add(running)
     try {
-      await runWithCaller({ ...currentCaller(), stop: line.stop, writeHeld: line.writeHeld }, op)
+      await bindCaller({ ...currentCaller(), stop: line.stop, writeHeld: line.writeHeld }, op)
     } finally {
       line.lent.delete(running)
       done()

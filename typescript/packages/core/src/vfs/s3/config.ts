@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
-import * as kp from '../../utils/key_prefix.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
+export { normalizeKeyPrefix } from '../../utils/key_prefix.ts'
 import { secretSchema, secretStr } from '../secrets.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
@@ -68,7 +68,7 @@ export const S3Config = z.object({
     .describe(
       'Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.',
     ),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
   )
@@ -117,11 +117,6 @@ export interface S3Config {
   httpAgentProvider?: () => S3HttpAgents
   defaultContentType?: string
   keyPrefix?: string
-}
-
-export function normalizeKeyPrefix(v: string | undefined): string | undefined {
-  const out = kp.normalize(v)
-  return out === '' ? undefined : out
 }
 
 // The S3 family's python spellings, shared by `s3` and every S3-compatible

@@ -13,14 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_under, just_made, settle
-from mirage.events.payload import text_field
 from mirage.types import Delta, FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -103,8 +102,8 @@ class AppDeltaHook:
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []
         for change in found:
-            item_id = text_field(change, "fileId")
-            if item_id is None:
+            item_id = change.get("fileId")
+            if not isinstance(item_id, str):
                 continue
             item = change.get("file")
             if (
@@ -127,7 +126,7 @@ class AppDeltaHook:
             feed_checkpoint({"token": token, "seen": seen}),
         )
 
-    def _path(self, prefix: str, item: dict[str, Any]) -> str:
+    def _path(self, prefix: str, item: Mapping[str, Any]) -> str:
         """Where the app lists ``item``.
 
         Args:

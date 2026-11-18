@@ -22,7 +22,13 @@ import {
 } from '../../../types.ts'
 import { systemNow } from '../../../utils/clock.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
-import { ALL_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
+import {
+  ALL_MODE_BITS,
+  contentSize,
+  fileMode,
+  posixMode,
+  sizeUnknown,
+} from '../../../utils/stat_view.ts'
 import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import {
   EPOCH_LS_TIME,
@@ -31,7 +37,6 @@ import {
   FIND_OLD_SECONDS,
   LS_RECENT_SECONDS,
   MONTHS,
-  TYPE_CHARS,
 } from './constants.ts'
 import { groupName, ownerName, UNKNOWN_NAME, type Identity } from './identity.ts'
 import { gnuStrftime } from './strftime.ts'
@@ -160,27 +165,9 @@ export function humanSize(n: number): string {
   return humanScaled(n, 1024, ['', 'K', 'M', 'G', 'T', 'P', 'E'])
 }
 
-function permTriplet(bits: number, special?: string): string {
-  const execBit =
-    special !== undefined
-      ? bits & 1
-        ? special.toLowerCase()
-        : special.toUpperCase()
-      : bits & 1
-        ? 'x'
-        : '-'
-  return (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + execBit
-}
-
 export function lsModeString(s: FileStat): string {
-  const typeChar = TYPE_CHARS[s.type] ?? '-'
-  const mode = s.mode ?? posixMode(s) & ALL_MODE_BITS
-  return (
-    typeChar +
-    permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
-    permTriplet(mode >> 3, mode & 0o2000 ? 's' : undefined) +
-    permTriplet(mode, mode & 0o1000 ? 't' : undefined)
-  )
+  const mode = posixMode(s)
+  return fileMode(s.mode === null ? mode : (mode & ~ALL_MODE_BITS) | (s.mode & ALL_MODE_BITS))
 }
 
 // The time column: `Mon DD HH:MM` for a recent time, `Mon DD  YYYY` for an

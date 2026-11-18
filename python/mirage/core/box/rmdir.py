@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -93,7 +94,7 @@ async def _delete_link(
 
 async def _delete_tree(
     accessor: BoxAccessor,
-    folder: dict[str, Any],
+    folder: Mapping[str, Any],
     path: PathSpec,
     lost: list[tuple[PathSpec, str | None]],
 ) -> bool:
@@ -148,7 +149,7 @@ async def _delete_tree(
 async def _remove(
     accessor: BoxAccessor,
     path: PathSpec,
-    item: dict[str, Any],
+    item: Mapping[str, Any],
     lost: list[tuple[PathSpec, str | None]],
 ) -> bool:
     """Delete ``item``: a file alone, a folder walked or whole.

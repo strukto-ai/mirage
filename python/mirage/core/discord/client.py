@@ -17,7 +17,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 
@@ -90,30 +90,17 @@ def _discord_error(
     return ApiError(f"Rate limited, retry after {retry}s", 429)
 
 
+DiscordMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+
+
 async def discord_request(
     accessor: DiscordAccessor,
-    method: str,
+    method: DiscordMethod,
     endpoint: str,
     params: dict[str, Any] | None = None,
     body: dict[str, Any] | None = None,
     form: aiohttp.FormData | None = None,
 ) -> Any:
-    """One Discord call, sent to the config's ``base_url`` when it names
-    one (the integ fake stands in for discord.com that way).
-
-    POST and PATCH send a JSON body, ``{}`` when none is given, or a
-    multipart ``form`` in its place; PUT and DELETE send none and read no
-    answer.
-
-    Args:
-        accessor (DiscordAccessor): Discord accessor.
-        method (str): the HTTP method.
-        endpoint (str): API path, e.g. ``/channels/{id}/messages``.
-        params (dict[str, Any] | None): query parameters.
-        body (dict[str, Any] | None): the JSON body of a POST or PATCH.
-        form (aiohttp.FormData | None): a multipart body sent in place of
-            the JSON one.
-    """
     sends_json = method in ("POST", "PATCH") and form is None
     return await api_request(
         method,

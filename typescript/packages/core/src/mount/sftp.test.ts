@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { currentCaller, bindCaller } from '../context/session_context.ts'
 import { strerrorOf } from '../errors/fs.ts'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -193,6 +193,16 @@ describe('helpers', () => {
     })
     expect(longname('f', attrs).startsWith('-rw-r-----')).toBe(true)
     expect(longname('f', attrs).endsWith(' f')).toBe(true)
+    for (const [mode, prefix] of [
+      [0o060640, 'brw-r-----'],
+      [0o140755, 'srwxr-xr-x'],
+      [0o010600, 'prw-------'],
+      [0o020666, 'crw-rw-rw-'],
+      [0o107644, '-rwSr-Sr-T'],
+      [0o107755, '-rwsr-sr-t'],
+    ] as const) {
+      expect(longname('f', { ...attrs, mode }).split(' ')[0]).toBe(prefix)
+    }
   })
 })
 
@@ -550,7 +560,7 @@ describe('PipeServer', () => {
     await until(() => internals.admitted.size === 1)
     const [stop = null] = internals.admitted
     const server = new PipeServer(ws.vfs, ws.getSession('agent'), (op) =>
-      runWithCaller({ ...currentCaller(), stop }, op),
+      bindCaller({ ...currentCaller(), stop }, op),
     )
     const end = client()
     const served = server.serve(end.reader, end.writer)

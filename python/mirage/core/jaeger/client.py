@@ -97,22 +97,13 @@ async def _get(
     endpoint: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Call the Jaeger query API and return the decoded body.
-
-    Args:
-        accessor (JaegerAccessor): jaeger accessor.
-        endpoint (str): API path beginning with a slash.
-        params (dict[str, Any] | None): query string arguments.
-
-    Returns:
-        dict[str, Any]: decoded JSON body.
-
-    Raises:
-        JaegerApiError: the API reported an error status.
-    """
     url = f"{accessor.config.host.rstrip('/')}{endpoint}"
     payload = await api_request(
-        "GET", url, error_of=_error_of, params=params, session=accessor.pool
+        "GET",
+        url,
+        error_of=_error_of,
+        params=params,
+        session=accessor.pool,
     )
     if not isinstance(payload, dict):
         raise JaegerApiError("Jaeger response must be a JSON object")
@@ -124,7 +115,9 @@ def _data_list(payload: dict[str, Any]) -> list[Any]:
     return data if isinstance(data, list) else []
 
 
-async def fetch_services(accessor: JaegerAccessor) -> list[str]:
+async def fetch_services(
+    accessor: JaegerAccessor,
+) -> list[str]:
     """List service names known to Jaeger.
 
     Args:

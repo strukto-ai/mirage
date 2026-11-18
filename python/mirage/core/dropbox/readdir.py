@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from functools import partial
 from typing import Any
 
@@ -26,7 +27,7 @@ from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 
 
-def stat_from_entry(entry: dict[str, Any]) -> FileStat:
+def stat_from_entry(entry: Mapping[str, Any]) -> FileStat:
     modified = (
         entry.get("server_modified") or entry.get("client_modified") or ""
     )

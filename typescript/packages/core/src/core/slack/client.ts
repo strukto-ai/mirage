@@ -98,6 +98,19 @@ function errorOf(endpoint: string, response: Response, text: string): SlackApiEr
   return new SlackApiError(endpoint, `HTTP ${String(response.status)}`, null, null, response.status)
 }
 
+function checked(endpoint: string, raw: unknown): SlackResponse {
+  const data = (raw ?? {}) as SlackResponse
+  if (!data.ok) {
+    throw new SlackApiError(
+      endpoint,
+      data.error ?? 'unknown_error',
+      data.needed ?? null,
+      data.provided ?? null,
+    )
+  }
+  return data
+}
+
 export interface SlackTransport {
   call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse>
   downloadFile?(url: string, offset?: number, size?: number | null): Promise<Uint8Array>
@@ -145,16 +158,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
       fetchFn: this.fetch,
       timeout: this.timeout,
     })
-    const data = (raw ?? {}) as SlackResponse
-    if (!data.ok) {
-      throw new SlackApiError(
-        endpoint,
-        data.error ?? 'unknown_error',
-        data.needed ?? null,
-        data.provided ?? null,
-      )
-    }
-    return data
+    return checked(endpoint, raw)
   }
 
   // Takes the window rather than a prepared header so the answer can be

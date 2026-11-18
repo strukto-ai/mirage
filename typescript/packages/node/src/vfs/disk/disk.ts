@@ -286,8 +286,8 @@ export class DiskVFS extends BaseVFS {
 
   override async getState(): Promise<DiskVFSState> {
     await mkdir(this.root, { recursive: true })
-    const files: Record<string, string> = {}
-    const modes: Record<string, number> = {}
+    const files = Object.create(null) as Record<string, string>
+    const modes = Object.create(null) as Record<string, number>
     const fileList: string[] = []
     await walkFiles(this.root, fileList)
     for (const full of fileList) {

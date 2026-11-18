@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { makeAccessor, serve, type FakeDrive9 } from '../../../tests/core/tidb_filesystem/drive9.ts'
-import { runWithEvaluation } from '../../context/session_context.ts'
+import { setCurrentEvaluation } from '../../context/session_context.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { EvaluationContext } from '../../workspace/evaluation.ts'
 import { SessionState } from '../../workspace/session/session.ts'
@@ -74,7 +74,7 @@ describe('upload', () => {
     const stop = new AbortController()
     const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
     evaluation.frame.abortSignal = stop.signal
-    const pending = runWithEvaluation(evaluation, () =>
+    const pending = setCurrentEvaluation(evaluation, () =>
       upload(accessor, '/root/big.bin', new Uint8Array(60_000)),
     )
     await new Promise((resolve) => setTimeout(resolve, 100))

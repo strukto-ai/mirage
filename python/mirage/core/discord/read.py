@@ -15,12 +15,12 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from functools import partial
-from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import refusals_denied
 from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import (
+    DiscordMessage,
     get_history_jsonl,
     list_messages_for_day,
     snowflake_at,
@@ -185,7 +185,7 @@ async def _follow_chat(
         list_messages_for_day, accessor, channel_id, day, accessor.time_range
     )
 
-    async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
+    async def after(last: DiscordMessage | None) -> list[DiscordMessage]:
         with refusals_denied(path):
             return await fetch(after=None if last is None else last["id"])
 
@@ -200,17 +200,17 @@ follow = per_kind(detect_scope, {"messages": _follow_chat})
 
 def _run_pages(
     accessor: DiscordAccessor, channel_id: str, first: str, last: str
-) -> AsyncGenerator[list[dict[str, Any]], None]:
+) -> AsyncGenerator[list[DiscordMessage], None]:
     return stream_messages_for_day(
         accessor, channel_id, first, accessor.time_range, last_day=last
     )
 
 
-def _sort_key(message: dict[str, Any]) -> float:
+def _sort_key(message: DiscordMessage) -> float:
     return int(message["id"])
 
 
-def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
+def _posted_within(message: DiscordMessage, start: float, end: float) -> bool:
     return snowflake_at(start) <= int(message["id"]) < snowflake_at(end)
 
 

@@ -15,11 +15,8 @@
 import { MongoDBAccessor } from '@struktoai/mirage-core/accessor/mongodb'
 import type { MongoDriver } from '@struktoai/mirage-core/core/mongodb/_driver'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { MongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
-import {
-  redactMongoDBConfig,
-  resolveMongoDBConfig,
-} from '@struktoai/mirage-core/vfs/mongodb/config'
+import { MongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
+import { redactedConfigDump, type RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { MongoDBVFS as CoreMongoDBVFS, VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { HttpMongoDriver } from './http_driver.ts'
@@ -36,7 +33,7 @@ export class MongoDBVFS extends CoreMongoDBVFS {
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override vfsMd: string
-  readonly config: ReturnType<typeof resolveMongoDBConfig>
+  readonly config: ReturnType<typeof MongoDBConfig.parse>
   readonly driver: MongoDriver
   override readonly accessor: MongoDBAccessor
 
@@ -46,7 +43,7 @@ export class MongoDBVFS extends CoreMongoDBVFS {
       'config' in options
         ? options
         : { config: options, prefix: undefined, driver: undefined, endpoint: undefined }
-    this.config = resolveMongoDBConfig(config)
+    this.config = MongoDBConfig.parse(config)
     this.driver =
       driver ??
       new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri, timeout: this.config.timeout })
@@ -54,12 +51,12 @@ export class MongoDBVFS extends CoreMongoDBVFS {
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactMongoDBConfig>> & {
+  override getState(): ConfigState<RedactedSchema<typeof MongoDBConfig>> & {
     needs_override: true
   } {
     return {
       type: this.name,
-      config: redactMongoDBConfig(this.config),
+      config: redactedConfigDump(MongoDBConfig, this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

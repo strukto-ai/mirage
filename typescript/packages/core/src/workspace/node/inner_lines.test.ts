@@ -25,7 +25,7 @@ import {
   wordValue,
   type Word,
 } from './inner_lines.ts'
-import { runAsProgram } from '../../context/session_context.ts'
+import { setProgramInvocation } from '../../context/session_context.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -199,7 +199,7 @@ describe('programLines', () => {
     expect(programLines(words(...texts), session, ws.registry)).not.toEqual([])
     session.functions[head] = `${head}() { :; }`
     expect(programLines(words(...texts), session, ws.registry)).toEqual([])
-    await runAsProgram(session, () => {
+    await setProgramInvocation(session, () => {
       expect(programLines(words(...texts), session, ws.registry)).not.toEqual([])
       return Promise.resolve()
     })

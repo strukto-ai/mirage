@@ -15,7 +15,7 @@
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { requireId } from '@struktoai/mirage-core/machine/config'
-import { APPLE_CONTAINER_CONFIG_FIELDS, type AppleContainerConfig } from './config.ts'
+import { AppleContainerConfig } from './config.ts'
 import { APPLE_CONTAINER_HINT, RUNNING_STATE, STATE_HINTS } from './constants.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import { reportedState } from '../program.ts'
@@ -41,7 +41,7 @@ import { ProgramMachine } from '../transport.ts'
  * machine of its own, which a policy route sends its session to.
  */
 export class AppleContainerMachine extends ProgramMachine<AppleContainerConfig> {
-  static override readonly configFields: ConfigFields = APPLE_CONTAINER_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = AppleContainerConfig
   static override readonly provider = 'apple_container'
   protected readonly program = 'container'
   protected readonly installHint = APPLE_CONTAINER_HINT

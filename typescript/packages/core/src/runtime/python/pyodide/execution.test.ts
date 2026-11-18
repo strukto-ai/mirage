@@ -18,7 +18,7 @@ import type { Program, RunAnswer } from '../../types.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { getCurrentSession, runWithSession } from '../../../context/session_context.ts'
+import { getCurrentSession, setCurrentSession } from '../../../context/session_context.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PyodideRuntime } from './runtime.ts'
@@ -120,12 +120,12 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
         new PrefixResolver(() => ['/data/']),
       )
       const run = (name: string) =>
-        runWithSession(new SessionState({ sessionId: name }), () =>
+        setCurrentSession(new SessionState({ sessionId: name }), () =>
           interpret(rt, { code: `print(open('/data/${name}').read())` }),
         )
       try {
         const first = run('one')
-        const second = runWithSession(new SessionState({ sessionId: 'two' }), () =>
+        const second = setCurrentSession(new SessionState({ sessionId: 'two' }), () =>
           interpret(rt, { code: "open('/data/two').read(); raise ValueError('expected failure')" }),
         )
         const third = run('three')

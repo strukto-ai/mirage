@@ -12,24 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from __future__ import annotations
 
-AsyncBoxd: Any
-APIConnectionError: Any
-ConflictError: Any
-NotFoundError: Any
-try:
-    from boxd import AsyncBoxd as _AsyncBoxd
-    from boxd.errors import APIConnectionError as _APIConnectionError
-    from boxd.errors import ConflictError as _ConflictError
-    from boxd.errors import NotFoundError as _NotFoundError
-except ImportError:
-    AsyncBoxd = None
-    APIConnectionError = None
-    ConflictError = None
-    NotFoundError = None
-else:
-    AsyncBoxd = _AsyncBoxd
-    APIConnectionError = _APIConnectionError
-    ConflictError = _ConflictError
-    NotFoundError = _NotFoundError
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    import boxd
+
+
+@runtime_checkable
+class BoxdSdk(Protocol):
+    AsyncBoxd: type[boxd.AsyncBoxd]
+    APIConnectionError: type[Exception]
+    ConflictError: type[Exception]
+    NotFoundError: type[Exception]

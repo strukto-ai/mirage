@@ -24,7 +24,7 @@ import { type FileStat, Limit, MountMode, OnExceed, PathSpec } from '../types.ts
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { SessionState } from '../workspace/session/session.ts'
-import { runWithEvaluation } from '../context/session_context.ts'
+import { setCurrentEvaluation } from '../context/session_context.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import type { Runtime } from '../runtime/base.ts'
@@ -2189,7 +2189,7 @@ it('a cancelled check after a quiet one keeps who passed', async () => {
   const controller = new AbortController()
   const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
   evaluation.frame.abortSignal = controller.signal
-  const running = runWithEvaluation(evaluation, () => policies.preNetwork(seen, passed))
+  const running = setCurrentEvaluation(evaluation, () => policies.preNetwork(seen, passed))
   void running.catch(() => undefined)
   await reached
   controller.abort()

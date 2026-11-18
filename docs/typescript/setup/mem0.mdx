@@ -45,13 +45,13 @@ An agent or run scope sets `agentId` or `runId` instead of `userId`. `host`
 <ResponseField name="host" type={"string"} default={"'https://api.mem0.ai'"}>
   Mem0 API base URL.
 </ResponseField>
-<ResponseField name="userId" type={"string"}>
+<ResponseField name="userId" type={"string"} default={"null"}>
   Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`.
 </ResponseField>
-<ResponseField name="agentId" type={"string"}>
+<ResponseField name="agentId" type={"string"} default={"null"}>
   Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`.
 </ResponseField>
-<ResponseField name="runId" type={"string"}>
+<ResponseField name="runId" type={"string"} default={"null"}>
   Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`.
 </ResponseField>
 <ResponseField name="defaultPageSize" type={"number"} default={"100"}>

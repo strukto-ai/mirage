@@ -14,14 +14,14 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
+import { PostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 
 function makeAccessor(
   rows: unknown[] | ((sql: string, params?: readonly unknown[]) => unknown[]),
 ): { accessor: PostgresAccessor; query: ReturnType<typeof vi.fn> } {
-  const cfg = resolvePostgresConfig({ dsn: 'postgres://localhost/db' })
+  const cfg = PostgresConfig.parse({ dsn: 'postgres://localhost/db' })
   const query = vi.fn((sql: string, params?: readonly unknown[]) => {
     const r = typeof rows === 'function' ? rows(sql, params) : rows
     return Promise.resolve({ rows: r, rowCount: r.length })
@@ -114,6 +114,12 @@ describe('estimateSize', () => {
     const plan = [{ Plan: { 'Plan Rows': 5000, 'Plan Width': 64 } }]
     const { accessor } = makeAccessor([{ 'QUERY PLAN': plan }])
     expect(await client.estimateSize(accessor, 'public', 'users')).toEqual([5000, 64])
+  })
+
+  it('preserves estimates above the signed 32-bit range', async () => {
+    const plan = [{ Plan: { 'Plan Rows': 3_000_000_000, 'Plan Width': 64 } }]
+    const { accessor } = makeAccessor([{ 'QUERY PLAN': plan }])
+    expect(await client.estimateSize(accessor, 'public', 'users')).toEqual([3_000_000_000, 64])
   })
 
   it('parses EXPLAIN JSON returned as string', async () => {

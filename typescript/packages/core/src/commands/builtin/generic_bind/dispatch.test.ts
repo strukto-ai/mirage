@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts'
+import { commandStarted, commandScope } from '../../../cache/index/scope.ts'
 import { command } from '../../config.ts'
 import { SPECS } from '../../spec/index.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { setMountGate } from '../../../context/session_context.ts'
 import { BUILDERS } from './builders/index.ts'
 import { ALL_COMMANDS } from '../../../policy/builtin/output_cap.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -39,7 +39,7 @@ it('reads the output inside the running command', async () => {
     yield new TextEncoder().encode('hit\n')
   }
   const dispatch = (() => Promise.reject(new Error('no op'))) as unknown as DispatchFn
-  const [started, stdout] = await runInCommandScope(async () => [
+  const [started, stdout] = await commandScope(async () => [
     commandStarted(),
     (
       await runDispatch(
@@ -358,7 +358,7 @@ it('a walk following a link onto a mount without readTree walks it', async () =>
 it('walks across mounts as a run across them, even inside a mount scope', async () => {
   const ws = new Workspace({ '/a': new RAMVFS(), '/a/b': new RAMVFS() }, { mode: MountMode.WRITE })
   const run = (name: string): Promise<string> =>
-    runWithMountGate('/a/', MountMode.WRITE, async () => {
+    setMountGate('/a/', MountMode.WRITE, async () => {
       const builder = BUILDERS.find((b) => b.name === name)
       if (builder === undefined) throw new Error(`missing builder ${name}`)
       const at = [PathSpec.fromStrPath('/a')]

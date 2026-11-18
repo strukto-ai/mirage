@@ -109,49 +109,57 @@ export function registerTemplateCommands(program: Command): void {
       'A workspace config, or a template as `get -o yaml` prints it',
     )
     .option('--description <text>', 'Say what the template is for')
-    .action(async (name: string, opts: { file: string; description?: string }) => {
-      const found = await readTemplate(opts.file)
-      const created = (await call('POST', '/v1/templates', {
-        name,
-        description: opts.description ?? found.description,
-        config: found.config,
-      })) as Template
-      header(`created template ${name}`)
-      const text = await asYaml(created)
-      emit(created, () => text.trimEnd())
-    })
+    .action(createCmd)
 
-  template
-    .command('list')
-    .description('List the saved templates.')
-    .action(async () => {
-      const { items } = (await call('GET', '/v1/templates')) as { items: Template[] }
-      emit(items, (rows) =>
-        formatTable(
-          ['NAME', 'DESCRIPTION'],
-          rows.map((t) => [t.name, t.description ?? '']),
-        ),
-      )
-    })
+  template.command('list').description('List the saved templates.').action(listCmd)
 
   template
     .command('get')
     .description('Print a template; `-o yaml` is a file `create -f` reads.')
     .argument('<id>', ID_HELP)
     .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
-    .action(async (name: string, opts: { output?: Output }) => {
-      const found = (await call('GET', templatePath(name))) as Template
-      const text = await asYaml(found)
-      await show(found, opts.output, () => text.trimEnd())
-    })
+    .action(getCmd)
 
   template
     .command('delete')
     .description('Delete a template.')
     .argument('<id>', ID_HELP)
-    .action(async (name: string) => {
-      await call('DELETE', templatePath(name))
-      header(`deleted template ${name}`)
-      emit({ deleted: name }, () => `Deleted template ${name}.`)
-    })
+    .action(deleteCmd)
+}
+
+async function createCmd(
+  name: string,
+  opts: { file: string; description?: string },
+): Promise<void> {
+  const found = await readTemplate(opts.file)
+  const created = (await call('POST', '/v1/templates', {
+    name,
+    description: opts.description ?? found.description,
+    config: found.config,
+  })) as Template
+  header(`created template ${name}`)
+  const text = await asYaml(created)
+  emit(created, () => text.trimEnd())
+}
+
+async function listCmd(): Promise<void> {
+  const { items } = (await call('GET', '/v1/templates')) as { items: Template[] }
+  emit(items, (rows) =>
+    formatTable(
+      ['NAME', 'DESCRIPTION'],
+      rows.map((t) => [t.name, t.description ?? '']),
+    ),
+  )
+}
+
+async function getCmd(name: string, opts: { output?: Output }): Promise<void> {
+  const found = (await call('GET', templatePath(name))) as Template
+  const text = await asYaml(found)
+  await show(found, opts.output, () => text.trimEnd())
+}
+
+async function deleteCmd(name: string): Promise<void> {
+  await call('DELETE', templatePath(name))
+  header(`deleted template ${name}`)
+  emit({ deleted: name }, () => `Deleted template ${name}.`)
 }

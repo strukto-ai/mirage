@@ -17,6 +17,8 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from mirage.commands.builtin.rg_filetypes import TypeChange, TypeSelection
+
 _REPETITION = re.compile(r"\{[0-9]*(,[0-9]*)?\}")
 
 
@@ -75,8 +77,8 @@ class RgFlags:
     globs: tuple[str, ...]
     iglobs: tuple[str, ...]
     glob_case_insensitive: bool
-    type_changes: tuple[tuple[str, str], ...]
-    type_selections: tuple[tuple[str, bool], ...]
+    type_changes: tuple[TypeChange, ...]
+    type_selections: tuple[TypeSelection, ...]
     hidden: bool
     max_depth: int | None
     max_filesize: int | None

@@ -114,14 +114,16 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
     const base = this.baseUrl().replace(/\/$/, '')
     const auth = await this.authHeaders()
     const headers: Record<string, string> = { ...auth }
-    if (body !== undefined) headers['content-type'] = 'application/json'
+    const json = method === 'POST' || method === 'PATCH' ? (body ?? {}) : undefined
+    if (json !== undefined) headers['content-type'] = 'application/json'
     return apiRequest(method, base + endpoint, {
       fetchFn: this.fetch,
       timeout: this.timeout,
       headers,
       ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { json: body } : {}),
-      retry: RATE_LIMIT_RETRY,
+      ...(json === undefined ? {} : { json }),
+      read: method === 'PUT' || method === 'DELETE' ? 'none' : 'json',
+      retry: method === 'GET' ? RATE_LIMIT_RETRY : NO_RETRY,
       errorOf: (response, text) => discordError(endpoint, response, text),
     })
   }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
@@ -55,7 +55,7 @@ async function stamped(
   path: string,
   options: { offset?: number; size?: number } = {},
 ): Promise<[Uint8Array, (string | null)[]]> {
-  const [data, records] = await runWithRecording(() =>
+  const [data, records] = await recordingScope(() =>
     read(accessor, PathSpec.fromStrPath(path), options),
   )
   return [data, records.map((r) => r.fingerprint ?? null)]

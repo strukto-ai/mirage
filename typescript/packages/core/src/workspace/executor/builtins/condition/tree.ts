@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../../../shell/voice.ts'
-import { runWithAdmission } from '../../../../context/session_context.ts'
+import { setAdmission } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { posixRegex } from '../../../../rs/regex.ts'
@@ -51,7 +51,7 @@ export async function evalCond(ctx: CondContext, node: CondNode): Promise<number
   // A leaf is a test of its own, admitted on its words once they are
   // expanded, which for a branch is only as it is reached.
   const gate = await ctx.admit(leafWords(node))
-  return runWithAdmission(gate, () => evalLeaf(ctx, node))
+  return setAdmission(gate, () => evalLeaf(ctx, node))
 }
 
 /** A `[[ ]]` leaf as the words `test` would be given for it. */

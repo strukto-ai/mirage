@@ -26,12 +26,17 @@ function buildMime(headers: Record<string, string>, body: string): string {
   const lines: string[] = []
   lines.push('MIME-Version: 1.0')
   lines.push('Content-Type: text/plain; charset="utf-8"')
-  lines.push('Content-Transfer-Encoding: 7bit')
+  const utf8 = /[^\t\r\n\x20-\x7e]/u.test(body)
+  lines.push(`Content-Transfer-Encoding: ${utf8 ? 'base64' : '7bit'}`)
   for (const [k, v] of Object.entries(headers)) {
+    if (/[\r\n]/u.test(v)) throw new Error(`Invalid newline in ${k} header`)
     if (v !== '') lines.push(`${k}: ${v}`)
   }
   lines.push('')
-  lines.push(body)
+  const wireBody = body.replace(/\r\n|\r|\n/gu, '\r\n')
+  lines.push(
+    utf8 ? (encodeBase64(ENC.encode(wireBody)).match(/.{1,76}/gu) ?? []).join('\r\n') : wireBody,
+  )
   return lines.join('\r\n')
 }
 

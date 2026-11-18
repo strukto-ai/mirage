@@ -11,7 +11,7 @@ import { rmR as spRmR } from '../sharepoint/rm.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { materialize } from '../../io/types.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { OneDriveVFS } from '../../vfs/onedrive/onedrive.ts'
 import { SharePointVFS } from '../../vfs/sharepoint/sharepoint.ts'
 import { PathSpec } from '../../types.ts'
@@ -208,7 +208,7 @@ it.each([
     const vfs = new OneDriveVFS({ accessToken: 'test' })
     const path = PathSpec.fromStrPath('/od/SECRET.txt', 'SECRET.txt')
     const read = async () => materialize(await vfs.read(path, undefined, 0, stream ? null : 1))
-    await expect(recorded ? runWithRecording(read) : read()).rejects.toMatchObject({
+    await expect(recorded ? recordingScope(read) : read()).rejects.toMatchObject({
       code: 'ENOENT',
       message: path.virtual,
     })

@@ -12,16 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, Protocol, runtime_checkable
 
-connect: Any
-DisconnectError: Any
-try:
-    from asyncssh import DisconnectError as _DisconnectError
-    from asyncssh import connect as _connect
-except ImportError:
-    connect = None
-    DisconnectError = None
-else:
-    connect = _connect
-    DisconnectError = _DisconnectError
+
+@runtime_checkable
+class SshSdk(Protocol):
+    def connect(self, **kwargs: Any) -> Awaitable[Any]: ...
+
+    DisconnectError: type[Exception]

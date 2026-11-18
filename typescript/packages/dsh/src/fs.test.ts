@@ -16,7 +16,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { FsErrorCode, FsTarget } from '@deepseek-ai/dsh-fs'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { setCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
@@ -1009,7 +1009,7 @@ describe('the session the adapter reads as', () => {
     const agent = ws.createSession('agent', { profile: 'agent' })
     const fs = await adapterOn(ws, {})
     expect(String((await fs.resolve('/data/vault/lk')).targetKey)).toBe('/data/public.txt')
-    const asAgent = await runWithSession(
+    const asAgent = await setCurrentSession(
       agent,
       async () => ({
         key: String((await fs.resolve('/data/vault/lk')).targetKey),

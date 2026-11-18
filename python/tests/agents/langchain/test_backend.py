@@ -482,12 +482,16 @@ async def test_aedit_keeps_a_leading_bom(backend, workspace):
 @pytest.mark.asyncio
 async def test_als(backend):
     await backend.awrite("/dir/a.txt", "a")
-    await backend.awrite("/dir/b.txt", "b")
+    await backend.awrite("/dir/sub/b.txt", "b")
+    await backend.awrite("/dir/ .hidden\n ", "c")
     result = await backend.als("/dir")
     assert result.entries is not None
     entries = result.entries
-    paths = [e["path"] for e in entries]
-    assert len(paths) == 2
+    assert {e["path"]: e["is_dir"] for e in entries} == {
+        "/dir/a.txt": False,
+        "/dir/sub": True,
+        "/dir/ .hidden\n ": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -496,6 +500,14 @@ async def test_als_reports_command_errors(backend):
 
     assert result.entries is None
     assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_agrep_treats_leading_dash_and_regex_syntax_as_text(backend):
+    await backend.awrite("/log.txt", "-a.b\n-axb\n")
+    result = await backend.agrep("-a.b", path="/log.txt")
+    assert result.error is None
+    assert [m["text"] for m in result.matches] == ["-a.b"]
 
 
 @pytest.mark.asyncio

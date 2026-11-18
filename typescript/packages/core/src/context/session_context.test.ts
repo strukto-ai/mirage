@@ -25,12 +25,12 @@ import {
   hiddenRefusal,
   sessionVisibility,
   readonlyBelow,
-  runWithAdmission,
-  runWithSession,
+  setAdmission,
+  setCurrentSession,
   strongestModeUnder,
-  runWithEvaluation,
+  setCurrentEvaluation,
   currentCaller,
-  runWithCaller,
+  bindCaller,
   withCaller,
   callerSignal,
   inLanding,
@@ -74,14 +74,14 @@ describe('a profile narrows the mounts it names', () => {
   })
 
   it('a profile naming no mount keeps every mode', async () => {
-    await runWithSession(new SessionState({ sessionId: 'free' }), () => {
+    await setCurrentSession(new SessionState({ sessionId: 'free' }), () => {
       expect(effectiveMountMode('/s3', MountMode.EXEC)).toBe(MountMode.EXEC)
       return Promise.resolve()
     })
   })
 
   it('narrows the mount mode', async () => {
-    await runWithSession(narrowedSession(), () => {
+    await setCurrentSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ro', MountMode.WRITE)).toBe(MountMode.READ)
       expect(effectiveMountMode('/rw', MountMode.EXEC)).toBe(MountMode.WRITE)
       return Promise.resolve()
@@ -89,7 +89,7 @@ describe('a profile narrows the mounts it names', () => {
   })
 
   it('cannot widen the mount mode', async () => {
-    await runWithSession(narrowedSession(), () => {
+    await setCurrentSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ex', MountMode.READ)).toBe(MountMode.READ)
       expect(effectiveMountMode('/rw', MountMode.READ)).toBe(MountMode.READ)
       return Promise.resolve()
@@ -97,7 +97,7 @@ describe('a profile narrows the mounts it names', () => {
   })
 
   it('normalizes prefixes before lookup', async () => {
-    await runWithSession(narrowedSession(), () => {
+    await setCurrentSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ro/', MountMode.WRITE)).toBe(MountMode.READ)
       return Promise.resolve()
     })
@@ -108,7 +108,7 @@ describe('a profile narrows the mounts it names', () => {
     // whatever the workspace gave it. A profile that must not touch a
     // mount hides it, which reads as ENOENT rather than as a permission
     // error naming something the profile cannot see.
-    await runWithSession(narrowedSession(), () => {
+    await setCurrentSession(narrowedSession(), () => {
       expect(effectiveMountMode('/other', MountMode.EXEC)).toBe(MountMode.EXEC)
       expect(effectiveMountMode('/', MountMode.WRITE)).toBe(MountMode.WRITE)
       return Promise.resolve()
@@ -121,7 +121,7 @@ describe('a binding belongs to the workspace that published it', () => {
     const mine = new SessionManager('default')
     const theirs = new SessionManager('default')
     const session = new SessionState({ sessionId: 'default' })
-    await runWithSession(
+    await setCurrentSession(
       session,
       () => {
         expect(getCurrentSessionFor(mine)).toBe(session)
@@ -138,10 +138,10 @@ describe('a binding belongs to the workspace that published it', () => {
     const mine = new SessionManager('default')
     const outer = new SessionState({ sessionId: 'default' })
     const inner = new SessionState({ sessionId: 'default' })
-    await runWithSession(
+    await setCurrentSession(
       outer,
       () =>
-        runWithSession(inner, () => {
+        setCurrentSession(inner, () => {
           expect(getCurrentSessionFor(mine)).toBe(inner)
           return Promise.resolve()
         }),
@@ -151,7 +151,7 @@ describe('a binding belongs to the workspace that published it', () => {
 
   it('an unowned bind answers nobody', async () => {
     // The op-dispatch binders name no owner, so no line adopts one.
-    await runWithSession(new SessionState({ sessionId: 'default' }), () => {
+    await setCurrentSession(new SessionState({ sessionId: 'default' }), () => {
       expect(getCurrentSessionFor(new SessionManager('default'))).toBeNull()
       return Promise.resolve()
     })
@@ -165,11 +165,11 @@ describe('a binding belongs to the workspace that published it', () => {
     const theirs = new SessionManager('default')
     const session = new SessionState({ sessionId: 'default' })
     expect(getCurrentSessionUnlessForeign(mine)).toBeNull()
-    await runWithSession(session, () => {
+    await setCurrentSession(session, () => {
       expect(getCurrentSessionUnlessForeign(mine)).toBe(session)
       return Promise.resolve()
     })
-    await runWithSession(
+    await setCurrentSession(
       session,
       () => {
         expect(getCurrentSessionUnlessForeign(mine)).toBe(session)
@@ -202,7 +202,7 @@ describe('hides', () => {
         },
       },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(visible('/a/secrets/x')).toBe(false)
       expect(visible('/shared/finance/q1.csv')).toBe(false)
       expect(visible('/repo/certs/k.pem')).toBe(false)
@@ -225,7 +225,7 @@ describe('hides', () => {
     expect(pathVisible(sess.visibility, '/repo/k.pem')).toBe(false)
     expect(pathVisible(sess.visibility, '/a/public')).toBe(true)
     expect(visible('/a/secrets/x')).toBe(true)
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(visible('/a/secrets/x')).toBe(false)
       expect(visible('/a/public')).toBe(true)
       return Promise.resolve()
@@ -241,7 +241,7 @@ describe('hides', () => {
       sessionId: 'agent',
       visibility: { paths: { paths: ['/w/vault', '/w/open/file.txt'], patterns: ['*.key'] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(refused('/w/vault/new.txt', true)).toMatchObject({
         code: 'ENOENT',
         message: '/w/vault/new.txt',
@@ -262,12 +262,12 @@ describe('hides', () => {
       sessionId: 'agent',
       visibility: { paths: { paths: ['/repo/.env'] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(visible('/repo/.env')).toBe(false)
       expect(visible('/repo/.envrc')).toBe(true)
       return Promise.resolve()
     })
-    await runWithSession(new SessionState({ sessionId: 'free' }), () => {
+    await setCurrentSession(new SessionState({ sessionId: 'free' }), () => {
       expect(visible('/repo/.env')).toBe(true)
       return Promise.resolve()
     })
@@ -288,7 +288,7 @@ describe('the path axis modes', () => {
         },
       },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       // The mount cap holds where no deeper entry speaks...
       expect(effectivePathMode('/repo/README.md', '/repo', MountMode.EXEC)).toBe(MountMode.READ)
       // ...and the deeper show entry wins below its anchor.
@@ -310,7 +310,7 @@ describe('the path axis modes', () => {
       mountModes: new Map([['/repo', MountMode.EXEC]]),
       visibility: { shown: { entries: [{ path: '/repo', mode: MountMode.READ }] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(effectivePathMode('/repo/x', '/repo', MountMode.EXEC)).toBe(MountMode.READ)
       return Promise.resolve()
     })
@@ -322,7 +322,7 @@ describe('the path axis modes', () => {
       mountModes: new Map([['/repo', MountMode.READ]]),
       visibility: { shown: { entries: [{ path: '/repo/build', mode: MountMode.WRITE }] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       // The mount-wide mode is READ, but a deeper grant makes a write
       // command runnable; the dispatcher then refuses per path.
       expect(strongestModeUnder('/repo', MountMode.EXEC)).toBe(MountMode.WRITE)
@@ -345,7 +345,7 @@ describe('the path axis modes', () => {
         },
       },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       // The anchor lies strictly below the operand, so a subtree
       // mutation over it is refused, and the deeper re-widening does
       // not clear it (the region between the two stays read-only).
@@ -364,7 +364,7 @@ describe('the path axis modes', () => {
       sessionId: 'agent',
       visibility: { shown: { entries: [{ path: '/repo/*/locked', mode: MountMode.READ }] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       // A pattern names no single anchor, so the operand is blamed
       // whenever the match space could reach below it.
       expect(readonlyBelow('/repo/tree', '/repo', MountMode.WRITE)).toBe('/repo/tree')
@@ -380,7 +380,7 @@ describe('the per-operand hide gate', () => {
       sessionId: 'agent',
       visibility: { paths: { paths: ['/repo/.env'] } },
     })
-    await runWithSession(sess, () => {
+    await setCurrentSession(sess, () => {
       expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(true)
       expect(hiddenUnder(sessionVisibility(), '/repo/.env')).toBe(true)
       expect(hiddenUnder(sessionVisibility(), '/s3')).toBe(false)
@@ -414,11 +414,11 @@ describe('the admission binding', () => {
     })
     expect(getAdmission()).toBeNull()
     const outer = gate(true)
-    await runWithAdmission(outer, async () => {
+    await setAdmission(outer, async () => {
       expect(getAdmission()).toBe(outer)
       // A nested line binds its own and hands the outer one back.
       const inner = gate(false)
-      await runWithAdmission(inner, () => {
+      await setAdmission(inner, () => {
         expect(getAdmission()).toBe(inner)
         return Promise.resolve()
       })
@@ -433,17 +433,17 @@ describe('the evaluation binding', () => {
     const session = new SessionState({ sessionId: 's' })
     const other = new SessionState({ sessionId: 'o' })
     const evaluation = new EvaluationContext(session)
-    await runWithEvaluation(evaluation, async () => {
+    await setCurrentEvaluation(evaluation, async () => {
       expect(getCurrentEvaluation()).toBe(evaluation)
       for (const [rebound, expected] of [
         [session, evaluation],
         [other, null],
       ] as const) {
-        await runWithSession(rebound, () => {
+        await setCurrentSession(rebound, () => {
           expect(getCurrentEvaluation()).toBe(expected)
           return Promise.resolve()
         })
-        await runWithCaller(sessionCaller(rebound), () => {
+        await bindCaller(sessionCaller(rebound), () => {
           expect(getCurrentEvaluation()).toBe(expected)
           return Promise.resolve()
         })
@@ -471,7 +471,7 @@ describe('withCaller', () => {
         seen.push(currentCaller().started)
       }
     }
-    await runWithCaller(reader, async () => {
+    await bindCaller(reader, async () => {
       const stream = withCaller(source(), made)
       expect((await stream.next()).value).toBe(1)
       expect(currentCaller()).toBe(reader)
@@ -489,7 +489,7 @@ describe('runLanding', () => {
     stop.abort()
     const evaluation = new EvaluationContext(new SessionState({ sessionId: 'run', cwd: '/' }))
     evaluation.frame.abortSignal = stop.signal
-    await runWithEvaluation(evaluation, async () => {
+    await setCurrentEvaluation(evaluation, async () => {
       expect(await runLanding(() => Promise.resolve([inLanding(), callerSignal()]))).toEqual([
         true,
         undefined,

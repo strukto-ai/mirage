@@ -19,7 +19,7 @@ import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import { lineOutput } from '../../../../commands/builtin/general/interpreter.ts'
 import {
   currentCaller,
-  runAsProgram,
+  setProgramInvocation,
   setTraits,
   type RedirectResult,
 } from '../../../../context/session_context.ts'
@@ -68,7 +68,7 @@ function runProgram(
   const node = new ExecutionNode({ command: name })
   const [stdout, io] = lineOutput(async (sink, signal) => {
     if (warned !== '') await sink.emit(Channel.STDERR, encodeText(warned))
-    return runAsProgram(session, () =>
+    return setProgramInvocation(session, () =>
       setTraits(traits, async () => {
         const ran = await executeFn(line, {
           sessionId: session.sessionId,

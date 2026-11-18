@@ -33,7 +33,7 @@ import {
   type RetryPolicy,
 } from './client.ts'
 import { ResponseTooLargeError } from './errors.ts'
-import { runWithEvaluation } from '../../context/session_context.ts'
+import { setCurrentEvaluation } from '../../context/session_context.ts'
 import { EvaluationContext } from '../../workspace/evaluation.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 
@@ -1102,7 +1102,7 @@ describe("the call's signal", () => {
       })
     }
     const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 3, retryTransport: true }
-    const pending = runWithEvaluation(evaluation, () =>
+    const pending = setCurrentEvaluation(evaluation, () =>
       apiRequest('GET', TARGET, { errorOf, fetchFn: hang, retry }),
     )
     await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1121,7 +1121,7 @@ describe("the call's signal", () => {
         ? Promise.reject(init.signal.reason as Error)
         : Promise.resolve(Response.json({ ok: true }))
     const own = new AbortController().signal
-    const got = await runWithEvaluation(evaluation, () =>
+    const got = await setCurrentEvaluation(evaluation, () =>
       apiRequest('GET', TARGET, { errorOf, fetchFn: answer, signal: own }),
     )
     expect(got).toEqual({ ok: true })

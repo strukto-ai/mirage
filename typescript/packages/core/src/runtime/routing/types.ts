@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProfilePolicySpec } from '../../policy/profile.ts'
+import type { ProfilePolicy } from '../../policy/profile.ts'
 import type { Route, RouteContext } from '../../policy/types.ts'
 
 /**
@@ -42,4 +42,4 @@ export type RouteVerdict = string | Route | null
  */
 export type RouteRule =
   | ((ctx: RouteContext) => RouteVerdict | Promise<RouteVerdict>)
-  | ProfilePolicySpec
+  | ProfilePolicy

@@ -48,19 +48,19 @@ is a top-level folder.
 <ResponseField name="uri" type={"string"} required>
   Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise.
 </ResponseField>
-<ResponseField name="apiKey" type={"string"} post={["secret"]}>
+<ResponseField name="apiKey" type={"string"} default={"null"} post={["secret"]}>
   API key for LanceDB Cloud or Enterprise.
 </ResponseField>
 <ResponseField name="region" type={"string"} default={"'us-east-1'"}>
   LanceDB Cloud region of a `db://` database; ignored for other URIs.
 </ResponseField>
-<ResponseField name="hostOverride" type={"string"}>
+<ResponseField name="hostOverride" type={"string"} default={"null"}>
   Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs.
 </ResponseField>
-<ResponseField name="storageOptions" type={"object"}>
+<ResponseField name="storageOptions" type={"object"} default={"null"}>
   Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI.
 </ResponseField>
-<ResponseField name="table" type={"string"}>
+<ResponseField name="table" type={"string"} default={"null"}>
   Table the mount root shows; unset lists every table as a top-level folder.
 </ResponseField>
 <ResponseField name="groupBy" type={"string[]"} default={"[]"}>
@@ -69,16 +69,16 @@ is a top-level folder.
 <ResponseField name="idColumn" type={"string"} default={"'id'"}>
   Column whose value names each row's files (`<id>.md`, `<id>.<blobExt>`).
 </ResponseField>
-<ResponseField name="titleColumn" type={"string"}>
+<ResponseField name="titleColumn" type={"string"} default={"null"}>
   Column whose value heads a row's card as a `# ` title; unset leaves the card without one.
 </ResponseField>
-<ResponseField name="blobColumn" type={"string"}>
+<ResponseField name="blobColumn" type={"string"} default={"null"}>
   Column of raw or base64 bytes served as `<id>.<blobExt>` and left out of the card; unset adds no blob file.
 </ResponseField>
 <ResponseField name="blobExt" type={"string"} default={"'bin'"}>
   File extension of the blob file, without the dot.
 </ResponseField>
-<ResponseField name="vectorColumn" type={"string"}>
+<ResponseField name="vectorColumn" type={"string"} default={"null"}>
   Embedding column left out of cards and listings.
 </ResponseField>
 <ResponseField name="searchLimit" type={"number"} default={"10"}>

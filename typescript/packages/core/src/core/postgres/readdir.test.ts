@@ -25,7 +25,7 @@ vi.mock('./client.ts', () => ({
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
+import { PostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { readdir } from './readdir.ts'
@@ -40,7 +40,7 @@ const STUB_DRIVER: PgDriver = {
 }
 
 function makeAccessor(): PostgresAccessor {
-  const cfg = resolvePostgresConfig({ dsn: 'postgres://localhost/db' })
+  const cfg = PostgresConfig.parse({ dsn: 'postgres://localhost/db' })
   return new PostgresAccessor(STUB_DRIVER, cfg)
 }
 
@@ -182,7 +182,7 @@ describe('readdir', () => {
     vi.mocked(client.listTables).mockResolvedValue(['users'])
     const accessor = new PostgresAccessor(
       STUB_DRIVER,
-      resolvePostgresConfig({ dsn: 'postgres://localhost/db', schemas: ['public'] }),
+      PostgresConfig.parse({ dsn: 'postgres://localhost/db', schemas: ['public'] }),
     )
     await expect(
       readdir(

@@ -48,12 +48,13 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
   } catch (err: unknown) {
     fail(`invalid config YAML/JSON at ${path}: ${String(err)}`, 2)
   }
-  if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
-    const raw = config as Record<string, unknown>
-    keepPolicyNames(raw, () => {
-      absolutizeScripts(raw, dirname(resolve(path)))
-    })
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    fail('config source must be a mapping', 2)
   }
+  const raw = config as Record<string, unknown>
+  keepPolicyNames(raw, () => {
+    absolutizeScripts(raw, dirname(resolve(path)))
+  })
   return config
 }
 
@@ -327,7 +328,7 @@ async function listRecords(
   return handleList(r)
 }
 
-export function registerWorkspaceCommands(program: Command): Command {
+export function app(program: Command): Command {
   const ws = program.command('workspace').description('Manage workspaces.')
   for (const kind of ['vfs', 'skill']) {
     ws.command(`${kind}-md`)
@@ -363,114 +364,30 @@ export function registerWorkspaceCommands(program: Command): Command {
     .option('-w, --workspace <id>', 'Explicit workspace id')
     .option('--id <id>', 'Explicit workspace id')
     .option('--explain', "Say what the server's policies make of it; create nothing")
-    .action(
-      async (
-        configPath: string | undefined,
-        opts: { template?: string; workspace?: string; id?: string; explain?: boolean },
-      ) => {
-        if ((configPath === undefined) === (opts.template === undefined)) {
-          fail('give a config file or --template NAME, not both', 2)
-        }
-        const body: { config?: unknown; template?: string; id?: string } = {}
-        if (opts.template !== undefined) {
-          body.template = opts.template
-        } else if (configPath !== undefined) {
-          try {
-            body.config = await resolveConfig(configPath)
-          } catch (err: unknown) {
-            fail(err instanceof Error ? err.message : String(err), 2)
-          }
-        }
-        const id = opts.workspace ?? opts.id
-        if (id !== undefined) body.id = id
-        const c = makeClient()
-        await c.ensureRunning({ allowSpawn: true })
-        const explain = opts.explain === true
-        const r = await c.request(
-          'POST',
-          explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
-          {
-            body: JSON.stringify(body),
-          },
-        )
-        if (explain) {
-          emit(
-            (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
-            formatWorkspaceExplanation,
-          )
-          return
-        }
-        const created = (await handleResponse(r)) as WorkspaceDetail
-        header(`created ${created.id}`)
-        emit(created, formatWorkspaceDetail)
-      },
-    )
+    .action(createCmd)
 
-  ws.command('list')
-    .description('List active workspaces.')
-    .action(async () => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        (await handleList(await c.request('GET', '/v1/workspaces'))) as WorkspaceBrief[],
-        formatWorkspaceList,
-      )
-    })
+  ws.command('list').description('List active workspaces.').action(listCmd)
 
   ws.command('get')
     .description('Show full details for one workspace.')
     .argument('<id>')
     .option('--verbose', 'Include cache/dirty/history internals')
-    .action(async (id: string, opts: { verbose?: boolean }) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const path =
-        `/v1/workspaces/${encodeURIComponent(id)}` + (opts.verbose === true ? '?verbose=true' : '')
-      emit(
-        (await handleResponse(await c.request('GET', path))) as WorkspaceDetail,
-        formatWorkspaceDetail,
-      )
-    })
+    .action(getCmd)
 
   ws.command('delete')
     .description('Stop and remove a workspace.')
     .argument('<id>')
-    .action(async (id: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      // A delete answers 204 with no body, so the id is the one given.
-      const deleted = (await handleResponse(
-        await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
-      )) as Record<string, unknown>
-      header(`deleted ${id}`)
-      emit({ id, ...deleted }, () => `Deleted workspace ${id}.`)
-    })
+    .action(deleteCmd)
 
   ws.command('stop')
     .description('Stop a workspace and keep its state for start.')
     .argument('<id>', 'Workspace id.')
-    .action(async (id: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const stopped = (await handleResponse(
-        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/stop`),
-      )) as { id: string }
-      header(`stopped ${id}`)
-      emit(stopped, (d) => `Stopped workspace ${d.id}.`)
-    })
+    .action(stopCmd)
 
   ws.command('start')
     .description('Start a stopped workspace from the config it was created with.')
     .argument('<id>', 'Workspace id.')
-    .action(async (id: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: true })
-      const started = (await handleResponse(
-        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/start`),
-      )) as { id: string }
-      header(`started ${id}`)
-      emit(started, (d) => `Started workspace ${d.id}.`)
-    })
+    .action(startCmd)
 
   ws.command('set-profile')
     .description(
@@ -481,35 +398,13 @@ export function registerWorkspaceCommands(program: Command): Command {
     .argument('<id>')
     .argument('<name>', "The profile's name.")
     .argument('<file>', 'YAML/JSON profile document.')
-    .action(async (id: string, name: string, file: string) => {
-      const body = await loadProfileArgument(file)
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request(
-            'PUT',
-            `/v1/workspaces/${encodeURIComponent(id)}/profiles/${encodeURIComponent(name)}`,
-            { body: JSON.stringify(body) },
-          ),
-        ),
-      )
-    })
+    .action(setProfileCmd)
 
   ws.command('clone')
     .description("Clone a workspace's live state.")
     .argument('<srcId>')
     .option('--id <id>', 'Explicit id for the clone')
-    .action(async (srcId: string, opts: { id?: string }) => {
-      const body: Record<string, unknown> = {}
-      if (opts.id !== undefined) body.id = opts.id
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(srcId)}/clone`, {
-        body: JSON.stringify(body),
-      })
-      emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
-    })
+    .action(cloneCmd)
 
   ws.command('logs')
     .description('Show completed commands, newest first.')
@@ -518,73 +413,20 @@ export function registerWorkspaceCommands(program: Command): Command {
     .option('--limit <count>', 'Commands per page (1-200)', '50')
     .option('--after <cursor>', 'Cursor from the previous page')
     .option('--jsonl', 'Export all matching retained commands, oldest first')
-    .action(
-      async (opts: {
-        workspace?: string
-        session?: string
-        limit: string
-        after?: string
-        jsonl?: boolean
-      }) => {
-        const id = resolveWorkspace(opts.workspace)
-        const params = new URLSearchParams({ limit: opts.limit })
-        if (opts.session !== undefined) params.set('session', opts.session)
-        if (opts.after !== undefined) params.set('after', opts.after)
-        if (opts.jsonl === true) params.set('format', 'jsonl')
-        const client = makeClient()
-        await client.ensureRunning({ allowSpawn: false })
-        const response = await client.request(
-          'GET',
-          `/v1/workspaces/${encodeURIComponent(id)}/logs?${params.toString()}`,
-        )
-        if (opts.jsonl === true && response.status < 400) {
-          if (response.body === null) return
-          const chunks: AsyncIterable<Uint8Array> = response.body
-          for await (const chunk of chunks) {
-            await new Promise<void>((resolve, reject) => {
-              process.stdout.write(chunk, (error) => {
-                if (error === null || error === undefined) resolve()
-                else reject(error)
-              })
-            })
-          }
-          return
-        }
-        emit((await handleResponse(response)) as LogPage, formatLogs)
-      },
-    )
+    .action(logsCmd)
   ws.command('list-asks')
     .description('List pending asks (every decision with --all).')
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', "Only this session's asks")
     .option('--all', 'Include settled decisions, not just pending asks')
-    .action(async (opts: { workspace?: string; session?: string; all?: boolean }) => {
-      const id = resolveWorkspace(opts.workspace)
-      const params = new URLSearchParams()
-      if (opts.session !== undefined) params.set('session_id', opts.session)
-      if (opts.all === true) params.set('all', 'true')
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const qs = params.toString()
-      const r = await c.request(
-        'GET',
-        `/v1/workspaces/${encodeURIComponent(id)}/asks${qs === '' ? '' : `?${qs}`}`,
-      )
-      emit((await handleList(r)) as AskRecord[], formatAsks)
-    })
+    .action(listAsksCmd)
 
   ws.command('list-lines')
     .description('List the lines the workspace keeps: running and newest ended.')
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', "Only this session's lines")
     .option('--state <state>', 'Only the lines in this state')
-    .action(async (opts: { workspace?: string; session?: string; state?: string }) => {
-      const found = await listRecords(opts.workspace, 'lines', {
-        session_id: opts.session,
-        state: opts.state,
-      })
-      emit(found as LineRecord[], formatLines)
-    })
+    .action(listLinesCmd)
 
   ws.command('list-jobs')
     .description("List the workspace's jobs, as each session's jobs shows them.")
@@ -592,16 +434,7 @@ export function registerWorkspaceCommands(program: Command): Command {
     .option('-s, --session <id>', "Only this session's jobs")
     .option('--state <state>', 'Only the jobs in this state')
     .option('--line <lineId>', 'Only the jobs this line started')
-    .action(
-      async (opts: { workspace?: string; session?: string; state?: string; line?: string }) => {
-        const found = await listRecords(opts.workspace, 'jobs', {
-          session_id: opts.session,
-          state: opts.state,
-          line_id: opts.line,
-        })
-        emit(found as JobRecord[], formatJobs)
-      },
-    )
+    .action(listJobsCmd)
 
   ws.command('list-processes')
     .description('List the processes the workspace keeps: live and newest ended.')
@@ -611,32 +444,12 @@ export function registerWorkspaceCommands(program: Command): Command {
     .option('--line <lineId>', 'Only the processes this line ran')
     .option('--job <jobId>', 'Only the processes this job ran')
     .option('--machine <machine>', 'Only the processes run on this machine (provider:name)')
-    .action(
-      async (opts: {
-        workspace?: string
-        session?: string
-        state?: string
-        line?: string
-        job?: string
-        machine?: string
-      }) => {
-        const found = await listRecords(opts.workspace, 'processes', {
-          session_id: opts.session,
-          state: opts.state,
-          line_id: opts.line,
-          job_id: opts.job,
-          machine: opts.machine,
-        })
-        emit(found as ProcessRecord[], formatProcesses)
-      },
-    )
+    .action(listProcessesCmd)
 
   ws.command('list-machines')
     .description('List the machines the workspace runs programs on, each checked now.')
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
-    .action(async (opts: { workspace?: string }) => {
-      emit((await listRecords(opts.workspace, 'machines', {})) as MachineRecord[], formatMachines)
-    })
+    .action(listMachinesCmd)
 
   ws.command('allow')
     .description('Allow a pending ask; the retry of the asked line passes.')
@@ -648,36 +461,14 @@ export function registerWorkspaceCommands(program: Command): Command {
       'once',
     )
     .option('--note <note>', 'What to record alongside the answer', '')
-    .action(async (id: string, askId: string, opts: { scope: string; note: string }) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request(
-        'POST',
-        `/v1/workspaces/${encodeURIComponent(id)}/asks/${encodeURIComponent(askId)}`,
-        {
-          body: JSON.stringify({ answer: 'allow', scope: opts.scope, note: opts.note }),
-        },
-      )
-      emit((await handleResponse(r)) as AskRecord, (d) => `Allowed ${d.id} (${d.scope}).`)
-    })
+    .action(allowCmd)
 
   ws.command('deny')
     .description('Deny a pending ask; the retry is refused in the deny voice, once.')
     .argument('<id>')
     .argument('<askId>', 'Ask id, as quoted in the refusal')
     .option('--note <note>', 'What to record alongside the answer', '')
-    .action(async (id: string, askId: string, opts: { note: string }) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request(
-        'POST',
-        `/v1/workspaces/${encodeURIComponent(id)}/asks/${encodeURIComponent(askId)}`,
-        {
-          body: JSON.stringify({ answer: 'deny', note: opts.note }),
-        },
-      )
-      emit((await handleResponse(r)) as AskRecord, (d) => `Denied ${d.id}.`)
-    })
+    .action(denyCmd)
 
   ws.command('snapshot')
     .description(
@@ -686,34 +477,7 @@ export function registerWorkspaceCommands(program: Command): Command {
     .argument('<id>')
     .argument('[output]', 'File to write the .tar to, on this machine')
     .option('--key <key>', "Put it in the server's snapshot store instead")
-    .action(async (id: string, output: string | undefined, opts: { key?: string }) => {
-      if (output !== undefined && opts.key !== undefined) {
-        fail('snapshot takes an output file or --key', 2)
-      }
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const path = `/v1/workspaces/${encodeURIComponent(id)}/snapshot`
-      const human = (d: { id: string; size: number }, target: string): string =>
-        `Snapshot ${d.id} -> ${target} (${d.size.toLocaleString()} bytes).`
-      if (opts.key !== undefined) {
-        const key = opts.key
-        const r = await c.request('POST', path, {
-          body: JSON.stringify({ key }),
-          timeoutMs: null,
-        })
-        emit((await handleResponse(r)) as { id: string; key: string; size: number }, (d) =>
-          human(d, key),
-        )
-        return
-      }
-      if (output === undefined) fail('snapshot takes an output file or --key', 2)
-      const target = output
-      const r = await c.request('GET', path, { timeoutMs: null })
-      if (!r.ok) await handleResponse(r)
-      const tar = new Uint8Array(await r.arrayBuffer())
-      writeFileSync(target, tar)
-      emit({ id, path: target, size: tar.byteLength }, (d) => human(d, target))
-    })
+    .action(snapshotCmd)
 
   ws.command('load')
     .description(
@@ -723,42 +487,319 @@ export function registerWorkspaceCommands(program: Command): Command {
     .argument('[config]', 'Workspace YAML/JSON config')
     .option('--key <key>', "Load from the server's snapshot store")
     .option('--id <id>', 'Explicit workspace id')
-    .action(
-      async (
-        first: string | undefined,
-        second: string | undefined,
-        opts: { key?: string; id?: string },
-      ) => {
-        const given = [first, second].filter((p): p is string => p !== undefined)
-        if (opts.key !== undefined && given.length > 1)
-          fail('load takes a FILE or --key, not both', 2)
-        if (opts.key === undefined && given.length === 0) {
-          fail('load takes a FILE (or --key) and an optional CONFIG', 2)
-        }
-        const tarPath = opts.key === undefined ? given.shift() : undefined
-        const configPath = given[0]
-        for (const p of [tarPath, configPath]) {
-          if (p !== undefined && !existsSync(p)) fail(`file not found: ${p}`, 2)
-        }
-        const body: Record<string, JsonValue> = {}
-        if (opts.id !== undefined) body.id = opts.id
-        if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
-        const c = makeClient()
-        await c.ensureRunning({ allowSpawn: true })
-        const r =
-          tarPath === undefined
-            ? await c.request('POST', '/v1/workspaces/load', {
-                body: JSON.stringify({ ...body, key: opts.key }),
-                timeoutMs: null,
-              })
-            : await c.requestUpload('POST', '/v1/workspaces/load', body, {
-                name: 'snapshot',
-                data: createReadStream(tarPath),
-              })
-        const created = (await handleResponse(r)) as WorkspaceDetail
-        header(`created ${created.id}`)
-        emit(created, formatWorkspaceDetail)
-      },
-    )
+    .action(loadCmd)
   return ws
+}
+
+async function createCmd(
+  configPath: string | undefined,
+  opts: { template?: string; workspace?: string; id?: string; explain?: boolean },
+): Promise<void> {
+  if ((configPath === undefined) === (opts.template === undefined)) {
+    fail('give a config file or --template NAME, not both', 2)
+  }
+  const body: { config?: unknown; template?: string; id?: string } = {}
+  if (opts.template !== undefined) {
+    body.template = opts.template
+  } else if (configPath !== undefined) {
+    try {
+      body.config = await resolveConfig(configPath)
+    } catch (err: unknown) {
+      fail(err instanceof Error ? err.message : String(err), 2)
+    }
+  }
+  const id = opts.workspace ?? opts.id
+  if (id !== undefined) body.id = id
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: true })
+  const explain = opts.explain === true
+  const r = await c.request('POST', explain ? '/v1/workspaces?explain=true' : '/v1/workspaces', {
+    body: JSON.stringify(body),
+  })
+  if (explain) {
+    emit(
+      (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
+      formatWorkspaceExplanation,
+    )
+    return
+  }
+  const created = (await handleResponse(r)) as WorkspaceDetail
+  header(`created ${created.id}`)
+  emit(created, formatWorkspaceDetail)
+}
+
+async function listCmd(): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  emit(
+    (await handleList(await c.request('GET', '/v1/workspaces'))) as WorkspaceBrief[],
+    formatWorkspaceList,
+  )
+}
+
+async function getCmd(id: string, opts: { verbose?: boolean }): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const path =
+    `/v1/workspaces/${encodeURIComponent(id)}` + (opts.verbose === true ? '?verbose=true' : '')
+  emit(
+    (await handleResponse(await c.request('GET', path))) as WorkspaceDetail,
+    formatWorkspaceDetail,
+  )
+}
+
+async function deleteCmd(id: string): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  // A delete answers 204 with no body, so the id is the one given.
+  const deleted = (await handleResponse(
+    await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
+  )) as Record<string, unknown>
+  header(`deleted ${id}`)
+  emit({ id, ...deleted }, () => `Deleted workspace ${id}.`)
+}
+
+async function stopCmd(id: string): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const stopped = (await handleResponse(
+    await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/stop`),
+  )) as { id: string }
+  header(`stopped ${id}`)
+  emit(stopped, (d) => `Stopped workspace ${d.id}.`)
+}
+
+async function startCmd(id: string): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: true })
+  const started = (await handleResponse(
+    await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/start`),
+  )) as { id: string }
+  header(`started ${id}`)
+  emit(started, (d) => `Started workspace ${d.id}.`)
+}
+
+async function setProfileCmd(id: string, name: string, file: string): Promise<void> {
+  const body = await loadProfileArgument(file)
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  emit(
+    await handleResponse(
+      await c.request(
+        'PUT',
+        `/v1/workspaces/${encodeURIComponent(id)}/profiles/${encodeURIComponent(name)}`,
+        { body: JSON.stringify(body) },
+      ),
+    ),
+  )
+}
+
+async function cloneCmd(srcId: string, opts: { id?: string }): Promise<void> {
+  const body: Record<string, unknown> = {}
+  if (opts.id !== undefined) body.id = opts.id
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(srcId)}/clone`, {
+    body: JSON.stringify(body),
+  })
+  emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+}
+
+async function logsCmd(opts: {
+  workspace?: string
+  session?: string
+  limit: string
+  after?: string
+  jsonl?: boolean
+}): Promise<void> {
+  const id = resolveWorkspace(opts.workspace)
+  const params = new URLSearchParams({ limit: opts.limit })
+  if (opts.session !== undefined) params.set('session', opts.session)
+  if (opts.after !== undefined) params.set('after', opts.after)
+  if (opts.jsonl === true) params.set('format', 'jsonl')
+  const client = makeClient()
+  await client.ensureRunning({ allowSpawn: false })
+  const response = await client.request(
+    'GET',
+    `/v1/workspaces/${encodeURIComponent(id)}/logs?${params.toString()}`,
+  )
+  if (opts.jsonl === true && response.status < 400) {
+    if (response.body === null) return
+    const chunks: AsyncIterable<Uint8Array> = response.body
+    for await (const chunk of chunks) {
+      await new Promise<void>((resolve, reject) => {
+        process.stdout.write(chunk, (error) => {
+          if (error === null || error === undefined) resolve()
+          else reject(error)
+        })
+      })
+    }
+    return
+  }
+  emit((await handleResponse(response)) as LogPage, formatLogs)
+}
+
+async function listAsksCmd(opts: {
+  workspace?: string
+  session?: string
+  all?: boolean
+}): Promise<void> {
+  const id = resolveWorkspace(opts.workspace)
+  const params = new URLSearchParams()
+  if (opts.session !== undefined) params.set('session_id', opts.session)
+  if (opts.all === true) params.set('all', 'true')
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const qs = params.toString()
+  const r = await c.request(
+    'GET',
+    `/v1/workspaces/${encodeURIComponent(id)}/asks${qs === '' ? '' : `?${qs}`}`,
+  )
+  emit((await handleList(r)) as AskRecord[], formatAsks)
+}
+
+async function listLinesCmd(opts: {
+  workspace?: string
+  session?: string
+  state?: string
+}): Promise<void> {
+  const found = await listRecords(opts.workspace, 'lines', {
+    session_id: opts.session,
+    state: opts.state,
+  })
+  emit(found as LineRecord[], formatLines)
+}
+
+async function listJobsCmd(opts: {
+  workspace?: string
+  session?: string
+  state?: string
+  line?: string
+}): Promise<void> {
+  const found = await listRecords(opts.workspace, 'jobs', {
+    session_id: opts.session,
+    state: opts.state,
+    line_id: opts.line,
+  })
+  emit(found as JobRecord[], formatJobs)
+}
+
+async function listProcessesCmd(opts: {
+  workspace?: string
+  session?: string
+  state?: string
+  line?: string
+  job?: string
+  machine?: string
+}): Promise<void> {
+  const found = await listRecords(opts.workspace, 'processes', {
+    session_id: opts.session,
+    state: opts.state,
+    line_id: opts.line,
+    job_id: opts.job,
+    machine: opts.machine,
+  })
+  emit(found as ProcessRecord[], formatProcesses)
+}
+
+async function listMachinesCmd(opts: { workspace?: string }): Promise<void> {
+  emit((await listRecords(opts.workspace, 'machines', {})) as MachineRecord[], formatMachines)
+}
+
+async function allowCmd(
+  id: string,
+  askId: string,
+  opts: { scope: string; note: string },
+): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const r = await c.request(
+    'POST',
+    `/v1/workspaces/${encodeURIComponent(id)}/asks/${encodeURIComponent(askId)}`,
+    {
+      body: JSON.stringify({ answer: 'allow', scope: opts.scope, note: opts.note }),
+    },
+  )
+  emit((await handleResponse(r)) as AskRecord, (d) => `Allowed ${d.id} (${d.scope}).`)
+}
+
+async function denyCmd(id: string, askId: string, opts: { note: string }): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const r = await c.request(
+    'POST',
+    `/v1/workspaces/${encodeURIComponent(id)}/asks/${encodeURIComponent(askId)}`,
+    {
+      body: JSON.stringify({ answer: 'deny', note: opts.note }),
+    },
+  )
+  emit((await handleResponse(r)) as AskRecord, (d) => `Denied ${d.id}.`)
+}
+
+async function snapshotCmd(
+  id: string,
+  output: string | undefined,
+  opts: { key?: string },
+): Promise<void> {
+  if (output !== undefined && opts.key !== undefined) {
+    fail('snapshot takes an output file or --key', 2)
+  }
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const path = `/v1/workspaces/${encodeURIComponent(id)}/snapshot`
+  const human = (d: { id: string; size: number }, target: string): string =>
+    `Snapshot ${d.id} -> ${target} (${d.size.toLocaleString()} bytes).`
+  if (opts.key !== undefined) {
+    const key = opts.key
+    const r = await c.request('POST', path, {
+      body: JSON.stringify({ key }),
+      timeoutMs: null,
+    })
+    emit((await handleResponse(r)) as { id: string; key: string; size: number }, (d) =>
+      human(d, key),
+    )
+    return
+  }
+  if (output === undefined) fail('snapshot takes an output file or --key', 2)
+  const target = output
+  const r = await c.request('GET', path, { timeoutMs: null })
+  if (!r.ok) await handleResponse(r)
+  const tar = new Uint8Array(await r.arrayBuffer())
+  writeFileSync(target, tar)
+  emit({ id, path: target, size: tar.byteLength }, (d) => human(d, target))
+}
+
+async function loadCmd(
+  first: string | undefined,
+  second: string | undefined,
+  opts: { key?: string; id?: string },
+): Promise<void> {
+  const given = [first, second].filter((p): p is string => p !== undefined)
+  if (opts.key !== undefined && given.length > 1) fail('load takes a FILE or --key, not both', 2)
+  if (opts.key === undefined && given.length === 0) {
+    fail('load takes a FILE (or --key) and an optional CONFIG', 2)
+  }
+  const tarPath = opts.key === undefined ? given.shift() : undefined
+  const configPath = given[0]
+  for (const p of [tarPath, configPath]) {
+    if (p !== undefined && !existsSync(p)) fail(`file not found: ${p}`, 2)
+  }
+  const body: Record<string, JsonValue> = {}
+  if (opts.id !== undefined) body.id = opts.id
+  if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: true })
+  const r =
+    tarPath === undefined
+      ? await c.request('POST', '/v1/workspaces/load', {
+          body: JSON.stringify({ ...body, key: opts.key }),
+          timeoutMs: null,
+        })
+      : await c.requestUpload('POST', '/v1/workspaces/load', body, {
+          name: 'snapshot',
+          data: createReadStream(tarPath),
+        })
+  const created = (await handleResponse(r)) as WorkspaceDetail
+  header(`created ${created.id}`)
+  emit(created, formatWorkspaceDetail)
 }

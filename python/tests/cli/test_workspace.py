@@ -79,6 +79,23 @@ def test_a_load_override_rebases_relative_code_refs_onto_its_dir(
     )
 
 
+def test_create_validates_the_document_it_sends(tmp_path, monkeypatch):
+    path = tmp_path / "mounts.yaml"
+    path.write_text("mounts: {}")
+    read_text = Path.read_text
+    reads = []
+
+    def read_once(file, *args, **kwargs):
+        if file == path:
+            reads.append(file)
+            assert len(reads) == 1
+        return read_text(file, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_once)
+    assert workspace_cli.resolve_config(path) == {"mounts": {}}
+    assert reads == [path]
+
+
 class _FakeResponse:
     def __init__(self, status_code: int, content: bytes) -> None:
         self.status_code = status_code

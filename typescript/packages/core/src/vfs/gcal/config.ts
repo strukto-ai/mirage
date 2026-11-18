@@ -14,7 +14,7 @@
 
 import { z } from 'zod'
 import { GoogleConfig } from '../../core/google/config.ts'
-import { orderedTimes, timeRangeOrderError, timeRangeShape } from '../../core/time_config.ts'
+import { TimeRangeConfig, orderedTimes } from '../../core/time_config.ts'
 import type { ConfigOf } from '../secrets.ts'
 
 // Calendar-only knobs live here, not on the shared Google base, so a drive
@@ -24,7 +24,7 @@ import type { ConfigOf } from '../secrets.ts'
 // import time should a key here ever shadow one of the base's. Mirrors
 // python's `GCalConfig(GoogleConfig)`.
 export const GCalConfig = GoogleConfig.safeExtend({
-  ...timeRangeShape,
+  ...TimeRangeConfig.shape,
   // One zone for the whole mount, not one per calendar: the Calendar UI
   // draws its whole grid in the primary zone, and per-calendar bucketing
   // would make the same day directory name mean different 24-hour windows
@@ -53,6 +53,6 @@ export const GCalConfig = GoogleConfig.safeExtend({
     .describe(
       "Day (`YYYY-MM-DD`) the default listing's 90-day future horizon is measured from, for tests and snapshots. Unset uses the current date in the mount's time zone.",
     ),
-}).refine(orderedTimes, timeRangeOrderError)
+}).check(orderedTimes)
 
 export type GCalConfig = ConfigOf<typeof GCalConfig>

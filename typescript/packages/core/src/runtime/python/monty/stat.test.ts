@@ -20,6 +20,14 @@ import { statFields, statResult } from './stat.ts'
 // mtime=1.5) and dir_stat(mode=0o40755, mtime=2). This file is what
 // keeps the JS side reproducing them by hand.
 describe('statFields', () => {
+  it('uses the explicit type when the directory hint disagrees', () => {
+    expect(statFields({ size: 5, isDir: true, mode: 0o100640 })).toMatchObject({
+      st_mode: 0o100640,
+      st_size: 5,
+      st_nlink: 1,
+    })
+  })
+
   it('reports a file the way StatResult.file_stat does', () => {
     const st = statFields({ size: 5, isDir: false, mtimeMs: 1500, mode: 0o100644 })
     expect(st).toEqual({

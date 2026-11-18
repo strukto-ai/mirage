@@ -57,6 +57,7 @@ import {
   CreateWorkspaceRequest,
   LoadWorkspaceRequest,
   SnapshotWorkspaceRequest,
+  type SnapshotWorkspaceResponse,
   type StopWorkspaceResponse,
   type WorkspaceBrief,
   type WorkspaceList,
@@ -621,246 +622,397 @@ function openWorkspace(
   })
 }
 
-export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDeps): void {
-  app.post<{ Body: unknown; Querystring: { explain?: string } }>(
-    '/v1/workspaces',
-    async (
-      req: RouteRequest<{ Body: unknown; Querystring: { explain?: string } }>,
-      reply: RouteReply,
-    ) => {
-      // The query is read before the body, as Python's route reads them.
-      const { explain } = queryFlag(req.query, 'explain')
-      // The policies judge, and the build uses, the same document.
-      const { body, cfg, written: config } = await configOf(req.body, deps.resources, deps.registry)
-      // The server's policies judge the config as written before any of it
-      // is built; explain answers what they say without creating anything.
-      if (explain) {
-        return explanationToDict(await deps.registry.explanation(config, req.account))
+async function createWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Body: unknown; Querystring: { explain?: string } }>,
+  reply: RouteReply,
+) {
+  // The query is read before the body, as Python's route reads them.
+  const { explain } = queryFlag(req.query, 'explain')
+  // The policies judge, and the build uses, the same document.
+  const { body, cfg, written: config } = await configOf(req.body, deps.resources, deps.registry)
+  // The server's policies judge the config as written before any of it
+  // is built; explain answers what they say without creating anything.
+  if (explain) {
+    return explanationToDict(await deps.registry.explanation(config, req.account))
+  }
+  // The registry id and the state-store scope must be the same identity,
+  // so resolve it before construction: explicit REST id, then the
+  // config's workspaceId, then a fresh mint. Creating is idempotent for
+  // one config, so an id held by a workspace created from an identical
+  // config answers it with 200, and an id held by anything else is
+  // refused.
+  const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
+  refuseId(wid, deps.host.reservedIds)
+  return openWorkspace(deps, req, reply, wid, cfg, config, 201)
+}
+
+async function listWorkspaces(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest,
+): Promise<WorkspaceList> {
+  const running = deps.registry
+    .list()
+    .filter((e) => deps.registry.visible(e.id, req.account) !== null)
+    .map(makeBrief)
+  // One that stops while this reads is listed once, as it was first read.
+  const listed = new Set(running.map((w) => w.id))
+  const idle: WorkspaceBrief[] = []
+  for (const id of await deps.registry.stoppedIds(req.account)) {
+    if (listed.has(id)) continue
+    const k = await kept(deps, id, req.account)
+    if (k !== null) idle.push(makeStoppedBrief(id, k.createdAt))
+  }
+  return { items: [...running, ...idle] }
+}
+
+async function loadWorkspace(deps: WorkspaceRoutesDeps, req: RouteRequest, reply: RouteReply) {
+  const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
+  let body: LoadWorkspaceRequest
+  let source: string | Uint8Array
+  try {
+    if (multipart) {
+      ;[body, source] = await readLoadBody(req)
+    } else {
+      body = parseLoadRequest(req.body)
+      const given = body.key ?? undefined
+      if (given === undefined) {
+        throw new HttpError('invalid_request', "load needs a 'key' or an uploaded 'snapshot' part")
       }
-      // The registry id and the state-store scope must be the same identity,
-      // so resolve it before construction: explicit REST id, then the
-      // config's workspaceId, then a fresh mint. Creating is idempotent for
-      // one config, so an id held by a workspace created from an identical
-      // config answers it with 200, and an id held by anything else is
-      // refused.
-      const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
-      refuseId(wid, deps.host.reservedIds)
-      return openWorkspace(deps, req, reply, wid, cfg, config, 201)
-    },
-  )
-
-  // The running workspaces, then the stopped ones.
-  app.get('/v1/workspaces', async (req): Promise<WorkspaceList> => {
-    const running = deps.registry
-      .list()
-      .filter((e) => deps.registry.visible(e.id, req.account) !== null)
-      .map(makeBrief)
-    // One that stops while this reads is listed once, as it was first read.
-    const listed = new Set(running.map((w) => w.id))
-    const idle: WorkspaceBrief[] = []
-    for (const id of await deps.registry.stoppedIds(req.account)) {
-      if (listed.has(id)) continue
-      const k = await kept(deps, id, req.account)
-      if (k !== null) idle.push(makeStoppedBrief(id, k.createdAt))
+      source = storeKey(deps.host, req.account, given)
     }
-    return { items: [...running, ...idle] }
-  })
-
-  app.post('/v1/workspaces/load', async (req, reply) => {
-    const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
-    let body: LoadWorkspaceRequest
-    let source: string | Uint8Array
+  } catch (e) {
+    if (e instanceof HttpError && multipart) void reply.header('connection', 'close')
+    throw e
+  }
+  const workspaceId = body.id ?? undefined
+  const override = (body.override ?? undefined) as OverrideShape | undefined
+  refuseId(workspaceId, deps.host.reservedIds)
+  if (
+    workspaceId !== undefined &&
+    (deps.registry.has(workspaceId) || deps.registry.removing(workspaceId))
+  ) {
+    throw new HttpError('already_exists', 'workspace id already exists')
+  }
+  await admit(deps, req, override)
+  const store = typeof source === 'string' ? snapshotStore(deps) : undefined
+  const wid = workspaceId ?? newWorkspaceId()
+  // What the snapshot holds is built under the server's network; its own
+  // setting is not known until it is read.
+  const rule = deps.registry.ruleFor()
+  return building(deps, req, reply, wid, async () => {
+    let overrides: Record<string, BaseVFS | Mount>
     try {
-      if (multipart) {
-        ;[body, source] = await readLoadBody(req)
-      } else {
-        body = parseLoadRequest(req.body)
-        const given = body.key ?? undefined
-        if (given === undefined) {
-          throw new HttpError(
-            'invalid_request',
-            "load needs a 'key' or an uploaded 'snapshot' part",
-          )
-        }
-        source = storeKey(deps.host, req.account, given)
-      }
+      // An override mount's credential may be a pointer at one of
+      // these declarations; a container the constructor will reject
+      // is left for it to reject. Mirrors the python load route.
+      overrides = await runWithNetwork(rule, () =>
+        buildOverrideMounts(override ?? null, override?.secrets, (name, config, sources) =>
+          deps.host.buildVfs(name, config, sources),
+        ),
+      )
     } catch (e) {
-      if (e instanceof HttpError && multipart) void reply.header('connection', 'close')
-      throw e
+      throw refusedBuild(e, 'override could not be built')
     }
-    const workspaceId = body.id ?? undefined
-    const override = (body.override ?? undefined) as OverrideShape | undefined
-    refuseId(workspaceId, deps.host.reservedIds)
-    if (
-      workspaceId !== undefined &&
-      (deps.registry.has(workspaceId) || deps.registry.removing(workspaceId))
-    ) {
-      throw new HttpError('already_exists', 'workspace id already exists')
-    }
-    await admit(deps, req, override)
-    const store = typeof source === 'string' ? snapshotStore(deps) : undefined
-    const wid = workspaceId ?? newWorkspaceId()
-    // What the snapshot holds is built under the server's network; its own
-    // setting is not known until it is read.
-    const rule = deps.registry.ruleFor()
-    return building(deps, req, reply, wid, async () => {
-      let overrides: Record<string, BaseVFS | Mount>
-      try {
-        // An override mount's credential may be a pointer at one of
-        // these declarations; a container the constructor will reject
-        // is left for it to reject. Mirrors the python load route.
-        overrides = await runWithNetwork(rule, () =>
-          buildOverrideMounts(override ?? null, override?.secrets, (name, config, sources) =>
-            deps.host.buildVfs(name, config, sources),
+    let ws: Workspace
+    let restoredWith: readonly Policy[] = []
+    try {
+      // The snapshot's saved values meet the server's policies as a live
+      // write does, before any of them lands.
+      ws = await deps.registry.restoring((policies) => {
+        restoredWith = policies
+        return runWithNetwork(rule, () =>
+          deps.host.Workspace.load(
+            source,
+            {
+              maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+              maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
+              ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
+              ...(store !== undefined ? { s3: store } : {}),
+              policies,
+              ceilings: deps.registry.ceilings,
+            },
+            overrides,
           ),
         )
-      } catch (e) {
-        throw refusedBuild(e, 'override could not be built')
-      }
-      let ws: Workspace
-      let restoredWith: readonly Policy[] = []
-      try {
-        // The snapshot's saved values meet the server's policies as a live
-        // write does, before any of them lands.
-        ws = await deps.registry.restoring((policies) => {
-          restoredWith = policies
-          return runWithNetwork(rule, () =>
-            deps.host.Workspace.load(
-              source,
-              {
-                maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
-                maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
-                ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
-                ...(store !== undefined ? { s3: store } : {}),
-                policies,
-                ceilings: deps.registry.ceilings,
-              },
-              overrides,
-            ),
-          )
+      })
+    } catch (e) {
+      if (e instanceof PolicyDenied) {
+        throw new HttpError('policy_refused', e.decision?.reason ?? e.message, {
+          decision: decisionToDict(e.decision ?? null),
         })
-      } catch (e) {
-        if (e instanceof PolicyDenied) {
-          throw new HttpError('policy_refused', e.decision?.reason ?? e.message, {
-            decision: decisionToDict(e.decision ?? null),
-          })
-        }
-        if ((e as { code?: unknown }).code === 'ENOENT') {
-          throw new HttpError('invalid_value', 'key names no snapshot', { param: 'key', cause: e })
-        }
-        throw refusedBuild(e, 'snapshot could not be loaded')
       }
-      const past = pastSessionCap(ws, deps.registry.maxSessions, 'the snapshot')
-      if (past !== null) {
-        await ws.close()
-        throw new HttpError('invalid_request', past)
+      if ((e as { code?: unknown }).code === 'ENOENT') {
+        throw new HttpError('invalid_value', 'key names no snapshot', { param: 'key', cause: e })
       }
-      let entry
-      try {
-        entry = deps.registry.add(ws, wid, req.account, restoredWith)
-      } catch (e) {
-        await ws.close()
-        throw new HttpError('conflict', (e as Error).message)
-      }
-      await deps.registry.dropConfig(wid)
-      return answer(reply, 201, await makeDetail(entry))
-    })
+      throw refusedBuild(e, 'snapshot could not be loaded')
+    }
+    const past = pastSessionCap(ws, deps.registry.maxSessions, 'the snapshot')
+    if (past !== null) {
+      await ws.close()
+      throw new HttpError('invalid_request', past)
+    }
+    let entry
+    try {
+      entry = deps.registry.add(ws, wid, req.account, restoredWith)
+    } catch (e) {
+      await ws.close()
+      throw new HttpError('conflict', (e as Error).message)
+    }
+    await deps.registry.dropConfig(wid)
+    return answer(reply, 201, await makeDetail(entry))
   })
+}
 
-  app.get<{ Params: WorkspaceIdParams; Querystring: { verbose?: string } }>(
-    '/v1/workspaces/:id',
-    async (req) => {
-      const { verbose } = queryFlag(req.query, 'verbose')
-      const entry = deps.registry.visible(req.params.id, req.account)
-      if (entry === null) {
-        const k = await kept(deps, req.params.id, req.account)
-        if (k === null) throw new HttpError('not_found', 'workspace not found')
-        return makeStoppedDetail(req.params.id, k.config, k.createdAt)
-      }
-      // A workspace being deleted keeps its id until the deletion is done,
-      // but its runner has stopped answering: it is gone to a reader.
-      if (deps.registry.removing(req.params.id)) {
-        throw new HttpError('not_found', 'workspace not found')
-      }
-      return await makeDetail(entry, verbose)
-    },
-  )
+async function getWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams; Querystring: { verbose?: string } }>,
+) {
+  const { verbose } = queryFlag(req.query, 'verbose')
+  const entry = deps.registry.visible(req.params.id, req.account)
+  if (entry === null) {
+    const k = await kept(deps, req.params.id, req.account)
+    if (k === null) throw new HttpError('not_found', 'workspace not found')
+    return makeStoppedDetail(req.params.id, k.config, k.createdAt)
+  }
+  // A workspace being deleted keeps its id until the deletion is done,
+  // but its runner has stopped answering: it is gone to a reader.
+  if (deps.registry.removing(req.params.id)) {
+    throw new HttpError('not_found', 'workspace not found')
+  }
+  return await makeDetail(entry, verbose)
+}
 
-  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceLogsQuery }>(
-    '/v1/workspaces/:id/logs',
-    async (req, reply) => {
-      const entry = requireEntry(deps.registry, req.params.id, req.account)
-      if (deps.registry.removing(req.params.id)) {
-        throw new HttpError('not_found', 'workspace not found')
+async function workspaceLogs(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams; Querystring: WorkspaceLogsQuery }>,
+  reply: RouteReply,
+) {
+  const entry = requireEntry(deps.registry, req.params.id, req.account)
+  if (deps.registry.removing(req.params.id)) {
+    throw new HttpError('not_found', 'workspace not found')
+  }
+  let session: string | undefined
+  try {
+    session = sessionFilter(req.query.session)
+    if (req.query.format !== 'jsonl') logPage([], req.query.limit, req.query.after)
+  } catch (e) {
+    throw loaderError(e)
+  }
+  const logs = completedLogs(await entry.runner.ws.observer.events(session))
+  if (req.query.format === 'jsonl')
+    return reply
+      .header('content-type', 'application/x-ndjson')
+      .header('content-disposition', logAttachment(req.params.id))
+      .send(streamOf(logLines(logs)))
+  try {
+    return logPage(logs, req.query.limit, req.query.after)
+  } catch (e) {
+    throw loaderError(e)
+  }
+}
+
+async function deleteWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+  reply: RouteReply,
+) {
+  const { id } = req.params
+  if (deps.registry.visible(id, req.account) === null) {
+    const k = await kept(deps, id, req.account)
+    if (k === null) throw new HttpError('not_found', 'workspace not found')
+    const store = storeOf(deps, k.config)
+    try {
+      const forgot = await deps.registry.forget(id, req.account, k.config, store)
+      if (forgot === Forget.Gone) throw new HttpError('not_found', 'workspace not found')
+      if (forgot === Forget.Held) {
+        throw new HttpError('workspace_busy', 'workspace is running on another server')
       }
-      let session: string | undefined
-      try {
-        session = sessionFilter(req.query.session)
-        if (req.query.format !== 'jsonl') logPage([], req.query.limit, req.query.after)
-      } catch (e) {
-        throw loaderError(e)
+      if (forgot === Forget.Busy) {
+        throw new HttpError('workspace_busy', 'workspace is starting or stopping; try again')
       }
-      const logs = completedLogs(await entry.runner.ws.observer.events(session))
-      if (req.query.format === 'jsonl')
-        return reply
-          .header('content-type', 'application/x-ndjson')
-          .header('content-disposition', logAttachment(req.params.id))
-          .send(streamOf(logLines(logs)))
-      try {
-        return logPage(logs, req.query.limit, req.query.after)
-      } catch (e) {
-        throw loaderError(e)
-      }
-    },
-  )
+    } finally {
+      await store.close()
+    }
+    return reply.status(204).send()
+  }
+  try {
+    await deps.registry.remove(id)
+  } catch (err) {
+    console.error('mirage: workspace delete failed', err)
+    throw new HttpError('internal', INTERNAL_MESSAGE, { cause: err })
+  }
+  return reply.status(204).send()
+}
+
+async function stopWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+): Promise<StopWorkspaceResponse> {
+  const { id } = req.params
+  const live = deps.registry.visible(id, req.account) !== null
+  if (!live && !(await isStopped(deps, id, req.account))) {
+    throw new HttpError('not_found', 'workspace not found')
+  }
+  if (live || deps.registry.removing(id)) await deps.registry.stop(id)
+  return { id, stopped_at: msToRfc3339(Date.now()) }
+}
+
+async function startWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+  reply: RouteReply,
+) {
+  const { id } = req.params
+  const held = deps.registry.visible(id, req.account)
+  if (held !== null && !deps.registry.removing(id)) return await makeDetail(held)
+  const config = await deps.registry.savedConfig(id, req.account)
+  if (config === null) throw new HttpError('not_found', 'workspace not found')
+  let cfg: WorkspaceConfig
+  try {
+    cfg = checkConfig(config)
+  } catch (e) {
+    throw loaderError(e, ['config'], config)
+  }
+  return openWorkspace(deps, req, reply, id, cfg, config, 200)
+}
+
+async function cancelWorkspaceLines(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+) {
+  const entry = requireEntry(deps.registry, req.params.id, req.account)
+  return { canceled: await entry.runner.ws.cancel() }
+}
+
+async function killWorkspaceJobs(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+) {
+  const entry = requireEntry(deps.registry, req.params.id, req.account)
+  return { killed: await entry.runner.ws.kill() }
+}
+
+function setProfile(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: { id: string; name: string }; Body: unknown }>,
+) {
+  const entry = requireEntry(deps.registry, req.params.id, req.account)
+  const name = req.params.name
+  try {
+    entry.runner.ws.setProfile(
+      name,
+      deps.host.loadProfile(SessionProfile(req.body, `profile \`${name}\``)),
+    )
+  } catch (err) {
+    throw loaderError(err, [], req.body)
+  }
+  return { name }
+}
+
+async function cloneWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams; Body: unknown }>,
+  reply: RouteReply,
+) {
+  const parsed = CloneWorkspaceRequest.safeParse(req.body ?? {})
+  if (!parsed.success) throw validationError(parsed.error, req.body ?? {})
+  const source = requireEntry(deps.registry, req.params.id, req.account)
+  const id = parsed.data.id ?? undefined
+  const override = (parsed.data.override ?? null) as OverrideShape | null
+  refuseId(id, deps.host.reservedIds)
+  if (id !== undefined && (deps.registry.has(id) || deps.registry.removing(id))) {
+    throw new HttpError('already_exists', 'workspace id already exists')
+  }
+  const wid = id ?? newWorkspaceId()
+  await admit(deps, req, override)
+  return building(deps, req, reply, wid, async () => {
+    const src = source.runner.ws
+    let newWs
+    try {
+      newWs = await runWithNetwork(deps.registry.ruleFor(src.network), () =>
+        cloneWorkspaceWithOverride(src, override, deps.host),
+      )
+    } catch (e) {
+      if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
+      // An override naming a source the host cannot resolve, or a
+      // block the schema refuses, is the caller's mistake -- the
+      // answer create, load and the historical clone already give.
+      throw refusedBuild(e, 'override could not be built')
+    }
+    let entry
+    try {
+      entry = deps.registry.add(newWs, wid, req.account)
+    } catch (e) {
+      await newWs.close()
+      throw new HttpError('conflict', (e as Error).message)
+    }
+    await deps.registry.dropConfig(wid)
+    return answer(reply, 201, await makeDetail(entry))
+  })
+}
+
+async function downloadSnapshot(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+  reply: RouteReply,
+) {
+  const entry = requireEntry(deps.registry, req.params.id, req.account)
+  let tar: Uint8Array
+  try {
+    tar = await entry.runner.ws.snapshot()
+  } catch (e) {
+    if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
+    throw e
+  }
+  return reply
+    .type('application/x-tar')
+    .send(Buffer.from(tar.buffer, tar.byteOffset, tar.byteLength))
+}
+
+async function snapshotWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest<{ Params: WorkspaceIdParams }>,
+  reply: RouteReply,
+) {
+  const { id } = req.params
+  const parsed = SnapshotWorkspaceRequest.safeParse(req.body)
+  if (!parsed.success) throw validationError(parsed.error, req.body)
+  const entry = requireEntry(deps.registry, id, req.account)
+  const store = snapshotStore(deps)
+  const { key } = parsed.data
+  const scoped = storeKey(deps.host, req.account, key)
+  let size: number
+  try {
+    size = await entry.runner.ws.snapshot(scoped, { s3: store })
+  } catch (e) {
+    if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
+    throw e
+  }
+  return reply.status(200).send({ id, key, size } satisfies SnapshotWorkspaceResponse)
+}
+
+export function router(app: RouteApp, deps: WorkspaceRoutesDeps): void {
+  app.post('/v1/workspaces', createWorkspace.bind(undefined, deps))
+
+  // The running workspaces, then the stopped ones.
+  app.get('/v1/workspaces', listWorkspaces.bind(undefined, deps))
+
+  app.post('/v1/workspaces/load', loadWorkspace.bind(undefined, deps))
+
+  app.get('/v1/workspaces/:id', getWorkspace.bind(undefined, deps))
+
+  app.get('/v1/workspaces/:id/logs', workspaceLogs.bind(undefined, deps))
 
   // A stopped workspace is deleted as a running one is: its state, config
   // and owner go.
-  app.delete<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id', async (req, reply) => {
-    const { id } = req.params
-    if (deps.registry.visible(id, req.account) === null) {
-      const k = await kept(deps, id, req.account)
-      if (k === null) throw new HttpError('not_found', 'workspace not found')
-      const store = storeOf(deps, k.config)
-      try {
-        const forgot = await deps.registry.forget(id, req.account, k.config, store)
-        if (forgot === Forget.Gone) throw new HttpError('not_found', 'workspace not found')
-        if (forgot === Forget.Held) {
-          throw new HttpError('workspace_busy', 'workspace is running on another server')
-        }
-        if (forgot === Forget.Busy) {
-          throw new HttpError('workspace_busy', 'workspace is starting or stopping; try again')
-        }
-      } finally {
-        await store.close()
-      }
-      return reply.status(204).send()
-    }
-    try {
-      await deps.registry.remove(id)
-    } catch (err) {
-      console.error('mirage: workspace delete failed', err)
-      throw new HttpError('internal', INTERNAL_MESSAGE, { cause: err })
-    }
-    return reply.status(204).send()
-  })
+  app.delete('/v1/workspaces/:id', deleteWorkspace.bind(undefined, deps))
 
   /**
    * Stop the workspace and keep its state and config for start. A stopped
    * workspace answers as it is, so a stop can be repeated.
    */
-  app.post<{ Params: WorkspaceIdParams }>(
-    '/v1/workspaces/:id/stop',
-    async (req): Promise<StopWorkspaceResponse> => {
-      const { id } = req.params
-      const live = deps.registry.visible(id, req.account) !== null
-      if (!live && !(await isStopped(deps, id, req.account))) {
-        throw new HttpError('not_found', 'workspace not found')
-      }
-      if (live || deps.registry.removing(id)) await deps.registry.stop(id)
-      return { id, stopped_at: msToRfc3339(Date.now()) }
-    },
-  )
+  app.post('/v1/workspaces/:id/stop', stopWorkspace.bind(undefined, deps))
 
   /**
    * Start a stopped workspace from the config it was created with, over the
@@ -868,125 +1020,24 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
    * judge the config again, and the secrets and saved entries it names are
    * read again, so a rotated secret is picked up.
    */
-  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/start', async (req, reply) => {
-    const { id } = req.params
-    const held = deps.registry.visible(id, req.account)
-    if (held !== null && !deps.registry.removing(id)) return await makeDetail(held)
-    const config = await deps.registry.savedConfig(id, req.account)
-    if (config === null) throw new HttpError('not_found', 'workspace not found')
-    let cfg: WorkspaceConfig
-    try {
-      cfg = checkConfig(config)
-    } catch (e) {
-      throw loaderError(e, ['config'], config)
-    }
-    return openWorkspace(deps, req, reply, id, cfg, config, 200)
-  })
+  app.post('/v1/workspaces/:id/start', startWorkspace.bind(undefined, deps))
 
   /** Cancel every session's running and queued lines; all stay open. */
-  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/cancel', async (req) => {
-    const entry = requireEntry(deps.registry, req.params.id, req.account)
-    return { canceled: await entry.runner.ws.cancel() }
-  })
+  app.post('/v1/workspaces/:id/cancel', cancelWorkspaceLines.bind(undefined, deps))
 
   /** Kill every session's background jobs and runners. */
-  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/kill', async (req) => {
-    const entry = requireEntry(deps.registry, req.params.id, req.account)
-    return { killed: await entry.runner.ws.kill() }
-  })
+  app.post('/v1/workspaces/:id/kill', killWorkspaceJobs.bind(undefined, deps))
 
   /**
    * Define a named profile on the live workspace, or replace it. Only the
    * live table changes: a session moves when it is updated onto the name,
    * and the workspace's config is never rewritten.
    */
-  app.put<{ Params: { id: string; name: string }; Body: unknown }>(
-    '/v1/workspaces/:id/profiles/:name',
-    (req) => {
-      const entry = requireEntry(deps.registry, req.params.id, req.account)
-      const name = req.params.name
-      try {
-        entry.runner.ws.setProfile(
-          name,
-          deps.host.loadProfile(SessionProfile(req.body, `profile \`${name}\``)),
-        )
-      } catch (err) {
-        throw loaderError(err, [], req.body)
-      }
-      return { name }
-    },
-  )
+  app.put('/v1/workspaces/:id/profiles/:name', setProfile.bind(undefined, deps))
 
-  app.post<{ Params: WorkspaceIdParams; Body: unknown }>(
-    '/v1/workspaces/:id/clone',
-    async (req, reply) => {
-      const parsed = CloneWorkspaceRequest.safeParse(req.body ?? {})
-      if (!parsed.success) throw validationError(parsed.error, req.body ?? {})
-      const source = requireEntry(deps.registry, req.params.id, req.account)
-      const id = parsed.data.id ?? undefined
-      const override = (parsed.data.override ?? null) as OverrideShape | null
-      refuseId(id, deps.host.reservedIds)
-      if (id !== undefined && (deps.registry.has(id) || deps.registry.removing(id))) {
-        throw new HttpError('already_exists', 'workspace id already exists')
-      }
-      const wid = id ?? newWorkspaceId()
-      await admit(deps, req, override)
-      return building(deps, req, reply, wid, async () => {
-        const src = source.runner.ws
-        let newWs
-        try {
-          newWs = await runWithNetwork(deps.registry.ruleFor(src.network), () =>
-            cloneWorkspaceWithOverride(src, override, deps.host),
-          )
-        } catch (e) {
-          if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
-          // An override naming a source the host cannot resolve, or a
-          // block the schema refuses, is the caller's mistake -- the
-          // answer create, load and the historical clone already give.
-          throw refusedBuild(e, 'override could not be built')
-        }
-        let entry
-        try {
-          entry = deps.registry.add(newWs, wid, req.account)
-        } catch (e) {
-          await newWs.close()
-          throw new HttpError('conflict', (e as Error).message)
-        }
-        await deps.registry.dropConfig(wid)
-        return answer(reply, 201, await makeDetail(entry))
-      })
-    },
-  )
+  app.post('/v1/workspaces/:id/clone', cloneWorkspace.bind(undefined, deps))
 
-  app.get<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
-    const entry = requireEntry(deps.registry, req.params.id, req.account)
-    let tar: Uint8Array
-    try {
-      tar = await entry.runner.ws.snapshot()
-    } catch (e) {
-      if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
-      throw e
-    }
-    return reply
-      .type('application/x-tar')
-      .send(Buffer.from(tar.buffer, tar.byteOffset, tar.byteLength))
-  })
+  app.get('/v1/workspaces/:id/snapshot', downloadSnapshot.bind(undefined, deps))
 
-  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
-    const { id } = req.params
-    const parsed = SnapshotWorkspaceRequest.safeParse(req.body)
-    if (!parsed.success) throw validationError(parsed.error, req.body)
-    const entry = requireEntry(deps.registry, id, req.account)
-    const store = snapshotStore(deps)
-    const { key } = parsed.data
-    const scoped = storeKey(deps.host, req.account, key)
-    let size: number
-    try {
-      size = await entry.runner.ws.snapshot(scoped, { s3: store })
-    } catch (e) {
-      if (isBusy(e)) throw new HttpError('conflict', (e as Error).message)
-      throw e
-    }
-    return reply.status(200).send({ id, key, size })
-  })
+  app.post('/v1/workspaces/:id/snapshot', snapshotWorkspace.bind(undefined, deps))
 }

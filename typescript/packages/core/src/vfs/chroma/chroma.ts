@@ -23,7 +23,7 @@ import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import type { RedactedSchema } from '../secrets.ts'
-import { resolveChromaConfig, type ChromaConfig } from './config.ts'
+import { ChromaConfig } from './config.ts'
 
 export const VFS_MD = `- Paths are document slugs from the collection's path tree.`
 
@@ -40,7 +40,7 @@ export class ChromaVFS extends BaseVFS {
   // never becomes the reported byte length.
   override readonly sizesAlwaysKnown: boolean = true
   override vfsMd: string = VFS_MD
-  readonly config: ReturnType<typeof resolveChromaConfig>
+  readonly config: ReturnType<typeof ChromaConfig.parse>
   override readonly accessor: ChromaAccessor
   override readonly handed = {
     readdir: ['entry'],
@@ -51,7 +51,7 @@ export class ChromaVFS extends BaseVFS {
   constructor(options: ChromaVFSOptions | ChromaConfig) {
     super()
     const config = 'config' in options ? options.config : options
-    this.config = resolveChromaConfig(config)
+    this.config = ChromaConfig.parse(config)
     this.accessor = new ChromaAccessor(this.config)
   }
 

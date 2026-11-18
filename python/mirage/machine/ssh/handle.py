@@ -14,7 +14,8 @@
 
 import asyncio
 import logging
-from typing import Any
+from functools import cached_property
+from typing import Any, cast
 
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
@@ -24,10 +25,9 @@ from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import read_into
-from mirage.machine.ssh import sdk
 from mirage.machine.ssh.config import SSHMachineConfig
+from mirage.machine.ssh.sdk import SshSdk
 from mirage.machine.types import MachinePipe
-from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.utils.ssh import connect_options
 
@@ -62,6 +62,10 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
     config_cls = SSHMachineConfig
     config: SSHMachineConfig
 
+    @cached_property
+    def _sdk(self) -> SshSdk:
+        return cast(SshSdk, self._load_sdk("asyncssh", SshSdk, "asyncssh"))
+
     _conn: Any = None
 
     @property
@@ -89,9 +93,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 await self.connect()
 
     async def connect(self) -> None:
-        if sdk.connect is None:
-            raise ImportError(sdk_install_hint("ssh", "asyncssh"))
-        self._conn = await sdk.connect(**self._connect_kwargs())
+        self._conn = await self._sdk.connect(**self._connect_kwargs())
 
     async def _exec_argv(
         self,
@@ -168,7 +170,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             if not tagged or stop_signal(current_caller().process) is None:
                 process.kill()
             raise
-        except sdk.DisconnectError as exc:
+        except self._sdk.DisconnectError as exc:
             raise ConnectionLostError(f"the connection closed: {exc}") from exc
         finally:
             if not feeding.done():

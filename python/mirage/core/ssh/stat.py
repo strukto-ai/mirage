@@ -19,10 +19,12 @@ import asyncssh
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.posix.stat import parse_tree, tree_command
 from mirage.core.posix.utils import join_root
+from mirage.core.ssh.constants import SFTP_KINDS
 from mirage.errors.fs import eacces, enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_path
+from mirage.utils.stat_view import mode_type
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +49,19 @@ def attrs_to_file_stat(name: str, attrs: asyncssh.SFTPAttrs) -> FileStat:
         name (str): the entry's name.
         attrs (asyncssh.SFTPAttrs): its attributes, links followed.
     """
-    is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
+    kind = (
+        SFTP_KINDS.get(attrs.type)
+        or mode_type(attrs.permissions or 0)
+        or FileType.FILE
+    )
     mod_str = epoch_to_iso(attrs.mtime) if attrs.mtime is not None else ""
     return FileStat(
         name=name,
-        size=None if is_dir else attrs.size,
+        size=None if kind == FileType.DIRECTORY else attrs.size,
         modified=mod_str,
         fingerprint=mod_str or None,
-        type=FileType.DIRECTORY if is_dir else FileType.FILE,
-        content=None if is_dir else content_type_for_path(name),
+        type=kind,
+        content=content_type_for_path(name) if kind == FileType.FILE else None,
         mode=(
             attrs.permissions & 0o7777
             if attrs.permissions is not None

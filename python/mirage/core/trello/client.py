@@ -53,7 +53,15 @@ async def _request(
     return data
 
 
-async def list_workspaces(accessor: TrelloAccessor) -> list[dict[str, Any]]:
+def _as_object(value: Any, detail: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TrelloAPIError(detail)
+    return value
+
+
+async def list_workspaces(
+    accessor: TrelloAccessor,
+) -> list[dict[str, Any]]:
     result = await _request(accessor, "GET", "/members/me/organizations")
     return result if isinstance(result, list) else []
 
@@ -72,9 +80,7 @@ async def list_workspace_boards(
 
 async def get_board(accessor: TrelloAccessor, board_id: str) -> dict[str, Any]:
     result = await _request(accessor, "GET", f"/boards/{board_id}")
-    if not isinstance(result, dict):
-        raise TrelloAPIError(f"unexpected response for board {board_id}")
-    return result
+    return _as_object(result, f"unexpected response for board {board_id}")
 
 
 async def list_board_lists(
@@ -88,9 +94,7 @@ async def list_board_lists(
 
 async def get_list(accessor: TrelloAccessor, list_id: str) -> dict[str, Any]:
     result = await _request(accessor, "GET", f"/lists/{list_id}")
-    if not isinstance(result, dict):
-        raise TrelloAPIError(f"unexpected response for list {list_id}")
-    return result
+    return _as_object(result, f"unexpected response for list {list_id}")
 
 
 async def list_board_members(
@@ -163,9 +167,7 @@ async def get_card(accessor: TrelloAccessor, card_id: str) -> dict[str, Any]:
             "member_fields": "id,username,fullName",
         },
     )
-    if not isinstance(result, dict):
-        raise TrelloAPIError(f"unexpected response for card {card_id}")
-    return result
+    return _as_object(result, f"unexpected response for card {card_id}")
 
 
 async def list_card_comments(
@@ -191,9 +193,11 @@ async def card_create(
     if desc:
         params["desc"] = desc
     result = await _request(accessor, "POST", "/cards", params=params)
-    if not isinstance(result, dict):
-        raise TrelloAPIError("unexpected response from card create")
-    return await get_card(accessor, result["id"])
+    created = _as_object(result, "unexpected response from card create")
+    card_id = created.get("id")
+    if not isinstance(card_id, str):
+        raise TrelloAPIError("card create returned no id")
+    return await get_card(accessor, card_id)
 
 
 async def card_update(
@@ -233,7 +237,10 @@ async def card_move(
 
 
 async def card_assign(
-    accessor: TrelloAccessor, *, card_id: str, member_id: str
+    accessor: TrelloAccessor,
+    *,
+    card_id: str,
+    member_id: str,
 ) -> dict[str, Any]:
     await _request(
         accessor,
@@ -253,13 +260,15 @@ async def comment_create(
         f"/cards/{card_id}/actions/comments",
         params={"text": text},
     )
-    if not isinstance(result, dict):
-        raise TrelloAPIError("unexpected response from comment create")
-    return result
+    return _as_object(result, "unexpected response from comment create")
 
 
 async def comment_update(
-    accessor: TrelloAccessor, *, card_id: str, comment_id: str, text: str
+    accessor: TrelloAccessor,
+    *,
+    card_id: str,
+    comment_id: str,
+    text: str,
 ) -> dict[str, Any]:
     result = await _request(
         accessor,
@@ -267,13 +276,14 @@ async def comment_update(
         f"/cards/{card_id}/actions/{comment_id}/comments",
         params={"text": text},
     )
-    if not isinstance(result, dict):
-        raise TrelloAPIError("unexpected response from comment update")
-    return result
+    return _as_object(result, "unexpected response from comment update")
 
 
 async def card_add_label(
-    accessor: TrelloAccessor, *, card_id: str, label_id: str
+    accessor: TrelloAccessor,
+    *,
+    card_id: str,
+    label_id: str,
 ) -> dict[str, Any]:
     await _request(
         accessor,
@@ -285,7 +295,10 @@ async def card_add_label(
 
 
 async def card_remove_label(
-    accessor: TrelloAccessor, *, card_id: str, label_id: str
+    accessor: TrelloAccessor,
+    *,
+    card_id: str,
+    label_id: str,
 ) -> dict[str, Any]:
     await _request(accessor, "DELETE", f"/cards/{card_id}/idLabels/{label_id}")
     return await get_card(accessor, card_id)

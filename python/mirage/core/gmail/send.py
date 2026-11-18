@@ -14,6 +14,7 @@
 
 import base64
 from email.mime.text import MIMEText
+from email.policy import SMTP
 from typing import Any
 
 from mirage.core.gmail.messages import (
@@ -22,6 +23,17 @@ from mirage.core.gmail.messages import (
     get_message_raw,
 )
 from mirage.core.google.client import TokenManager, gmail_base, google_post
+
+
+def _build_mime(headers: dict[str, str], body: str) -> bytes:
+    mime = MIMEText(body, policy=SMTP)
+    for name, value in headers.items():
+        mime[name] = value
+    return mime.as_bytes()
+
+
+def _base64_url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
 async def send_message(
@@ -41,10 +53,7 @@ async def send_message(
     Returns:
         dict: API response with sent message metadata.
     """
-    msg = MIMEText(body)
-    msg["To"] = to
-    msg["Subject"] = subject
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    raw = _base64_url_encode(_build_mime({"To": to, "Subject": subject}, body))
     url = f"{gmail_base(token_manager)}/users/me/messages/send"
     return await google_post(token_manager, url, {"raw": raw})
 
@@ -73,14 +82,12 @@ async def reply_message(
     thread_id = raw_msg.get("threadId", "")
     msg_id_header = _extract_header(headers, "Message-ID")
 
-    mime = MIMEText(body)
-    mime["To"] = to
-    mime["Subject"] = subject
+    mime_headers = {"To": to, "Subject": subject}
     if msg_id_header:
-        mime["In-Reply-To"] = msg_id_header
-        mime["References"] = msg_id_header
+        mime_headers["In-Reply-To"] = msg_id_header
+        mime_headers["References"] = msg_id_header
 
-    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    raw = _base64_url_encode(_build_mime(mime_headers, body))
     payload: dict[str, Any] = {"raw": raw}
     if thread_id:
         payload["threadId"] = thread_id
@@ -116,16 +123,15 @@ async def reply_all_message(
 
     all_to = ", ".join(filter(None, [sender, original_to]))
 
-    mime = MIMEText(body)
-    mime["To"] = all_to
+    mime_headers = {"To": all_to}
     if original_cc:
-        mime["Cc"] = original_cc
-    mime["Subject"] = subject
+        mime_headers["Cc"] = original_cc
+    mime_headers["Subject"] = subject
     if msg_id_header:
-        mime["In-Reply-To"] = msg_id_header
-        mime["References"] = msg_id_header
+        mime_headers["In-Reply-To"] = msg_id_header
+        mime_headers["References"] = msg_id_header
 
-    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    raw = _base64_url_encode(_build_mime(mime_headers, body))
     payload: dict[str, Any] = {"raw": raw}
     if thread_id:
         payload["threadId"] = thread_id

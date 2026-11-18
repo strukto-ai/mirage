@@ -17,7 +17,7 @@ import logging
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
 from functools import partial
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import aiohttp
 
@@ -60,6 +60,13 @@ def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
     }
 
 
+class SlackResponse(TypedDict, total=False):
+    ok: bool
+    error: str
+    needed: str
+    provided: str
+
+
 class SlackApiError(ApiError):
     """A Slack call that failed: an ``ok: false`` payload, or a status
     that carried none.
@@ -79,7 +86,7 @@ class SlackApiError(ApiError):
         self.slack_error = slack_error
 
 
-def _format_slack_error_message(method: str, data: dict[str, Any]) -> str:
+def _format_slack_error_message(method: str, data: SlackResponse) -> str:
     err = data.get("error", "unknown_error")
     base = f"Slack API error ({method}): {err}"
     if err != "missing_scope":
@@ -102,7 +109,7 @@ def _error_of(
         data = None
     if isinstance(data, dict):
         return SlackApiError(
-            _format_slack_error_message(method, data),
+            _format_slack_error_message(method, cast(SlackResponse, data)),
             resp.status,
             str(data.get("error", "unknown_error")),
         )
@@ -113,9 +120,9 @@ def _error_of(
 
 def _checked(method: str, data: Any) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
-    if not payload.get("ok"):
+    if payload.get("ok") is not True:
         raise SlackApiError(
-            _format_slack_error_message(method, payload),
+            _format_slack_error_message(method, cast(SlackResponse, payload)),
             slack_error=str(payload.get("error", "unknown_error")),
         )
     return payload
@@ -142,21 +149,30 @@ def refusals_denied(path_spec: PathSpec) -> Iterator[None]:
         raise eacces(path_spec) from exc
 
 
+async def _request(
+    accessor: SlackAccessor,
+    endpoint: str,
+    params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = await api_request(
+        "GET" if body is None else "POST",
+        f"{accessor.config.base_url.rstrip('/')}/{endpoint}",
+        error_of=partial(_error_of, method=endpoint),
+        headers=slack_headers(accessor.config, endpoint),
+        params=params,
+        json_body=body,
+        session=accessor.pool,
+    )
+    return _checked(endpoint, data)
+
+
 async def slack_get(
     accessor: SlackAccessor,
     method: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    url = f"{accessor.config.base_url.rstrip('/')}/{method}"
-    data = await api_request(
-        "GET",
-        url,
-        error_of=partial(_error_of, method=method),
-        headers=slack_headers(accessor.config, method),
-        params=params,
-        session=accessor.pool,
-    )
-    return _checked(method, data)
+    return await _request(accessor, method, params=params)
 
 
 async def slack_post(
@@ -164,16 +180,7 @@ async def slack_post(
     method: str,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    url = f"{accessor.config.base_url.rstrip('/')}/{method}"
-    data = await api_request(
-        "POST",
-        url,
-        error_of=partial(_error_of, method=method),
-        headers=slack_headers(accessor.config, method),
-        json_body=body or {},
-        session=accessor.pool,
-    )
-    return _checked(method, data)
+    return await _request(accessor, method, body=body or {})
 
 
 async def download_file(

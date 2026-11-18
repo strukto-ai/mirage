@@ -19,7 +19,6 @@ import concurrent.futures
 import json
 import logging
 import posixpath
-import shlex
 import stat
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
@@ -60,6 +59,7 @@ from mirage.server.ssh.stream import ChannelInput, Mark, deliver
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.terminal import JobOutput
 from mirage.shell.constants import INTERRUPTED_STATUS
+from mirage.shell.join import shell_join
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
 
@@ -186,7 +186,7 @@ def argv_line(argv: list[str]) -> str:
         and "c" in argv[1]
     ):
         return argv[2]
-    return shlex.join(argv)
+    return shell_join(argv)
 
 
 def rpc_error(err: Exception) -> CodexRPCError:
@@ -966,7 +966,7 @@ class CodexChannel:
     async def _create_directory(self, params: Message) -> JsonValue:
         path = to_path(arg(params, "path", str))
         if arg(params, "recursive", bool, False):
-            await self._line(f"mkdir -p -- {shlex.quote(path)}")
+            await self._line(shell_join(["mkdir", "-p", "--", path]))
         else:
             await self._fs(lambda core: make_directory(core, path))
         return {}
@@ -997,7 +997,7 @@ class CodexChannel:
         if not stat.S_ISDIR(st.mode):
             await self._fs(lambda core: core.unlink(path))
         elif recursive:
-            await self._line(f"rm -r -- {shlex.quote(path)}")
+            await self._line(shell_join(["rm", "-r", "--", path]))
         else:
             await self._fs(lambda core: core.rmdir(path))
         return {}
@@ -1013,10 +1013,8 @@ class CodexChannel:
                 "fs/copy requires recursive: true when sourcePath is a "
                 "directory",
             )
-        flag = "-R " if tree else ""
-        await self._line(
-            f"cp {flag}-- {shlex.quote(source)} {shlex.quote(destination)}"
-        )
+        flags = ["-R"] if tree else []
+        await self._line(shell_join(["cp", *flags, "--", source, destination]))
         return {}
 
     async def _open(self, params: Message) -> JsonValue:

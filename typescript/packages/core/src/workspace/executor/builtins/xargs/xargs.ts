@@ -29,8 +29,8 @@ import { boundedMapStream } from '../../../../concurrency/limiter.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import {
   currentCaller,
-  runAsProgram,
-  runWithEvaluation,
+  setProgramInvocation,
+  setCurrentEvaluation,
 } from '../../../../context/session_context.ts'
 import { enoent, fsStrerror, isMissingPath } from '../../../../errors/fs.ts'
 import { chunks } from '../../../../io/cooperative.ts'
@@ -1026,7 +1026,7 @@ async function* runLines(
     const process = currentCaller().process
     if (process != null) process.oneCommand = false
     if (!forked) {
-      await runAsProgram(session, () =>
+      await setProgramInvocation(session, () =>
         drainChild(
           executeFn(line, { sessionId: session.sessionId, context, stdin, signal, sink: pipe }),
           output,
@@ -1044,8 +1044,8 @@ async function* runLines(
       child.vars.set(slotVar, { value: String(slot), attrs: new Set([VarAttr.Export]) })
     }
     try {
-      await runWithEvaluation(childEvaluation, () =>
-        runAsProgram(child, () =>
+      await setCurrentEvaluation(childEvaluation, () =>
+        setProgramInvocation(child, () =>
           drainChild(
             executeFn(line, {
               sessionId: child.sessionId,

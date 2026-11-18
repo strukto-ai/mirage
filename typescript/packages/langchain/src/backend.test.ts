@@ -122,6 +122,23 @@ describe('LangchainWorkspace.read', () => {
     expect(r.content).toBeUndefined()
   })
 
+  it('reads extensionless UTF-8 and preserves invalid UTF-8 in raw reads', async () => {
+    const ws = mkWs()
+    const backend = new LangchainWorkspace(ws)
+    await ws.vfs.write('/Makefile', 'all: build')
+    expect(await backend.read('/Makefile')).toMatchObject({
+      content: 'all: build',
+      mimeType: 'text/plain',
+    })
+    const bytes = new Uint8Array([0xff, 0xfe])
+    await ws.vfs.write('/invalid.txt', bytes)
+    expect((await backend.read('/invalid.txt')).error).toMatch(/binary/i)
+    expect((await backend.readRaw('/invalid.txt')).data).toMatchObject({
+      content: bytes,
+      mimeType: 'application/octet-stream',
+    })
+  })
+
   it('returns Uint8Array for application/pdf', async () => {
     const ws = mkWs()
     await ws.vfs.write('/x.pdf', new Uint8Array([0x25, 0x50, 0x44, 0x46]))
@@ -223,6 +240,7 @@ describe('LangchainWorkspace.ls', () => {
     await ws.vfs.write('/a.txt', 'a')
     await ws.vfs.mkdir('/d')
     await ws.vfs.write('/d/b.txt', 'b')
+    await ws.vfs.write('/ .hidden\n ', 'c')
     const lw = new LangchainWorkspace(ws)
     const r = await lw.ls('/')
     expect(r.error).toBeUndefined()
@@ -230,6 +248,7 @@ describe('LangchainWorkspace.ls', () => {
     const paths = files.map((i) => i.path).sort()
     expect(paths).toContain('/a.txt')
     expect(paths).toContain('/d')
+    expect(paths).toContain('/ .hidden\n ')
     const dirEntry = files.find((i) => i.path === '/d')
     expect(dirEntry?.is_dir).toBe(true)
     const fileEntry = files.find((i) => i.path === '/a.txt')
@@ -346,6 +365,20 @@ describe('LangchainWorkspace.grep', () => {
     expect(matches[0]?.path).toBe('/log.txt')
     expect(matches[0]?.line).toBe(2)
     expect(matches[0]?.text).toContain('error here')
+  })
+
+  it('matches literal text beginning with a dash under the requested relative glob', async () => {
+    const lw = new LangchainWorkspace(mkWs())
+    await lw.write('/src/main.ts', '-a.b')
+    await lw.write('/src/app/main.ts', '-a.b\n-axb')
+    const result = await lw.grep('-a.b', '/src', 'app/*.ts')
+    expect(result.matches).toEqual([{ path: '/src/app/main.ts', line: 1, text: '-a.b' }])
+  })
+
+  it('reports a missing search root', async () => {
+    const result = await new LangchainWorkspace(mkWs()).grep('needle', '/missing')
+    expect(result.error).toContain('/missing')
+    expect(result.matches).toBeUndefined()
   })
 
   it('returns empty matches for no hits', async () => {

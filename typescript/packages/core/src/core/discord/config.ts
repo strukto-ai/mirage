@@ -15,10 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 export const DiscordConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   token: secretStr().describe('Discord bot token, sent as `Authorization: Bot <token>`.'),
   baseUrl: z.string().optional().meta({
     description: 'Discord API root; override to point at a fake or proxy.',

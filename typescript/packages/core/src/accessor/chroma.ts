@@ -14,15 +14,15 @@
 
 import type { ChromaClient, Collection } from 'chromadb'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import type { resolveChromaConfig } from '../vfs/chroma/config.ts'
+import type { ChromaConfig } from '../vfs/chroma/config.ts'
 import { Accessor } from './base.ts'
 
 export class ChromaAccessor extends Accessor {
-  readonly config: ReturnType<typeof resolveChromaConfig>
+  readonly config: ReturnType<typeof ChromaConfig.parse>
   private client: ChromaClient | null = null
   private collection: Collection | null = null
 
-  constructor(config: ReturnType<typeof resolveChromaConfig>) {
+  constructor(config: ReturnType<typeof ChromaConfig.parse>) {
     super()
     this.config = config
   }

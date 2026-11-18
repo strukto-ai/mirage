@@ -16,7 +16,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
-import { runWithMountGate } from '../../context/session_context.ts'
+import { setMountGate } from '../../context/session_context.ts'
 import { materialize } from '../../io/types.ts'
 import { answeringFiles } from '../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -66,7 +66,7 @@ async function runDu(
       },
     ],
   )
-  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+  const result = await setMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
       stdin: null,
       flags,

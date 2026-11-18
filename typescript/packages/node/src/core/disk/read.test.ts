@@ -15,7 +15,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
@@ -86,13 +86,13 @@ describe('core/disk/read window record path', () => {
   })
 
   it('a sized window records the virtual path', async () => {
-    const [data, records] = await runWithRecording(() => read(accessor, path, 0, 1))
+    const [data, records] = await recordingScope(() => read(accessor, path, 0, 1))
     expect(new TextDecoder().decode(data)).toBe('0')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
 
   it('a rest-of-file window records the virtual path', async () => {
-    const [data, records] = await runWithRecording(() => read(accessor, path, 0, null))
+    const [data, records] = await recordingScope(() => read(accessor, path, 0, null))
     expect(new TextDecoder().decode(data)).toBe('0123456789')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })

@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Command } from 'commander'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { registerConfigCommands } from './config.ts'
+import { app as registerConfigCommands } from './config.ts'
 
 function buildProgram(): Command {
   const program = new Command()

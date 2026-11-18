@@ -15,7 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { stat } from './stat.ts'
 import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
@@ -31,7 +31,7 @@ function accessor(overrides: Partial<Parameters<typeof stubMongoDriver>[0]> = {}
       listCollections: (_db, kind) => Promise.resolve(kind === 'view' ? ['recent'] : ['users']),
       ...overrides,
     }),
-    resolveMongoDBConfig({ uri: 'mongodb://h' }),
+    MongoDBConfig.parse({ uri: 'mongodb://h' }),
   )
 }
 

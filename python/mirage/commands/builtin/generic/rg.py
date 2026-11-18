@@ -13,7 +13,11 @@ from typing import TypedDict, cast
 
 from mirage.commands.builtin.grep_pattern import resolve_pattern
 from mirage.commands.builtin.grep_scan import exit_code_for
-from mirage.commands.builtin.rg_filetypes import FileTypes, type_listing
+from mirage.commands.builtin.rg_filetypes import (
+    FileTypes,
+    TypeChange,
+    type_listing,
+)
 from mirage.commands.builtin.rg_glob import (
     IgnoreRules,
     Overrides,
@@ -287,7 +291,7 @@ def parse_flags(fl: FlagView) -> RgFlags:
         for name, value in fl.occurrences("type", "type_not")
         if isinstance(value, str)
     ]
-    changes = [
+    changes: list[TypeChange] = [
         ("clear" if name == "type_clear" else "add", value)
         for name, value in fl.occurrences("type_clear", "type_add")
         if isinstance(value, str)

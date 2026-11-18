@@ -35,7 +35,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
-import { LOCAL_CONFIG_FIELDS, type LocalConfig } from './config.ts'
+import { LocalConfig } from './config.ts'
 import {
   closeChildren,
   cwdRefusal,
@@ -119,7 +119,7 @@ export class LocalRuntime
   extends PythonRuntime<undefined>
   implements ProcessExecutorMixin<undefined>
 {
-  static override readonly configFields: ConfigFields = LOCAL_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = LocalConfig
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
   // Spawns the host interpreter: a real process with the user's own

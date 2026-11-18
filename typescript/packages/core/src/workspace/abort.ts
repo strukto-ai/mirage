@@ -18,7 +18,7 @@ import {
   type CallerDispatchFn,
   currentCaller,
   lineFrames,
-  runWithCaller,
+  bindCaller,
 } from '../context/session_context.ts'
 import type { StatusWriter } from './types.ts'
 import type { SessionState } from './session/session.ts'
@@ -36,7 +36,7 @@ export function runWithLineAbort<T>(
   fn: () => Promise<T>,
   stop?: AbortSignal,
 ): Promise<T> {
-  return runWithCaller(
+  return bindCaller(
     {
       ...currentCaller(),
       lineAbort: { signal, sessions, writer, ...(stop === undefined ? {} : { stop }) },

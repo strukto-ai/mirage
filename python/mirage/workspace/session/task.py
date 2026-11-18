@@ -161,97 +161,108 @@ async def drive(
         diagnostics (list[str | bytes]): where its warnings go, in order,
             whether it ends or stops.
     """
-    failure: BaseException | None = None
-    records = host.session.vars
-    shown = host.session.visibility
-    while (ask := task.step()) is not None:
-        held = records.shell
-        match ask[0]:
-            case "pause":
-                records.shell = ask[-1]
-            case "subscript" | "run":
-                records.shell = ask[1]
-            case _:
-                records.shell = ask[1].fork()
-        failed: Callable[[], None]
-        match ask[0]:
-            case "subscript":
-                failed = partial(task.answer_subscript, None, ask[1])
-            case "run":
-                failed = partial(task.answer_ran, ask[1], 0, "stop", 0, False)
-            case _:
-                failed = task.answer_failed
-        answer: Callable[[], None] = failed
-        try:
-            match ask:
-                case ("substitute", _, body, node, span, read):
-                    try:
-                        out, err, status = await host.substitute(
-                            ask[1], body, node, span, read
+    try:
+        failure: BaseException | None = None
+        records = host.session.vars
+        shown = host.session.visibility
+        while (ask := task.step()) is not None:
+            held = records.shell
+            match ask[0]:
+                case "pause":
+                    records.shell = ask[-1]
+                case "subscript" | "run":
+                    records.shell = ask[1]
+                case _:
+                    records.shell = ask[1].fork()
+            failed: Callable[[], None]
+            match ask[0]:
+                case "subscript":
+                    failed = partial(task.answer_subscript, None, ask[1])
+                case "run":
+                    failed = partial(
+                        task.answer_ran, ask[1], 0, "stop", 0, False
+                    )
+                case _:
+                    failed = task.answer_failed
+            answer: Callable[[], None] = failed
+            try:
+                match ask:
+                    case ("substitute", _, body, node, span, read):
+                        try:
+                            out, err, status = await host.substitute(
+                                ask[1], body, node, span, read
+                            )
+                        finally:
+                            # The child shell ends with its substitution.
+                            ask[1].close()
+                        answer = partial(
+                            task.answer_substituted, out, err, status
                         )
-                    finally:
-                        # The child shell ends with its substitution.
-                        ask[1].close()
-                    answer = partial(task.answer_substituted, out, err, status)
-                case ("process", _, node):
-                    path = await host.process(ask[1], node)
-                    answer = partial(
-                        task.answer_path, path, host.session.last_bg_job_id
-                    )
-                case ("subscript", shell, text):
-                    answer = partial(
-                        task.answer_subscript,
-                        await host.subscript(text),
+                    case ("process", _, node):
+                        path = await host.process(ask[1], node)
+                        answer = partial(
+                            task.answer_path, path, host.session.last_bg_job_id
+                        )
+                    case ("subscript", shell, text):
+                        answer = partial(
+                            task.answer_subscript,
+                            await host.subscript(text),
+                            shell,
+                        )
+                    case (
+                        "run",
                         shell,
-                    )
-                case (
-                    "run",
-                    shell,
-                    index,
-                    test,
-                    start,
-                    pending,
-                    framed,
-                    said,
-                ):
-                    answer = partial(
-                        task.answer_ran,
-                        shell,
-                        *await host.run(
-                            index, test, start, pending, framed, said
-                        ),
-                    )
-                case ("pause", _):
-                    await task_turn()
-                    await while_paused()
-                    answer = task.answer_resumed
-        except BaseException as exc:
-            failure = exc
-            answer = failed
-        finally:
-            records.shell = held
-        # The copies the request lent go before the task goes on, so a
-        # write it lands shares its records with none and copies nothing.
-        del ask
-        try:
-            answer()
-        except BaseException as exc:
-            failure = exc
-            task.answer_failed()
-    result, said = task.finish()
-    # A profile changed while the host answered hid its names on a copy
-    # lent meanwhile; the shell, back with its owner, takes them now.
-    if host.session.visibility is not shown:
-        host.session.hide_vars()
-    diagnostics.extend(said)
-    if failure is not None:
-        raise failure
-    if result[0] != "ok":
-        raise fault_error(result)
-    if not task.more():
-        return result[1]
-    fields = list(result[1])
-    while task.more():
-        await task_turn()
-        fields.extend(task.slice())
-    return fields
+                        index,
+                        test,
+                        start,
+                        pending,
+                        framed,
+                        said,
+                    ):
+                        answer = partial(
+                            task.answer_ran,
+                            shell,
+                            *await host.run(
+                                index, test, start, pending, framed, said
+                            ),
+                        )
+                    case ("pause", _):
+                        await task_turn()
+                        await while_paused()
+                        answer = task.answer_resumed
+            except BaseException as exc:
+                failure = exc
+                answer = failed
+            finally:
+                records.shell = held
+            # The copies the request lent go before the task goes on, so a
+            # write it lands shares its records with none and copies nothing.
+            del ask
+            try:
+                answer()
+            except BaseException as exc:
+                failure = exc
+                task.answer_failed()
+            finally:
+                del answer, failed
+        result, said = task.finish()
+        # A profile changed while the host answered hid its names on a copy
+        # lent meanwhile; the shell, back with its owner, takes them now.
+        if host.session.visibility is not shown:
+            host.session.hide_vars()
+        diagnostics.extend(said)
+        if failure is not None:
+            raise failure
+        if result[0] != "ok":
+            raise fault_error(result)
+        if not task.more():
+            return result[1]
+        fields = list(result[1])
+        while task.more():
+            await task_turn()
+            fields.extend(task.slice())
+        return fields
+    finally:
+        # A traceback can outlive this coroutine and be collected by a worker.
+        # Release the Rust task on the thread that owns its shell.
+        del task

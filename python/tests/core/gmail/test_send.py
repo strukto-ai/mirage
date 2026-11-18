@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+from email import policy
+from email.parser import BytesParser
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -49,6 +51,25 @@ async def test_send_message(token_manager):
         call_args = mock_post.call_args
         payload = call_args[0][2]
         assert "raw" in payload
+
+
+@pytest.mark.asyncio
+async def test_unicode_body_and_single_line_headers(token_manager):
+    body = "café ☕" * 40
+    with patch(
+        "mirage.core.gmail.send.google_post", new_callable=AsyncMock
+    ) as post:
+        await send_message(token_manager, "reader@example.org", "Hello", body)
+        raw = post.await_args.args[2]["raw"]
+        message = BytesParser(policy=policy.default).parsebytes(
+            base64.urlsafe_b64decode(raw + "===")
+        )
+        assert message.get_content() == body
+        with pytest.raises(ValueError):
+            await send_message(
+                token_manager, "reader@example.org", "one\r\ntwo", body
+            )
+        assert post.await_count == 1
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { eqClause, holdingClause, predicate } from './query.ts'
+import { eqClause, holdingClause, listTables, predicate } from './query.ts'
 
 describe('lancedb where clause', () => {
   it('quotes a long literal across the host transfer window', () => {
@@ -70,4 +70,14 @@ describe('lancedb where clause', () => {
     expect(predicate('id', {}, '')).toBe('')
     expect(predicate('', {}, 'doc-1')).toBe('')
   })
+})
+
+it('resumes the table list after the last name on a full SDK page', async () => {
+  const first = Array.from({ length: 100 }, (_, i) => String(i).padStart(3, '0'))
+  const names = await listTables(({ startAfter }) => {
+    if (startAfter === undefined) return Promise.resolve(first)
+    expect(startAfter).toBe('099')
+    return Promise.resolve(['100'])
+  })
+  expect(names).toEqual([...first, '100'])
 })

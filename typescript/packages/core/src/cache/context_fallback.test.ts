@@ -16,7 +16,7 @@ import { SessionState } from '../workspace/session/session.ts'
 import { Dispatcher } from '../workspace/dispatcher/dispatcher.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { record, runWithRecording, startOp } from '../observe/context.ts'
+import { record, recordingScope, startOp } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { CacheManager } from './manager.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
@@ -37,8 +37,8 @@ import {
 } from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
-import { runInCommandScope } from './index/scope.ts'
-import { callsAs, currentCaller, runWithCaller, withCaller } from '../context/session_context.ts'
+import { commandScope } from './index/scope.ts'
+import { callsAs, currentCaller, bindCaller, withCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { materialize } from '../io/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
@@ -96,15 +96,15 @@ describe('the active cache manager on the fallback storage', () => {
     const [hold, release] = gate()
     let besideOther: CacheInvalidator | null = managerB
     let afterOtherSettled: CacheInvalidator | null = null
-    const first = runWithCaller({ ...currentCaller(), cache: { manager: managerB } }, async () => {
+    const first = bindCaller({ ...currentCaller(), cache: { manager: managerB } }, async () => {
       await hold
     })
-    const second = runWithCaller({ ...currentCaller(), cache: { manager: managerA } }, async () => {
+    const second = bindCaller({ ...currentCaller(), cache: { manager: managerA } }, async () => {
       besideOther = activeCacheManager()
       release()
       await first
       afterOtherSettled = activeCacheManager()
-      await runWithCaller({ ...currentCaller(), cache: { manager: managerA } }, () => {
+      await bindCaller({ ...currentCaller(), cache: { manager: managerA } }, () => {
         expect(activeCacheManager()).toBe(managerA)
         return Promise.resolve()
       })
@@ -380,12 +380,12 @@ describe('listedThisCommand on the fallback storage', () => {
     const [listed, markListed] = gate()
     const [checked, markChecked] = gate()
     let mine: boolean | null = null
-    const a = runInCommandScope(async () => {
+    const a = commandScope(async () => {
       await listed
       mine = manager.listedThisCommand('/data')
       markChecked()
     })
-    const b = runInCommandScope(async () => {
+    const b = commandScope(async () => {
       await manager.scopeIndex()?.setDir('/data', [])
       markListed()
       await checked
@@ -401,11 +401,11 @@ describe('listedThisCommand on the fallback storage', () => {
     async (replayed) => {
       const index = new RAMIndexCacheStore({ ttl: 600 })
       const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await manager.scopeIndex()?.setDir('/data', [])
         const check = (): boolean => manager.listedThisCommand('/data')
         const mine = replayed
-          ? await runWithCaller(currentCaller(), () => Promise.resolve(check()))
+          ? await bindCaller(currentCaller(), () => Promise.resolve(check()))
           : check()
         expect(mine).toBe(true)
       })
@@ -440,8 +440,8 @@ it("overlapping browser sessions cannot borrow or replace each other's versions"
     durationMs: 0,
     fingerprint: 'v3',
   })
-  await runWithCaller({ ...currentCaller(), session: a }, () =>
-    runWithCaller({ ...currentCaller(), session: b }, async () => {
+  await bindCaller({ ...currentCaller(), session: a }, () =>
+    bindCaller({ ...currentCaller(), session: b }, async () => {
       await expect(manager.readVersion(path)).rejects.toMatchObject({ code: 'ENOTSUP' })
       expect(() => {
         manager.observe(rec)
@@ -453,8 +453,8 @@ it("overlapping browser sessions cannot borrow or replace each other's versions"
     }),
   )
   await expect(
-    runWithCaller({ ...currentCaller(), session: a }, () =>
-      runWithCaller({ ...currentCaller(), session: null }, () =>
+    bindCaller({ ...currentCaller(), session: a }, () =>
+      bindCaller({ ...currentCaller(), session: null }, () =>
         runWithWriteContext(
           '/s3/',
           {
@@ -474,8 +474,8 @@ it("overlapping browser sessions cannot borrow or replace each other's versions"
   ).rejects.toMatchObject({ code: 'ENOTSUP' })
   expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
   expect(b.versions.read(manager.versionScope, '/f')).toBe('v2')
-  await runWithCaller({ ...currentCaller(), session: a }, () =>
-    runWithCaller({ ...currentCaller(), session: a.fork() }, async () => {
+  await bindCaller({ ...currentCaller(), session: a }, () =>
+    bindCaller({ ...currentCaller(), session: a.fork() }, async () => {
       expect(await manager.readVersion(path)).toBe('v1')
     }),
   )
@@ -504,7 +504,7 @@ it.each([false, true])(
     const [held, release] = gate()
     const [started, markStarted] = gate()
     let sent = false
-    const upload = runWithCaller({ ...base, session: a }, () =>
+    const upload = bindCaller({ ...base, session: a }, () =>
       runWithWriteContext(
         '/s3/',
         {
@@ -519,7 +519,7 @@ it.each([false, true])(
           },
         },
         () =>
-          runWithRecording(async () => {
+          recordingScope(async () => {
             expect(await writeCondition(path, 'put')).toEqual({ kind: 'match', version: 'v1' })
             const timer = startOp()
             markStarted()
@@ -541,7 +541,7 @@ it.each([false, true])(
       await expect(
         (async () => {
           if (callback) await callsAs(caller, overlapping)()
-          else await runWithCaller(caller, overlapping)
+          else await bindCaller(caller, overlapping)
         })(),
       ).rejects.toMatchObject({ code: 'ENOTSUP' })
     } finally {
@@ -615,9 +615,9 @@ it.each([
     }
     const stream = withCaller(source(), { ...base, session: b, write: { prefix: '/s3/', context } })
     expect(await stream.next()).toEqual({ done: false, value: 1 })
-    const upload = runWithCaller({ ...base, session: a }, () =>
+    const upload = bindCaller({ ...base, session: a }, () =>
       runWithWriteContext('/s3/', context, () =>
-        runWithRecording(async () => {
+        recordingScope(async () => {
           if (action === 'next')
             await expect(stream.next()).rejects.toMatchObject({ code: 'ENOTSUP' })
           else await stream.return(undefined)
@@ -692,10 +692,10 @@ it.each([false, true])(
       if (pending !== undefined) await pending[0]
       await ready()
     })
-    const first = runWithCaller({ ...caller, session: a }, () =>
+    const first = bindCaller({ ...caller, session: a }, () =>
       dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
     )
-    const other = runWithCaller({ ...caller, session: b }, () =>
+    const other = bindCaller({ ...caller, session: b }, () =>
       dispatcher.dispatch('read', PathSpec.fromStrPath('/data/g'), [], {}, undefined, {
         ...caller,
         session: b,
@@ -732,7 +732,7 @@ it('an explicit dispatcher owner wins over an already live browser peer', async 
   const b = new SessionState({ sessionId: 'b' })
   const caller = currentCaller()
   try {
-    const [result] = await runWithCaller({ ...caller, session: b }, () =>
+    const [result] = await bindCaller({ ...caller, session: b }, () =>
       dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f'), [], {}, undefined, {
         ...caller,
         session: a,
@@ -754,8 +754,8 @@ it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
     const b = new SessionState({ sessionId: 'b' })
     const caller = currentCaller()
     try {
-      const read = runWithCaller({ ...caller, session: a }, () =>
-        runWithCaller({ ...caller, session: b }, () =>
+      const read = bindCaller({ ...caller, session: a }, () =>
+        bindCaller({ ...caller, session: b }, () =>
           dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
         ),
       )
@@ -778,7 +778,7 @@ it.each([
   const { ws, manager, dispatcher } = await conditionalReads(cached)
   const a = new SessionState({ sessionId: 'a' })
   try {
-    const [result] = await runWithCaller({ ...currentCaller(), session: a }, () =>
+    const [result] = await bindCaller({ ...currentCaller(), session: a }, () =>
       dispatcher.dispatch('read', PathSpec.fromStrPath(path, undefined, '/')),
     )
     expect(result).toEqual(new Uint8Array([1]))

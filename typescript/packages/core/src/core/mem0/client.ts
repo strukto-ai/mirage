@@ -25,7 +25,7 @@ export async function getAllMemories(
   for (;;) {
     const response = await accessor.request('POST', '/v3/memories/', {
       params: { page, page_size: accessor.config.defaultPageSize },
-      json: { filters: accessor.config.scopeFilter },
+      json: { filters: accessor.scopeFilter },
     })
     const batch = records(response.results)
     for (const item of batch) results.push(item)
@@ -43,7 +43,7 @@ export async function searchMemories(
   threshold: number,
 ): Promise<Record<string, unknown>[]> {
   const response = await accessor.request('POST', '/v3/memories/search/', {
-    json: { query, filters: accessor.config.scopeFilter, top_k: topK, threshold },
+    json: { query, filters: accessor.scopeFilter, top_k: topK, threshold },
   })
   return records(response.results)
 }

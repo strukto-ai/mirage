@@ -14,6 +14,7 @@
 
 import json
 import math
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import orjson
@@ -147,7 +148,7 @@ def ecma_numbers(value: Any) -> Any:
     return value
 
 
-def jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
+def jsonl_bytes(rows: Sequence[Mapping[str, Any]]) -> bytes:
     """Render rows as line-delimited JSON, one compact object per line.
 
     Numbers use the shared ECMAScript spelling, including nested cells.

@@ -27,6 +27,7 @@ import {
   isLink,
   LINK_MODE,
   mtimeMs,
+  modeType,
   posixMode,
   sizeUnknown,
 } from './stat_view.ts'
@@ -118,6 +119,12 @@ describe('posixMode', () => {
     const dir = new FileStat({ name: 'd', type: FileType.DIRECTORY })
     const file = new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })
     expect(posixMode(dir)).toBe(DIR_MODE)
+    expect(
+      posixMode(new FileStat({ name: 'block', type: FileType.BLOCK_DEVICE, mode: 0o640 })),
+    ).toBe(0o060640)
+    expect(posixMode(new FileStat({ name: 'socket', type: FileType.SOCKET, mode: 0o775 }))).toBe(
+      0o140775,
+    )
     expect(posixMode(file)).toBe(FILE_MODE)
   })
 
@@ -171,4 +178,11 @@ describe('FIFO', () => {
     expect(sizeUnknown(fifo)).toBe(false)
     expect(contentSize(fifo)).toBe(0)
   })
+})
+
+it('reads directory and regular type bits and leaves unspecified types unknown', () => {
+  expect(modeType(0o040755)).toBe(FileType.DIRECTORY)
+  expect(modeType(0o100644)).toBe(FileType.FILE)
+  expect(modeType(0o644)).toBeUndefined()
+  expect(modeType(undefined)).toBeUndefined()
 })

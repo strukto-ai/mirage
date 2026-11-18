@@ -14,4 +14,4 @@
 
 import type * as Ssh2Mod from 'ssh2'
 
-export type Ssh2Sdk = typeof Ssh2Mod
+export type SshSdk = typeof Ssh2Mod

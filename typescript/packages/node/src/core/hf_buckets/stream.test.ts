@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingActive, recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -71,7 +71,7 @@ describe('hf stream', () => {
   it('is stamped before its first chunk', async () => {
     const { accessor, fake } = await mounted({ 'big.bin': BIG })
     fake.reach = []
-    const [[chunks, first], records] = await runWithRecording(async () => {
+    const [[chunks, first], records] = await recordingScope(async () => {
       const iter = readStream(accessor, PathSpec.fromStrPath('/big.bin'))[Symbol.asyncIterator]()
       return [iter, await iter.next()] as const
     })
@@ -88,7 +88,7 @@ describe('hf stream', () => {
 
   it('stamps an empty stream too', async () => {
     const accessor = await accessorWith({ empty: '' })
-    const [data, records] = await runWithRecording(() => drain(accessor, '/empty'))
+    const [data, records] = await recordingScope(() => drain(accessor, '/empty'))
     expect(data.byteLength).toBe(0)
     expect(records.map((r) => r.fingerprint)).toEqual([xetHash(Buffer.from(''))])
   })
@@ -102,7 +102,7 @@ describe('hf stream', () => {
   it.each([['W/"abc"'], [NO_ETAG]])('stamps nothing without a strong etag (%s)', async (served) => {
     const { accessor, hub } = await mounted({ x: 'abc' })
     hub.etags.set('x', served)
-    const [, records] = await runWithRecording(() => drain(accessor, '/x'))
+    const [, records] = await recordingScope(() => drain(accessor, '/x'))
     expect(records.map((r) => r.fingerprint ?? null)).toEqual([null])
   })
 

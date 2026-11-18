@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import type { ConfigOf } from '../secrets.ts'
 import { secretSchema } from '../secrets.ts'
 
@@ -59,7 +59,7 @@ function normalizeHost(value: string): string {
 }
 
 export const DatabricksVolumeConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   catalog: z
     .string()
     .refine(validVolumePart, 'must be a non-empty path segment')

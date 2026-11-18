@@ -40,7 +40,6 @@ class GridFSConfig(TimeoutConfig):
     to (`/trash/<filename>`, which no mount path reaches). Unset keeps
     every revision, so a snapshot pinned to any of them still reads."""
 
-    @field_validator("key_prefix")
-    @classmethod
-    def _normalize_key_prefix(cls, v: str | None) -> str | None:
-        return kp.normalize(v) or None
+    _normalize_key_prefix = field_validator("key_prefix")(
+        kp.normalize_key_prefix
+    )

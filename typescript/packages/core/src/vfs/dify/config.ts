@@ -13,56 +13,45 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
-import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { defaultRequestTimeout } from '../../core/api/config.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import type { ConfigOf } from '../secrets.ts'
-import { normalizeNonEmpty, secretStr } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
 export const DifyConfig = z.object({
   apiKey: secretStr().describe('Dify Knowledge API key, sent as `Authorization: Bearer`.'),
-  baseUrl: z.string().describe('Dify API root, such as `https://api.dify.ai/v1`.'),
-  datasetId: z.string().describe('ID of the Knowledge dataset the mount shows.'),
-  slugMetadataName: z.string().optional().meta({
-    description:
-      "Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name.",
-    default: 'slug',
-  }),
-  maxConcurrency: z.number().optional().meta({
+  baseUrl: z
+    .string()
+    .transform(rstripSlash)
+    .describe('Dify API root, such as `https://api.dify.ai/v1`.'),
+  datasetId: z
+    .string()
+    .trim()
+    .min(1, 'datasetId cannot be empty')
+    .describe('ID of the Knowledge dataset the mount shows.'),
+  slugMetadataName: z
+    .string()
+    .trim()
+    .min(1, 'slugMetadataName cannot be empty')
+    .default('slug')
+    .meta({
+      description:
+        "Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name.",
+      default: 'slug',
+    }),
+  maxConcurrency: z.number().int().positive().default(10).meta({
     description: 'The most Dify API requests in flight at once.',
     default: 10,
   }),
-  retryAttempts: z.number().optional().meta({
+  retryAttempts: z.number().int().positive().default(4).meta({
     description:
       'Attempts per request, the first included. A 429, a 5xx or a transport error is retried.',
     default: 4,
   }),
-  retryMaxDelay: z.number().optional().meta({
+  retryMaxDelay: z.number().positive().default(30).meta({
     description: 'Longest wait in seconds before a retry, whether from backoff or `Retry-After`.',
     default: 30,
   }),
-  ...timeoutShape,
+  timeout: defaultRequestTimeout,
 })
 
-export type DifyConfig = ConfigOf<typeof DifyConfig>
-
-function normalizePositive(value: number | undefined, fallback: number, field: string): number {
-  const resolved = value ?? fallback
-  if (!(resolved > 0)) {
-    throw new Error(`${field} must be positive`)
-  }
-  return resolved
-}
-
-export function resolveDifyConfig(config: DifyConfig) {
-  return {
-    apiKey: config.apiKey,
-    baseUrl: rstripSlash(config.baseUrl),
-    datasetId: normalizeNonEmpty(config.datasetId, 'datasetId'),
-    slugMetadataName: normalizeNonEmpty(config.slugMetadataName ?? 'slug', 'slugMetadataName'),
-    maxConcurrency: normalizePositive(config.maxConcurrency, 10, 'maxConcurrency'),
-    timeout: normalizePositive(config.timeout, DEFAULT_TIMEOUT, 'timeout'),
-    retryAttempts: normalizePositive(config.retryAttempts, 4, 'retryAttempts'),
-    retryMaxDelay: normalizePositive(config.retryMaxDelay, 30, 'retryMaxDelay'),
-  }
-}
+export type DifyConfig = z.input<typeof DifyConfig>

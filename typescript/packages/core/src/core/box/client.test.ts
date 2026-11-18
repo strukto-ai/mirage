@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BoxTokenManager, boxGetBytes, conflictOf } from './client.ts'
 import { BOX_TOKEN_URL } from './constants.ts'
 import { ManualClock } from '../../utils/clock.ts'
-import { runWithEvaluation } from '../../context/session_context.ts'
+import { setCurrentEvaluation } from '../../context/session_context.ts'
 import { EvaluationContext } from '../../workspace/evaluation.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
@@ -270,7 +270,7 @@ it.each([undefined, 1.001])(
     const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
     evaluation.frame.abortSignal = stop.signal
     try {
-      const pending = runWithEvaluation(evaluation, () =>
+      const pending = setCurrentEvaluation(evaluation, () =>
         boxUploadSession(
           new BoxTokenManager({
             accessToken: 'token',

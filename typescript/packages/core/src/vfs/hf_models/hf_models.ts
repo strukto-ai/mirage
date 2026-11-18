@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../types.ts'
-import { normalizeKeyPrefix } from '../s3/config.ts'
 import type { ConfigState } from '../types.ts'
 import { accountOf, HfModelsAccessor } from '../../accessor/hf_hub.ts'
-import { assertHfRepoRef, redactHfRepoConfig } from '../hf_buckets/config.ts'
+import { normalizeHfRepoConfig, redactHfRepoConfig } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
 import { type HfModelsConfig } from './config.ts'
 
@@ -27,15 +26,7 @@ export class HfModelsVFS extends HfHubVFS {
 
   constructor(config: HfModelsConfig) {
     super()
-    assertHfRepoRef(config.repoId, 'repo_id')
-    const normalized = normalizeKeyPrefix(config.keyPrefix)
-    const cfg: HfModelsConfig = { ...config }
-    if (normalized !== undefined) {
-      cfg.keyPrefix = normalized
-    } else {
-      delete cfg.keyPrefix
-    }
-    this.config = cfg
+    this.config = normalizeHfRepoConfig(config)
     this.accessor = new HfModelsAccessor(accountOf(this.config), this.config)
   }
 

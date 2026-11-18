@@ -283,152 +283,160 @@ async function explained(
   return reply.send(explanationToDict(said))
 }
 
-export function registerShellRoutes(
-  app: RouteApp,
-  deps: { registry: WorkspaceRegistry; jobs: RequestTable },
-): void {
-  app.post<{
+interface ShellRoutesDeps {
+  registry: WorkspaceRegistry
+  jobs: RequestTable
+}
+
+async function shell(
+  deps: ShellRoutesDeps,
+  req: RouteRequest<{
     Params: { wsId: string }
     Body: ShellRequest
     Querystring: { session_id?: string; explain?: string; stream?: string }
-  }>('/v1/workspaces/:wsId/shell', async (req, reply) => {
-    const { wsId } = req.params
-    let streaming: boolean
-    let entry: WorkspaceEntry
-    try {
-      const flags = queryFlag(req.query, 'explain', 'stream')
-      streaming = flags.stream
-      entry = requireEntry(deps.registry, wsId, req.account)
-      if (streaming && flags.explain) {
-        throw new HttpError('invalid_request', 'stream cannot be combined with explain')
-      }
-      if (flags.explain) return await explained(entry, req, reply, req.query.session_id)
-    } catch (err) {
-      return failure(reply, err)
+  }>,
+  reply: RouteReply,
+) {
+  const { wsId } = req.params
+  let streaming: boolean
+  let entry: WorkspaceEntry
+  try {
+    const flags = queryFlag(req.query, 'explain', 'stream')
+    streaming = flags.stream
+    entry = requireEntry(deps.registry, wsId, req.account)
+    if (streaming && flags.explain) {
+      throw new HttpError('invalid_request', 'stream cannot be combined with explain')
     }
-    try {
-      await sessionOf(entry.runner.ws, req.query.session_id)
-    } catch (err) {
-      if (req.headers['content-type']?.startsWith('multipart/') === true) {
-        reply.header('connection', 'close')
-      }
-      return failure(reply, err)
+    if (flags.explain) return await explained(entry, req, reply, req.query.session_id)
+  } catch (err) {
+    return failure(reply, err)
+  }
+  try {
+    await sessionOf(entry.runner.ws, req.query.session_id)
+  } catch (err) {
+    if (req.headers['content-type']?.startsWith('multipart/') === true) {
+      reply.header('connection', 'close')
     }
-    let upload: ShellUpload
-    try {
-      upload = await readShellBody(req, entry.runner.ws.io.bufferBytes)
-    } catch (error) {
-      return refuse(req, reply, error)
-    }
-    const { body, stdin } = upload
-    if (body.open_stdin === true && (stdin !== undefined || !streaming)) {
-      try {
-        await upload.finish()
-      } catch (error) {
-        return refuse(req, reply, error)
-      }
-      return errorResponse(
-        reply,
-        new HttpError('invalid_request', 'open_stdin takes stream=true and no stdin part'),
-      )
-    }
-    try {
-      checkPlacement(entry.runner.ws, body)
-    } catch (error) {
-      try {
-        await upload.finish()
-      } catch (finished) {
-        return refuse(req, reply, finished)
-      }
-      return refuse(req, reply, error)
-    }
-    const pipe =
-      body.open_stdin === true
-        ? new BytePipe(entry.runner.ws.io.bufferBytes, currentRequest() !== null)
-        : undefined
-    const source = pipe?.stream() ?? stdin
-    await entry.runner.ws.ensureSessionsLoaded()
-    const sessionId = (req.query.session_id ?? '') || entry.runner.ws.defaultSessionId
-    if (deps.jobs.draining || !entry.acceptingJobs) {
-      try {
-        await upload.finish()
-      } catch (error) {
-        return refuse(req, reply, error)
-      }
-      if (deps.jobs.draining) {
-        refused('shutting_down')
-        return errorResponse(reply, new HttpError('shutting_down', 'server is shutting down'))
-      }
-      return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
-    }
-    const table = entry.runner.ws.jobTable
-    if (!table.claimed) {
-      // Once held, the lease is this daemon's until the workspace closes,
-      // so only a line on a workspace it does not hold yet waits for the
-      // store here.
-      try {
-        await table.claim()
-      } catch (err) {
-        if (!(err instanceof WorkspaceHeldError)) throw err
-        try {
-          await upload.finish()
-        } catch (error) {
-          return refuse(req, reply, error)
-        }
-        return errorResponse(reply, new HttpError('workspace_busy', err.message))
-      }
-    }
-    let opened!: (execution: ShellExecution | null) => void
-    const execution = new Promise<ShellExecution | null>((resolve) => {
-      opened = resolve
-    })
-    let job = deps.jobs.submit(
-      wsId,
-      body.command,
-      async (signal, lineHandle) => {
-        const options = {
-          sessionId,
-          lineHandle,
-          ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
-          ...(body.machine !== undefined ? { machine: body.machine } : {}),
-          ...(body.record !== undefined ? { record: body.record } : {}),
-          ...(source !== undefined ? { stdin: source } : {}),
-          signal,
-        }
-        const lineId = lineHandle.id.value
-        if (!streaming)
-          return Object.assign(ioResultToDict(await entry.runner.ws.shell(body.command, options)), {
-            line_id: lineId,
-          })
-        // The response reads the events and closes the execution; the job
-        // waits for its status, and a cancelled job's signal stops it.
-        try {
-          const shell = await entry.runner.ws.shell(body.command, { ...options, stream: true })
-          opened(shell)
-          return Object.assign(ioResultToDict(await shell.wait()), { line_id: lineId })
-        } finally {
-          opened(null)
-        }
-      },
-      sessionId,
-    )
-    job.stdin = pipe
-    if (streaming) {
-      return shellResponse(execution, deps.jobs, job, reply, req.closed, upload.failed, stdin)
-    }
-    job = await waitAttended(deps.jobs, job.id, req.closed, upload.failed)
+    return failure(reply, err)
+  }
+  let upload: ShellUpload
+  try {
+    upload = await readShellBody(req, entry.runner.ws.io.bufferBytes)
+  } catch (error) {
+    return refuse(req, reply, error)
+  }
+  const { body, stdin } = upload
+  if (body.open_stdin === true && (stdin !== undefined || !streaming)) {
     try {
       await upload.finish()
     } catch (error) {
       return refuse(req, reply, error)
     }
-    if (job.line.record.signal !== null) {
-      return errorResponse(reply, new HttpError('canceled', 'job canceled'))
+    return errorResponse(
+      reply,
+      new HttpError('invalid_request', 'open_stdin takes stream=true and no stdin part'),
+    )
+  }
+  try {
+    checkPlacement(entry.runner.ws, body)
+  } catch (error) {
+    try {
+      await upload.finish()
+    } catch (finished) {
+      return refuse(req, reply, finished)
     }
-    if (job.error !== null) {
-      console.error(`mirage: line ${job.id.value} failed: ${job.error}`)
-      return errorResponse(reply, new HttpError('internal', INTERNAL_MESSAGE))
+    return refuse(req, reply, error)
+  }
+  const pipe =
+    body.open_stdin === true
+      ? new BytePipe(entry.runner.ws.io.bufferBytes, currentRequest() !== null)
+      : undefined
+  const source = pipe?.stream() ?? stdin
+  await entry.runner.ws.ensureSessionsLoaded()
+  const sessionId = (req.query.session_id ?? '') || entry.runner.ws.defaultSessionId
+  if (deps.jobs.draining || !entry.acceptingJobs) {
+    try {
+      await upload.finish()
+    } catch (error) {
+      return refuse(req, reply, error)
     }
-    return job.result
+    if (deps.jobs.draining) {
+      refused('shutting_down')
+      return errorResponse(reply, new HttpError('shutting_down', 'server is shutting down'))
+    }
+    return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
+  }
+  const table = entry.runner.ws.jobTable
+  if (!table.claimed) {
+    // Once held, the lease is this daemon's until the workspace closes,
+    // so only a line on a workspace it does not hold yet waits for the
+    // store here.
+    try {
+      await table.claim()
+    } catch (err) {
+      if (!(err instanceof WorkspaceHeldError)) throw err
+      try {
+        await upload.finish()
+      } catch (error) {
+        return refuse(req, reply, error)
+      }
+      return errorResponse(reply, new HttpError('workspace_busy', err.message))
+    }
+  }
+  let opened!: (execution: ShellExecution | null) => void
+  const execution = new Promise<ShellExecution | null>((resolve) => {
+    opened = resolve
   })
+  let job = deps.jobs.submit(
+    wsId,
+    body.command,
+    async (signal, lineHandle) => {
+      const options = {
+        sessionId,
+        lineHandle,
+        ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+        ...(body.machine !== undefined ? { machine: body.machine } : {}),
+        ...(body.record !== undefined ? { record: body.record } : {}),
+        ...(source !== undefined ? { stdin: source } : {}),
+        signal,
+      }
+      const lineId = lineHandle.id.value
+      if (!streaming)
+        return Object.assign(ioResultToDict(await entry.runner.ws.shell(body.command, options)), {
+          line_id: lineId,
+        })
+      // The response reads the events and closes the execution; the job
+      // waits for its status, and a cancelled job's signal stops it.
+      try {
+        const shell = await entry.runner.ws.shell(body.command, { ...options, stream: true })
+        opened(shell)
+        return Object.assign(ioResultToDict(await shell.wait()), { line_id: lineId })
+      } finally {
+        opened(null)
+      }
+    },
+    sessionId,
+  )
+  job.stdin = pipe
+  if (streaming) {
+    return shellResponse(execution, deps.jobs, job, reply, req.closed, upload.failed, stdin)
+  }
+  job = await waitAttended(deps.jobs, job.id, req.closed, upload.failed)
+  try {
+    await upload.finish()
+  } catch (error) {
+    return refuse(req, reply, error)
+  }
+  if (job.line.record.signal !== null) {
+    return errorResponse(reply, new HttpError('canceled', 'job canceled'))
+  }
+  if (job.error !== null) {
+    console.error(`mirage: line ${job.id.value} failed: ${job.error}`)
+    return errorResponse(reply, new HttpError('internal', INTERNAL_MESSAGE))
+  }
+  return job.result
+}
+
+export function router(app: RouteApp, deps: ShellRoutesDeps): void {
+  app.post('/v1/workspaces/:wsId/shell', shell.bind(undefined, deps))
 }

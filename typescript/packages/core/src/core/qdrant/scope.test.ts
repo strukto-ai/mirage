@@ -15,13 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { INVALID, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import { filtersOf } from '../vector/scope.ts'
 import { scopesFor } from './scope.ts'
 
-function cfg(over: Partial<QdrantConfig> = {}): ReturnType<typeof resolveQdrantConfig> {
-  return resolveQdrantConfig({
+function cfg(over: Partial<QdrantConfig> = {}): ReturnType<typeof QdrantConfig.parse> {
+  return QdrantConfig.parse({
     groupBy: ['label', 'kind'],
     idField: 'id',
     textField: 'name',
@@ -34,7 +34,7 @@ function cfg(over: Partial<QdrantConfig> = {}): ReturnType<typeof resolveQdrantC
 
 const config = cfg()
 
-function detect(c: ReturnType<typeof resolveQdrantConfig>): DetectFn {
+function detect(c: ReturnType<typeof QdrantConfig.parse>): DetectFn {
   return makeDetectScope(scopesFor(c))
 }
 
@@ -63,7 +63,7 @@ describe('qdrant scope', () => {
   })
 
   it('text and blob leaves need their config fields', () => {
-    const bare = resolveQdrantConfig({ groupBy: ['label', 'kind'] })
+    const bare = QdrantConfig.parse({ groupBy: ['label', 'kind'] })
     expect(detect(bare)(ps('/animals/cat/big/3.txt')).kind).toBe(INVALID)
     expect(detect(bare)(ps('/animals/cat/big/3.png')).kind).toBe(INVALID)
     expect(detect(bare)(ps('/animals/cat/big/3.json')).kind).toBe('row_json')

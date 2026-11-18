@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseConfigWithSchema } from '../secrets.ts'
-import { PostgresConfig, resolvePostgresConfig } from './config.ts'
+import { PostgresConfig } from './config.ts'
 
 describe('PostgresConfig', () => {
   it('applies Python-parity defaults', () => {
-    const resolved = resolvePostgresConfig({ dsn: 'postgres://localhost/db' })
+    const resolved = PostgresConfig.parse({ dsn: 'postgres://localhost/db' })
     expect(resolved.dsn).toBe('postgres://localhost/db')
     expect(resolved.schemas).toBeNull()
     expect(resolved.defaultRowLimit).toBe(1000)
@@ -27,7 +27,7 @@ describe('PostgresConfig', () => {
   })
 
   it('keeps explicit overrides', () => {
-    const resolved = resolvePostgresConfig({
+    const resolved = PostgresConfig.parse({
       dsn: 'postgres://localhost/db',
       schemas: ['public'],
       maxReadRows: 50,
@@ -50,6 +50,8 @@ describe('PostgresConfig parsing', () => {
       default_row_limit: 25,
     })
     expect(out).toEqual({
+      schemas: null,
+      timeout: 30,
       dsn: 'postgres://h/d',
       maxReadRows: 50,
       maxReadBytes: 2048,
@@ -62,7 +64,14 @@ describe('PostgresConfig parsing', () => {
       dsn: 'postgres://h/d',
       maxReadRows: 50,
     })
-    expect(out).toEqual({ dsn: 'postgres://h/d', maxReadRows: 50 })
+    expect(out).toEqual({
+      dsn: 'postgres://h/d',
+      maxReadRows: 50,
+      schemas: null,
+      timeout: 30,
+      maxReadBytes: 10 * 1024 * 1024,
+      defaultRowLimit: 1000,
+    })
   })
 
   it('preserves the schemas array', () => {

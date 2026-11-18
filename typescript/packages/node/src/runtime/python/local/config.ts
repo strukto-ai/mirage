@@ -12,11 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  HOME_CONFIG_FIELDS,
-  type ConfigFields,
-  type HomeConfig,
-} from '@struktoai/mirage-core/runtime/config'
+import { HomeConfig, type ConfigFields } from '@struktoai/mirage-core/runtime/config'
 
 /**
  * The host interpreter and the environment its program runs with. Mirrors
@@ -30,4 +26,7 @@ export interface LocalConfig extends HomeConfig {
   env?: Record<string, string>
 }
 
-export const LOCAL_CONFIG_FIELDS: ConfigFields = { ...HOME_CONFIG_FIELDS, env: { type: 'map' } }
+export const LocalConfig = {
+  ...HomeConfig,
+  env: { type: 'map' },
+} satisfies ConfigFields<LocalConfig>

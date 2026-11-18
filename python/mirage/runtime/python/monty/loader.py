@@ -12,33 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import ModuleType
 from typing import Any
 
-# pydantic-monty is the `monty` extra, so importing this package must
-# not require it: every name below resolves to None when it is absent
-# and the runtime raises a pointed ImportError at construction instead.
-# AbstractOS falls back to `object` because a class statement subclasses
-# it at import time, before any of that can be checked.
-pydantic_monty: Any
+from mirage.runtime.python.monty.constants import MISSING_PACKAGE_HINT
+from mirage.runtime.python.monty.errors import MontyUnavailableError
+
+_pydantic_monty: ModuleType | None
 AbstractOS: Any
-MontyFileHandle: Any
-StatResult: Any
 path_from_arg: Any
 try:
-    import pydantic_monty as _pydantic_monty
-    from pydantic_monty import AbstractOS as _AbstractOS
-    from pydantic_monty import MontyFileHandle as _MontyFileHandle
-    from pydantic_monty import StatResult as _StatResult
-    from pydantic_monty.os_access import path_from_arg as _path_from_arg
-except ImportError:
-    pydantic_monty = None
+    import pydantic_monty as _package
+except ModuleNotFoundError as exc:
+    if exc.name != "pydantic_monty":
+        raise
+    _pydantic_monty = None
     AbstractOS = object
-    MontyFileHandle = None
-    StatResult = None
     path_from_arg = None
 else:
-    pydantic_monty = _pydantic_monty
-    AbstractOS = _AbstractOS
-    MontyFileHandle = _MontyFileHandle
-    StatResult = _StatResult
+    from pydantic_monty.os_access import path_from_arg as _path_from_arg
+
+    _pydantic_monty = _package
+    AbstractOS = _package.AbstractOS
     path_from_arg = _path_from_arg
+
+
+def load_monty_module() -> ModuleType:
+    """The installed engine, or the install hint for the optional runtime."""
+    if _pydantic_monty is None:
+        raise MontyUnavailableError(MISSING_PACKAGE_HINT)
+    return _pydantic_monty

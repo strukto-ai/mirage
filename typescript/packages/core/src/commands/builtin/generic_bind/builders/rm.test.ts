@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { runWithMountGate } from '../../../../context/session_context.ts'
+import { setMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
@@ -68,7 +68,7 @@ async function rm(
   paths: string[],
   flags: Record<string, boolean> = {},
 ): Promise<[number, string, string]> {
-  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+  const result = await setMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(
       {} as Accessor,
       paths.map((p) => PathSpec.fromStrPath(p)),
@@ -157,7 +157,7 @@ it.each([
       walkError: refusal,
     })
     const valid = PathSpec.fromStrPath('/data/ok')
-    const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+    const result = await setMountGate('/', MountMode.WRITE, async () =>
       command.fn({} as Accessor, [refused, valid], [], {
         flags: { force },
         stdin: null,
@@ -196,7 +196,7 @@ it('rm -r names a mount below and fails', async () => {
     ['/data/', '/data/inner/'],
   )
   const command = generic('rm')
-  const result = await runWithMountGate('/data/', MountMode.WRITE, async () =>
+  const result = await setMountGate('/data/', MountMode.WRITE, async () =>
     command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
       flags: { recursive: true },
       stdin: null,

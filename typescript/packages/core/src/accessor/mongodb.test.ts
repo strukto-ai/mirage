@@ -14,14 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { stubMongoDriver } from '../../tests/core/mongodb/_test_util.ts'
-import { resolveMongoDBConfig } from '../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../vfs/mongodb/config.ts'
 import { MongoDBAccessor } from './mongodb.ts'
 
 const STUB_DRIVER = stubMongoDriver()
 
 describe('MongoDBAccessor', () => {
   it('holds the driver and resolved config', () => {
-    const config = resolveMongoDBConfig({ uri: 'mongodb://localhost' })
+    const config = MongoDBConfig.parse({ uri: 'mongodb://localhost' })
     const accessor = new MongoDBAccessor(STUB_DRIVER, config)
     expect(accessor.driver).toBe(STUB_DRIVER)
     expect(accessor.config).toBe(config)

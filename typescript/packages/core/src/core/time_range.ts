@@ -84,8 +84,12 @@ export class TimeRange {
   }
 }
 
+interface TimeRangeAccessor {
+  readonly timeRange: TimeRange
+}
+
 export function guardDay(
-  accessor: { readonly timeRange: TimeRange },
+  accessor: TimeRangeAccessor,
   match: ScopeMatch,
   virtual: string,
 ): Promise<void> {

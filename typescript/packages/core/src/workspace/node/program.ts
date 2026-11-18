@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BytePipe } from '../../io/pipe.ts'
-import { currentCaller, type RedirectResult, runWithCaller } from '../../context/session_context.ts'
+import { currentCaller, type RedirectResult, bindCaller } from '../../context/session_context.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -650,6 +650,6 @@ async function readOn(
   const io =
     reading === null
       ? await run()
-      : await runWithCaller({ ...currentCaller(), history: reading.readOn(at - rows) }, run)
+      : await bindCaller({ ...currentCaller(), history: reading.readOn(at - rows) }, run)
   return [io.stdout, io, new ExecutionNode({ command: rest, exitCode: io.exitCode })]
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 const Name = z
   .string()
@@ -11,7 +11,7 @@ const Name = z
 
 export const WandbConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     entities: z
       .array(Name)
       .min(1)

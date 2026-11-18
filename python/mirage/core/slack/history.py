@@ -13,13 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.time_range import TimeRange
+
+
+class SlackMessage(TypedDict):
+    ts: str
+    user: NotRequired[str]
+    text: NotRequired[str]
+    thread_ts: NotRequired[str]
+    files: NotRequired[list[dict[str, Any]]]
 
 
 async def stream_messages_for_day(
@@ -30,7 +38,7 @@ async def stream_messages_for_day(
     limit: int = 200,
     after: str | None = None,
     last_day: str | None = None,
-) -> AsyncGenerator[list[dict[str, Any]], None]:
+) -> AsyncGenerator[list[SlackMessage], None]:
     """Page-streaming history for a channel-day, or a run of days.
 
     Args:
@@ -77,7 +85,7 @@ async def fetch_messages_for_day(
     date_str: str,
     scope: TimeRange,
     after: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[SlackMessage]:
     """Fetch all messages for a date as parsed dicts (eager).
 
     Args:
@@ -90,7 +98,7 @@ async def fetch_messages_for_day(
     Returns:
         list[dict]: messages sorted by ts ascending.
     """
-    messages: list[dict[str, Any]] = []
+    messages: list[SlackMessage] = []
     async for page in stream_messages_for_day(
         accessor, channel_id, date_str, scope, after=after
     ):
@@ -121,7 +129,7 @@ async def get_history_jsonl(
 
 async def fetch_recent_messages(
     accessor: SlackAccessor, channel_id: str, limit: int = 20
-) -> list[dict[str, Any]]:
+) -> list[SlackMessage]:
     """Fetch the most recent messages of a channel (one API page).
 
     Args:
@@ -138,8 +146,8 @@ async def fetch_recent_messages(
         {"channel": channel_id, "limit": limit},
     )
     messages = data.get("messages")
-    items = (
-        [m for m in messages if isinstance(m, dict)]
+    items: list[SlackMessage] = (
+        [cast(SlackMessage, m) for m in messages if isinstance(m, dict)]
         if isinstance(messages, list)
         else []
     )

@@ -1,17 +1,16 @@
+import type { PrintfKind } from '../../utils/stat_view.ts'
+export type { PrintfKind } from '../../utils/stat_view.ts'
 import type { FileStat } from '../../types.ts'
 
 /** find's row actions: -print, -print0, -ls and -delete. */
 export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
-
-/** The one-letter kind a -printf %y/%Y directive renders. */
-export type PrintfKind = 'f' | 'd' | 'l' | 'c' | 'p'
 
 export interface FindEntry {
   key: string
   name: string
   // 'l' is a namespace symlink: GNU find without -L reports the link
   // itself and never walks through it, so it is never 'f' or 'd'.
-  kind: 'f' | 'd' | 'l' | 'c' | 'p'
+  kind: PrintfKind
   depth: number
   isEmpty?: boolean | null
   mtime?: number | null

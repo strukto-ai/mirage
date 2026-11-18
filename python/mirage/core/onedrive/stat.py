@@ -17,6 +17,7 @@ import logging
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.client import GraphError, graph_get
 from mirage.core.msgraph.drive import (
+    as_number,
     batch_tree,
     delta_tree,
     folder_child_count,
@@ -50,7 +51,7 @@ async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
             type=FileType.DIRECTORY,
             modified=item.get("lastModifiedDateTime"),
             extra={
-                "size_bytes": item.get("size"),
+                "size_bytes": as_number(item.get("size")),
                 "child_count": folder_child_count(item),
             },
         )

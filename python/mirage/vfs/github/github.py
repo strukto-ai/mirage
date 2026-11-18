@@ -138,6 +138,7 @@ class GitHubVFS(BaseVFS):
                 "constructor kwargs or in GitHubConfig"
             )
         self.config = config
+        self._configured_ref = ref
         self.accessor = GitHubAccessor(
             GitHubAccount(
                 GhConfig(
@@ -202,7 +203,13 @@ class GitHubVFS(BaseVFS):
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(
-            self.config,
+            self.config.model_copy(
+                update={
+                    "owner": self.accessor.owner,
+                    "repo": self.accessor.repo,
+                    "ref": self._configured_ref,
+                }
+            ),
             owner=self.accessor.owner,
             repo=self.accessor.repo,
             ref=self.accessor.ref,

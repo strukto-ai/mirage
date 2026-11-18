@@ -393,6 +393,7 @@ class JobHandle:
             await asyncio.sleep(WATCH_RETRY_SECONDS)
 
 
-JobRunner = Callable[
-    [JobHandle], Coroutine[Any, Any, tuple[IOResult, ExecutionNode]]
-]
+JobResult = tuple[IOResult, ExecutionNode]
+
+
+JobRunner = Callable[[JobHandle], Coroutine[Any, Any, JobResult]]

@@ -16,6 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
+from stat import filemode
 
 from mirage.commands.builtin.utils import constants
 from mirage.commands.builtin.utils.identity import (
@@ -187,23 +188,11 @@ def human_size(n: int) -> str:
     return human_scaled(n, 1024, ("", "K", "M", "G", "T", "P", "E"))
 
 
-def _perm_triplet(bits: int, special: str | None = None) -> str:
-    if special is not None:
-        execbit = special.lower() if bits & 1 else special.upper()
-    else:
-        execbit = "x" if bits & 1 else "-"
-    return ("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") + execbit
-
-
 def ls_mode_string(s: FileStat) -> str:
-    type_char = constants.TYPE_CHARS.get(s.type, "-")
-    mode = s.mode if s.mode is not None else posix_mode(s) & ALL_MODE_BITS
-    perms = (
-        _perm_triplet(mode >> 6, "s" if mode & 0o4000 else None)
-        + _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None)
-        + _perm_triplet(mode, "t" if mode & 0o1000 else None)
-    )
-    return f"{type_char}{perms}"
+    mode = posix_mode(s)
+    if s.mode is not None:
+        mode = (mode & ~ALL_MODE_BITS) | (s.mode & ALL_MODE_BITS)
+    return filemode(mode)
 
 
 def _parse_when(modified: str | None) -> datetime | None:

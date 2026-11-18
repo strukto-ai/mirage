@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import copy
 import logging
 import re
 from typing import Any
@@ -574,14 +573,13 @@ async def _searched_channels(
     search_token = accessor.config.search_token
     if not reveal_secret(search_token):
         return None
-    searcher = copy.copy(accessor)
-    searcher.config = accessor.config.model_copy(
-        update={"token": search_token}
-    )
-    return frozenset(
-        channel["id"]
-        for channel in await list_channels(searcher, types=_SEARCHED_TYPES)
-    )
+    config = accessor.config.model_copy(update={"token": search_token})
+    async with SlackAccessor(config, accessor.time_range) as searcher:
+        searcher.share(accessor)
+        return frozenset(
+            channel["id"]
+            for channel in await list_channels(searcher, types=_SEARCHED_TYPES)
+        )
 
 
 async def files_containing(

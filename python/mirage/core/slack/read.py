@@ -15,7 +15,6 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from functools import partial
-from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
@@ -26,6 +25,7 @@ from mirage.core.slack.client import (
     refusals_denied,
 )
 from mirage.core.slack.history import (
+    SlackMessage,
     fetch_messages_for_day,
     get_history_jsonl,
     stream_messages_for_day,
@@ -180,7 +180,7 @@ async def _follow_chat(
         fetch_messages_for_day, accessor, channel_id, day, accessor.time_range
     )
 
-    async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
+    async def after(last: SlackMessage | None) -> list[SlackMessage]:
         with refusals_denied(path):
             return await fetch(after=None if last is None else last["ts"])
 
@@ -195,17 +195,17 @@ follow = per_kind(detect_scope, {"messages": _follow_chat})
 
 def _run_pages(
     accessor: SlackAccessor, channel_id: str, first: str, last: str
-) -> AsyncGenerator[list[dict[str, Any]], None]:
+) -> AsyncGenerator[list[SlackMessage], None]:
     return stream_messages_for_day(
         accessor, channel_id, first, accessor.time_range, last_day=last
     )
 
 
-def _sort_key(message: dict[str, Any]) -> float:
+def _sort_key(message: SlackMessage) -> float:
     return float(message.get("ts", "0"))
 
 
-def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
+def _posted_within(message: SlackMessage, start: float, end: float) -> bool:
     return start <= float(message["ts"]) < end
 
 

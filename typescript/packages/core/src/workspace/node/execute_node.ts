@@ -15,7 +15,7 @@
 import { caseHead, loopHead } from '../../shell/printer.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { traceLine } from '../../shell/xtrace.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
@@ -24,9 +24,9 @@ import {
   type RedirectRunner,
   redirectRunnerFor,
   redirectSyntaxFor,
-  runAsProgram,
-  runWithEvaluation,
-  runWithRedirectPaths,
+  setProgramInvocation,
+  setCurrentEvaluation,
+  setRedirectPaths,
 } from '../../context/session_context.ts'
 import { newLineId } from '../../execution/context.ts'
 import { share } from '../../io/async_line_iterator.ts'
@@ -630,7 +630,7 @@ async function runRedirected(
           followLinks,
         )
       }
-      ;[stdout, io, execNode] = await runWithRedirectPaths(
+      ;[stdout, io, execNode] = await setRedirectPaths(
         command,
         [],
         () =>
@@ -1064,8 +1064,8 @@ async function forkSubshell(
           }),
       )
     try {
-      subshellRan = await runWithEvaluation(child, () =>
-        asProgram ? runAsProgram(child.session, body) : body(),
+      subshellRan = await setCurrentEvaluation(child, () =>
+        asProgram ? setProgramInvocation(child.session, body) : body(),
       )
     } finally {
       await child.session.closeInputs()
@@ -1142,7 +1142,7 @@ async function runFor(
   const resolved =
     values === null
       ? positionalParams(session, callStack)
-      : await runInCommandScope(async () => {
+      : await commandScope(async () => {
           const classified = await expandAndClassify(
             values,
             context,
@@ -1431,7 +1431,7 @@ async function executeNodeBody(
   if (kind === NodeKind.COMMAND) {
     const expanded: ExpandedWords = { words: null }
     try {
-      const ran = await runInCommandScope(() =>
+      const ran = await commandScope(() =>
         executeCommand(
           recurse,
           dispatch,
@@ -1570,7 +1570,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.DECLARATION) {
     const declared: ExpandedWords = { words: null }
-    const ran = await runInCommandScope(() =>
+    const ran = await commandScope(() =>
       executeDeclaration(
         node,
         context,

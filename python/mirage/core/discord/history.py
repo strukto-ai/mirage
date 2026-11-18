@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from functools import partial
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.scope import sole_command_started
@@ -22,6 +22,14 @@ from mirage.core.discord.client import discord_request
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import TimeRange
+
+
+class DiscordMessage(TypedDict):
+    id: str
+    attachments: NotRequired[list[dict[str, Any]]]
+    author: NotRequired[dict[str, str]]
+    content: NotRequired[str]
+
 
 DISCORD_EPOCH = 1420070400000
 
@@ -43,7 +51,7 @@ async def stream_messages_for_day(
     page_size: int = 100,
     after: str | None = None,
     last_day: str | None = None,
-) -> AsyncGenerator[list[dict[str, Any]], None]:
+) -> AsyncGenerator[list[DiscordMessage], None]:
     """Stream message pages for a channel-day, or a run of days.
 
     Walks ``/channels/<id>/messages?after=<snowflake>&limit=N``
@@ -70,7 +78,7 @@ async def stream_messages_for_day(
     first = snowflake_at(start)
     before_int = snowflake_at(end)
     floor = max(0, first - 1, int(after) if after is not None else 0)
-    async for page in after_id_pages(
+    pages: AsyncIterator[list[DiscordMessage]] = after_id_pages(
         accessor,
         f"/channels/{channel_id}/messages",
         base_params={},
@@ -78,7 +86,8 @@ async def stream_messages_for_day(
         page_size=page_size,
         start_after=str(floor),
         newest_first=True,
-    ):
+    )
+    async for page in pages:
         in_range = [m for m in page if first <= int(m["id"]) < before_int]
         if in_range:
             yield in_range
@@ -93,7 +102,7 @@ async def list_messages_for_day(
     scope: TimeRange,
     page_size: int = 100,
     after: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DiscordMessage]:
     """List all messages for a channel-day (eager).
 
     Args:
@@ -107,7 +116,7 @@ async def list_messages_for_day(
     Returns:
         list[dict]: messages within the date, sorted oldest-first.
     """
-    out: list[dict[str, Any]] = []
+    out: list[DiscordMessage] = []
     async for page in stream_messages_for_day(
         accessor, channel_id, date_str, scope, page_size, after=after
     ):
@@ -118,7 +127,7 @@ async def list_messages_for_day(
 
 async def _kept_day(
     accessor: DiscordAccessor, channel_id: str, date_str: str
-) -> list[dict[str, Any]]:
+) -> list[DiscordMessage]:
     """A channel-day's messages: the ones the running command already
     fetched, else fetched now and kept for that command. Outside any
     command nothing is kept, since no command bounds how long the day
@@ -146,7 +155,7 @@ async def _kept_day(
 
 async def listed_messages_for_day(
     accessor: DiscordAccessor, channel_id: str, date_str: str
-) -> list[dict[str, Any]]:
+) -> list[DiscordMessage]:
     """A channel-day's messages for its listing, kept for the read of its
     chat.jsonl that follows in the same command.
 
@@ -189,7 +198,7 @@ async def get_history_jsonl(
 
 async def fetch_recent_messages(
     accessor: DiscordAccessor, channel_id: str, limit: int = 20
-) -> list[dict[str, Any]]:
+) -> list[DiscordMessage]:
     """Fetch the most recent messages of a channel (one API page).
 
     Args:
@@ -203,8 +212,8 @@ async def fetch_recent_messages(
     page = await discord_request(
         accessor, "GET", f"/channels/{channel_id}/messages", {"limit": limit}
     )
-    items = (
-        [m for m in page if isinstance(m, dict)]
+    items: list[DiscordMessage] = (
+        [cast(DiscordMessage, m) for m in page if isinstance(m, dict)]
         if isinstance(page, list)
         else []
     )

@@ -1,7 +1,7 @@
 import logging
 import posixpath
 import string
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -42,6 +42,7 @@ from mirage.types import (
     PathSpec,
     PolymorphicReadFn,
     ReaddirFn,
+    SetAttrFields,
     StatFn,
 )
 from mirage.utils.clock import system_now
@@ -55,7 +56,7 @@ from mirage.utils.dates import epoch_to_iso, iso_timestamp
 
 logger = logging.getLogger(__name__)
 
-SetAttrsFn = Callable[[PathSpec, Mapping[str, Any]], Awaitable[Any]]
+SetAttrsFn = Callable[[PathSpec, SetAttrFields], Awaitable[Any]]
 
 
 def _ascii_lower(text: str) -> str:
@@ -399,18 +400,20 @@ async def keep_attributes(
     """
     if set_attrs is None:
         return
-    fields: dict[str, Any] = {}
+    fields: SetAttrFields = {}
     if info is not None:
         if info.mode is not None:
             fields["mode"] = info.mode & 0o7777
-        fields.update(mtime=info.modified, atime=info.atime)
+        if info.modified:
+            fields["mtime"] = info.modified
+        if info.atime:
+            fields["atime"] = info.atime
     if mtime:
         fields["mtime"] = epoch_to_iso(mtime)
-    kept = {k: v for k, v in fields.items() if v not in (None, "")}
-    if not kept:
+    if not fields:
         return
     try:
-        await set_attrs(out, kept)
+        await set_attrs(out, fields)
     except FS_ERRORS as exc:
         logger.debug("gzip: attributes not kept on %s: %s", out.virtual, exc)
 

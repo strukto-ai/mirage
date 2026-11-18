@@ -17,7 +17,7 @@ import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_f
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command, type CommandFn } from '../commands/config.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
 import { SessionProfile } from '../policy/profile.ts'
 import { FileType, MountMode, type FileStat } from '../types.ts'
@@ -280,7 +280,7 @@ describe('structure below a mount whose own content is hidden', () => {
     const sess = ws.createSession('agent', {
       profile: { paths: { hide: ['/base/top.txt', '/base/other'] } },
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       expect(await ws.dispatch('readdir', '/base')).toEqual(['/base/inner'])
       const st = (await ws.dispatch('stat', '/base')) as FileStat
       expect(st.type).toBe(FileType.DIRECTORY)
@@ -296,7 +296,7 @@ describe('structure below a mount whose own content is hidden', () => {
     const ln = await ws.shell('ln -s /b/secret.txt /b/leak')
     expect(ln.exitCode).toBe(0)
     const sess = ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       const names = (await ws.dispatch('readdir', '/')) as string[]
       expect(names).not.toContain('/b')
       expect(names).toContain('/a')

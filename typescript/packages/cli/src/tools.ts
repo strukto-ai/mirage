@@ -61,51 +61,25 @@ export function registerToolCommands(parent: Command): void {
     .description("The session's agent tools, as MCP serves them.")
   toolCommand(program, 'shell', 'Run a command line and read its output as the agent does.')
     .argument('<command>', 'The command line to run')
-    .action(async (command: string, opts: Target) => {
-      await callTool(opts, 'shell', { command })
-    })
+    .action(shellCmd)
   toolCommand(program, 'read', 'Read a file with line numbers.')
     .argument('<path>', 'File to read')
     .option('--offset <n>', 'Line to start at (0-based)', Number)
     .option('--limit <n>', 'Most lines to return', Number)
-    .action(async (path: string, opts: Target & { offset?: number; limit?: number }) => {
-      const args: Record<string, unknown> = { path }
-      if (opts.offset !== undefined) args.offset = opts.offset
-      if (opts.limit !== undefined) args.limit = opts.limit
-      await callTool(opts, 'read', args)
-    })
+    .action(readCmd)
   toolCommand(program, 'write', 'Write a file; an existing one must be read in full first.')
     .argument('<path>', 'File to write')
     .option('--content <text>', 'Text to write; stdin when absent')
-    .action(async (path: string, opts: Target & { content?: string }) => {
-      const content = opts.content ?? (await buffer(process.stdin)).toString('utf-8')
-      await callTool(opts, 'write', { path, content })
-    })
+    .action(writeCmd)
   toolCommand(program, 'edit', 'Replace a string in an existing file.')
     .argument('<path>', 'File to edit')
     .argument('<old>', 'The exact text to replace')
     .argument('<new>', 'The text to put in its place')
     .option('--replace-all', 'Replace every occurrence')
-    .action(
-      async (
-        path: string,
-        oldString: string,
-        newString: string,
-        opts: Target & { replaceAll?: boolean },
-      ) => {
-        await callTool(opts, 'edit', {
-          path,
-          old_string: oldString,
-          new_string: newString,
-          replace_all: opts.replaceAll === true,
-        })
-      },
-    )
+    .action(editCmd)
   toolCommand(program, 'ls', 'List a directory.')
     .argument('<path>', 'Directory to list')
-    .action(async (path: string, opts: Target) => {
-      await callTool(opts, 'ls', { path })
-    })
+    .action(lsCmd)
   toolCommand(program, 'grep', 'Search files recursively, as grep -rn does.')
     .argument('<pattern>', 'Regular expression to search for')
     .argument('<path>', 'File or directory to search under')
@@ -116,35 +90,74 @@ export function registerToolCommands(parent: Command): void {
     .option('-l, --files-with-matches', 'Print only the names of matching files')
     .option('-c, --count', 'Print only a count of matching lines per file')
     .option('-m, --max-count <n>', 'Stop each file after this many matches', Number)
-    .action(
-      async (
-        pattern: string,
-        path: string,
-        opts: Target & {
-          ignoreCase?: boolean
-          fixedStrings?: boolean
-          include?: string
-          context?: number
-          filesWithMatches?: boolean
-          count?: boolean
-          maxCount?: number
-        },
-      ) => {
-        const args: Record<string, unknown> = { pattern, path }
-        if (opts.ignoreCase === true) args.ignore_case = true
-        if (opts.fixedStrings === true) args.fixed_strings = true
-        if (opts.include !== undefined) args.include = opts.include
-        if (opts.context !== undefined) args.context = opts.context
-        if (opts.filesWithMatches === true) args.files_with_matches = true
-        if (opts.count === true) args.count = true
-        if (opts.maxCount !== undefined) args.max_count = opts.maxCount
-        await callTool(opts, 'grep', args)
-      },
-    )
+    .action(grepCmd)
   toolCommand(program, 'glob', 'Find files whose path matches a pattern.')
     .argument('<pattern>', 'Pathname pattern such as **/*.py')
     .argument('[path]', 'Directory a relative pattern is matched under', '/')
-    .action(async (pattern: string, path: string, opts: Target) => {
-      await callTool(opts, 'glob', { pattern, path })
-    })
+    .action(globCmd)
+}
+
+async function shellCmd(command: string, opts: Target): Promise<void> {
+  await callTool(opts, 'shell', { command })
+}
+
+async function readCmd(
+  path: string,
+  opts: Target & { offset?: number; limit?: number },
+): Promise<void> {
+  const args: Record<string, unknown> = { path }
+  if (opts.offset !== undefined) args.offset = opts.offset
+  if (opts.limit !== undefined) args.limit = opts.limit
+  await callTool(opts, 'read', args)
+}
+
+async function writeCmd(path: string, opts: Target & { content?: string }): Promise<void> {
+  const content = opts.content ?? (await buffer(process.stdin)).toString('utf-8')
+  await callTool(opts, 'write', { path, content })
+}
+
+async function editCmd(
+  path: string,
+  oldString: string,
+  newString: string,
+  opts: Target & { replaceAll?: boolean },
+): Promise<void> {
+  await callTool(opts, 'edit', {
+    path,
+    old_string: oldString,
+    new_string: newString,
+    replace_all: opts.replaceAll === true,
+  })
+}
+
+async function lsCmd(path: string, opts: Target): Promise<void> {
+  await callTool(opts, 'ls', { path })
+}
+
+async function grepCmd(
+  pattern: string,
+  path: string,
+  opts: Target & {
+    ignoreCase?: boolean
+    fixedStrings?: boolean
+    include?: string
+    context?: number
+    filesWithMatches?: boolean
+    count?: boolean
+    maxCount?: number
+  },
+): Promise<void> {
+  const args: Record<string, unknown> = { pattern, path }
+  if (opts.ignoreCase === true) args.ignore_case = true
+  if (opts.fixedStrings === true) args.fixed_strings = true
+  if (opts.include !== undefined) args.include = opts.include
+  if (opts.context !== undefined) args.context = opts.context
+  if (opts.filesWithMatches === true) args.files_with_matches = true
+  if (opts.count === true) args.count = true
+  if (opts.maxCount !== undefined) args.max_count = opts.maxCount
+  await callTool(opts, 'grep', args)
+}
+
+async function globCmd(pattern: string, path: string, opts: Target): Promise<void> {
+  await callTool(opts, 'glob', { pattern, path })
 }

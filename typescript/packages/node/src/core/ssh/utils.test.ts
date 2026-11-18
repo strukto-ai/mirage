@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { isDirectoryAttrs, isFileAttrs, isNoSuchFile } from './utils.ts'
+import { isNoSuchFile } from './utils.ts'
 
 describe('isNoSuchFile', () => {
   it('returns true for { code: 2 }', () => {
@@ -30,29 +30,5 @@ describe('isNoSuchFile', () => {
   })
   it('returns false for a plain Error without code', () => {
     expect(isNoSuchFile(new Error('x'))).toBe(false)
-  })
-})
-
-describe('isDirectoryAttrs', () => {
-  it('returns true for a dir mode', () => {
-    expect(isDirectoryAttrs({ mode: 0o040755 })).toBe(true)
-  })
-  it('returns false for a regular file mode', () => {
-    expect(isDirectoryAttrs({ mode: 0o100644 })).toBe(false)
-  })
-  it('returns false when mode is missing', () => {
-    expect(isDirectoryAttrs({})).toBe(false)
-  })
-})
-
-describe('isFileAttrs', () => {
-  it('returns true for a regular file mode', () => {
-    expect(isFileAttrs({ mode: 0o100644 })).toBe(true)
-  })
-  it('returns false for a dir mode', () => {
-    expect(isFileAttrs({ mode: 0o040755 })).toBe(false)
-  })
-  it('returns false when mode is missing', () => {
-    expect(isFileAttrs({})).toBe(false)
   })
 })

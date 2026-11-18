@@ -12,20 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from __future__ import annotations
 
-AsyncDaytona: Any
-DaytonaConfig: Any
-DaytonaNotFoundError: Any
-try:
-    from daytona import AsyncDaytona as _AsyncDaytona
-    from daytona import DaytonaConfig as _DaytonaConfig
-    from daytona import DaytonaNotFoundError as _DaytonaNotFoundError
-except ImportError:
-    AsyncDaytona = None
-    DaytonaConfig = None
-    DaytonaNotFoundError = None
-else:
-    AsyncDaytona = _AsyncDaytona
-    DaytonaConfig = _DaytonaConfig
-    DaytonaNotFoundError = _DaytonaNotFoundError
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    import daytona
+
+
+@runtime_checkable
+class DaytonaSdk(Protocol):
+    AsyncDaytona: type[daytona.AsyncDaytona]
+    DaytonaConfig: type[daytona.DaytonaConfig]
+    DaytonaNotFoundError: type[Exception]

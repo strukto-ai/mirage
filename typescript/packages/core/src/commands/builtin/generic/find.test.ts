@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { currentCaller, runWithCaller } from '../../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../../context/session_context.ts'
 import type { FindArgs } from '../../../core/generic/types.ts'
 import { modifiedTs, walkFind } from '../../../core/generic/find.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -94,7 +94,7 @@ describe('generic command find', () => {
     try {
       const get = vi.spyOn(ws.cache, 'get')
       const row = new FileStat({ name: 'logs', type: FileType.DIRECTORY })
-      const result = await runWithCaller(
+      const result = await bindCaller(
         { ...currentCaller(), cache: { manager: ws.mount('/mnt').cacheManager } },
         () => findGeneric([spec('/mnt/logs')], [], optsWith(row), () => walked('/mnt/logs')),
       )

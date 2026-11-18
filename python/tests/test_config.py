@@ -58,6 +58,24 @@ def test_a_machine_mount_names_a_machine_the_document_defines():
         )
 
 
+@pytest.mark.parametrize("selected", ["gpu", [1]])
+def test_machine_mount_requires_a_list_of_machine_names(selected):
+    with pytest.raises(
+        ValueError, match="machines must be a list of machine names"
+    ):
+        WorkspaceConfig.model_validate(
+            {
+                "mounts": {
+                    "/tmp": {
+                        "vfs": "machine",
+                        "config": {"machines": selected},
+                    }
+                },
+                "machines": {"gpu": {"provider": "docker", "container": "c"}},
+            }
+        )
+
+
 def test_at_machine_is_that_machine_s_files_at_its_own_path():
     config = WorkspaceConfig.model_validate(
         {"mounts": {"/tmp/": "@gpu", "/data": {"vfs": "ram"}}}

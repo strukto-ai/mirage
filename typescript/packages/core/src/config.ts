@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CacheConfig } from './cache/file/config.ts'
+import type { CacheConfig, RedisCacheConfig } from './cache/file/config.ts'
 import type { IndexConfig, RedisIndexConfig } from './cache/index/config.ts'
 import { mcpCli } from './commands/cli/mcp/build.ts'
 import { NAME as MCP_CLI } from './commands/cli/mcp/constants.ts'
@@ -30,7 +30,7 @@ import {
   runWithNetwork,
 } from './io/network.ts'
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
-import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
+import { parseProgram, SessionProfile, type ProfilePolicy } from './policy/profile.ts'
 import { statedProcesses } from './execution/process/config.ts'
 import type { MachineHandle } from './machine/handle.ts'
 import { validateDocument } from './rs/document.ts'
@@ -378,7 +378,7 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
   if (isPlainObject(out.mounts)) {
     out.mounts = Object.fromEntries(
-      Object.entries(out.mounts).map(([prefix, block]) => [
+      Object.entries(expandMounts(out.mounts)).map(([prefix, block]) => [
         prefix,
         isPlainObject(block) && isPlainObject(block.index)
           ? { ...block, index: camelizeKeys(block.index) }
@@ -437,7 +437,7 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
 }
 
 /** A path-form policy program with its script loaded; one carrying source is left alone. */
-export function loadProgram(program: ProfilePolicySpec, host: ConfigHost): ProfilePolicySpec {
+export function loadProgram(program: ProfilePolicy, host: ConfigHost): ProfilePolicy {
   return typeof program.script === 'string'
     ? { ...program, script: loadScriptSource(program.script, host) }
     : program
@@ -671,7 +671,7 @@ export interface WorkspaceConfig {
    * builds is a store the workspace closes; building it here would
    * leave a redis client with no owner once the workspace shut down.
    */
-  cache?: CacheConfig | null
+  cache?: CacheConfig | RedisCacheConfig | null
   index?: IndexBlock | null
   store?: StoreBlock | null
   /**
@@ -721,17 +721,18 @@ export function checkWorkspaceConfig(
   const raw = { ...source }
   const interpolated = env === null ? raw : interpolateEnv(raw, env ?? readProcessEnv())
   const mounts = interpolated.mounts
-  if (
-    mounts === undefined ||
-    typeof mounts !== 'object' ||
-    mounts === null ||
-    Array.isArray(mounts)
-  ) {
+  if (!isPlainObject(mounts)) {
     throw new Error('config requires a `mounts` mapping')
   }
-  // "@<machine>" is the machine VFS over that machine at the prefix, as
-  // Python's `WorkspaceConfig._v_mounts` reads it.
-  interpolated.mounts = Object.fromEntries(
+  const checked = { ...interpolated, mounts: expandMounts(mounts) }
+  checkMountMachines(checked)
+  validateConfigKeys(checked)
+  return interpolated
+}
+
+/** Expand a machine mount shorthand for validation and runtime construction. */
+function expandMounts(mounts: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
     Object.entries(mounts).map(([prefix, block]) => [
       prefix,
       typeof block === 'string' && block.startsWith(MACHINE_MARK)
@@ -742,9 +743,6 @@ export function checkWorkspaceConfig(
         : block,
     ]),
   )
-  checkMountMachines(interpolated)
-  validateConfigKeys(interpolated)
-  return interpolated
 }
 
 /**
@@ -764,11 +762,15 @@ function checkMountMachines(config: Record<string, unknown>): void {
   for (const [prefix, block] of Object.entries(config.mounts)) {
     if (!isPlainObject(block) || block.vfs !== VFSName.MACHINE || !isPlainObject(block.config))
       continue
-    const listed: unknown[] = Array.isArray(block.config.machines) ? block.config.machines : []
+    const listed: unknown = block.config.machines ?? []
+    if (!Array.isArray(listed) || !listed.every((name) => typeof name === 'string'))
+      throw new Error(`mount '${prefix}': machines must be a list of machine names`)
     const chosen = block.config.default_machine ?? block.config.defaultMachine
-    for (const name of [...listed, ...(chosen === undefined ? [] : [chosen])]) {
-      if (typeof name !== 'string' || !names.includes(name))
-        throw new Error(`mount '${prefix}': no machine '${String(name)}' (machines: ${known})`)
+    if (chosen != null && typeof chosen !== 'string')
+      throw new Error(`mount '${prefix}': default_machine must be a machine name`)
+    for (const name of [...listed, ...(chosen == null ? [] : [chosen])]) {
+      if (!names.includes(name))
+        throw new Error(`mount '${prefix}': no machine '${name}' (machines: ${known})`)
     }
   }
 }

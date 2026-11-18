@@ -21,7 +21,7 @@ import {
   currentCaller,
   explaining,
   liveCallers,
-  runWithCaller,
+  bindCaller,
 } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import type { PolicyDecision } from '../types.ts'
@@ -319,7 +319,9 @@ export class Decisions extends DecisionOwner {
     if (outer !== null) return run(outer)
     const handed: HandOff = { claimed: [], parent: null, origin: null }
     try {
-      return await runWithOpCall(this, handed, sessionId, () => run(handed))
+      return await bindCaller({ ...currentCaller(), call: [this, handed, sessionId] }, () =>
+        run(handed),
+      )
     } catch (err) {
       const held = err instanceof PolicyDenied && isPending(err.decision)
       if (held && asyncContextIsolatesTasks) this.release(sessionId, handed)
@@ -521,23 +523,6 @@ export class Decisions extends DecisionOwner {
   private async flush(): Promise<void> {
     if (this.sessions !== null) await this.sessions.flush()
   }
-}
-
-/**
- * Run one call, the unit an op-level answer covers: a file tool's, or a
- * line's or a job's, whose session writes are its ops. A grant one of its
- * ops is answered by is claimed on `handed` for the call's other ops on
- * that subject. `owner` is the ledger
- * the call runs under, the only one that claims on `handed` and spends
- * it. Mirrors Python's `set_op_call`.
- */
-export function runWithOpCall<T>(
-  owner: Decisions,
-  handed: HandOff,
-  sessionId: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runWithCaller({ ...currentCaller(), call: [owner, handed, sessionId] }, fn)
 }
 
 /**

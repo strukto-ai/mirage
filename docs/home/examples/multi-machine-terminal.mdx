@@ -194,6 +194,14 @@ code uses:
   ```
 </Accordion>
 
+The profile evaluates each command in a shell line. With the jobs below in
+`/workspace/jobs`, this line runs the count on Monty, builds features on E2B,
+and trains on the GPU. Each step starts after the previous one succeeds.
+
+```bash
+python3 /workspace/jobs/count.py /workspace/raw/2025-Q1.csv && python3 /workspace/jobs/build.py && python3 /workspace/jobs/train.py
+```
+
 ## Count Page Views
 
 `/workspace/raw` holds a year of page views, one file a quarter. Mirage fans the

@@ -15,10 +15,12 @@
 import { z } from 'zod'
 import { DEFAULT_TIMEOUT } from './constants.ts'
 
-export const timeoutShape = {
-  timeout: z.number().positive().optional().meta({
-    description:
-      'Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.',
-    default: DEFAULT_TIMEOUT,
-  }),
+const timeoutSeconds = z.number().positive()
+const timeoutMetadata = {
+  description:
+    'Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.',
+  default: DEFAULT_TIMEOUT,
 }
+
+export const TimeoutConfig = z.object({ timeout: timeoutSeconds.optional().meta(timeoutMetadata) })
+export const defaultRequestTimeout = timeoutSeconds.default(DEFAULT_TIMEOUT).meta(timeoutMetadata)

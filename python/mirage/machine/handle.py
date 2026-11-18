@@ -17,6 +17,8 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from importlib import import_module
+from types import ModuleType
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -57,6 +59,7 @@ from mirage.machine.mounts import MachineMounts
 from mirage.machine.resources import parse_resources
 from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.clock import bound_system_clock
@@ -327,6 +330,21 @@ class MachineHandle:
                 self.open_pipe,
                 lambda: self._working > 0,
             )
+
+    def _load_sdk(
+        self, package: str, shape: type, needs: str | None = None
+    ) -> ModuleType:
+        try:
+            module = import_module(package)
+        except ModuleNotFoundError as exc:
+            if exc.name != package:
+                raise
+            raise ImportError(sdk_install_hint(self.provider, needs)) from exc
+        if not isinstance(module, shape):
+            raise ImportError(
+                f"the {self.provider} runtime needs a compatible {package} SDK"
+            )
+        return module
 
     @property
     def machine(self) -> MachineName:

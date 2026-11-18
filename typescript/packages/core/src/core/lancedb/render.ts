@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
+import { type LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { valueText } from '../render/json.ts'
 import type { LanceRow } from './types.ts'
 
@@ -42,7 +42,7 @@ export function cellText(value: unknown): string {
 
 export function renderCard(
   row: LanceRow,
-  config: ReturnType<typeof resolveLanceDBConfig>,
+  config: ReturnType<typeof LanceDBConfig.parse>,
 ): Uint8Array {
   const lines: string[] = []
   const title = config.titleColumn !== null ? row[config.titleColumn] : undefined

@@ -15,7 +15,7 @@
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { SMOLVM_CONFIG_FIELDS, type SmolvmConfig } from './config.ts'
+import { SmolvmConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import {
   MACHINE_GONE,
@@ -48,7 +48,7 @@ import { ProgramMachine } from '../transport.ts'
  * resumes it.
  */
 export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
-  static override readonly configFields: ConfigFields = SMOLVM_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = SmolvmConfig
   static override readonly provider = 'smolvm'
   protected override readonly pauses = true
   protected readonly program = 'smolvm'

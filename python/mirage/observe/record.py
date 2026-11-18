@@ -280,7 +280,7 @@ class Recorder:
 
     Bundles the sink (shared by reference across all push frames) with
     the mount_id for the current async frame. Frozen so each push is
-    task-isolated: ``push_mount_context`` creates a new Recorder for
+    task-isolated: ``set_mount_context`` creates a new Recorder for
     the calling task via ``_recorder.set``, never mutates the parent.
     The sink list is the one piece that's intentionally shared, so
     records emitted from any frame land in the same collection.

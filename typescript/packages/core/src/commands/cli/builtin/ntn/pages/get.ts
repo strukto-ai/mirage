@@ -14,13 +14,33 @@
 
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { getPage, getPageMarkdown } from '../../../../../core/notion/pages.ts'
-import { extractTitle } from '../../../../../core/notion/normalize.ts'
+import { stringify } from 'yaml'
+import { asObject } from '../../../../../utils/records.ts'
+import { compareCodePoints } from '../../../../../utils/sort.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
+import { plainTextOf } from '../../../../../core/notion/normalize.ts'
 import { firstText, notionTransport, prettyJson, usageError, type NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
+
+function propertyValue(prop: Record<string, unknown>): unknown {
+  const kind = prop.type
+  if (typeof kind !== 'string') return null
+  const value = prop[kind] ?? null
+  if (kind === 'title' || kind === 'rich_text') return plainTextOf(value)
+  if (['select', 'status', 'created_by', 'last_edited_by'].includes(kind)) {
+    const item = asObject(value)
+    return item.name ?? item.id ?? null
+  }
+  if (['multi_select', 'people', 'files', 'relation'].includes(kind) && Array.isArray(value)) {
+    return value.map(asObject).map((item) => item.name ?? item.id ?? null)
+  }
+  if ((kind === 'formula' || kind === 'rollup') && value !== null)
+    return propertyValue(asObject(value))
+  return value
+}
 
 export async function get(
   accessor: NtnAccessor,
@@ -36,11 +56,22 @@ export async function get(
     return usageError(err)
   }
   const transport = notionTransport(accessor, ctx.flags)
-  // Both calls happen either way: the body comes from the markdown endpoint
-  // and the title heading the frontmatter only exists on the page object.
+  // The Markdown endpoint omits the properties printed in the frontmatter.
   const rendered = await getPageMarkdown(transport, pageId)
   const page = await getPage(transport, pageId)
   if (fl.asBool('json')) return [prettyJson({ markdown: rendered, page }), new IOResult()]
   const body = typeof rendered.markdown === 'string' ? rendered.markdown : ''
-  return [ENC.encode(`---\ntitle: ${extractTitle(page)}\n---\n\n${body}`), new IOResult()]
+  const fields = Object.fromEntries(
+    Object.entries(asObject(page.properties)).map(([key, prop]) => [
+      key,
+      propertyValue(asObject(prop)),
+    ]),
+  )
+  const frontmatter = stringify(fields, {
+    sortMapEntries: (a, b) => compareCodePoints(String(a.key), String(b.key)),
+    indentSeq: false,
+    singleQuote: true,
+    lineWidth: 0,
+  })
+  return [ENC.encode(`---\n${frontmatter}---\n\n${body}`), new IOResult()]
 }

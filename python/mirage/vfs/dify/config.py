@@ -35,10 +35,10 @@ class DifyConfig(TimeoutConfig):
     def normalize_base_url(cls, value: str) -> str:
         return value.rstrip("/")
 
-    @field_validator("slug_metadata_name")
+    @field_validator("dataset_id", "slug_metadata_name")
     @classmethod
-    def normalize_slug_metadata_name(cls, value: str) -> str:
+    def normalize_non_empty(cls, value: str) -> str:
         name = value.strip()
         if not name:
-            raise ValueError("slug_metadata_name cannot be empty")
+            raise ValueError("value cannot be empty")
         return name

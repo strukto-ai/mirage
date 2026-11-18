@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-from typing import Any, cast
+from typing import Any, NotRequired, TypedDict, cast
 
 from mirage.core.google.client import (
     TokenManager,
@@ -24,12 +24,41 @@ from mirage.core.google.client import (
 from mirage.core.render.json import compact_json_bytes
 
 
+class GmailBody(TypedDict, total=False):
+    data: str
+    size: int
+    attachmentId: str
+
+
+class GmailPayload(TypedDict, total=False):
+    mimeType: str
+    body: GmailBody
+    headers: list[dict[str, str]]
+    filename: str
+    parts: list["GmailPayload"]
+
+
+class GmailMessageRaw(TypedDict, total=False):
+    id: str
+    threadId: str
+    internalDate: str
+    labelIds: list[str]
+    snippet: str
+    sizeEstimate: int
+    payload: GmailPayload
+
+
+class GmailMessageStub(TypedDict):
+    id: str
+    threadId: NotRequired[str]
+
+
 async def list_message_page(
     token_manager: TokenManager,
     label_id: str | None = None,
     query: str | None = None,
     max_results: int = 50,
-) -> tuple[list[dict[str, Any]], str | None]:
+) -> tuple[list[GmailMessageStub], str | None]:
     """One page of message stubs for a label or query, and the next page's token.
 
     Gmail may return fewer than ``max_results`` stubs and still name a
@@ -60,7 +89,7 @@ async def list_messages(
     label_id: str | None = None,
     query: str | None = None,
     max_results: int = 50,
-) -> list[dict[str, Any]]:
+) -> list[GmailMessageStub]:
     """List message IDs for a label or query.
 
     Args:
@@ -81,7 +110,7 @@ async def list_messages(
 async def get_message_raw(
     token_manager: TokenManager,
     message_id: str,
-) -> dict[str, Any]:
+) -> GmailMessageRaw:
     """Get raw message JSON from API.
 
     Args:
@@ -95,14 +124,18 @@ async def get_message_raw(
         f"{gmail_base(token_manager)}/users/me/messages"
         f"/{message_id}?format=full"
     )
-    return await google_get(token_manager, url)
+    return cast(GmailMessageRaw, await google_get(token_manager, url))
 
 
-def _decode_body(payload: dict[str, Any]) -> str:
+def _base64_url_decode_to_bytes(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _decode_body(payload: GmailPayload) -> str:
     if payload.get("mimeType") == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
-            return base64.urlsafe_b64decode(data + "==").decode(
+            return _base64_url_decode_to_bytes(data).decode(
                 "utf-8", errors="replace"
             )
     for part in payload.get("parts", []):
@@ -112,10 +145,10 @@ def _decode_body(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _extract_header(headers: list[dict[str, Any]], name: str) -> str:
+def _extract_header(headers: list[dict[str, str]], name: str) -> str:
     for h in headers:
         if h.get("name", "").lower() == name.lower():
-            return cast(str, h.get("value", ""))
+            return h.get("value", "")
     return ""
 
 
@@ -158,10 +191,10 @@ async def get_attachment(
         token_manager, "GET", url, max_body_bytes=(size * 4 + 2) // 3 + 1024
     )
     raw = data.get("data", "")
-    return base64.urlsafe_b64decode(raw + "==")
+    return _base64_url_decode_to_bytes(raw)
 
 
-def _extract_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_attachments(payload: GmailPayload) -> list[dict[str, Any]]:
     """Extract attachment metadata from message payload.
 
     Args:
@@ -219,7 +252,7 @@ async def get_message_processed(
     return process_message(raw)
 
 
-def message_json_bytes(raw: dict[str, Any]) -> bytes:
+def message_json_bytes(raw: GmailMessageRaw) -> bytes:
     """Render a raw message as its .gmail.json byte content.
 
     The single renderer behind both read and the readdir-time size, so
@@ -234,7 +267,7 @@ def message_json_bytes(raw: dict[str, Any]) -> bytes:
     return compact_json_bytes(process_message(raw))
 
 
-def process_message(raw: dict[str, Any]) -> dict[str, Any]:
+def process_message(raw: GmailMessageRaw) -> dict[str, Any]:
     """Shape a raw messages.get payload into the rendered message dict.
 
     Args:

@@ -21,8 +21,8 @@ import {
   callerSignal,
   currentCaller,
   lineSignal,
-  runWithCaller,
-  runWithEvaluation,
+  bindCaller,
+  setCurrentEvaluation,
 } from '../context/session_context.ts'
 import { EvaluationContext } from './evaluation.ts'
 import { MountMode } from '../types.ts'
@@ -60,7 +60,7 @@ describe('the status write on the fallback storage', () => {
     const a = new SessionState({ sessionId: 'a', cwd: '/' })
     const abort = new AbortController()
     const seen = await runWithLineAbort(abort.signal, [a], Symbol('line'), () =>
-      runWithCaller({ ...currentCaller(), writeHeld: true }, () => Promise.resolve(lineSignal(a))),
+      bindCaller({ ...currentCaller(), writeHeld: true }, () => Promise.resolve(lineSignal(a))),
     )
     expect(seen).toBe(abort.signal)
   })
@@ -163,9 +163,9 @@ describe('a job on the fallback storage', () => {
     const jobEvaluation = new EvaluationContext(job)
     jobEvaluation.frame.abortSignal = jobAbort.signal
     await runWithLineAbort(lineAbort.signal, [line], Symbol('line'), () =>
-      runWithEvaluation(evaluation, () =>
+      setCurrentEvaluation(evaluation, () =>
         runWithLineAbort(jobAbort.signal, [job], Symbol('line'), () =>
-          runWithEvaluation(jobEvaluation, () => {
+          setCurrentEvaluation(jobEvaluation, () => {
             expect(callerSignal()).toBeUndefined()
             expect(callerSignal(evaluation)).toBe(lineAbort.signal)
             expect(callerSignal(jobEvaluation)).toBe(jobAbort.signal)

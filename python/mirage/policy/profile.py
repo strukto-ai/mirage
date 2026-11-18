@@ -14,11 +14,14 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.config import (
+    DEFAULT_PROCESS_PERMISSIONS,
+    ProcessPermissions,
+)
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
@@ -461,6 +464,13 @@ class ProfilePolicy(BaseModel):
         return v
 
 
+ProfilePrograms: TypeAlias = dict[ScriptMethod, list[ProfilePolicy]]
+
+
+def parse_program(raw: Any) -> ProfilePolicy:
+    return ProfilePolicy.model_validate(raw)
+
+
 def compile_program(program: ProfilePolicy, profile: str) -> ProfileScript:
     """A policy program as it runs: its source, its runtime's name and
     that runtime's settings.
@@ -491,6 +501,46 @@ def compile_program(program: ProfilePolicy, profile: str) -> ProfileScript:
         config=dict(named.get("config") or {}),
         env=dict(program.env),
     )
+
+
+def parse_profile_policy(v: Any) -> Any:
+    if v is None:
+        return None
+    if not isinstance(v, Mapping):
+        raise ValueError("policy must be a mapping of method to programs")
+    unknown = sorted(str(k) for k in v if k not in METHODS)
+    if unknown:
+        raise ValueError(
+            f"policy names {', '.join(unknown)}; a program answers at "
+            f"{', '.join(METHODS)}"
+        )
+    return v
+
+
+def parse_profile_mounts(v: Any) -> Any:
+    if v is None:
+        return None
+    if not isinstance(v, Mapping):
+        # A bare list used to mean "only these mounts", and now
+        # means nothing at all, so it fails loudly rather than
+        # quietly dropping the confinement it used to carry.
+        raise ValueError("mounts must be a mapping of prefix to its settings")
+    entries: dict[str, Any] = {}
+    for prefix, entry in v.items():
+        if not isinstance(prefix, str):
+            raise ValueError("mounts keys must be strings")
+        root = norm(prefix)
+        if isinstance(entry, str):
+            entry = {"mode": entry}
+        elif isinstance(entry, Mapping) and isinstance(
+            entry.get("paths"), Mapping
+        ):
+            entry = {
+                **entry,
+                "paths": _paths(entry["paths"], f"mounts[{root}].paths"),
+            }
+        entries[root] = entry
+    return entries
 
 
 class SessionProfile(BaseModel):
@@ -557,7 +607,7 @@ class SessionProfile(BaseModel):
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
     commands: CommandsBlock | None = None
-    policy: dict[ScriptMethod, list[ProfilePolicy]] | None = None
+    policy: ProfilePrograms | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
     network: bool | dict[str, list[str] | dict[str, str]] | None = None
@@ -589,49 +639,9 @@ class SessionProfile(BaseModel):
             check_command_limits(v, "profile", takes_line=True)
         return v
 
-    @field_validator("policy", mode="before")
-    @classmethod
-    def _v_policy(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if not isinstance(v, Mapping):
-            raise ValueError("policy must be a mapping of method to programs")
-        unknown = sorted(str(k) for k in v if k not in METHODS)
-        if unknown:
-            raise ValueError(
-                f"policy names {', '.join(unknown)}; a program answers at "
-                f"{', '.join(METHODS)}"
-            )
-        return v
+    _v_policy = field_validator("policy", mode="before")(parse_profile_policy)
 
-    @field_validator("mounts", mode="before")
-    @classmethod
-    def _v_mounts(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if not isinstance(v, Mapping):
-            # A bare list used to mean "only these mounts", and now
-            # means nothing at all, so it fails loudly rather than
-            # quietly dropping the confinement it used to carry.
-            raise ValueError(
-                "mounts must be a mapping of prefix to its settings"
-            )
-        entries: dict[str, Any] = {}
-        for prefix, entry in v.items():
-            if not isinstance(prefix, str):
-                raise ValueError("mounts keys must be strings")
-            root = norm(prefix)
-            if isinstance(entry, str):
-                entry = {"mode": entry}
-            elif isinstance(entry, Mapping) and isinstance(
-                entry.get("paths"), Mapping
-            ):
-                entry = {
-                    **entry,
-                    "paths": _paths(entry["paths"], f"mounts[{root}].paths"),
-                }
-            entries[root] = entry
-        return entries
+    _v_mounts = field_validator("mounts", mode="before")(parse_profile_mounts)
 
     @model_validator(mode="after")
     def _v_absolute(self) -> "SessionProfile":
@@ -842,7 +852,7 @@ class ProfilePolicies:
     commands: AdmissionRules | None = None
     scripts: ProfileScripts = field(default_factory=dict)
     command_limits: Mapping[str, Limit] | None = None
-    processes: ProcessPermissions = ProcessPermissions()
+    processes: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS
     network: NetworkSetting | None = None
 
 

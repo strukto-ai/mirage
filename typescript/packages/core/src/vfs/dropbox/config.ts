@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import { secretSchema, secretStr, z } from '../secrets.ts'
 
 export interface DropboxConfig {
@@ -26,7 +26,7 @@ export interface DropboxConfig {
 }
 
 export const DropboxConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr()
     .optional()

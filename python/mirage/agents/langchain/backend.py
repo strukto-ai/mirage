@@ -90,6 +90,19 @@ BINARY_EXTENSIONS = frozenset(
 )
 
 
+def _text_content(path: str, data: bytes) -> str | None:
+    if (
+        PurePosixPath(path).suffix.lower() in BINARY_EXTENSIONS
+        or b"\x00" in data
+    ):
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        logger.debug("binary content at %s: %s", path, exc)
+        return None
+
+
 def _relative_to(root: str, path: str) -> str:
     prefix = root.rstrip("/") + "/"
     if path.startswith(prefix):
@@ -186,22 +199,22 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     @on_owner_loop
     async def als(self, path: str) -> LsResult:
-        io = await self._exec(f"ls {shlex.quote(path)}")
-        stdout = (await io.stdout_str()).strip()
+        base = path.rstrip("/")
+        io = await self._exec(
+            f"ls -1Ap --zero --quoting-style=literal -- {shlex.quote(base + '/')}"
+        )
+        stdout = await io.stdout_str()
         error = await _command_error(io)
         if error:
             return LsResult(error=error)
-        if not stdout:
-            return LsResult(entries=[])
-        base = path.rstrip("/")
-        result: list[FileInfo] = []
-        for name in stdout.split("\n"):
-            name = name.strip()
-            if not name:
-                continue
-            is_dir = name.endswith("/")
-            clean = name.rstrip("/")
-            result.append(FileInfo(path=f"{base}/{clean}", is_dir=is_dir))
+        result = [
+            FileInfo(
+                path=f"{base}/{name.removesuffix('/')}",
+                is_dir=name.endswith("/"),
+            )
+            for name in stdout.split("\0")
+            if name
+        ]
         return LsResult(entries=result)
 
     # ── read ─────────────────────────────────────────────────
@@ -220,15 +233,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
             data = await ops.read(file_path)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
             return ReadResult(error=f"Error: {exc}")
-        suffix = PurePosixPath(file_path).suffix.lower()
-        try:
-            text = (
-                None
-                if suffix in BINARY_EXTENSIONS or b"\x00" in data
-                else data.decode("utf-8")
-            )
-        except UnicodeDecodeError:
-            text = None
+        text = _text_content(file_path, data)
         if text is None:
             content = base64.standard_b64encode(data).decode("ascii")
             return ReadResult(
@@ -349,10 +354,10 @@ class LangchainWorkspace(SandboxBackendProtocol):
                 included = compile_grep_include_glob(glob)
             except InvalidGlobPatternError as exc:
                 return GrepResult(error=str(exc))
-        parts = ["grep", "-rnH"]
+        parts = ["grep", "-FrnH"]
         if glob and "/" not in glob:
             parts.extend(["--include", shlex.quote(glob)])
-        parts.append(shlex.quote(pattern))
+        parts.extend(["--", shlex.quote(pattern)])
         parts.append(shlex.quote(root))
         io = await self._exec(" ".join(parts))
         await io.materialize_stdout()

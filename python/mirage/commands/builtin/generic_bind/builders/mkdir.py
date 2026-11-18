@@ -35,7 +35,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
-from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
+from mirage.context import DEFAULT_UMASK, session_umask, walk_probe_for
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_virtual_path, fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -87,8 +87,8 @@ async def mkdir(
     lines: list[str] = []
     errors: list[str] = []
     links = links_of(ctx)
-    probe = get_walk_probe()
     for path in paths:
+        probe = walk_probe_for(path.virtual)
         taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
         if taken:
             if refusal is not None:

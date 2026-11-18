@@ -22,7 +22,7 @@ import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { openProgramPipe, reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
-import { KUBERNETES_CONFIG_FIELDS, type KubernetesConfig } from './config.ts'
+import { KubernetesConfig } from './config.ts'
 import {
   EXIT_PREFIX,
   EXIT_STATUS,
@@ -119,7 +119,7 @@ export class ExitLineFilter {
  * `confidential-sandbox` pod denies exec, so it cannot take a line.
  */
 export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
-  static override readonly configFields: ConfigFields = KUBERNETES_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = KubernetesConfig
   static override readonly provider = 'kubernetes'
   protected readonly program = 'kubectl'
   protected readonly installHint = KUBECTL_HINT

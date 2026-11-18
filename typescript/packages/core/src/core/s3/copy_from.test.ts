@@ -19,7 +19,7 @@ import type * as ClientModule from './client.ts'
 
 import { S3Accessor } from '../../accessor/s3.ts'
 import { classify } from '../../errors/classify.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { PathSpec } from '../../types.ts'
 import { copyFrom } from './copy.ts'
@@ -68,7 +68,7 @@ beforeEach(() => {
 
 describe('S3 copyFrom', () => {
   it('copies across buckets under one service', async () => {
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       copyFrom(accessor('b2', { keyPrefix: 'p/' }), accessor('b1'), SRC, DST),
     )
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy', DST.virtual]])

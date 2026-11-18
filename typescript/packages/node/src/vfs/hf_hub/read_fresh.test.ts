@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -341,7 +341,7 @@ describe('hf_hub ranged read', () => {
     try {
       const accessor = vfs.accessor as HfHubAccessor
       const row = await rowAt(accessor, spec)
-      ;[data, records] = await runWithRecording(() =>
+      ;[data, records] = await recordingScope(() =>
         read(accessor, spec, { offset: 2, size: 3 }, row),
       )
     } finally {

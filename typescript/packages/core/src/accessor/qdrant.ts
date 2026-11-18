@@ -15,17 +15,17 @@
 import type { QdrantClient } from '@qdrant/js-client-rest'
 import type { QdrantRow } from '../core/qdrant/types.ts'
 import { missingPeer } from '../utils/optional_peer.ts'
-import type { resolveQdrantConfig } from '../vfs/qdrant/config.ts'
+import { type QdrantConfig } from '../vfs/qdrant/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
 
 export class QdrantAccessor extends Accessor {
-  readonly config: ReturnType<typeof resolveQdrantConfig>
+  readonly config: ReturnType<typeof QdrantConfig.parse>
   readonly indexesEnsured = new Set<string>()
   readonly searches = new ResponseCache<string, QdrantRow[]>()
   private opened: QdrantClient | null = null
 
-  constructor(config: ReturnType<typeof resolveQdrantConfig>) {
+  constructor(config: ReturnType<typeof QdrantConfig.parse>) {
     super()
     this.config = config
   }

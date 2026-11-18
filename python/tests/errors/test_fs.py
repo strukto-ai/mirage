@@ -40,6 +40,7 @@ from mirage.errors.fs import (
     is_aborting,
     listing_error,
     no_mount,
+    numbered,
     readdir_error,
     stale_write,
     strerror_of,
@@ -113,6 +114,13 @@ def test_fs_strerror_reads_a_bare_class_and_nothing_else():
     )
     assert fs_strerror(ValueError("nope")) is None
     assert fs_strerror(OSError(errno.EIO, "Input/output error", "/d")) is None
+
+
+def test_numbered_preserves_an_unnamed_backend_error():
+    error = numbered(FileNotFoundError())
+    assert isinstance(error, FileNotFoundError)
+    assert error.errno == errno.ENOENT
+    assert error.filename is None
 
 
 def test_a_kernel_estale_keeps_its_own_words():

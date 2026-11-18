@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '../../runtime/config.ts'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '../config.ts'
+import { MachineConfig } from '../config.ts'
 import type { PauseAction } from '../types.ts'
 import { ON_PAUSE } from './constants.ts'
 
@@ -39,11 +39,11 @@ export interface E2BConfig extends MachineConfig {
   onPause?: PauseAction
 }
 
-export const E2B_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
+export const E2BConfig = {
+  ...MachineConfig,
   sandboxId: { type: 'string' },
   template: { type: 'string' },
   idleTimeout: { type: 'number' },
   apiKey: { type: 'string' },
   onPause: { type: 'string', options: ON_PAUSE },
-}
+} satisfies ConfigFields<E2BConfig>

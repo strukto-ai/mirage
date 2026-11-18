@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -56,7 +57,7 @@ def resource_type_for(mime: str) -> str:
     return _RESOURCE_TYPES.get(mime, "gdrive/file")
 
 
-def stat_from_item(item: dict[str, Any]) -> FileStat:
+def stat_from_item(item: Mapping[str, Any]) -> FileStat:
     """The stat of one Drive file resource, as a listing, ``files.get``
     or an upload's reply returns it.
 

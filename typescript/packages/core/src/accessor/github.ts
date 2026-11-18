@@ -83,8 +83,11 @@ export class GitHubAccessor extends Accessor {
   readonly account: GitHubAccount
   readonly owner: string
   readonly repo: string
-  readonly ref: string
-  readonly defaultBranch: string
+  ref: string | null
+  defaultBranch: string | null
+  branchPending: Promise<string> | null = null
+  treePending: Promise<void> | null = null
+  treeLoaded: boolean
   // The recursive git tree, which is this mount's whole listing. grep's
   // scope counter and code search read it straight. Reseated by every
   // listing, so it is as fresh as the last one.
@@ -98,8 +101,8 @@ export class GitHubAccessor extends Accessor {
     account: GitHubAccount
     owner: string
     repo: string
-    ref: string
-    defaultBranch: string
+    ref?: string
+    defaultBranch?: string
     truncated?: boolean
     tree?: Record<string, TreeEntry>
   }) {
@@ -107,14 +110,15 @@ export class GitHubAccessor extends Accessor {
     this.account = opts.account
     this.owner = opts.owner
     this.repo = opts.repo
-    this.ref = opts.ref
-    this.defaultBranch = opts.defaultBranch
+    this.ref = opts.ref ?? null
+    this.defaultBranch = opts.defaultBranch ?? null
+    this.treeLoaded = opts.tree !== undefined
     this.truncated = opts.truncated ?? false
     this.tree = opts.tree ?? {}
   }
 
   get isDefaultBranch(): boolean {
-    return this.ref === this.defaultBranch
+    return this.ref !== null && this.ref === this.defaultBranch
   }
 
   /** Drop the tree with the mount's caches, so the next listing fetches it again. */
@@ -122,6 +126,8 @@ export class GitHubAccessor extends Accessor {
     super.forget?.()
     this.generation += 1
     this.tree = {}
+    this.treeLoaded = false
+    this.treePending = null
     this.truncated = false
   }
 }

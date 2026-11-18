@@ -16,7 +16,7 @@ import type { QdrantClient } from '@qdrant/js-client-rest'
 import { describe, expect, it, vi } from 'vitest'
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 import { groupName } from './naming.ts'
 import {
@@ -193,7 +193,7 @@ function withClient(acc: QdrantAccessor, client: unknown): QdrantAccessor {
 function accessorWith(client: unknown): QdrantAccessor {
   return withClient(
     new QdrantAccessor(
-      resolveQdrantConfig({ url: 'http://x', collection: 'c', groupBy: ['code'], idField: 'id' }),
+      QdrantConfig.parse({ url: 'http://x', collection: 'c', groupBy: ['code'], idField: 'id' }),
     ),
     client,
   )
@@ -269,7 +269,7 @@ function pagingClient(state: { pages: number }, points: QdrantPoint[] = widePoin
 function wideAccessor(client: unknown): QdrantAccessor {
   return withClient(
     new QdrantAccessor(
-      resolveQdrantConfig({ url: 'http://x', collection: 'c', idField: 'id', maxRows: CAP }),
+      QdrantConfig.parse({ url: 'http://x', collection: 'c', idField: 'id', maxRows: CAP }),
     ),
     client,
   )
@@ -384,7 +384,7 @@ describe('qdrant query search', () => {
     const seen: QueryOpts[] = []
     const acc = withClient(
       new QdrantAccessor(
-        resolveQdrantConfig({ url: 'http://x', collection: 'c', idField: 'id', ...extra }),
+        QdrantConfig.parse({ url: 'http://x', collection: 'c', idField: 'id', ...extra }),
       ),
       queryClient(seen),
     )

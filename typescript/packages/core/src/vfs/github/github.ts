@@ -17,10 +17,8 @@ import { GitHubConfig } from '../../core/github/config.ts'
 import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
 import { readMany as githubReadMany, readStream as githubStream } from '../../core/github/read.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
-import { fetchDefaultBranch } from '../../core/github/repo.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
-import { fetchTree as fetchGitHubTree } from '../../core/github/tree.ts'
 import { type ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
@@ -31,7 +29,7 @@ import type { Handed } from '../types.ts'
 export interface GitHubVFSState {
   type: string
   config: RedactedSchema<typeof GitHubConfig>
-  defaultBranch: string
+  defaultBranch: string | null
   truncated: boolean
 }
 
@@ -84,26 +82,16 @@ export class GitHubVFS extends BaseVFS {
     const account = new GitHubAccount({
       ...(config.token === undefined ? {} : { token: config.token }),
       ...(config.app === undefined ? {} : { app: config.app }),
+      ...(config.timeout === undefined ? {} : { timeout: config.timeout }),
       ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
     })
-    const defaultBranch = await fetchDefaultBranch(account.transport, config.owner, config.repo)
-    const ref = config.ref ?? defaultBranch
-    const { tree, truncated } = await fetchGitHubTree(
-      account.transport,
-      config.owner,
-      config.repo,
-      ref,
-    )
     const accessor = new GitHubAccessor({
       account,
       owner: config.owner,
       repo: config.repo,
-      ref,
-      defaultBranch,
-      truncated,
-      tree,
+      ...(config.ref === undefined ? {} : { ref: config.ref }),
     })
-    return new GitHubVFS(config, accessor)
+    return Promise.resolve(new GitHubVFS(config, accessor))
   }
 
   override readonly handed = {

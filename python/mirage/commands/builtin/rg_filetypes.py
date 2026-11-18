@@ -14,6 +14,7 @@
 
 import re
 from collections.abc import Sequence
+from typing import Literal
 
 from mirage.commands.builtin.rg_glob import Verdict, compile_glob
 from mirage.commands.errors import UsageError
@@ -27,6 +28,10 @@ INVALID_DEFINITION = (
 )
 # The name that selects every type at once; it cannot be defined.
 ALL_TYPES = "all"
+
+
+TypeChange = tuple[Literal["clear", "add"], str]
+TypeSelection = tuple[str, bool]
 
 
 def _add_glob(defs: dict[str, list[str]], name: str, glob: str) -> None:
@@ -82,10 +87,10 @@ class FileTypes:
     type matches is dropped.
 
     Args:
-        changes (Sequence[tuple[str, str]]): the --type-clear and
+        changes (Sequence[TypeChange]): the --type-clear and
             --type-add values in line order, each as ``("clear", name)``
             or ``("add", definition)``.
-        selections (Sequence[tuple[str, bool]]): the -t and -T names in
+        selections (Sequence[TypeSelection]): the -t and -T names in
             line order, each with whether it negates (-T).
 
     Raises:
@@ -95,8 +100,8 @@ class FileTypes:
 
     def __init__(
         self,
-        changes: Sequence[tuple[str, str]],
-        selections: Sequence[tuple[str, bool]],
+        changes: Sequence[TypeChange],
+        selections: Sequence[TypeSelection],
     ) -> None:
         defs = {name: list(globs) for name, globs in DEFAULT_TYPES.items()}
         for kind, value in changes:

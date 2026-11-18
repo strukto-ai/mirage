@@ -15,13 +15,7 @@
 import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { memoryRoom } from '../../../io/memory.ts'
-import {
-  HOME_CONFIG_FIELDS,
-  resolveHome,
-  type ConfigFields,
-  type HomeConfig,
-  type RuntimeOptions,
-} from '../../config.ts'
+import { HomeConfig, resolveHome, type ConfigFields, type RuntimeOptions } from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
@@ -66,7 +60,7 @@ const DEC = new TextDecoder()
  * directory on Node and a URL on a page. Mirrors Python's `QuickJsRuntime`.
  */
 export class QuickJsRuntime extends JsRuntime<WasmExecution> {
-  static override readonly configFields: ConfigFields = HOME_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = HomeConfig
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` wait on the
   // workspace bridge: guest I/O has no way around the gate.

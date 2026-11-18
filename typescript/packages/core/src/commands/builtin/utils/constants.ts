@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, PathSpec } from '../../../types.ts'
+export { TYPE_CHARS } from '../../../utils/stat_view.ts'
+import { PathSpec } from '../../../types.ts'
 
 export const MONTHS = [
   'Jan',
@@ -50,15 +51,6 @@ export const HTTP_TIMEOUT_SECONDS = 30
 
 // The operand a command reads stdin through when the line names none.
 export const STDIN_OPERAND = new PathSpec({ virtual: '-', directory: '-', vfsPath: '-' })
-
-export const TYPE_CHARS: Partial<Record<FileType, string>> = {
-  [FileType.DIRECTORY]: 'd',
-  [FileType.SYMLINK]: 'l',
-  [FileType.CHAR_DEVICE]: 'c',
-  [FileType.BLOCK_DEVICE]: 'b',
-  [FileType.FIFO]: 'p',
-  [FileType.SOCKET]: 's',
-}
 
 // GNU ls's window of "recent" times: half a Gregorian year of 365.2425
 // days, in seconds. GNU find -ls draws its own line: old past 180 days,

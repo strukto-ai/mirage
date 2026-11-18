@@ -16,7 +16,7 @@ import type { QdrantClient } from '@qdrant/js-client-rest'
 import { describe, expect, it, vi } from 'vitest'
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import type { DirListing } from '../../types.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
@@ -68,7 +68,7 @@ function accessorOf(config: QdrantConfig, points: QdrantPoint[], collection = 'a
       })
     },
   }
-  const accessor = new QdrantAccessor(resolveQdrantConfig(config))
+  const accessor = new QdrantAccessor(QdrantConfig.parse(config))
   vi.spyOn(accessor, 'client').mockResolvedValue(client as unknown as QdrantClient)
   return accessor
 }

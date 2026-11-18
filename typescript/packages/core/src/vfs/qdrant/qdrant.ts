@@ -19,7 +19,8 @@ import type { FileStat, PathSpec, SearchQuery } from '../../types.ts'
 import { VFSName, type DirListing } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { ConfigState } from '../types.ts'
-import { redactQdrantConfig, resolveQdrantConfig, type QdrantConfig } from './config.ts'
+import { QdrantConfig } from './config.ts'
+import { redactedConfigDump, type RedactedSchema } from '../secrets.ts'
 
 export const VFS_MD = `- At the root each directory is a collection, unless config pins one.
 - Inside a collection, directories are the group-by payload fields;
@@ -39,22 +40,22 @@ export class QdrantVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = false
   override vfsMd: string = VFS_MD
-  readonly config: ReturnType<typeof resolveQdrantConfig>
+  readonly config: ReturnType<typeof QdrantConfig.parse>
   override readonly accessor: QdrantAccessor
 
   constructor(options: QdrantVFSOptions | QdrantConfig) {
     super()
     const config = 'config' in options ? options.config : options
-    this.config = resolveQdrantConfig(config)
+    this.config = QdrantConfig.parse(config)
     this.accessor = new QdrantAccessor(this.config)
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactQdrantConfig>> & {
+  override getState(): ConfigState<RedactedSchema<typeof QdrantConfig>> & {
     needs_override: true
   } {
     return {
       type: this.name,
-      config: redactQdrantConfig(this.config),
+      config: redactedConfigDump(QdrantConfig, this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

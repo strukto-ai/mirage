@@ -16,11 +16,15 @@ import json
 import logging
 from datetime import datetime, timezone
 from http import HTTPStatus
-from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail.api import GmailApi
-from mirage.core.gmail.messages import _extract_attachments, _extract_header
+from mirage.core.gmail.labels import GmailLabel
+from mirage.core.gmail.messages import (
+    GmailMessageRaw,
+    _extract_attachments,
+    _extract_header,
+)
 from mirage.core.gmail.readdir import (
     MSG_SUFFIX,
     _attach_dir_name,
@@ -38,8 +42,8 @@ logger = logging.getLogger(__name__)
 
 def message_paths(
     prefix: str,
-    raw: dict[str, Any],
-    labels: dict[str, dict[str, Any]],
+    raw: GmailMessageRaw,
+    labels: dict[str, GmailLabel],
     label_ids: list[str],
 ) -> list[str]:
     """The paths a message is under ``label_ids``: its file in each label's
@@ -70,7 +74,7 @@ def message_paths(
     return paths
 
 
-def label_folders(labels: list[dict[str, Any]]) -> dict[str, str]:
+def label_folders(labels: list[GmailLabel]) -> dict[str, str]:
     """Each label's folder name, by label id, as the root listing names it:
     a system label by its id, any other by its name.
 

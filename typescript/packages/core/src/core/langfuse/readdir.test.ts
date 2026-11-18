@@ -20,7 +20,8 @@ import type { DirListing } from '../../types.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import type { LangfuseTransport } from './client.ts'
+import { fetchTrace, type LangfuseTransport } from './client.ts'
+import { PaginationStalledError } from '../api/errors.ts'
 import type { LangfuseConfig } from '../../vfs/langfuse/config.ts'
 import { readdir } from './readdir.ts'
 import { jsonlBytes } from '../render/json.ts'
@@ -256,4 +257,12 @@ describe('langfuse single-page listings', () => {
     expect(rowsOf(out)).toHaveLength(1)
     expect((out as DirListing).window).toBe(true)
   })
+})
+
+it('refuses a repeated observations cursor', async () => {
+  const transport = new RecordingTransport({
+    '/api/public/v2/observations': { data: [{ id: 'trace' }], meta: { cursor: 'same' } },
+  })
+  await expect(fetchTrace(transport, 'trace')).rejects.toBeInstanceOf(PaginationStalledError)
+  expect(transport.calls).toHaveLength(2)
 })

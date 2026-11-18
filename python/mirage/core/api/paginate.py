@@ -91,6 +91,8 @@ async def cursor_items(
     Raises:
         PaginationStalledError: the endpoint repeated a cursor.
     """
+    if max_results is not None and max_results <= 0:
+        return []
     collected: list[Any] = []
     async with aclosing(cursor_pages(fetch_page, shape=shape)) as pages:
         async for page in pages:

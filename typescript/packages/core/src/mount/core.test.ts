@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { constants as fsConstants } from 'node:fs'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, Limit, MountMode } from '../types.ts'
@@ -196,7 +196,7 @@ describe('MountCore', () => {
     const core = new MountCore(ws.vfs, { session: sess })
     // The fs adapter enters the session context before every kernel
     // callback; the unit test binds the same way.
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(core.symlink('/data/greeting.txt', '/extra/lk')).rejects.toMatchObject({
         code: 'ENOENT',
       })
@@ -222,7 +222,7 @@ describe('MountCore', () => {
     await ws.shell('ln -s secret.txt /extra/lk')
     const sess = ws.createSession('agent', { profile: { paths: { hide: ['/extra'] } } })
     const core = new MountCore(ws.vfs, { session: sess })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(core.unlink('/extra/lk')).rejects.toMatchObject({ code: 'ENOENT' })
     })
     expect(ws.namespace.isLink('/extra/lk')).toBe(true)

@@ -28,6 +28,8 @@ vi.mock('../../core/github/constants.ts', async () => {
 })
 
 import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
+import { ensureRef } from '../../core/github/repo.ts'
+import { ensureTree } from '../../core/github/tree.ts'
 import type { GitHubTreeItem } from '../../core/github/client.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
@@ -65,6 +67,23 @@ afterEach(() => {
 })
 
 describe('GitHubVFS', () => {
+  it('opens offline and hydrates an empty repository once across concurrent readers', async () => {
+    const paths: string[] = []
+    const fetch = vi.fn((input: string | URL | Request) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
+      paths.push(path)
+      const body = path === '/repos/o/r' ? { default_branch: 'trunk' } : { tree: [] }
+      return Promise.resolve(Response.json(body))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const vfs = await GitHubVFS.create({ token: 't', owner: 'o', repo: 'r', timeout: 2 })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(vfs.accessor.account.config.timeout).toBe(2)
+    await Promise.all([ensureTree(vfs.accessor), ensureTree(vfs.accessor), ensureRef(vfs.accessor)])
+    await ensureTree(vfs.accessor)
+    expect(paths).toEqual(['/repos/o/r', '/repos/o/r/git/trees/trunk'])
+  })
+
   for (const [mode, refusal] of [
     [MountMode.READ, 'Read-only file system'],
     [MountMode.WRITE, 'Operation not supported'],

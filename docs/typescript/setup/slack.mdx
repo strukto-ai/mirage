@@ -36,6 +36,12 @@ await ws.close()
 ### Fields
 
 {/* generated: config-table slack start */}
+<ResponseField name="startTime" type={"string"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="endTime" type={"string"}>
+  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
@@ -47,12 +53,6 @@ await ws.close()
 </ResponseField>
 <ResponseField name="baseUrl" type={"string"} default={"'https://slack.com/api'"}>
   Slack Web API root; override to point at a fake or proxy.
-</ResponseField>
-<ResponseField name="startTime" type={"string"}>
-  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
-</ResponseField>
-<ResponseField name="endTime" type={"string"}>
-  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
@@ -193,14 +193,14 @@ createServer(async (req, res) => {
   <Accordion title="Browser fields">
 
 {/* generated: config-table browser/slack start */}
-<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
-  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
-</ResponseField>
 <ResponseField name="startTime" type={"string"}>
   Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
 </ResponseField>
 <ResponseField name="endTime" type={"string"}>
   End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
 <ResponseField name="proxyUrl" type={"string"} required>
   URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment.

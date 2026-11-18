@@ -27,8 +27,8 @@ import { ScriptSource } from '../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 
-import { getCurrentSession, runWithSession } from '../../../../context/session_context.ts'
-import { record, runWithRecording, startOp } from '../../../../observe/context.ts'
+import { getCurrentSession, setCurrentSession } from '../../../../context/session_context.ts'
+import { record, recordingScope, startOp } from '../../../../observe/context.ts'
 import { SessionState } from '../../../../workspace/session/session.ts'
 import type * as asyncContextModule from '../../../../utils/async_context.ts'
 import { bindOver, runContext } from '../../../../../tests/runtime/fixtures/bridge.ts'
@@ -488,11 +488,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const one = new SessionState({ sessionId: 'one' })
       const two = new SessionState({ sessionId: 'two' })
       try {
-        const first = runWithSession(one, () =>
-          runWithRecording(() => interpret(rt, "print(open('/data/one').read())")),
+        const first = setCurrentSession(one, () =>
+          recordingScope(() => interpret(rt, "print(open('/data/one').read())")),
         )
-        const second = runWithSession(two, () =>
-          runWithRecording(() => interpret(rt, "print(open('/data/two').read())")),
+        const second = setCurrentSession(two, () =>
+          recordingScope(() => interpret(rt, "print(open('/data/two').read())")),
         )
         const [[run, firstRecords], [other, secondRecords]] = await Promise.all([first, second])
         expect(DEC.decode(run.stdout)).toBe('one\n')

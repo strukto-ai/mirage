@@ -14,6 +14,7 @@
 
 import json
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -35,7 +36,7 @@ def _is_reset(exc: DropboxApiError) -> bool:
 
 
 def _relative_of(
-    accessor: DropboxAccessor, entry: dict[str, Any]
+    accessor: DropboxAccessor, entry: Mapping[str, Any]
 ) -> str | None:
     """A listing row's mount-relative path, or None for the mount root.
 
