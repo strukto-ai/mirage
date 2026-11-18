@@ -1,0 +1,22 @@
+---
+title: ast-grep
+icon: code
+description: Search and rewrite syntax trees in the workspace.
+---
+
+import Reference from '/snippets/cli/ast-grep.mdx'
+import License from '/snippets/cli/license/ast-grep.mdx'
+
+Install `mirage-ai[ast-grep]` to load the shared Rust parser with Wasmtime.
+
+```python
+from mirage.commands.cli.builtin.ast_grep import AST_GREP
+
+ws.register_cli("ast-grep", AST_GREP)
+```
+
+See [setup and shell examples](/home/setup/cli/ast-grep) for supported languages, rules and resource limits.
+
+<Reference />
+
+<License />

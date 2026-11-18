@@ -177,6 +177,9 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
     {
       mode: MountMode.EXEC,
       workspaceId: run.id,
+      maxMemory: 100 * 1024 * 1024,
+      clis: { 'ast-grep': ['ast-grep', null], 'sg-large': ['ast-grep', { max_memory: '32MB' }] },
+      commandLimits: { 'ast-grep run': new Limit({ walkLimit: 1 }) },
       store: new SqlWorkspaceStateStore(driver, { scope: run.id }),
       ownsStore: true,
     },

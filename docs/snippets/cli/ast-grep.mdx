@@ -1,0 +1,24 @@
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `ast-grep <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `ast-grep run` | Search or rewrite a code pattern |
+| `ast-grep scan` | Scan with YAML rules |
+| `ast-grep outline` | Outline source symbols |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+```bash
+ast-grep -l ts -p 'console.log($ARG)' src
+ast-grep scan -r rules/logging.yml src
+ast-grep outline src/bytes.ts --match 'encodeText|decodeText'
+```
+
+## Behavior
+
+The CLI reads source files and rules through the workspace VFS. A rewrite previews the edits by default and writes them when given `-U`. Set the parser’s memory ceiling on the CLI installation and the directory walk limit on the workspace. [Configuration and examples](/home/setup/cli/ast-grep)

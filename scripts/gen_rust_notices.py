@@ -10,6 +10,7 @@ RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
 # cargo about cannot see because it is not a dependency.
 ADAPTED = [
+    ROOT / "licenses/third_party/ast-grep.txt",
     ROOT / "licenses/third_party/cobra.txt",
     ROOT / "licenses/third_party/gh.txt",
     ROOT / "licenses/third_party/go-gh.txt",
@@ -41,7 +42,7 @@ WHEEL_LEAD = (
 )
 
 
-def notices(manifest: str) -> str:
+def crate_sections(manifest: str) -> list[str]:
     """The notices for the crates one binding compiles in.
 
     Args:
@@ -52,6 +53,8 @@ def notices(manifest: str) -> str:
             "cargo",
             "about",
             "generate",
+            "--config",
+            str(RUST / "about.toml"),
             "--manifest-path",
             str(RUST / manifest),
             str(RUST / "about.hbs"),
@@ -63,17 +66,27 @@ def notices(manifest: str) -> str:
     )
     # about.hbs ends each license with this line, as a text need not end
     # in a newline.
-    sections = [
+    return [
         part.strip()
         for part in out.stdout.split("%%section%%")
         if part.strip()
     ]
-    sections += [path.read_text().strip() for path in ADAPTED]
+
+
+def notices(manifest: str, ast_grep: list[str]) -> str:
+    sections = crate_sections(manifest)
+    sections.append(
+        "The bundled ast-grep WebAssembly module includes the following crates."
+    )
+    sections.extend(ast_grep)
+    sections.extend(path.read_text().strip() for path in ADAPTED)
     joined = f"\n\n{RULE}\n\n".join(sections)
     return "\n".join(line.rstrip() for line in joined.splitlines()) + "\n"
 
 
-def append(path: pathlib.Path, lead: str, manifest: str) -> None:
+def append(
+    path: pathlib.Path, lead: str, manifest: str, ast_grep: list[str]
+) -> None:
     """Rewrite a package's notices after its hand-kept sections: `lead`,
     then the crates its binding compiles in. The generated part starts at
     the rule before the lead's opening words, which name the binding and
@@ -83,17 +96,21 @@ def append(path: pathlib.Path, lead: str, manifest: str) -> None:
         path (pathlib.Path): the package's THIRD_PARTY_NOTICES.
         lead (str): the paragraph the generated sections follow.
         manifest (str): the binding's Cargo.toml, relative to rust/.
+        ast_grep (list[str]): notices for the shared syntax parser.
     """
     text = path.read_text()
     at = text.find(lead.split(" (", 1)[0])
     if at >= 0:
         text = text[: text.rfind(RULE, 0, at)].rstrip("\n") + "\n"
-    path.write_text(f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest)}")
+    path.write_text(
+        f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest, ast_grep)}"
+    )
 
 
 def main() -> int:
-    append(WHEEL, WHEEL_LEAD, "python/Cargo.toml")
-    append(CORE, CORE_LEAD, "pdf-wasm/Cargo.toml")
+    ast_grep = crate_sections("ast-grep/Cargo.toml")
+    append(WHEEL, WHEEL_LEAD, "python/Cargo.toml", ast_grep)
+    append(CORE, CORE_LEAD, "pdf-wasm/Cargo.toml", ast_grep)
     print(f"wrote {WHEEL.relative_to(ROOT)}, {CORE.relative_to(ROOT)}")
     return 0
 

@@ -30,6 +30,7 @@ CLI_SPECS: dict[str, CLI] = {}
 # the modules pull optional extras (himalaya needs the email stack), so
 # they must not import until the name is actually requested.
 BUILTIN_CLI_SPECS: dict[str, str] = {
+    "ast-grep": "mirage.commands.cli.builtin.ast_grep:AST_GREP",
     "airtable": "mirage.commands.cli.builtin.airtable:AIRTABLE",
     "discord": "mirage.commands.cli.builtin.discord:DISCORD",
     "gh": "mirage.commands.cli.builtin.gh:GH",

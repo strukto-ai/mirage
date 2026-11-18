@@ -46,6 +46,7 @@ interface Case {
   id: string
   hosts?: string[]
   vfs: string
+  command?: string
   body_bytes?: number
   config: Record<string, unknown>
   expect: { refused?: string; state?: Record<string, unknown>; absent?: string[] }
@@ -140,8 +141,25 @@ async function workspace(testCase: Case): Promise<string[]> {
     return problems(testCase, null, error instanceof Error ? error.message : String(error))
   }
   if (testCase.body_bytes === undefined) {
-    const ws = new Workspace(args.mounts, args.options)
+    let ws: Workspace
     try {
+      ws = new Workspace(args.mounts, args.options)
+    } catch (error) {
+      return problems(testCase, null, error instanceof Error ? error.message : String(error))
+    }
+    try {
+      if (testCase.command !== undefined) {
+        const result = await ws.shell(testCase.command)
+        return problems(
+          testCase,
+          {
+            stdout: result.stdoutText,
+            stderr: result.stderrText,
+            exit_code: result.exitCode,
+          },
+          null,
+        )
+      }
       return problems(testCase, { max_body_bytes: ws.registry.bodyLimit }, null)
     } finally {
       await ws.close()

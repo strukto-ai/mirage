@@ -1,0 +1,226 @@
+{
+  "cases": [
+    {
+      "id": "ast_grep_setup",
+      "seq": 568750,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && mkdir -p src rules && printf 'export function main() {\\n  console.log(42)\\n}\\n' > src/a.ts && printf 'def main():\\n    print(42)\\n' > src/b.py && printf 'console.log(42)\\n' > src/c.jsx && printf '%s\\n' '{id: log, language: TypeScript, severity: warning, message: log $A, rule: {pattern: console.log($A)}, fix: emit($A)}' > rules/log.yml && printf 'ruleDirs: [rules]\\n' > sgconfig.yml",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_shorthand",
+      "seq": 568751,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep -p 'console.log($A)' -l ts src",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/a.ts:2:  console.log(42)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_kind",
+      "seq": 568752,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep run -k function_definition -l py --files-with-matches src",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/b.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_outline",
+      "seq": 568753,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep outline src/b.py --match main",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/b.py\n1: def main():\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_scan_inline",
+      "seq": 568754,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep scan --inline-rules '{id: log, language: TypeScript, severity: warning, message: log $A, rule: {pattern: console.log($A)}, fix: emit($A)}' --report-style short src/a.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/a.ts:2:3: warning[log]: log 42\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_scan_rule",
+      "seq": 568755,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep scan -r rules/log.yml --report-style short src/a.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/a.ts:2:3: warning[log]: log 42\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_scan_project",
+      "seq": 568756,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep scan --report-style short src",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/a.ts:2:3: warning[log]: log 42\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_preview",
+      "seq": 568757,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep -p 'console.log($A)' -r 'emit($A)' -l ts src && cat src/a.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/a.ts\n@@ -0,3 +0,3 @@\n1 1│ export function main() {\n2  │-  console.log(42)\n  2│+  emit(42)\n3 3│ }\nexport function main() {\n  console.log(42)\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_update",
+      "seq": 568758,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep run -p 'console.log($A)' -l js -r 'emit($A)' -U src && cat src/c.jsx",
+      "expect": {
+        "exit": 0,
+        "stdout": "emit(42)\n",
+        "stderr": "Applied 1 changes\n"
+      }
+    },
+    {
+      "id": "ast_grep_scan_update",
+      "seq": 568759,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep scan -r rules/log.yml -U src && cat src/a.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "export function main() {\n  emit(42)\n}\n",
+        "stderr": "Applied 1 changes\n"
+      }
+    },
+    {
+      "id": "ast_grep_no_match",
+      "seq": 568760,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep run -p 'missing($A)' -l ts src",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_stdin",
+      "seq": 568761,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && printf 'print(42)\\n' | ast-grep -l py --stdin -p 'print($A)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "STDIN:1:print(42)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_ignored_paths",
+      "seq": 568762,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && mkdir -p ignored && echo 'skip.ts' > ignored/.ignore && echo 'emit(99)' > ignored/skip.ts && echo 'emit(42)' > ignored/keep.ts && ast-grep -p 'emit($A)' -r 'log($A)' -U ignored && cat ignored/skip.ts ignored/keep.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "emit(99)\nlog(42)\n",
+        "stderr": "Applied 1 changes\n"
+      }
+    },
+    {
+      "id": "ast_grep_explicit_glob",
+      "seq": 568763,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && ast-grep -p 'emit($A)' --globs '*.jsx' src",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/c.jsx:1:emit(42)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ast_grep_readonly",
+      "seq": 568764,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "ast-grep -p 'emit($A)' -r 'log($A)' -U /repo/src/a.ts",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ast-grep run: /repo/src/a.ts: Read-only file system\n"
+      },
+      "session": "reader"
+    },
+    {
+      "id": "ast_grep_bounded_rewrite",
+      "seq": 568765,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && yes 'foo(1);' | head -n 100000 > dense.ts && ast-grep -p 'foo($X)' -r 'bar($X)' -U dense.ts",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ast-grep: parser resource limit exceeded\n"
+      }
+    },
+    {
+      "id": "ast_grep_recovery",
+      "seq": 568766,
+      "targets": [
+        "ast-grep-sql"
+      ],
+      "command": "cd /repo && head -n 1 dense.ts && ast-grep -p 'emit($X)' src/a.ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "foo(1);\nsrc/a.ts:2:  emit(42)\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

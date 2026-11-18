@@ -124,8 +124,22 @@ async def _workspace(case: dict[str, Any]) -> list[str]:
     except ValueError as exc:
         return _problems(case, None, str(exc))
     if "body_bytes" not in case:
-        ws = Workspace(**kwargs)
         try:
+            ws = Workspace(**kwargs)
+        except ValueError as exc:
+            return _problems(case, None, str(exc))
+        try:
+            if "command" in case:
+                result = await ws.shell(case["command"])
+                return _problems(
+                    case,
+                    {
+                        "stdout": (result.stdout or b"").decode(),
+                        "stderr": (result.stderr or b"").decode(),
+                        "exit_code": result.exit_code,
+                    },
+                    None,
+                )
             return _problems(
                 case, {"max_body_bytes": ws.registry.body_limit}, None
             )

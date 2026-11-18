@@ -133,6 +133,7 @@ jobs:
             # integ/ that one job owns selects only that job. A push to main
             # still runs every job.
             ts:
+              - 'python/mirage/commands/cli/builtin/ast_grep/engine.wasm.gz'
               - 'integ/**'
               - 'typescript/**'
               - 'rust/**'
@@ -811,6 +812,10 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx metadata.ts 2>&1 | python3 check_json.py truth_metadata.json
 
+      - name: Run ast-grep on SQLite with 100 MiB (TypeScript)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --target ast-grep-sql --strict
+
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
@@ -1001,6 +1006,10 @@ jobs:
       - uses: ./.github/actions/integ-battery-setup
         with:
           build-packages: "false"
+
+      - name: Run ast-grep on SQLite with 100 MiB (Python)
+        if: matrix.shard == 0
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target ast-grep-sql --strict
 
       # The ram-scripted target's profile programs run on wasi, the
       # CPython WASI build.

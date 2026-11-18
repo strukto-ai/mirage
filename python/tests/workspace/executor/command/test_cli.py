@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.cli.builtin.ast_grep import AST_GREP
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.cli.walk import walk
@@ -1128,12 +1129,10 @@ async def test_a_mount_tier_cli_write_drops_nothing(tmp_path):
         assert "made.txt" not in listing
 
 
-def test_a_root_with_a_config_model_or_a_script_reaches_a_service():
-    # A script root's config is opaque, so it never carries a config
-    # model, yet its program may reach a service exactly as an account
-    # CLI does; only a root with neither writes through the dispatcher.
+def test_only_service_and_script_clis_reach_a_service():
     assert reaches_service(make_install().cli)
     assert reaches_service(script_install().cli)
+    assert not reaches_service(AST_GREP)
     assert not reaches_service(STASH)
 
 

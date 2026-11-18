@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { gunzipSync } from 'node:zlib'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -89,6 +90,10 @@ function embed(crate, name, build, small = []) {
       writeFileSync(cached, wasm)
     }
   }
+  writeModule(name, wasm)
+}
+
+function writeModule(name, wasm) {
   mkdirSync(output, { recursive: true })
   writeFileSync(
     new URL(`${name}.d.ts`, output),
@@ -169,4 +174,11 @@ embed(
   'mirage_pdf',
   ['--release'],
   ['regex', 'regex-automata', 'regex-syntax', 'aho-corasick'],
+)
+
+writeModule(
+  'mirage_ast_grep',
+  gunzipSync(
+    readFileSync(join(workspace, '../python/mirage/commands/cli/builtin/ast_grep/engine.wasm.gz')),
+  ),
 )

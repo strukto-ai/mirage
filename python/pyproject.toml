@@ -86,6 +86,7 @@ exclude = ["**/__pycache__/**"]
 # execution model, 0.0.20 split the distribution into client + runtime
 # packages), and upstream pins its own worker binary the same way.
 monty    = ["pydantic-monty==1.6.0"]
+ast-grep = ["wasmtime>=46"]
 wasi     = ["wasmtime>=46"]
 quickjs  = ["wasmtime>=46"]
 

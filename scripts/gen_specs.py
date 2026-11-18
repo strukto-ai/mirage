@@ -258,6 +258,7 @@ def _cli_specs() -> dict[str, Any]:
                 for path, handler in sorted(cli.handlers.items())
             },
             "config_model": cli.config_model is not None,
+            "vfs_only": cli.vfs_only,
         }
     return programs
 

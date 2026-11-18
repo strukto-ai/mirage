@@ -30,7 +30,13 @@ from mirage.commands.cli.constants import (
     USAGE_EXIT,
 )
 from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
-from mirage.commands.cli.types import CLI, WalkFlagBag, WalkResult, WalkWord
+from mirage.commands.cli.types import (
+    CLI,
+    DefaultCommandRoot,
+    WalkFlagBag,
+    WalkResult,
+    WalkWord,
+)
 from mirage.commands.spec.compile import (
     CompiledSpec,
     compile_spec,
@@ -911,6 +917,17 @@ def walk(
     taken: list[_Taken] = []
     paths: dict[int, PathSpec] = {}
     i = 0
+
+    if (
+        isinstance(spec, DefaultCommandRoot)
+        and spec.subcommands
+        and argv
+        and argv[0].startswith("-")
+        and argv[0] not in ("-h", "--help")
+        and find_child(spec, argv[0]) is None
+    ):
+        node = spec.subcommands[0]
+        path = (node.name,)
 
     while True:
         # A script node terminates the walk exactly like an fn leaf:

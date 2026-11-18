@@ -14,6 +14,7 @@
 
 import type { CLI } from './types.ts'
 import { AIRTABLE } from './builtin/airtable/index.ts'
+import { AST_GREP } from './builtin/ast_grep/index.ts'
 import { DISCORD } from './builtin/discord/index.ts'
 import { GH } from './builtin/gh/index.ts'
 import { GIT } from './builtin/git/index.ts'
@@ -40,6 +41,7 @@ import { NAME as MCP_CLI } from './mcp/constants.ts'
 const CLI_SPECS = new Map<string, CLI>(
   [
     AIRTABLE,
+    AST_GREP,
     DISCORD,
     GH,
     GIT,
