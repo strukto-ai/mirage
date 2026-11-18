@@ -32,6 +32,7 @@ from mirage.commands.builtin.utils.links import (
     owed_names,
 )
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_umask
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -108,4 +109,5 @@ async def run_tar(
         mounts=mount_view(vfs),
         relay=True,
         chmod=chmod if vfs is not None else None,
+        umask=session_umask(),
     )

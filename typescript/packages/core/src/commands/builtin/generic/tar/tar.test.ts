@@ -57,6 +57,26 @@ it('lists the member a cut short stream reaches', async () => {
   ])
 })
 
+it('lands every member of a piped extract', async () => {
+  const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+  try {
+    const made = await ws.shell(
+      'cd /data && for d in $(seq 12); do mkdir -p src/d$d; for f in $(seq 100); do ' +
+        'echo $d.$f > src/d$d/f$f; done; done; chmod +x src/d1/f1; mkdir out',
+    )
+    expect(made.exitCode).toBe(0)
+    const r = await ws.shell('tar -cf - -C /data src | tar -xf - -C /data/out')
+    expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([0, ''])
+    const landed: number[] = []
+    for (let d = 1; d <= 12; d++)
+      landed.push((await ws.vfs.readdir(`/data/out/src/d${String(d)}`)).length)
+    expect(landed).toEqual(Array(12).fill(100))
+    expect(DEC.decode((await ws.shell('stat -c %a /data/out/src/d1/f1')).stdout)).toBe('755\n')
+  } finally {
+    await ws.close()
+  }
+}, 60_000)
+
 it('streams an archive without a writable root or a dash file', async () => {
   const ws = new Workspace(
     { '/data': [new RAMVFS(), MountMode.WRITE] },
@@ -120,6 +140,11 @@ const ROWS: [string, string, [number, string, string]][] = [
     'exclude_vcs',
     'mkdir .git; echo 1 > .git/c; tar --exclude-vcs -cf o.tar .git a; tar -tf o.tar',
     [0, 'a\n', ''],
+  ],
+  [
+    'extract_gives_the_member_mode_under_the_umask',
+    "chmod 755 a; chmod 666 b; mkdir d; tar -cf o.tar a b d; mkdir o; cd o; tar -xf ../o.tar; stat -c '%a %n' a b d; cd ..; mkdir m; cd m; umask 077; tar -xf ../o.tar; stat -c '%a %n' a b d; cd ..; mkdir p; cd p; tar -xpf ../o.tar; stat -c '%a %n' a b d",
+    [0, '755 a\n644 b\n755 d\n700 a\n600 b\n700 d\n755 a\n666 b\n755 d\n', ''],
   ],
 ]
 

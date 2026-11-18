@@ -208,6 +208,36 @@ export class ExitLineFilter {
 }
 
 /**
+ * When a run's output last moved. A chunk still being handed to its sink
+ * counts as moving until the sink takes it, so a reader slow to take what the
+ * program wrote keeps the run while that output is on its way. Mirrors
+ * Python's `OutputWatch`.
+ */
+export class OutputWatch {
+  private busy = 0
+  private moved = performance.now() / 1000
+
+  /** `sink`, with each chunk handed to it counted as moving. */
+  watched(sink: OutputFn): OutputFn {
+    return async (data) => {
+      this.busy += 1
+      this.moved = performance.now() / 1000
+      try {
+        await sink(data)
+      } finally {
+        this.busy -= 1
+        this.moved = performance.now() / 1000
+      }
+    }
+  }
+
+  /** Seconds since the output last moved; 0 while a chunk is still being handed on. */
+  quiet(): number {
+    return this.busy > 0 ? 0 : performance.now() / 1000 - this.moved
+  }
+}
+
+/**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
@@ -444,18 +474,19 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       filters.push(outExit, outPid)
       sink = outExit.write
     }
+    const watch = new OutputWatch()
     const execution = this.execArgv(
       runArgv(tag, nonce, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
-      sink,
-      exitLine.write,
+      watch.watched(sink),
+      watch.watched(exitLine.write),
       mergeSignals(ctx.signal, letGo.signal),
     )
     let done: RunResult
     try {
-      done = await this.outcome(execution, ended, letGo, ctx.signal)
+      done = await this.outcome(execution, ended, watch, letGo, ctx.signal)
       for (const filter of filters) await filter.finish()
     } catch (error) {
       if (ctx.signal?.aborted === true) {
@@ -484,14 +515,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * How a run ended: its exec's answer, or, when its exit line says its
    * program has exited while the exec stays open because something the
    * program left running holds its output, the status the line gave. That
-   * exec is let go after a moment for the output still arriving, and what
-   * the program left running stays. A run stopped meanwhile ends as stopped,
-   * whatever its program said as it went, as Python's cancelled `_outcome`
-   * does. Mirrors Python's `_outcome`.
+   * exec is let go once its output has been quiet for `RUN_DRAIN_SECONDS`, so
+   * output a slow reader is still taking all arrives, and what the program
+   * left running stays. A run stopped meanwhile ends as stopped, whatever its
+   * program said as it went, as Python's cancelled `_outcome` does. Mirrors
+   * Python's `_outcome`.
    */
   private async outcome(
     execution: Promise<RunResult>,
     ended: Promise<number>,
+    watch: OutputWatch,
     letGo: AbortController,
     signal?: AbortSignal,
   ): Promise<RunResult> {
@@ -501,7 +534,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     const code = await Promise.race([ended, closed])
     if (code === null) return execution
-    if (await settledWithin(execution, RUN_DRAIN_SECONDS)) return execution
+    for (let quiet = watch.quiet(); quiet < RUN_DRAIN_SECONDS; quiet = watch.quiet()) {
+      if (await settledWithin(execution, RUN_DRAIN_SECONDS - quiet)) return execution
+    }
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
     signal?.throwIfAborted()

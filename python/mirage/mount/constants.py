@@ -36,6 +36,13 @@ FSTAT_ROW_SECONDS = 1.0
 # program starts there (``RecentChanges``).
 KERNEL_CACHE_SECONDS = 1
 
+# The extension a machine's sshfs renames with when the server names it,
+# replacing what the new name held as rename(2) does: SFTP v3's own rename
+# refuses an existing target, so without it `mv` over a file, git and every
+# save through a temporary file fail there. asyncssh names it in its
+# VERSION; TypeScript's server names it on a machine's pipe.
+POSIX_RENAME = "posix-rename@openssh.com"
+
 # The files an NFS server keeps open between reads. NFS has no open or
 # close, so a read opens its file and later reads reuse that handle; past
 # this many, the least recently read one no read is using is released.

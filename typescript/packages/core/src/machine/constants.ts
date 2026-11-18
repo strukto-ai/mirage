@@ -82,6 +82,14 @@ export const SSHFS_OPTIONS =
   `entry_timeout=${String(KERNEL_CACHE_SECONDS)},` +
   `negative_timeout=${String(KERNEL_CACHE_SECONDS)}`
 
+// sshfs with the fix for CVE-2026-47187 refuses a link whose target is
+// absolute or holds a `..` (EPERM), guarding a machine against a hostile
+// server. The server here is the workspace, and a project's own links
+// (node_modules/.bin, a virtualenv's interpreter, a link out to the machine's
+// disk) point that way, so a machine's sshfs that knows this option is given
+// it; an older one refuses an option it does not know.
+export const SSHFS_LINKS_OPTION = 'no_contain_symlinks'
+
 // sshfs's errors go to a log of its own per prefix in Mirage's folder on the
 // machine (`MACHINE_DIR`): its stdout is the SFTP stream, and E2B's pipe joins
 // stderr to it.
@@ -216,8 +224,9 @@ export const TOOLS_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sb
 
 // Output as base64 lines per read, status on fd 3, for an exec that returns text.
 // How often something waiting for a process a scan found looks at the
-// machines, and how long a run's output gets to arrive once its program has
-// exited while what the program left running keeps the exec open.
+// machines, and how long a run's output must stay quiet, once its program has
+// exited while what the program left running keeps the exec open, before the
+// exec is let go.
 export const RUN_WATCH_SECONDS = 2
 export const RUN_DRAIN_SECONDS = 0.5
 

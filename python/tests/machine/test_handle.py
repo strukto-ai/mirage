@@ -913,6 +913,41 @@ async def test_a_run_ends_on_its_exit_line_while_the_exec_stays_open():
         await ws.close()
 
 
+class ExitsFirstBox(RecordingMachine):
+    """A program that has exited, its exit line out, while the exec still
+    hands on what it wrote: 200 chunks of 4 KiB."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"0\n")
+        for _ in range(200):
+            await output(b"x" * 4096)
+        return RunResult(exit_code=0)
+
+
+# A reader slow to take the output (here one that waits past the drain
+# time before it reads) still gets all of it: the run is let go only once
+# its output stops moving, not a set time after its exit line.
+@pytest.mark.asyncio
+async def test_a_slow_reader_gets_all_a_run_wrote_after_its_exit_line():
+    box = ExitsFirstBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(10):
+            io = await ws.shell(
+                f"train | {{ sleep {RUN_DRAIN_SECONDS * 2}; cat; }} | wc -c"
+            )
+        assert (io.exit_code, await materialize(io.stdout)) == (
+            0,
+            b"819200\n",
+        )
+    finally:
+        await ws.close()
+
+
 class SlowStopBox(RecordingMachine):
     started = False
 

@@ -36,6 +36,7 @@ from mirage.machine.constants import (
     PIPE_SERVER_HINT,
     SSHFS_HINT,
     SSHFS_LINE,
+    SSHFS_LINKS_OPTION,
     SSHFS_LOG_NAME,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
@@ -199,6 +200,29 @@ def unmount_line(prefix: str) -> str:
     """
     path = single_quote(prefix)
     return f"fusermount3 -uz {path} || fusermount -uz {path}"
+
+
+def sshfs_line(source: str, prefix: str, log: str) -> str:
+    """The pipe command that mounts ``source`` at ``prefix`` with sshfs,
+    its errors in ``log``. It passes SSHFS_LINKS_OPTION only when the
+    machine's sshfs names it in its help, which reads no input, so the
+    pipe's stream is sshfs's alone. Each file shows as the machine user's
+    own, as on a disk that user mounted: the host's uid means nothing
+    there, and git refuses a repository another user owns. The modes stay
+    the workspace's.
+
+    Args:
+        source (str): the sshfs source.
+        prefix (str): the mountpoint.
+        log (str): the log's path in the machine.
+    """
+    return (
+        f'o={SSHFS_OPTIONS}; case "$(sshfs -h 2>&1)" in '
+        f'*{SSHFS_LINKS_OPTION}*) o="$o,{SSHFS_LINKS_OPTION}";; esac; '
+        'u=$(id -u 2>/dev/null) && g=$(id -g 2>/dev/null) && o="$o,uid=$u,gid=$g"; '
+        f'exec sshfs -f -o "$o" {single_quote(source)} {single_quote(prefix)} '
+        f"2>{single_quote(log)}"
+    )
 
 
 def unmounted(provider: str, prefix: str) -> str:
@@ -908,14 +932,12 @@ class MachineMounts:
                 f"{self._provider}: cannot make {prefix} in the machine: "
                 f"{said(made.stderr)}"
             )
-        log = single_quote(f"{folder}/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log")
+        log_path = f"{folder}/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log"
+        log = single_quote(log_path)
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
-        pipe = await self._open_pipe(
-            f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} "
-            f"{path} 2>{log}"
-        )
+        pipe = await self._open_pipe(sshfs_line(source, prefix, log_path))
         context = Context()
         context.run(SERVED_BY.set, self._machine)
         task = asyncio.create_task(
