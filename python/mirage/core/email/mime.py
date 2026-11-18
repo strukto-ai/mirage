@@ -62,7 +62,10 @@ def parse_addresses(value: str) -> list[Address]:
     Args:
         value (str): an address header value.
     """
-    return json.loads(render_mime(f"{value}\n".encode(), "addresses"))
+    addresses: list[Address] = json.loads(
+        render_mime(f"{value}\n".encode(), "addresses")
+    )
+    return addresses
 
 
 def parse_attachments(raw: bytes, *, payloads: bool) -> list[Attachment]:

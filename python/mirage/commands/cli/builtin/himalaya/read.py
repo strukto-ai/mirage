@@ -41,5 +41,5 @@ async def read(
         if fl.as_bool("json"):
             return notice(fl, raw.decode("utf-8", "replace")), IOResult()
         return raw, IOResult()
-    view = "json" if fl.as_bool("json") else "read"
-    return render_mime(raw, view), IOResult()
+    answer = render_mime(raw, "json" if fl.as_bool("json") else "read")
+    return answer, IOResult()

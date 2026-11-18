@@ -7,7 +7,9 @@ const headers = 'Subject: Sample\r\nContent-Type: text/plain; charset=UTF-8\r\n\
 
 test('plain text JSON handles a decoded UTF-8 BOM like the Node parser', () => {
   const raw = encoder.encode(headers + '\uFEFFbody')
-  const result = JSON.parse(decoder.decode(renderMime(raw, 'json')))
+  const result = JSON.parse(decoder.decode(renderMime(raw, 'json'))) as {
+    parts: { body: unknown }[]
+  }
   expect(result.parts[0].body).toEqual({ Text: 'body' })
 })
 

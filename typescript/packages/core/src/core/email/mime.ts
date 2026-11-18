@@ -46,16 +46,19 @@ export function renderMime(
 }
 
 export function parseAddresses(value: string): Address[] {
-  return JSON.parse(DECODER.decode(renderMime(ENCODER.encode(`${value}\n`), 'addresses')))
+  return JSON.parse(
+    DECODER.decode(renderMime(ENCODER.encode(`${value}\n`), 'addresses')),
+  ) as Address[]
 }
 
 export function parseAttachments(raw: Uint8Array, payloads: boolean): Attachment[] {
   const output = renderMime(raw, 'attachments', payloads)
   const end = output.byteLength - 4
   const metadata = end - new DataView(output.buffer, output.byteOffset + end, 4).getUint32(0, true)
-  const rows: Omit<Attachment, 'payload'>[] = JSON.parse(
-    DECODER.decode(output.subarray(metadata, end)),
-  )
+  const rows = JSON.parse(DECODER.decode(output.subarray(metadata, end))) as Omit<
+    Attachment,
+    'payload'
+  >[]
   const empty = new Uint8Array()
   let start = 0
   return rows.map((row) => {
