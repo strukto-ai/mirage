@@ -120,7 +120,7 @@ You need the `mirage` CLI, a Slack bot, a mailbox and two keys,
     installs `himalaya` with the support account. With your own mailbox, set its
     hosts and username, and drop the two ports and `use_ssl`.
 
-    The `support` profile is what every terminal gets. Its allow list leaves
+    The `support` profile is what every terminal gets. Its `commands` leave
     the agent the text tools it needs and three mail commands, to list, read
     and reply: no `compose`, `forward`, `delete` or raw `send`. Its policy,
     `guard.py`, judges each reply before it runs:
@@ -152,8 +152,25 @@ You need the `mirage` CLI, a Slack bot, a mailbox and two keys,
     profiles:
       support:
         commands:
-          allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, cut, sort, uniq, mkdir,
-                  himalaya envelope list, himalaya message read, himalaya message reply]
+          "*": deny
+          cd: allow
+          pwd: allow
+          echo: allow
+          cat: allow
+          ls: allow
+          grep: allow
+          jq: allow
+          head: allow
+          tail: allow
+          wc: allow
+          awk: allow
+          cut: allow
+          sort: allow
+          uniq: allow
+          mkdir: allow
+          himalaya:
+            envelope: {list: allow}
+            message: {read: allow, reply: allow}
         policy:
           pre_command:
             - {script: ./guard.py}

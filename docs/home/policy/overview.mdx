@@ -29,7 +29,7 @@ profiles:
     paths:
       hide: [/repo/.env]
     commands:
-      deny: [rm]
+      rm: deny
 ```
 
 A session under `reviewer`, such as `ws.session("agent", profile="reviewer")`:
@@ -47,13 +47,15 @@ rm: Permission denied
 ```
 
 The host still writes `/repo`; the profile narrows only that session.
-[Session Profiles](/home/configuration/session) lists every key.
+[Session Profiles](/home/configuration/session) lists every key, and
+[Command rules](/home/configuration/session#command-rules) shows how to write
+a rule for a subcommand, an option or an operand.
 
 ## Three ways to write policy
 
 | Write | Where | For |
 | --- | --- | --- |
-| Rules | a [profile](/home/configuration/session)'s `commands`, `paths`, `mounts` and `network` | allow and deny lists, hidden paths, read-only mounts |
+| Rules | a [profile](/home/configuration/session)'s `commands`, `paths`, `mounts` and `network` | command rules, hidden paths, read-only mounts |
 | A [class](/home/policy/policies) | `policies` on the workspace, in Python or TypeScript | decisions over the full context: each command's expanded words, the paths it reaches, what came back |
 | A [script](/home/policy/scripts) | a profile's `policy:` or a server's policy file | the same decisions in config, run sandboxed on Monty or Python on wasm |
 
