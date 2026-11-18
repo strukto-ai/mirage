@@ -46,16 +46,20 @@ fn transformed_keys_and_months_resume_across_filtered_blocks_and_fields() {
                     for a in &records {
                         for b in &records {
                             let (a, b) = (a.as_bytes(), b.as_bytes());
-                            let mut comparison = super::Comparison::default();
-                            let mut calls = 0;
-                            let actual = loop {
-                                calls += 1;
-                                assert!(calls < 500, "comparison failed to advance");
-                                if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1) {
-                                    break order;
-                                }
-                            };
-                            assert_eq!(actual, compare.records(a, b), "{mode}");
+                            for budget in [1, 4096] {
+                                let mut comparison = super::Comparison::default();
+                                let mut calls = 0;
+                                let actual = loop {
+                                    calls += 1;
+                                    assert!(calls < 500, "comparison failed to advance");
+                                    if let Some(order) =
+                                        comparison.step(&compare, a, b, &mut 0, budget)
+                                    {
+                                        break order;
+                                    }
+                                };
+                                assert_eq!(actual, compare.records(a, b), "{mode}");
+                            }
                         }
                     }
                 }

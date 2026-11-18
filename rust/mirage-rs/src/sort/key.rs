@@ -787,6 +787,11 @@ impl Comparison {
             self.offset = end;
             return None;
         }
+        let source_bytes = a.len().saturating_add(b.len());
+        if self.translated.is_none() && source_bytes <= *bytes {
+            *bytes -= source_bytes;
+            return Some(translated(a, mods).cmp(translated(b, mods)));
+        }
         let cursors = self
             .translated
             .get_or_insert_with(|| Box::new([Translated::default(), Translated::default()]));
