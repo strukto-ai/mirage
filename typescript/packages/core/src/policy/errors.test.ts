@@ -35,6 +35,14 @@ describe('describeDecision', () => {
     ).toBe('requires approval: sign-off (ask abc123)')
     expect(
       describeDecision({
+        kind: 'pending',
+        reason: 'sign-off',
+        policy: '',
+        askId: null,
+      }),
+    ).toBe('requires approval: sign-off (ask )')
+    expect(
+      describeDecision({
         kind: 'failed',
         reason: 'Raising failed',
         policy: 'Raising',

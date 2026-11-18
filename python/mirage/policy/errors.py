@@ -74,7 +74,8 @@ def describe_decision(decision: PolicyDecision) -> str:
         decision (PolicyDecision): the record off a refused result.
     """
     if decision.kind == "pending":
-        return f"requires approval: {decision.reason} (ask {decision.ask_id})"
+        ask_id = decision.ask_id or ""
+        return f"requires approval: {decision.reason} (ask {ask_id})"
     if decision.kind == "failed":
         return f"policy {decision.policy} failed"
     return f"policy denied: {decision.reason}"

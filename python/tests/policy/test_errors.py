@@ -32,6 +32,10 @@ def test_describe_decision_carries_the_reason_the_stderr_line_dropped():
         == "requires approval: sign-off (ask abc123)"
     )
     assert (
+        describe_decision(PolicyDecision(kind="pending", reason="sign-off"))
+        == "requires approval: sign-off (ask )"
+    )
+    assert (
         describe_decision(
             PolicyDecision(
                 kind="failed", reason="Raising failed", policy="Raising"
