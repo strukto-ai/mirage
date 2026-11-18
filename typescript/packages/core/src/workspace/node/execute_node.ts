@@ -689,7 +689,9 @@ async function runRedirected(
  * The gate of a redirect no command owns (a compound's, a bare one,
  * `exec`'s): the session's trees judge each target before it opens
  * (`admitRedirect`), and a refusal replaces the statement's run as a
- * failed open does. Mirrors Python's _redirect_gate.
+ * failed open does. The opener passes every target so far; only the last
+ * is new, and one already judged is not asked again. Mirrors Python's
+ * _redirect_gate.
  */
 function redirectGate(
   context: EvaluationContext,
@@ -697,7 +699,7 @@ function redirectGate(
   namespace: Namespace,
 ): RedirectGuard {
   return async (paths) => {
-    const refused = await admitRedirect(paths, context.session, registry, namespace)
+    const refused = await admitRedirect(paths.slice(-1), context.session, registry, namespace)
     if (refused === null) return null
     const io = new IOResult({
       exitCode: refused.exitCode,

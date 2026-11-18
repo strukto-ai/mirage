@@ -818,7 +818,8 @@ def _redirect_gate(
     """The gate of a redirect no command owns (a compound's, a bare
     one, ``exec``'s): the session's trees judge each target before it
     opens (``admit_redirect``), and a refusal replaces the statement's
-    run as a failed open does.
+    run as a failed open does. The opener passes every target so far;
+    only the last is new, and one already judged is not asked again.
 
     Args:
         context (EvaluationContext): the evaluation's session.
@@ -830,7 +831,7 @@ def _redirect_gate(
         paths: tuple[PathSpec, ...], given: ByteSource | None
     ) -> RedirectResult | None:
         refused = await admit_redirect(
-            paths, context.session, registry, namespace
+            paths[-1:], context.session, registry, namespace
         )
         if refused is None:
             return None
