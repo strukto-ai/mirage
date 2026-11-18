@@ -1695,6 +1695,11 @@
    "typescript_only": {
     "TreeJSON": "Names one command tree of a session record, which TypeScript writes typed; Python writes the same JSON as a dict."
    }
+  },
+  "workspace/session/validate": {
+   "typescript_only": {
+    "nodeKey": "Python compares the normalized subtrees two mounts' grammars give with dataclass equality; a TypeScript tree of Maps has no structural equality, so it compares their JSON with each Map as its entries."
+   }
   }
  }
 }

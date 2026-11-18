@@ -408,11 +408,6 @@ function namedSpec(cmd: Command, cmdName: string): CommandSpec {
   return new CommandSpec({ ...spec, name: cmdName })
 }
 
-function refill<K, V>(target: Map<K, V>, from: ReadonlyMap<K, V>): void {
-  target.clear()
-  for (const [key, value] of from) target.set(key, value)
-}
-
 export class MountEntry {
   visible: ((sessionId: string | null) => boolean) | null = null
   readonly mountId: string
@@ -450,13 +445,13 @@ export class MountEntry {
   cacheManager: CacheManager | null = null
   private writeContextFor: { manager: CacheManager; context: WriteContext } | null = null
 
-  private readonly cmds = new Map<CmdKey, Command>()
+  private cmds = new Map<CmdKey, Command>()
   // The keys of `cmds` a user registered (`registerCommands`), not mirage.
-  private readonly userKeys = new Set<CmdKey>()
+  private userKeys = new Set<CmdKey>()
   private readonly generalCmds = new Map<string, Command>()
   // name -> the root command registered and the tree it walks
-  private readonly trees = new Map<string, [Command, CLI]>()
-  private readonly cmdSpecs = new Map<string, CommandSpec>()
+  private trees = new Map<string, [Command, CLI]>()
+  private cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
   treesChanged: (() => void) | null = null
 
@@ -816,11 +811,10 @@ export class MountEntry {
     try {
       this.treesChanged()
     } catch (err) {
-      refill(this.cmds, held.cmds)
-      refill(this.cmdSpecs, held.cmdSpecs)
-      refill(this.trees, held.trees)
-      this.userKeys.clear()
-      for (const key of held.userKeys) this.userKeys.add(key)
+      this.cmds = held.cmds
+      this.cmdSpecs = held.cmdSpecs
+      this.userKeys = held.userKeys
+      this.trees = held.trees
       this.prefixIndex = null
       throw err
     }
