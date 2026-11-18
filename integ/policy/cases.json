@@ -624,6 +624,7 @@
     {"op": "exec", "session": "plain", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": [], "keys": []}}}},
     {"op": "exec", "session": "option", "command": "rm -r /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "operand", "command": "echo secret1", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo secret* is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["secret*"]}}}},
+    {"op": "exec", "session": "operand", "command": "echo -n secret1", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo secret* is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["secret*"]}}}},
     {"op": "exec", "session": "operand", "command": "echo public", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "value", "command": "head -n 10 /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1* is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1*"]}}}},
     {"op": "exec", "session": "value", "command": "head --lines=12 /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1* is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1*"]}}}},
@@ -661,6 +662,8 @@
     {"op": "exec", "session": "agent", "command": "grep --recursive x /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "grep --recursive is not allowed", "matched": {"command": ["grep"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "head -n1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
     {"op": "exec", "session": "agent", "command": "head --lines=1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
+    {"op": "exec", "session": "agent", "command": "head -n 1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
+    {"op": "exec", "session": "agent", "command": "head --lines 1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
     {"op": "exec", "session": "agent", "command": "head -n 2 /data/f", "expect": {"value": {"exit_code": 0, "stdout": "one\ntwo\n", "stderr": "", "decision": null, "matched": null}}}
    ]
   },
@@ -772,6 +775,7 @@
    "steps": [
     {"op": "session", "id": "unknown", "profile": {"commands": {"rm": {"--no-such-flag": "deny"}}}, "expect": {"error": "commands.rm.--no-such-flag: no option --no-such-flag"}},
     {"op": "session", "id": "prefix", "profile": {"commands": {"rm": {"--rec": "deny"}}}, "expect": {"error": "commands.rm.--rec: no option --rec"}},
+    {"op": "session", "id": "typo", "profile": {"commands": {"rm": {"--recusive": {"--force": "deny"}}}}, "expect": {"error": "commands.rm.--recusive: no option --recusive"}},
     {"op": "session", "id": "flagset", "profile": {"commands": {"rm": {"-Z": "deny"}}}, "expect": {"error": "commands.rm.-Z: no option -Z"}},
     {"op": "session", "id": "verb", "profile": {"commands": {"git": {"status": "deny", "shove": "deny"}}}, "expect": {"error": "commands.git: no subcommand shove"}},
     {"op": "session", "id": "cluster", "profile": {"commands": {"rm": {"-rf": "deny"}}}, "expect": {"error": "-rf is a cluster of options"}}
