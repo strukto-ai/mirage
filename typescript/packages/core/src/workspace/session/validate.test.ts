@@ -303,6 +303,35 @@ describe('a workspace checks command trees against its grammars', () => {
     }
   })
 
+  it('a rule on a subcommand meets an option its parent reads', async () => {
+    const rooted = new CLI({
+      spec: new CommandSpec({
+        name: 'prog',
+        arguments: [new Argument(['-C'], { type: 'path' })],
+        subcommands: [new CommandSpec({ name: 'run' }), new CommandSpec({ name: 'list' })],
+      }),
+      handlers: {
+        run: new CLIHandler({ fn: noopVerb }),
+        list: new CLIHandler({ fn: noopVerb }),
+      },
+    })
+    const rule = { decision: 'deny', reason: 'no -C on run' }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { prog: { run: { '-C': rule } } } }) } },
+    )
+    try {
+      ws.registerCli('prog', rooted)
+      const refused = await ws.shell('prog -C /data run')
+      expect(refused.exitCode).toBe(126)
+      expect(refused.decision?.reason).toBe('no -C on run')
+      expect((await ws.shell('prog run')).exitCode).toBe(0)
+      expect((await ws.shell('prog -C /data list')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('registerCli refuses a CLI a profile names wrongly', () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -370,6 +399,11 @@ describe('normalizeTree', () => {
     [{ git: { status: { '-u': { values: { some: 'deny' } } } } }, "takes none of 'some'"],
   ])('refuses a name its grammar lacks or reads two ways %#', (doc, says) => {
     expect(() => normalizeTree(commandTree(doc), grammars())).toThrow(says)
+  })
+
+  it('names an option a parent declares under its subcommand', () => {
+    const written = { git: { status: { '-C': { values: { '/repo': 'deny' } } } } }
+    expect(normalized(written)).toEqual(written)
   })
 
   it('keeps operands on a command with no grammar, and can wait for one', () => {

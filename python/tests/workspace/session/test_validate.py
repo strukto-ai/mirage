@@ -304,6 +304,39 @@ async def test_a_default_rule_no_grammar_can_read_refuses_its_command():
         await ws.close()
 
 
+def _rooted() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="prog",
+            arguments=(Argument("-C", type="path"),),
+            subcommands=(CommandSpec(name="run"), CommandSpec(name="list")),
+        ),
+        handlers={
+            "run": CLIHandler(fn=_answer),
+            "list": CLIHandler(fn=_answer),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_rule_on_a_subcommand_meets_an_option_its_parent_reads():
+    rule = {"decision": "deny", "reason": "no -C on run"}
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        profiles={"default": {"commands": {"prog": {"run": {"-C": rule}}}}},
+    )
+    try:
+        ws.register_cli("prog", _rooted())
+        refused = await ws.shell("prog -C /data run")
+        assert refused.exit_code == 126
+        assert refused.decision is not None
+        assert refused.decision.reason == "no -C on run"
+        assert (await ws.shell("prog run")).exit_code == 0
+        assert (await ws.shell("prog -C /data list")).exit_code == 0
+    finally:
+        await ws.close()
+
+
 def test_register_cli_refuses_a_cli_a_profile_names_wrongly():
     ws = Workspace(
         {"/data/": RAMVFS()},
@@ -379,6 +412,11 @@ def test_a_tree_holds_each_name_by_its_canonical_spelling():
 def test_a_name_its_grammar_lacks_or_reads_two_ways_is_refused(doc, says):
     with pytest.raises(PolicyError, match=re.escape(says)):
         normalize_tree(command_tree(doc), _grammars())
+
+
+def test_a_subcommand_names_an_option_its_parent_declares():
+    written = {"git": {"status": {"-C": {"values": {"/repo": "deny"}}}}}
+    assert _normalized(written) == written
 
 
 def test_a_command_with_no_grammar_keeps_its_operands_and_can_wait():
