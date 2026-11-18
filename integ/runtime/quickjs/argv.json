@@ -23,14 +23,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/ram/*"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/ram/*"
+                ]
+              }
             }
           }
         }

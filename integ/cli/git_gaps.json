@@ -1322,14 +1322,13 @@
       "session_profiles": {
         "sealed-numbers": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/numbers.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/numbers.txt"
+              ]
+            }
           }
         }
       }
@@ -1365,15 +1364,14 @@
       "session_profiles": {
         "sealed-clone": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/sealed/numbers.txt",
-                  "/repo/sealed/fresh.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/sealed/numbers.txt",
+                "/repo/sealed/fresh.txt"
+              ]
+            }
           }
         }
       }
@@ -1395,15 +1393,14 @@
       "session_profiles": {
         "sealed-clone": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/sealed/numbers.txt",
-                  "/repo/sealed/fresh.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/sealed/numbers.txt",
+                "/repo/sealed/fresh.txt"
+              ]
+            }
           }
         }
       }
@@ -1425,15 +1422,14 @@
       "session_profiles": {
         "sealed-clone": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/sealed/numbers.txt",
-                  "/repo/sealed/fresh.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/sealed/numbers.txt",
+                "/repo/sealed/fresh.txt"
+              ]
+            }
           }
         }
       }
@@ -1455,15 +1451,14 @@
       "session_profiles": {
         "sealed-clone": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/sealed/numbers.txt",
-                  "/repo/sealed/fresh.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/sealed/numbers.txt",
+                "/repo/sealed/fresh.txt"
+              ]
+            }
           }
         }
       }
@@ -1485,15 +1480,14 @@
       "session_profiles": {
         "sealed-clone": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/repo/sealed/numbers.txt",
-                  "/repo/sealed/fresh.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/repo/sealed/numbers.txt",
+                "/repo/sealed/fresh.txt"
+              ]
+            }
           }
         }
       }

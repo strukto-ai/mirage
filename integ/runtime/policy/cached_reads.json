@@ -22,7 +22,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -66,52 +65,6 @@
           },
           "expect": {
             "errno": "ENOENT",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "content": "SEC",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "errno": "EACCES",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -262,7 +215,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -306,52 +258,6 @@
           },
           "expect": {
             "errno": "ENOENT",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "content": "SEC",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "errno": "EACCES",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -502,7 +408,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -546,52 +451,6 @@
           },
           "expect": {
             "errno": "ENOENT",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "content": "SEC",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "handle": {
-            "id": "kept",
-            "op": "read",
-            "size": 3,
-            "offset": 3
-          },
-          "expect": {
-            "errno": "EACCES",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -743,7 +602,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -776,45 +634,6 @@
           },
           "expect": {
             "errno": "ENOENT",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/data/secret.txt"
-          },
-          "expect": {
-            "value": "TOPSECRET plans\n"
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/data/secret.txt"
-          },
-          "expect": {
-            "errno": "EACCES",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -941,7 +760,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -972,43 +790,6 @@
             "exit": 1,
             "stdout": "",
             "stderr_contains": "No such file",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "command": "cat /data/secret.txt",
-          "expect": {
-            "exit": 0,
-            "stdout": "TOPSECRET plans\n",
-            "stderr": ""
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "command": "cat /data/secret.txt",
-          "expect": {
-            "exit": 1,
-            "stdout": "",
-            "stderr_contains": "Permission denied",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -1130,7 +911,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1164,43 +944,6 @@
             "exit": 128,
             "stdout": "",
             "stderr_contains": "No such file",
-            "backend_reads": {
-              "/data/secret.txt": 0
-            }
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/allow"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "command": "git hash-object /data/secret.txt",
-          "expect": {
-            "exit": 0,
-            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
-            "stderr": ""
-          }
-        },
-        {
-          "facade": {
-            "method": "read",
-            "path": "/control/deny"
-          },
-          "expect": {
-            "value": ""
-          }
-        },
-        {
-          "command": "git hash-object /data/secret.txt",
-          "expect": {
-            "exit": 1,
-            "stdout": "",
-            "stderr_contains": "Permission denied",
             "backend_reads": {
               "/data/secret.txt": 0
             }
@@ -1327,7 +1070,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1381,7 +1123,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1463,7 +1204,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1510,7 +1250,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1558,7 +1297,7 @@
       ]
     },
     {
-      "id": "live_deny_revokes_running_guest",
+      "id": "live_hide_revokes_running_guest",
       "runtimes": [
         "monty",
         "wasi",
@@ -1585,7 +1324,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": ""
             }
@@ -1595,8 +1333,8 @@
       "steps": [
         {
           "program": {
-            "python": "from pathlib import Path\nPath('/data/secret.txt').read_text()\nPath('/control/deny').read_text()\nPath('/data/continued.txt').write_text('after revocation')\nprint('after revocation')",
-            "js": "let file = std.open('/data/secret.txt', 'r'); file.readAsString(); file.close(); file = std.open('/control/deny', 'r'); file.readAsString(); file.close(); file = std.open('/data/continued.txt', 'w'); file.puts('after revocation'); file.close(); console.log('after revocation')"
+            "python": "from pathlib import Path\nPath('/data/secret.txt').read_text()\nPath('/control/hide').read_text()\nPath('/data/continued.txt').write_text('after revocation')\nprint('after revocation')",
+            "js": "let file = std.open('/data/secret.txt', 'r'); file.readAsString(); file.close(); file = std.open('/control/hide', 'r'); file.readAsString(); file.close(); file = std.open('/data/continued.txt', 'w'); file.puts('after revocation'); file.close(); console.log('after revocation')"
           },
           "expect": {
             "cancelled": true
@@ -1654,7 +1392,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -1829,7 +1566,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2024,7 +1760,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2199,7 +1934,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2394,7 +2128,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2569,7 +2302,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2769,7 +2501,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",
@@ -2818,7 +2549,6 @@
             "files": {
               "allow": "",
               "hide": "",
-              "deny": "",
               "pre": "",
               "post": "",
               "pre_stat": "",

@@ -4,21 +4,36 @@ import platform
 import resource
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
 from pathlib import Path
 
 from mirage import MountMode, Workspace
 from mirage.policy.base import Policy
 from mirage.policy.policies import Policies
+from mirage.policy.profile import command_tree
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
-    CommandRule,
     Deny,
+    ScopedTree,
     VfsContext,
 )
 from mirage.rs.policy import admission_matcher, units
 from mirage.vfs.ram import RAMVFS
+
+
+def bench_rules(size: int) -> AdmissionRules:
+    tree: dict = {
+        f"blocked{i}": {"decision": "deny", "reason": f"rule {i}"}
+        for i in range(size - 1)
+    }
+    tree["cat"] = {
+        "decision": "deny",
+        "reason": "protected path",
+        "paths": ["/private/*"],
+    }
+    return AdmissionRules(
+        trees=(ScopedTree(tree=command_tree(tree), mount="", inline=False),)
+    )
 
 
 class Counter(Policy):
@@ -57,19 +72,7 @@ async def run() -> dict:
         )
 
     for size in (4, 256):
-        rules = AdmissionRules(
-            deny=tuple(
-                CommandRule(reason=f"rule {i}", commands=(f"blocked{i}",))
-                for i in range(size - 1)
-            )
-            + (
-                CommandRule(
-                    reason="protected path",
-                    commands=("cat",),
-                    paths=("/private/*",),
-                ),
-            )
-        )
+        rules = bench_rules(size)
         matcher = admission_matcher(rules)
         assert matcher.ask("has_rules") is True
 
@@ -77,18 +80,11 @@ async def run() -> dict:
             assert admission_matcher(rules) is matcher
 
         async def equivalent() -> None:
-            assert (
-                admission_matcher(
-                    replace(
-                        rules, deny=tuple(replace(rule) for rule in rules.deny)
-                    )
-                )
-                is matcher
-            )
+            assert admission_matcher(bench_rules(size)) is matcher
 
         await measure(f"cache_same_{size}", 500, cache)
         await measure(f"cache_equal_{size}", 500, equivalent)
-        changed = replace(rules, deny=())
+        changed = AdmissionRules(trees=())
         assert admission_matcher(changed).ask("has_rules") is False
         assert admission_matcher(rules).ask("has_rules") is True
         for count in (1, 256):
@@ -154,7 +150,7 @@ async def run() -> dict:
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
         policies=[callback],
-        profiles={"bench": {"commands": {"deny": ["blocked"]}}},
+        profiles={"bench": {"commands": {"blocked": "deny"}}},
     )
     ws.create_session("bench", profile="bench")
     try:

@@ -229,10 +229,6 @@ async function run(test: Case): Promise<void> {
       const before = http.requests.length
       const restriction = test.restriction
       if (restriction === 'hide') await ws.setSessionProfile('reader', { paths: { hide: [file] } })
-      else if (restriction === 'deny')
-        await ws.setSessionProfile('reader', {
-          commands: { deny: [{ paths: [file], reason: 'sealed' }] },
-        })
       else {
         assert(restriction !== undefined)
         stage = restriction

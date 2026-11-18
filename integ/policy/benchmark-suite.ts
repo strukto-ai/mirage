@@ -1,15 +1,20 @@
-import { admissionMatcher, units } from '@struktoai/mirage-core/rs/policy'
+import { units } from '@struktoai/mirage-core/rs/document'
+import { admissionMatcher } from '@struktoai/mirage-core/rs/policy'
 import { Policies } from '@struktoai/mirage-core/policy/policies'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
-import type {
-  AdmissionRules,
-  CommandContext,
-  CommandRule,
-} from '@struktoai/mirage-core/policy/types'
+import { commandTree } from '@struktoai/mirage-core/policy/profile'
+import type { AdmissionRules, CommandContext } from '@struktoai/mirage-core/policy/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 function check(condition: boolean): asserts condition {
   if (!condition) throw new Error('benchmark correctness check failed')
+}
+
+function benchRules(size: number): AdmissionRules {
+  const tree: Record<string, unknown> = {}
+  for (let i = 0; i < size - 1; i++) tree[`blocked${i}`] = { decision: 'deny', reason: `rule ${i}` }
+  tree.cat = { decision: 'deny', reason: 'protected path', paths: ['/private/*'] }
+  return { trees: [{ tree: commandTree(tree), mount: '', inline: false }] }
 }
 
 export async function run(factory: (policy: Policy) => Workspace) {
@@ -35,36 +40,16 @@ export async function run(factory: (policy: Policy) => Workspace) {
     })
   }
   for (const size of [4, 256]) {
-    const deny: CommandRule[] = Array.from({ length: size - 1 }, (_, i) => ({
-      reason: `rule ${i}`,
-      commands: [`blocked${i}`],
-    }))
-    deny.push({ reason: 'protected path', commands: ['cat'], paths: ['/private/*'] })
-    const rules: AdmissionRules = {
-      allow: null,
-      ask: [],
-      deny,
-    }
+    const rules = benchRules(size)
     const matcher = admissionMatcher(rules)
     check(matcher.ask('has_rules') === true)
     await measure(`cache_same_${size}`, 500, async () => {
       check(admissionMatcher(rules) === matcher)
     })
     await measure(`cache_equal_${size}`, 500, async () => {
-      check(
-        admissionMatcher({
-          ...rules,
-          deny: rules.deny.map((rule) => ({
-            ...rule,
-            commands: [...(rule.commands ?? [])],
-            ...(rule.paths === undefined ? {} : { paths: [...rule.paths] }),
-          })),
-        }) === matcher,
-      )
+      check(admissionMatcher(benchRules(size)) === matcher)
     })
-    const saved = deny.splice(0)
-    check(admissionMatcher(rules).ask('has_rules') === false)
-    deny.push(...saved)
+    check(admissionMatcher({ trees: [] }).ask('has_rules') === false)
     check(admissionMatcher(rules).ask('has_rules') === true)
     for (const count of [1, 256]) {
       const paths = Array.from({ length: count }, (_, i) => ({

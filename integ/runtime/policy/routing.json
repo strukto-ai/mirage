@@ -655,14 +655,13 @@
         "profiles": {
           "sealed": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/ram/sec/*"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/ram/sec/*"
+                ]
+              }
             }
           }
         },

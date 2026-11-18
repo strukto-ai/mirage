@@ -10,7 +10,7 @@ const samples = await run(
       {
         mode: MountMode.WRITE,
         policies: [policy],
-        profiles: { bench: SessionProfile({ commands: { deny: ['blocked'] } }) },
+        profiles: { bench: SessionProfile({ commands: { blocked: 'deny' } }) },
       },
     ),
 )

@@ -409,7 +409,6 @@ class ReadControl(Policy):
             if mode not in (
                 "allow",
                 "hide",
-                "deny",
                 "pre",
                 "post",
                 "pre_stat",
@@ -419,13 +418,9 @@ class ReadControl(Policy):
             previous = self.mode
             self.mode = mode
             profile = (
-                {"paths": {"hide": [self.path]}}
-                if mode == "hide"
-                else {"commands": {"deny": [{"paths": [self.path]}]}}
-                if mode == "deny"
-                else {}
+                {"paths": {"hide": [self.path]}} if mode == "hide" else {}
             )
-            if mode in ("hide", "deny") or previous in ("hide", "deny"):
+            if "hide" in (mode, previous):
                 await self.ws.set_session_profile(
                     self.ws.default_session_id, profile
                 )

@@ -208,8 +208,8 @@ async function run(
             mode: 'write',
             mounts: { '/work': { vfs: 'ram', mode: 'write' } },
             profiles: {
-              denied: { commands: { deny: [{ commands: ['rm'], reason: 'no deletes' }] } },
-              approval: { commands: { ask: [{ commands: ['rm'], reason: 'needs approval' }] } },
+              denied: { commands: { rm: { decision: 'deny', reason: 'no deletes' } } },
+              approval: { commands: { rm: { decision: 'ask', reason: 'needs approval' } } },
             },
           },
         },

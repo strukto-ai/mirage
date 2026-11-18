@@ -1,46 +1,95 @@
 {
   "cases": [
     {
-      "id": "mapping_order_is_rule_order",
-      "op": "rules",
-      "where": "commands.deny",
-      "value": [
-        {
-          "command": "z",
-          "paths": [
-            "/z"
-          ]
-        },
-        {
-          "command": "a",
-          "paths": [
-            "/a"
-          ]
+      "id": "tree_is_read_into_its_canonical_nodes",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "rm": {
+          "--recursive": "deny",
+          "*": "allow"
         }
-      ],
-      "options": {
-        "reason": "blocked"
       },
-      "expect": [
-        {
-          "reason": "blocked",
-          "commands": [
-            "z"
-          ],
-          "paths": [
-            "/z"
-          ]
+      "expect": {
+        "decision": [],
+        "subcommands": {
+          "rm": {
+            "decision": [
+              {
+                "decision": "allow",
+                "reason": "",
+                "paths": []
+              }
+            ],
+            "subcommands": {},
+            "options": {
+              "--recursive": {
+                "decision": [
+                  {
+                    "decision": "deny",
+                    "reason": "",
+                    "paths": []
+                  }
+                ],
+                "values": {},
+                "options": {}
+              }
+            },
+            "other_options": [],
+            "operands": {}
+          }
         },
-        {
-          "reason": "blocked",
-          "commands": [
-            "a"
-          ],
-          "paths": [
-            "/a"
-          ]
+        "options": {},
+        "other_options": [],
+        "operands": {}
+      }
+    },
+    {
+      "id": "null_is_not_a_reason",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "rm": {
+          "decision": "deny",
+          "reason": null
         }
-      ]
+      },
+      "error": "commands.rm.reason must be a string"
+    },
+    {
+      "id": "an_option_needs_a_command",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "--force": "deny"
+      },
+      "error": "commands: the option --force needs a command"
+    },
+    {
+      "id": "flat_lists_are_refused_naming_the_tree",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "deny": [
+          "rm"
+        ]
+      },
+      "error": "commands is in the old flat format"
+    },
+    {
+      "id": "a_flat_path_rule_points_at_hides",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "deny": [
+          {
+            "paths": [
+              "/x"
+            ]
+          }
+        ]
+      },
+      "error": "hide those paths with paths.hide"
     },
     {
       "id": "grouped_hides_and_mode_aliases",
@@ -95,45 +144,6 @@
           "/data/\udc80"
         ]
       }
-    },
-    {
-      "id": "null_is_not_a_reason",
-      "op": "rules",
-      "where": "commands.deny",
-      "value": [
-        {
-          "commands": [
-            "rm"
-          ],
-          "reason": null
-        }
-      ],
-      "error": "commands.deny[0].reason must be a string"
-    },
-    {
-      "id": "blank_command_is_refused",
-      "op": "rules",
-      "where": "deny",
-      "value": [
-        " "
-      ],
-      "error": "must name a command"
-    },
-    {
-      "id": "ambiguous_command_path_lists_are_refused",
-      "op": "rules",
-      "where": "commands.deny",
-      "value": [
-        {
-          "commands": [
-            "rm"
-          ],
-          "paths": [
-            "/x"
-          ]
-        }
-      ],
-      "error": "commands.deny[0] lists commands beside paths"
     },
     {
       "id": "mount_boundary_is_a_component",

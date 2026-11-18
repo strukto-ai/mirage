@@ -462,20 +462,18 @@
       "session_profiles": {
         "redirects": {
           "commands": {
-            "deny": [
-              {
-                "command": "cat",
-                "paths": [
-                  "/scratch/redirect-private"
-                ]
-              },
-              {
-                "command": "rg",
-                "paths": [
-                  "/scratch/redirect-private"
-                ]
-              }
-            ]
+            "cat": {
+              "decision": "deny",
+              "paths": [
+                "/scratch/redirect-private"
+              ]
+            },
+            "rg": {
+              "decision": "deny",
+              "paths": [
+                "/scratch/redirect-private"
+              ]
+            }
           }
         }
       }

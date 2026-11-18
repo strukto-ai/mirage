@@ -137,17 +137,6 @@
       ]
     },
     {
-      "id": "core-policy-deny",
-      "adapter": "core",
-      "kind": "policy",
-      "restriction": "deny",
-      "expected_errno": 13,
-      "expected_statuses": [
-        200,
-        200
-      ]
-    },
-    {
       "id": "core-policy-pre_vfs",
       "adapter": "core",
       "kind": "policy",
@@ -268,17 +257,6 @@
       "kind": "policy",
       "restriction": "hide",
       "expected_errno": 2,
-      "expected_statuses": [
-        200,
-        200
-      ]
-    },
-    {
-      "id": "fuse-policy-deny",
-      "adapter": "fuse",
-      "kind": "policy",
-      "restriction": "deny",
-      "expected_errno": 13,
       "expected_statuses": [
         200,
         200

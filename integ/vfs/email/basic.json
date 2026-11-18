@@ -877,14 +877,13 @@
       "session_profiles": {
         "email-deny": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/mail/INBOX/2026-01-05/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/mail/INBOX/2026-01-05/*"
+              ]
+            }
           }
         }
       }

@@ -432,18 +432,13 @@ class ReadControl implements Policy {
   async preVfs(ctx: VfsContext): Promise<Action | null> {
     if (ctx.call.name === 'read' && ctx.path.virtual.startsWith('/control/')) {
       const mode = ctx.path.virtual.split('/').at(-1) ?? ''
-      if (!['allow', 'hide', 'deny', 'pre', 'post', 'pre_stat', 'post_stat'].includes(mode)) {
+      if (!['allow', 'hide', 'pre', 'post', 'pre_stat', 'post_stat'].includes(mode)) {
         throw new Error(`unknown read control: ${mode}`)
       }
       const previous = this.mode
       this.mode = mode
-      const profile =
-        mode === 'hide'
-          ? { paths: { hide: [this.path] } }
-          : mode === 'deny'
-            ? { commands: { deny: [{ paths: [this.path] }] } }
-            : {}
-      if (['hide', 'deny'].includes(mode) || ['hide', 'deny'].includes(previous)) {
+      const profile = mode === 'hide' ? { paths: { hide: [this.path] } } : {}
+      if (mode === 'hide' || previous === 'hide') {
         await this.ws.setSessionProfile(
           this.ws.defaultSessionId,
           SessionProfile(profile, 'read control'),

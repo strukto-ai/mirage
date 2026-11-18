@@ -22,14 +22,13 @@
         {
           "profile": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "blocked",
-                  "paths": [
-                    "/data/blocked"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "blocked",
+                "paths": [
+                  "/data/blocked"
+                ]
+              }
             }
           }
         },
@@ -77,15 +76,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "protected",
-                  "command": "python3",
-                  "paths": [
-                    "/ram/secret.py"
-                  ]
-                }
-              ]
+              "python3": {
+                "decision": "deny",
+                "reason": "protected",
+                "paths": [
+                  "/ram/secret.py"
+                ]
+              }
             }
           }
         }
@@ -149,15 +146,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "protected",
-                  "command": "python3",
-                  "paths": [
-                    "/ram/secret.py"
-                  ]
-                }
-              ]
+              "python3": {
+                "decision": "deny",
+                "reason": "protected",
+                "paths": [
+                  "/ram/secret.py"
+                ]
+              }
             }
           }
         }

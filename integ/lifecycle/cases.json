@@ -4462,9 +4462,7 @@
               ]
             },
             "commands": {
-              "deny": [
-                "rm"
-              ]
+              "rm": "deny"
             }
           }
         }

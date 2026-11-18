@@ -851,28 +851,45 @@
       "sessions": {
         "walled": {
           "commands": {
-            "deny": [
+            "grep": [
               {
+                "decision": "deny",
                 "reason": "held for review",
-                "command": "grep",
                 "paths": [
                   "/data/warmwalk/locked.txt"
                 ]
               },
               {
-                "reason": "held for review",
-                "command": "tar",
-                "paths": [
-                  "/data/warmwalk/locked.txt"
-                ]
-              },
-              {
+                "decision": "deny",
                 "reason": "kept off limits",
                 "paths": [
                   "/data/warmwalk/sealed.txt"
                 ]
               }
-            ]
+            ],
+            "tar": [
+              {
+                "decision": "deny",
+                "reason": "held for review",
+                "paths": [
+                  "/data/warmwalk/locked.txt"
+                ]
+              },
+              {
+                "decision": "deny",
+                "reason": "kept off limits",
+                "paths": [
+                  "/data/warmwalk/sealed.txt"
+                ]
+              }
+            ],
+            "*": {
+              "decision": "deny",
+              "reason": "kept off limits",
+              "paths": [
+                "/data/warmwalk/sealed.txt"
+              ]
+            }
           }
         },
         "veiled": {
@@ -1290,14 +1307,13 @@
         },
         "walled": {
           "commands": {
-            "deny": [
-              {
-                "reason": "kept off limits",
-                "paths": [
-                  "/search/gamma.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "kept off limits",
+              "paths": [
+                "/search/gamma.txt"
+              ]
+            }
           }
         }
       }
@@ -1952,14 +1968,13 @@
         },
         "walled": {
           "commands": {
-            "deny": [
-              {
-                "reason": "kept off limits",
-                "paths": [
-                  "/search/gamma.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "kept off limits",
+              "paths": [
+                "/search/gamma.txt"
+              ]
+            }
           }
         }
       }
@@ -1997,15 +2012,14 @@
       "sessions": {
         "sealed": {
           "commands": {
-            "deny": [
-              {
-                "reason": "unreadable cache subtree",
-                "paths": [
-                  "/repo/src/cache",
-                  "/trunc/src/cache"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "unreadable cache subtree",
+              "paths": [
+                "/repo/src/cache",
+                "/trunc/src/cache"
+              ]
+            }
           }
         }
       }
@@ -2424,34 +2438,32 @@
       "profiles": {
         "crew": {
           "commands": {
-            "allow": [
-              "h1",
-              "h2"
-            ],
-            "ask": [
-              {
-                "reason": "outbound mail needs a nod",
-                "commands": [
-                  "h1 message send"
-                ]
+            "*": "deny",
+            "h1": {
+              "*": "allow",
+              "message": {
+                "send": {
+                  "decision": "ask",
+                  "reason": "outbound mail needs a nod"
+                }
               }
-            ],
-            "deny": [
-              {
-                "reason": "beta is read-only",
-                "commands": [
-                  "h2 message send"
-                ]
+            },
+            "h2": {
+              "*": "allow",
+              "message": {
+                "send": {
+                  "decision": "deny",
+                  "reason": "beta is read-only"
+                }
               }
-            ]
+            }
           }
         },
         "solo": {
           "commands": {
-            "allow": [
-              "h1",
-              "type"
-            ]
+            "*": "deny",
+            "h1": "allow",
+            "type": "allow"
           }
         }
       },
@@ -2638,14 +2650,12 @@
       "profiles": {
         "guarded": {
           "commands": {
-            "deny": [
-              {
-                "reason": "adding is off",
-                "commands": [
-                  "items add-item"
-                ]
+            "items": {
+              "add-item": {
+                "decision": "deny",
+                "reason": "adding is off"
               }
-            ]
+            }
           }
         }
       },
@@ -3369,14 +3379,13 @@
         },
         "histrule": {
           "commands": {
-            "deny": [
-              {
-                "reason": "history kept",
-                "paths": [
-                  "/scratch/hist/secret.txt"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "history kept",
+              "paths": [
+                "/scratch/hist/secret.txt"
+              ]
+            }
           }
         },
         "reviewer": "reviewer",
@@ -3385,27 +3394,27 @@
         "granted": {},
         "nodder": {
           "commands": {
-            "ask": [
-              {
-                "reason": "profile nod",
-                "command": "rm",
-                "paths": [
-                  "/scratch/both/*"
-                ]
-              }
-            ]
+            "rm": {
+              "decision": "ask",
+              "reason": "profile nod",
+              "paths": [
+                "/scratch/both/*"
+              ]
+            }
           }
         },
         "frozen": {
           "commands": {
-            "deny": [
+            "*": [
               {
+                "decision": "deny",
                 "reason": "frozen",
                 "paths": [
                   "/scratch/locked/*"
                 ]
               },
               {
+                "decision": "deny",
                 "reason": "walled",
                 "paths": [
                   "/scratch/wk/sealed"
@@ -3463,22 +3472,20 @@
         },
         "spanner": {
           "commands": {
-            "ask": [
+            "cat": [
               {
+                "decision": "deny",
+                "reason": "span sealed",
+                "paths": [
+                  "/scratch/span/sealed/*"
+                ]
+              },
+              {
+                "decision": "ask",
                 "reason": "span review",
-                "command": "cat",
                 "paths": [
                   "/scratch/span/*",
                   "/scratch/deep/a/b/c/*"
-                ]
-              }
-            ],
-            "deny": [
-              {
-                "reason": "span sealed",
-                "command": "cat",
-                "paths": [
-                  "/scratch/span/sealed/*"
                 ]
               }
             ]
@@ -3486,21 +3493,19 @@
         },
         "carver": {
           "commands": {
-            "ask": [
+            "rm": [
               {
-                "reason": "carve nod",
-                "command": "rm",
-                "paths": [
-                  "/scratch/carve/open/*"
-                ]
-              }
-            ],
-            "deny": [
-              {
+                "decision": "deny",
                 "reason": "carve locked",
-                "command": "rm",
                 "paths": [
                   "/scratch/carve/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "carve nod",
+                "paths": [
+                  "/scratch/carve/open/*"
                 ]
               }
             ]
@@ -3508,49 +3513,49 @@
         },
         "courier": {
           "commands": {
-            "ask": [
+            "cp": [
               {
+                "decision": "deny",
+                "reason": "courier sealed",
+                "paths": [
+                  "/scratch/vaultc/*"
+                ]
+              },
+              {
+                "decision": "ask",
                 "reason": "outbox nod",
-                "command": "cp",
                 "paths": [
                   "/scratch/outbox/deep/*"
                 ]
               },
               {
-                "reason": "outbox nod",
-                "command": "mv",
-                "paths": [
-                  "/scratch/outbox/deep/*"
-                ]
-              },
-              {
+                "decision": "ask",
                 "reason": "staging nod",
-                "command": "cp",
-                "paths": [
-                  "/scratch/stage/*"
-                ]
-              },
-              {
-                "reason": "staging nod",
-                "command": "mv",
                 "paths": [
                   "/scratch/stage/*"
                 ]
               }
             ],
-            "deny": [
+            "mv": [
               {
+                "decision": "deny",
                 "reason": "courier sealed",
-                "command": "cp",
                 "paths": [
                   "/scratch/vaultc/*"
                 ]
               },
               {
-                "reason": "courier sealed",
-                "command": "mv",
+                "decision": "ask",
+                "reason": "outbox nod",
                 "paths": [
-                  "/scratch/vaultc/*"
+                  "/scratch/outbox/deep/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "staging nod",
+                "paths": [
+                  "/scratch/stage/*"
                 ]
               }
             ]
@@ -3565,14 +3570,13 @@
                 ]
               },
               "commands": {
-                "deny": [
-                  {
-                    "reason": "anchored pem",
-                    "paths": [
-                      "*.pem"
-                    ]
-                  }
-                ]
+                "*": {
+                  "decision": "deny",
+                  "reason": "anchored pem",
+                  "paths": [
+                    "*.pem"
+                  ]
+                }
               }
             }
           }
@@ -3634,109 +3638,395 @@
         },
         "default": {
           "commands": {
-            "allow": [
-              "mkdir",
-              "tee",
-              "touch",
-              "ls",
-              "cat",
-              "head",
-              "rm",
-              "find",
-              "grep",
-              "git",
-              "man",
-              "xargs",
-              "python3",
-              "ln",
-              "mv",
-              "rmdir",
-              "du",
-              "cp",
-              "tar",
-              "tree",
-              "stat",
-              "file",
-              "wc",
-              "zip",
-              "echo",
-              "cd",
-              "test",
-              "[",
-              "type",
-              "command",
-              "which"
-            ],
-            "ask": [
+            "*": [
+              "deny",
               {
-                "reason": "sign-off",
-                "command": "rm",
+                "decision": "deny",
+                "reason": "sealed until review",
                 "paths": [
-                  "/scratch/shared/*"
-                ]
-              },
-              "head",
-              {
-                "reason": "both: needs a nod",
-                "command": "rm",
-                "paths": [
-                  "/scratch/both/*"
+                  "/repo/sealed/*"
                 ]
               }
             ],
-            "deny": [
+            "mkdir": [
+              "allow",
               {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "tee": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "touch": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "ls": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "private",
+                "paths": [
+                  "/scratch/private"
+                ]
+              },
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "cat": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "private",
+                "paths": [
+                  "/scratch/private"
+                ]
+              },
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "head": [
+              "allow",
+              "ask",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "rm": [
+              "allow",
+              {
+                "decision": "deny",
                 "reason": "no deletes in the repo",
-                "command": "rm",
                 "paths": [
                   "/repo/*"
                 ]
               },
               {
+                "decision": "deny",
+                "reason": "both: locked",
+                "paths": [
+                  "/scratch/both/locked/*"
+                ]
+              },
+              {
+                "decision": "deny",
+                "reason": "both: locked, second voice",
+                "paths": [
+                  "/scratch/both/locked/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "sign-off",
+                "paths": [
+                  "/scratch/shared/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "both: needs a nod",
+                "paths": [
+                  "/scratch/both/*"
+                ]
+              },
+              {
+                "decision": "deny",
                 "reason": "sealed until review",
                 "paths": [
                   "/repo/sealed/*"
                 ]
-              },
+              }
+            ],
+            "find": [
+              "allow",
               {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "grep": [
+              "allow",
+              {
+                "decision": "deny",
                 "reason": "private",
-                "command": "cat",
                 "paths": [
                   "/scratch/private"
                 ]
               },
               {
-                "reason": "private",
-                "command": "ls",
+                "decision": "deny",
+                "reason": "sealed until review",
                 "paths": [
-                  "/scratch/private"
+                  "/repo/sealed/*"
                 ]
-              },
+              }
+            ],
+            "git": {
+              "*": [
+                "allow",
+                {
+                  "decision": "deny",
+                  "reason": "sealed until review",
+                  "paths": [
+                    "/repo/sealed/*"
+                  ]
+                }
+              ],
+              "branch": [
+                {
+                  "decision": "deny",
+                  "reason": "no branches"
+                },
+                {
+                  "decision": "deny",
+                  "reason": "sealed until review",
+                  "paths": [
+                    "/repo/sealed/*"
+                  ]
+                }
+              ]
+            },
+            "man": [
+              "allow",
               {
-                "reason": "private",
-                "command": "grep",
+                "decision": "deny",
+                "reason": "sealed until review",
                 "paths": [
-                  "/scratch/private"
+                  "/repo/sealed/*"
                 ]
-              },
+              }
+            ],
+            "xargs": [
+              "allow",
               {
-                "reason": "both: locked",
-                "command": "rm",
+                "decision": "deny",
+                "reason": "sealed until review",
                 "paths": [
-                  "/scratch/both/locked/*"
+                  "/repo/sealed/*"
                 ]
-              },
+              }
+            ],
+            "python3": [
+              "allow",
               {
-                "reason": "both: locked, second voice",
-                "command": "rm",
+                "decision": "deny",
+                "reason": "sealed until review",
                 "paths": [
-                  "/scratch/both/locked/*"
+                  "/repo/sealed/*"
                 ]
-              },
+              }
+            ],
+            "ln": [
+              "allow",
               {
-                "reason": "no branches",
-                "commands": [
-                  "git branch"
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "mv": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "rmdir": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "du": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "cp": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "tar": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "tree": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "stat": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "file": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "wc": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "zip": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "echo": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "cd": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "test": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "[": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "type": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "command": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
+                ]
+              }
+            ],
+            "which": [
+              "allow",
+              {
+                "decision": "deny",
+                "reason": "sealed until review",
+                "paths": [
+                  "/repo/sealed/*"
                 ]
               }
             ]
@@ -3744,53 +4034,51 @@
           "mounts": {
             "/repo": {
               "commands": {
-                "ask": [
-                  {
-                    "reason": "log needs a nod",
-                    "commands": [
-                      "git log"
-                    ]
+                "git": {
+                  "log": {
+                    "decision": "ask",
+                    "reason": "log needs a nod"
                   },
-                  {
-                    "reason": "branches need a nod",
-                    "commands": [
-                      "git branch"
-                    ]
-                  }
-                ],
-                "deny": [
-                  {
-                    "reason": "history is read-only here",
-                    "commands": [
-                      "git commit",
-                      "git reset --hard"
-                    ]
+                  "branch": {
+                    "decision": "ask",
+                    "reason": "branches need a nod"
                   },
-                  {
-                    "reason": "owner: sealed",
-                    "command": "rm",
-                    "paths": [
-                      "/repo/sealed/*"
-                    ]
+                  "commit": {
+                    "decision": "deny",
+                    "reason": "history is read-only here"
+                  },
+                  "reset": {
+                    "--hard": {
+                      "decision": "deny",
+                      "reason": "history is read-only here"
+                    }
                   }
-                ]
+                },
+                "rm": {
+                  "decision": "deny",
+                  "reason": "owner: sealed",
+                  "paths": [
+                    "/repo/sealed/*"
+                  ]
+                }
               }
             }
           }
         },
         "reviewer": {
           "commands": {
-            "allow": [
-              "ls",
-              "cat",
-              "git log",
-              "git status",
-              "xargs",
-              "type",
-              "eval",
-              "cd",
-              "echo"
-            ]
+            "*": "deny",
+            "ls": "allow",
+            "cat": "allow",
+            "git": {
+              "log": "allow",
+              "status": "allow"
+            },
+            "xargs": "allow",
+            "type": "allow",
+            "eval": "allow",
+            "cd": "allow",
+            "echo": "allow"
           }
         },
         "scripted": {
@@ -3843,9 +4131,8 @@
         },
         "speaker": {
           "commands": {
-            "allow": [
-              "echo"
-            ]
+            "*": "deny",
+            "echo": "allow"
           }
         },
         "linkwalled": {
@@ -3855,21 +4142,22 @@
             ]
           },
           "commands": {
-            "allow": [
-              "sed",
-              "awk"
-            ],
-            "deny": [
+            "*": "deny",
+            "sed": [
+              "allow",
               {
+                "decision": "deny",
                 "reason": "kept behind the link",
-                "command": "sed",
                 "paths": [
                   "/scratch/lw/flink"
                 ]
-              },
+              }
+            ],
+            "awk": [
+              "allow",
               {
+                "decision": "deny",
                 "reason": "kept behind the link",
-                "command": "awk",
                 "paths": [
                   "/scratch/lw/secret"
                 ]
@@ -3924,54 +4212,51 @@
         },
         "auditrule": {
           "commands": {
-            "deny": [
-              {
-                "reason": "audit sealed",
-                "paths": [
-                  "/scratch/audit/secret.txt",
-                  "/scratch/audit/hdir",
-                  "/scratch/audit/box/secret.txt",
-                  "/scratch/agit/secret.txt",
-                  "/scratch/agit/hdir",
-                  "/vault/ax/hl",
-                  "/scratch/audit/hdir/*",
-                  "/scratch/agit/hdir/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "audit sealed",
+              "paths": [
+                "/scratch/audit/secret.txt",
+                "/scratch/audit/hdir",
+                "/scratch/audit/box/secret.txt",
+                "/scratch/agit/secret.txt",
+                "/scratch/agit/hdir",
+                "/vault/ax/hl",
+                "/scratch/audit/hdir/*",
+                "/scratch/agit/hdir/*"
+              ]
+            }
           }
         },
         "auditrulepat": {
           "commands": {
-            "deny": [
-              {
-                "reason": "audit sealed",
-                "paths": [
-                  "*secret.txt",
-                  "/scratch/a*/hdir",
-                  "/vault/a?/hl"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "audit sealed",
+              "paths": [
+                "*secret.txt",
+                "/scratch/a*/hdir",
+                "/vault/a?/hl"
+              ]
+            }
           }
         },
         "auditask": {
           "commands": {
-            "ask": [
-              {
-                "reason": "audit nod",
-                "paths": [
-                  "/scratch/audit/secret.txt",
-                  "/scratch/audit/hdir",
-                  "/scratch/audit/box/secret.txt",
-                  "/scratch/agit/secret.txt",
-                  "/scratch/agit/hdir",
-                  "/vault/ax/hl",
-                  "/scratch/audit/hdir/*",
-                  "/scratch/agit/hdir/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "ask",
+              "reason": "audit nod",
+              "paths": [
+                "/scratch/audit/secret.txt",
+                "/scratch/audit/hdir",
+                "/scratch/audit/box/secret.txt",
+                "/scratch/agit/secret.txt",
+                "/scratch/agit/hdir",
+                "/vault/ax/hl",
+                "/scratch/audit/hdir/*",
+                "/scratch/agit/hdir/*"
+              ]
+            }
           }
         }
       }
@@ -4002,15 +4287,14 @@
       "profiles": {
         "default": {
           "commands": {
-            "allow": [
-              "ls",
-              "cat",
-              "echo",
-              "head",
-              "mkdir",
-              "touch",
-              "rm"
-            ]
+            "*": "deny",
+            "ls": "allow",
+            "cat": "allow",
+            "echo": "allow",
+            "head": "allow",
+            "mkdir": "allow",
+            "touch": "allow",
+            "rm": "allow"
           }
         },
         "scriptedwasm": {
@@ -4066,15 +4350,14 @@
       "profiles": {
         "default": {
           "commands": {
-            "allow": [
-              "ls",
-              "cat",
-              "echo",
-              "head",
-              "mkdir",
-              "touch",
-              "rm"
-            ]
+            "*": "deny",
+            "ls": "allow",
+            "cat": "allow",
+            "echo": "allow",
+            "head": "allow",
+            "mkdir": "allow",
+            "touch": "allow",
+            "rm": "allow"
           }
         },
         "scriptedwasm": {
@@ -4150,14 +4433,12 @@
       "profiles": {
         "gated": {
           "commands": {
-            "deny": [
-              {
-                "reason": "reading GATED is off here",
-                "commands": [
-                  "printenv GATED"
-                ]
+            "printenv": {
+              "GATED": {
+                "decision": "deny",
+                "reason": "reading GATED is off here"
               }
-            ]
+            }
           }
         }
       },

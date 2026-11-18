@@ -48,23 +48,25 @@
      "hide": ["/vault"]
     },
     "commands": {
-     "allow": ["cat", "ls", "echo", "rm"],
-     "deny": [
-      {
-       "reason": "no deletes here",
-       "commands": ["rm"]
-      }
-     ]
+      "*": "deny",
+      "cat": "allow",
+      "ls": "allow",
+      "echo": "allow",
+      "rm": [
+        "allow",
+        {
+          "decision": "deny",
+          "reason": "no deletes here"
+        }
+      ]
     }
    },
    "asker": {
     "commands": {
-     "ask": [
-      {
-       "reason": "removal needs sign-off",
-       "commands": ["rm"]
+      "rm": {
+        "decision": "ask",
+        "reason": "removal needs sign-off"
       }
-     ]
     }
    },
    "reader": {
@@ -208,7 +210,7 @@
   {
    "id": "explain",
    "op": "explain",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"allow": ["cat", "echo", "ls", "rm"], "deny": [{"reason": "sealed", "paths": ["/sec/*"]}], "ask": [{"reason": "removal needs sign-off", "commands": ["rm"]}, {"reason": "nod", "paths": ["/out/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"*": ["deny", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "cat": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "echo": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "ls": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "rm": ["allow", {"decision": "ask", "reason": "removal needs sign-off"}, {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}]}}}},
    "session": {"id": "agent", "profile": "sealed"},
    "setup": ["mkdir /sec /out", "echo k > /sec/k", "echo key > /vault/key.txt", "echo f > /f"],
    "cases": [
@@ -301,7 +303,7 @@
     {"id": "exposes_a_workspace_skill", "input": {"step": "expose", "id": "w", "kind": "skill", "path": "/SKILL.md"}, "expect": {"text": "exposed"}},
     {"id": "every_session_reads_them", "input": {"step": "shell", "id": "w", "command": "grep -cE ' (read|write|exec) \\|$' /VFS.md; head -2 /SKILL.md"}, "expect": {"text": "3\n---\nname: workspace-commands\n", "is_error": false}},
     {"id": "creates_a_session_to_redefine", "input": {"step": "session_create", "id": "w", "session": "s4", "profile": "reader"}, "expect": {"text": "s4"}},
-    {"id": "redefines_its_profile", "input": {"step": "set_profile", "id": "w", "name": "reader", "profile": {"commands": {"allow": ["cat", "whoami"]}}}, "expect": {"text": "reader"}},
+    {"id": "redefines_its_profile", "input": {"step": "set_profile", "id": "w", "name": "reader", "profile": {"commands": {"*": "deny", "cat": "allow", "whoami": "allow"}}}, "expect": {"text": "reader"}},
     {"id": "the_live_session_keeps_its_rules", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
     {"id": "moves_onto_the_new_definition", "input": {"step": "session_update", "id": "w", "session": "s4", "profile": "reader"}, "expect": {"text": "s4"}},
     {"id": "runs_the_new_definition_by_name", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt; whoami"}, "expect": {"text": "key\nreader\n", "is_error": false}},
@@ -429,7 +431,7 @@
   {
    "id": "audit_rules",
    "op": "session",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "deny", "reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"
@@ -450,7 +452,7 @@
   {
    "id": "audit_rules_bytes",
    "op": "bytes",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "deny", "reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"
@@ -471,7 +473,7 @@
   {
    "id": "audit_asks",
    "op": "session",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "ask", "reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"
@@ -492,7 +494,7 @@
   {
    "id": "audit_asks_bytes",
    "op": "bytes",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "ask", "reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"

@@ -143,14 +143,13 @@
       "session_profiles": {
         "slack-deny": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/slack/channels/leadership__C5/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/slack/channels/leadership__C5/*"
+              ]
+            }
           }
         }
       }

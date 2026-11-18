@@ -149,21 +149,17 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "no deletes",
-                  "commands": [
-                    "rm"
-                  ]
-                },
-                {
-                  "reason": "sealed",
-                  "command": "cat",
-                  "paths": [
-                    "/ram/secret*"
-                  ]
-                }
-              ]
+              "rm": {
+                "decision": "deny",
+                "reason": "no deletes"
+              },
+              "cat": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/ram/secret*"
+                ]
+              }
             }
           }
         }
@@ -551,14 +547,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/ram/*"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/ram/*"
+                ]
+              }
             }
           }
         },

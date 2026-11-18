@@ -71,9 +71,7 @@
             ]
           },
           "commands": {
-            "allow": [
-              "*"
-            ]
+            "*": "allow"
           }
         }
       },
@@ -99,9 +97,14 @@
             ]
           },
           "commands": {
-            "allow": [
-              "gws drive files get"
-            ]
+            "*": "deny",
+            "gws": {
+              "drive": {
+                "files": {
+                  "get": "allow"
+                }
+              }
+            }
           }
         }
       },
@@ -127,11 +130,16 @@
             ]
           },
           "commands": {
-            "allow": [
-              "gws drive files list",
-              "jq",
-              "cat"
-            ]
+            "*": "deny",
+            "gws": {
+              "drive": {
+                "files": {
+                  "list": "allow"
+                }
+              }
+            },
+            "jq": "allow",
+            "cat": "allow"
           }
         }
       },

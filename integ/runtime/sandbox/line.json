@@ -105,14 +105,13 @@
         {
           "profile": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/data/secret.txt"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/data/secret.txt"
+                ]
+              }
             }
           }
         },
