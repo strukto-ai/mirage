@@ -146,6 +146,11 @@ const ROWS: [string, string, [number, string, string]][] = [
     "chmod 755 a; chmod 666 b; mkdir d; tar -cf o.tar a b d; mkdir o; cd o; tar -xf ../o.tar; stat -c '%a %n' a b d; cd ..; mkdir m; cd m; umask 077; tar -xf ../o.tar; stat -c '%a %n' a b d; cd ..; mkdir p; cd p; tar -xpf ../o.tar; stat -c '%a %n' a b d",
     [0, '755 a\n644 b\n755 d\n700 a\n600 b\n700 d\n755 a\n666 b\n755 d\n', ''],
   ],
+  [
+    'a_later_member_sets_back_an_earlier_mode',
+    'chmod 755 a; tar -cf d.tar a; chmod 644 a; tar -rf d.tar a; rm a; tar -xf d.tar; stat -c %a a',
+    [0, '644\n', ''],
+  ],
 ]
 
 it.each(ROWS)('tar option %s', async (_name, line, expected) => {
