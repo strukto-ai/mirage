@@ -51,6 +51,7 @@ from mirage.errors import classify  # noqa: E402
 from mirage.fuse.fs import MirageFS  # noqa: E402
 from mirage.mount.core import MountCore  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
+from mirage.policy.constants import METADATA_OPS  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
     CommandContext,
     Deny,
@@ -344,14 +345,19 @@ class LockWrites(Policy):
 
 
 class SealReads(Policy):
-    """Test-only pre_vfs policy: refuse read ops on a path suffix."""
+    """Test-only pre_vfs policy: refuse read ops on a path suffix;
+    ``allow_metadata`` lets ``stat`` and ``exists`` through, so a file
+    opens and only its content is refused."""
 
     HOOK = "pre_vfs"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._suffix = spec["suffix"]
+        self._skip = METADATA_OPS if spec.get("allow_metadata") else ()
 
     def decide(self, ctx: VfsContext) -> Deny | None:
+        if ctx.call.name in self._skip:
+            return None
         if not ctx.write and ctx.path.virtual.endswith(self._suffix):
             return Deny("sealed")
         return None

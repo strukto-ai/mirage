@@ -27,7 +27,8 @@
         "policies": [
           {
             "name": "seal_reads",
-            "suffix": "/data/sealed/f.txt"
+            "suffix": "/data/sealed/f.txt",
+            "allow_metadata": true
           }
         ]
       },

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { METADATA_OPS } from '@struktoai/mirage-core/policy/constants'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { Console } from 'node:console'
 import { createHash } from 'node:crypto'
@@ -214,6 +215,7 @@ interface PolicySpec {
   reason?: string
   prefix?: string
   suffix?: string
+  allow_metadata?: boolean
   marker?: string
   max_bytes?: number
   max_lines?: number
@@ -381,10 +383,13 @@ class LockWrites implements TestPolicy<VfsContext> {
 class SealReads implements TestPolicy<VfsContext> {
   readonly hook = 'preVfs'
   private readonly suffix: string
+  private readonly skip: ReadonlySet<string>
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
+    this.skip = spec.allow_metadata === true ? METADATA_OPS : new Set()
   }
   decide(ctx: VfsContext): Action | null {
+    if (this.skip.has(ctx.call.name)) return null
     if (!ctx.write && ctx.path.virtual.endsWith(this.suffix)) {
       return { kind: 'deny', reason: 'sealed' }
     }
