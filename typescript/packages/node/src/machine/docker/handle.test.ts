@@ -276,7 +276,7 @@ describe('DockerMachine under session restrictions', () => {
     }
   })
 
-  it.each(RESTRICTIONS)('refuses a line on fuse mounts', async (profile) => {
+  it.each(RESTRICTIONS)('refuses a line on own mounts', async (profile) => {
     const runtime = new MountingDockerMachine('box', { container: 'c', mountType: 'own' })
     const ws = restricted(runtime, profile)
     try {

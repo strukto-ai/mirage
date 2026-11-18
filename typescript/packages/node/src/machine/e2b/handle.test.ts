@@ -1131,7 +1131,7 @@ describe('E2BMachine under session restrictions', () => {
     }
   })
 
-  it.each(RESTRICTIONS)('refuses a line on fuse mounts', async (profile) => {
+  it.each(RESTRICTIONS)('refuses a line on own mounts', async (profile) => {
     const runtime = new MountingE2BMachine('box', { sandboxId: 'sb-live', mountType: 'own' })
     const ws = restricted(runtime, profile)
     try {
