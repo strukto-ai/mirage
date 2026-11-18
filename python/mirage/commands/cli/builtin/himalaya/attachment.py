@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
@@ -27,118 +26,28 @@ from mirage.commands.cli.builtin.himalaya.util import fetch_source
 from mirage.commands.cli.operand import ensure_dir
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.email.mime import (
-    MimeMessage,
-    attribute_of,
-    content_type_of,
-    parse_mime,
-)
+from mirage.core.email.mime import Attachment, parse_attachments
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 MAX_NAME_TRIES = 1024
-PARSE_FAILURE = "Failed to parse RFC 5322 message"
-
-
-@dataclass(frozen=True, slots=True)
-class AttachmentRow:
-    """One attachment of a message.
-
-    Args:
-        id (str): the part's position, 1-based.
-        filename (str | None): the name the message gives it.
-        mime (str | None): the part's MIME type.
-        payload (bytes): the decoded contents.
-        inline (bool): whether the part is marked inline.
-    """
-
-    id: str
-    filename: str | None
-    mime: str | None
-    payload: bytes
-    inline: bool
-
-
-def part_name(headers: list[dict[str, Any]]) -> str | None:
-    """The file name a part carries.
-
-    Args:
-        headers (list[dict[str, Any]]): the part's headers.
-    """
-    return attribute_of(
-        content_type_of(headers, "content_disposition"), "filename"
-    ) or attribute_of(content_type_of(headers, "content_type"), "name")
-
-
-def part_mime(headers: list[dict[str, Any]]) -> str | None:
-    """A part's MIME type as `type/subtype`.
-
-    Args:
-        headers (list[dict[str, Any]]): the part's headers.
-    """
-    content = content_type_of(headers, "content_type")
-    if content is None:
-        return None
-    subtype = content["c_subtype"]
-    return f"{content['c_type']}/{subtype}" if subtype else content["c_type"]
-
-
-def part_payload(body: dict[str, Any]) -> bytes:
-    """A part's decoded contents.
-
-    Args:
-        body (dict[str, Any]): the part's body.
-    """
-    for kind in ("Text", "Html"):
-        if kind in body:
-            return str(body[kind]).encode()
-    for kind in ("Binary", "InlineBinary"):
-        if kind in body:
-            return bytes(body[kind])
-    return bytes(body["Message"].raw) if "Message" in body else b""
-
-
-def attachment_rows(message: MimeMessage) -> list[AttachmentRow]:
-    """Every attachment of a parsed message, in order.
-
-    Args:
-        message (MimeMessage): the parsed message.
-    """
-    rows = []
-    for part_id in message.attachments:
-        part = message.parts[part_id]
-        headers = part["headers"]
-        disposition = content_type_of(headers, "content_disposition")
-        rows.append(
-            AttachmentRow(
-                id=str(part_id + 1),
-                filename=part_name(headers),
-                mime=part_mime(headers),
-                payload=part_payload(part["body"]),
-                inline=disposition is not None
-                and disposition["c_type"].lower() == "inline",
-            )
-        )
-    return rows
 
 
 async def _rows_of(
-    accessor: EmailAccessor, mailbox: str, uid: str
-) -> list[AttachmentRow]:
-    raw = await fetch_source(accessor, mailbox, uid)
-    message = parse_mime(raw)
-    if message is None:
-        raise ValueError(PARSE_FAILURE)
-    return attachment_rows(message)
+    accessor: EmailAccessor, mailbox: str, uid: str, *, payloads: bool
+) -> list[Attachment]:
+    return parse_attachments(
+        await fetch_source(accessor, mailbox, uid), payloads=payloads
+    )
 
 
-def _document(row: AttachmentRow, path: str | None) -> dict[str, Any]:
+def _document(row: Attachment, path: str | None) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "id": row.id,
         "filename": row.filename,
         "mime": row.mime,
-        "size": len(row.payload),
+        "size": row.size,
         "inline": row.inline,
     }
     if path is not None:
@@ -147,7 +56,7 @@ def _document(row: AttachmentRow, path: str | None) -> dict[str, Any]:
 
 
 def _table(
-    rows: list[AttachmentRow],
+    rows: list[Attachment],
     paths: list[str] | None,
     with_inline: bool,
 ) -> str:
@@ -162,7 +71,7 @@ def _table(
             Cell(row.id),
             Cell(row.filename or ""),
             Cell(row.mime or ""),
-            Cell(format_size(len(row.payload))),
+            Cell(format_size(row.size)),
         ]
         if with_inline:
             cells.append(Cell("yes" if row.inline else "no"))
@@ -215,7 +124,7 @@ async def attachment_list(
     rows = [
         row
         for row in await _rows_of(
-            accessor, fl.as_str("mailbox", "INBOX"), texts[0]
+            accessor, fl.as_str("mailbox", "INBOX"), texts[0], payloads=False
         )
         if with_inline or not row.inline
     ]
@@ -237,11 +146,13 @@ async def attachment_download(
     uid = texts[0]
     if ctx.vfs is None:
         raise ValueError("attachment download needs a workspace")
-    rows = await _rows_of(accessor, fl.as_str("mailbox", "INBOX"), uid)
+    rows = await _rows_of(
+        accessor, fl.as_str("mailbox", "INBOX"), uid, payloads=True
+    )
     directory = fl.as_path("dir") or PathSpec.from_str_path(".", cwd=ctx.cwd)
     await ensure_dir(ctx.vfs, directory)
     remaining = set(texts[1:])
-    written: list[AttachmentRow] = []
+    written: list[Attachment] = []
     written_paths: list[str] = []
     for row in rows:
         if texts[1:] and row.id not in remaining:

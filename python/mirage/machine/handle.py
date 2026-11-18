@@ -23,7 +23,7 @@ from types import ModuleType
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import current_caller, missing_program
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
@@ -505,13 +505,15 @@ class MachineHandle:
         """
         await self.ensure_connected()
         run = argv
+        lead, reason, voice = missing_program(argv[0])
+        missing = (f"{lead}: ", reason, voice)
         if self._mounts is not None:
             refusal = await self._mounts.validate(
                 binding, ctx.cwd.virtual, errors
             )
             if refusal is not None:
                 return refusal
-            run = self._mounts.guarded(argv)
+            run = self._mounts.guarded(argv, missing)
         given = {**self.config.env, **(ctx.env or {})}
         clock = await self._system_time_env(given)
         # The run is the process it runs as, which its tag names; one run
@@ -559,7 +561,7 @@ class MachineHandle:
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
-                run_argv(tag, nonce, run),
+                run_argv(tag, nonce, run, missing),
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,

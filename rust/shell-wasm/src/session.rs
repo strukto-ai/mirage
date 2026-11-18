@@ -669,7 +669,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "place" => {
             let name = args.string()?;
             let var = args.maybe()?.map(record_in).transpose()?.map(Arc::new);
-            Item::opt(shell.store_mut()?.place(&name, var), |old| {
+            Item::opt(shell.store_mut()?.place_written(&name, var), |old| {
                 host::record_out(&old)
             })
         }
@@ -874,6 +874,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,
                 err_trap: args.flag()?,
+                clock: args.int()?,
+                started: args.int()?,
             };
             shell.shell_mut()?.apply(frame);
             Item::Nil
@@ -950,11 +952,14 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         return Ok(Item::list([fields, Item::Bool(more)]));
     }
     let answer = match op {
-        "answer_substituted" => Answer::Substituted(Substitution {
-            stdout: args.bytes()?,
-            stderr: args.bytes()?,
-            status: status(args.int()?)?,
-        }),
+        "answer_substituted" => Answer::Substituted {
+            ran: Substitution {
+                stdout: args.bytes()?,
+                stderr: args.bytes()?,
+                status: status(args.int()?)?,
+            },
+            now_us: args.int()?,
+        },
         "answer_path" => Answer::Path(
             args.bytes()?,
             args.maybe()?

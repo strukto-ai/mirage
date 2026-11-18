@@ -14,7 +14,7 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { epochToIso } from '../../utils/dates.ts'
+import { msToRfc3339 } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { refusal } from '../posix/errors.ts'
 import { parseTree, treeCommand } from '../posix/stat.ts'
@@ -36,7 +36,7 @@ import { rstripSlash } from '../../utils/slash.ts'
  */
 export function rowStat(name: string, row: TreeRow): FileStat {
   const kind = KINDS[row.kind] ?? FileType.FILE
-  const modified = epochToIso(row.mtime)
+  const modified = msToRfc3339(row.mtimeMs)
   const regular = kind === FileType.FILE
   return new FileStat({
     name,
@@ -48,7 +48,7 @@ export function rowStat(name: string, row: TreeRow): FileStat {
     mode: row.mode,
     uid: row.user,
     gid: row.group,
-    atime: epochToIso(row.atime),
+    atime: msToRfc3339(row.atimeMs),
   })
 }
 

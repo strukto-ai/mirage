@@ -64,6 +64,10 @@ impl<'s> Reading<'s> {
 impl Vars for Reading<'_> {
     fn draw(&mut self, name: &str) -> Result<Option<Vec<u8>>, Halt> {
         if let Some(value) = self.store.dynamic(name) {
+            let pending = self.draws.as_deref().and_then(|draws| draws.seconds);
+            if let Some(count) = pending.filter(|_| self.store.target(name) == SECONDS) {
+                return Ok(Some(count.to_string().into_bytes()));
+            }
             return Ok(Some(value));
         }
         if !self.store.random_special(name) {
@@ -147,6 +151,16 @@ impl Vars for Reading<'_> {
     }
 
     fn wrote(&mut self, name: &str, value: &str) -> Result<(), Halt> {
+        if self.store.counts_seconds(name) {
+            // A read later in the expression counts from the assignment
+            // (`SECONDS=10, SECONDS+1`); the session's count restarts only
+            // when the write lands, so an expression a caller declines
+            // (`SECONDS=20, 1/0`) leaves it as it was.
+            if let Some(draws) = self.draws.as_deref_mut() {
+                draws.seconds = value.parse::<i64>().ok().or(Some(0));
+            }
+            return Ok(());
+        }
         if !self.store.random_special(name) {
             return Ok(());
         }
@@ -180,11 +194,19 @@ impl Store {
             kept: None,
         };
         let store = &reading.store;
-        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID]
-            .into_iter()
-            .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
-            .map(str::to_owned)
-            .collect();
+        let dynamic: Vec<String> = [
+            RANDOM,
+            LINENO,
+            BASHPID,
+            SECONDS,
+            EPOCHSECONDS,
+            EPOCHREALTIME,
+            SRANDOM,
+        ]
+        .into_iter()
+        .filter(|&name| store.random_special(name) || store.is_dynamic(name))
+        .map(str::to_owned)
+        .collect();
         reading.evaluate(text, added, nounset, &dynamic, expand)
     }
 
@@ -194,5 +216,24 @@ impl Store {
         let mut reading = Reading::plain(self);
         let outcome = reading.evaluate(word, None, false, &[], false);
         outcome.value.map(|value| value as u32)
+    }
+
+    /// A value landing on `SECONDS` as the count it restarts from, as bash
+    /// assigns it: evaluated as arithmetic once `SECONDS` is an integer
+    /// (`seconds_integer`), a decimal number before, white space ahead of it
+    /// and space or tab after allowed; 0 when it is neither.
+    pub(super) fn seconds_from(&mut self, word: &[u8]) -> i64 {
+        if !self.seconds_integer() {
+            let mut number = word.trim_ascii_start();
+            while let [rest @ .., b' ' | b'\t'] = number {
+                number = rest;
+            }
+            return parse_decimal::<i64>(number).unwrap_or(0);
+        }
+        let mut reading = Reading::plain(self);
+        reading
+            .evaluate(word, None, false, &[], false)
+            .value
+            .unwrap_or(0)
     }
 }

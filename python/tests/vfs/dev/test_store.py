@@ -21,6 +21,9 @@ from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.dev.types import DevFileState
 from mirage.vfs.ram.store import RAMFiles
 
+# The synthetic devices, as a fresh store lists them.
+DEVICES = ["/null", "/random", "/tty", "/urandom", "/zero"]
+
 
 def _with_pipe() -> tuple[DevFiles, str]:
     files = DevFiles("owner")
@@ -56,8 +59,8 @@ def test_delete_tombstones_a_synthetic_device():
     files = DevFiles()
     del files["/null"]
     assert "/null" not in files
-    assert list(files.keys()) == ["/zero"]
-    assert len(files) == 1
+    assert list(files.keys()) == DEVICES[1:]
+    assert len(files) == len(DEVICES) - 1
     with pytest.raises(KeyError):
         files["/null"]
     with pytest.raises(KeyError):
@@ -70,8 +73,8 @@ def test_set_after_delete_stores_real_bytes():
     files["/null"] = b"recreated"
     assert "/null" in files
     assert files["/null"] == b"recreated"
-    assert list(files.keys()) == ["/zero", "/null"]
-    assert len(files) == 2
+    assert list(files.keys()) == [*DEVICES[1:], "/null"]
+    assert len(files) == len(DEVICES)
 
 
 def test_delete_of_recreated_file_removes_it_again():
@@ -80,7 +83,7 @@ def test_delete_of_recreated_file_removes_it_again():
     files["/null"] = b"recreated"
     del files["/null"]
     assert "/null" not in files
-    assert list(files.keys()) == ["/zero"]
+    assert list(files.keys()) == DEVICES[1:]
 
 
 def test_non_device_names_store_for_real():
@@ -88,7 +91,7 @@ def test_non_device_names_store_for_real():
     files["/custom"] = b"bytes"
     assert "/custom" in files
     assert files["/custom"] == b"bytes"
-    assert list(files.keys()) == ["/null", "/zero", "/custom"]
+    assert list(files.keys()) == [*DEVICES, "/custom"]
     del files["/custom"]
     assert "/custom" not in files
 
@@ -98,8 +101,7 @@ def test_clear_keeps_the_device_overlay_and_backing_files():
     files["/custom"] = b"bytes"
     files.clear()
     assert files.items() == [
-        ("/null", b""),
-        ("/zero", b""),
+        *((name, b"") for name in DEVICES),
         ("/custom", b"bytes"),
     ]
 
@@ -126,13 +128,13 @@ def test_pop_mirrors_delete_semantics():
 
 def test_iterates_synthetic_then_real():
     files = DevFiles()
-    assert list(files) == ["/null", "/zero"]
-    assert len(files) == 2
+    assert list(files) == DEVICES
+    assert len(files) == len(DEVICES)
 
 
 def test_dev_store_starts_with_synthetic_files_and_root():
     store = DevStore()
-    assert list(store.files.keys()) == ["/null", "/zero"]
+    assert list(store.files.keys()) == DEVICES
     assert "/" in store.dirs
     assert store.modified == {}
 
@@ -158,8 +160,8 @@ def test_pipe_row_refuses_byte_access_and_stays(access, code):
 def test_pipe_row_is_listed_and_counted_empty():
     files, key = _with_pipe()
     assert key in files
-    assert list(files) == ["/null", "/zero", key]
-    assert len(files) == 3
+    assert list(files) == [*DEVICES, key]
+    assert len(files) == len(DEVICES) + 1
     assert files.items()[-1] == (key, b"")
     assert files.values()[-1] == b""
 
@@ -237,3 +239,23 @@ def test_a_pipe_row_refuses_a_splice_and_its_size(access):
         else:
             files.size(key)
     assert caught.value.errno == errno.EINVAL
+
+
+def test_the_terminal_refuses_reads_and_writes_with_enxio():
+    files = DevFiles()
+    for touch in (
+        lambda: files["/tty"],
+        lambda: files.__setitem__("/tty", b"x"),
+        lambda: files.splice("/tty", 0, b"x"),
+    ):
+        with pytest.raises(OSError) as caught:
+            touch()
+        assert caught.value.errno == errno.ENXIO
+
+
+def test_random_devices_swallow_writes():
+    files = DevFiles()
+    files["/urandom"] = b"seed"
+    files.splice("/random", 0, b"seed")
+    assert files["/urandom"] == b""
+    assert "/urandom" in files

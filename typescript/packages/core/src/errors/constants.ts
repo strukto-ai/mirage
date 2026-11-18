@@ -39,6 +39,7 @@ export const ERRNO_ARMS: Record<string, FsCondition> = {
   EFBIG: 'EFBIG',
   EDQUOT: 'EDQUOT',
   EPIPE: 'EPIPE',
+  ENXIO: 'ENXIO',
   ENODATA: 'NO_XATTR',
   ENOATTR: 'NO_XATTR',
   STALE_WRITE: 'STALE_WRITE',
@@ -65,6 +66,7 @@ export const OPERAND_CONDITIONS: ReadonlySet<FsCondition> = new Set<FsCondition>
   'EFBIG',
   'EDQUOT',
   'EPIPE',
+  'ENXIO',
   'STALE_WRITE',
 ])
 

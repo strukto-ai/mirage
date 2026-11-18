@@ -73,6 +73,10 @@ pub struct Frame {
     pub bash_pid: u32,
     pub voice: Vec<u8>,
     pub err_trap: bool,
+    /// The time now and when the running shell started, in epoch
+    /// microseconds; 0 for a host that keeps no clock.
+    pub clock: i64,
+    pub started: i64,
 }
 
 impl Shell {
@@ -103,6 +107,7 @@ impl Shell {
             frame.bash_pid,
             frame.voice,
         );
+        self.vars.set_clock(frame.clock, frame.started);
         self.paren = frame.paren;
         self.memory_room = frame.memory_room;
         self.err_trap = frame.err_trap;

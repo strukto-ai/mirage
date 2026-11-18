@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { setProgramInvocation } from '../../../../context/session_context.ts'
+import { missingProgram, setProgramInvocation } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -125,7 +125,7 @@ export async function handleExecPath(
     const code = (exc as { code?: string }).code
     if (absent !== undefined && code === 'ENOENT') return absent()
     return scriptError(
-      `${shellVoice()}${path}`,
+      missingProgram(path)[0],
       strerror,
       code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS,
       path,

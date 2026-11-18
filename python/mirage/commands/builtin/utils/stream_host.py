@@ -48,6 +48,7 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import byte_view, text_view
+from mirage.shell.constants import STDIN_PATHS
 from mirage.shell.join import shell_join
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -62,7 +63,9 @@ from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
 
-STDIN_NAMES = frozenset({"-", "/dev/stdin"})
+# The operands a program reads its standard input by: `-`, and the paths
+# that name descriptor 0.
+STDIN_NAMES = frozenset({"-", *STDIN_PATHS})
 
 
 async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:

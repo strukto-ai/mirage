@@ -79,7 +79,9 @@ def test_device_safeguard_does_not_cap_adjacent_regular_files(shell):
 
 def test_dev_nodes_are_classified_as_character_devices(shell):
     assert shell.mirage("find /dev -type f") == ""
-    assert shell.mirage("find /dev -type c") == "/dev/null\n/dev/zero\n"
+    assert shell.mirage("find /dev -type c") == (
+        "/dev/null\n/dev/random\n/dev/tty\n/dev/urandom\n/dev/zero\n"
+    )
     assert shell.mirage("find /dev -empty") == ""
     assert shell.mirage("stat -c '%F %t %T' /dev/null") == (
         "character special file 1 3\n"

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import logging
 from collections.abc import Awaitable, Callable
 from itertools import groupby
@@ -50,6 +51,7 @@ from mirage.shell.descriptors import (
     Inherited,
     Recorder,
     bad_descriptor_line,
+    named_descriptor,
     redirect_operations,
     unsupported_descriptor,
 )
@@ -77,7 +79,11 @@ from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.executor.create import create_file, write_description
+from mirage.workspace.executor.create import (
+    create_file,
+    open_read,
+    write_description,
+)
 from mirage.workspace.executor.find_action_dispatch import program_head
 from mirage.workspace.executor.statement import (
     Written,
@@ -257,9 +263,26 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
+        named = named_descriptor(
+            redirect, lambda fd: fd in session.descriptors
+        )
+        if (
+            named is not None
+            and _identity(session, named[0].target)[0] == CLOSED
+        ):
+            label = (
+                redirect.target.raw_path
+                if isinstance(redirect.target, PathSpec)
+                else str(redirect.target)
+            )
+            missing = FileNotFoundError(
+                errno.ENOENT, "No such file or directory"
+            )
+            return _error_line(label, missing)
         target = redirect.target
         if (
-            guard is not None
+            named is None
+            and guard is not None
             and isinstance(target, (str, PathSpec))
             and redirect.kind not in OPENS_NO_FILE
         ):
@@ -267,7 +290,7 @@ async def _install(
             refused = await guard((scope,), stdin)
             if refused is not None:
                 return refused
-        for operation in redirect_operations(redirect):
+        for operation in named or redirect_operations(redirect):
             error = await _install_descriptor(
                 owned, dispatch, session, operation, stdin
             )
@@ -341,11 +364,11 @@ async def _install_descriptor(
     try:
         if redirect.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
             try:
-                data, _ = await dispatch("read", scope, stream=True)
+                data, endless = await open_read(dispatch, scope)
             except FileNotFoundError:
                 if redirect.kind != RedirectKind.READWRITE:
                     raise
-                data = b""
+                data, endless = b"", False
             if redirect.kind == RedirectKind.READWRITE:
                 file = FileDescription(scope, opened=True)
                 file.source = FileInput(file, data or b"")
@@ -365,7 +388,8 @@ async def _install_descriptor(
                     await close_quietly(data)
                     reading = PipeInput(data.path, data.end)
                 source = SharedInput(
-                    reading, seekable=not isinstance(data, PipeStream)
+                    reading,
+                    seekable=not (endless or isinstance(data, PipeStream)),
                 )
                 if not isinstance(data, PipeStream):
                     owned.append(source)

@@ -113,6 +113,7 @@ export const ERRNO_CODE: Readonly<Record<FsCondition, ErrorCode>> = {
   EDQUOT: 'storage_full',
   EIO: 'internal',
   EPIPE: 'internal',
+  ENXIO: 'invalid_request',
   EBADF: 'internal',
 }
 

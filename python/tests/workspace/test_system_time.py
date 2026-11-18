@@ -220,3 +220,16 @@ def test_parse_system_time_reads(text, seconds):
 def test_parse_system_time_refuses(text):
     with pytest.raises(ValueError, match="is not an ISO 8601 instant"):
         parse_system_time(text)
+
+
+@pytest.mark.asyncio
+async def test_seconds_counts_on_the_system_clock_and_keeps_an_assignment():
+    clock = ManualClock(1_000_000)
+    ws = _started("2026-03-02T09:00:00Z", clock)
+    try:
+        assert await _out(ws, "echo $SECONDS") == "0\n"
+        await ws.shell("SECONDS=100")
+        clock.advance(5)
+        assert await _out(ws, "echo $SECONDS") == "105\n"
+    finally:
+        await ws.close()

@@ -31,6 +31,9 @@ function codeOf(fn: () => unknown): string {
   return 'NO_THROW'
 }
 
+// The synthetic devices, as a fresh store lists them.
+const DEVICES = ['/null', '/random', '/tty', '/urandom', '/zero']
+
 describe('DevFiles', () => {
   it('reports has() true only for null/zero (with or without leading slash)', () => {
     const f = new DevFiles()
@@ -72,8 +75,8 @@ describe('DevFiles', () => {
     expect(f.delete('/null')).toBe(true)
     expect(f.has('/null')).toBe(false)
     expect(f.get('/null')).toBeUndefined()
-    expect([...f.keys()]).toEqual(['/zero'])
-    expect(f.size).toBe(1)
+    expect([...f.keys()]).toEqual(DEVICES.slice(1))
+    expect(f.size).toBe(DEVICES.length - 1)
     expect(f.delete('/null')).toBe(false)
   })
 
@@ -92,8 +95,8 @@ describe('DevFiles', () => {
     f.set('/null', new TextEncoder().encode('recreated'))
     expect(f.has('/null')).toBe(true)
     expect(new TextDecoder().decode(f.get('/null'))).toBe('recreated')
-    expect([...f.keys()]).toEqual(['/zero', '/null'])
-    expect(f.size).toBe(2)
+    expect([...f.keys()]).toEqual([...DEVICES.slice(1), '/null'])
+    expect(f.size).toBe(DEVICES.length)
   })
 
   it('delete of a recreated real file removes it again', () => {
@@ -102,7 +105,7 @@ describe('DevFiles', () => {
     f.set('/null', new TextEncoder().encode('recreated'))
     expect(f.delete('/null')).toBe(true)
     expect(f.has('/null')).toBe(false)
-    expect([...f.keys()]).toEqual(['/zero'])
+    expect([...f.keys()]).toEqual(DEVICES.slice(1))
   })
 
   it('stores non-device names for real', () => {
@@ -110,7 +113,7 @@ describe('DevFiles', () => {
     f.set('/custom', new TextEncoder().encode('bytes'))
     expect(f.has('/custom')).toBe(true)
     expect(new TextDecoder().decode(f.get('/custom'))).toBe('bytes')
-    expect([...f.keys()]).toEqual(['/null', '/zero', '/custom'])
+    expect([...f.keys()]).toEqual([...DEVICES, '/custom'])
     expect(f.delete('/custom')).toBe(true)
     expect(f.has('/custom')).toBe(false)
   })
@@ -122,17 +125,35 @@ describe('DevFiles', () => {
     expect(f.has('/zero')).toBe(true)
   })
 
-  it('iterates as [/null, /zero]', () => {
+  it('iterates as the synthetic devices', () => {
     const f = new DevFiles()
-    expect([...f.keys()]).toEqual(['/null', '/zero'])
-    expect(f.size).toBe(2)
+    expect([...f.keys()]).toEqual(DEVICES)
+    expect(f.size).toBe(DEVICES.length)
+  })
+
+  it('refuses reads and writes of the terminal with ENXIO', () => {
+    const f = new DevFiles()
+    expect(codeOf(() => f.get('/tty'))).toBe('ENXIO')
+    expect(codeOf(() => f.set('/tty', new Uint8Array([1])))).toBe('ENXIO')
+    expect(
+      codeOf(() => {
+        f.splice('/tty', 0, new Uint8Array([1]))
+      }),
+    ).toBe('ENXIO')
+  })
+
+  it('swallows writes to the random devices', () => {
+    const f = new DevFiles()
+    f.set('/urandom', new Uint8Array([1]))
+    f.splice('/random', 0, new Uint8Array([1]))
+    expect(f.get('/urandom')?.byteLength).toBe(0)
   })
 })
 
 describe('DevStore', () => {
   it('starts with the synthetic files and root dir', () => {
     const s = new DevStore()
-    expect(s.files.size).toBe(2)
+    expect(s.files.size).toBe(DEVICES.length)
     expect(s.dirs.has('/')).toBe(true)
     expect(s.modified.size).toBe(0)
   })
@@ -153,8 +174,8 @@ describe('DevFiles descriptor rows', () => {
   it('pipe row is listed and counted empty', () => {
     const [files, key] = withPipe()
     expect(files.has(key)).toBe(true)
-    expect([...files.keys()]).toEqual(['/null', '/zero', key])
-    expect(files.size).toBe(3)
+    expect([...files.keys()]).toEqual([...DEVICES, key])
+    expect(files.size).toBe(DEVICES.length + 1)
     expect([...files.entries()].at(-1)).toEqual([key, new Uint8Array()])
     expect([...files.values()].at(-1)).toEqual(new Uint8Array())
   })

@@ -47,6 +47,18 @@ export const FD_STDERR = 2
 export const FD_BOTH = -1
 export const FD_CLOSE = -1
 
+// The paths that name a standard descriptor, as Linux gives them, and the
+// folder whose entries name each descriptor by its number: bash opens a
+// redirect onto one as the descriptor it stands for.
+export const DESCRIPTOR_PATHS: Readonly<Record<string, number>> = {
+  '/dev/stdin': 0,
+  '/dev/stdout': 1,
+  '/dev/stderr': 2,
+}
+export const DESCRIPTOR_FOLDER = '/dev/fd/'
+// The paths an operand names standard input by.
+export const STDIN_PATHS: ReadonlySet<string> = new Set(['/dev/stdin', '/dev/fd/0'])
+
 // Builtins that read and write no file of their own, so a write redirect on
 // one can wait for their output: nothing they do can see a target emptied
 // early. `printf -v` assigns a variable instead, and is opened first like any
@@ -63,6 +75,15 @@ export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
 // which the variable store does not hold.
 export const FUNCNAME = 'FUNCNAME'
 export const PPID = 'PPID'
+
+// What a bash shell sets of itself as it starts, as the pinned bash 5.2.37
+// does: its version as text and as a readonly array of its parts, and how
+// deeply it is nested, exported (`SHLVL`).
+export const BASH_VERSION = 'BASH_VERSION'
+export const BASH_VERSINFO = 'BASH_VERSINFO'
+export const SHLVL = 'SHLVL'
+export const VERSION_TEXT = '5.2.37(1)-release'
+export const VERSION_PARTS = ['5', '2', '37', '1', 'release', 'x86_64-pc-linux-gnu'] as const
 // What the shell calls itself when no script is running, bash's "bash".
 // A nested `bash`/`sh` overrides it through SessionState.scriptName, and
 // `SessionState.argv0` is the one place the two are folded together.

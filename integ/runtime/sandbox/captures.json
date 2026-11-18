@@ -245,6 +245,106 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_program_the_machine_lacks_is_reported_in_bash_s_words",
+      "note": "A captured program the machine cannot run is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, a file PATH holds that cannot run named by its path with `Permission denied` (126), and under `timeout` GNU timeout's own words. The wrapper that reports it leaves the program's environment as it was. Each run makes its own folder, as the Python and TypeScript drivers share one container; its name holds no character a sed pattern reads specially, so the check matches the real path.",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "mirage-no-such-program a b",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "bash: line 1: mirage-no-such-program: command not found\n"
+          }
+        },
+        {
+          "command": "echo a\nmirage-no-such-program",
+          "expect": {
+            "exit": 127,
+            "stdout": "a\n",
+            "stderr": "bash: line 2: mirage-no-such-program: command not found\n"
+          }
+        },
+        {
+          "command": "timeout 5 mirage-no-such-program",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "timeout: failed to run command 'mirage-no-such-program': No such file or directory\n"
+          }
+        },
+        {
+          "command": "p=keep-p w=keep-w dash -c 'echo \"$p $w\"'",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep-p keep-w\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "d=$(dash -c 'mktemp -d /tmp/mirage-np-XXXXXX') && dash -c 'printf \"echo x\\\\n\" > \"$1/mirage-np-prog\"' dash \"$d\" && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "{ PATH=$d:$PATH mirage-np-prog; echo \"status=$?\"; } 2>&1 | sed \"s|$d|DIR|\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "bash: line 1: DIR/mirage-np-prog: Permission denied\nstatus=126\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "PATH=$d:$PATH timeout 5 mirage-np-prog",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "timeout: failed to run command 'mirage-np-prog': Permission denied\n"
+          }
+        },
+        {
+          "command": "dash -c 'printf \"#!/bin/sh\\\\necho ran\\\\n\" > \"$1/mirage-ep-prog\" && chmod +x \"$1/mirage-ep-prog\"' dash \"$d\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && PATH=/nowhere: mirage-ep-prog",
+          "expect": {
+            "exit": 0,
+            "stdout": "ran\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -r \"$1\"' dash \"$d\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

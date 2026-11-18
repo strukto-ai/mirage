@@ -16,7 +16,7 @@ import asyncio
 from contextlib import aclosing
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.device import active_device, active_pipe
+from mirage.core.dev.device import active_device, active_pipe, refuse_tty
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.dest import (
     check_capacity,
@@ -80,7 +80,9 @@ async def write(
         return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
-    if active_device(accessor, p) is not None:
+    device = active_device(accessor, p)
+    refuse_tty(device, path_spec.virtual)
+    if device is not None:
         if isinstance(data, bytes):
             size = len(data)
         else:

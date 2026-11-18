@@ -138,19 +138,54 @@ export const PIPE_SERVER_HINT =
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 /**
+ * What a wrapper checks before it hands over to the program, so a program the
+ * machine cannot run is reported in bash's words rather than in those of the
+ * machine's sh, whose exec would: `$1` leads the line (`bash: line 3: x: `),
+ * `$2` is the reason for a name no folder on PATH holds (`command not found`),
+ * `$3` leads a file PATH holds that cannot run, named by its path as bash
+ * names it (`bash: line 3: `; empty to lead with `$1`), and `$4` is the
+ * program. An empty PATH entry is the working directory, as it is to bash and
+ * to sh's exec. A path that names nothing the machine user can see is
+ * reported by its nearest folder that exists: one that is a file is `Not a
+ * directory`, one the user cannot search `Permission denied`, as exec's
+ * ENOTDIR and EACCES are. It runs in a subshell of its own, so none of its
+ * names reaches the program's environment, and needs only sh's builtins, so a
+ * PATH with no tools still runs it. Mirrors Python's `PROGRAM_CHECK`.
+ */
+export const PROGRAM_CHECK =
+  'case $4 in */*) if [ -d "$4" ]; then ' +
+  `printf '%sIs a directory\\n' "$1" >&2; exit 126; ` +
+  `elif [ ! -e "$4" ]; then e='No such file or directory'; c=127; d=$4; ` +
+  'while case $d in */*) d=${d%/*};; *) d=;; esac; [ -n "$d" ]; do ' +
+  `if [ -e "$d" ]; then if [ ! -d "$d" ]; then e='Not a directory'; c=126; ` +
+  `elif [ ! -x "$d" ]; then e='Permission denied'; c=126; fi; break; fi; done; ` +
+  `printf '%s%s\\n' "$1" "$e" >&2; exit $c; ` +
+  'elif [ ! -x "$4" ]; then ' +
+  `printf '%sPermission denied\\n' "$1" >&2; exit 126; fi;; ` +
+  '*) f=; r=$PATH; while :; do d=${r%%:*}; d=${d:-.}; ' +
+  'if [ -f "$d/$4" ] && [ -x "$d/$4" ]; then exit 0; fi; ' +
+  'if [ -z "$f" ] && [ -e "$d/$4" ] && [ ! -d "$d/$4" ]; then f=$d/$4; fi; ' +
+  'case $r in *:*) r=${r#*:};; *) break;; esac; done; ' +
+  `if [ -z "$f" ]; then printf '%s%s\\n' "$1" "$2" >&2; exit 127; fi; ` +
+  `if [ -n "$3" ]; then printf '%s%s: Permission denied\\n' "$3" "$f" >&2; ` +
+  `else printf '%sPermission denied\\n' "$1" >&2; fi; exit 126;; esac`
+
+/**
  * A line in a machine holding mounts runs under this guard, inside its own
  * exec, so it checks the boot the program runs in: a machine that restarted
  * after the line was admitted has lost its mounts, and a program run over
- * the bare directories would write to the machine's own disk. `$1` is the
- * mount table, then four words per mount (mountpoint and source as the
- * table escapes them, type, the message), then `--` and the argv. Each
+ * the bare directories would write to the machine's own disk. `$1` to `$3`
+ * are the words a program it cannot run is reported in (`PROGRAM_CHECK`),
+ * `$4` the mount table, then four words per mount (mountpoint and source as
+ * the table escapes them, type, the message), then `--` and the argv. Each
  * mount must be the top entry at its mountpoint, or the guard prints its
- * message and exits 126 with nothing run. The check runs in a subshell, so
- * its names never reach the program's environment, and needs only sh's
- * builtins, so a PATH with no tools still runs it.
+ * message and exits 126 with nothing run; then the program is checked. Both
+ * checks run in subshells, so their names never reach the program's
+ * environment, and need only sh's builtins, so a PATH with no tools still
+ * runs it.
  */
 export const MOUNT_GUARD =
-  '( t=$1; shift; ' +
+  '( t=$4; shift 4; ' +
   `[ -r "$t" ] || { printf '%s\\n' "$4" >&2; exit 126; }; ` +
   'while [ "$1" != -- ]; do f=; ' +
   'while read -r s m k o; do [ "$m" = "$1" ] || continue; ' +
@@ -158,7 +193,11 @@ export const MOUNT_GUARD =
   'done < "$t"; ' +
   `[ -n "$f" ] || { printf '%s\\n' "$4" >&2; exit 126; }; ` +
   'shift 4; done ) || exit 126; ' +
-  'shift; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
+  '( p=$1; w=$2; v=$3; shift 4; while [ "$1" != -- ]; do shift 4; done; ' +
+  'set -- "$p" "$w" "$v" "$2"; ' +
+  PROGRAM_CHECK +
+  ' ) || exit $?; ' +
+  'shift 4; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
 
 /**
  * `text` as `/proc/mounts` writes it in a field: space, tab, newline and
@@ -244,33 +283,39 @@ export const FIFO_NAME = 'fd'
 // Every program runs as a child of this wrapper, which outlives it to say
 // how it ended, since an exec holds on while anything the program started
 // keeps its output open (E2B, msb). `$1` is the run's own word, which no
-// program's output can know to forge; `$2` the tag's assignment, exported for
-// the program alone so the wrapper shows in no scan and takes no signal by
-// tag; then the program. The subshell execs it, so the pid the wrapper writes
-// is the program's, with its start in clock ticks, on stderr behind
-// `RUN_PID_MARK` ahead of anything the program writes; once the program exits
-// its status follows behind `runExitMark`, so the exec that runs the program
-// brings both back itself, and stdout ends what the program wrote with the same
-// status behind `runDoneMark`, so a reader knows when that output has all
-// arrived. A program a signal ended gets no such line: its stdout may have no
-// reader left (head took what it wanted), and a machine that keeps that pipe
-// open past its exec (kubectl) would hold the wrapper on it, its words still
-// in a scan. A shell reports a child a signal ended on
-// its stderr, so the wrapper's goes nowhere and the program gets the real
-// one back. It needs only a POSIX shell at `/bin/sh`. Mirrors Python's
-// `RUN_WRAPPER`.
+// program's output can know to forge; `$2` to `$4` the words a program the
+// machine cannot run is reported in (`PROGRAM_CHECK`); `$5` the tag's
+// assignment, exported for the program alone so the wrapper shows in no scan
+// and takes no signal by tag; then the program. The wrapper keeps every word
+// positional, so it sets no name the program's environment would carry. The
+// subshell execs the program, so the pid the wrapper writes is the program's,
+// with its start in clock ticks, on stderr behind `RUN_PID_MARK` ahead of
+// anything the program writes; once the program exits its status follows
+// behind `runExitMark`, so the exec that runs the program brings both back
+// itself, and stdout ends what the program wrote with the same status behind
+// `runDoneMark`, so a reader knows when that output has all arrived. A program
+// a signal ended gets no such line: its stdout may have no reader left (head
+// took what it wanted), and a machine that keeps that pipe open past its exec
+// (kubectl) would hold the wrapper on it, its words still in a scan. A shell
+// reports a child a signal ended on its stderr, so the wrapper's goes nowhere
+// and the program gets the real one back. It needs only a POSIX shell at
+// `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
 export const RUN_WRAPPER =
-  'n=$1; t=$2; shift 2; ' +
   'exec 6>&2 2>/dev/null; ' +
   "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
   'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; ' +
-  'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
-  's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$n" "$s"; ' +
-  'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+  'export "$5"; exec 2>&6 6>&-; ' +
+  '( set -- "$2" "$3" "$4" "$6"; ' +
+  PROGRAM_CHECK +
+  ' ) || exit $?; ' +
+  'shift 5; exec "$@" ); ' +
+  's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$1" "$s"; ' +
+  'printf "\\036mirage-exit %s %s\\n" "$1" "$s" >&6; exit "$s"'
 
 // Where a run's program starts in what `runArgv` builds: past
-// `/bin/sh -c RUN_WRAPPER sh`, the run's own word and the tag's assignment.
-export const RUN_PROGRAM_AT = 6
+// `/bin/sh -c RUN_WRAPPER sh`, the run's own word, the three words a program
+// it cannot run is reported in, and the tag's assignment.
+export const RUN_PROGRAM_AT = 9
 
 // The marks ahead of the pid line and the exit line the wrapper writes on
 // stderr, a record separator first so no program's output starts with it.
@@ -467,9 +512,16 @@ export function fifoLine(name: string, prefixes: readonly string[]): string {
  * @param tag the run's tag.
  * @param nonce the run's own word, which its exit line carries (`runExitMark`).
  * @param argv the program and its arguments.
+ * @param missing the words a program the machine cannot run is reported in
+ *   (`PROGRAM_CHECK`).
  */
-export function runArgv(tag: string, nonce: string, argv: readonly string[]): string[] {
-  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', nonce, `${PROCESS}=${tag}`, ...argv]
+export function runArgv(
+  tag: string,
+  nonce: string,
+  argv: readonly string[],
+  missing: readonly [string, string, string] = ['', 'command not found', ''],
+): string[] {
+  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', nonce, ...missing, `${PROCESS}=${tag}`, ...argv]
 }
 
 /**

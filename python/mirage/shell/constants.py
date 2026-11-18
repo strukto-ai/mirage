@@ -87,6 +87,14 @@ FD_STDERR = 2
 FD_BOTH = -1
 FD_CLOSE = -1
 
+# The paths that name a standard descriptor, as Linux gives them, and the
+# folder whose entries name each descriptor by its number: bash opens a
+# redirect onto one as the descriptor it stands for.
+DESCRIPTOR_PATHS = {"/dev/stdin": 0, "/dev/stdout": 1, "/dev/stderr": 2}
+DESCRIPTOR_FOLDER = "/dev/fd/"
+# The paths an operand names standard input by.
+STDIN_PATHS = frozenset({"/dev/stdin", "/dev/fd/0"})
+
 # Builtins that read and write no file of their own, so a write
 # redirect on one can wait for their output: nothing they do can see a
 # target emptied early. `printf -v` assigns a variable instead, and is
@@ -97,6 +105,15 @@ OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 # (`SessionState.function_names`), which the variable store does not hold.
 FUNCNAME = "FUNCNAME"
 PPID = "PPID"
+
+# What a bash shell sets of itself as it starts, as the pinned bash 5.2.37
+# does: its version as text and as a readonly array of its parts, and how
+# deeply it is nested, exported (`SHLVL`).
+BASH_VERSION = "BASH_VERSION"
+BASH_VERSINFO = "BASH_VERSINFO"
+SHLVL = "SHLVL"
+VERSION_TEXT = "5.2.37(1)-release"
+VERSION_PARTS = ("5", "2", "37", "1", "release", "x86_64-pc-linux-gnu")
 
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final

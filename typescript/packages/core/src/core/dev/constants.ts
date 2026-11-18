@@ -14,7 +14,21 @@
 
 export const ZERO_CHUNK_SIZE = 1 << 20
 
+// Logical major:minor for the synthetic devices, the canonical Linux numbers
+// so `stat`, `ls -l`, `file` and tar render GNU-like output. Mirrors Python's
+// `DEV_RDEV`.
 export const DEV_RDEV: Readonly<Record<string, readonly [number, number]>> = {
   null: [1, 3],
+  random: [1, 8],
+  tty: [5, 0],
+  urandom: [1, 9],
   zero: [1, 5],
 }
+
+// The devices that read endless random bytes and swallow writes, as Linux's
+// random and urandom do.
+export const RANDOM_DEVICES: ReadonlySet<string> = new Set(['random', 'urandom'])
+
+// The controlling terminal, which a shell run with none, as `bash -c` from an
+// agent is, cannot open: a read or a write of it is ENXIO.
+export const TTY = 'tty'

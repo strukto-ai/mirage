@@ -277,6 +277,8 @@ describe('Shell', () => {
       bashPid: 1,
       voice: 'bash: ',
       errTrap: false,
+      clock: 0,
+      started: 0,
     }
     shell.frame({ ...frame, status: 2 ** 40 })
     expect(() => shell.has('x')).toThrow('out of range')
@@ -290,6 +292,43 @@ describe('Shell', () => {
     expect(() => shell.visibleNames('bogus' as 'scalar')).toThrow()
     shell.frame(frame)
     expect(count()).toEqual(['ok', ['2']])
+    shell.close()
+  })
+
+  it("reads the clock's names from the frame's clock", () => {
+    const shell = Shell.create(() => 7)
+    shell.frame({
+      positional: [],
+      calls: [],
+      status: 0,
+      pid: 1,
+      lastJob: null,
+      argv0: 'bash',
+      options: new Map<string, boolean>(),
+      shopts: new Map<string, boolean>(),
+      envLimit: null,
+      outside: 0,
+      pipeStatus: [],
+      functionNames: null,
+      callLines: [],
+      sourceFiles: [],
+      paren: false,
+      memoryRoom: null,
+      line: 1,
+      bashPid: 1,
+      voice: 'bash: ',
+      errTrap: false,
+      clock: 1_700_000_003_250_000,
+      started: 1_700_000_000_500_000,
+    })
+    const read = (name: string): unknown =>
+      run(shell.expand(word(`echo $${name}`), 'fields'), () => {
+        throw new Error('nothing to ask')
+      })[0]
+    expect(read('SECONDS')).toEqual(['ok', ['2']])
+    expect(read('EPOCHSECONDS')).toEqual(['ok', ['1700000003']])
+    expect(read('EPOCHREALTIME')).toEqual(['ok', ['1700000003.250000']])
+    expect(read('SRANDOM')).toEqual(['ok', ['7']])
     shell.close()
   })
 

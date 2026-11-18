@@ -25,8 +25,12 @@ import {
   ReadonlyVariableError,
   UnboundVariable,
 } from '../../shell/errors.ts'
+import { systemNow } from '../../utils/clock.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionState } from './session.ts'
+
+// Microseconds in a second, the unit of the clock the shell reads.
+const MICROS = 1_000_000
 
 /**
  * What a running shell task asks the host for, on the session whose shell the
@@ -152,8 +156,11 @@ export async function drive(
               ask[4],
               ask[5],
             )
+            // The words after it read the time it ended at
+            // (`"$(sleep 1)$SECONDS"`).
+            const clock = Math.trunc(systemNow() * MICROS)
             answer = () => {
-              task.answerSubstituted(stdout, stderr, status)
+              task.answerSubstituted(stdout, stderr, status, clock)
             }
           } finally {
             // The child shell ends with its substitution.

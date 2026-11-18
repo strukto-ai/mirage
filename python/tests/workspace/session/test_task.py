@@ -22,6 +22,7 @@ from mirage.policy import Policy
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import CommandContext, Deny
 from mirage.types import HiddenVars, Visibility
+from mirage.utils.clock import ManualClock
 from mirage.workspace import Workspace
 from mirage.workspace.session import task as task_module
 from mirage.workspace.session.state import seed_var
@@ -135,4 +136,29 @@ async def test_nested_expansion_error_releases_the_native_task_on_its_thread(
     finally:
         if enabled:
             gc.enable()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_substitution_brings_its_end_time_to_the_words_after_it():
+    ws = Workspace({}, clock=ManualClock(1_000_000))
+    try:
+        io = await ws.shell('SECONDS=0; echo "$(sleep 3)$SECONDS"')
+        assert await io.stdout_str() == "3\n"
+    finally:
+        await ws.close()
+
+
+# The count an unassigned SECONDS reads starts with the session's shell,
+# so a later top-level line counts on from it.
+@pytest.mark.asyncio
+async def test_seconds_counts_from_the_session_s_first_line():
+    clock = ManualClock(1_000_000)
+    ws = Workspace({}, clock=clock, system_time="2026-01-01T00:00:00Z")
+    try:
+        await ws.shell("true")
+        clock.advance(5)
+        io = await ws.shell("echo $SECONDS")
+        assert await io.stdout_str() == "5\n"
+    finally:
         await ws.close()

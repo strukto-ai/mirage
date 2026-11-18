@@ -27,7 +27,12 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource, check_name
+from mirage.utils.ids import (
+    IdSource,
+    SystemIdSource,
+    check_name,
+    secure_draw,
+)
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -378,7 +383,7 @@ class SessionManager(SessionOwner):
     def env(self, value: dict[str, str]) -> None:
         session = self._sessions[self._default_id]
         session.vars = ShellVars.of(
-            vars_from_env(value), session.ids.random_u32
+            vars_from_env(value), secure_draw(session.ids)
         )
 
     def adopt_default(self, session_id: str) -> None:

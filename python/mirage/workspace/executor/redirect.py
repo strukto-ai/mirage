@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import dataclasses
+import errno
 import logging
 import posixpath
 from collections.abc import Awaitable, Callable
@@ -63,6 +64,8 @@ from mirage.shell.descriptors import (
     StreamOwner,
     bad_descriptor_line,
     deliver,
+    descriptor_of,
+    named_descriptor,
     redirect_operations,
     unreadable_stdin,
     unsupported_descriptor,
@@ -97,6 +100,7 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.create import (
     create_file,
+    open_read,
     sole_stream,
     write_description,
 )
@@ -1013,7 +1017,8 @@ class _Opened:
         files (list[FileDescription]): the files opened to write.
         targets (tuple[PathSpec, ...]): the paths named so far.
         read_paths (dict[int, str]): the file each descriptor reads.
-        piped (set[int]): the descriptors reading a pipe.
+        piped (set[int]): the descriptors reading a pipe, or an endless
+            device, whose output goes out as it is written.
         deferred (FileDescription | None): the final target, opened by
             the write of the command's output.
         opening_stderr (_FdDest): where stderr pointed when the deferred
@@ -1036,6 +1041,14 @@ class _Opened:
     deferred: FileDescription | None = None
     opening_stderr: _FdDest = _TO_STDERR
     complete_output: FileDescription | None = None
+
+    def holds(self, fd: int) -> bool:
+        """Whether a descriptor is open here.
+
+        Args:
+            fd (int): the descriptor.
+        """
+        return fd in self.outputs and fd not in self.closed
 
     def reopen(self, fd: int) -> None:
         """Forget what a descriptor had closed or was reading.
@@ -1189,15 +1202,11 @@ async def _open_input(
     dispatch, session = opened.dispatch, opened.session
     inputs, outputs = opened.inputs, opened.outputs
     try:
-        if scope.virtual == "/dev/stdin" and r.kind == RedirectKind.STDIN:
-            opened.reopen(r.fd)
-            inputs[r.fd], outputs[r.fd] = opened.stdin, _CLOSED
-            return None
-        data, _ = await dispatch("read", scope, stream=True)
+        data, endless = await open_read(dispatch, scope)
     except FileNotFoundError as exc:
         if r.kind != RedirectKind.READWRITE:
             return await opened.failed(_redirect_failure(scope, exc))
-        data = b""
+        data, endless = b"", False
     except Exception as exc:
         if is_aborting(exc):
             raise
@@ -1220,10 +1229,10 @@ async def _open_input(
         inputs[r.fd], outputs[r.fd] = file.source, file
         return None
     opened.read_paths[r.fd] = scope.virtual
-    if isinstance(data, PipeStream):
+    if endless or isinstance(data, PipeStream):
         opened.piped.add(r.fd)
     reading = SharedInput(
-        data or b"", seekable=not isinstance(data, PipeStream)
+        data or b"", seekable=not (endless or isinstance(data, PipeStream))
     )
     if not isinstance(data, PipeStream):
         owned.append(reading)
@@ -1502,6 +1511,18 @@ async def _handle_redirect(
     )
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
+        named = named_descriptor(r, opened.holds)
+        if named is not None and not opened.holds(named[0].target):
+            return await opened.failed(_unnamed(r.target))
+        if named is not None:
+            expanded.extend(named)
+            for operation in named:
+                bad = _duplicate(opened, operation, operation.target)
+                if bad is not None:
+                    return await opened.failed(
+                        _shell_failure(bad_descriptor_line(bad))
+                    )
+            continue
         expanded.extend(redirect_operations(r))
         unusable = _unusable(r)
         if unusable is not None:
@@ -1883,6 +1904,20 @@ def _redirect_failure(
     return None, io, node
 
 
+def _unnamed(
+    target: str | int | PathSpec,
+) -> tuple[None, IOResult, ExecutionNode]:
+    """The failure of a redirect onto the path of a descriptor the command
+    has closed (``0<&- </dev/fd/0``): bash opens the path, which names
+    nothing then, where ``0<&0`` copies a closed descriptor onto itself.
+
+    Args:
+        target (str | int | PathSpec): the descriptor's path.
+    """
+    missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
+    return _redirect_failure(_ensure_scope(target), missing)
+
+
 def _shell_failure(
     line: bytes, status: int = 1
 ) -> tuple[None, IOResult, ExecutionNode]:
@@ -1947,7 +1982,7 @@ async def redirect_stdin(
             scope = PathSpec.from_str_path(target, cwd=session.cwd)
             sources[r.fd] = (
                 stdin
-                if scope.virtual == "/dev/stdin"
+                if descriptor_of(scope.virtual, _none_open) == FD_STDIN
                 else DeviceInput()
                 if await _stat_type(dispatch, scope) == FileType.CHAR_DEVICE
                 else b""
@@ -1955,6 +1990,16 @@ async def redirect_stdin(
         else:
             sources[r.fd] = DeviceInput()
     return sources.get(FD_STDIN)
+
+
+def _none_open(fd: int) -> bool:
+    """No descriptor past the standard three is open: what the admission
+    pass, which opens none, asks of ``/dev/fd/N``.
+
+    Args:
+        fd (int): the descriptor.
+    """
+    return False
 
 
 async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:

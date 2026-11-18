@@ -43,6 +43,7 @@ mod json_validate;
 mod lance_query;
 mod look;
 mod ls;
+mod mime;
 mod network;
 pub mod nfs;
 mod nl;
@@ -136,6 +137,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_eval" => jq::open_eval(config),
         "jq" => jq::open_main(config),
         "look" => look::open(config),
+        "mime" => mime::open(config),
         "network" => network::open(config),
         "cat" => cat::open(config),
         "nl" => nl::open(config),

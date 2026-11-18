@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller } from '../context/session_context.ts'
+import { currentCaller, missingProgram } from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
@@ -441,7 +441,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const refusal =
       (await this.mounts?.validate(binding, ctx.cwd.virtual, errors, ctx.signal)) ?? null
     if (refusal !== null) return refusal
-    const run = this.mounts?.guarded(argv) ?? argv
+    const [lead, reason, voice] = missingProgram(argv[0] ?? '')
+    const missing: [string, string, string] = [`${lead}: `, reason, voice]
+    const run = this.mounts?.guarded(argv, missing) ?? argv
     const given = { ...this.config.env, ...ctx.env }
     const clock = await this.systemTimeEnv(given, ctx.signal)
     // A deadline that passed during the probe starts nothing.
@@ -485,7 +487,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     }
     const watch = new OutputWatch()
     const execution = this.execArgv(
-      runArgv(tag, nonce, run),
+      runArgv(tag, nonce, run, missing),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,

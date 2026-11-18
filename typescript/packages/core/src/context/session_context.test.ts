@@ -36,6 +36,9 @@ import {
   inLanding,
   runLanding,
   sessionVoice,
+  missingProgram,
+  setProgramInvocation,
+  clearProgramInvocation,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { MountMode, weakerMode } from '../types.ts'
@@ -505,5 +508,27 @@ describe('runLanding', () => {
     session.parseName = 'environment'
     session.lineRow = 2
     expect(sessionVoice(session)).toBe('environment: line 3: ')
+  })
+})
+
+describe('missingProgram', () => {
+  it('words a missing program by whatever execs it', async () => {
+    expect(missingProgram('x')).toEqual(['bash: x', 'command not found', 'bash: '])
+    const session = new SessionState({ sessionId: 's' })
+    await setProgramInvocation(
+      session,
+      async () => {
+        expect(missingProgram('x')).toEqual([
+          "timeout: failed to run command 'x'",
+          'No such file or directory',
+          '',
+        ])
+        await clearProgramInvocation(async () => {
+          expect(missingProgram('x')).toEqual(['bash: x', 'command not found', 'bash: '])
+          return Promise.resolve()
+        })
+      },
+      "timeout: failed to run command 'x'",
+    )
   })
 })

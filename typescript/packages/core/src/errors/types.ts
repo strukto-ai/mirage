@@ -56,6 +56,7 @@ export type FsCondition =
   | 'EFBIG'
   | 'EDQUOT'
   | 'EPIPE'
+  | 'ENXIO'
   | 'NO_XATTR'
   | 'STALE_WRITE'
 

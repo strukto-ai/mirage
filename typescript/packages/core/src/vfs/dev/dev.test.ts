@@ -73,10 +73,10 @@ describe('DevVFS', () => {
     await expect(call('read', dev, '/nope')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('readdir of root lists /null and /zero', async () => {
+  it('readdir of root lists the synthetic devices', async () => {
     const { dev } = setupOps()
     const entries = (await call('readdir', dev, '/')) as string[]
-    expect(entries.sort()).toEqual(['/null', '/zero'])
+    expect(entries.sort()).toEqual(['/null', '/random', '/tty', '/urandom', '/zero'])
   })
 })
 
@@ -122,7 +122,9 @@ describe('character device commands', () => {
   it('classifies and renders active synthetic devices', async () => {
     const ws = makeWs()
     expect((await ws.shell('find /dev -type f')).stdoutText).toBe('')
-    expect((await ws.shell('find /dev -type c')).stdoutText).toBe('/dev/null\n/dev/zero\n')
+    expect((await ws.shell('find /dev -type c')).stdoutText).toBe(
+      '/dev/null\n/dev/random\n/dev/tty\n/dev/urandom\n/dev/zero\n',
+    )
     expect((await ws.shell('find /dev -empty')).stdoutText).toBe('')
     expect((await ws.shell("stat -c '%F %t %T' /dev/null")).stdoutText).toBe(
       'character special file 1 3\n',

@@ -25,7 +25,14 @@ from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
-from mirage.shell.constants import FD_BOTH, FD_CLOSE
+from mirage.shell.constants import (
+    DESCRIPTOR_FOLDER,
+    DESCRIPTOR_PATHS,
+    FD_BOTH,
+    FD_CLOSE,
+    FD_STDERR,
+    FD_STDOUT,
+)
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
@@ -58,6 +65,75 @@ def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
         ):
             return r.target
     return None
+
+
+def descriptor_of(path: str, is_open: Callable[[int], bool]) -> int | None:
+    """The descriptor a path names, None for any other path: a standard
+    one by its name (``/dev/stderr``), or ``/dev/fd/N``, always for 0 to
+    2 and past them only while the shell holds N open, so the pipe a
+    process substitution puts there stays the path it is.
+
+    Args:
+        path (str): the absolute path.
+        is_open (Callable[[int], bool]): whether the shell holds a
+            descriptor open.
+    """
+    if path in DESCRIPTOR_PATHS:
+        return DESCRIPTOR_PATHS[path]
+    if not path.startswith(DESCRIPTOR_FOLDER):
+        return None
+    digits = path[len(DESCRIPTOR_FOLDER) :]
+    if not digits.isascii() or not digits.isdigit() or len(digits) > 9:
+        return None
+    fd = int(digits)
+    return fd if fd <= FD_STDERR or is_open(fd) else None
+
+
+def named_descriptor(
+    redirect: Redirect, is_open: Callable[[int], bool]
+) -> tuple[Redirect, ...] | None:
+    """The duplications a redirect onto a descriptor's path makes, as bash
+    opens one on Linux (``> /dev/stderr`` is ``>&2``, ``< /dev/fd/3`` is
+    ``<&3``, ``&> /dev/stdout`` is ``>&1 2>&1``, ``< /dev/stdin`` keeps
+    the fd 0 the redirects before it left); None for any other target.
+    Deliberate divergence: Linux reopens a descriptor's file, so
+    ``> /dev/stdout`` on a stdout redirected to a file truncates it
+    there; this duplicates, as bash does where the system has no such
+    paths.
+
+    Args:
+        redirect (Redirect): the expanded redirect.
+        is_open (Callable[[int], bool]): whether the shell holds a
+            descriptor open.
+    """
+    if redirect.kind not in (
+        RedirectKind.STDOUT,
+        RedirectKind.STDERR,
+        RedirectKind.STDIN,
+    ):
+        return None
+    target = redirect.target
+    if isinstance(target, PathSpec):
+        path = target.virtual
+    elif isinstance(target, str):
+        path = target
+    else:
+        return None
+    fd = descriptor_of(path, is_open)
+    if fd is None:
+        return None
+    if redirect.kind == RedirectKind.STDIN:
+        return (
+            Redirect(fd=redirect.fd, target=fd, kind=RedirectKind.DUP_INPUT),
+        )
+    if redirect.fd == FD_BOTH:
+        return (
+            Redirect(fd=FD_STDOUT, target=fd, kind=RedirectKind.DUP_OUTPUT),
+            Redirect(
+                fd=FD_STDERR, target=FD_STDOUT, kind=RedirectKind.DUP_OUTPUT
+            ),
+        )
+    return (Redirect(fd=redirect.fd, target=fd, kind=RedirectKind.DUP_OUTPUT),)
 
 
 def redirect_operations(redirect: Redirect) -> tuple[Redirect, ...]:

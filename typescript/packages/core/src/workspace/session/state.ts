@@ -21,8 +21,16 @@ import type { Item, Outcome, Shell } from '../../rs/shell.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { PPID } from '../../shell/constants.ts'
+import {
+  BASH_VERSINFO,
+  BASH_VERSION,
+  PPID,
+  SHLVL,
+  VERSION_PARTS,
+  VERSION_TEXT,
+} from '../../shell/constants.ts'
 import { VarAttr, type ShellValue } from '../../shell/variable.ts'
+import { systemNow } from '../../utils/clock.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
   argsBytes,
@@ -36,15 +44,24 @@ import {
 import type { SessionState } from './session.ts'
 import { faultError } from './task.ts'
 
+// Microseconds in a second, the unit of the clock the shell reads.
+export const MICROS = 1_000_000
+
 /**
  * Hand the session's shell the state around it that a task reads: the
  * positional parameters in scope, the special parameters, the options,
  * `max_env` and the bytes the session holds beside its variables, the bytes
- * left under `max_memory`, the running command's line and process, and the
- * voice the shell's diagnostics lead with. Mirrors Python's frame.
+ * left under `max_memory`, the running command's line and process, the voice
+ * the shell's diagnostics lead with, and the time now and when the running
+ * shell started, which `$SECONDS` and `$EPOCHSECONDS` read: a shell's first
+ * frame sets its start (`shellStartedUs`, 0 until then) from the clock the
+ * line reads, so the two never come from different clocks. Mirrors Python's
+ * frame.
  */
 export function frame(session: SessionState, callStack: CallStack | null = null): void {
   const calls = callStack !== null && callStack.depth > 1 ? [callStack.getAllPositional()] : []
+  const now = Math.trunc(systemNow() * MICROS)
+  if (session.shellStartedUs === 0) session.shellStartedUs = now
   const limit = envLimit()
   const outside = limit === null ? 0 : outsideBytes(session)
   session.vars.shell.frame({
@@ -68,6 +85,8 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     bashPid: session.bashPid,
     voice: sessionVoice(session),
     errTrap: session.errTrap !== null && session.errTrap !== '',
+    clock: now,
+    started: session.shellStartedUs,
   })
 }
 
@@ -569,6 +588,30 @@ export function seedParent(session: SessionState, pid: number): void {
   seedVar(session, PPID, String(pid))
   setAttr(session, PPID, VarAttr.Integer)
   setAttr(session, PPID, VarAttr.Readonly)
+}
+
+/**
+ * Start what a bash shell sets of itself as it starts: the count `$SECONDS`
+ * reads, from its first frame, on the clock the line reads (`frame`), once per
+ * session, so a later top-level line counts on from it and only a nested shell
+ * starts its own; its version (`BASH_VERSION` and the readonly `BASH_VERSINFO`), and `SHLVL`,
+ * exported: one deeper than the one it was handed for a nested shell
+ * (`bash script.sh`), and 1 for a top one handed none. A name made readonly
+ * stays as it is. Mirrors Python's `seed_shell`.
+ */
+export function seedShell(session: SessionState, nested = false): void {
+  if (nested) session.shellStartedUs = 0
+  if (!envIsReadonly(session, BASH_VERSINFO)) {
+    seedVar(session, BASH_VERSION, VERSION_TEXT)
+    seedVar(session, BASH_VERSINFO, new ShellArray(VERSION_PARTS.map((part, i) => [i, part])))
+    setAttr(session, BASH_VERSINFO, VarAttr.Readonly)
+  }
+  if (envIsReadonly(session, SHLVL)) return
+  const held = envGet(session, SHLVL)
+  if (held !== null && !nested) return
+  const level = held !== null && /^[0-9]+$/.test(held) ? Number(held) : 0
+  seedVar(session, SHLVL, String(level + 1))
+  setAttr(session, SHLVL, VarAttr.Export)
 }
 
 /**

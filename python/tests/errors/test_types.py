@@ -47,6 +47,7 @@ def test_vocabulary_names_the_probed_conditions():
         "EFBIG",
         "EDQUOT",
         "EPIPE",
+        "ENXIO",
         "NO_XATTR",
         "STALE_WRITE",
     }

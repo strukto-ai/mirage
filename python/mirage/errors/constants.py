@@ -81,6 +81,7 @@ ERRNO_ARMS: dict[int, FsCondition] = {
     errno.EFBIG: FsCondition.EFBIG,
     errno.EDQUOT: FsCondition.EDQUOT,
     errno.EPIPE: FsCondition.EPIPE,
+    errno.ENXIO: FsCondition.ENXIO,
     POSIX[FsCondition.NO_XATTR].errno: FsCondition.NO_XATTR,
 }
 
@@ -105,6 +106,7 @@ OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
         FsCondition.EFBIG,
         FsCondition.EDQUOT,
         FsCondition.EPIPE,
+        FsCondition.ENXIO,
         FsCondition.STALE_WRITE,
     }
 )

@@ -32,6 +32,7 @@ import {
   ENCODE_OUTPUT,
   MOUNT_GUARD,
   PROCESS,
+  PROGRAM_CHECK,
   NOT_RUNNING_STATUS,
   RUN_PROGRAM_AT,
   SSHFS_LINE,
@@ -78,6 +79,42 @@ it('ends the stdout of a run a signal ended with nothing', () => {
   expect([done.status, done.stdout.toString()]).toEqual([137, 'out\n'])
   const mark = new TextDecoder().decode(runExitMark('n1'))
   expect(done.stderr.toString().endsWith(`${mark}137\n`)).toBe(true)
+})
+
+// How the program check reports `path`: its status and stderr.
+function checked(path: string): [number | null, string] {
+  const done = spawnSync('/bin/sh', [
+    '-c',
+    PROGRAM_CHECK,
+    'sh',
+    'x: ',
+    'command not found',
+    '',
+    path,
+  ])
+  return [done.status, done.stderr.toString()]
+}
+
+// A path that names nothing the user can see is reported by its nearest folder
+// that exists, as exec reports it: a file there is not a directory, a folder
+// the user cannot search denies it, and only a folder that can be searched and
+// lacks it makes the program missing.
+it('reports a program path by its nearest folder', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-check-'))
+  const locked = join(root, 'locked')
+  try {
+    writeFileSync(join(root, 'file'), '')
+    expect(checked(join(root, 'file', 'x'))).toEqual([126, 'x: Not a directory\n'])
+    expect(checked(join(root, 'gone', 'x'))).toEqual([127, 'x: No such file or directory\n'])
+    if (process.getuid?.() === 0) return
+    mkdirSync(join(locked, 'sub'), { recursive: true })
+    chmodSync(locked, 0)
+    expect(checked(join(locked, 'sub', 'x'))).toEqual([126, 'x: Permission denied\n'])
+    expect(checked(join(locked, 'x'))).toEqual([126, 'x: Permission denied\n'])
+  } finally {
+    if (existsSync(locked)) chmodSync(locked, 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 // The folder the line picks with `home` and `spare` for HOME and TMPDIR, under
@@ -230,7 +267,19 @@ const tables: string[] = []
 function guarded(table: string, ...entries: string[]): ReturnType<typeof spawnSync> {
   return spawnSync(
     '/bin/sh',
-    ['-c', MOUNT_GUARD, 'sh', table, ...entries, '--', '/bin/echo', 'ran'],
+    [
+      '-c',
+      MOUNT_GUARD,
+      'sh',
+      '',
+      'command not found',
+      '',
+      table,
+      ...entries,
+      '--',
+      '/bin/echo',
+      'ran',
+    ],
     {
       env: { PATH: '/nowhere' },
       encoding: 'utf8',
@@ -303,6 +352,9 @@ describe('MOUNT_GUARD', () => {
         '-c',
         MOUNT_GUARD,
         'sh',
+        '',
+        'command not found',
+        '',
         tableOf('mirage-x:/data /data fuse.sshfs rw 0 0\n'),
         ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'),
         '--',

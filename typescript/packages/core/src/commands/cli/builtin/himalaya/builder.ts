@@ -15,7 +15,7 @@
 import type { FlagView } from '../../../spec/index.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { materialize } from '../../../../io/types.ts'
-import { Stream } from '../../../../core/email/mime.ts'
+import { parseAddresses } from '../../../../core/email/mime.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 import { SYSTEM_IDS, type IdSource } from '../../../../utils/ids.ts'
 
@@ -67,23 +67,9 @@ export interface Source {
 
 type Mailbox = [string | null, string]
 
-interface MailAddress {
-  name: string | null
-  address: string | null
-}
-
 /** Split an address value into its mailboxes. */
 export function parseMailboxes(value: string): Mailbox[] {
-  const parsed = new Stream(ENC.encode(`${value}\n`)).parseAddress()
-  let entries: MailAddress[] = []
-  if (parsed !== null && typeof parsed === 'object' && 'Address' in parsed) {
-    const address = (
-      parsed as unknown as {
-        Address: { List?: MailAddress[]; Group?: { addresses: MailAddress[] }[] }
-      }
-    ).Address
-    entries = address.List ?? (address.Group ?? []).flatMap((group) => group.addresses)
-  }
+  const entries = parseAddresses(value)
   if (entries.length === 0) throw new Error(`Could not parse address \`${value}\``)
   return entries.map((entry): Mailbox => {
     if (entry.address === null) throw new Error(`Address \`${value}\` has no email`)

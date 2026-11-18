@@ -12,8 +12,8 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, LOWER, NAMEREF, PIPESTATUS, RANDOM, Slot,
-    Store, UPPER, Value, entry_bytes, strip_key_quotes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, LOWER, NAMEREF, PIPESTATUS, RANDOM,
+    SECONDS, Slot, Store, UPPER, Value, entry_bytes, strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -254,16 +254,22 @@ impl<'a> Writer<'a> {
                 }
             }
         }
+        // A `SECONDS` bash takes as an integer evaluates what lands on it
+        // here, once, and the count restarts from the result as it lands;
+        // before that it takes a decimal number alone (`seconds_from`).
+        let counting = self.store.counts_seconds(&name) && self.store.seconds_integer();
         let seeding = match &value {
-            Value::Scalar(word) if self.store.seeds_random(&name) => Some(word),
+            Value::Scalar(word) if self.store.seeds_random(&name) || counting => Some(word),
             _ => None,
         };
+        let mut counted = None;
         if let Some(word) = seeding {
             match self.store.evaluate_integer(&mut coercion, word, None) {
-                Ok(text) => {
+                Ok(text) if name == RANDOM => {
                     let state = parse_decimal::<i64>(&text).unwrap_or(0).rem_euclid(1 << 32) as u32;
                     self.store.seed_random(word.clone(), state);
                 }
+                Ok(text) => counted = Some(text),
                 Err(error) => {
                     self.land_coercion(&mut coercion)?;
                     let subscript = matches!(
@@ -288,6 +294,9 @@ impl<'a> Writer<'a> {
                     };
                 }
             }
+        }
+        if let Some(text) = counted {
+            value = Value::Scalar(text);
         }
         self.store.note_kind(&name, &value);
         self.land_coercion(&mut coercion)?;
@@ -727,13 +736,41 @@ impl<'a> Writer<'a> {
         if self.store.is_readonly(&name, false) {
             return Ok(Element::Readonly);
         }
+        // A `SECONDS` that was read is an integer to bash, so `+=` adds to
+        // the count it reads now; before a read it appends, as below.
+        if append && slot.is_none() && self.store.counts_seconds(&name) && self.store.seconds_read()
+        {
+            let mut coercion = Coercion::default();
+            let added = match self.store.evaluate_integer(&mut coercion, value, None) {
+                Ok(text) => parse_decimal::<i64>(&text).unwrap_or(0),
+                Err(error) => {
+                    self.land_coercion(&mut coercion)?;
+                    return Err(fatal(self.store.voice(), error));
+                }
+            };
+            self.land_coercion(&mut coercion)?;
+            let now = self
+                .store
+                .dynamic(SECONDS)
+                .and_then(|text| parse_decimal::<i64>(&text))
+                .unwrap_or(0);
+            let total = now.saturating_add(added).to_string().into_bytes();
+            self.set(&name, Value::Scalar(total), true, None, None)?;
+            return Ok(Element::Landed);
+        }
         // `x+=v` on a scalar no attribute reshapes grows it in place rather
         // than copying what it holds into a new value each time.
         let plain = self
             .store
             .record(&name)
             .is_some_and(|var| var.attrs & (INTEGER | LOWER | UPPER | NAMEREF) == 0);
-        if append && slot.is_none() && plain && name != PIPESTATUS && name != RANDOM {
+        if append
+            && slot.is_none()
+            && plain
+            && name != PIPESTATUS
+            && name != RANDOM
+            && !self.store.counts_seconds(&name)
+        {
             let held = self.store.record(&name).and_then(|var| var.value.as_ref());
             let before = entry_bytes(&name, held);
             self.check(before, before + value.len())?;
@@ -808,8 +845,18 @@ impl<'a> Writer<'a> {
     }
 
     /// Evaluate `text` when all of it can land. None leaves the session
-    /// as it was, for the host to evaluate it and report what it finds.
+    /// as it was, for the host to evaluate it and report what it finds: a
+    /// `$SECONDS` it read does not make `SECONDS` an integer then.
     pub fn clean_arith(&mut self, text: &[u8]) -> Option<i64> {
+        let read = self.store.seconds_read();
+        let value = self.clean_arith_landed(text);
+        if value.is_none() {
+            self.store.set_seconds_read(read);
+        }
+        value
+    }
+
+    fn clean_arith_landed(&mut self, text: &[u8]) -> Option<i64> {
         let mut draws = Draws::default();
         let outcome = self
             .store
@@ -822,7 +869,7 @@ impl<'a> Writer<'a> {
         let bytes = outcome
             .writes
             .iter()
-            .map(|write| write.name.len() + write.value.len())
+            .map(|write| self.store.target(&write.name).len() + write.value.len())
             .sum();
         if !outcome.writes.iter().all(open) || !self.fits(0, bytes) {
             return None;
@@ -950,6 +997,106 @@ mod tests {
     }
 
     #[test]
+    fn a_seconds_write_restarts_the_count_from_its_value() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar(" 7 "), true, None, None)
+            .unwrap();
+        store.set_clock(11_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"9".to_vec()));
+        writer(&mut store)
+            .set(SECONDS, scalar("2+3"), true, None, None)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"5".to_vec()));
+        writer(&mut store)
+            .set(SECONDS, scalar("abc"), true, None, None)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"0".to_vec()));
+    }
+
+    #[test]
+    fn an_unread_seconds_takes_a_decimal_number_alone() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        store.seed("n", scalar("5"));
+        writer(&mut store)
+            .set(SECONDS, scalar("n++"), true, None, None)
+            .unwrap();
+        assert_eq!(store.scalar("n"), Some(&b"5"[..]));
+        assert_eq!(store.dynamic(SECONDS), Some(b"0".to_vec()));
+    }
+
+    #[test]
+    fn a_read_seconds_evaluates_what_lands_on_it_once() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        store.dynamic(SECONDS);
+        store.seed("n", scalar("5"));
+        writer(&mut store)
+            .set(SECONDS, scalar("n++"), true, None, None)
+            .unwrap();
+        assert_eq!(store.scalar("n"), Some(&b"6"[..]));
+        assert_eq!(store.dynamic(SECONDS), Some(b"5".to_vec()));
+    }
+
+    #[test]
+    fn a_seconds_append_concatenates_and_restarts_the_count() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar("10"), true, None, None)
+            .unwrap();
+        store.set_clock(11_000_000, 1_000_000);
+        writer(&mut store)
+            .element(SECONDS, None, b"5", true)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"105".to_vec()));
+        store.set_clock(12_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"106".to_vec()));
+    }
+
+    #[test]
+    fn a_seconds_append_after_a_read_adds() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar("10"), true, None, None)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
+        writer(&mut store)
+            .element(SECONDS, None, b"2+3", true)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"15".to_vec()));
+    }
+
+    #[test]
+    fn a_declined_expression_leaves_seconds_as_it_was() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        store.set_seconds(10);
+        assert_eq!(writer(&mut store).clean_arith(b"SECONDS=20, 1/0"), None);
+        assert!(!store.seconds_read());
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
+        assert_eq!(
+            writer(&mut store).clean_arith(b"SECONDS=20, SECONDS+1"),
+            Some(21)
+        );
+        assert_eq!(store.dynamic(SECONDS), Some(b"20".to_vec()));
+    }
+
+    #[test]
+    fn an_arithmetic_seconds_write_counts_for_the_reads_after_it() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        let value = writer(&mut store)
+            .arith(b"SECONDS=10, SECONDS+1", false)
+            .unwrap();
+        assert_eq!(value, 11);
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
+    }
+
+    #[test]
     fn an_element_seeding_random_lands_what_it_assigns() {
         let mut store = Store::new(Arc::new(|| 1));
         let seeded = Value::Indexed(Indexed::dense([b"x=1+2".to_vec()]));
@@ -995,6 +1142,24 @@ mod tests {
         assert!(matches!(failed, Err(Fault::Signal(_))));
         assert_eq!(text(&store, "z").as_deref(), Some("4"));
         assert_eq!(text(&store, "w").as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn quick_arithmetic_sizes_a_write_by_the_name_it_lands_on() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.place(
+            "r",
+            Some(Arc::new(Var {
+                value: Some(scalar("long_target")),
+                attrs: NAMEREF,
+                managed: None,
+            })),
+        );
+        let room = store.held() + "x1".len() + "r1".len();
+        let mut writer = writer(&mut store);
+        writer.limit = Some(room);
+        assert_eq!(writer.clean_arith(b"x=1, r=1"), None);
+        assert_eq!(store.scalar("x"), None);
     }
 
     #[test]

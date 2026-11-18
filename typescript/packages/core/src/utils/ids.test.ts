@@ -24,6 +24,7 @@ import {
   type IdSource,
   SeededIdSource,
   SystemIdSource,
+  secureDraw,
   newSessionId,
   newWorkspaceId,
   randomBelow,
@@ -469,4 +470,21 @@ describe('checkName', () => {
       }).toThrow(/^invalid profile name: must be 1/)
     },
   )
+})
+
+describe('secureBytes', () => {
+  it('comes from the platform, or replays a seed', () => {
+    const first = new SystemIdSource().secureBytes(70000)
+    expect(first.length).toBe(70000)
+    expect(first).not.toEqual(new SystemIdSource().secureBytes(70000))
+    expect(new SeededIdSource(7).secureBytes(9)).toEqual(new SeededIdSource(7).secureBytes(9))
+  })
+})
+
+describe('secureDraw', () => {
+  it('replays a seed word for word', () => {
+    expect(secureDraw(new SeededIdSource(5))()).toBe(new SeededIdSource(5).randomU32())
+    const drawn = secureDraw(new SystemIdSource())()
+    expect(drawn >= 0 && drawn < 2 ** 32).toBe(true)
+  })
 })

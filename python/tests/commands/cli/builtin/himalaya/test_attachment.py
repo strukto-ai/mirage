@@ -12,11 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.himalaya.attachment import (
-    attachment_rows,
-    part_payload,
-)
-from mirage.core.email.mime import parse_mime
+from mirage.core.email.mime import parse_attachments
 
 INNER = b"Subject: inner\r\n\r\ninner body"
 RAW = (
@@ -32,9 +28,7 @@ RAW = (
 
 
 def _rows():
-    message = parse_mime(RAW)
-    assert message is not None
-    return attachment_rows(message)
+    return parse_attachments(RAW, payloads=True)
 
 
 def test_a_binary_part_decodes():
@@ -52,5 +46,7 @@ def test_an_attached_message_is_its_own_bytes():
     assert _rows()[1].payload == INNER
 
 
-def test_an_empty_body_has_no_payload():
-    assert part_payload({"Multipart": []}) == b""
+def test_listing_an_attachment_keeps_its_size():
+    row = parse_attachments(RAW, payloads=False)[0]
+    assert row.size == len(b"%PDF")
+    assert row.payload == b""
