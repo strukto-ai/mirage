@@ -56,7 +56,7 @@ AI 에이전트는 터미널에서 일합니다. Mirage는 터미널 인터페�
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="하나의 통합 가상 파일시스템 위의 하나의 가상 터미널: 각 명령은 자신에게 맞는 머신에서 실행되고, 에이전트의 allow, deny, show, hide 규칙을 거치며, 세션, 작업, 명령 로그를 그것들을 위해 고른 백엔드에 보관합니다" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="세 개의 가상 파일시스템(S3, Slack, Google Drive), 세 개의 가상 CLI(gh, linear, deepwiki-mcp), 세 개의 VM(Monty, E2B 샌드박스, EC2 GPU) 위의 Mirage: grep 하나가 세 파일시스템을 모두 검색하고, 세 CLI의 출력이 하나의 grep으로 이어지며, 파이프라인 하나가 각 VM에서 한 단계씩 실행됩니다" width="100%">
   </picture>
 </p>
 
