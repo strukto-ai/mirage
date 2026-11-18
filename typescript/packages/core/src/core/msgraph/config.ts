@@ -25,7 +25,7 @@ const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
 // MsGraphConfig base model. `accessToken` accepts a provider callable as well
 // as a literal, and either way it is marked secret so the redaction machinery
 // keeps it out of snapshot state.
-export const MSGRAPH_CONFIG_SHAPE = {
+export const MsGraphConfig = z.object({
   accessToken: secretSchema(
     z.union([
       z.string(),
@@ -46,28 +46,24 @@ export const MSGRAPH_CONFIG_SHAPE = {
     .describe(
       'Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`.',
     ),
-  timeout: z.number().optional().meta({
+  timeout: z.number().positive('timeout must be positive').optional().meta({
     description:
       'Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed.',
     default: DEFAULT_TIMEOUT,
   }),
-  maxRetries: z.number().optional().meta({
-    description:
-      'Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds.',
-    default: 5,
-  }),
-}
+  maxRetries: z
+    .number()
+    .int()
+    .nonnegative('maxRetries must be a non-negative integer')
+    .optional()
+    .meta({
+      description:
+        'Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds.',
+      default: 5,
+    }),
+})
 
-export interface MsGraphConfig {
-  accessToken: string | (() => string | Promise<string>)
-  tenantHost?: string
-  // Full service root, version segment included, for any deployment other
-  // than the worldwide one: a sovereign cloud, a private endpoint, or a
-  // test server.
-  graphBaseUrl?: string
-  timeout?: number
-  maxRetries?: number
-}
+export type MsGraphConfig = z.input<typeof MsGraphConfig>
 
 export function optionalText(value: string | undefined): string | null {
   const normalized = value?.trim()
@@ -75,18 +71,13 @@ export function optionalText(value: string | undefined): string | null {
 }
 
 export function resolveMsGraphConfig(config: MsGraphConfig) {
-  const timeout = config.timeout ?? DEFAULT_TIMEOUT
-  const maxRetries = config.maxRetries ?? 5
-  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('timeout must be positive')
-  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
-    throw new Error('maxRetries must be a non-negative integer')
-  }
+  const validated = MsGraphConfig.parse(config)
   return {
-    accessToken: config.accessToken,
-    tenantHost: optionalText(config.tenantHost),
-    graphBaseUrl: optionalText(config.graphBaseUrl),
-    timeout,
-    maxRetries,
+    accessToken: validated.accessToken,
+    tenantHost: optionalText(validated.tenantHost),
+    graphBaseUrl: optionalText(validated.graphBaseUrl),
+    timeout: validated.timeout ?? DEFAULT_TIMEOUT,
+    maxRetries: validated.maxRetries ?? 5,
   }
 }
 

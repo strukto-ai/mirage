@@ -13,21 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_request
+
+T = TypeVar("T")
 
 
 async def after_id_pages(
     accessor: DiscordAccessor,
     endpoint: str,
     base_params: dict[str, Any],
-    last_id_fn: Callable[[dict[str, Any]], str],
+    last_id_fn: Callable[[T], str],
     page_size: int = 100,
     start_after: str = "0",
     newest_first: bool = False,
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncIterator[list[T]]:
     """Walk an after-id paginated Discord endpoint.
 
     Used for endpoints that return a flat list and accept `after=<id>` +

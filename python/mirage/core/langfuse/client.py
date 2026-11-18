@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
+from contextlib import aclosing
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
@@ -22,6 +23,7 @@ from langfuse.api.core.api_error import ApiError as SdkError
 from langfuse.api.core.pydantic_utilities import UniversalBaseModel
 
 from mirage.core.api.errors import ApiError
+from mirage.core.api.paginate import cursor_pages
 from mirage.errors.fs import enoent
 
 T = TypeVar("T")
@@ -41,13 +43,17 @@ async def _answer(pending: Awaitable[T]) -> T:
     try:
         return await pending
     except SdkError as exc:
-        body = exc.body
-        message = (
-            str(body["message"])
-            if isinstance(body, dict) and "message" in body
-            else f"Langfuse API error: HTTP {exc.status_code}"
-        )
-        raise LangfuseApiError(message, exc.status_code) from exc
+        raise _langfuse_error(exc) from exc
+
+
+def _langfuse_error(exc: SdkError) -> LangfuseApiError:
+    body = exc.body
+    message = (
+        str(body["message"])
+        if isinstance(body, dict) and "message" in body
+        else f"Langfuse API error: HTTP {exc.status_code}"
+    )
+    return LangfuseApiError(message, exc.status_code)
 
 
 async def fetch_or_enoent(pending: Awaitable[T], virtual: str) -> T:
@@ -122,15 +128,29 @@ async def _collect(
     **kwargs: Any,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    cursor: str | None = None
-    while limit is None or len(out) < limit:
+    if limit is not None and limit <= 0:
+        return out
+
+    async def fetch(cursor: str | None) -> dict[str, Any]:
         size = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - len(out))
         result = await _answer(page(limit=size, cursor=cursor, **kwargs))
-        out.extend(_to_dict(row) for row in result.data)
-        cursor = result.meta.cursor
-        if not result.data or not cursor:
-            break
+        return {
+            "results": _get_data(result.data),
+            "next_cursor": result.meta.cursor,
+            "has_more": bool(result.data),
+        }
+
+    async with aclosing(cursor_pages(fetch)) as pages:
+        async for rows in pages:
+            if limit is not None and len(out) + len(rows) >= limit:
+                out.extend(rows[: limit - len(out)])
+                break
+            out.extend(rows)
     return out
+
+
+def _get_data(rows: Iterable[UniversalBaseModel]) -> list[dict[str, Any]]:
+    return [_to_dict(row) for row in rows]
 
 
 async def fetch_traces(
@@ -223,7 +243,7 @@ async def fetch_sessions(
 
 async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await _answer(api.prompts.list())
-    return [_to_dict(p) for p in result.data]
+    return _get_data(result.data)
 
 
 async def fetch_prompt(
@@ -240,7 +260,7 @@ async def fetch_prompt(
 
 async def fetch_datasets(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await _answer(api.datasets.list())
-    return [_to_dict(d) for d in result.data]
+    return _get_data(result.data)
 
 
 async def fetch_dataset_items(
@@ -251,7 +271,7 @@ async def fetch_dataset_items(
     result = await _answer(
         api.dataset_items.list(dataset_name=dataset_name, limit=limit)
     )
-    return [_to_dict(item) for item in result.data]
+    return _get_data(result.data)
 
 
 async def fetch_dataset_runs(

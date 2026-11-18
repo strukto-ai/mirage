@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { setProgramInvocation } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
 import { Limit, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -27,7 +27,7 @@ const DEC = new TextDecoder()
 
 async function programPrintf(args: string[]): Promise<[string | null, string, number]> {
   const session = new SessionState({ sessionId: 's1' })
-  const [out, io, node] = await runAsProgram(session, () => handlePrintf(args, session))
+  const [out, io, node] = await setProgramInvocation(session, () => handlePrintf(args, session))
   const text = out === null ? null : DEC.decode(await materialize(out))
   expect(io.exitCode).toBe(node.exitCode)
   return [text, DEC.decode(await materialize(io.stderr)), node.exitCode]

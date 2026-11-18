@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
+import { TimeoutConfig } from '@struktoai/mirage-core/core/api/config'
+import { normalizeKeyPrefix } from '@struktoai/mirage-core/utils/key_prefix'
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { parseConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
 export const GridFSConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   uri: secretStr().describe('MongoDB connection URI.'),
   database: z.string().describe('Database that holds the GridFS bucket.'),
   bucket: z.string().optional().meta({
@@ -31,6 +31,7 @@ export const GridFSConfig = z.object({
     .describe('Filename prefix the mount treats as its root; files outside it are not listed.'),
   chunkSizeBytes: z
     .number()
+    .int()
     .optional()
     .describe(
       "Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB.",

@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { enoent } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -218,7 +218,7 @@ describe('a mount that keeps its VFS listings', () => {
     store.add('d')
     const ws = workspace(store)
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
           '/f/a.txt',
           '/f/d',
@@ -255,7 +255,7 @@ describe('a mount that keeps its VFS listings', () => {
     const store = new Folders()
     const ws = workspace(store)
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await ws.dispatch('mkdir', '/f/a/b/c', [], { parents: true })
         const byName = new Map([...store.nodes].map(([id, node]) => [node.name, { id, node }]))
         expect(byName.get('a')?.node.parent).toBe('root')
@@ -282,7 +282,7 @@ describe('a mount that keeps its VFS listings', () => {
     store.add('old.txt', 'root', ENC.encode('o'))
     const ws = workspace(store)
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await ws.dispatch('readdir', '/f')
         await ws.dispatch('write', '/f/new.txt', [ENC.encode('n')])
         expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
@@ -899,7 +899,7 @@ it.each(['scratch', 'retired', 'live'])(
     }
     const index = kind === 'scratch' ? new ListingCheckStore() : mount.index
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await mount.call('stat', '/k/new', [], { index })
         expect(manager.probedStat(PathSpec.fromStrPath('/k/new')) !== null).toBe(kind === 'live')
       })
@@ -923,7 +923,7 @@ it('a retired beyond stat does not note a probe', async () => {
     return row
   }
   try {
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       expect(await ws.vfs.read('/k/new')).toEqual(ENC.encode('present'))
       expect(manager.probedStat(PathSpec.fromStrPath('/k/new'))).toBe(null)
     })

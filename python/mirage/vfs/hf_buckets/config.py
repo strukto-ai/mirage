@@ -20,6 +20,13 @@ from mirage.utils import key_prefix as kp
 HF_ENDPOINT = "https://huggingface.co"
 
 
+def assert_hf_repo_id(v: str) -> str:
+    parts = v.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(f"bucket must be in 'namespace/name' form; got {v!r}")
+    return v
+
+
 class HfBucketsConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -33,20 +40,30 @@ class HfBucketsConfig(TimeoutConfig):
     """Path inside the bucket that becomes the mount root; files outside it
     are not listed."""
 
-    @field_validator("bucket")
-    @classmethod
-    def _validate_bucket(cls, v: str) -> str:
-        parts = v.split("/")
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            raise ValueError(
-                f"bucket must be in 'namespace/name' form; got {v!r}"
-            )
-        return v
+    _assert_hf_repo_id = field_validator("bucket")(assert_hf_repo_id)
 
-    @field_validator("key_prefix")
-    @classmethod
-    def _normalize_key_prefix(cls, v: str | None) -> str | None:
-        return kp.normalize(v) or None
+    _normalize_key_prefix = field_validator("key_prefix")(
+        kp.normalize_key_prefix
+    )
+
+
+def assert_hf_repo_ref(v: str) -> str:
+    """Either spelling the Hub itself accepts.
+
+    A repo id is ``namespace/name`` or a bare ``name``, and the
+    second resolves against whoever the token belongs to. That is
+    not a convenience: ``hf repo create widget`` followed by
+    ``hf download widget`` is what the real CLI produces, and
+    refusing the bare form made mirage reject an id the Hub had
+    just minted. What is refused is a shape the Hub has no reading
+    for: an empty segment, or more than one slash.
+    """
+    parts = v.split("/")
+    if len(parts) > 2 or any(not part for part in parts):
+        raise ValueError(
+            f"repo_id must be 'name' or 'namespace/name'; got {v!r}"
+        )
+    return v
 
 
 class HfRepoConfig(TimeoutConfig):
@@ -78,27 +95,8 @@ class HfRepoConfig(TimeoutConfig):
     50 entries per request instead of 1000. Unset does so only when the
     whole repository fits in one page."""
 
-    @field_validator("repo_id")
-    @classmethod
-    def _validate_repo_id(cls, v: str) -> str:
-        """Either spelling the Hub itself accepts.
+    _assert_hf_repo_ref = field_validator("repo_id")(assert_hf_repo_ref)
 
-        A repo id is ``namespace/name`` or a bare ``name``, and the
-        second resolves against whoever the token belongs to. That is
-        not a convenience: ``hf repo create widget`` followed by
-        ``hf download widget`` is what the real CLI produces, and
-        refusing the bare form made mirage reject an id the Hub had
-        just minted. What is refused is a shape the Hub has no reading
-        for: an empty segment, or more than one slash.
-        """
-        parts = v.split("/")
-        if len(parts) > 2 or any(not part for part in parts):
-            raise ValueError(
-                f"repo_id must be 'name' or 'namespace/name'; got {v!r}"
-            )
-        return v
-
-    @field_validator("key_prefix")
-    @classmethod
-    def _normalize_key_prefix(cls, v: str | None) -> str | None:
-        return kp.normalize(v) or None
+    _normalize_key_prefix = field_validator("key_prefix")(
+        kp.normalize_key_prefix
+    )

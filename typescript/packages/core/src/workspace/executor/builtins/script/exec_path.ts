@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { setProgramInvocation } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -148,7 +148,7 @@ export async function handleExecPath(
     context = childContext(context)
     session = context.session
 
-    return await runAsProgram(session, () =>
+    return await setProgramInvocation(session, () =>
       handleCommandBuiltin(
         (command, opts) => executeFn(command, { ...opts, context }),
         ['--', name, ...args],

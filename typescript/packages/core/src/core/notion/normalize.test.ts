@@ -13,37 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { extractTitle, normalizePage, pageSegmentName } from './normalize.ts'
+import { plainTextOf, normalizePage, pageSegmentName } from './normalize.ts'
 
-describe('extractTitle', () => {
-  it('joins title.title plain_text fragments', () => {
-    const page = {
-      properties: {
-        title: {
-          title: [{ plain_text: 'Hello' }, { plain_text: ' World' }],
-        },
-      },
-    }
-    expect(extractTitle(page)).toBe('Hello World')
-  })
-
-  it('falls back to properties.Name.title for database rows', () => {
-    const page = {
-      properties: {
-        Name: {
-          title: [{ plain_text: 'Row A' }],
-        },
-      },
-    }
-    expect(extractTitle(page)).toBe('Row A')
-  })
-
-  it('returns "untitled" when properties is empty', () => {
-    expect(extractTitle({ properties: {} })).toBe('untitled')
-  })
-
-  it('returns "untitled" when properties is missing', () => {
-    expect(extractTitle({})).toBe('untitled')
+describe('plainTextOf', () => {
+  it('joins text fragments and skips malformed values', () => {
+    expect(
+      plainTextOf([{ plain_text: 'Hello' }, null, { plain_text: 3 }, { plain_text: ' World' }]),
+    ).toBe('Hello World')
+    expect(plainTextOf(null)).toBe('')
   })
 })
 

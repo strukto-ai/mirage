@@ -20,10 +20,10 @@ import { parseTree, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
+import { modeType, S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
 import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isDirectoryAttrs, isNoSuchFile, isPermissionDenied } from './utils.ts'
+import { isNoSuchFile, isPermissionDenied } from './utils.ts'
 
 const FIND_TYPES: Readonly<Record<string, number>> = { d: S_IFDIR, f: S_IFREG }
 
@@ -53,25 +53,14 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
   // also the fingerprint: without one, a `read: fresh` mount has
   // nothing to compare and keeps serving a cached copy that the server has
   // already replaced. Mirrors the python stat.
-  if (isDirectoryAttrs(attrs)) {
-    return new FileStat({
-      name,
-      size: null,
-      modified,
-      fingerprint: modified,
-      type: FileType.DIRECTORY,
-      mode,
-      atime,
-      extra,
-    })
-  }
+  const type = modeType(attrs.mode) ?? FileType.FILE
   return new FileStat({
     name,
-    size: attrs.size ?? null,
+    size: type === FileType.DIRECTORY ? null : (attrs.size ?? null),
     modified,
     fingerprint: modified,
-    type: FileType.FILE,
-    content: contentTypeForPath(name),
+    type,
+    content: type === FileType.FILE ? contentTypeForPath(name) : null,
     mode,
     atime,
     extra,

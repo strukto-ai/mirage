@@ -16,7 +16,7 @@
 // python/tests/workspace/node/test_declaration.py.
 
 import { describe, expect, it } from 'vitest'
-import { runExplaining } from '../../context/session_context.ts'
+import { setExplaining } from '../../context/session_context.ts'
 import { DryRun } from '../../policy/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
@@ -31,7 +31,7 @@ describe('executeDeclaration', () => {
   it('changes only its copy on a deciding line', async () => {
     const ws = makeWs()
     await ws.shell('HELD=1; A=(x y); kept() { :; }')
-    const io = await runExplaining(DryRun.DECIDING, () =>
+    const io = await setExplaining(DryRun.DECIDING, () =>
       ws.shell(
         "export E=1; readonly R=1; declare D=1; Y=1; let L=1; ((F=1)); unset HELD 'A[0]'; " +
           'unset -f kept; eval \'V=1\'; echo "$E$R$D$Y$L$F${G:=1}$V${HELD-h}"; declare -F kept',

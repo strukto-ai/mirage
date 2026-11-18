@@ -17,9 +17,11 @@ import base64
 import codecs
 import io
 import shlex
+import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import e2b
 import pytest
 from e2b import (
     CommandExitException,
@@ -44,7 +46,7 @@ from mirage.machine.constants import (
     stop_line,
     wrap_line,
 )
-from mirage.machine.e2b import E2BConfig, E2BMachine, sdk
+from mirage.machine.e2b import E2BConfig, E2BMachine
 from mirage.machine.e2b import handle as e2b_handle
 from mirage.machine.e2b.constants import (
     BUSY_TIMEOUT_SECONDS,
@@ -290,7 +292,7 @@ def fake_sdk(monkeypatch):
     FakeMachine.timeouts = []
     FakeMachine.timeout_refusal = None
     FakeMachine.kill_refusal = None
-    monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
+    monkeypatch.setattr(e2b, "AsyncSandbox", FakeMachine)
 
 
 @pytest.mark.asyncio
@@ -446,13 +448,14 @@ async def test_nested_and_concurrent_work_sets_the_timeouts_once():
 
 
 @pytest.mark.asyncio
-async def test_the_idle_timeout_comes_from_the_config():
-    machine = _startable(MapMemory(), idle_timeout=30)
+@pytest.mark.parametrize(("configured", "seconds"), [(30, 30), (0.5, 1)])
+async def test_the_idle_timeout_comes_from_the_config(configured, seconds):
+    machine = _startable(MapMemory(), idle_timeout=configured)
     await machine.connect()
     async with machine._at_work():
         pass
     await _settled()
-    assert FakeMachine.timeouts[-1] == ("sb-new-1", 30)
+    assert FakeMachine.timeouts[-1] == ("sb-new-1", seconds)
 
 
 @pytest.mark.asyncio
@@ -815,7 +818,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
-    monkeypatch.setattr(sdk, "AsyncSandbox", None)
+    monkeypatch.setitem(sys.modules, "e2b", None)
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     with pytest.raises(ImportError, match=r"mirage-ai\[e2b\]"):
         await runtime.connect()
@@ -993,7 +996,9 @@ class MountingE2BMachine(E2BMachine):
         return RunAnswer(0, stdout.encode())
 
     async def open_pipe(self, command):
-        source, prefix = shlex.split(command)[5:7]
+        words = shlex.split(command)
+        at = words.index("exec")
+        source, prefix = words[at + 5 : at + 7]
         self.table[prefix] = (source, "fuse.sshfs")
         self.pipes.append(prefix)
         requests = asyncio.StreamReader()
@@ -1334,7 +1339,7 @@ def test_on_pause_takes_only_pause():
 @pytest.mark.asyncio
 async def test_a_sandbox_already_gone_counts_as_paused():
     machine = await _reached(on_pause="pause")
-    FakeMachine.pause_refusal = sdk.SandboxNotFoundException("gone")
+    FakeMachine.pause_refusal = SandboxNotFoundException("gone")
     await machine.pause()
 
 

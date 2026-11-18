@@ -15,11 +15,8 @@
 import { PostgresAccessor } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver } from '@struktoai/mirage-core/core/postgres/_driver'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { PostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
-import {
-  redactPostgresConfig,
-  resolvePostgresConfig,
-} from '@struktoai/mirage-core/vfs/postgres/config'
+import { PostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
+import { redactedConfigDump, type RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
   PostgresVFS as CorePostgresVFS,
   VFS_MD,
@@ -38,7 +35,7 @@ export class PostgresVFS extends CorePostgresVFS {
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override vfsMd: string
-  readonly config: ReturnType<typeof resolvePostgresConfig>
+  readonly config: ReturnType<typeof PostgresConfig.parse>
   readonly driver: PgDriver
   override readonly accessor: PostgresAccessor
 
@@ -46,18 +43,18 @@ export class PostgresVFS extends CorePostgresVFS {
     super()
     const { config, prefix, driver } =
       'config' in options ? options : { config: options, prefix: undefined, driver: undefined }
-    this.config = resolvePostgresConfig(config)
+    this.config = PostgresConfig.parse(config)
     this.driver = driver ?? new NeonPgDriver(this.config.dsn, this.config.timeout)
     this.accessor = new PostgresAccessor(this.driver, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactPostgresConfig>> & {
+  override getState(): ConfigState<RedactedSchema<typeof PostgresConfig>> & {
     needs_override: true
   } {
     return {
       type: this.name,
-      config: redactPostgresConfig(this.config),
+      config: redactedConfigDump(PostgresConfig, this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

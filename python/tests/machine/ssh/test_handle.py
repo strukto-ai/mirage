@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import sys
 from pathlib import Path
 
 import asyncssh
@@ -25,7 +26,7 @@ from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
-from mirage.machine.ssh import SSHMachine, sdk
+from mirage.machine.ssh import SSHMachine
 from mirage.runtime.binding import answer_of
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import PathSpec
@@ -133,7 +134,7 @@ def test_connect_kwargs_defaults_stay_out():
 
 @pytest.mark.asyncio
 async def test_connect_requires_asyncssh(monkeypatch):
-    monkeypatch.setattr(sdk, "connect", None)
+    monkeypatch.setitem(sys.modules, "asyncssh", None)
     runtime = SSHMachine("box", config={"host": "box"})
     with pytest.raises(ImportError, match=r"mirage-ai\[ssh\]"):
         await runtime.connect()
@@ -148,7 +149,7 @@ async def test_connect_opens_one_reused_connection(monkeypatch):
         seen.update(kwargs)
         return conn
 
-    monkeypatch.setattr(sdk, "connect", fake_connect)
+    monkeypatch.setattr(asyncssh, "connect", fake_connect)
     runtime = SSHMachine("box", config={"host": "box"})
     await runtime.connect()
     assert seen["host"] == "box"
@@ -502,7 +503,7 @@ async def test_dropped_connection_reconnects_before_next_command(monkeypatch):
         connections.append(conn)
         return conn
 
-    monkeypatch.setattr(sdk, "connect", connect)
+    monkeypatch.setattr(asyncssh, "connect", connect)
     runtime = FakeSSHMachine(config={"host": "box"})
     await _line(runtime, "true")
     await _line(runtime, "true")
@@ -529,7 +530,7 @@ async def _fake_connect(**kwargs):
 async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
     monkeypatch, profile
 ):
-    monkeypatch.setattr(sdk, "connect", _fake_connect)
+    monkeypatch.setattr(asyncssh, "connect", _fake_connect)
     runtime = FakeSSHMachine(config={"host": "box"})
     ws = Workspace(
         {"/data": SSHVFS(SSHConfig(host="box"))},

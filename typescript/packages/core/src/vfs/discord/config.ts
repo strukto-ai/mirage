@@ -1,5 +1,5 @@
 import { DiscordConfig as DiscordCredentialsSchema } from '../../core/discord/config.ts'
-import { orderedTimes, timeRangeOrderError, timeRangeShape } from '../../core/time_config.ts'
+import { TimeRangeConfig } from '../../core/time_config.ts'
 import type { ConfigOf } from '../secrets.ts'
 
 /**
@@ -7,8 +7,6 @@ import type { ConfigOf } from '../secrets.ts'
  * keeps the credentials schema, so installing it with start_time/end_time
  * is refused rather than accepted and never applied.
  */
-export const DiscordConfig = DiscordCredentialsSchema.extend({
-  ...timeRangeShape,
-}).refine(orderedTimes, timeRangeOrderError)
+export const DiscordConfig = TimeRangeConfig.safeExtend({ ...DiscordCredentialsSchema.shape })
 
 export type DiscordConfig = ConfigOf<typeof DiscordConfig>

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 
 from mirage.accessor.base import SessionAccessor
-from mirage.core.msgraph.config import MsGraphConfig
+from mirage.core.msgraph.config import MsGraphConfig, optional_text
 
 DRIVE_TARGETS = ("drive_id", "site_id", "group_id", "user_id")
 
@@ -35,6 +35,11 @@ class OneDriveConfig(MsGraphConfig):
     """User ID or UPN whose drive the mount uses, under app-only auth."""
     key_prefix: str | None = None
     """Folder path from the drive root that the mount uses as its root."""
+
+    @field_validator("drive_id", "site_id", "group_id", "user_id")
+    @classmethod
+    def _v_drive_target(cls, value: str | None) -> str | None:
+        return optional_text(value)
 
     @model_validator(mode="after")
     def _one_drive_target(self) -> "OneDriveConfig":

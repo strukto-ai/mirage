@@ -60,7 +60,7 @@ export interface Zone {
 }
 
 const HOUR = 3600
-const DAY_MS = 86_400_000
+export const DAY_MS = 86_400_000
 
 // Character classes of a POSIX TZ string, ASCII only as in the C locale:
 // `ÄBC5` has no name GNU accepts.
@@ -158,11 +158,9 @@ export function tzAbbreviation(name: string, offsetSec: number, atSec: number): 
  * tzAbbreviation for its `%Z`, so `Asia/Hong_Kong` renders `HKT` here as
  * it does under GNU date and in the Python twin.
  */
-class IntlZone implements Zone {
-  private readonly format: Intl.DateTimeFormat
-
+export class IntlZone extends Intl.DateTimeFormat implements Zone {
   constructor(private readonly name: string) {
-    this.format = new Intl.DateTimeFormat('en-US', {
+    super('en-US', {
       timeZone: name,
       hourCycle: 'h23',
       year: 'numeric',
@@ -176,7 +174,7 @@ class IntlZone implements Zone {
 
   parts(dt: Date): ZoneParts {
     const fields: Record<string, string> = {}
-    for (const part of this.format.formatToParts(dt)) fields[part.type] = part.value
+    for (const part of this.formatToParts(dt)) fields[part.type] = part.value
     const wall: WallParts = {
       year: Number(fields.year),
       month: Number(fields.month) - 1,

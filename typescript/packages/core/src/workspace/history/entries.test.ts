@@ -52,3 +52,104 @@ describe('historyEntries', () => {
     expect(entries(input)).toEqual(expected)
   })
 })
+
+it.each([
+  [
+    'cat <<A <<B\na\nA\nb\nB\necho z\n',
+    [
+      { text: 'cat <<A <<B\na\nA\nb\nB\n', at: 0 },
+      { text: 'echo z', at: 20 },
+    ],
+  ],
+  [
+    'X=$(cat <<A\na\nA\n)\ncat <<B\nb\nB\n',
+    [
+      { text: 'X=$(cat <<A\na\nA\n\n)', at: 0 },
+      { text: 'cat <<B\nb\nB\n', at: 18 },
+    ],
+  ],
+  [
+    'echo ok\ncat <<A; (\n',
+    [
+      { text: 'echo ok', at: 0 },
+      { text: 'cat <<A; (', at: 8 },
+    ],
+  ],
+  ['if true; then\necho z\n', [{ text: 'if true; then\necho z', at: 0 }]],
+])('preserves entry positions for %j', (source, expected) => {
+  const scope = new ParseScope()
+  try {
+    expect(historyEntries(scope.parse(source))).toEqual(expected)
+  } finally {
+    scope.release()
+  }
+})
+
+it('uses the last logical predecessor in a nonmonotone continuation map', () => {
+  const word: TSNodeLike = {
+    type: 'string',
+    text: '',
+    startIndex: 1,
+    endIndex: 4,
+    children: [],
+    namedChildren: [],
+    isNamed: true,
+  }
+  const command: TSNodeLike = {
+    type: 'command',
+    text: '',
+    startIndex: 0,
+    endIndex: 4,
+    children: [word],
+    namedChildren: [word],
+    isNamed: true,
+  }
+  const root: TSNodeLike = {
+    type: 'program',
+    text: 'abc\n',
+    sourceText: 'a\\\nb\\\nc\n',
+    offsets: [0, 6, 1, 7, 8],
+    startIndex: 0,
+    children: [command],
+    namedChildren: [command],
+  }
+  expect(historyEntries(root)).toEqual([{ text: 'ab\\\nc', at: 0 }])
+})
+
+it.each(['word', '|'])('keeps the later leaf on a predecessor tie ending in %j', (last) => {
+  const leaves: TSNodeLike[] = (last === 'word' ? ['|', 'word'] : ['word', '|']).map((type) => ({
+    type,
+    text: '',
+    startIndex: 0,
+    endIndex: 1,
+    children: [],
+    namedChildren: [],
+    isNamed: type === 'word',
+  }))
+  leaves.push({
+    type: 'word',
+    text: '',
+    startIndex: 2,
+    endIndex: 3,
+    children: [],
+    namedChildren: [],
+    isNamed: true,
+  })
+  const command: TSNodeLike = {
+    type: 'command',
+    text: '',
+    startIndex: 0,
+    endIndex: 3,
+    children: leaves,
+    namedChildren: leaves,
+    isNamed: true,
+  }
+  const root: TSNodeLike = {
+    type: 'program',
+    text: 'a\nb\n',
+    startIndex: 0,
+    children: [command],
+    namedChildren: [command],
+  }
+  expect(historyEntries(root)).toEqual([{ text: last === 'word' ? 'a; b' : 'a b', at: 0 }])
+})

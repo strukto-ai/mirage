@@ -40,6 +40,15 @@ describe('loadOptionalPeer', () => {
     )
   })
 
+  it.each([
+    ["Cannot find package 'other' imported from /peer/index.js", 'ERR_MODULE_NOT_FOUND'],
+    ["Cannot find module './binding.js'\nRequire stack: /peer/index.cjs", 'MODULE_NOT_FOUND'],
+  ])('preserves a missing dependency inside the installed peer', async (message, code) => {
+    const err = withCode(message, code)
+    const load = loadOptionalPeer(() => Promise.reject(err), { ...CONFIG, systemHint: HINT })
+    await expect(load).rejects.toBe(err)
+  })
+
   // A native peer dlopens its system library while it loads, so the driver
   // being absent is a load failure, not a resolution failure. Reporting
   // "install the package" there sends the reader after the wrong thing.

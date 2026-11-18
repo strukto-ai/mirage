@@ -12,6 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncssh
+
+from mirage.types import FileType
+
+SFTP_TYPES = {
+    FileType.FILE: asyncssh.FILEXFER_TYPE_REGULAR,
+    FileType.DIRECTORY: asyncssh.FILEXFER_TYPE_DIRECTORY,
+    FileType.SYMLINK: asyncssh.FILEXFER_TYPE_SYMLINK,
+    FileType.CHAR_DEVICE: asyncssh.FILEXFER_TYPE_CHAR_DEVICE,
+    FileType.BLOCK_DEVICE: asyncssh.FILEXFER_TYPE_BLOCK_DEVICE,
+    FileType.SOCKET: asyncssh.FILEXFER_TYPE_SOCKET,
+    FileType.FIFO: asyncssh.FILEXFER_TYPE_FIFO,
+}
+SFTP_KINDS = {value: kind for kind, value in SFTP_TYPES.items()}
+
 SCOPE_ERROR = 5000
 
 # SFTP open flags: write, creating a missing file and truncating none.

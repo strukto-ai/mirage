@@ -20,14 +20,20 @@ export interface ColumnInfo {
   nullable: boolean
 }
 
+interface ColumnReference {
+  schema: string
+  table: string
+  columns: string[]
+}
+
 export interface ForeignKey {
   columns: string[]
-  references: { schema: string; table: string; columns: string[] }
+  references: ColumnReference
 }
 
 export interface Relationship {
-  from: { schema: string; table: string; columns: string[] }
-  to: { schema: string; table: string; columns: string[] }
+  from: ColumnReference
+  to: ColumnReference
   kind: 'many_to_one'
 }
 
@@ -120,8 +126,8 @@ export async function estimateSize(
   let plan: unknown = Object.values(result.rows[0] ?? {})[0]
   if (typeof plan === 'string') plan = JSON.parse(plan)
   const top = (plan as { Plan: Record<string, unknown> }[])[0]?.Plan ?? {}
-  const rows = Number(top['Plan Rows'] ?? 0) | 0
-  const width = Number(top['Plan Width'] ?? 0) | 0
+  const rows = Number(top['Plan Rows'] ?? 0)
+  const width = Number(top['Plan Width'] ?? 0)
   return [rows, width]
 }
 

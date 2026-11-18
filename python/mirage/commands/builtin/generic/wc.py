@@ -2,7 +2,7 @@ import inspect
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, TypeAlias
 
 from mirage.commands.builtin.utils.files0 import listed_names
 from mirage.commands.builtin.utils.operands import at_offsets
@@ -85,6 +85,9 @@ class WCCounts:
         self.chars += other.chars
         if other.max_line_length > self.max_line_length:
             self.max_line_length = other.max_line_length
+
+
+WCRow: TypeAlias = tuple[WCCounts, str | None]
 
 
 async def wc(
@@ -170,7 +173,7 @@ def number_width(sizes: list[int | None], operands: int, counts: int) -> int:
 
 
 def format_wc_lines(
-    rows: list[tuple[WCCounts, str | None]],
+    rows: list[WCRow],
     *,
     lines: bool = False,
     words: bool = False,
@@ -209,7 +212,7 @@ def format_wc_lines(
 
 
 def format_count_rows(
-    rows: list[tuple[WCCounts, str | None]],
+    rows: list[WCRow],
     totals: WCCounts,
     operand_count: int,
     flags: WCFlags,
@@ -221,7 +224,7 @@ def format_count_rows(
 
 
 def count_lines(
-    rows: list[tuple[WCCounts, str | None]],
+    rows: list[WCRow],
     totals: WCCounts,
     operand_count: int,
     flags: WCFlags,
@@ -231,7 +234,7 @@ def count_lines(
     total, without terminators.
 
     Args:
-        rows (list[tuple[WCCounts, str | None]]): each row and its name.
+        rows (list[WCRow]): each row and its name.
         totals (WCCounts): the summed counts.
         operand_count (int): how many operands the line named.
         flags (WCFlags): the parsed flags.
@@ -340,7 +343,7 @@ async def format_multi(
         max_line_length=max_line_length,
         total=total,
     )
-    rows: list[tuple[WCCounts, str | None]] = []
+    rows: list[WCRow] = []
     named: list[tuple[PathSpec, int]] = []
     sizes: list[int | None] = []
     totals = WCCounts()
@@ -575,7 +578,7 @@ async def wc_generic(
         )
         line = " ".join(str(value) for value in values) + "\n"
         return encode_text(line), IOResult()
-    rows: list[tuple[WCCounts, str | None]] = [(counts, None)]
+    rows: list[WCRow] = [(counts, None)]
     if parsed.total == "always":
         rows.append((counts, "total"))
     rendered = format_wc_lines(

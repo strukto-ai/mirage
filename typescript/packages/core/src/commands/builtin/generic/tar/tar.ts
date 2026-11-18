@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
+import { sessionUmask } from '../../../../context/session_context.ts'
 import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
 import { type ByteSource, IOResult, materialize } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
@@ -533,6 +534,7 @@ export async function tarGeneric(
       wildcards: flags.wildcards,
       unanchored: flags.unanchored,
       preserve: flags.preserve,
+      umask: ctx.vfs === undefined ? null : sessionUmask(ctx.session?.access()),
       to_stdout: flags.toStdout,
       base: byteView(rstripSlash(extractDest(directories.at(-1) ?? null, ctx.cwd.virtual))),
       refusal: refusal.map((line) => byteView(line)),

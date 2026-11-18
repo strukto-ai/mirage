@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.usage import usage_hint
+from mirage.context.session_context import session_access
 from mirage.shell.bytes import encode_text
 from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import path_visible
@@ -99,9 +100,10 @@ async def handle_mount(
     if fl.as_str("options") is not None or any(map(fl.as_bool, MOUNTING)):
         return fail("mount", BAD_USAGE)
     types = fl.as_str("types")
+    access = session_access(session)
     lines = [
         f"{m.vfs.name} on {m.prefix.rstrip('/') or '/'} type {m.vfs.name} "
-        f"({MODE_OPTIONS[m.effective_mode()]})\n"
+        f"({MODE_OPTIONS[m.effective_mode(access)]})\n"
         for m in sorted(registry.visible_mounts(), key=lambda m: m.prefix)
         if m.prefix not in UNLISTED_MOUNTS
         and path_visible(session.visibility, m.prefix.rstrip("/") or "/")

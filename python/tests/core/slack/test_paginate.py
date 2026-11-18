@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.api.errors import PaginationStalledError
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
 
@@ -73,3 +74,22 @@ async def test_cursor_pages_propagates_cancellation():
         await gen.aclose()
     assert first == [1]
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_cursor_fails_without_a_third_request():
+    reply = {
+        "ok": True,
+        "members": [],
+        "response_metadata": {"next_cursor": "loop"},
+    }
+    async with SlackAccessor(SlackConfig(token="t")) as accessor:
+        with patch(
+            "mirage.core.slack.paginate.slack_get", side_effect=[reply, reply]
+        ) as get:
+            with pytest.raises(PaginationStalledError, match="loop"):
+                async for _ in cursor_pages(
+                    accessor, "users.list", {}, "members"
+                ):
+                    pass
+    assert get.await_count == 2

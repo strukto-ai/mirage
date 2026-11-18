@@ -120,7 +120,7 @@ export function failure(reply: RouteReply, err: unknown): RouteReply {
  * bytes as they are pulled, over HTTP only, where the body can carry them
  * raw. Mirrors Python's `vfs_route`.
  */
-export function registerVfsRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

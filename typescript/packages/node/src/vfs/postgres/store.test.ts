@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
+import { PostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { PostgresStore } from '@struktoai/mirage-core/vfs/postgres/store'
 
@@ -64,13 +64,13 @@ describe('PostgresStore', () => {
   })
 
   it('does not create a pool until first query', () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     void store
     expect(PoolCtor).not.toHaveBeenCalled()
   })
 
   it('lazily creates a single pool with read-only server option', async () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     await store.query('SELECT 1')
     await store.query('SELECT 2')
     expect(PoolCtor).toHaveBeenCalledTimes(1)
@@ -82,7 +82,7 @@ describe('PostgresStore', () => {
   })
 
   it('reads a date or time type as its text and leaves others to pg', async () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     await store.query('SELECT 1')
     const parsers = PoolCtor.mock.calls[0]?.[0].types as typeof types
     expect(parsers.getTypeParser(1184)('2026-01-01 00:00:00.000001+00')).toBe(
@@ -93,7 +93,7 @@ describe('PostgresStore', () => {
   })
 
   it('listens for an idle connection error, which would otherwise end the process', async () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     await store.query('SELECT 1')
     const call = pools[0]?.on.mock.calls.find(([event]) => event === 'error')
     expect(typeof call?.[1]).toBe('function')
@@ -103,7 +103,7 @@ describe('PostgresStore', () => {
   })
 
   it('forwards SQL and params to pg.Pool.query', async () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     const result = await store.query('SELECT $1::int AS x', [42])
     expect(result.rows).toEqual([{ x: 1 }])
     expect(result.rowCount).toBe(1)
@@ -111,7 +111,7 @@ describe('PostgresStore', () => {
   })
 
   it('calls end() on close and resets the pool', async () => {
-    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    const store = new PostgresStore(PostgresConfig.parse({ dsn: 'postgres://localhost/db' }))
     await store.query('SELECT 1')
     await store.close()
     expect(pools[0]?.end).toHaveBeenCalledTimes(1)

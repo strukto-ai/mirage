@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import type { ConfigOf } from '../secrets.ts'
 import { secretStr, z } from '../secrets.ts'
 
 export const LangfuseConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   publicKey: z.string().describe('Langfuse project public key.'),
   secretKey: secretStr().describe('Langfuse project secret key.'),
   host: z.string().optional().meta({

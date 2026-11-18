@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -101,7 +101,7 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
       expect(io.exitCode, `${line}: ${new TextDecoder().decode(io.stderr)}`).toBe(0)
     }
     const shell = ws.records.slice(start)
-    const [, block] = await runWithRecording(async () => {
+    const [, block] = await recordingScope(async () => {
       await ws.dispatch('create', C)
       await ws.dispatch('append', C, [new TextEncoder().encode('q')])
     })
@@ -279,7 +279,7 @@ async function sweep(vfs: BaseVFS, setup: string | null): Promise<Swept> {
       if (line === `cat ${K}`) catRecords = ws.records.slice(before)
     }
     const shell = ws.records.slice(start)
-    const [, block] = await runWithRecording(async () => {
+    const [, block] = await recordingScope(async () => {
       await ws.dispatch('create', C)
       await ws.dispatch('append', C, [new TextEncoder().encode('q')])
     })

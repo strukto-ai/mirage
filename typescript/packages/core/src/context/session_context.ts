@@ -254,7 +254,7 @@ export function liveCallers(): readonly Caller[] {
  * stream pulled or a callback run after its command returned was made
  * with.
  */
-export async function runWithCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
+export async function bindCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
   return callsAs(caller, fn)()
 }
 
@@ -307,7 +307,7 @@ function flushCloses(): void {
   for (const [finish, caller] of pendingCloses) {
     if (callerConflict(caller) !== null) continue
     pendingCloses.delete(finish)
-    void runWithCaller(caller, finish).catch((error: unknown) => {
+    void bindCaller(caller, finish).catch((error: unknown) => {
       console.debug('deferred stream closer failed:', error)
     })
   }
@@ -318,7 +318,7 @@ export function awaitsAs<A extends unknown[], R>(
   caller: Caller,
   fn: (...args: A) => Promise<R>,
 ): (...args: A) => Promise<R> {
-  return (...args) => runWithCaller(caller, () => fn(...args))
+  return (...args) => bindCaller(caller, () => fn(...args))
 }
 
 /**
@@ -333,7 +333,7 @@ export async function* withCaller<T>(source: AsyncIterable<T>, caller: Caller): 
   const iterator = source[Symbol.asyncIterator]()
   try {
     for (;;) {
-      const next = await runWithCaller(caller, () => iterator.next())
+      const next = await bindCaller(caller, () => iterator.next())
       if (next.done === true) return
       yield next.value
     }
@@ -343,7 +343,7 @@ export async function* withCaller<T>(source: AsyncIterable<T>, caller: Caller): 
       // A conflicting operation may itself await this close. Queue cleanup
       // without binding over that operation or waiting for it to finish.
       if (callerConflict(caller) !== null) pendingCloses.set(finish, caller)
-      else await runWithCaller(caller, () => finish())
+      else await bindCaller(caller, () => finish())
     }
   }
 }
@@ -367,7 +367,7 @@ export function currentProcessId(): ProcessId | null {
  * starts, carries `traits`. Mirrors Python's `set_traits`.
  */
 export function setTraits<T>(traits: ProcessTraits, fn: () => Promise<T>): Promise<T> {
-  return runChanged({ traits }, fn)
+  return bindChanges({ traits }, fn)
 }
 
 /**
@@ -379,11 +379,11 @@ export function setTraits<T>(traits: ProcessTraits, fn: () => Promise<T>): Promi
 export function runAsProcess<T>(run: () => Promise<T>, process: ProcessHandle): Promise<T> {
   const caller = currentCaller()
   const traits = caller.traits.leads ? { ...caller.traits, leads: false } : caller.traits
-  return runWithCaller({ ...caller, process, traits }, run)
+  return bindCaller({ ...caller, process, traits }, run)
 }
 
-function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {
-  return runWithCaller({ ...currentCaller(), ...changes }, fn)
+function bindChanges<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {
+  return bindCaller({ ...currentCaller(), ...changes }, fn)
 }
 
 /**
@@ -395,13 +395,13 @@ function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<
  * evaluation running on the session; omitting it keeps the one already
  * bound when it runs on this same session, and drops another session's.
  */
-export function runWithSession<T>(
+export function setCurrentSession<T>(
   session: SessionState,
   fn: () => Promise<T>,
   options: { owner?: SessionOwner; evaluation?: EvaluationContext } = {},
 ): Promise<T> {
   const bound = currentCaller()
-  return runChanged(
+  return bindChanges(
     {
       session,
       owner: options.owner ?? bound.owner,
@@ -508,12 +508,12 @@ export function inLanding(): boolean {
 }
 
 /** Bind an evaluation with its session, as one binding. */
-export function runWithEvaluation<T>(
+export function setCurrentEvaluation<T>(
   context: EvaluationContext,
   fn: () => Promise<T>,
   owner?: SessionOwner,
 ): Promise<T> {
-  return runWithSession(context.session, fn, {
+  return setCurrentSession(context.session, fn, {
     ...(owner === undefined ? {} : { owner }),
     evaluation: context,
   })
@@ -743,8 +743,8 @@ export function hiddenRefusal(
  * command gets its gate back when it returns, and a pipeline stage in
  * its own async context never sees a sibling's.
  */
-export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Promise<T> {
-  return runChanged({ gate }, fn)
+export function setAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Promise<T> {
+  return bindChanges({ gate }, fn)
 }
 
 /**
@@ -795,12 +795,8 @@ export function getAdmission(): EntryGate | null {
  * (`crossesMounts`), and the prefix a path it makes up is keyed below
  * (`mountRoot`).
  */
-export function runWithMountGate<T>(
-  prefix: string,
-  mode: MountMode,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runChanged({ mount: [prefix, mode] }, fn)
+export function setMountGate<T>(prefix: string, mode: MountMode, fn: () => Promise<T>): Promise<T> {
+  return bindChanges({ mount: [prefix, mode] }, fn)
 }
 
 /**
@@ -814,8 +810,8 @@ export function runWithMountGate<T>(
  * stream drained after its command returned still reaches it. Mirrors
  * Python's set_decision_sink.
  */
-export function runWithDecisionSink<T>(sink: DecisionSink, fn: () => Promise<T>): Promise<T> {
-  return runChanged({ refusals: sink }, fn)
+export function setDecisionSink<T>(sink: DecisionSink, fn: () => Promise<T>): Promise<T> {
+  return bindChanges({ refusals: sink }, fn)
 }
 
 /**
@@ -834,11 +830,11 @@ export function lineRunning(): boolean {
  * explained: its reads run, nothing changes. A null trace runs `fn` for
  * real. Mirrors Python's `set_explaining`.
  */
-export function runExplaining<T>(
+export function setExplaining<T>(
   trace: VfsExplanation[] | DryRun | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return runChanged({ explaining: trace }, fn)
+  return bindChanges({ explaining: trace }, fn)
 }
 
 /**
@@ -898,14 +894,14 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
  * The runner applies redirects after command words expand, admitting each
  * resolved target before opening it. Nested expansions keep their own identity.
  */
-export function runWithRedirectPaths<T>(
+export function setRedirectPaths<T>(
   node: object,
   paths: readonly PathSpec[],
   fn: () => Promise<T>,
   runner: RedirectRunner | null = null,
   syntax: readonly Redirect[] = [],
 ): Promise<T> {
-  return runChanged({ redirects: [node, paths, runner, syntax] }, fn)
+  return bindChanges({ redirects: [node, paths, runner, syntax] }, fn)
 }
 
 /** The caller a deferred workspace callback runs as: the bound one, as
@@ -929,15 +925,15 @@ export function sessionCaller(session: SessionState, owner?: SessionOwner): Call
  * it starts inherit, and cleared again by a nested shell the line starts
  * (`-exec sh -c ...`), so that shell's builtins are its own.
  */
-export function runAsProgram<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
-  return runChanged({ program: session }, fn)
+export function setProgramInvocation<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
+  return bindChanges({ program: session }, fn)
 }
 
 /** Run a nested shell's script as the shell's own again: a nested shell
  * is a program, and the builtins it runs are its builtins, `printf -v`
  * included. */
-export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
-  return runChanged({ program: null }, fn)
+export function clearProgramInvocation<T>(fn: () => Promise<T>): Promise<T> {
+  return bindChanges({ program: null }, fn)
 }
 
 /** Whether the line running in this session is a program run. */

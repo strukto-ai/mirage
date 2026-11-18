@@ -43,6 +43,7 @@ from mirage.machine.constants import (
     RUN_PROGRAM_AT,
     SSHFS_HINT,
     SSHFS_LINE,
+    SSHFS_LINKS_OPTION,
     SSHFS_OPTIONS,
     is_run,
 )
@@ -54,6 +55,7 @@ from mirage.machine.mounts import (
     running_line,
     served_prefixes,
     source_name,
+    sshfs_line,
     top_prefixes,
 )
 from mirage.machine.types import MachinePipe
@@ -220,7 +222,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
 
     async def open_pipe(self, command):
         self.pipes.append(command)
-        source, prefix = shlex.split(command)[5:7]
+        source, prefix = sshfs_mount(command)
         if self.sshfs_mounts:
             self.table[prefix] = (source, "fuse.sshfs")
             self.running.add(source)
@@ -278,8 +280,15 @@ LOST = (
 )
 
 
+def sshfs_mount(command):
+    """The source and mountpoint an sshfs pipe command names."""
+    words = shlex.split(command)
+    at = words.index("exec")
+    return words[at + 5], words[at + 6]
+
+
 def served(sandbox):
-    return [shlex.split(p)[6] for p in sandbox.pipes]
+    return [sshfs_mount(p)[1] for p in sandbox.pipes]
 
 
 def test_mount_table_unescapes_paths_and_keeps_the_top_entry():
@@ -409,6 +418,58 @@ def test_served_prefixes_leave_out_what_the_machine_holds_itself():
     assert served_prefixes(prefixes) == ["/data", "/tmp"]
 
 
+FAKE_SSHFS = """#!/bin/sh
+if [ "$1" = -h ]; then
+    echo "usage: sshfs [user@]host:[dir] mountpoint [options]"
+    [ -n "$NAMES_IT" ] && echo "    -o {option} allow all symlink targets"
+    exit 0
+fi
+printf '%s\\n' "$@"
+cat
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("names_it", "options"),
+    [
+        ("1", f"{SSHFS_OPTIONS},{SSHFS_LINKS_OPTION}"),
+        ("", SSHFS_OPTIONS),
+    ],
+)
+async def test_sshfs_passes_every_link_target_when_it_knows_how(
+    tmp_path, names_it, options
+):
+    fake = tmp_path / "sshfs"
+    fake.write_text(FAKE_SSHFS.format(option=SSHFS_LINKS_OPTION))
+    fake.chmod(0o755)
+    log = tmp_path / "sshfs.log"
+    done = await asyncio.create_subprocess_exec(
+        "/bin/sh",
+        "-c",
+        sshfs_line("mirage-w:/my notes", "/my notes", str(log)),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "NAMES_IT": names_it,
+        },
+    )
+    out, _ = await done.communicate(b"sftp stream")
+    assert (done.returncode, out.decode().splitlines()) == (
+        0,
+        [
+            "-f",
+            "-o",
+            f"{options},uid={os.getuid()},gid={os.getgid()}",
+            "mirage-w:/my notes",
+            "/my notes",
+            "sftp stream",
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_ssh_serves_every_prefix_the_session_sees():
     sandbox = FakeMachine("ssh")
@@ -417,13 +478,16 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
     name = source_name(ws.workspace_id, "box")
-    pipes = [p.split(" 2>")[0] for p in sandbox.pipes]
+    pipes = [p.rsplit(" 2>", 1)[0] for p in sandbox.pipes]
     found = re.search(r"-([0-9a-f]{8})-1:/data'", pipes[0])
     instance = found.group(1) if found else ""
     assert pipes == [
-        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-{instance}-1:/data' '/data'",
-        f"exec sshfs -f -o {SSHFS_OPTIONS} "
-        f"'{name}-{instance}-2:/my notes' '/my notes'",
+        sshfs_line(f"{name}-{instance}-1:/data", "/data", "").rsplit(" 2>", 1)[
+            0
+        ],
+        sshfs_line(f"{name}-{instance}-2:/my notes", "/my notes", "").rsplit(
+            " 2>", 1
+        )[0],
     ]
     await agent.shell("python3 again.py")
     assert len(sandbox.pipes) == 2
@@ -485,7 +549,7 @@ async def test_ssh_leaves_a_file_mounted_at_its_own_path_off_the_machine():
     await ws.vfs_md("/VFS.md")
     result = await ws.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
-    assert [shlex.split(p.split(" 2>")[0])[-1] for p in sandbox.pipes] == [
+    assert served(sandbox) == [
         "/data",
         "/my notes",
     ]

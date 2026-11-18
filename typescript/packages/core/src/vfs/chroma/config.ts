@@ -13,44 +13,41 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { ConfigOf } from '../secrets.ts'
-import { normalizeNonEmpty } from '../secrets.ts'
 
 export const ChromaConfig = z.object({
   host: z
     .string()
-    .optional()
+    .default('localhost')
     .meta({ description: 'Host name of the Chroma HTTP server.', default: 'localhost' }),
   port: z
     .number()
-    .optional()
+    .int()
+    .default(8000)
     .meta({ description: 'Port of the Chroma HTTP server.', default: 8000 }),
   ssl: z
     .boolean()
-    .optional()
+    .default(false)
     .meta({ description: 'Connect over HTTPS instead of HTTP.', default: false }),
-  collectionName: z.string().describe('Name of the existing Chroma collection to mount.'),
-  slugField: z.string().optional().meta({
+  collectionName: z
+    .string()
+    .trim()
+    .min(1, 'collectionName cannot be empty')
+    .describe('Name of the existing Chroma collection to mount.'),
+  slugField: z.string().trim().min(1, 'slugField cannot be empty').default('page_slug').meta({
     description:
       'Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`).',
     default: 'page_slug',
   }),
-  chunkIndexField: z.string().optional().meta({
-    description:
-      "Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.",
-    default: 'chunk_index',
-  }),
+  chunkIndexField: z
+    .string()
+    .trim()
+    .min(1, 'chunkIndexField cannot be empty')
+    .default('chunk_index')
+    .meta({
+      description:
+        "Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.",
+      default: 'chunk_index',
+    }),
 })
 
-export type ChromaConfig = ConfigOf<typeof ChromaConfig>
-
-export function resolveChromaConfig(config: ChromaConfig) {
-  return {
-    host: config.host ?? 'localhost',
-    port: config.port ?? 8000,
-    ssl: config.ssl ?? false,
-    collectionName: normalizeNonEmpty(config.collectionName, 'collectionName'),
-    slugField: normalizeNonEmpty(config.slugField ?? 'page_slug', 'slugField'),
-    chunkIndexField: normalizeNonEmpty(config.chunkIndexField ?? 'chunk_index', 'chunkIndexField'),
-  }
-}
+export type ChromaConfig = z.input<typeof ChromaConfig>

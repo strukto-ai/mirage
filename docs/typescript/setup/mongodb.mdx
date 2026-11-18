@@ -43,7 +43,7 @@ fields, such as embeddings, from what an agent reads.
 <ResponseField name="uri" type={"string"} required post={["secret"]}>
   MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.
 </ResponseField>
-<ResponseField name="databases" type={"string[]"}>
+<ResponseField name="databases" type={"string[]"} default={"null"}>
   Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`.
 </ResponseField>
 <ResponseField name="maxDocLimit" type={"number"} default={"5000"}>

@@ -15,10 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 export const LinearConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   apiKey: secretStr().describe('Linear personal API key.'),
   teamIds: z
     .array(z.string())

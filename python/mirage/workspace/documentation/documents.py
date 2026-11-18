@@ -23,7 +23,13 @@ from mirage.context import (
 )
 from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.policy.profile import CompiledProfile
-from mirage.types import FileType, MountMode, PathSpec, ReadSpec, WritePolicy
+from mirage.types import (
+    DEFAULT_READ_SPEC,
+    FileType,
+    MountMode,
+    PathSpec,
+    WritePolicy,
+)
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
@@ -183,7 +189,7 @@ class Documents:
                 path,
                 view,
                 MountMode.READ,
-                ReadSpec(),
+                DEFAULT_READ_SPEC,
                 write=WritePolicy.UNCONDITIONAL,
                 store=NULL_INDEX,
             )

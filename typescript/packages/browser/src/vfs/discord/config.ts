@@ -12,34 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
-import {
-  orderedTimes,
-  timeRangeOrderError,
-  timeRangeShape,
-} from '@struktoai/mirage-core/core/time_config'
+import { TimeoutConfig } from '@struktoai/mirage-core/core/api/config'
+import { TimeRangeConfig } from '@struktoai/mirage-core/core/time_config'
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
 
-export const DiscordConfig = z
-  .object({
-    ...timeoutShape,
-    ...timeRangeShape,
-    proxyUrl: z
-      .string()
-      .describe(
-        "URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.",
-      ),
-    getHeaders: secretSchema(
-      z.custom<() => Promise<Record<string, string>> | Record<string, string>>(
-        (value) => typeof value === 'function',
-      ),
-    )
-      .optional()
-      .describe(
-        'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
-      ),
-  })
-  .refine(orderedTimes, timeRangeOrderError)
+export const DiscordConfig = TimeRangeConfig.safeExtend({
+  ...TimeoutConfig.shape,
+  proxyUrl: z
+    .string()
+    .describe(
+      "URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.",
+    ),
+  getHeaders: secretSchema(
+    z.custom<() => Promise<Record<string, string>> | Record<string, string>>(
+      (value) => typeof value === 'function',
+    ),
+  )
+    .optional()
+    .describe(
+      'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
+    ),
+})
 
 export type DiscordConfig = ConfigOf<typeof DiscordConfig>

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -23,7 +24,7 @@ from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 
 
-def resource_type_for(item: dict[str, Any]) -> str:
+def resource_type_for(item: Mapping[str, Any]) -> str:
     if item.get("type") == "folder":
         return "box/folder"
     if item.get("type") == "web_link":
@@ -31,7 +32,7 @@ def resource_type_for(item: dict[str, Any]) -> str:
     return "box/file"
 
 
-def stat_from_item(item: dict[str, Any]) -> FileStat:
+def stat_from_item(item: Mapping[str, Any]) -> FileStat:
     """The stat of one Box item, as a listing, ``GET /files/{id}`` or an
     upload's reply returns it.
 
@@ -40,7 +41,7 @@ def stat_from_item(item: dict[str, Any]) -> FileStat:
     write sends.
 
     Args:
-        item (dict[str, Any]): a Box item.
+        item (Mapping[str, Any]): a Box item.
     """
     vfs_name = item["name"]
     rt = resource_type_for(item)

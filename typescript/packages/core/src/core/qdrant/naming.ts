@@ -15,7 +15,7 @@
 import { md5Hex } from '../../utils/hash.ts'
 import { fitIdName, parseIdName } from '../../utils/naming.ts'
 import { byteLength, NAME_MAX_BYTES, pathSafeName } from '../../utils/sanitize.ts'
-import type { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { valueText } from '../render/json.ts'
 import { fieldValue } from './payload.ts'
@@ -50,7 +50,7 @@ export function groupName(value: unknown, basename = false): string {
 }
 
 /** Return the stable, human-readable stem for a point's files. */
-export function rowStem(row: QdrantRow, config: ReturnType<typeof resolveQdrantConfig>): string {
+export function rowStem(row: QdrantRow, config: ReturnType<typeof QdrantConfig.parse>): string {
   // The point id is synthetic rather than payload data: pointToRow stores it
   // under the configured key verbatim, even when that key contains dots.
   const pointId = String(row[config.idField] as string | number | bigint | boolean)
@@ -67,7 +67,7 @@ export function rowStem(row: QdrantRow, config: ReturnType<typeof resolveQdrantC
 /** Recover the opaque Qdrant point id from a VFS file stem. */
 export function pointIdFromStem(
   stem: string,
-  config: ReturnType<typeof resolveQdrantConfig>,
+  config: ReturnType<typeof QdrantConfig.parse>,
 ): string {
   if (config.nameField === null || config.nameField === '') return stem
   try {

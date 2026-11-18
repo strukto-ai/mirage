@@ -14,12 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import type { PgDriver } from '../core/postgres/_driver.ts'
-import { resolvePostgresConfig } from '../vfs/postgres/config.ts'
+import { PostgresConfig } from '../vfs/postgres/config.ts'
 import { PostgresAccessor, readAsText, SESSION, TEXT_TYPES } from './postgres.ts'
 
 describe('PostgresAccessor', () => {
   it('holds the driver and resolved config', () => {
-    const config = resolvePostgresConfig({ dsn: 'postgres://localhost/db' })
+    const config = PostgresConfig.parse({ dsn: 'postgres://localhost/db' })
     const driver: PgDriver = {
       query: () => Promise.resolve({ rows: [], rowCount: 0 }),
       close: () => Promise.resolve(),

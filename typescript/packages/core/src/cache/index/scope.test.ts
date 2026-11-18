@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { commandStarted, runInCommandScope, tick } from './scope.ts'
+import { commandStarted, commandScope, tick } from './scope.ts'
 
 describe('the command scope', () => {
   it('has no stamp outside any command', () => {
@@ -21,8 +21,8 @@ describe('the command scope', () => {
   })
 
   it('gives each command a later stamp', async () => {
-    const first = await runInCommandScope(() => Promise.resolve(commandStarted()))
-    const second = await runInCommandScope(() => Promise.resolve(commandStarted()))
+    const first = await commandScope(() => Promise.resolve(commandStarted()))
+    const second = await commandScope(() => Promise.resolve(commandStarted()))
     expect(first).not.toBeNull()
     expect(second).not.toBeNull()
     expect(second ?? 0).toBeGreaterThan(first ?? 0)
@@ -32,9 +32,9 @@ describe('the command scope', () => {
   // A $(...) inside a command runs its own commands; leaving it must not
   // leave the outer command holding the inner, later stamp.
   it('restores the outer stamp after a nested command', async () => {
-    const [outer, inner] = await runInCommandScope(async () => {
+    const [outer, inner] = await commandScope(async () => {
       const mine = commandStarted()
-      const nested = await runInCommandScope(() => Promise.resolve(commandStarted()))
+      const nested = await commandScope(() => Promise.resolve(commandStarted()))
       expect(commandStarted()).toBe(mine)
       return [mine, nested] as const
     })
@@ -43,7 +43,7 @@ describe('the command scope', () => {
   })
 
   it('draws a write tick after the running command', async () => {
-    const [started, written] = await runInCommandScope(() =>
+    const [started, written] = await commandScope(() =>
       Promise.resolve([commandStarted(), tick()] as const),
     )
     expect(started).not.toBeNull()
@@ -53,7 +53,7 @@ describe('the command scope', () => {
   it('keeps concurrent commands on their own stamps', async () => {
     const seen: [number | null, number | null][] = []
     const one = (): Promise<void> =>
-      runInCommandScope(async () => {
+      commandScope(async () => {
         const mine = commandStarted()
         await Promise.resolve()
         await new Promise((resolve) => setTimeout(resolve, 0))

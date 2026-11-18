@@ -211,7 +211,7 @@ jobs:
               - '!integ/{runtime,cloudflare,fuse,access,wandb,browser}/**'
               - '!integ/cross.sh'
               - '!integ/server/monty_remote/**'
-            # The TypeScript host on a Cloudflare worker, over the server API.
+            # The Worker uses the Wasm build scripts in both core and cloudflare.
             cloudflare:
               - 'integ/**'
               - 'typescript/**'
@@ -299,6 +299,7 @@ jobs:
               - 'python/mirage/workspace/documentation/**'
               - 'typescript/packages/core/src/{accessor,core,commands/builtin,vfs}/document{.ts,/**}'
               - 'typescript/packages/core/src/workspace/documentation/**'
+              # Includes the message types shared by Discord's cache and history reader.
               - 'python/mirage/{accessor,core,vfs}/discord{.py,/**}'
               - 'typescript/packages/core/src/{accessor,core}/discord{.ts,/**}'
               - 'typescript/packages/node/src/vfs/discord/**'
@@ -1536,7 +1537,7 @@ jobs:
   # this job has already set up both hosts and built the packages they
   # load. The notion battery rides with them for its node fake.
   integ-tidb-filesystem:
-    needs: changes
+    needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     name: integ-tidb-filesystem and integ-events
     runs-on: ubuntu-latest
@@ -1625,30 +1626,10 @@ jobs:
           tail -50 "$RUNNER_TEMP/drive9.log"
           exit 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: ./.github/actions/integ-battery-setup
         with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
-
-      - name: Build mirage-core, mirage-node and mirage-browser
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser build
+          start-services: "false"
+          typescript-build-artifact: integ-typescript-dist
 
       - name: Run declarative battery on tidb-filesystem (typescript, background)
         run: |
@@ -1665,16 +1646,6 @@ jobs:
       - name: Show the drive9 log
         if: failure()
         run: tail -200 "$RUNNER_TEMP/drive9.log"
-
-      # integ/generated/ is gitignored, so every kit fake this job starts
-      # (notion, dropbox, box, onedrive, airtable) fails to import its client
-      # until this runs.
-      # The battery jobs get it from the integ-battery-setup action; this job
-      # does not use that action and has to ask for it itself.
-      - name: Generate integ Prisma clients
-        if: ${{ !cancelled() }}
-        working-directory: integ
-        run: pnpm run prisma:clients
 
       - name: Start fake Notion API (Prisma)
         if: ${{ !cancelled() }}

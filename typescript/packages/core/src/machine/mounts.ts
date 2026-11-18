@@ -15,7 +15,7 @@
 import {
   currentCaller,
   getCurrentSession,
-  runWithCaller,
+  bindCaller,
   type Caller,
 } from '../context/session_context.ts'
 import { strerrorOf } from '../errors/fs.ts'
@@ -40,6 +40,7 @@ import {
   PIPE_SERVER_HINT,
   SSHFS_HINT,
   SSHFS_LINE,
+  SSHFS_LINKS_OPTION,
   SSHFS_LOG_NAME,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
@@ -161,6 +162,24 @@ export function sourceName(workspaceId: string, machine: string): string {
 function unmountLine(prefix: string): string {
   const path = singleQuote(prefix)
   return `fusermount3 -uz ${path} || fusermount -uz ${path}`
+}
+
+/**
+ * The pipe command that mounts `source` at `prefix` with sshfs, its errors in
+ * `log`. It passes SSHFS_LINKS_OPTION only when the machine's sshfs names it in
+ * its help, which reads no input, so the pipe's stream is sshfs's alone. Each
+ * file shows as the machine user's own, as on a disk that user mounted: the
+ * host's uid means nothing there, and git refuses a repository another user
+ * owns. The modes stay the workspace's. Mirrors Python's `sshfs_line`.
+ */
+export function sshfsLine(source: string, prefix: string, log: string): string {
+  return (
+    `o=${SSHFS_OPTIONS}; case "$(sshfs -h 2>&1)" in ` +
+    `*${SSHFS_LINKS_OPTION}*) o="$o,${SSHFS_LINKS_OPTION}";; esac; ` +
+    'u=$(id -u 2>/dev/null) && g=$(id -g 2>/dev/null) && o="$o,uid=$u,gid=$g"; ' +
+    `exec sshfs -f -o "$o" ${singleQuote(source)} ${singleQuote(prefix)} ` +
+    `2>${singleQuote(log)}`
+  )
 }
 
 /** Why a line did not run: the machine no longer holds `prefix`. */
@@ -511,7 +530,7 @@ export class MachineMounts {
       for (const { server } of [...this.served.values()]) {
         const failed = await runDetached(() =>
           SERVED_BY.run(this.machine, () =>
-            runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+            bindCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
           ),
         )
         for (const [path, err] of failed) lost.push(`${this.provider}: ${path}: ${strerrorOf(err)}`)
@@ -561,7 +580,7 @@ export class MachineMounts {
     })
     line.lent.add(running)
     try {
-      await runWithCaller({ ...currentCaller(), stop: line.stop, writeHeld: line.writeHeld }, op)
+      await bindCaller({ ...currentCaller(), stop: line.stop, writeHeld: line.writeHeld }, op)
     } finally {
       line.lent.delete(running)
       done()
@@ -792,15 +811,12 @@ export class MachineMounts {
         `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
       )
     }
-    const log = singleQuote(
-      `${folder}/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log`,
-    )
+    const logPath = `${folder}/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log`
+    const log = singleQuote(logPath)
     this.serves += 1
     const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
-    const pipe = await this.openPipe(
-      `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
-    )
+    const pipe = await this.openPipe(sshfsLine(source, prefix, logPath))
     const entry: Served = {
       source,
       pipe,

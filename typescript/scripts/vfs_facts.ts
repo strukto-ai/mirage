@@ -869,6 +869,8 @@ function shapeOf(
 ): Record<string, FieldShape> {
   if (ts.isParenthesizedExpression(expr))
     return shapeOf(expr.expression, source, env, packagesRoot, label)
+  if (ts.isPropertyAccessExpression(expr) && expr.name.text === 'shape')
+    return shapeOf(expr.expression, source, env, packagesRoot, label)
   if (ts.isIdentifier(expr)) {
     const bound = bindingOf(expr.text, source, env, packagesRoot)
     if (bound === undefined)
@@ -949,26 +951,15 @@ function shapeOfLiteral(
     }
     const key = propertyKey(prop, source)
     if (key === undefined) continue
-    if (ts.isPropertyAssignment(prop)) {
-      const field = declaration(prop.initializer, source, env, packagesRoot)
-      out[key] = {
-        required: !OPTIONAL_RE.test(prop.initializer.getText(source)),
-        expr: field?.expr,
-        source: field?.source ?? source,
-        env,
-        overrides: out[key],
-      }
-    } else if (ts.isShorthandPropertyAssignment(prop)) {
-      const bound = bindingOf(key, source, env, packagesRoot)
-      const field =
-        bound === undefined ? undefined : declaration(bound.expr, bound.source, env, packagesRoot)
-      out[key] = {
-        required: bound === undefined || !OPTIONAL_RE.test(bound.expr.getText(bound.source)),
-        expr: field?.expr,
-        source: field?.source ?? source,
-        env,
-        overrides: out[key],
-      }
+    if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) continue
+    const initializer = ts.isPropertyAssignment(prop) ? prop.initializer : prop.name
+    const field = declaration(initializer, source, env, packagesRoot)
+    out[key] = {
+      required: field === undefined || !OPTIONAL_RE.test(field.expr.getText(field.source)),
+      expr: field?.expr,
+      source: field?.source ?? source,
+      env,
+      overrides: out[key],
     }
   }
   return out
@@ -1047,13 +1038,17 @@ export function fieldDoc(field: FieldShape, packagesRoot: string): FieldDoc {
     if (method === 'describe' && arg !== undefined && ts.isStringLiteralLike(arg))
       doc.description ??= arg.text
     if (method === 'default' && arg !== undefined) doc.default ??= arg.getText(source)
-    if (method === 'meta' && arg !== undefined && ts.isObjectLiteralExpression(arg)) {
-      for (const prop of arg.properties) {
+    const meta =
+      method === 'meta' && arg !== undefined
+        ? declaration(arg, source, field.env, packagesRoot)
+        : undefined
+    if (meta !== undefined && ts.isObjectLiteralExpression(meta.expr)) {
+      for (const prop of meta.expr.properties) {
         if (!ts.isPropertyAssignment(prop)) continue
-        const key = propertyKey(prop, source)
+        const key = propertyKey(prop, meta.source)
         if (key === 'description' && ts.isStringLiteralLike(prop.initializer))
           doc.description ??= prop.initializer.text
-        if (key === 'default') doc.default ??= prop.initializer.getText(source)
+        if (key === 'default') doc.default ??= prop.initializer.getText(meta.source)
       }
     }
     node = callee.expression

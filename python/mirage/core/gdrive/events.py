@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any
@@ -22,7 +23,7 @@ from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import unique_shared_drive_name
 from mirage.core.gdrive.resolve import root_context
 from mirage.core.google.client import GoogleApiError
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, DriveFile
 from mirage.core.google.events import feed_checkpoint, feed_state
 from mirage.events.base import DeltaHook
 from mirage.events.delta import (
@@ -33,13 +34,13 @@ from mirage.events.delta import (
     moved_below,
     settle,
 )
-from mirage.events.payload import text_field, virtual_of
+from mirage.events.payload import virtual_of
 from mirage.types import Delta, FileChangeKind, PathSpec
 
 logger = logging.getLogger(__name__)
 
 
-def _is_folder(item: dict[str, Any]) -> bool:
+def _is_folder(item: Mapping[str, Any]) -> bool:
     """Whether a changed item is a folder the hook places by name; a
     shared drive's root is named by the root listing instead.
 
@@ -51,7 +52,7 @@ def _is_folder(item: dict[str, Any]) -> bool:
     return not (item.get("driveId") and not item.get("parents"))
 
 
-def _filename_of(item: dict[str, Any]) -> str:
+def _filename_of(item: Mapping[str, Any]) -> str:
     """The name the listing gives ``item``.
 
     Args:
@@ -222,13 +223,13 @@ class GDriveDeltaHook:
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []
         unknown = False
-        latest: dict[str, tuple[str, dict[str, Any] | None, bool]] = {}
+        latest: dict[str, tuple[str, DriveFile | None, bool]] = {}
         for change in found:
             if change.get("changeType") == "drive":
                 unknown = unknown or not scoped
                 continue
-            item_id = text_field(change, "fileId")
-            if item_id is None:
+            item_id = change.get("fileId")
+            if not isinstance(item_id, str):
                 continue
             item = change.get("file")
             if not isinstance(item, dict):

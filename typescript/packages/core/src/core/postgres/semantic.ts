@@ -55,10 +55,15 @@ interface ColumnEntry {
   sample_values?: string[]
 }
 
+interface RelationshipColumn {
+  left_column: string
+  right_column: string
+}
+
 interface Relationship {
   left_table: string
   right_table: string
-  relationship_columns: { left_column: string; right_column: string }[]
+  relationship_columns: RelationshipColumn[]
 }
 
 // Assign a column its semantic role. Mirrors the dimension / time_dimension /

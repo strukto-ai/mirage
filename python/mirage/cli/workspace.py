@@ -17,7 +17,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NotRequired, TypedDict, cast
 from urllib.parse import quote
 
 import typer
@@ -54,13 +54,14 @@ def resolve_config(path: Path) -> dict[str, Any]:
     compiler-set ``mount`` field, which the document grammar refuses
     as never typed).
     """
-    from mirage.config import load_config  # noqa: PLC0415 - cold start
+    from mirage.config import WorkspaceConfig  # noqa: PLC0415 - cold start
 
     try:
-        load_config(path)
+        resolved = _load_config_argument(path)
+        WorkspaceConfig.model_validate(resolved)
     except ValueError as e:
         fail(str(e), exit_code=2)
-    return _load_config_argument(path)
+    return resolved
 
 
 def _load_config_argument(path: Path) -> dict[str, Any]:
@@ -79,8 +80,12 @@ def _load_config_argument(path: Path) -> dict[str, Any]:
         _interpolate_env,
     )
 
-    raw = parse_yaml(path.read_text(encoding="utf-8")) or {}
     try:
+        raw = parse_yaml(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"config source must be a mapping, got {type(raw).__name__}"
+            )
         resolved = cast(
             dict[str, Any], _interpolate_env(raw, dict(os.environ))
         )
@@ -120,14 +125,37 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], resolved["profiles"][""])
 
 
-def _format_workspace_list(items: list[dict[str, Any]]) -> str:
+class WorkspaceBrief(TypedDict):
+    id: str
+    status: str
+
+
+class WorkspaceDetail(WorkspaceBrief):
+    created_at: str
+    mounts: NotRequired[list[dict[str, str]]]
+    sessions: NotRequired[list[dict[str, str]]]
+    internals: NotRequired[dict[str, int | None] | None]
+
+
+class AskRecord(TypedDict):
+    id: str
+    session_id: str
+    command: str
+    argv: list[str]
+    cwd: str
+    paths: list[str]
+    reason: str
+    outcome: str | None
+
+
+def _format_workspace_list(items: list[WorkspaceBrief]) -> str:
     if not items:
         return "No workspaces."
     rows = [[item["id"], item["status"]] for item in items]
     return format_table(["ID", "STATUS"], rows)
 
 
-def _format_workspace_detail(detail: dict[str, Any]) -> str:
+def _format_workspace_detail(detail: WorkspaceDetail) -> str:
     created = datetime.fromisoformat(detail["created_at"]).timestamp()
     lines = [
         f"ID:        {detail['id']}",
@@ -199,7 +227,7 @@ def _format_logs(page: dict[str, Any]) -> str:
     return text
 
 
-def _format_asks(items: list[dict[str, Any]]) -> str:
+def _format_asks(items: list[AskRecord]) -> str:
     if not items:
         return "No asks."
     rows = [

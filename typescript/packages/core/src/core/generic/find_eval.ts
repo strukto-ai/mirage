@@ -19,7 +19,7 @@ import { inMtimeWindow, isoTimestamp } from '../../utils/dates.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { DIR_SIZE, posixMode } from '../../utils/stat_view.ts'
+import { DIR_SIZE, TYPE_CHARS, posixMode } from '../../utils/stat_view.ts'
 import type { Effects, FindEntry, Owner, Path, PredNode, PrintfKind, Regex } from './types.ts'
 
 const ACCESS_BITS = { r: 0o400, w: 0o200, x: 0o100 } as const
@@ -559,9 +559,5 @@ export function unrespellRaw(row: string, virtual: string, raw: string): string 
 
 /** The one-letter kind a -printf %y/%Y directive renders for a stat. */
 export function printfKind(st: FileStat): PrintfKind {
-  if (st.type === FileType.DIRECTORY) return 'd'
-  if (st.type === FileType.SYMLINK) return 'l'
-  if (st.type === FileType.CHAR_DEVICE) return 'c'
-  if (st.type === FileType.FIFO) return 'p'
-  return 'f'
+  return TYPE_CHARS[st.type] ?? 'f'
 }

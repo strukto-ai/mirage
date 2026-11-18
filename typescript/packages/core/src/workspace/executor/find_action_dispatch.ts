@@ -27,7 +27,7 @@ import { linkView } from '../../commands/builtin/utils/links.ts'
 import {
   currentCaller,
   getCurrentSession,
-  runAsProgram,
+  setProgramInvocation,
   withCaller,
 } from '../../context/session_context.ts'
 import { depthFirstOrder, modifiedTs } from '../../core/generic/find.ts'
@@ -196,7 +196,7 @@ async function runExec(
         sink,
         ...(merged !== undefined ? { signal: merged } : {}),
       })
-    return session === null ? run() : runAsProgram(session, run)
+    return session === null ? run() : setProgramInvocation(session, run)
   })
   io.stdout = stdout
   return io

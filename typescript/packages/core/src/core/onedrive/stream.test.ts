@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { readStream } from './stream.ts'
 
@@ -44,7 +44,7 @@ describe('a recorded OneDrive stream', () => {
     )
     const spec = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const [out, records] = await runWithRecording(async () => {
+    const [out, records] = await recordingScope(async () => {
       const chunks: number[] = []
       for await (const chunk of readStream(accessor, spec)) chunks.push(...chunk)
       return chunks

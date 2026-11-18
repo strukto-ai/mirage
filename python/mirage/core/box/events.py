@@ -16,10 +16,10 @@ import json
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.api import events_now, events_since
+from mirage.core.box.api import BoxEvent, events_now, events_since
 from mirage.core.box.constants import (
     EVENT_REPLAY_DAYS,
     EVENT_STREAM,
@@ -29,7 +29,7 @@ from mirage.core.box.constants import (
 from mirage.core.box.resolve import mount_relative_key
 from mirage.events.base import DeltaHook
 from mirage.events.delta import events_under, lost_at
-from mirage.events.payload import event_at, field, text_field
+from mirage.events.payload import event_at, field
 from mirage.types import Delta, FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.utils.key_prefix import under_path
 
@@ -79,7 +79,7 @@ def _source_of(value: JsonValue) -> dict[str, Any] | None:
     return value
 
 
-def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+def _ordered(events: Sequence[BoxEvent]) -> list[BoxEvent]:
     """Each event once, in the order it happened.
 
     Box may send an event more than once or out of order: a repeat
@@ -88,11 +88,11 @@ def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     the one before it.
 
     Args:
-        events (Sequence[dict[str, Any]]): Events as ``events_since``
+        events (Sequence[BoxEvent]): Events as ``events_since``
             read them.
     """
     seen: set[str] = set()
-    stamped: list[tuple[datetime, dict[str, Any]]] = []
+    stamped: list[tuple[datetime, BoxEvent]] = []
     stamp = datetime.min.replace(tzinfo=timezone.utc)
     for event in events:
         event_id = event.get("event_id")
@@ -100,7 +100,7 @@ def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             if event_id in seen:
                 continue
             seen.add(event_id)
-        value = text_field(event, "created_at")
+        value = event.get("created_at")
         try:
             if value is not None:
                 stamp = datetime.fromisoformat(value)
@@ -166,7 +166,7 @@ class BoxDeltaHook:
         for event in _ordered(found):
             events.extend(
                 await mapper.to_events(
-                    root, str(event.get("event_type") or ""), event
+                    root, event.get("event_type") or "", cast(JsonValue, event)
                 )
             )
         return Delta(

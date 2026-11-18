@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { cursorPages as apiPages } from '../api/paginate.ts'
 import type { SlackTransport } from './client.ts'
 
 export async function* cursorPages<T = Record<string, unknown>>(
@@ -20,15 +21,13 @@ export async function* cursorPages<T = Record<string, unknown>>(
   baseParams: Record<string, string>,
   itemsKey: string,
 ): AsyncIterableIterator<T[]> {
-  let cursor: string | undefined
-  for (;;) {
-    const params: Record<string, string> = { ...baseParams }
-    if (cursor !== undefined && cursor !== '') params.cursor = cursor
-    const data = await transport.call(endpoint, params)
-    const items = (data[itemsKey] as T[] | undefined) ?? []
-    yield items
-    const meta = data.response_metadata as { next_cursor?: string } | undefined
-    cursor = meta?.next_cursor
-    if (cursor === undefined || cursor === '') return
-  }
+  const fetchPage = (cursor: string | null) =>
+    transport.call(endpoint, cursor === null ? baseParams : { ...baseParams, cursor })
+  for await (const page of apiPages(fetchPage, { itemsKey, nextCursor })) yield page as T[]
+}
+
+function nextCursor(data: Record<string, unknown>): string | null {
+  const meta = data.response_metadata as { next_cursor?: unknown } | null | undefined
+  const cursor = meta?.next_cursor
+  return typeof cursor === 'string' && cursor !== '' ? cursor : null
 }

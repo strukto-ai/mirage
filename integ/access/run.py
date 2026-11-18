@@ -987,6 +987,35 @@ async def server_checks(server: Server, report: Report) -> None:
         report.check(
             f"{server.key} server.templates", codes, want["templates"][d.name]
         )
+        fields = {"owner": "o", "repo": "r", "token": "t"}
+        pointers = {
+            key: {"from": "strukto", "ref": name, "key": key} for key in fields
+        }
+        uses = {"mounts": {"/gh": {"vfs": "github", "config": pointers}}}
+        codes = [
+            (
+                await http.post(
+                    "/v1/vfs",
+                    json={"name": name, "type": "github", "fields": fields},
+                    headers=auth,
+                )
+            ).status_code,
+            (
+                await http.post(
+                    "/v1/templates",
+                    json={"name": name, "config": uses},
+                    headers=auth,
+                )
+            ).status_code,
+            (await http.delete(f"/v1/vfs/{name}", headers=auth)).status_code,
+            (await http.get(template, headers=auth)).status_code,
+            (await http.delete(template, headers=auth)).status_code,
+        ]
+        report.check(
+            f"{server.key} server.entry_outlives_template",
+            codes,
+            want["entry_outlives_template"][d.name],
+        )
         policy = f"/v1/policies/{name}.py"
         source = {"source": "pass\n"}
         codes = [

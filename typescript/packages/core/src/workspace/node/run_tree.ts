@@ -14,7 +14,7 @@
 
 import { guardOutput } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
-import { runWithAdmission } from '../../context/session_context.ts'
+import { setAdmission } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -104,7 +104,7 @@ export async function runCommandTree(
         }),
       ]
     } else {
-      result = await runWithAdmission(verdict, () =>
+      result = await setAdmission(verdict, () =>
         handleRedirect(
           (inner, current, input, stack) => executeNode(deps, inner, current, input, stack),
           deps.dispatch,

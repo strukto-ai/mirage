@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
 import { materialize } from '@struktoai/mirage-core/io/types'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { CapacityState, FileType, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
@@ -634,7 +634,7 @@ describe('SqlVFS', () => {
     const vfs = new SqlVFS()
     const path = at('/f')
     try {
-      const [, records] = await runWithRecording(async () => {
+      const [, records] = await recordingScope(async () => {
         await ops(vfs).write(path, enc.encode('hi'))
         await ops(vfs).read(path)
       })

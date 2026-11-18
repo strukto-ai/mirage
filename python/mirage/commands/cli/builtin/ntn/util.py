@@ -19,6 +19,7 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.notion.normalize import plain_text_of
 from mirage.io.types import ByteSource, materialize
 from mirage.types import JsonValue
 
@@ -163,26 +164,6 @@ def first_text(texts: list[str], what: str) -> str:
     if not texts:
         raise UsageError(f"{what} is required")
     return texts[0]
-
-
-def plain_text_of(fragments: JsonValue) -> str:
-    """Join a rich-text array down to its plain text.
-
-    Args:
-        fragments (JsonValue): a Notion rich-text array.
-
-    Returns:
-        str: the concatenated plain text.
-    """
-    if not isinstance(fragments, list):
-        return ""
-    out = ""
-    for fragment in fragments:
-        if isinstance(fragment, dict):
-            text = fragment.get("plain_text")
-            if isinstance(text, str):
-                out += text
-    return out
 
 
 def _names_of(value: JsonValue) -> str:

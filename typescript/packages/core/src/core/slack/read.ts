@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SlackMessage } from './types.ts'
 import { chunks } from '../../io/cooperative.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
@@ -20,12 +21,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import {
-  fetchMessagesForDay,
-  getHistoryJsonl,
-  streamMessagesForDay,
-  type SlackMessage,
-} from './history.ts'
+import { fetchMessagesForDay, getHistoryJsonl, streamMessagesForDay } from './history.ts'
 import { downloadFile, refusalsDenied } from './client.ts'
 import { getUserProfile, userJsonBytes } from './users.ts'
 import { detectScope } from './scope.ts'

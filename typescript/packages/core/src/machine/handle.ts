@@ -18,6 +18,7 @@ import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
+import { PipeClosed } from '../io/errors.ts'
 import type { ByteSource } from '../io/types.ts'
 import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
@@ -29,7 +30,7 @@ import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { shellQuote } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { BASE_CONFIG_FIELDS, checkMountType, type MachineConfig } from './config.ts'
+import { MachineConfig, checkMountType } from './config.ts'
 import {
   CHECK_LINE,
   CHECK_MARK,
@@ -38,6 +39,7 @@ import {
   FAKETIME_PROBE_SECONDS,
   MACHINE_STOP_WAIT_SECONDS,
   NOT_RUNNING_STATUS,
+  PIPE_SIGNAL,
   RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
   RUN_PID_HOLD,
@@ -45,10 +47,12 @@ import {
   SCAN_FACTS_MARK,
   SCAN_MARK,
   SCAN_WAIT_SECONDS,
+  STOP_POLL_SECONDS,
   faketimeEnv,
   faketimeProbe,
   resourcesLine,
   runArgv,
+  runDoneMark,
   runExitMark,
   scanLine,
   signalLine,
@@ -208,6 +212,36 @@ export class ExitLineFilter {
 }
 
 /**
+ * How long a run's output has been quiet. A chunk still being handed to its
+ * sink counts as moving until the sink takes it, so a reader slow to take what
+ * the program wrote never makes the output quiet. Mirrors Python's
+ * `OutputWatch`.
+ */
+export class OutputWatch {
+  private busy = 0
+  private moved = performance.now() / 1000
+
+  /** `sink`, with each chunk handed to it counted as moving. */
+  watched(sink: OutputFn): OutputFn {
+    return async (data) => {
+      this.busy += 1
+      this.moved = performance.now() / 1000
+      try {
+        await sink(data)
+      } finally {
+        this.busy -= 1
+        this.moved = performance.now() / 1000
+      }
+    }
+  }
+
+  /** Seconds since the output last moved; 0 while a chunk is still being handed on. */
+  quiet(): number {
+    return this.busy > 0 ? 0 : performance.now() / 1000 - this.moved
+  }
+}
+
+/**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
@@ -229,7 +263,7 @@ export class ExitLineFilter {
  * against the provider's own key list. Mirrors Python's `MachineHandle`.
  */
 export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
-  static readonly configFields: ConfigFields = BASE_CONFIG_FIELDS
+  static readonly configFields: ConfigFields = MachineConfig
   /** The provider this class reaches machines through, as `machines:` spells it. */
   static readonly provider: string
 
@@ -285,7 +319,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   constructor(
     readonly name: string,
     config?: C,
-    configFields: ConfigFields = BASE_CONFIG_FIELDS,
+    configFields: ConfigFields = MachineConfig,
   ) {
     const coerced = coerceRuntimeConfig(config, Object.keys(configFields), 'machine')
     this.config = { ...coerced, env: { ...coerced.env } }
@@ -434,32 +468,42 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const exited = (code: number): void => {
       settle(code)
     }
+    let deliver: (code: number) => void = () => undefined
+    const drained = new Promise<number>((resolve) => {
+      deliver = resolve
+    })
     const pidLine = new PidLineFilter(errors, found, true)
     const exitLine = new ExitLineFilter(pidLine.write, exited, mark)
-    const filters: (ExitLineFilter | PidLineFilter)[] = [exitLine, pidLine]
-    let sink = output
+    const doneLine = new ExitLineFilter(output, deliver, runDoneMark(nonce))
+    let filters: (ExitLineFilter | PidLineFilter)[] = [exitLine, pidLine, doneLine]
+    let sink = doneLine.write
     if (this.joinsStreams) {
-      const outPid = new PidLineFilter(output, found, false)
+      const outPid = new PidLineFilter(doneLine.write, found, false)
       const outExit = new ExitLineFilter(outPid.write, exited, mark)
-      filters.push(outExit, outPid)
+      filters = [outExit, outPid, ...filters]
       sink = outExit.write
     }
+    const watch = new OutputWatch()
     const execution = this.execArgv(
       runArgv(tag, nonce, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
-      sink,
-      exitLine.write,
+      watch.watched(sink),
+      watch.watched(exitLine.write),
       mergeSignals(ctx.signal, letGo.signal),
     )
     let done: RunResult
     try {
-      done = await this.outcome(execution, ended, letGo, ctx.signal)
+      done = await this.outcome(execution, ended, drained, watch, letGo, ctx.signal)
       for (const filter of filters) await filter.finish()
     } catch (error) {
       if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        throw error
+      }
+      if (error instanceof PipeClosed) {
+        await this.stop(tag, PIPE_SIGNAL)
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
@@ -484,14 +528,19 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * How a run ended: its exec's answer, or, when its exit line says its
    * program has exited while the exec stays open because something the
    * program left running holds its output, the status the line gave. That
-   * exec is let go after a moment for the output still arriving, and what
-   * the program left running stays. A run stopped meanwhile ends as stopped,
-   * whatever its program said as it went, as Python's cancelled `_outcome`
-   * does. Mirrors Python's `_outcome`.
+   * exec is kept until the line that ends the program's stdout has been handed
+   * on (`drained`), so output a slow reader is still taking all arrives, then
+   * let go after `RUN_DRAIN_SECONDS`, and what the program left running stays. A
+   * stdout that never brings that line is waited on only until it has been
+   * quiet that long. A run stopped meanwhile ends as stopped, whatever its
+   * program said as it went, as Python's cancelled `_outcome` does. Mirrors
+   * Python's `_outcome`.
    */
   private async outcome(
     execution: Promise<RunResult>,
     ended: Promise<number>,
+    drained: Promise<number>,
+    watch: OutputWatch,
     letGo: AbortController,
     signal?: AbortSignal,
   ): Promise<RunResult> {
@@ -501,7 +550,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     const code = await Promise.race([ended, closed])
     if (code === null) return execution
-    if (await settledWithin(execution, RUN_DRAIN_SECONDS)) return execution
+    const either = Promise.race([closed, drained])
+    for (let quiet = watch.quiet(); quiet < RUN_DRAIN_SECONDS; quiet = watch.quiet()) {
+      const wait = Math.max(RUN_DRAIN_SECONDS - quiet, STOP_POLL_SECONDS)
+      if (await settledWithin(either, wait)) break
+    }
+    if (await settledWithin(closed, 0)) return execution
+    const delivered = await settledWithin(drained, 0)
+    if (delivered && (await settledWithin(execution, RUN_DRAIN_SECONDS))) return execution
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
     signal?.throwIfAborted()

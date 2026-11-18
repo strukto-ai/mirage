@@ -137,6 +137,22 @@ describe('HttpDiscordTransport', () => {
     expect(out).toEqual([{ id: 'g1' }])
   })
 
+  it('surfaces a rate-limited write after one request', async () => {
+    const fetch = vi.fn(() => Promise.resolve(jsonResponse({ retry_after: 0.001 }, 429)))
+    const transport = new TestTransport('https://discord.test', {}, fetch)
+    await expect(
+      transport.call('POST', '/channels/c/messages', {}, { content: 'hello' }),
+    ).rejects.toMatchObject({ status: 429 })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a successful delete with a non-JSON response', async () => {
+    const transport = new TestTransport('https://discord.test', {}, () =>
+      Promise.resolve(new Response('removed')),
+    )
+    expect(await transport.call('DELETE', '/channels/c/messages/m')).toBeNull()
+  })
+
   it('429 after MAX_RETRIES throws DiscordApiError', async () => {
     const fakeFetch: typeof fetch = () => Promise.resolve(jsonResponse({ retry_after: 0.001 }, 429))
     const t = new TestTransport(

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import { MachineConfig } from '@struktoai/mirage-core/machine/config'
 
 /**
  * How to reach the machine that runs captured lines.
@@ -43,8 +43,8 @@ export interface SSHMachineConfig extends MachineConfig {
   timeout?: number
 }
 
-export const SSH_RUNTIME_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
+export const SSHMachineConfig = {
+  ...MachineConfig,
   host: { type: 'string', required: true },
   hostname: { type: 'string' },
   port: { type: 'number' },
@@ -52,4 +52,4 @@ export const SSH_RUNTIME_CONFIG_FIELDS: ConfigFields = {
   identityFile: { type: 'string' },
   privateKey: { type: 'string' },
   timeout: { type: 'number', default: 30 },
-}
+} satisfies ConfigFields<SSHMachineConfig>

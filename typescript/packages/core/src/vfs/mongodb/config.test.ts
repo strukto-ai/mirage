@@ -14,18 +14,18 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseConfigWithSchema } from '../secrets.ts'
-import { MongoDBConfig, resolveMongoDBConfig } from './config.ts'
+import { MongoDBConfig } from './config.ts'
 
 describe('MongoDBConfig', () => {
   it('applies Python-parity defaults', () => {
-    const r = resolveMongoDBConfig({ uri: 'mongodb://localhost' })
+    const r = MongoDBConfig.parse({ uri: 'mongodb://localhost' })
     expect(r.uri).toBe('mongodb://localhost')
     expect(r.databases).toBeNull()
     expect(r.maxDocLimit).toBe(5000)
   })
 
   it('keeps explicit overrides', () => {
-    const r = resolveMongoDBConfig({
+    const r = MongoDBConfig.parse({
       uri: 'mongodb://localhost',
       databases: ['app'],
       maxDocLimit: 200,
@@ -42,6 +42,9 @@ describe('MongoDBConfig parsing', () => {
       max_doc_limit: 200,
     })
     expect(out).toEqual({
+      timeout: 30,
+      databases: null,
+      elideFields: {},
       uri: 'mongodb://h',
       maxDocLimit: 200,
     })

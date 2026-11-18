@@ -16,15 +16,15 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { type Caller, currentCaller, runWithCaller } from '../context/session_context.ts'
+import { type Caller, currentCaller, bindCaller } from '../context/session_context.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import {
   commandRecords,
   record,
   recordStream,
   revisionFor,
-  runWithRecording,
-  runWithMountContext,
+  recordingScope,
+  setMountContext,
   startOp,
   withMountContext,
 } from './context.ts'
@@ -34,12 +34,12 @@ import { ManualClock, SystemClock } from '../utils/clock.ts'
 describe('the recording clock', () => {
   it('times and stamps a recorded op on the line clock', async () => {
     const clock = new ManualClock(1_000)
-    const [, records] = await runWithRecording(
+    const [, records] = await recordingScope(
       async () => {
         const timer = startOp()
         clock.advance(2.5)
         record('read', '/s3/a', 's3', 1, timer)
-        await runWithMountContext(async () => {
+        await setMountContext(async () => {
           clock.advance(1)
           recordStream('read', '/s3/b', 's3')
         }, 'mount-a')
@@ -58,13 +58,13 @@ describe('the recording clock', () => {
   })
 })
 
-describe('runWithRecording / record / runWithMountContext', () => {
+describe('recordingScope / record / setMountContext', () => {
   it('record outside recording scope is a no-op', () => {
     record('read', '/a.txt', 's3', 100, startOp())
   })
 
-  it('runWithMountContext outside recording scope runs fn and records nothing', async () => {
-    const value = await runWithMountContext(async () => {
+  it('setMountContext outside recording scope runs fn and records nothing', async () => {
+    const value = await setMountContext(async () => {
       record('read', '/a.txt', 's3', 1, startOp())
       return 7
     }, 'm1')
@@ -73,7 +73,7 @@ describe('runWithRecording / record / runWithMountContext', () => {
   })
 
   it('captures a single record within scope', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       record('read', '/a.txt', 's3', 100, startOp())
     })
     expect(records).toHaveLength(1)
@@ -82,7 +82,7 @@ describe('runWithRecording / record / runWithMountContext', () => {
   })
 
   it('records after scope ends are dropped', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       record('read', '/a.txt', 's3', 100, startOp())
     })
     record('read', '/b.txt', 's3', 200, startOp())
@@ -90,7 +90,7 @@ describe('runWithRecording / record / runWithMountContext', () => {
   })
 
   it('captures multiple records with correct sources', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       record('read', '/a.txt', 's3', 100, startOp())
       record('write', '/b.txt', 'ram', 50, startOp())
     })
@@ -99,17 +99,17 @@ describe('runWithRecording / record / runWithMountContext', () => {
     expect(records[1]?.source).toBe('ram')
   })
 
-  it('runWithMountContext carries mountId; undefined inherits, null clears', async () => {
-    const [, records] = await runWithRecording(() =>
-      runWithMountContext(async () => {
+  it('setMountContext carries mountId; undefined inherits, null clears', async () => {
+    const [, records] = await recordingScope(() =>
+      setMountContext(async () => {
         record('read', '/s3/a.txt', 's3', 1, startOp())
-        await runWithMountContext(async () => {
+        await setMountContext(async () => {
           record('read', '/s3/b.txt', 's3', 1, startOp())
         }, undefined)
-        await runWithMountContext(async () => {
+        await setMountContext(async () => {
           record('read', '/s3/c.txt', 's3', 1, startOp())
         }, null)
-        await runWithMountContext(async () => {
+        await setMountContext(async () => {
           record('read', '/db/d.txt', 'postgres', 1, startOp())
         }, 'db-id')
         record('read', '/s3/e.txt', 's3', 1, startOp())
@@ -131,13 +131,13 @@ describe('runWithRecording / record / runWithMountContext', () => {
   it('keeps mountId task-local across concurrent branches', async () => {
     const gate = { s3: false, db: false }
     const branch = async (key: 's3' | 'db', other: 's3' | 'db', file: string) => {
-      await runWithMountContext(async () => {
+      await setMountContext(async () => {
         gate[key] = true
         while (!gate[other]) await new Promise((r) => setTimeout(r, 0))
         record('read', file, key, 1, startOp())
       }, `${key}-id`)
     }
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await Promise.all([branch('s3', 'db', '/s3/alpha.txt'), branch('db', 's3', '/db/beta.txt')])
     })
     expect(new Set(records.map((r) => `${r.path}=${String(r.mountId)}`))).toEqual(
@@ -155,12 +155,9 @@ describe('runWithRecording / record / runWithMountContext', () => {
       record('read', '/s3/a.txt', 's3', 1, startOp())
       yield new Uint8Array([2])
     }
-    const [, records] = await runWithRecording(async () => {
-      const wrapped = await runWithMountContext(
-        async () => withMountContext(lazy(), 's3-id'),
-        's3-id',
-      )
-      await runWithMountContext(async () => {
+    const [, records] = await recordingScope(async () => {
+      const wrapped = await setMountContext(async () => withMountContext(lazy(), 's3-id'), 's3-id')
+      await setMountContext(async () => {
         for await (const _chunk of wrapped) void _chunk
       }, 'db-id')
     })
@@ -170,7 +167,7 @@ describe('runWithRecording / record / runWithMountContext', () => {
 
 describe('OpRecord: fingerprint + revision', () => {
   it('record() persists fingerprint and revision on the OpRecord', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       record('read', '/a.txt', 's3', 100, startOp(), {
         fingerprint: 'abc',
         revision: 'v1',
@@ -182,7 +179,7 @@ describe('OpRecord: fingerprint + revision', () => {
   })
 
   it('record() defaults fingerprint and revision to null', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       record('read', '/a.txt', 's3', 100, startOp())
     })
     expect(records[0]?.fingerprint).toBeNull()
@@ -191,7 +188,7 @@ describe('OpRecord: fingerprint + revision', () => {
 
   it('recordStream() persists fingerprint and revision', async () => {
     let rec: ReturnType<typeof recordStream> = null
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       rec = recordStream('read', '/a.txt', 's3', { fingerprint: 'abc', revision: 'v1' })
     })
     expect(rec).not.toBeNull()
@@ -200,7 +197,7 @@ describe('OpRecord: fingerprint + revision', () => {
   })
 
   it('recordStream() allows late mutation of fp/rev on the returned record', async () => {
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       const rec = recordStream('read', '/a.txt', 's3')
       if (rec !== null) {
         rec.fingerprint = 'late-fp'
@@ -218,13 +215,13 @@ describe('revisions context', () => {
   })
 
   it('revisionFor returns null when null is passed as the map', async () => {
-    await runWithCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
+    await bindCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
       expect(revisionFor('/s3/a')).toBeNull()
     })
   })
 
   it('a revisions frame exposes its installed map; restores prior state after fn', async () => {
-    await runWithCaller(
+    await bindCaller(
       {
         ...currentCaller(),
         revisions: {
@@ -243,8 +240,8 @@ describe('revisions context', () => {
     expect(revisionFor('/s3/a')).toBeNull()
   })
 
-  it('a revisions frame works independently of runWithRecording', async () => {
-    await runWithCaller(
+  it('a revisions frame works independently of recordingScope', async () => {
+    await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([['/s3/a', 'v1']]) } },
       async () => {
         expect(revisionFor('/s3/a')).toBe('v1')
@@ -268,7 +265,7 @@ describe('recorder stores the path as given', () => {
     }
     const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
-      const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
+      const [, records] = await recordingScope(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)
       expect(records.map((r) => r.path)).toEqual(['/x/y', '/m/k.txt'])
     } finally {
@@ -287,7 +284,7 @@ describe('recorder stores the path as given', () => {
     }
     const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
-      const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
+      const [, records] = await recordingScope(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)
       expect(records.map((r) => r.path)).toEqual(['/x/y', '/m/k.txt'])
     } finally {
@@ -300,7 +297,7 @@ describe('commandRecords', () => {
   it("collects only its own command's records", async () => {
     let inner: OpRecord[] = []
     let outer: OpRecord[] = []
-    const [, sink] = await runWithRecording(async () => {
+    const [, sink] = await recordingScope(async () => {
       await commandRecords(async (mine) => {
         outer = mine
         record('write', '/a', 'ram', 1, startOp())
@@ -345,7 +342,7 @@ describe('commandRecords', () => {
         while (!recorded.has(other)) await new Promise((r) => setTimeout(r, 0))
         return mine.map((r) => r.path)
       })
-    const [[first, second]] = await runWithRecording(async () =>
+    const [[first, second]] = await recordingScope(async () =>
       Promise.all([command('A', 'B', '/a/x.txt'), command('B', 'A', '/b/y.txt')]),
     )
     expect([first, second]).toEqual([['/a/x.txt'], ['/b/y.txt']])
@@ -354,14 +351,14 @@ describe('commandRecords', () => {
   // A lazy stream pull or a runtime hop runs under a captured context after
   // the command's own frame has exited; its record is still the command's.
   it('rides a captured recording context', async () => {
-    const [mine] = await runWithRecording(async () => {
+    const [mine] = await recordingScope(async () => {
       let captured: Caller | undefined
       const list = await commandRecords(async (records) => {
         captured = currentCaller()
         return records
       })
       if (captured === undefined) throw new Error('no caller captured')
-      await runWithCaller(captured, async () => {
+      await bindCaller(captured, async () => {
         record('write', '/late', 'ram', 1, startOp())
       })
       return list
@@ -371,7 +368,7 @@ describe('commandRecords', () => {
 })
 
 it('stream completion starts pending and stays out of serialized observations', async () => {
-  const [, records] = await runWithRecording(async () => {
+  const [, records] = await recordingScope(async () => {
     record('read', '/f', 'box', 0, startOp())
     const rec = recordStream('read', '/g', 'box')
     expect(rec?.complete).toBe(false)

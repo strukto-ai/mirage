@@ -456,3 +456,15 @@ async def test_a_listing_with_no_whole_head_names_no_version(
         accessor = _served_accessor(gh)
         listing = await readdir(accessor, _root("/gh"))
         assert listing.version is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [{}, {"tree": None}, {"tree": {}}])
+async def test_recursive_tree_requires_a_listing(account, reply):
+    with patch(
+        "mirage.core.github.tree.github_get",
+        new_callable=AsyncMock,
+        return_value=reply,
+    ):
+        with pytest.raises(GitHubApiError, match="carries no tree"):
+            await fetch_tree(account, "acme", "proj", "main")

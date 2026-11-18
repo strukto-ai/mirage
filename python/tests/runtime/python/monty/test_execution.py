@@ -55,7 +55,7 @@ class _Pool:
 async def test_runtimes_share_one_pool_the_last_one_closes(monkeypatch):
     opened: list[_Pool] = []
     monkeypatch.setattr(
-        monty_execution.pydantic_monty,
+        monty_execution.load_monty_module(),
         "AsyncMonty",
         lambda **_: _Pool(opened),
     )
@@ -78,7 +78,7 @@ async def test_runtimes_share_one_pool_the_last_one_closes(monkeypatch):
 def test_a_workspace_on_its_own_loop_takes_the_same_pool(monkeypatch):
     opened: list[_Pool] = []
     monkeypatch.setattr(
-        monty_execution.pydantic_monty,
+        monty_execution.load_monty_module(),
         "AsyncMonty",
         lambda **_: _Pool(opened),
     )

@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
+import { LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import type { LanceDriver, LanceRow } from './types.ts'
@@ -33,7 +33,7 @@ const ROW: LanceRow = {
   name: 'a big orange cat',
 }
 
-const config = resolveLanceDBConfig({
+const config = LanceDBConfig.parse({
   uri: '/tmp/db',
   groupBy: ['label', 'kind'],
   idColumn: 'id',
@@ -105,7 +105,7 @@ function wideAccessor(): {
     distinct: vi.fn().mockResolvedValue(['all']),
     rowsMatching,
   } as unknown as LanceDriver
-  const wideConfig = resolveLanceDBConfig({
+  const wideConfig = LanceDBConfig.parse({
     uri: '/tmp/db',
     table: 'wide',
     groupBy: ['label'],
@@ -250,7 +250,7 @@ function crowdedAccessor(): { accessor: LanceDBAccessor; distinct: ReturnType<ty
     distinct,
     rowsMatching: vi.fn().mockResolvedValue([]),
   } as unknown as LanceDriver
-  const crowdedConfig = resolveLanceDBConfig({
+  const crowdedConfig = LanceDBConfig.parse({
     uri: '/tmp/db',
     table: 'crowded',
     groupBy: ['label'],

@@ -37,7 +37,7 @@ export interface ResourceStore {
   createEntry(kind: EntryKind, input: EntryInput): Promise<Entry>
   /** Replace an entry, keeping a sealed value the input leaves out and removing one given as null; not_found when missing. */
   updateEntry(kind: EntryKind, input: EntryInput): Promise<Entry>
-  /** Delete an entry and wipe its sealed values; a conflict while a saved template names it. */
+  /** Delete an entry and wipe its sealed values. */
   deleteEntry(kind: EntryKind, name: string): Promise<void>
   revealEntry(kind: EntryKind, name: string): Promise<RevealedEntry>
 

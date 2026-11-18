@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { create } from './create.ts'
 
@@ -43,7 +43,7 @@ describe('SharePoint create', () => {
       site: 'Team',
       drive: 'Documents',
     })
-    const [, records] = await runWithRecording(() => create(accessor, SPEC))
+    const [, records] = await recordingScope(() => create(accessor, SPEC))
     const [url, init] = fetchMock.mock.calls[2] as unknown as [string, RequestInit]
     expect(init.method).toBe('PUT')
     expect(url).toBe('https://graph.microsoft.com/v1.0/drives/drive-id/root:/m/k.txt:/content')

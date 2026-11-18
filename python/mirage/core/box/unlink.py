@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -29,7 +30,7 @@ from mirage.types import FileStat, PathSpec
 
 
 async def delete_resolved(
-    accessor: BoxAccessor, path: PathSpec, item: dict[str, Any]
+    accessor: BoxAccessor, path: PathSpec, item: Mapping[str, Any]
 ) -> None:
     """Delete a resolved file, held to the version read, else the one found.
 

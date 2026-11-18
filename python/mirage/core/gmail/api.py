@@ -27,16 +27,18 @@ class GmailApi(Protocol):
     implementation is served there.
     """
 
-    async def list_labels(self) -> list[dict[str, Any]]: ...
+    async def list_labels(self) -> list[labels.GmailLabel]: ...
 
     async def list_messages(
         self,
         label_id: str | None = None,
         query: str | None = None,
         max_results: int = 50,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[messages.GmailMessageStub]: ...
 
-    async def get_message_raw(self, message_id: str) -> dict[str, Any]: ...
+    async def get_message_raw(
+        self, message_id: str
+    ) -> messages.GmailMessageRaw: ...
 
     async def get_attachment(
         self, message_id: str, attachment_id: str, size: int
@@ -56,7 +58,7 @@ class GmailClient:
 
     token_manager: TokenManager
 
-    async def list_labels(self) -> list[dict[str, Any]]:
+    async def list_labels(self) -> list[labels.GmailLabel]:
         return await labels.list_labels(self.token_manager)
 
     async def list_messages(
@@ -64,12 +66,14 @@ class GmailClient:
         label_id: str | None = None,
         query: str | None = None,
         max_results: int = 50,
-    ) -> list[dict[str, Any]]:
+    ) -> list[messages.GmailMessageStub]:
         return await messages.list_messages(
             self.token_manager, label_id, query, max_results
         )
 
-    async def get_message_raw(self, message_id: str) -> dict[str, Any]:
+    async def get_message_raw(
+        self, message_id: str
+    ) -> messages.GmailMessageRaw:
         return await messages.get_message_raw(self.token_manager, message_id)
 
     async def get_attachment(

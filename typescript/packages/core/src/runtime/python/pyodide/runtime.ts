@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, runWithCaller } from '../../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../../context/session_context.ts'
 import type { Context } from '../../../commands/config.ts'
 import type { PathSpec } from '../../../types.ts'
 import { Activity } from '../../../utils/activity.ts'
@@ -322,10 +322,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
       return this.withFreshRuntime(execute)
     const caller = currentCaller()
     return this.schedule(() =>
-      this.withPermit(
-        () => runWithCaller(caller, () => this.withFreshRuntime(execute)),
-        ctx.signal,
-      ),
+      this.withPermit(() => bindCaller(caller, () => this.withFreshRuntime(execute)), ctx.signal),
     )
   }
 

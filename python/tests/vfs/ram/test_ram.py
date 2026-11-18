@@ -68,6 +68,13 @@ async def test_load_state_recounts_the_store():
     assert (await vfs.capacity()).used == 3
 
 
+@pytest.mark.parametrize("state", [{}, {"dirs": []}, {"dirs": ["/child"]}])
+def test_load_state_restores_the_mount_root(state):
+    vfs = RAMVFS()
+    vfs.load_state(state)
+    assert "/" in vfs.get_state()["dirs"]
+
+
 def test_get_state_saves_the_capacity_only_when_capped():
     assert "config" not in RAMVFS().get_state()
     assert RAMVFS(capacity=10).get_state()["config"] == {"capacity": 10}

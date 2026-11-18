@@ -15,11 +15,11 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretSchema, secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 export const GoogleConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     // Two ways to authenticate, the same two MsGraphConfig offers: a token
     // (or provider) supplied by the caller, or the refresh-token grant where
     // mirage mints and renews the access token itself through TokenManager.

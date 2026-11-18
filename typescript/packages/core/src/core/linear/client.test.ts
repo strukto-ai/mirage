@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { getIssue, listTeamIssues, type LinearTransport } from './client.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { HttpLinearTransport, getIssue, listTeamIssues, type LinearTransport } from './client.ts'
 
 class RecordingTransport implements LinearTransport {
   readonly queries = new Map<string, string>()
@@ -100,3 +100,16 @@ it('asks a project-scoped listing only for those projects', async () => {
   expect(asked).toHaveLength(1)
   expect(asked[0]?.filter).toEqual({ project: { id: { in: ['P1', 'P2'] } } })
 })
+
+it.each([null, {}, { data: [] }, { data: null }])(
+  'rejects an invalid GraphQL response body %j',
+  async (body) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(body))
+    try {
+      const transport = new HttpLinearTransport({ apiKey: 'token' })
+      await expect(transport.graphql('query { viewer { id } }')).rejects.toThrow('no data object')
+    } finally {
+      fetch.mockRestore()
+    }
+  },
+)

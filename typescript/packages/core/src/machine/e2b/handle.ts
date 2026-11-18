@@ -49,7 +49,7 @@ import {
 } from './constants.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type { E2bSdk } from './sdk.ts'
-import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
+import { E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
 
 const ENC = new TextEncoder()
@@ -165,7 +165,7 @@ class PtyWriter implements PipeWriter {
  * connects again.
  */
 export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport {
-  static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = E2BConfig
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'e2b'
   protected override readonly pauses = true

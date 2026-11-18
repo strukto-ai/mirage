@@ -18,7 +18,7 @@ import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { MICROSANDBOX_CONFIG_FIELDS, type MicrosandboxConfig } from './config.ts'
+import { MicrosandboxConfig } from './config.ts'
 import { EXEC_PRELUDE, notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import {
   RUNNING_STATE,
@@ -40,7 +40,7 @@ import { ProgramMachine } from '../transport.ts'
  * `onPause: 'pause'` or the call names it, and the next connect resumes it.
  */
 export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
-  static override readonly configFields: ConfigFields = MICROSANDBOX_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = MicrosandboxConfig
   static override readonly provider = 'microsandbox'
   protected override readonly pauses = true
   protected readonly program = 'msb'

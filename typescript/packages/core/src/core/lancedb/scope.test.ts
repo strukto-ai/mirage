@@ -15,13 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { resolveLanceDBConfig, type LanceDBConfig } from '../../vfs/lancedb/config.ts'
+import { LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { INVALID, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import { filtersOf } from '../vector/scope.ts'
 import { scopesFor } from './scope.ts'
 
-function cfg(over: Partial<LanceDBConfig> = {}): ReturnType<typeof resolveLanceDBConfig> {
-  return resolveLanceDBConfig({
+function cfg(over: Partial<LanceDBConfig> = {}): ReturnType<typeof LanceDBConfig.parse> {
+  return LanceDBConfig.parse({
     uri: '/tmp/db',
     groupBy: ['label', 'kind'],
     idColumn: 'id',
@@ -34,7 +34,7 @@ function cfg(over: Partial<LanceDBConfig> = {}): ReturnType<typeof resolveLanceD
 
 const config = cfg()
 
-function detect(c: ReturnType<typeof resolveLanceDBConfig>): DetectFn {
+function detect(c: ReturnType<typeof LanceDBConfig.parse>): DetectFn {
   return makeDetectScope(scopesFor(c))
 }
 
@@ -57,7 +57,7 @@ describe('lancedb scope', () => {
   })
 
   it('blob leaf needs a blob column', () => {
-    const blobless = resolveLanceDBConfig({ uri: '/tmp/db', groupBy: ['label', 'kind'] })
+    const blobless = LanceDBConfig.parse({ uri: '/tmp/db', groupBy: ['label', 'kind'] })
     const match = detect(blobless)(ps('/animals/cat/big/3.png'))
     expect(match.kind).toBe(INVALID)
   })

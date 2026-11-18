@@ -106,6 +106,12 @@ def secret_field_names(config: type[BaseModel] | BaseModel) -> list[str]:
     ]
 
 
+def vfs_state_requires_override(state: dict[str, Any]) -> bool:
+    return state.get("needs_override") is True or has_redacted_secret(
+        state.get("config")
+    )
+
+
 def has_redacted_secret(value: Any) -> bool:
     """Whether a saved config carries the redaction marker anywhere.
 

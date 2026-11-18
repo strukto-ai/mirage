@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { activeRecords, runWithRecording } from '../observe/context.ts'
+import { activeRecords, recordingScope } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import type * as RecordModule from '../observe/record.ts'
 import { publishRead } from './context.ts'
@@ -27,7 +27,7 @@ import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/const
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { RedisIndexCacheStore } from './index/redis.ts'
 import type { IndexCacheStore } from './index/store.ts'
-import { runInCommandScope } from './index/scope.ts'
+import { commandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
 import { RefusingStore } from '../../tests/cache/_test_util.ts'
@@ -526,7 +526,7 @@ describe('what a mount has listed since a command started', () => {
   it('counts a write through the locked view for the shared one', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await locked(manager).setDir('/data', [])
       expect(manager.listingTrusted('/data')).toBe(true)
       expect(manager.listingTrusted('/data/other')).toBe(false)
@@ -553,9 +553,9 @@ describe('what a mount has listed since a command started', () => {
         await releasePromise
         await scoped(manager).setDir('/data', [])
       }
-      const produce = (): Promise<void> => (producer === 'none' ? note() : runInCommandScope(note))
+      const produce = (): Promise<void> => (producer === 'none' ? note() : commandScope(note))
       const early = producer === 'later' ? null : produce()
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         const task = early ?? produce()
         await readyPromise
         release()
@@ -569,7 +569,7 @@ describe('what a mount has listed since a command started', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     await scoped(manager).setDir('/data', [])
-    await runInCommandScope(() => {
+    await commandScope(() => {
       expect(manager.listingTrusted('/data')).toBe(false)
       return Promise.resolve()
     })
@@ -595,7 +595,7 @@ describe('which listings a mount trusts', () => {
     const index = new RAMIndexCacheStore({ ttl: 600, clock })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     await scoped(manager).setDir('/data', [])
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       expect(manager.listingTrusted('/data')).toBe(false)
       await scoped(manager).setDir('/data', [])
       clock.advance(LISTING_TRUST_WINDOW * 10)
@@ -697,14 +697,14 @@ describe('what a probe saw this command', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     const stat = probed()
-    await runInCommandScope(() => {
+    await commandScope(() => {
       manager.noteProbed(path, stat)
       expect(manager.probedStat(path)).toBe(stat)
       expect(manager.probedStat(PathSpec.fromStrPath('/data/arch/other'))).toBeNull()
       return Promise.resolve()
     })
     expect(manager.probedStat(path)).toBeNull()
-    await runInCommandScope(() => {
+    await commandScope(() => {
       expect(manager.probedStat(path)).toBeNull()
       return Promise.resolve()
     })
@@ -733,9 +733,9 @@ describe('what a probe saw this command', () => {
       await releasePromise
       manager.noteProbed(path, probed())
     }
-    const producer = scoped ? runInCommandScope(note) : note()
+    const producer = scoped ? commandScope(note) : note()
     await readyPromise
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       release()
       await producer
       expect(manager.probedStat(path)).toBeNull()
@@ -782,7 +782,7 @@ describe('what a probe saw this command', () => {
     it(`is retired by ${name} in the same command`, async () => {
       const index = new RAMIndexCacheStore({ ttl: 600 })
       const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         manager.noteProbed(path, probed())
         expect(manager.probedStat(path)).not.toBeNull()
         await drop(manager)
@@ -801,7 +801,7 @@ describe('what a probe saw this command', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     const spy = vi.spyOn(manager as unknown as { pruneProbes: () => void }, 'pruneProbes')
-    await runInCommandScope(() => {
+    await commandScope(() => {
       for (let n = 0; n < PROBED_LIMIT * 4; n++) {
         manager.noteProbed(PathSpec.fromStrPath(`/data/f${String(n)}`), probed())
       }
@@ -814,12 +814,12 @@ describe('what a probe saw this command', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     for (let n = 0; n < PROBED_LIMIT; n++) {
-      await runInCommandScope(() => {
+      await commandScope(() => {
         manager.noteProbed(PathSpec.fromStrPath(`/data/old${String(n)}`), probed())
         return Promise.resolve()
       })
     }
-    await runInCommandScope(() => {
+    await commandScope(() => {
       const mine = PathSpec.fromStrPath('/data/mine')
       manager.noteProbed(mine, probed())
       expect(manager.probedStat(mine)).not.toBeNull()
@@ -1035,7 +1035,7 @@ describe('version lookups in one line', () => {
     const manager = new CacheManager(new RAMFileCacheStore(), null, '/data/', true)
     const path = PathSpec.fromStrPath('/data/f')
     built.length = 0
-    await runWithRecording(async () => {
+    await recordingScope(async () => {
       const records = activeRecords() as OpRecord[]
       for (let i = 0; i < 50; i++) {
         records.push(

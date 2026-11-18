@@ -16,7 +16,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import aclosing, asynccontextmanager
-from typing import Any, BinaryIO, NoReturn, TypeVar, assert_never
+from datetime import datetime
+from typing import Any, BinaryIO, NoReturn, TypedDict, TypeVar, assert_never
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import condition_version
@@ -33,6 +34,7 @@ from mirage.cache.types import (
 )
 from mirage.concurrency.limiter import owned_task
 from mirage.context.session_context import current_caller
+from mirage.core.api.errors import PaginationStalledError
 from mirage.core.object_store.driver import (
     ChildEntry,
     ObjectMeta,
@@ -70,6 +72,42 @@ logger = logging.getLogger(__name__)
 DELETE_BATCH = 1000
 
 
+class Listing(TypedDict, total=False):
+    CommonPrefixes: list[dict[str, str]]
+    Contents: list[dict[str, Any]]
+    IsTruncated: bool
+    NextContinuationToken: str
+
+
+def _iso_of(modified: datetime | str | None) -> str:
+    return (
+        to_iso_z(modified)
+        if isinstance(modified, datetime)
+        else modified or ""
+    )
+
+
+async def _list_pages(
+    conn: S3Conn, prefix: str, *, delimiter: str | None = None
+) -> AsyncIterator[Listing]:
+    params = {"Bucket": conn.config.bucket, "Prefix": prefix}
+    if delimiter is not None:
+        params["Delimiter"] = delimiter
+    paginator = conn.client.get_paginator("list_objects_v2")
+    seen: set[str] = set()
+    async for page in paginator.paginate(**params):
+        if page.get("IsTruncated") is True:
+            token = page.get("NextContinuationToken")
+            if not isinstance(token, str) or not token:
+                raise ValueError(
+                    "truncated S3 listing has no continuation token"
+                )
+            if token in seen:
+                raise PaginationStalledError(token)
+            seen.add(token)
+        yield page
+
+
 def _key_prefix_of(accessor: S3Accessor) -> str:
     return accessor.config.key_prefix or ""
 
@@ -87,10 +125,7 @@ async def _connect(accessor: S3Accessor) -> AsyncIterator[S3Conn]:
 
 
 async def _list_children(conn: S3Conn, pfx: str) -> AsyncIterator[ChildEntry]:
-    paginator = conn.client.get_paginator("list_objects_v2")
-    async for page in paginator.paginate(
-        Bucket=conn.config.bucket, Prefix=pfx, Delimiter="/"
-    ):
+    async for page in _list_pages(conn, pfx, delimiter="/"):
         for cp in page.get("CommonPrefixes") or []:
             child = cp["Prefix"].rstrip("/")
             if child:
@@ -100,12 +135,11 @@ async def _list_children(conn: S3Conn, pfx: str) -> AsyncIterator[ChildEntry]:
         for obj in page.get("Contents") or []:
             relative = obj["Key"][len(pfx) :]
             if relative and "/" not in relative:
-                last_mod = obj.get("LastModified")
                 yield ChildEntry(
                     key=obj["Key"],
                     kind="f",
                     size=obj.get("Size"),
-                    modified=to_iso_z(last_mod) if last_mod else "",
+                    modified=_iso_of(obj.get("LastModified")),
                 )
             else:
                 yield ChildEntry(key=obj["Key"], kind="marker")
@@ -116,10 +150,7 @@ async def _list_subtree(conn: S3Conn, stem: str) -> AsyncIterator[TreeEntry]:
     # name prefix ("data-old" under stem "data"), so each key is checked
     # against the exact stem or the slashed subtree.
     base = (stem + "/") if stem else ""
-    paginator = conn.client.get_paginator("list_objects_v2")
-    async for page in paginator.paginate(
-        Bucket=conn.config.bucket, Prefix=stem
-    ):
+    async for page in _list_pages(conn, stem):
         for obj in page.get("Contents") or []:
             okey = obj["Key"]
             if not (okey == stem or okey.startswith(base)):
@@ -127,9 +158,7 @@ async def _list_subtree(conn: S3Conn, stem: str) -> AsyncIterator[TreeEntry]:
             yield TreeEntry(
                 key=okey,
                 size=obj.get("Size", 0),
-                modified=to_iso_z(obj["LastModified"])
-                if obj.get("LastModified")
-                else "",
+                modified=_iso_of(obj.get("LastModified")),
             )
 
 
@@ -171,7 +200,7 @@ async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
     etag_raw = _etag_of(resp)
     return ObjectMeta(
         size=resp["ContentLength"],
-        modified=to_iso_z(resp["LastModified"]),
+        modified=_iso_of(resp.get("LastModified")),
         fingerprint=etag_raw or None,
         revision=_version_of(resp),
         extra={"etag": etag_raw},
@@ -731,10 +760,7 @@ async def _known_pages(
         pfx (str): the key prefix walked.
         known (KnownVersions): the mount's versions for the listed keys.
     """
-    paginator = conn.client.get_paginator("list_objects_v2")
-    async for page in paginator.paginate(
-        Bucket=conn.config.bucket, Prefix=pfx
-    ):
+    async for page in _list_pages(conn, pfx):
         listed = [
             (obj["Key"], _quoted(str(obj.get("ETag") or "")))
             for obj in page.get("Contents") or []
@@ -953,10 +979,7 @@ async def _delete_file(conn: S3Conn, key: str) -> None:
 
 
 async def _delete_prefix(conn: S3Conn, pfx: str) -> None:
-    paginator = conn.client.get_paginator("list_objects_v2")
-    async for page in paginator.paginate(
-        Bucket=conn.config.bucket, Prefix=pfx
-    ):
+    async for page in _list_pages(conn, pfx):
         keys = [{"Key": obj["Key"]} for obj in page.get("Contents") or []]
         if keys:
             resp = await conn.client.delete_objects(
@@ -1020,11 +1043,8 @@ async def _move_prefix(conn: S3Conn, src_pfx: str, dst_pfx: str) -> bool:
     Returns:
         bool: whether any key was found under the source prefix.
     """
-    paginator = conn.client.get_paginator("list_objects_v2")
     moved: list[dict[str, str]] = []
-    async for page in paginator.paginate(
-        Bucket=conn.config.bucket, Prefix=src_pfx
-    ):
+    async for page in _list_pages(conn, src_pfx):
         for obj in page.get("Contents") or []:
             key = obj["Key"]
             await _copy_object(conn, key, f"{dst_pfx}{key[len(src_pfx) :]}")

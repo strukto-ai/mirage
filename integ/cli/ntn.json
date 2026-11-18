@@ -181,7 +181,7 @@
       "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "ffff1111-2222-3333-4444-555566667777\t\u2713\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
+        "stdout": "ffff1111-2222-3333-4444-555566667777\t✓\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
         "stderr": ""
       }
     },
@@ -429,7 +429,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "\u2714 Page trashed\n"
+        "stderr": "✔ Page trashed\n"
       }
     },
     {
@@ -1137,7 +1137,9 @@
     {
       "id": "ntn_files_list_empty",
       "seq": 9940125,
-      "targets": ["cli-ntn"],
+      "targets": [
+        "cli-ntn"
+      ],
       "command": "ntn files list; ntn files ls --json | jq -c .",
       "expect": {
         "exit": 0,
@@ -1148,7 +1150,9 @@
     {
       "id": "ntn_files_create_get_list",
       "seq": 9940126,
-      "targets": ["cli-ntn"],
+      "targets": [
+        "cli-ntn"
+      ],
       "command": "id=$(printf hello | ntn files create --filename a.txt --content-type text/plain --json | jq -r .id); ntn files get \"$id\" --json | jq -c '[.status, .filename, .content_type, .content_length]'; ntn files list --json | jq -c '.[0].filename'; ntn files list | cut -f2-5; ntn files list --plain | wc -l | tr -d ' '; ntn files get \"$id\" | cut -f2-5; ntn files get \"$id\" --plain | cut -f2-5; printf hello | ntn files create --filename b.txt --plain | cut -f2-5; ntn files get \"$id\" --json | jq -c keys",
       "expect": {
         "exit": 0,
@@ -1159,7 +1163,9 @@
     {
       "id": "ntn_files_create_from_url",
       "seq": 9940127,
-      "targets": ["cli-ntn"],
+      "targets": [
+        "cli-ntn"
+      ],
       "command": "ntn files create --external-url https://example.com/a/photo.png | cut -f2-5; ntn files create --external-url https://example.com/a/photo.png --json | jq -c '[.status, .filename, .content_type]'",
       "expect": {
         "exit": 0,
@@ -1170,7 +1176,9 @@
     {
       "id": "ntn_files_create_empty_stdin",
       "seq": 9940128,
-      "targets": ["cli-ntn"],
+      "targets": [
+        "cli-ntn"
+      ],
       "command": "printf '' | ntn files create; echo rc=$?",
       "expect": {
         "exit": 0,
@@ -1181,12 +1189,40 @@
     {
       "id": "ntn_files_get_missing",
       "seq": 9940129,
-      "targets": ["cli-ntn"],
+      "targets": [
+        "cli-ntn"
+      ],
       "command": "ntn files get 00000000-0000-4000-8000-000000000000; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=5\n",
         "stderr": "error: Public API request failed (404 Not Found object_not_found): Could not find file upload with ID: 00000000-0000-4000-8000-000000000000. Make sure the relevant pages and databases are shared with your integration.\n"
+      }
+    },
+    {
+      "id": "ntn_pages_get_renamed_title",
+      "seq": 9940130,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/data_sources/d5000000-2222-3333-4444-555566667777 -X PATCH -d '{\"properties\":{\"Name\":{\"name\":\"Headline\"}}}' > /dev/null && ntn pages get ffff1111-2222-3333-4444-555566667777 | grep '^Headline:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Headline: Write spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_sorts_numeric_property_names",
+      "seq": 9940131,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/data_sources/d5000000-2222-3333-4444-555566667777 -X PATCH -d '{\"properties\":{\"2\":{\"rich_text\":{}},\"10\":{\"rich_text\":{}}}}' | grep -oE '\"(2|10)\":'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"10\":\n\"2\":\n",
+        "stderr": ""
       }
     }
   ]

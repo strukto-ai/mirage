@@ -17,7 +17,7 @@ import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import {
   isProgramInvocation,
-  runWithAdmission,
+  setAdmission,
   sessionVoice,
 } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -136,7 +136,7 @@ async function flatStatus(
   if (admit === undefined) return (await evalFlat(ctx, args)) ? 0 : 1
   const words = args.map((a) => wordText(a))
   const gate = await admit([...words, ']'])
-  return runWithAdmission(gate, async () => ((await evalFlat(ctx, args)) ? 0 : 1))
+  return setAdmission(gate, async () => ((await evalFlat(ctx, args)) ? 0 : 1))
 }
 
 /** The `test` / `[` / `[[` arm; `[` must close with `]`. */

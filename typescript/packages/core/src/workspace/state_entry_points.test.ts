@@ -20,7 +20,7 @@ import {
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { Command, type Context } from '../commands/config.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
 import type { Action, CommandContext, Decision, Policy, VfsContext } from '../policy/index.ts'
 import { Outcome, Scope, type AskHandler } from '../policy/index.ts'
@@ -210,7 +210,7 @@ describe('name-plane writes go through the dispatcher', () => {
   it("facade symlink respects the session's view", async () => {
     const ws = makeWs()
     const sess = ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await ws.vfs.symlink('/a/lk', 'x.txt')
       // The hidden mount does not exist for the session, so a create
       // under it answers ENOENT as every read does; only a create at a
@@ -907,7 +907,7 @@ describe('hidden paths across the tiers', () => {
   it('ws.vfs agrees with the shell', async () => {
     const ws = makeHiddenPathsWs()
     const sess = ws.getSession('agent')
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(ws.vfs.read('/a/secrets/token.txt')).rejects.toMatchObject({
         code: 'ENOENT',
       })
@@ -2282,7 +2282,7 @@ describe('a walk below the operand meets the rule guard', () => {
   it('the dispatcher stats a refused entry and withholds its content', async () => {
     const ws = await walkWs()
     const sess = ws.getSession('g')
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       const st = (await ws.dispatch('stat', '/data/t/locked/y')) as { size?: number }
       expect(st.size).toBe(2)
       await expect(ws.dispatch('read', '/data/t/locked/y')).rejects.toMatchObject({

@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.file.utils import token_or_none
 from mirage.commands.cli import mcp
 from mirage.commands.cli.mcp.types import MCPSource, MCPTool
 from mirage.commands.cli.types import CLI
@@ -73,10 +74,10 @@ from mirage.shell.console import (
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.variable import ShellVar
 from mirage.types import (
-    JsonValue,
+    DEFAULT_READ_SPEC,
+    JsonObject,
     Limit,
     MountMode,
-    ReadSpec,
     VFSName,
     WritePolicy,
 )
@@ -96,6 +97,7 @@ from mirage.vfs.secrets import (
     has_redacted_secret,
     redacted_config_dump,
     revealed_config_dump,
+    vfs_state_requires_override,
 )
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.documentation.documents import Documents
@@ -201,7 +203,7 @@ CLIOverrides = dict[
 
 
 def cli_config_dump(
-    config: BaseModel | dict[str, JsonValue] | None, reveal: bool = False
+    config: BaseModel | JsonObject | None, reveal: bool = False
 ) -> dict[str, Any] | None:
     """Serialize an installation's config for a snapshot.
 
@@ -215,7 +217,7 @@ def cli_config_dump(
     would sit in this verbatim capture.
 
     Args:
-        config (BaseModel | dict[str, JsonValue] | None): the validated
+        config (BaseModel | JsonObject | None): the validated
             install config.
         reveal (bool): reveal secrets instead of redacting them, which
             only a same-process copy does.
@@ -615,7 +617,7 @@ def build_mount_args(
             read = (
                 override.read
                 if isinstance(override, Mount) and override.read is not None
-                else ReadSpec()
+                else DEFAULT_READ_SPEC
             )
         # The saved policy survives an override, as `mode` does.
         saved_write = m.get(MountKey.WRITE)
@@ -991,7 +993,7 @@ def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         cache._entries[key] = CacheEntry(
             size=entry.get(CacheKey.SIZE, len(data)),
             cached_at=entry.get(CacheKey.CACHED_AT, 0),
-            fingerprint=entry.get(CacheKey.FINGERPRINT) or None,
+            fingerprint=token_or_none(entry.get(CacheKey.FINGERPRINT)),
             ttl=entry.get(CacheKey.TTL),
         )
         cache._cache_size += entry.get(CacheKey.SIZE, len(data))
@@ -1198,12 +1200,10 @@ def requires_vfs_override(mount_state: dict[str, Any]) -> bool:
         mount_state (dict[str, Any]): one captured ``mounts`` entry.
     """
     vfs_state = mount_state[MountKey.VFS_STATE]
-    if vfs_state.get(VFSStateKey.NEEDS_OVERRIDE) is True:
+    if vfs_state_requires_override(vfs_state):
         return True
     cls, _entry = _saved_class(mount_state)
-    if cls is None:
-        return True
-    return has_redacted_secret(vfs_state.get(VFSStateKey.CONFIG))
+    return cls is None
 
 
 def reusable_clis(ws: WorkspaceLike) -> CLIOverrides:

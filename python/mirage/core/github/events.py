@@ -70,7 +70,7 @@ class GitHubEventHook:
         if name.lower() != f"{accessor.owner}/{accessor.repo}".lower():
             return ()
         ref = accessor.ref or text_field(repository, "default_branch")
-        if text_field(payload, "ref") not in (
+        if not ref or text_field(payload, "ref") not in (
             f"refs/heads/{ref}",
             f"refs/tags/{ref}",
         ):

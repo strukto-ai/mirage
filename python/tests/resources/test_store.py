@@ -140,20 +140,15 @@ async def test_a_create_refuses_a_taken_name_and_an_update_a_missing_one():
 
 
 @pytest.mark.asyncio
-async def test_an_entry_a_template_names_is_not_deleted():
+async def test_an_entry_a_template_names_is_deleted_and_the_template_kept():
     store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
     await store.create_entry("vfs", GITHUB)
     ref = {"token": {"from": "strukto", "ref": "github", "key": "token"}}
     config = {"mounts": {"/gh": {"vfs": "github", "config": ref}}}
     await store.create_template(TemplateInput(name="agent", config=config))
-    with pytest.raises(ResourceError) as used:
-        await store.delete_entry("vfs", "github")
-    assert (used.value.code, str(used.value)) == (
-        "conflict",
-        "github is used by agent",
-    )
-    await store.delete_template("agent")
     await store.delete_entry("vfs", "github")
+    assert await store.list_entries("vfs") == []
+    assert (await store.get_template("agent")).config == config
 
 
 @pytest.mark.parametrize("name", ["../x", "Upper", "", "a" * 64])

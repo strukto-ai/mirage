@@ -28,7 +28,7 @@ vi.mock('../../utils/hash.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { Digest, sha1Hex } from '../../utils/hash.ts'
 import * as api from './api.ts'
@@ -64,7 +64,7 @@ async function recordedRead(
   window?: { offset?: number; size?: number },
 ): Promise<[Uint8Array, Row[]]> {
   vi.mocked(api.downloadFile).mockResolvedValue(data)
-  const [got, records] = await runWithRecording(() => read(makeAccessor(), PATH, window, row))
+  const [got, records] = await recordingScope(() => read(makeAccessor(), PATH, window, row))
   return [got, records.map((r) => [r.op, r.bytes, r.fingerprint])]
 }
 
@@ -83,7 +83,7 @@ async function recordedStream(
   closeAfter: number | null = null,
 ): Promise<[Uint8Array[], Row[]]> {
   chunked(...chunks)
-  const [got, records] = await runWithRecording(async () => {
+  const [got, records] = await recordingScope(async () => {
     const out: Uint8Array[] = []
     for await (const c of readStream(makeAccessor(), PATH, row)) {
       out.push(c)

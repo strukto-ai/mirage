@@ -16,7 +16,7 @@ import asyncio
 import os
 import stat
 import sys
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 from urllib.parse import quote, urlencode
 
 import typer
@@ -131,30 +131,50 @@ def shell_cmd(
         raise typer.Exit(code=code)
 
 
-def _format_explanation(data: dict[str, Any]) -> str:
+class ExplainedNode(TypedDict):
+    type: str
+    text: str
+    children: list["ExplainedNode"]
+    outcome: NotRequired[str]
+    exit_code: NotRequired[int]
+    reason: NotRequired[str]
+    source: NotRequired[str]
+    machine: NotRequired[str]
+
+
+class ExplanationRecord(TypedDict):
+    line: str
+    outcome: str
+    reason: str
+    exit_code: int
+    answers: list[dict[str, str | None]]
+    node: ExplainedNode
+
+
+def _format_explanation(data: ExplanationRecord) -> str:
     """An explained line as a tree, one node a row, each command with
     its verdict.
 
     Args:
-        data (dict[str, Any]): the ``explain/shell`` answer.
+        data (ExplanationRecord): the ``explain/shell`` answer.
     """
     verdict = f"{data['outcome']}, exit {data['exit_code']}"
     if data["reason"]:
         verdict += f": {data['reason']}"
     out = [f"{data['line']}  [{verdict}]"]
     for said in data["answers"]:
-        if said["kind"] == "route" and said["reason"]:
-            out.append(f"  on {said['machine']}: {said['reason']}")
+        if said["kind"] == "route" and said.get("reason"):
+            out.append(f"  on {said.get('machine') or ''}: {said['reason']}")
     for child in data["node"]["children"]:
         _explained_lines(child, 1, out)
     return "\n".join(out)
 
 
-def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
+def _explained_lines(node: ExplainedNode, depth: int, out: list[str]) -> None:
     """Append one node of an explained line, and what it holds, as rows.
 
     Args:
-        node (dict[str, Any]): the node.
+        node (ExplainedNode): the node.
         depth (int): how deep it sits under the line.
         out (list[str]): the rows so far.
     """
@@ -163,12 +183,12 @@ def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
         out.append(f"{pad}{node['type']}: {node['text']}")
     else:
         line = f"{pad}{node['text']}  [{node['outcome']}"
-        if node["exit_code"]:
+        if node.get("exit_code"):
             line += f", exit {node['exit_code']}"
-        line += f": {node['reason']}]" if node["reason"] else "]"
-        if node["source"]:
+        line += f": {node['reason']}]" if node.get("reason") else "]"
+        if node.get("source"):
             line += f"  {node['source']}"
-        if node["machine"]:
+        if node.get("machine"):
             line += f"  on {node['machine']}"
         out.append(line)
     for child in node["children"]:

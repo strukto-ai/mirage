@@ -30,6 +30,7 @@ from typing import (
     Literal,
     Protocol,
     TypeAlias,
+    TypedDict,
     TypeVar,
 )
 
@@ -182,12 +183,8 @@ class FileType(str, Enum):
     FileStat.content. Distinct from ContentType, which is only a
     rendering hint for a FILE.
 
-    The full POSIX set is enumerated so the model is comprehensive.
-    DIRECTORY, FILE, SYMLINK, CHAR_DEVICE (the /dev mount) and FIFO (a
-    process substitution's /dev/fd/N) are produced today; BLOCK_DEVICE
-    and SOCKET are declared but not yet emitted, and the render/derivation
-    tables (find letter, st_mode bits, ls char) grow a row for one the
-    moment a backend starts producing it.
+    The type follows the backend's stat result, including character and
+    block devices, pipes and sockets reported by an SSH mount.
     """
 
     DIRECTORY = "directory"
@@ -232,6 +229,15 @@ DEVICE_NUMBERS_KEY = "device_numbers"
 # generated document): a kernel mount reads it fresh on every read
 # rather than holding what an earlier read returned.
 LIVE_KEY = "mirage.live"
+
+
+class SetAttrFields(TypedDict, total=False):
+    mode: int
+    uid: int | str
+    gid: int | str
+    atime: str
+    mtime: str
+    nofollow: bool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -309,6 +315,9 @@ class DirListing:
 JsonValue: TypeAlias = (
     "None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]"
 )
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+
 
 # One page request of a cursor-paginated endpoint: receives the cursor to
 # resume from (None for the first page) and returns the decoded reply.
@@ -598,6 +607,9 @@ class ReadSpec:
 
     policy: ReadPolicy = ReadPolicy.BOUNDED
     ttl: int = DEFAULT_READ_TTL
+
+
+DEFAULT_READ_SPEC = ReadSpec()
 
 
 @dataclass(frozen=True, slots=True)

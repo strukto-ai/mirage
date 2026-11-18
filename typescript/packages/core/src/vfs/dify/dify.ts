@@ -23,7 +23,7 @@ import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { REDACTED_SECRET, type RedactedSchema } from '../secrets.ts'
-import { resolveDifyConfig, type DifyConfig } from './config.ts'
+import { DifyConfig } from './config.ts'
 
 export const VFS_MD = `- Every file is plain text assembled from the document's Dify segments,
   whatever its original extension.`
@@ -42,13 +42,13 @@ export class DifyVFS extends BaseVFS {
     read: ['entry'],
     stat: ['entry'],
   } as const
-  readonly config: ReturnType<typeof resolveDifyConfig>
+  readonly config: ReturnType<typeof DifyConfig.parse>
   override readonly accessor: DifyAccessor
 
   constructor(options: DifyVFSOptions | DifyConfig) {
     super()
     const config = 'config' in options ? options.config : options
-    this.config = resolveDifyConfig(config)
+    this.config = DifyConfig.parse(config)
     this.accessor = new DifyAccessor(this.config)
   }
 

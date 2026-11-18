@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
-import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
+import { record, revisionFor, recordingScope, startOp } from '../observe/context.ts'
 import type { Handed } from '../vfs/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
@@ -140,11 +140,11 @@ function build(accessor: FakeRemoteAccessor): Workspace {
   return new Workspace({ '/remote': res }, { mode: MountMode.WRITE })
 }
 
-// Wrap a dispatch call in runWithRecording so the captured OpRecord
+// Wrap a dispatch call in recordingScope so the captured OpRecord
 // reaches `ws.records`, mirroring what `Workspace.shell` does
-// implicitly via its `runWithRecording` setup.
+// implicitly via its `recordingScope` setup.
 async function recordedDispatch(ws: Workspace, op: string, path: string): Promise<unknown> {
-  const [result, records] = await runWithRecording(async () => ws.dispatch(op, path))
+  const [result, records] = await recordingScope(async () => ws.dispatch(op, path))
   ws.records.push(...records)
   return result
 }
@@ -431,7 +431,7 @@ it.each([
     try {
       await recordedDispatch(ws, 'read', '/remote/data/nested/file')
       if (delayed) {
-        reading = runWithRecording(async () => {
+        reading = recordingScope(async () => {
           const result = await ws.dispatch('read', '/remote/data/file')
           enter()
           await release
@@ -489,7 +489,7 @@ it('snapshot rejects fingerprints from a retired lazy op', async () => {
   const ws = new Workspace({ '/remote': new LazyRemoteVFS(old) })
   try {
     const id = ws.mount('/remote').mountId
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       const stream = (await ws.dispatch('read', '/remote/file', [], {
         stream: true,
       })) as AsyncIterable<Uint8Array>

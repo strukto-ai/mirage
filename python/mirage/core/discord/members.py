@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import NotRequired, TypedDict
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_request
@@ -21,9 +21,14 @@ from mirage.core.discord.paginate import after_id_pages
 from mirage.core.hierarchy.readdir import held_pages
 
 
+class DiscordMember(TypedDict):
+    user: NotRequired[dict[str, str]]
+    nick: NotRequired[str | None]
+
+
 def list_members_stream(
     accessor: DiscordAccessor, guild_id: str, page_size: int = 1000
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncIterator[list[DiscordMember]]:
     """Stream guild members across pages.
 
     Walks ``/guilds/<id>/members?after=<user_id>&limit=N`` until the
@@ -41,7 +46,7 @@ def list_members_stream(
         accessor,
         f"/guilds/{guild_id}/members",
         base_params={},
-        last_id_fn=lambda m: cast(str, m.get("user", {}).get("id", "")),
+        last_id_fn=lambda m: m.get("user", {}).get("id", ""),
         page_size=page_size,
     )
 
@@ -51,7 +56,7 @@ async def list_members(
     guild_id: str,
     page_size: int = 1000,
     stop_at: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DiscordMember]:
     """List all guild members (paginated), and no page past the one that
     brings ``stop_at``.
 
@@ -71,7 +76,7 @@ async def list_members(
 
 async def search_members(
     accessor: DiscordAccessor, guild_id: str, query: str, limit: int = 100
-) -> list[dict[str, Any]]:
+) -> list[DiscordMember]:
     """Search guild members by name.
 
     Args:

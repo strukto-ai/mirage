@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig, type MongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import {
   countDocuments,
   findDocuments,
@@ -41,7 +41,7 @@ function makeAccessor(
   driver: MongoDriver,
   cfgOverrides: Partial<MongoDBConfig> = {},
 ): MongoDBAccessor {
-  const cfg = resolveMongoDBConfig({ uri: 'mongodb://h', ...cfgOverrides })
+  const cfg = MongoDBConfig.parse({ uri: 'mongodb://h', ...cfgOverrides })
   return new MongoDBAccessor(driver, cfg)
 }
 

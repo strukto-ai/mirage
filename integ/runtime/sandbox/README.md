@@ -16,7 +16,12 @@ serve over it, a file a program writes there is the file Mirage reads, and a
 line runs from it. Mirage leaves no files of its own there
 (`captures.json`): its named pipes go in the machine user's `~/.mirage`.
 A file mounted at a path of its own, such as `VFS.md`, stays in the
-workspace: sshfs mounts only a directory.
+workspace: sshfs mounts only a directory. A link whose target leaves its
+folder, by a `..` or an absolute path, reaches the box as a link, which
+sshfs refuses since the fix for CVE-2026-47187 unless told otherwise, and an
+absolute target resolves on the box's own disk. A served file shows as owned by the box's user, so git
+takes a repository there as its own. A rename over an existing name lands, through the
+posix-rename extension the server names.
 
 | File              | Pins                                                                                                                                                                                            | Runs on                                                                     |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |

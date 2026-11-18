@@ -14,7 +14,7 @@
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from mirage.core.api.constants import DEFAULT_TIMEOUT
 
@@ -43,10 +43,19 @@ class MsGraphConfig(BaseModel):
     """Seconds a Graph request may wait to connect, or between two reads of
     its answer, before it fails; also how long a server-side copy is polled
     before it fails as unconfirmed."""
-    max_retries: int = 5
+    max_retries: int = Field(default=5, ge=0)
     """Times a request is retried after a `429`, `503` or `504` response.
     Each retry waits what `Retry-After` asks or an exponential backoff, at
     most 30 seconds."""
+
+    @field_validator("tenant_host", "graph_base_url")
+    @classmethod
+    def _v_optional_text(cls, value: str | None) -> str | None:
+        return optional_text(value)
+
+
+def optional_text(value: str | None) -> str | None:
+    return (value.strip() or None) if value is not None else None
 
 
 def graph_api(config: MsGraphConfig) -> str:

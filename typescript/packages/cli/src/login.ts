@@ -318,61 +318,15 @@ export function registerLoginCommands(program: Command): void {
       '--token <token>',
       'Keep this token instead of using the browser; - reads it from stdin',
     )
-    .action(async (given: string | undefined, opts: { name?: string; token?: string }) => {
-      let token = opts.token
-      if (token === '-') {
-        const chunks: Buffer[] = []
-        for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-        token = Buffer.concat(chunks).toString('utf-8').trim()
-        if (token === '') fail('no token on stdin')
-      }
-      const url = rstripSlash(given ?? HOSTED_URL)
-      const name = checkName(opts.name ?? contextName(url))
-      const login =
-        token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
-      await saveContext(name, url, login)
-      if (login === null) {
-        removeLogin(loginPath(name))
-        process.stdout.write(noLogin(url) + '\n')
-        return
-      }
-      writeLogin(login, loginPath(name))
-      header('logged in', name)
-      const account = tokenClaims(login.access_token).sub
-      const who = typeof account === 'string' ? ` as ${account}.` : '.'
-      process.stdout.write(`Logged in to ${url}${who}\n`)
-    })
+    .action(loginCmd)
   program
     .command('logout')
     .description('Sign out of the current context; the context stays.')
-    .action(() => {
-      const login = removeLogin()
-      process.stdout.write(login !== null ? `Logged out of ${login.url}.\n` : 'Not logged in.\n')
-    })
+    .action(logoutCmd)
   program
     .command('whoami')
     .description('Print the current context: its server, team and user, and when to log in again.')
-    .action(() => {
-      const url = rstripSlash(loadDaemonSettings().url)
-      const name = currentName()
-      const stored = readLogin(loginPath(name))
-      const login = stored?.url === url ? stored : null
-      const account = login !== null ? tokenClaims(login.access_token).sub : undefined
-      emit(
-        {
-          context: name,
-          url,
-          team: readContext(name)?.team ?? null,
-          user: typeof account === 'string' ? account : null,
-          renew_by:
-            login !== null ? new Date(renewBy(login) * 1000).toISOString().slice(0, 10) : null,
-        },
-        (row) =>
-          Object.entries(row)
-            .map(([k, v]) => `${k}: ${v ?? '-'}`)
-            .join('\n'),
-      )
-    })
+    .action(whoamiCmd)
 }
 
 interface ContextRow {
@@ -390,50 +344,110 @@ export function registerContextCommands(program: Command): void {
   context
     .command('list')
     .description('List the contexts; the current one is marked.')
-    .action(() => {
-      const current = chosenName()
-      const table = readDaemonTable(mirageHome(process.env))
-      const rows: ContextRow[] = contextNames().map((name) => {
-        const entry = readContext(name) ?? emptyContext()
-        return {
-          name,
-          url: entry.url !== '' ? entry.url : localUrl(table),
-          team: entry.team,
-          current: name === current,
-        }
-      })
-      emit(rows, (items) =>
-        formatTable(
-          ['', 'NAME', 'URL', 'TEAM'],
-          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '']),
-        ),
-      )
-    })
+    .action(listCmd)
 
   context
     .command('use')
     .argument('<name>', 'Context name')
     .description('Make a context the current one.')
-    .action((name: string) => {
-      if (readContext(name) === null) {
-        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-      }
-      writeCurrent(name)
-      header('now current', name)
-      emit({ current: name }, () => `Using context ${name}.`)
-    })
+    .action(useCmd)
 
   context
     .command('delete')
     .argument('<name>', 'Context name')
     .description('Forget a context and its login; `local` stays.')
-    .action((name: string) => {
-      if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
-      if (readContext(name) === null) {
-        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-      }
-      if (readCurrent() === name) writeCurrent(LOCAL)
-      removeContext(name)
-      emit({ deleted: name }, () => `Deleted context ${name}.`)
-    })
+    .action(deleteCmd)
+}
+
+async function loginCmd(
+  given: string | undefined,
+  opts: { name?: string; token?: string },
+): Promise<void> {
+  let token = opts.token
+  if (token === '-') {
+    const chunks: Buffer[] = []
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+    token = Buffer.concat(chunks).toString('utf-8').trim()
+    if (token === '') fail('no token on stdin')
+  }
+  const url = rstripSlash(given ?? HOSTED_URL)
+  const name = checkName(opts.name ?? contextName(url))
+  const login =
+    token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
+  await saveContext(name, url, login)
+  if (login === null) {
+    removeLogin(loginPath(name))
+    process.stdout.write(noLogin(url) + '\n')
+    return
+  }
+  writeLogin(login, loginPath(name))
+  header('logged in', name)
+  const account = tokenClaims(login.access_token).sub
+  const who = typeof account === 'string' ? ` as ${account}.` : '.'
+  process.stdout.write(`Logged in to ${url}${who}\n`)
+}
+
+function logoutCmd(): void {
+  const login = removeLogin()
+  process.stdout.write(login !== null ? `Logged out of ${login.url}.\n` : 'Not logged in.\n')
+}
+
+function whoamiCmd(): void {
+  const url = rstripSlash(loadDaemonSettings().url)
+  const name = currentName()
+  const stored = readLogin(loginPath(name))
+  const login = stored?.url === url ? stored : null
+  const account = login !== null ? tokenClaims(login.access_token).sub : undefined
+  emit(
+    {
+      context: name,
+      url,
+      team: readContext(name)?.team ?? null,
+      user: typeof account === 'string' ? account : null,
+      renew_by: login !== null ? new Date(renewBy(login) * 1000).toISOString().slice(0, 10) : null,
+    },
+    (row) =>
+      Object.entries(row)
+        .map(([k, v]) => `${k}: ${v ?? '-'}`)
+        .join('\n'),
+  )
+}
+
+function listCmd(): void {
+  const current = chosenName()
+  const table = readDaemonTable(mirageHome(process.env))
+  const rows: ContextRow[] = contextNames().map((name) => {
+    const entry = readContext(name) ?? emptyContext()
+    return {
+      name,
+      url: entry.url !== '' ? entry.url : localUrl(table),
+      team: entry.team,
+      current: name === current,
+    }
+  })
+  emit(rows, (items) =>
+    formatTable(
+      ['', 'NAME', 'URL', 'TEAM'],
+      items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '']),
+    ),
+  )
+}
+
+function useCmd(name: string): void {
+  if (readContext(name) === null) {
+    throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+  }
+  writeCurrent(name)
+  header('now current', name)
+  emit({ current: name }, () => `Using context ${name}.`)
+}
+
+function deleteCmd(name: string): void {
+  if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
+  if (readContext(name) === null) {
+    throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+  }
+  if (readCurrent() === name) writeCurrent(LOCAL)
+  removeContext(name)
+  emit({ deleted: name }, () => `Deleted context ${name}.`)
 }

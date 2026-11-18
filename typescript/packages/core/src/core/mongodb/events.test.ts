@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { FileChangeKind, type JsonValue, PathSpec } from '../../types.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { MongoDBEventHook } from './events.ts'
 
@@ -34,7 +34,7 @@ function hook(listed: string[][], databases?: string[]): MongoDBEventHook {
   return new MongoDBEventHook(
     new MongoDBAccessor(
       driver,
-      resolveMongoDBConfig({
+      MongoDBConfig.parse({
         uri: 'mongodb://h',
         ...(databases === undefined ? {} : { databases }),
       }),

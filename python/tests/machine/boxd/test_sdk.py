@@ -12,32 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
 import sys
+from unittest.mock import patch
 
-from mirage.machine.boxd import sdk
+import pytest
 
-NAMES = ("AsyncBoxd", "APIConnectionError", "ConflictError", "NotFoundError")
-
-
-def test_the_extra_resolves_as_a_unit():
-    """Every name comes from the SDK, or every name is None; never a mix."""
-    present = [getattr(sdk, name) is not None for name in NAMES]
-    assert all(present) or not any(present)
+from mirage.machine.boxd import BoxdMachine
 
 
-def test_an_absent_extra_reads_as_none():
-    """CI installs every extra, so this is the only run of the except arm."""
-    saved = {name: sys.modules.get(name) for name in ("boxd", "boxd.errors")}
-    sys.modules["boxd"] = None
-    sys.modules["boxd.errors"] = None
-    try:
-        module = importlib.reload(sdk)
-        assert all(getattr(module, name) is None for name in NAMES)
-    finally:
-        for name, module in saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-        importlib.reload(sdk)
+def test_the_sdk_loads_on_first_use(monkeypatch):
+    monkeypatch.setitem(sys.modules, "boxd", None)
+    machine = BoxdMachine("box", config={"machine_id": "id"})
+    with pytest.raises(ImportError, match=r"mirage-ai\[boxd\]"):
+        _ = machine._sdk
+
+
+def test_a_broken_dependency_keeps_its_import_error():
+    machine = BoxdMachine("box", config={"machine_id": "id"})
+    failure = ModuleNotFoundError(
+        "missing SDK dependency", name="upstream_dep"
+    )
+    with patch("mirage.machine.handle.import_module", side_effect=failure):
+        with pytest.raises(ModuleNotFoundError) as caught:
+            _ = machine._sdk
+    assert caught.value is failure

@@ -26,7 +26,7 @@ import {
   type Decision,
   type VfsContext,
 } from './types.ts'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { currentCaller, bindCaller } from '../context/session_context.ts'
 import { scriptContext } from './script.ts'
 
 // The browser-runtime branch under node's test runner: no task isolation,
@@ -251,7 +251,7 @@ describe('a method without task isolation', () => {
     const tools = new Session(ws, 'agent').tools
     try {
       const line = { ...currentCaller(), refusals: (): void => undefined }
-      const result = await runWithCaller(line, () => tools.write('/data/sealed/a.txt', 'x'))
+      const result = await bindCaller(line, () => tools.write('/data/sealed/a.txt', 'x'))
       expect(result.isError).toBe(true)
       expect(await ws.vfs.exists('/data/sealed/a.txt')).toBe(false)
     } finally {

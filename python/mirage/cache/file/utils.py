@@ -13,6 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+def token_or_none(fingerprint: str | None) -> str | None:
+    return fingerprint or None
+
+
 def glob_escape(literal: str) -> str:
     """Escape a literal for use inside a redis MATCH pattern.
 

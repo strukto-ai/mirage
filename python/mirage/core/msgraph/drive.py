@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import posixpath
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any, TypeVar
@@ -107,7 +107,15 @@ class DriveLoc:
         return replace(self, path=path, virt=virt)
 
     def parent(self) -> str:
-        return posixpath.dirname("/" + self.path).strip("/")
+        return parent_path(self.path)
+
+
+def parent_path(path: str) -> str:
+    return path.strip("/").rpartition("/")[0]
+
+
+def base_name(path: str) -> str:
+    return posixpath.basename(path.rstrip("/"))
 
 
 def _parent_reference(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
@@ -168,7 +176,7 @@ async def copy_once(
     await check_item(accessor, src, src_virtual)
     await check_item(accessor, dst, dst_virtual)
     body = {
-        "name": posixpath.basename(dst.path),
+        "name": base_name(dst.path),
         "parentReference": _parent_reference(src, dst),
     }
     try:
@@ -234,7 +242,7 @@ async def copy_tree(
 
 
 def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
-    body: dict[str, Any] = {"name": posixpath.basename(dst.path)}
+    body: dict[str, Any] = {"name": base_name(dst.path)}
     if dst.parent() != src.parent() or src.drive != dst.drive:
         body["parentReference"] = {"path": dst.ref(dst.parent())}
     return body
@@ -446,6 +454,15 @@ async def write_item(
     return len(data)
 
 
+def as_number(value: Any) -> int | None:
+    """A nonnegative integral byte or child count from Graph."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value < 0 or (isinstance(value, float) and not value.is_integer()):
+        return None
+    return int(value)
+
+
 def folder_child_count(item: dict[str, Any]) -> int | None:
     """Child count from a driveItem's folder facet.
 
@@ -459,8 +476,7 @@ def folder_child_count(item: dict[str, Any]) -> int | None:
     facet = item.get("folder")
     if not isinstance(facet, dict):
         return None
-    count = facet.get("childCount")
-    return count if isinstance(count, int) else None
+    return as_number(facet.get("childCount"))
 
 
 def entry_stat(item: dict[str, Any]) -> FileStat:
@@ -475,13 +491,13 @@ def entry_stat(item: dict[str, Any]) -> FileStat:
             type=FileType.DIRECTORY,
             modified=item.get("lastModifiedDateTime"),
             extra={
-                "size_bytes": item.get("size"),
+                "size_bytes": as_number(item.get("size")),
                 "child_count": folder_child_count(item),
             },
         )
     return FileStat(
         name=name,
-        size=item.get("size"),
+        size=as_number(item.get("size")),
         modified=item.get("lastModifiedDateTime"),
         type=FileType.FILE,
         content=content_type_for_path(name),
@@ -655,7 +671,7 @@ async def walk_tree(
                 yield entry
 
 
-def parent_id(item: dict[str, Any]) -> str:
+def parent_id(item: Mapping[str, Any]) -> str:
     """The id of the folder a driveItem sits in, "" when it names none.
 
     Args:

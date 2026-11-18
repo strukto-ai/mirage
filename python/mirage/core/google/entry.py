@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.core.gdrive.api import DriveApi
@@ -22,7 +22,7 @@ from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
-def app_file(name: str, item: dict[str, Any]) -> FileStat:
+def app_file(name: str, item: Mapping[str, Any]) -> FileStat:
     """A native app file as its corpus listing names it and stat answers.
 
     The size stays None: Drive reports the source document's storage
@@ -32,7 +32,7 @@ def app_file(name: str, item: dict[str, Any]) -> FileStat:
 
     Args:
         name (str): the app's file name for the item.
-        item (dict[str, Any]): the Drive file resource.
+        item (Mapping[str, Any]): the Drive file resource.
     """
     modified = item.get("modifiedTime") or None
     extra: dict[str, Any] = {"doc_id": item["id"], "doc_name": item["name"]}

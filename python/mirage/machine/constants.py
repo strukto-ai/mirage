@@ -94,6 +94,14 @@ SSHFS_OPTIONS = (
     f"negative_timeout={KERNEL_CACHE_SECONDS}"
 )
 
+# sshfs with the fix for CVE-2026-47187 refuses a link whose target is
+# absolute or holds a `..` (EPERM), guarding a machine against a hostile
+# server. The server here is the workspace, and a project's own links
+# (node_modules/.bin, a virtualenv's interpreter, a link out to the
+# machine's disk) point that way, so a machine's sshfs that knows this
+# option is given it; an older one refuses an option it does not know.
+SSHFS_LINKS_OPTION = "no_contain_symlinks"
+
 # sshfs's errors go to a log of its own per prefix in Mirage's folder on
 # the machine (``MACHINE_DIR``): its stdout is the SFTP stream, and E2B's
 # pipe joins stderr to it.
@@ -234,8 +242,9 @@ STOP_POLL_SECONDS = 0.02
 TOOLS_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # How often something waiting for a process a scan found looks at the
-# machines, and how long a run's output gets to arrive once its program
-# has exited while what the program left running keeps the exec open.
+# machines, and how long a run's output must stay quiet, once its program
+# has exited while what the program left running keeps the exec open,
+# before the exec is let go.
 RUN_WATCH_SECONDS = 2.0
 RUN_DRAIN_SECONDS = 0.5
 
@@ -260,7 +269,12 @@ FIFO_NAME = "fd"
 # writes is the program's, with its start in clock ticks, on stderr behind
 # ``RUN_PID_MARK`` ahead of anything the program writes; once the program
 # exits its status follows behind ``run_exit_mark``, so the exec that runs
-# the program brings both back itself. A shell reports
+# the program brings both back itself, and stdout ends what the program
+# wrote with the same status behind ``run_done_mark``, so a reader knows
+# when that output has all arrived. A program a signal ended gets no such
+# line: its stdout may have no reader left (head took what it wanted), and
+# a machine that keeps that pipe open past its exec (kubectl) would hold the
+# wrapper on it, its words still in a scan. A shell reports
 # a child a signal ended on its stderr, so the wrapper's goes nowhere and
 # the program gets the real one back. It needs only a POSIX shell at
 # ``/bin/sh``.
@@ -270,7 +284,8 @@ RUN_WRAPPER = (
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
     'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
-    's=$?; printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+    's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$n" "$s"; '
+    'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 )
 
 # Where a run's program starts in what ``run_argv`` builds: past
@@ -282,6 +297,8 @@ RUN_PROGRAM_AT = 6
 # stderr, a record separator first so no program's output starts with it.
 RUN_PID_MARK = b"\x1emirage-pid "
 RUN_EXIT_MARK = b"\x1emirage-exit "
+# The mark ahead of the line that ends a program's stdout.
+RUN_DONE_MARK = b"\x1emirage-done "
 # The most digits an exit status has, 0 to 255.
 EXIT_DIGITS = 3
 # How much of stderr may come ahead of that line, the exec client's own
@@ -380,6 +397,11 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
 # What the stop line exits with when no process carries the run's id: the
 # box it ran in holds nothing of the run.
 NOT_RUNNING_STATUS = 3
+
+# The signal a run gets once the reader of its output has gone, as a pipe's
+# writer does: a machine that keeps a program past its exec stream (kubectl)
+# would otherwise leave it running.
+PIPE_SIGNAL = 13
 
 
 def stop_line(process: str, signum: int = 15) -> str:
@@ -489,6 +511,16 @@ def run_argv(tag: str, nonce: str, argv: Sequence[str]) -> tuple[str, ...]:
         f"{PROCESS}={tag}",
         *argv,
     )
+
+
+def run_done_mark(nonce: str) -> bytes:
+    """What the line that ends one run's stdout starts with:
+    ``RUN_DONE_MARK`` and the run's own word (``run_exit_mark``).
+
+    Args:
+        nonce (str): the run's own word (``run_argv``).
+    """
+    return RUN_DONE_MARK + nonce.encode() + b" "
 
 
 def run_exit_mark(nonce: str) -> bytes:

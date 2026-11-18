@@ -26,7 +26,7 @@ import {
 import { CHAR_MODE, DIR_MODE, DIR_SIZE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { BaseVFS } from '../vfs/base.ts'
-import { callsAs, runWithEvaluation } from '../context/session_context.ts'
+import { callsAs, setCurrentEvaluation } from '../context/session_context.ts'
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { captureBinding, workspaceBridge, type WorkspaceBinding } from './binding.ts'
@@ -595,7 +595,7 @@ describe('RuntimeFiles landing', () => {
     )
     const evaluation = new EvaluationContext(ws.getSession(ws.sessionManager.defaultId))
     evaluation.frame.abortSignal = stop.signal
-    await runWithEvaluation(evaluation, async () => {
+    await setCurrentEvaluation(evaluation, async () => {
       const fd = await files.open('/data/out.txt', parseMode('w'))
       await files.pwrite(fd, 0, enc.encode('kept'))
       stop.abort()

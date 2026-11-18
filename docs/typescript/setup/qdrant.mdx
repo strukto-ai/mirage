@@ -44,7 +44,7 @@ bytes as a file, such as `3.jpg`.
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
-<ResponseField name="url" type={"string"}>
+<ResponseField name="url" type={"string"} default={"null"}>
   Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored.
 </ResponseField>
 <ResponseField name="host" type={"string"} default={"'localhost'"}>
@@ -56,10 +56,10 @@ bytes as a file, such as `3.jpg`.
 <ResponseField name="https" type={"boolean"} default={"false"}>
   Connect to `host` over HTTPS when `url` is unset.
 </ResponseField>
-<ResponseField name="apiKey" type={"string"} post={["secret"]}>
+<ResponseField name="apiKey" type={"string"} default={"null"} post={["secret"]}>
   Qdrant API key, required by Qdrant Cloud.
 </ResponseField>
-<ResponseField name="collection" type={"string"}>
+<ResponseField name="collection" type={"string"} default={"null"}>
   Collection the mount root shows; unset lists every collection as a top-level folder.
 </ResponseField>
 <ResponseField name="groupBy" type={"string[]"} default={"[]"}>
@@ -71,19 +71,19 @@ bytes as a file, such as `3.jpg`.
 <ResponseField name="idField" type={"string"} default={"'id'"}>
   Key the point id is written under in a point's `.json`; it replaces a payload field of that name.
 </ResponseField>
-<ResponseField name="nameField" type={"string"}>
+<ResponseField name="nameField" type={"string"} default={"null"}>
   Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone.
 </ResponseField>
-<ResponseField name="textField" type={"string"}>
+<ResponseField name="textField" type={"string"} default={"null"}>
   Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`.
 </ResponseField>
-<ResponseField name="blobField" type={"string"}>
+<ResponseField name="blobField" type={"string"} default={"null"}>
   Payload field of raw or base64 bytes served as `<id>.<blobExt>` and left out of the `.json`; unset adds no blob file.
 </ResponseField>
 <ResponseField name="blobExt" type={"string"} default={"'bin'"}>
   File extension of the blob file, without the dot.
 </ResponseField>
-<ResponseField name="vectorField" type={"string"}>
+<ResponseField name="vectorField" type={"string"} default={"null"}>
   Payload field holding a copy of the vector, left out of the `.json`.
 </ResponseField>
 <ResponseField name="searchLimit" type={"number"} default={"10"}>
@@ -98,7 +98,7 @@ bytes as a file, such as `3.jpg`.
 <ResponseField name="cloudInference" type={"boolean"} default={"false"}>
   Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query.
 </ResponseField>
-<ResponseField name="embed" type={"function"} post={["secret"]}>
+<ResponseField name="embed" type={"function"} default={"null"} post={["secret"]}>
   Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.
 </ResponseField>
 

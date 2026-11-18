@@ -21,9 +21,11 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     PrivateAttr,
     StrictFloat,
+    Tag,
     field_validator,
     model_validator,
 )
@@ -52,6 +54,7 @@ from mirage.policy.profile import (
     ProfilePolicy,
     SessionProfile,
     compile_program,
+    parse_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.rs.document import validate_document
@@ -77,7 +80,12 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.clock import parse_system_time
-from mirage.utils.loader import load_attr, optional_attr
+from mirage.utils.loader import (
+    is_module_path,
+    load_attr,
+    optional_attr,
+    split_ref,
+)
 from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
@@ -151,42 +159,6 @@ def _interpolate_env(value: Any, env: dict[str, str]) -> Any:
         unique_missing = sorted(set(missing))
         raise ValueError(f"missing environment variables: {unique_missing}")
     return out
-
-
-class RamCacheBlock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["ram"] = "ram"
-    limit: str | int = "32MB"
-    max_drain_bytes: int | None = None
-
-    @field_validator("limit", mode="before")
-    @classmethod
-    def _v_limit(cls, v: Any) -> Any:
-        parse_limit(v, "limit")
-        return v
-
-
-class RedisCacheBlock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["redis"]
-    limit: str | int = "512MB"
-    max_drain_bytes: int | None = None
-    url: str = "redis://localhost:6379/0"
-    key_prefix: str | None = None
-
-    @field_validator("limit", mode="before")
-    @classmethod
-    def _v_limit(cls, v: Any) -> Any:
-        parse_limit(v, "limit")
-        return v
-
-
-CacheBlock = Annotated[
-    RamCacheBlock | RedisCacheBlock,
-    Field(discriminator="type"),
-]
 
 
 class RamIndexBlock(BaseModel):
@@ -587,8 +559,8 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
     """
     if ":" not in ref:
         return ref
-    source, attr = ref.rsplit(":", 1)
-    if "/" not in source and not source.endswith(".py"):
+    source, attr = split_ref(ref)
+    if not is_module_path(source):
         return ref
     if Path(source).is_absolute():
         return ref
@@ -659,6 +631,47 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
     return resolved if ":" in block.cli else block.cli
 
 
+def _build_cli_entries(
+    blocks: Mapping[str, CLIBlock],
+    built: Mapping[str, CLI],
+) -> dict[str, tuple[str | CLI, dict[str, Any]]]:
+    missing = [
+        name
+        for name, block in blocks.items()
+        if block.cli == MCP_CLI and name not in built
+    ]
+    if missing:
+        raise ValueError(
+            f"clis entries {missing!r} are built from their MCP "
+            "server: pass mcp_clis=await build_mcp_clis(config)"
+        )
+    return {
+        name: (
+            built[name] if block.cli == MCP_CLI else _cli_entry(name, block),
+            dict(block.config),
+        )
+        for name, block in blocks.items()
+    }
+
+
+def expand_mounts(mounts: dict[str, Any]) -> dict[str, Any]:
+    """Expand a machine mount shorthand for config validation and binding."""
+    return {
+        prefix: (
+            {
+                "vfs": VFSName.MACHINE.value,
+                "config": {
+                    "root": norm(prefix),
+                    "machines": [block.removeprefix(MACHINE_MARK)],
+                },
+            }
+            if isinstance(block, str) and block.startswith(MACHINE_MARK)
+            else block
+        )
+        for prefix, block in mounts.items()
+    }
+
+
 def check_mount_machines(
     mounts: Mapping[str, "MountBlock"],
     machines: Mapping[str, dict[str, Any]] | None,
@@ -681,9 +694,22 @@ def check_mount_machines(
     for prefix, block in mounts.items():
         if block.vfs != VFSName.MACHINE.value:
             continue
+        listed = block.config.get("machines")
+        if listed is None:
+            listed = ()
+        if not isinstance(listed, (tuple, list)) or not all(
+            isinstance(name, str) for name in listed
+        ):
+            raise ValueError(
+                f"mount {prefix!r}: machines must be a list of machine names"
+            )
         chosen = block.config.get("default_machine")
+        if chosen is not None and not isinstance(chosen, str):
+            raise ValueError(
+                f"mount {prefix!r}: default_machine must be a machine name"
+            )
         for name in [
-            *(block.config.get("machines") or ()),
+            *listed,
             *([chosen] if chosen is not None else []),
         ]:
             if name not in machines:
@@ -750,7 +776,20 @@ class WorkspaceConfig(BaseModel):
     write: WritePolicy | None = None
     default_session_id: str | None = None
     workspace_id: str | None = None
-    cache: CacheBlock | None = None
+    cache: (
+        Annotated[
+            Annotated[CacheConfig, Tag("ram")]
+            | Annotated[RedisCacheConfig, Tag("redis")],
+            Discriminator(
+                lambda block: (
+                    block.get("type")
+                    if isinstance(block, dict)
+                    else getattr(block, "type", None)
+                )
+            ),
+        ]
+        | None
+    ) = None
     index: IndexBlock | None = None
     store: StoreBlock | None = None
     # The environment plane: one map, name -> entry. A bare string is
@@ -766,23 +805,7 @@ class WorkspaceConfig(BaseModel):
     @field_validator("mounts", mode="before")
     @classmethod
     def _v_mounts(cls, v: Any) -> Any:
-        # "@<machine>" is the machine VFS over that machine at the prefix.
-        if not isinstance(v, dict):
-            return v
-        return {
-            prefix: (
-                {
-                    "vfs": VFSName.MACHINE.value,
-                    "config": {
-                        "root": norm(prefix),
-                        "machines": [block.removeprefix(MACHINE_MARK)],
-                    },
-                }
-                if isinstance(block, str) and block.startswith(MACHINE_MARK)
-                else block
-            )
-            for prefix, block in v.items()
-        }
+        return expand_mounts(v) if isinstance(v, dict) else v
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -925,18 +948,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["network"] = self.network
         if self.system_time is not None:
             kwargs["system_time"] = self.system_time
-        if isinstance(self.cache, RedisCacheBlock):
-            kwargs["cache"] = RedisCacheConfig(
-                limit=self.cache.limit,
-                max_drain_bytes=self.cache.max_drain_bytes,
-                url=self.cache.url,
-                key_prefix=self.cache.key_prefix,
-            )
-        elif self.cache is not None:
-            kwargs["cache"] = CacheConfig(
-                limit=self.cache.limit,
-                max_drain_bytes=self.cache.max_drain_bytes,
-            )
+        if self.cache is not None:
+            kwargs["cache"] = self.cache.model_copy()
         if self.index is not None:
             kwargs["index"] = _build_index_config(self.index)
         if self.workspace_id is not None:
@@ -969,26 +982,7 @@ class WorkspaceConfig(BaseModel):
             kwargs["secrets"] = self.secrets
 
         if self.clis is not None:
-            built = mcp_clis or {}
-            missing = [
-                name
-                for name, block in self.clis.items()
-                if block.cli == MCP_CLI and name not in built
-            ]
-            if missing:
-                raise ValueError(
-                    f"clis entries {missing!r} are built from their MCP "
-                    "server: pass mcp_clis=await build_mcp_clis(config)"
-                )
-            kwargs["clis"] = {
-                name: (
-                    built[name]
-                    if block.cli == MCP_CLI
-                    else _cli_entry(name, block),
-                    dict(block.config),
-                )
-                for name, block in self.clis.items()
-            }
+            kwargs["clis"] = _build_cli_entries(self.clis, mcp_clis or {})
         return kwargs
 
     def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:
@@ -1281,7 +1275,7 @@ def load_policy_file(
                 _absolutize_script_key(program, source.resolve().parent)
             loaded.append(
                 compile_program(
-                    _load_program(ProfilePolicy.model_validate(program)),
+                    _load_program(parse_program(program)),
                     source.name,
                 )
             )

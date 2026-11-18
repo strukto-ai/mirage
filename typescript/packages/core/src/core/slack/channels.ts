@@ -15,15 +15,9 @@
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import { heldPages } from '../hierarchy/readdir.ts'
 import { cursorPages } from './paginate.ts'
+import type { SlackChannel } from './types.ts'
 
-export interface SlackChannel {
-  id: string
-  name?: string
-  user?: string
-  is_archived?: boolean
-  created?: number
-  [key: string]: unknown
-}
+export type { SlackChannel } from './types.ts'
 
 export interface ListChannelsOptions {
   types?: string

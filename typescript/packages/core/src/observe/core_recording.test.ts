@@ -17,7 +17,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { ops } from '../test-utils.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { runWithRecording } from './context.ts'
+import { recordingScope } from './context.ts'
 
 function call(name: string, ram: RAMVFS, path: string, ...args: unknown[]): Promise<unknown> {
   return ops(ram).call(name, PathSpec.fromStrPath(path), args)
@@ -29,11 +29,11 @@ function setup(): { ram: RAMVFS } {
   return { ram }
 }
 
-describe('core ram ops emit OpRecords inside runWithRecording', () => {
+describe('core ram ops emit OpRecords inside recordingScope', () => {
   it('read records op="read" with correct byte count and source="ram"', async () => {
     const { ram } = setup()
     ram.store.files.set('/hello.txt', new TextEncoder().encode('hello world'))
-    const [data, records] = await runWithRecording(async () => {
+    const [data, records] = await recordingScope(async () => {
       return (await call('read', ram, '/hello.txt')) as Uint8Array
     })
     expect(new TextDecoder().decode(data)).toBe('hello world')
@@ -46,7 +46,7 @@ describe('core ram ops emit OpRecords inside runWithRecording', () => {
   it('write records op="write" with correct byte count', async () => {
     const { ram } = setup()
     ram.store.dirs.add('/')
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await call('write', ram, '/hello.txt', new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)
@@ -57,7 +57,7 @@ describe('core ram ops emit OpRecords inside runWithRecording', () => {
   it('append records op="append" with correct byte count', async () => {
     const { ram } = setup()
     ram.store.dirs.add('/')
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await call('append', ram, '/test.jsonl', new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)

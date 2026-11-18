@@ -52,7 +52,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
@@ -320,7 +320,7 @@ describe('dropbox write records the upload reply', () => {
 
   async function writeRecorded(reply: unknown): Promise<unknown[][]> {
     vi.mocked(client.dropboxUpload).mockResolvedValue(reply as never)
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
     )
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])

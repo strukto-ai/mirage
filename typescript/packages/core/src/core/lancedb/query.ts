@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../utils/sort.ts'
+import { PaginationStalledError } from '../api/errors.ts'
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 
 import { openStreamSync } from '../../rs/stream.ts'
@@ -91,6 +93,28 @@ export async function rowsWhere(
 ): Promise<LanceRow[] | null> {
   const rows = await accessor.driver.rowsWhere(table, clause, columns, limit + 1)
   return rows.length <= limit ? rows : null
+}
+
+/** Read each SDK page, resuming after the last table name it returned. */
+export async function listTables(
+  tableNames: (options: { limit: number; startAfter?: string }) => Promise<string[]>,
+): Promise<string[]> {
+  const limit = 100
+  const names: string[] = []
+  let startAfter: string | undefined
+  for (;;) {
+    const page = await tableNames(startAfter === undefined ? { limit } : { limit, startAfter })
+    for (const name of page) names.push(name)
+    if (page.length < limit) return names.sort(compareCodePoints)
+    const last = page.at(-1)
+    if (
+      last === undefined ||
+      (startAfter !== undefined && compareCodePoints(last, startAfter) <= 0)
+    ) {
+      throw new PaginationStalledError(last ?? '')
+    }
+    startAfter = last
+  }
 }
 
 export async function tableExists(accessor: LanceDBAccessor, name: string): Promise<boolean> {

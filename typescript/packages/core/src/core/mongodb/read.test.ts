@@ -15,7 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { read, streamAny } from './read.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
@@ -38,7 +38,7 @@ describe('read', () => {
         { _id: 'b', x: 2 },
       ]),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     const out = await read(accessor, ps('/mongo/app/collections/users/documents.jsonl'))
     const lines = decode(out).trim().split('\n')
     expect(lines).toHaveLength(2)
@@ -47,7 +47,7 @@ describe('read', () => {
 
   it('throws ENOENT for an unknown path', async () => {
     const driver = stubMongoDriver()
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     await expect(read(accessor, ps('/mongo/app/something'))).rejects.toThrow()
   })
 
@@ -59,7 +59,7 @@ describe('read', () => {
         Promise.resolve([{ name: filter.name ?? 'users', type: 'collection' }]),
       countDocuments: () => Promise.resolve(7),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     const out = await read(accessor, ps('/mongo/app/database.json'))
     const parsed = JSON.parse(decode(out)) as { database: string; collections: unknown[] }
     expect(parsed.database).toBe('app')
@@ -71,7 +71,7 @@ describe('read', () => {
       listDatabases: () => Promise.resolve(['app']),
       listCollections: () => Promise.resolve([]),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     await expect(
       read(accessor, ps('/mongo/app/collections/ghost/documents.jsonl')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -79,7 +79,7 @@ describe('read', () => {
 
   it('throws ENOENT when DATABASE_JSON path references a missing database', async () => {
     const driver = stubMongoDriver({ listDatabases: () => Promise.resolve([]) })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     await expect(read(accessor, ps('/mongo/ghost/database.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
@@ -101,7 +101,7 @@ describe('registered read stream contract', () => {
         listIndexes: () => Promise.resolve([{ name: '_id_', key: { _id: 1 } }]),
         countDocuments,
       })
-      const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+      const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
       const path = ps(`/mongo/app/${leaf}`)
       const expected = decode(await read(accessor, path))
       let actual = ''
@@ -128,7 +128,7 @@ describe('registered read stream contract', () => {
         }
       },
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     for await (const chunk of streamAny(
       accessor,
       ps('/mongo/app/collections/users/documents.jsonl'),
@@ -153,7 +153,7 @@ it('builds a database manifest with two catalog requests regardless of collectio
       listDatabases: () => Promise.resolve(['app']),
       listCollections,
     }),
-    resolveMongoDBConfig({ uri: 'mongodb://h' }),
+    MongoDBConfig.parse({ uri: 'mongodb://h' }),
   )
   const result = JSON.parse(decode(await read(accessor, ps('/mongo/app/database.json')))) as {
     collections: unknown[]

@@ -14,8 +14,8 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import {
   type StubDrive,
@@ -56,7 +56,7 @@ describe('Drive checksum', () => {
       [field]: 'ABC123',
     }
     drive.getFile.mockResolvedValue(reply)
-    const [found, records] = await runWithRecording(() =>
+    const [found, records] = await recordingScope(() =>
       checksum(accessor, SCOPE, algorithm, row('gdrive/file')),
     )
     expect(found).toBe('abc123')
@@ -79,7 +79,7 @@ describe('Drive checksum', () => {
 
   // Mirrors python's test_a_pinned_revision_reads.
   it('reads a pinned revision', async () => {
-    const found = await runWithCaller(
+    const found = await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([[SCOPE.virtual, 'r7']]) } },
       () => checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
     )

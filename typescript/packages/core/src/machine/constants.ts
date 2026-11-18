@@ -82,6 +82,14 @@ export const SSHFS_OPTIONS =
   `entry_timeout=${String(KERNEL_CACHE_SECONDS)},` +
   `negative_timeout=${String(KERNEL_CACHE_SECONDS)}`
 
+// sshfs with the fix for CVE-2026-47187 refuses a link whose target is
+// absolute or holds a `..` (EPERM), guarding a machine against a hostile
+// server. The server here is the workspace, and a project's own links
+// (node_modules/.bin, a virtualenv's interpreter, a link out to the machine's
+// disk) point that way, so a machine's sshfs that knows this option is given
+// it; an older one refuses an option it does not know.
+export const SSHFS_LINKS_OPTION = 'no_contain_symlinks'
+
 // sshfs's errors go to a log of its own per prefix in Mirage's folder on the
 // machine (`MACHINE_DIR`): its stdout is the SFTP stream, and E2B's pipe joins
 // stderr to it.
@@ -216,8 +224,9 @@ export const TOOLS_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sb
 
 // Output as base64 lines per read, status on fd 3, for an exec that returns text.
 // How often something waiting for a process a scan found looks at the
-// machines, and how long a run's output gets to arrive once its program has
-// exited while what the program left running keeps the exec open.
+// machines, and how long a run's output must stay quiet, once its program has
+// exited while what the program left running keeps the exec open, before the
+// exec is let go.
 export const RUN_WATCH_SECONDS = 2
 export const RUN_DRAIN_SECONDS = 0.5
 
@@ -241,7 +250,12 @@ export const FIFO_NAME = 'fd'
 // is the program's, with its start in clock ticks, on stderr behind
 // `RUN_PID_MARK` ahead of anything the program writes; once the program exits
 // its status follows behind `runExitMark`, so the exec that runs the program
-// brings both back itself. A shell reports a child a signal ended on
+// brings both back itself, and stdout ends what the program wrote with the same
+// status behind `runDoneMark`, so a reader knows when that output has all
+// arrived. A program a signal ended gets no such line: its stdout may have no
+// reader left (head took what it wanted), and a machine that keeps that pipe
+// open past its exec (kubectl) would hold the wrapper on it, its words still
+// in a scan. A shell reports a child a signal ended on
 // its stderr, so the wrapper's goes nowhere and the program gets the real
 // one back. It needs only a POSIX shell at `/bin/sh`. Mirrors Python's
 // `RUN_WRAPPER`.
@@ -251,7 +265,8 @@ export const RUN_WRAPPER =
   "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
   'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; ' +
   'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
-  's=$?; printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+  's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$n" "$s"; ' +
+  'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 
 // Where a run's program starts in what `runArgv` builds: past
 // `/bin/sh -c RUN_WRAPPER sh`, the run's own word and the tag's assignment.
@@ -261,6 +276,8 @@ export const RUN_PROGRAM_AT = 6
 // stderr, a record separator first so no program's output starts with it.
 export const RUN_PID_MARK = new TextEncoder().encode('\x1emirage-pid ')
 export const RUN_EXIT_MARK = new TextEncoder().encode('\x1emirage-exit ')
+// The mark ahead of the line that ends a program's stdout.
+export const RUN_DONE_MARK = new TextEncoder().encode('\x1emirage-done ')
 // The most digits an exit status has, 0 to 255.
 export const EXIT_DIGITS = 3
 // How much of stderr may come ahead of that line, the exec client's own
@@ -357,6 +374,11 @@ export function wrapLine(
 // box it ran in holds nothing of the run.
 export const NOT_RUNNING_STATUS = 3
 
+// The signal a run gets once the reader of its output has gone, as a pipe's
+// writer does: a machine that keeps a program past its exec stream (kubectl)
+// would otherwise leave it running.
+export const PIPE_SIGNAL = 13
+
 /**
  * The shell line that stops every process of the run `process` tags.
  *
@@ -448,6 +470,16 @@ export function fifoLine(name: string, prefixes: readonly string[]): string {
  */
 export function runArgv(tag: string, nonce: string, argv: readonly string[]): string[] {
   return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', nonce, `${PROCESS}=${tag}`, ...argv]
+}
+
+/**
+ * What the line that ends one run's stdout starts with: `RUN_DONE_MARK` and the
+ * run's own word (`runExitMark`). Mirrors Python's `run_done_mark`.
+ *
+ * @param nonce the run's own word (`runArgv`).
+ */
+export function runDoneMark(nonce: string): Uint8Array {
+  return new Uint8Array([...RUN_DONE_MARK, ...new TextEncoder().encode(`${nonce} `)])
 }
 
 /**

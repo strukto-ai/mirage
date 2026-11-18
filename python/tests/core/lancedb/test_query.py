@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from mirage.core.lancedb.query import (
@@ -19,6 +22,7 @@ from mirage.core.lancedb.query import (
     distinct_values,
     eq_clause,
     holding_clause,
+    list_tables,
 )
 
 
@@ -100,3 +104,21 @@ async def test_a_kept_test_bounds_the_cap_by_matches(accessor):
     assert await distinct_values(
         accessor, "animals", "label", {}, 1, keep=lambda value: value == "dog"
     ) == ["dog"]
+
+
+@pytest.mark.asyncio
+async def test_list_tables_follows_the_sdk_page_token():
+    db = SimpleNamespace(
+        list_tables=AsyncMock(
+            side_effect=[
+                SimpleNamespace(tables=["z"], page_token="next"),
+                SimpleNamespace(tables=["a"], page_token=None),
+            ]
+        )
+    )
+    accessor = SimpleNamespace(db=AsyncMock(return_value=db))
+    assert await list_tables(accessor) == ["a", "z"]
+    assert [call.kwargs for call in db.list_tables.await_args_list] == [
+        {"page_token": None},
+        {"page_token": "next"},
+    ]

@@ -220,6 +220,7 @@ def test_a_path_goes_back_out_quoted():
     [
         (["/usr/bin/bash", "-lc", "ls | wc -l"], "ls | wc -l"),
         (["sh", "-c", "echo hi"], "echo hi"),
+        (["echo", "\udcff"], "echo ''$'\\xff'''"),
         (["grep", "-n", "a b", "/f"], "grep -n 'a b' /f"),
         (["bash", "-c", "echo $1", "sh", "x"], "bash -c 'echo $1' sh x"),
     ],

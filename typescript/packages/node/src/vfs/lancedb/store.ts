@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Connection, Query, Table } from '@lancedb/lancedb'
-import { eqClause, predicate } from '@struktoai/mirage-core/core/lancedb/query'
+import { eqClause, listTables, predicate } from '@struktoai/mirage-core/core/lancedb/query'
 import { cellText } from '@struktoai/mirage-core/core/lancedb/render'
 import type { LanceDriver, LanceRow, ValueTest } from '@struktoai/mirage-core/core/lancedb/types'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import type { resolveLanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
+import { type LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
 
 // Arrow's names for a column a card spells as text, and for one it spells as
 // digits, signs or a fixed word; any other type (a list, a struct, bytes, a
@@ -63,11 +63,11 @@ async function keptTexts(
 }
 
 export class LanceDBStore implements LanceDriver {
-  private readonly config: ReturnType<typeof resolveLanceDBConfig>
+  private readonly config: ReturnType<typeof LanceDBConfig.parse>
   private db: Connection | null = null
   private readonly tables = new Map<string, Table>()
 
-  constructor(config: ReturnType<typeof resolveLanceDBConfig>) {
+  constructor(config: ReturnType<typeof LanceDBConfig.parse>) {
     this.config = config
   }
 
@@ -103,8 +103,7 @@ export class LanceDBStore implements LanceDriver {
 
   async listTables(): Promise<string[]> {
     const db = await this.connection()
-    const names = await db.tableNames()
-    return [...names].sort(compareCodePoints)
+    return listTables((options) => db.tableNames(options))
   }
 
   async distinct(

@@ -14,12 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { renderJson, renderText } from './render.ts'
 
 const DEC = new TextDecoder()
 
-const config = resolveQdrantConfig({
+const config = QdrantConfig.parse({
   idField: 'id',
   textField: 'name',
   blobField: 'image_bytes',
@@ -62,7 +62,7 @@ describe('qdrant render', () => {
   })
 
   it('resolves nested text and blob fields consistently', () => {
-    const nested = resolveQdrantConfig({
+    const nested = QdrantConfig.parse({
       textField: 'document.text',
       blobField: 'document.blob',
     })

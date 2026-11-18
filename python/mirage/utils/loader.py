@@ -25,6 +25,20 @@ from typing import Any
 SCRIPT_MODULE_NAME = "_mirage_user_backend"
 
 
+def is_module_path(source: str) -> bool:
+    return "/" in source or source.endswith(".py")
+
+
+def split_ref(spec: str) -> tuple[str, str]:
+    if ":" not in spec:
+        raise ValueError(
+            f"invalid backend spec {spec!r}, expected 'source:ClassName'"
+        )
+
+    source, _, attr_name = spec.rpartition(":")
+    return source, attr_name
+
+
 def load_attr(spec: str) -> Any:
     """Load a module attribute from a reference string.
 
@@ -40,14 +54,9 @@ def load_attr(spec: str) -> Any:
         Any: The loaded attribute; callers type-check what they expect
         (a VFS class, a CLI tree).
     """
-    if ":" not in spec:
-        raise ValueError(
-            f"invalid backend spec {spec!r}, expected 'source:ClassName'"
-        )
+    source, attr_name = split_ref(spec)
 
-    source, attr_name = spec.rsplit(":", 1)
-
-    if "/" in source or source.endswith(".py"):
+    if is_module_path(source):
         module_spec = importlib.util.spec_from_file_location(
             SCRIPT_MODULE_NAME, source
         )

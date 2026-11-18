@@ -14,8 +14,8 @@
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { VFSName } from '../../types.ts'
-import type { PostgresConfig } from '../postgres/config.ts'
-import { redactPostgresConfig, resolvePostgresConfig } from '../postgres/config.ts'
+import { PostgresConfig } from '../postgres/config.ts'
+import { redactedConfigDump, type RedactedSchema } from '../secrets.ts'
 import { PostgresVFS as CorePostgresVFS, VFS_MD } from '../postgres/postgres.ts'
 import type { ConfigState } from '../types.ts'
 import { PostgresStore } from '../postgres/store.ts'
@@ -30,7 +30,7 @@ export class PostgresVFS extends CorePostgresVFS {
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override vfsMd: string
-  readonly config: ReturnType<typeof resolvePostgresConfig>
+  readonly config: ReturnType<typeof PostgresConfig.parse>
   readonly store: PostgresStore
   override readonly accessor: PostgresAccessor
 
@@ -38,18 +38,18 @@ export class PostgresVFS extends CorePostgresVFS {
     super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
-    this.config = resolvePostgresConfig(config)
+    this.config = PostgresConfig.parse(config)
     this.store = new PostgresStore(this.config)
     this.accessor = new PostgresAccessor(this.store, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactPostgresConfig>> & {
+  override getState(): ConfigState<RedactedSchema<typeof PostgresConfig>> & {
     needs_override: true
   } {
     return {
       type: this.name,
-      config: redactPostgresConfig(this.config),
+      config: redactedConfigDump(PostgresConfig, this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

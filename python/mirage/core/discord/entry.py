@@ -12,25 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from mirage.core.discord.channels import DiscordChannel
+from mirage.core.discord.guilds import DiscordGuild
 from mirage.core.discord.history import DISCORD_EPOCH
+from mirage.core.discord.members import DiscordMember
 from mirage.core.render.json import compact_json_bytes
 from mirage.types import ContentType, FileStat, FileType
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.naming import make_id_name
 
 
-def guild_dirname(g: dict[str, Any]) -> str:
+def guild_dirname(g: Mapping[str, Any]) -> str:
     return make_id_name(g.get("name", ""), g["id"], path_safe=True)
 
 
-def channel_dirname(c: dict[str, Any]) -> str:
+def channel_dirname(c: Mapping[str, Any]) -> str:
     return make_id_name(c.get("name", ""), c["id"], path_safe=True)
 
 
-def member_filename(m: dict[str, Any]) -> str:
+def member_filename(m: DiscordMember) -> str:
     user = m.get("user", {})
     return make_id_name(
         user.get("username", ""), user["id"], path_safe=True, suffix=".json"
@@ -61,7 +65,7 @@ def snowflake_to_iso(snowflake: str) -> str | None:
     return epoch_to_iso(ms // 1000)
 
 
-def guild_entry(g: dict[str, Any]) -> FileStat:
+def guild_entry(g: DiscordGuild) -> FileStat:
     return FileStat(
         name=guild_dirname(g),
         type=FileType.DIRECTORY,
@@ -69,7 +73,7 @@ def guild_entry(g: dict[str, Any]) -> FileStat:
     )
 
 
-def channel_entry(c: dict[str, Any]) -> FileStat:
+def channel_entry(c: DiscordChannel) -> FileStat:
     last = c.get("last_message_id", "") or ""
     return FileStat(
         name=channel_dirname(c),
@@ -79,7 +83,7 @@ def channel_entry(c: dict[str, Any]) -> FileStat:
     )
 
 
-def member_entry(m: dict[str, Any]) -> FileStat:
+def member_entry(m: DiscordMember) -> FileStat:
     user = m.get("user", {})
     return FileStat(
         name=member_filename(m),

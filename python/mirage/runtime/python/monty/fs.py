@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from __future__ import annotations
+
 import logging
 import time as _time
 from datetime import date, datetime, tzinfo
 from pathlib import PurePosixPath
-from stat import S_ISREG
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mirage.errors import FsCondition, classify
 from mirage.runtime.files import RuntimeFiles
@@ -32,14 +33,22 @@ from mirage.runtime.python.monty.errors import as_guest_error, guest_error
 from mirage.runtime.python.monty.list import child_paths
 from mirage.runtime.python.monty.loader import (
     AbstractOS,
-    MontyFileHandle,
+    load_monty_module,
     path_from_arg,
 )
-from mirage.runtime.python.monty.stat import stat_result
+from mirage.runtime.python.monty.stat import (
+    is_dir_row,
+    is_regular_row,
+    stat_result,
+)
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.utils.clock import bound_system_clock
 from mirage.utils.remnants import entry_name
 from mirage.utils.timezone import TZ_VAR, zone_from_env
+
+if TYPE_CHECKING:
+    from pydantic_monty import MontyFileHandle
+
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +168,11 @@ class MontyFs(AbstractOS):
 
     def path_is_file(self, path: PurePosixPath) -> bool:
         row = self._row(path)
-        return row is not None and S_ISREG(row.mode)
+        return row is not None and is_regular_row(row)
 
     def path_is_dir(self, path: PurePosixPath) -> bool:
         row = self._row(path)
-        return row is not None and row.is_dir
+        return row is not None and is_dir_row(row)
 
     def path_is_symlink(self, path: PurePosixPath) -> bool:
         """Whether the name plane holds a symlink at `path`, via readlink.
@@ -232,11 +241,16 @@ class MontyFs(AbstractOS):
         if root is None:
             raise guest_error(FsCondition.ENOENT, str(path))
         tree = [
-            ("", root.is_dir, S_ISREG(root.mode), self.path_is_symlink(path))
+            (
+                "",
+                is_dir_row(root),
+                is_regular_row(root),
+                self.path_is_symlink(path),
+            )
         ]
         if max_depth is None and follow_symlinks:
             max_depth = SCAN_LINK_DEPTH
-        pending = [(path, "", 0)] if root.is_dir else []
+        pending = [(path, "", 0)] if is_dir_row(root) else []
         while pending:
             directory, relative, depth = pending.pop()
             if max_depth is not None and depth >= max_depth:
@@ -282,7 +296,7 @@ class MontyFs(AbstractOS):
         """
         listed = row.is_dir or row.mode is not None
         if not row.is_link and listed and files.serves(str(path)):
-            return row.is_dir, row.mode is not None and S_ISREG(row.mode)
+            return is_dir_row(row), is_regular_row(row)
         try:
             reached = self._row(path)
         except OSError as exc:
@@ -290,12 +304,15 @@ class MontyFs(AbstractOS):
             return False, False
         if reached is None:
             return False, False
-        return reached.is_dir, S_ISREG(reached.mode)
+        return is_dir_row(reached), is_regular_row(reached)
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         # Built first: a malformed mode must raise before any effect
         # lands on the mount.
-        handle = MontyFileHandle(str(path), mode)
+        file_handle: type[MontyFileHandle] = (
+            load_monty_module().MontyFileHandle
+        )
+        handle = file_handle(str(path), mode)
         files = self._files_for(path)
         parsed = parse_mode(mode)
         with as_guest_error(str(path)):
@@ -305,7 +322,7 @@ class MontyFs(AbstractOS):
             finally:
                 files.close(fh)
         if parsed.append:
-            return MontyFileHandle(str(path), mode, position=size)
+            return file_handle(str(path), mode, position=size)
         return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
@@ -375,7 +392,7 @@ class MontyFs(AbstractOS):
             exist_ok (bool): stay quiet when it already exists.
         """
         row = self._row(path)
-        if row is not None and not row.is_dir:
+        if row is not None and not is_dir_row(row):
             raise guest_error(FsCondition.EEXIST, str(path))
         if row is not None:
             if exist_ok:

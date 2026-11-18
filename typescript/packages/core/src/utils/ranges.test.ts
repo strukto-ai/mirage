@@ -97,6 +97,8 @@ describe('isUnsatisfiableRange', () => {
 
   it('recognizes a bare status, with no code at all', () => {
     expect(isUnsatisfiableRange({ status: 416 })).toBe(true)
+    expect(isUnsatisfiableRange({ response: { status: 416 } })).toBe(true)
+    expect(isUnsatisfiableRange({ response: { status: 403 } })).toBe(false)
     expect(isUnsatisfiableRange({ statusCode: 416 })).toBe(true)
   })
 

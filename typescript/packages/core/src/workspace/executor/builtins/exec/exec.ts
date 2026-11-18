@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { callerSignal, runAsProgram } from '../../../../context/session_context.ts'
+import { callerSignal, setProgramInvocation } from '../../../../context/session_context.ts'
 import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
 import { PipeInput, share, SharedInput } from '../../../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
@@ -138,7 +138,7 @@ export async function handleExecCommand(
   const line =
     (scan.letters.includes('c') ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
   clearTraps(session)
-  const io = await runAsProgram(session, () =>
+  const io = await setProgramInvocation(session, () =>
     executeFn(line, {
       sessionId: session.sessionId,
       stdin,

@@ -16,7 +16,7 @@ import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
 import { specOf } from '../../commands/spec/builtins.ts'
 import { PARSES_KEPT } from '../../commands/spec/constants.ts'
-import { runAsProgram } from '../../context/session_context.ts'
+import { setProgramInvocation } from '../../context/session_context.ts'
 import { parseCommand } from '../../commands/spec/index.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
@@ -151,7 +151,7 @@ describe('lookup', () => {
     for (const name of ['sleep', 'chmod', 'cat', 'greet']) {
       session.functions[name] = `${name}() { :; }`
     }
-    await runAsProgram(session, () => {
+    await setProgramInvocation(session, () => {
       expect(lookup('sleep', session, registry)).toBe(Consumer.SESSION)
       expect(lookup('chmod', session, registry)).toBe(Consumer.MOUNT)
       expect(lookupAll('cat', session, registry)).toEqual([Consumer.MOUNT, Consumer.FUNCTION])

@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../../core/api/config.ts'
-import type { RedactedSchema } from '../secrets.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
+import { normalizeKeyPrefix } from '../../utils/key_prefix.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
 import { parseConfigWithSchema, redactedConfigDump, secretStr, z } from '../secrets.ts'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
@@ -47,14 +48,6 @@ export function assertHfRepoRef(value: string, field: string): string {
   return value
 }
 
-export interface HfBucketsConfig {
-  bucket: string
-  token?: string
-  endpoint?: string
-  timeout?: number
-  keyPrefix?: string
-}
-
 export const HfBucketsConfig = z.object({
   bucket: z.string().describe('Bucket id in `namespace/name` form.'),
   token: secretStr().optional().describe('Hugging Face access token.'),
@@ -62,14 +55,17 @@ export const HfBucketsConfig = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   keyPrefix: z
     .string()
+    .transform(normalizeKeyPrefix)
     .optional()
     .describe(
       'Path inside the bucket that becomes the mount root; files outside it are not listed.',
     ),
 })
+
+export type HfBucketsConfig = ConfigOf<typeof HfBucketsConfig>
 
 export function redactHfBucketsConfig(
   config: HfBucketsConfig,
@@ -82,26 +78,9 @@ export function redactHfBucketsConfig(
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
   const config = parseConfigWithSchema(HfBucketsConfig, input)
+  if (config.keyPrefix === undefined) delete config.keyPrefix
   assertHfRepoId(config.bucket, 'bucket')
   return config
-}
-
-export interface HfRepoConfig {
-  repoId: string
-  token?: string
-  endpoint?: string
-  timeout?: number
-  keyPrefix?: string
-  revision?: string
-  // Whether the listing asks the Hub for each path's last commit, which
-  // is a Hub file's only source of an mtime and drops the tree page from
-  // 1000 rows to 50. Undefined is the default and means decide by size:
-  // ask for one expanded page, and keep it if the whole repository fit in
-  // it, otherwise re-walk bare. A small repo therefore gets mtimes for the
-  // same one request it would have cost without them, and a sharded
-  // dataset pays one wasted page rather than a twentyfold walk. true and
-  // false force it either way.
-  expandCommits?: boolean
 }
 
 export const HfRepoConfig = z.object({
@@ -119,9 +98,10 @@ export const HfRepoConfig = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   keyPrefix: z
     .string()
+    .transform(normalizeKeyPrefix)
     .optional()
     .describe(
       'Path inside the repository that becomes the mount root; files outside it are not listed.',
@@ -138,6 +118,8 @@ export const HfRepoConfig = z.object({
     ),
 })
 
+export type HfRepoConfig = ConfigOf<typeof HfRepoConfig>
+
 export function redactHfRepoConfig(config: HfRepoConfig): RedactedSchema<typeof HfRepoConfig> {
   return redactedConfigDump(HfRepoConfig, {
     ...config,
@@ -147,6 +129,7 @@ export function redactHfRepoConfig(config: HfRepoConfig): RedactedSchema<typeof 
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {
   const config = parseConfigWithSchema(HfRepoConfig, input)
+  if (config.keyPrefix === undefined) delete config.keyPrefix
   assertHfRepoRef(config.repoId, 'repo_id')
   return config
 }

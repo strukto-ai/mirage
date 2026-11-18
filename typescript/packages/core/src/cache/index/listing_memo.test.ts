@@ -18,7 +18,7 @@ import type { Clock } from '../../utils/clock.ts'
 import { LookupStatus, type ListResult } from './config.ts'
 import { LISTING_TRUST_WINDOW } from './constants.ts'
 import { ListingMemo } from './listing_memo.ts'
-import { runInCommandScope } from './scope.ts'
+import { commandScope } from './scope.ts'
 
 const WALL = 2_000_000_000
 
@@ -96,7 +96,7 @@ describe('ListingMemo', () => {
       const paths = Array.from({ length: 1000 }, (_, n) => `/d/${String(n)}`)
       const fetch = vi.fn(rowBatch)
       expect(await memo.row('/d/0', fetch)).toBeNull()
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await memo.read('/d', new Folder(paths, partial).fetch)
         for (const path of paths) {
           const row = await memo.row(path, fetch)
@@ -119,7 +119,7 @@ describe('ListingMemo', () => {
       return partial ? listing.partialEntries : listing.entries
     }
     expect(await keys('/d/a')).toEqual(['/d/a'])
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       expect(await keys('/d/b')).toEqual(['/d/b'])
       expect(await keys('/d/z')).toEqual([])
       expect(await keys()).toEqual(['/d/a', '/d/b'])
@@ -138,7 +138,7 @@ describe('ListingMemo', () => {
         })
       ).entries
     expect(await keys('/d/a')).toEqual(['/d/a'])
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       expect(await keys('/d/a')).toEqual(['/d/a'])
       expect(held(memo)).toEqual([])
       expect(await keys('/d/z')).toEqual([])
@@ -154,7 +154,7 @@ describe('ListingMemo', () => {
   it.each([LISTING_TRUST_WINDOW / 2, LISTING_TRUST_WINDOW * 2])(
     'expires rows at the listing expiry or trust window (%s)',
     async (expiry) => {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await memo.read('/d', new Folder(undefined, false, WALL + expiry).fetch)
         expect(await memo.row('/d/a', rowBatch)).not.toBeNull()
         elapsed = Math.min(expiry, LISTING_TRUST_WINDOW)
@@ -168,7 +168,7 @@ describe('ListingMemo', () => {
       memo.rowWrote('/d/a')
       return rowBatch(paths)
     })
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', new Folder().fetch)
       await memo.row('/d/a', fetch)
       await memo.row('/d/b', fetch)
@@ -178,7 +178,7 @@ describe('ListingMemo', () => {
 
   it('does not fetch rows a batch did not find again', async () => {
     const fetch = vi.fn(() => Promise.resolve(new Map<string, FileStat>()))
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', new Folder().fetch)
       for (const path of ['/d/a', '/d/b', '/d/a']) {
         expect(await memo.row(path, fetch)).toBeNull()
@@ -189,7 +189,7 @@ describe('ListingMemo', () => {
 
   it('refetches a written row alone', async () => {
     const fetch = vi.fn(rowBatch)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', new Folder().fetch)
       await memo.row('/d/a', fetch)
       memo.rowWrote('/d/a')
@@ -201,7 +201,7 @@ describe('ListingMemo', () => {
 
   it('reads a listing once per command', async () => {
     const folder = new Folder()
-    const within = await runInCommandScope(async () => {
+    const within = await commandScope(async () => {
       const seen = []
       for (let n = 0; n < 10; n++) seen.push(await memo.read('/d', folder.fetch))
       return seen
@@ -217,15 +217,15 @@ describe('ListingMemo', () => {
   it('reads each command its own listing', async () => {
     const folder = new Folder()
     for (let n = 0; n < 2; n++) {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await memo.read('/d', folder.fetch)
         await memo.read('/d', folder.fetch)
       })
     }
     expect(folder.reads).toBe(2)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
-      await runInCommandScope(() => memo.read('/d', folder.fetch))
+      await commandScope(() => memo.read('/d', folder.fetch))
       await memo.read('/d', folder.fetch)
     })
     expect(folder.reads).toBe(4)
@@ -233,7 +233,7 @@ describe('ListingMemo', () => {
 
   it('reads a listing without an expiry each time', async () => {
     const folder = new Folder(undefined, false, null)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       for (let n = 0; n < 2; n++) {
         expect((await memo.read('/d', folder.fetch)).status).toBe(LookupStatus.NOT_FOUND)
       }
@@ -244,7 +244,7 @@ describe('ListingMemo', () => {
   it('drops the listing read once a write on the prefix finishes', async () => {
     const folder = new Folder()
     const other = new ListingMemo(`${prefix}other:`, clock)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       other.wrote()
       await memo.read('/d', folder.fetch)
@@ -259,7 +259,7 @@ describe('ListingMemo', () => {
     const folder = new Folder()
     const peer = new ListingMemo(prefix, clock)
     peer.wrote()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       peer.close()
       peer.close()
@@ -277,7 +277,7 @@ describe('ListingMemo', () => {
     closed.close()
     const fresh = new ListingMemo(shared, clock)
     const folder = new Folder()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await fresh.read('/d', folder.fetch)
       closed.wrote()
       await fresh.read('/d', folder.fetch)
@@ -288,7 +288,7 @@ describe('ListingMemo', () => {
   it('counts a write when it finishes, resolved or rejected', async () => {
     const folder = new Folder()
     const release = gate()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       const writing = memo.writing(() => release.opened)
       await memo.read('/d', folder.fetch)
       await memo.read('/d', folder.fetch)
@@ -309,7 +309,7 @@ describe('ListingMemo', () => {
     const folder = new Folder()
     const release = gate()
     folder.gate = release.opened
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       const reading = memo.read('/d', folder.fetch)
       await folder.entered
       memo.wrote()
@@ -322,7 +322,7 @@ describe('ListingMemo', () => {
 
   it('trusts a listing for under the window', async () => {
     const folder = new Folder()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       elapsed = LISTING_TRUST_WINDOW * 0.9
       await memo.read('/d', folder.fetch)
@@ -335,7 +335,7 @@ describe('ListingMemo', () => {
 
   it('never serves a listing past its expiry', async () => {
     const folder = new Folder(undefined, false, WALL + LISTING_TRUST_WINDOW / 4)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       elapsed = LISTING_TRUST_WINDOW / 4
       await memo.read('/d', folder.fetch)
@@ -346,7 +346,7 @@ describe('ListingMemo', () => {
   it.each([false, true])('lets no caller change a later answer (partial=%s)', async (partial) => {
     const folder = new Folder(undefined, partial)
     const field = partial ? 'partialEntries' : 'entries'
-    const after = await runInCommandScope(async () => {
+    const after = await commandScope(async () => {
       ;(await memo.read('/d', folder.fetch))[field]?.push('/d/x')
       ;(await memo.read('/d', folder.fetch))[field]?.splice(0)
       return memo.read('/d', folder.fetch)
@@ -357,12 +357,12 @@ describe('ListingMemo', () => {
 
   it('drops on a fill the listings no command can be served', async () => {
     const live = new Folder()
-    await runInCommandScope(async () => {
-      await runInCommandScope(() => memo.read('/aged', new Folder().fetch))
+    await commandScope(async () => {
+      await commandScope(() => memo.read('/aged', new Folder().fetch))
       elapsed = LISTING_TRUST_WINDOW * 0.6
       await memo.read('/live', live.fetch)
       elapsed = LISTING_TRUST_WINDOW * 1.2
-      await runInCommandScope(() => memo.read('/next', new Folder().fetch))
+      await commandScope(() => memo.read('/next', new Folder().fetch))
       expect(held(memo)).toEqual(['/live', '/next'])
       await memo.read('/live', live.fetch)
     })
@@ -370,7 +370,7 @@ describe('ListingMemo', () => {
   })
 
   it('drops on a fill the listings a write or expiry ended', async () => {
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/written', new Folder().fetch)
       memo.wrote()
       await memo.read('/expiring', new Folder(undefined, false, WALL + 0.1).fetch)

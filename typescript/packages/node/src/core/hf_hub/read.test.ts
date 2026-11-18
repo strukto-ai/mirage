@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as client from '@struktoai/mirage-core/core/hf_hub/client'
@@ -63,7 +63,7 @@ describe('hf_hub read', () => {
 describe('hf_hub read record path', () => {
   it('records the virtual path', async () => {
     vi.spyOn(client, 'hubBytesTagged').mockResolvedValue([new TextEncoder().encode('hello'), ''])
-    const [data, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
+    const [data, records] = await recordingScope(() => read(handle(), PATH, {}, K_ROW))
     expect(new TextDecoder().decode(data)).toBe('hello')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
@@ -123,7 +123,7 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('hello'),
       '"oid-k"',
     ])
-    const [, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
+    const [, records] = await recordingScope(() => read(handle(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
   })
 
@@ -135,7 +135,7 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('newer'),
       '"another-version"',
     ])
-    const [, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
+    const [, records] = await recordingScope(() => read(handle(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })
 })

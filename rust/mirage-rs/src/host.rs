@@ -236,6 +236,10 @@ impl Host {
         if path.starts_with("/full/") {
             return failure("EDQUOT", "Disk quota exceeded");
         }
+        let parent = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+        if self.modes.get(parent).is_some_and(|mode| mode & 0o200 == 0) {
+            return failure("EACCES", "Permission denied");
+        }
         let window = match (request["spool"].as_u64(), request["size"].as_u64()) {
             (Some(fd), Some(size)) => {
                 let skip = request["skip"].as_u64().unwrap_or(0) as usize;
@@ -318,8 +322,12 @@ impl Host {
             }
             "chmod" => {
                 let path = text(&request["path"]);
-                if !self.files.contains_key(&path) {
+                if !self.files.contains_key(&path) && !self.directories.contains(&path) {
                     return (failure("ENOENT", "No such file or directory"), Vec::new());
+                }
+                let parent = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+                if self.modes.get(parent).is_some_and(|mode| mode & 0o100 == 0) {
+                    return (failure("EACCES", "Permission denied"), Vec::new());
                 }
                 let mode = request["mode"].as_u64().unwrap_or_default() as u32;
                 self.modes.insert(path, mode);

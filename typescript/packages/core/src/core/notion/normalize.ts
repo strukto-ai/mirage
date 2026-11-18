@@ -23,31 +23,14 @@ import {
 import { formatSegment } from './pathing.ts'
 import { blocksToMarkdown } from './render.ts'
 
-function joinTitleFragments(fragments: unknown[]): string {
+export function plainTextOf(fragments: unknown): string {
   let out = ''
-  for (const fragment of fragments) {
+  for (const fragment of asArray(fragments)) {
     const obj = asObject(fragment)
     const text = pickStringOrNull(obj, 'plain_text')
     if (text !== null) out += text
   }
   return out
-}
-
-export function extractTitle(page: JsonObject): string {
-  const properties = asObject(page.properties)
-  const titleProp = asObject(properties.title)
-  const titleFragments = asArray(titleProp.title)
-  if (titleFragments.length > 0) {
-    const joined = joinTitleFragments(titleFragments)
-    if (joined !== '') return joined
-  }
-  const nameProp = asObject(properties.Name)
-  const nameFragments = asArray(nameProp.title)
-  if (nameFragments.length > 0) {
-    const joined = joinTitleFragments(nameFragments)
-    if (joined !== '') return joined
-  }
-  return 'untitled'
 }
 
 export function pageSegmentName(page: JsonObject): string {
@@ -59,7 +42,7 @@ function pageContentTitle(page: JsonObject): string {
   for (const value of Object.values(properties)) {
     const prop = asObject(value)
     if (strOf(prop, 'type') === 'title') {
-      return joinTitleFragments(asArray(prop.title))
+      return plainTextOf(prop.title)
     }
   }
   return ''
@@ -68,7 +51,7 @@ function pageContentTitle(page: JsonObject): string {
 function extractDatabaseTitle(database: JsonObject): string {
   const titleFragments = asArray(database.title)
   if (titleFragments.length > 0) {
-    const joined = joinTitleFragments(titleFragments)
+    const joined = plainTextOf(titleFragments)
     if (joined !== '') return joined
   }
   return 'untitled'

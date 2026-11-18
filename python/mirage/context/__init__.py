@@ -32,7 +32,6 @@ from mirage.context.session_context import (
     get_current_session,
     get_current_session_for,
     get_current_session_unless_foreign,
-    get_walk_probe,
     hidden_refusal,
     is_program_invocation,
     line_running,
@@ -59,6 +58,7 @@ from mirage.context.session_context import (
     strongest_under_session,
     syntax_head,
     voice_name,
+    walk_probe_for,
     while_paused,
 )
 
@@ -84,7 +84,7 @@ __all__ = [
     "set_traits",
     "get_current_session_for",
     "get_current_session_unless_foreign",
-    "get_walk_probe",
+    "walk_probe_for",
     "explaining",
     "line_running",
     "note_decision",

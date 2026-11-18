@@ -61,14 +61,24 @@ const IANA_FLAGS = [
   'mdn-sent',
 ]
 const IANA_BY_BARE_NAME = new Map(IANA_FLAGS.map((name) => [name.replace('-', ''), name]))
+interface EnvelopeFlag {
+  raw: string
+  iana: string | null
+}
+
+interface EnvelopeAddress {
+  name: string | null
+  email: string
+}
+
 export interface Envelope {
   id: string
   'message-id': string | null
   'in-reply-to': string[]
-  flags: { raw: string; iana: string | null }[]
+  flags: EnvelopeFlag[]
   subject: string
-  from: { name: string | null; email: string }[]
-  to: { name: string | null; email: string }[]
+  from: EnvelopeAddress[]
+  to: EnvelopeAddress[]
   date: string | null
   size: number
   'has-attachment': boolean | null

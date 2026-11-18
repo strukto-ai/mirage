@@ -74,17 +74,34 @@ _YamlDumper.yaml_implicit_resolvers = {
 _YamlDumper.add_implicit_resolver("tag:yaml.org,2002:int", OCTAL, ["0"])
 
 
-def dump_yaml(obj: Any) -> str:
+class _BlockDumper(_YamlDumper):
+    def represent_str(self, data: str) -> yaml.ScalarNode:
+        return self.represent_scalar(
+            "tag:yaml.org,2002:str", data, style="|" if "\n" in data else None
+        )
+
+
+_BlockDumper.add_representer(str, _BlockDumper.represent_str)
+
+
+def dump_yaml(
+    obj: Any, *, sort_keys: bool = False, multiline: bool = False
+) -> str:
     """Write YAML that ``parse_yaml`` and TypeScript's loader both read
     back as ``obj``.
 
     Args:
+        sort_keys (bool): order each mapping by key.
+        multiline (bool): use literal blocks for multi-line strings.
         obj (Any): plain data.
 
     Returns:
         str: the YAML document.
     """
     text: str = yaml.dump(
-        obj, Dumper=_YamlDumper, sort_keys=False, allow_unicode=True
+        obj,
+        Dumper=_BlockDumper if multiline else _YamlDumper,
+        sort_keys=sort_keys,
+        allow_unicode=True,
     )
     return text

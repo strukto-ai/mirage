@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { pidFilePath } from '@struktoai/mirage-server/paths'
 import type { Command } from 'commander'
-import { registerConfigCommands } from './config.ts'
+import { app as registerConfigCommands } from './config.ts'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'
 
@@ -83,114 +83,123 @@ async function waitForUnreachable(timeoutMs: number): Promise<boolean> {
   return false
 }
 
-export function registerDaemonCommands(program: Command): void {
+export function app(program: Command): Command {
   const d = program.command('daemon').description('Manage the daemon process lifecycle.')
   registerConfigCommands(d)
 
   d.command('status')
     .description('Show daemon health, PID, uptime, workspace count.')
-    .action(async () => {
-      const pid = readPid()
-      const c = makeClient()
-      const url = c.settings.url
-      try {
-        const r = await c.request('GET', '/v1/health')
-        if (r.status !== 200) {
-          emit({ running: false, pid, url }, formatStatus)
-          process.exit(1)
-        }
-        const body = (await r.json()) as { uptime_ms?: number; workspaces?: number }
-        emit({ running: true, pid, url, ...body }, formatStatus)
-      } catch {
-        emit({ running: false, pid, url }, formatStatus)
-        process.exit(1)
-      }
-    })
+    .action(statusCmd)
 
   d.command('stop')
     .description('Gracefully stop the daemon.')
     .option('--timeout <s>', 'Seconds to wait for graceful exit', '5')
-    .action(async (opts: { timeout: string }) => {
-      const timeoutMs = Number(opts.timeout) * 1000
-      const c = makeClient()
-      let r: Response
-      try {
-        r = await c.request('POST', '/v1/daemon/shutdown')
-      } catch (err: unknown) {
-        fail(`daemon not reachable: ${String(err)}`)
-      }
-      if (r.status >= 400) fail(`shutdown failed: ${await r.text()}`, 2)
-      if (await waitForUnreachable(timeoutMs)) {
-        emit({ stopped: true, via: 'graceful' }, formatStop)
-        return
-      }
-      const pid = readPid()
-      if (pid !== null && processAlive(pid)) {
-        try {
-          process.kill(pid, 'SIGTERM')
-          emit({ stopped: true, via: 'sigterm', pid }, formatStop)
-          return
-        } catch {
-          // fall through to fail
-        }
-      }
-      fail(`daemon did not exit within ${opts.timeout}s and no live PID found`, 2)
-    })
+    .action(stopCmd)
 
   d.command('restart')
     .description('Stop the daemon. Next CLI command auto-spawns a fresh one.')
     .option('--timeout <s>', 'Seconds to wait for graceful exit', '5')
     .option('--eager', 'Spawn a fresh daemon immediately')
-    .action(async (opts: { timeout: string; eager?: boolean }) => {
-      const timeoutMs = Number(opts.timeout) * 1000
-      try {
-        await makeClient().request('POST', '/v1/daemon/shutdown')
-      } catch {
-        // already unreachable; fall through to pid cleanup
-      }
-      if (!(await waitForUnreachable(timeoutMs))) {
-        const pid = readPid()
-        if (pid !== null && processAlive(pid)) {
-          try {
-            process.kill(pid, 'SIGTERM')
-          } catch {
-            // process may have exited between checks
-          }
-        }
-      }
-      if (opts.eager === true) {
-        await makeClient().ensureRunning({ allowSpawn: true })
-        emit({ restarted: true, spawned_fresh: true }, formatRestart)
-        return
-      }
-      emit(
-        {
-          restarted: true,
-          spawned_fresh: false,
-          note: 'next workspace create will auto-spawn',
-        },
-        formatRestart,
-      )
-    })
+    .action(restartCmd)
 
   d.command('kill')
     .description('SIGKILL the daemon. Last resort -- skips graceful shutdown.')
-    .action(() => {
-      const pid = readPid()
-      if (pid === null) {
-        emit({ killed: false, reason: 'no daemon running', pid: null }, formatKill)
-        return
-      }
-      if (!processAlive(pid)) {
-        emit({ killed: false, reason: 'process already gone', pid }, formatKill)
-        return
-      }
+    .action(killCmd)
+  return d
+}
+
+async function statusCmd(): Promise<void> {
+  const pid = readPid()
+  const c = makeClient()
+  const url = c.settings.url
+  try {
+    const r = await c.request('GET', '/v1/health')
+    if (r.status !== 200) {
+      emit({ running: false, pid, url }, formatStatus)
+      process.exit(1)
+    }
+    const body = (await r.json()) as { uptime_ms?: number; workspaces?: number }
+    emit({ running: true, pid, url, ...body }, formatStatus)
+  } catch {
+    emit({ running: false, pid, url }, formatStatus)
+    process.exit(1)
+  }
+}
+
+async function stopCmd(opts: { timeout: string }): Promise<void> {
+  const timeoutMs = Number(opts.timeout) * 1000
+  const c = makeClient()
+  let r: Response
+  try {
+    r = await c.request('POST', '/v1/daemon/shutdown')
+  } catch (err: unknown) {
+    fail(`daemon not reachable: ${String(err)}`)
+  }
+  if (r.status >= 400) fail(`shutdown failed: ${await r.text()}`, 2)
+  if (await waitForUnreachable(timeoutMs)) {
+    emit({ stopped: true, via: 'graceful' }, formatStop)
+    return
+  }
+  const pid = readPid()
+  if (pid !== null && processAlive(pid)) {
+    try {
+      process.kill(pid, 'SIGTERM')
+      emit({ stopped: true, via: 'sigterm', pid }, formatStop)
+      return
+    } catch {
+      // fall through to fail
+    }
+  }
+  fail(`daemon did not exit within ${opts.timeout}s and no live PID found`, 2)
+}
+
+async function restartCmd(opts: { timeout: string; eager?: boolean }): Promise<void> {
+  const timeoutMs = Number(opts.timeout) * 1000
+  try {
+    await makeClient().request('POST', '/v1/daemon/shutdown')
+  } catch {
+    // already unreachable; fall through to pid cleanup
+  }
+  if (!(await waitForUnreachable(timeoutMs))) {
+    const pid = readPid()
+    if (pid !== null && processAlive(pid)) {
       try {
-        process.kill(pid, 'SIGKILL')
+        process.kill(pid, 'SIGTERM')
       } catch {
-        emit({ killed: false, reason: 'process gone', pid }, formatKill)
-        return
+        // process may have exited between checks
       }
-      emit({ killed: true, pid }, formatKill)
-    })
+    }
+  }
+  if (opts.eager === true) {
+    await makeClient().ensureRunning({ allowSpawn: true })
+    emit({ restarted: true, spawned_fresh: true }, formatRestart)
+    return
+  }
+  emit(
+    {
+      restarted: true,
+      spawned_fresh: false,
+      note: 'next workspace create will auto-spawn',
+    },
+    formatRestart,
+  )
+}
+
+function killCmd(): void {
+  const pid = readPid()
+  if (pid === null) {
+    emit({ killed: false, reason: 'no daemon running', pid: null }, formatKill)
+    return
+  }
+  if (!processAlive(pid)) {
+    emit({ killed: false, reason: 'process already gone', pid }, formatKill)
+    return
+  }
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    emit({ killed: false, reason: 'process gone', pid }, formatKill)
+    return
+  }
+  emit({ killed: true, pid }, formatKill)
 }

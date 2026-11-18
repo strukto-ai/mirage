@@ -32,7 +32,7 @@ import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { abortable } from '@struktoai/mirage-core/utils/abort'
 import type { Boxd, ExecStream } from '@boxd-sh/sdk'
-import { BOXD_CONFIG_FIELDS, type BoxdConfig } from './config.ts'
+import { BoxdConfig } from './config.ts'
 import { MACHINE_GONE } from './constants.ts'
 import { loadSdk, type BoxdSdk } from './sdk.ts'
 
@@ -65,7 +65,7 @@ async function drain(
  * again. close() releases the SDK client.
  */
 export class BoxdMachine extends MachineHandle<BoxdConfig> {
-  static override readonly configFields: ConfigFields = BOXD_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = BoxdConfig
   static override readonly provider = 'boxd'
   private sdk: BoxdSdk | null = null
   private client: Boxd | null = null

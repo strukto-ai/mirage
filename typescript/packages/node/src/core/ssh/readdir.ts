@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { modeType } from '@struktoai/mirage-core/utils/stat_view'
 import type { FileEntryWithStats, Stats } from 'ssh2'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, listingError } from '@struktoai/mirage-core/errors/fs'
@@ -21,7 +22,7 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { attrsToFileStat, type SshAttrs } from './stat.ts'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
-import { isDirectoryAttrs, isFileAttrs, isNoSuchFile, isPermissionDenied } from './utils.ts'
+import { isNoSuchFile, isPermissionDenied } from './utils.ts'
 
 async function attrsOrNull(accessor: SSHAccessor, key: string): Promise<Stats | null> {
   const sftp = await accessor.sftp()
@@ -44,17 +45,17 @@ async function attrsOrNull(accessor: SSHAccessor, key: string): Promise<Stats | 
 
 async function isFile(accessor: SSHAccessor, key: string): Promise<boolean> {
   const attrs = await attrsOrNull(accessor, key)
-  return attrs !== null && !isDirectoryAttrs(attrs)
+  return attrs !== null && modeType(attrs.mode) !== FileType.DIRECTORY
 }
 
 async function isDir(accessor: SSHAccessor, key: string): Promise<boolean> {
   const attrs = await attrsOrNull(accessor, key)
-  return attrs !== null && isDirectoryAttrs(attrs)
+  return attrs !== null && modeType(attrs.mode) === FileType.DIRECTORY
 }
 
 /**
- * A listed entry as `stat` answers it. Readdir attrs are lstat-style, so an
- * entry that is neither a directory nor a regular file (a link) is stat'ed
+ * A listed entry as `stat` answers it. Readdir attrs are lstat-style, so a
+ * link or entry without type bits is stat'ed
  * once more, links followed, as `stat` reads it. A link that resolves to
  * nothing the session may read keeps its listed name as a file. Mirrors
  * Python's `_row_of`.
@@ -67,7 +68,8 @@ async function rowOf(
   // ssh2 types every field as present, but a server may leave the times (or
   // size) out of a readdir entry; read them as optional.
   const attrs: SshAttrs = entry.attrs
-  if (isDirectoryAttrs(attrs) || isFileAttrs(attrs)) return attrsToFileStat(entry.filename, attrs)
+  const kind = modeType(attrs.mode)
+  if (kind !== undefined && kind !== FileType.SYMLINK) return attrsToFileStat(entry.filename, attrs)
   const followed = await attrsOrNull(accessor, key).catch((err: unknown) => {
     if (isPermissionDenied(err)) return null
     throw err

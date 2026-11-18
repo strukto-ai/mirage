@@ -15,7 +15,7 @@
 import { cliSpecFor, knownCliNames } from '@struktoai/mirage-core/commands/cli/specs'
 import { NAME as MCP_CLI } from '@struktoai/mirage-core/commands/cli/mcp/constants'
 import { MCPConfig } from '@struktoai/mirage-core/core/mcp/config'
-import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
+import { MachineConfig } from '@struktoai/mirage-core/machine/config'
 import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
@@ -221,7 +221,7 @@ function machineTypes(): TypeTable {
       ? configTypes(
           Object.fromEntries(
             Object.entries(runtimeClass('sandlock').configFields).filter(
-              ([name]) => !(name in BASE_CONFIG_FIELDS),
+              ([name]) => !(name in MachineConfig),
             ),
           ),
         ).map((field) => ({ ...field, name: `sandbox.${field.name}`, group: 'sandbox' }))

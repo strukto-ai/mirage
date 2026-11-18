@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.core.notion.pathing import format_segment
 from mirage.core.notion.render import blocks_to_markdown
+from mirage.utils.records import as_array, as_object, string_of
 
 
 def _page_fields(page: dict[str, Any]) -> dict[str, Any]:
@@ -34,7 +35,7 @@ def _page_fields(page: dict[str, Any]) -> dict[str, Any]:
     # level up, in data_source.json's `properties`.
     return {
         "page_id": page.get("id", ""),
-        "title": extract_title(page),
+        "title": _page_content_title(page),
         "url": page.get("url", ""),
         "created_time": page.get("created_time", ""),
         "last_edited_time": page.get("last_edited_time", ""),
@@ -83,8 +84,7 @@ def normalize_row(page: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_database(database: dict[str, Any]) -> dict[str, Any]:
-    title_items = database.get("title", [])
-    title = "".join(item.get("plain_text", "") for item in title_items)
+    title = plain_text_of(database.get("title"))
     return {
         "database_id": database.get("id", ""),
         "title": title,
@@ -99,8 +99,7 @@ def normalize_database(database: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
-    title_items = data_source.get("title", [])
-    title = "".join(item.get("plain_text", "") for item in title_items)
+    title = plain_text_of(data_source.get("title"))
     parent = data_source.get("parent", {})
     return {
         "data_source_id": data_source.get("id", ""),
@@ -117,7 +116,7 @@ def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
 
 
 def page_segment_name(page: dict[str, Any]) -> str:
-    return format_segment(extract_title(page), page["id"])
+    return format_segment(_page_content_title(page), page["id"])
 
 
 def database_segment_name(database: dict[str, Any]) -> str:
@@ -149,19 +148,20 @@ def extract_data_source_title(data_source: dict[str, Any]) -> str:
     return extract_database_title(data_source)
 
 
-def extract_title(page: dict[str, Any]) -> str:
-    props = page.get("properties", {})
-    if not isinstance(props, dict):
-        return ""
-    for prop in props.values():
-        if not isinstance(prop, dict):
-            continue
+def plain_text_of(fragments: Any) -> str:
+    return "".join(
+        string_of(as_object(item), "plain_text")
+        for item in as_array(fragments)
+    )
+
+
+def _page_content_title(page: dict[str, Any]) -> str:
+    for value in as_object(page.get("properties")).values():
+        prop = as_object(value)
         if prop.get("type") == "title":
-            title_items = prop.get("title", [])
-            return "".join(item.get("plain_text", "") for item in title_items)
+            return plain_text_of(prop.get("title"))
     return ""
 
 
 def extract_database_title(database: dict[str, Any]) -> str:
-    title_items = database.get("title", [])
-    return "".join(item.get("plain_text", "") for item in title_items)
+    return plain_text_of(database.get("title"))

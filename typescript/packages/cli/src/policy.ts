@@ -103,55 +103,62 @@ export function registerPolicyCommands(program: Command): void {
     .description('Save a new policy; a name already saved is refused.')
     .argument('<name>', "The policy's name, such as guard.py.")
     .requiredOption('--source <source>', 'The program: @FILE reads a file, else the text.')
-    .action(async (name: string, opts: { source: string }) => {
-      const saved = (await call('POST', '', {
-        name,
-        source: readSource(opts.source),
-      })) as PolicyBody
-      emit(saved, (p) => `Created policy ${p.name}.`)
-    })
+    .action(createCmd)
 
-  policy
-    .command('list')
-    .description('List saved policies by name.')
-    .action(async () => {
-      const items = itemsOf(await call('GET', ''))
-      emit(items, () =>
-        formatTable(
-          ['NAME'],
-          items.map((p) => [p.name]),
-        ),
-      )
-    })
+  policy.command('list').description('List saved policies by name.').action(listCmd)
 
   policy
     .command('get')
     .description('Show one policy; in a terminal, its source.')
     .argument('<id>', ID_HELP)
     .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
-    .action(async (name: string, opts: { output?: Output }) => {
-      const got = (await call('GET', ref(name))) as PolicyBody
-      await show(got, opts.output, () => got.source.replace(/\n+$/, ''))
-    })
+    .action(getCmd)
 
   policy
     .command('update')
     .description("Replace a saved policy's source.")
     .argument('<id>', ID_HELP)
     .requiredOption('--source <source>', 'The program: @FILE reads a file, else the text.')
-    .action(async (name: string, opts: { source: string }) => {
-      const saved = (await call('PUT', ref(name), {
-        source: readSource(opts.source),
-      })) as PolicyBody
-      emit(saved, (p) => `Updated policy ${p.name}.`)
-    })
+    .action(updateCmd)
 
   policy
     .command('delete')
     .description('Delete a saved policy.')
     .argument('<id>', ID_HELP)
-    .action(async (name: string) => {
-      await call('DELETE', ref(name))
-      process.stdout.write(`Deleted policy ${name}.\n`)
-    })
+    .action(deleteCmd)
+}
+
+async function createCmd(name: string, opts: { source: string }): Promise<void> {
+  const saved = (await call('POST', '', {
+    name,
+    source: readSource(opts.source),
+  })) as PolicyBody
+  emit(saved, (p) => `Created policy ${p.name}.`)
+}
+
+async function listCmd(): Promise<void> {
+  const items = itemsOf(await call('GET', ''))
+  emit(items, () =>
+    formatTable(
+      ['NAME'],
+      items.map((p) => [p.name]),
+    ),
+  )
+}
+
+async function getCmd(name: string, opts: { output?: Output }): Promise<void> {
+  const got = (await call('GET', ref(name))) as PolicyBody
+  await show(got, opts.output, () => got.source.replace(/\n+$/, ''))
+}
+
+async function updateCmd(name: string, opts: { source: string }): Promise<void> {
+  const saved = (await call('PUT', ref(name), {
+    source: readSource(opts.source),
+  })) as PolicyBody
+  emit(saved, (p) => `Updated policy ${p.name}.`)
+}
+
+async function deleteCmd(name: string): Promise<void> {
+  await call('DELETE', ref(name))
+  process.stdout.write(`Deleted policy ${name}.\n`)
 }

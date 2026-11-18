@@ -16,7 +16,7 @@ import { readAsText, SESSION } from '../../accessor/postgres.ts'
 import type { PgDriver, PgQueryResult } from '../../core/postgres/_driver.ts'
 import { judgeSocket } from '../../io/web/network.ts'
 import { missingPeer } from '../../utils/optional_peer.ts'
-import type { resolvePostgresConfig } from './config.ts'
+import { type PostgresConfig } from './config.ts'
 
 interface PgPoolLike {
   query: (
@@ -65,10 +65,10 @@ function dsnEndpoints(dsn: string): [string, number][] {
 }
 
 export class PostgresStore implements PgDriver {
-  readonly config: ReturnType<typeof resolvePostgresConfig>
+  readonly config: ReturnType<typeof PostgresConfig.parse>
   private poolPromise: Promise<PgPoolLike> | null = null
 
-  constructor(config: ReturnType<typeof resolvePostgresConfig>) {
+  constructor(config: ReturnType<typeof PostgresConfig.parse>) {
     this.config = config
   }
 

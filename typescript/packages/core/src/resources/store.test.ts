@@ -135,20 +135,15 @@ describe('RecordResourceStore', () => {
     expect((await s.getPolicy('guard.py')).source).toBe('pass')
   })
 
-  it('does not delete an entry a template names', async () => {
+  it('deletes an entry a template names and keeps the template', async () => {
     const s = store()
     await s.createEntry('vfs', GITHUB)
     const token = { from: 'strukto', ref: 'github', key: 'token' }
-    await s.createTemplate({
-      name: 'agent',
-      config: { mounts: { '/gh': { vfs: 'github', config: { token } } } },
-    })
-    await expect(s.deleteEntry('vfs', 'github')).rejects.toMatchObject({
-      code: 'conflict',
-      message: 'github is used by agent',
-    })
-    await s.deleteTemplate('agent')
+    const config = { mounts: { '/gh': { vfs: 'github', config: { token } } } }
+    await s.createTemplate({ name: 'agent', config })
     await s.deleteEntry('vfs', 'github')
+    expect(await s.listEntries('vfs')).toEqual([])
+    expect((await s.getTemplate('agent')).config).toEqual(config)
   })
 
   it('saves one of two creates of one template', async () => {

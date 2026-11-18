@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDriver, LanceRow } from '../core/lancedb/types.ts'
-import type { resolveLanceDBConfig } from '../vfs/lancedb/config.ts'
+import { type LanceDBConfig } from '../vfs/lancedb/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
 
 export class LanceDBAccessor extends Accessor {
   readonly driver: LanceDriver
-  readonly config: ReturnType<typeof resolveLanceDBConfig>
+  readonly config: ReturnType<typeof LanceDBConfig.parse>
   readonly searches = new ResponseCache<string, LanceRow[]>()
 
-  constructor(driver: LanceDriver, config: ReturnType<typeof resolveLanceDBConfig>) {
+  constructor(driver: LanceDriver, config: ReturnType<typeof LanceDBConfig.parse>) {
     super()
     this.driver = driver
     this.config = config

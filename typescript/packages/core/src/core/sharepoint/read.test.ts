@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { read } from './read.ts'
 
@@ -127,7 +127,7 @@ describe('a recorded SharePoint read', () => {
       [DOWNLOAD]: () => new Response(new Uint8Array([1, 2, 3])),
     })
     const spec = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
-    const [data, records] = await runWithRecording(() => read(scoped(), spec))
+    const [data, records] = await recordingScope(() => read(scoped(), spec))
     expect([...data]).toEqual([1, 2, 3])
     expect(records).toMatchObject([{ op: 'read', path: '/m/m/k.txt', source: 'sharepoint' }])
   })

@@ -55,13 +55,13 @@ import {
   isProgramInvocation,
   redirectPathsFor,
   redirectTargetJudged,
-  runAsProgram,
+  setProgramInvocation,
   runLanding,
-  runWithAdmission,
-  runWithCaller,
-  runWithEvaluation,
-  runWithRedirectPaths,
-  runWithSession,
+  setAdmission,
+  bindCaller,
+  setCurrentEvaluation,
+  setRedirectPaths,
+  setCurrentSession,
   sessionCaller,
   sessionUmask,
   sessionVisibility,
@@ -111,12 +111,12 @@ describe('the bound evaluation on the fallback storage', () => {
     const [holdLine, releaseLine] = gate()
     const [holdGate, releaseGate] = gate()
     let seen: EvaluationContext | null = null
-    const running = runWithEvaluation(evaluation, async () => {
+    const running = setCurrentEvaluation(evaluation, async () => {
       await holdLine
       seen = getCurrentEvaluation()
       releaseGate()
     })
-    const entered = runWithSession(other, async () => {
+    const entered = setCurrentSession(other, async () => {
       releaseLine()
       await holdGate
     })
@@ -138,7 +138,7 @@ describe('a landing on the fallback storage', () => {
       await hold
       return inLanding()
     })
-    const beside = await runWithEvaluation(evaluation, () =>
+    const beside = await setCurrentEvaluation(evaluation, () =>
       Promise.resolve(callerSignal()?.aborted),
     )
     release()
@@ -156,10 +156,10 @@ describe('session predicates on the fallback storage', () => {
     const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
     let allowedBesideHider: boolean | undefined
-    const long = runWithSession(hider, async () => {
+    const long = setCurrentSession(hider, async () => {
       await hold
     })
-    const short = runWithSession(other, () => {
+    const short = setCurrentSession(other, () => {
       // The hider's frame is not the newest, but its hide must still
       // count: every live session is folded, most restrictive first.
       allowedBesideHider = pathVisible(sessionVisibility(), '/repo/.env')
@@ -201,10 +201,10 @@ describe('session predicates on the fallback storage', () => {
     })
     const [hold, release] = gate()
     let seen: ReturnType<typeof sessionVisibility> = null
-    const long = runWithSession(wide, async () => {
+    const long = setCurrentSession(wide, async () => {
       await hold
     })
-    const short = runWithSession(narrow, () => {
+    const short = setCurrentSession(narrow, () => {
       seen = sessionVisibility()
       release()
       return Promise.resolve()
@@ -227,10 +227,10 @@ describe('session predicates on the fallback storage', () => {
     const dispatch = (() => Promise.reject(new Error('unused'))) as unknown as DispatchFn
     const [hold, release] = gate()
     let folded: boolean | undefined
-    const long = runWithSession(hider, async () => {
+    const long = setCurrentSession(hider, async () => {
       await hold
     })
-    const short = runWithSession(other, () => {
+    const short = setCurrentSession(other, () => {
       folded = readerOf(new Files(dispatch, readers([], null, other.visibility))).visible('/data/x')
       release()
       return Promise.resolve()
@@ -254,10 +254,10 @@ describe('session predicates on the fallback storage', () => {
     const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
     let seen: boolean | undefined
-    const first = runWithSession(other, async () => {
+    const first = setCurrentSession(other, async () => {
       await hold
     })
-    const second = runWithSession(hider, async () => {
+    const second = setCurrentSession(hider, async () => {
       release()
       await first
       seen = pathVisible(sessionVisibility(), '/repo/.env')
@@ -274,14 +274,14 @@ describe('session predicates on the fallback storage', () => {
     const [hold, release] = gate()
     let forA: SessionState | null = null
     let forB: SessionState | null = null
-    const runA = runWithSession(
+    const runA = setCurrentSession(
       sessA,
       async () => {
         await hold
       },
       { owner: ownerA },
     )
-    const runB = runWithSession(
+    const runB = setCurrentSession(
       sessB,
       () => {
         // A's binding is beneath B's own: the owner search must reach
@@ -306,10 +306,10 @@ describe('session predicates on the fallback storage', () => {
     tight.umask = 0o077
     const [hold, release] = gate()
     let masked: number | undefined
-    const long = runWithSession(tight, async () => {
+    const long = setCurrentSession(tight, async () => {
       await hold
     })
-    const short = runWithSession(loose, () => {
+    const short = setCurrentSession(loose, () => {
       masked = sessionUmask()
       release()
       return Promise.resolve()
@@ -339,10 +339,10 @@ describe('the admission gate on the fallback storage', () => {
     const gateA = entryGate(true, [ruleShared, ruleAOnly], '/a/secret')
     const gateB = entryGate(false, [ruleShared], '/b/secret')
     const [hold, release] = gate()
-    const runA = runWithAdmission(gateA, async () => {
+    const runA = setAdmission(gateA, async () => {
       await hold
     })
-    const runB = runWithAdmission(gateB, () => {
+    const runB = setAdmission(gateB, () => {
       const seen = getAdmission()
       release()
       return Promise.resolve(seen)
@@ -372,10 +372,10 @@ describe('the admission gate on the fallback storage', () => {
     const gateB = entryGate(false, [], '/b/secret')
     const [hold, release] = gate()
     let after: EntryGate | null = null
-    const first = runWithAdmission(gateB, async () => {
+    const first = setAdmission(gateB, async () => {
       await hold
     })
-    const second = runWithAdmission(gateA, async () => {
+    const second = setAdmission(gateA, async () => {
       release()
       await first
       after = getAdmission()
@@ -394,12 +394,12 @@ describe('redirect targets on the fallback storage', () => {
     const [hold, release] = gate()
     let pathsInA: readonly PathSpec[] = []
     let judgedInA = false
-    const runA = runWithRedirectPaths(nodeA, [outA], async () => {
+    const runA = setRedirectPaths(nodeA, [outA], async () => {
       await hold
       pathsInA = redirectPathsFor(nodeA)
       judgedInA = redirectTargetJudged(outA.virtual)
     })
-    const runB = runWithRedirectPaths(nodeB, [outB], () => {
+    const runB = setRedirectPaths(nodeB, [outB], () => {
       expect(redirectPathsFor(nodeB)).toEqual([outB])
       expect(redirectPathsFor(nodeA)).toEqual([outA])
       release()
@@ -435,7 +435,7 @@ describe('a named facade session on the fallback storage', () => {
       await wide.mkdir('/data/vault')
       await wide.write('/data/vault/secret', 'top\n')
       const [held, release] = gate()
-      const holding = runWithSession(host, () => held, { owner: ws.sessionManager })
+      const holding = setCurrentSession(host, () => held, { owner: ws.sessionManager })
       const named = new Session(ws, ws.defaultSessionId).vfs
       await expect(named.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
       expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
@@ -516,21 +516,21 @@ describe('deferred evaluation on the fallback storage', () => {
     async (explicit) => {
       const parent = new EvaluationContext(new SessionState({ sessionId: 'parent' }))
       const child = parent.fork()
-      const deferred = await runAsProgram(parent.session, () =>
-        runWithEvaluation(child, () =>
+      const deferred = await setProgramInvocation(parent.session, () =>
+        setCurrentEvaluation(child, () =>
           Promise.resolve(explicit ? sessionCaller(child.session) : currentCaller()),
         ),
       )
       const other = new EvaluationContext(new SessionState({ sessionId: 'other' }))
-      await runWithEvaluation(other, async () => {
-        const recaptured = await runWithCaller(deferred, async () => {
+      await setCurrentEvaluation(other, async () => {
+        const recaptured = await bindCaller(deferred, async () => {
           await Promise.resolve()
           expect(getCurrentSession()).toBe(child.session)
           expect(getCurrentEvaluation()).toBe(child)
           expect(isProgramInvocation(child.session)).toBe(true)
           return currentCaller()
         })
-        await runWithCaller(recaptured, async () => {
+        await bindCaller(recaptured, async () => {
           await Promise.resolve()
           expect(getCurrentEvaluation()).toBe(child)
           expect(isProgramInvocation(child.session)).toBe(true)
@@ -572,7 +572,7 @@ describe('xargs session isolation on the fallback storage', () => {
       }
       return new IOResult({ stdout: stream('out'), stderr: stream('err') })
     }
-    await runWithSession(parent, async () => {
+    await setCurrentSession(parent, async () => {
       const [out, io] = await handleXargs(
         execute,
         [`-P${String(procs)}`, '-n1', 'echo'],
@@ -609,7 +609,7 @@ describe('xargs session isolation on the fallback storage', () => {
       await sessionView(current).set('X', 'inner')
       throw new Error('command failed')
     }
-    await runWithSession(parent, async () => {
+    await setCurrentSession(parent, async () => {
       await expect(
         handleXargs(
           execute,
@@ -928,7 +928,7 @@ it('keeps unbound file calls restrictive when a wider browser session shadows th
   const [held, releaseWide] = gate()
   try {
     await ws.vfs.write('/data/secret', 'secret')
-    const first = runWithSession(
+    const first = setCurrentSession(
       narrow,
       async () => {
         await resume
@@ -937,7 +937,7 @@ it('keeps unbound file calls restrictive when a wider browser session shadows th
       },
       { owner: ws.sessionManager },
     )
-    const second = runWithSession(wide, () => held, { owner: ws.sessionManager })
+    const second = setCurrentSession(wide, () => held, { owner: ws.sessionManager })
     try {
       releaseNarrow()
       await first
@@ -1233,7 +1233,7 @@ it('judges a named facade’s op by its own rules when a wider session binds mea
     }
     const reading = refusal(ws.vfs.forSession('sealed').read('/data/secret'))
     await entered
-    const other = runWithSession(free, () => freeHeld, { owner: ws.sessionManager })
+    const other = setCurrentSession(free, () => freeHeld, { owner: ws.sessionManager })
     release()
     const overlapped = await reading
     releaseFree()
@@ -1279,7 +1279,7 @@ it('expands an ambient glob under every live session’s hides', async () => {
     await ws.vfs.write('/data/open', 'o')
     const line = ws.shell('globber', { sessionId: hider.sessionId })
     await entered
-    const other = runWithSession(wide, () => wideHeld, { owner: ws.sessionManager })
+    const other = setCurrentSession(wide, () => wideHeld, { owner: ws.sessionManager })
     release()
     await line
     releaseWide()
@@ -1358,7 +1358,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     return calls === 2 ? ['/root/one/file'] : ['/second/file']
   }
   const work = runWithLineAbort(wanted.signal, [first], Symbol('line'), () =>
-    runWithEvaluation(new EvaluationContext(first), () =>
+    setCurrentEvaluation(new EvaluationContext(first), () =>
       resolveGlobWith(
         read,
         null,
@@ -1384,7 +1384,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
   )
   await listed
   const overlap = runWithLineAbort(unwanted.signal, [other], Symbol('line'), () =>
-    runWithEvaluation(new EvaluationContext(other), () => otherHold),
+    setCurrentEvaluation(new EvaluationContext(other), () => otherHold),
   )
   try {
     release()
@@ -1392,7 +1392,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     wanted.abort()
     await expect(
       runWithLineAbort(wanted.signal, [first], Symbol('line'), () =>
-        runWithEvaluation(new EvaluationContext(first), () =>
+        setCurrentEvaluation(new EvaluationContext(first), () =>
           expandPattern(read, null, PathSpec.fromStrPath('/root/*/*', '/*/*')),
         ),
       ),
@@ -1425,7 +1425,7 @@ it.each([true, false])(
       [first],
       Symbol('line'),
       () =>
-        runWithEvaluation(new EvaluationContext(first), () =>
+        setCurrentEvaluation(new EvaluationContext(first), () =>
           searchScope(tree, null, [
             new PathSpec({
               virtual: '/root/*.txt',
@@ -1439,7 +1439,7 @@ it.each([true, false])(
     )
     await loaded
     const overlap = runWithLineAbort(unwanted.signal, [other], Symbol('line'), () =>
-      runWithEvaluation(new EvaluationContext(other), () => otherHold),
+      setCurrentEvaluation(new EvaluationContext(other), () => otherHold),
     )
     try {
       release()

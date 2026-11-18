@@ -147,31 +147,31 @@ export function registerMcpCommand(program: Command): void {
     .option('-s, --session <id>', "Session the tools act as; the workspace's default when absent")
     .option('--all-calls', 'Also serve each VFS call as a tool, and explain')
     .description("Serve a Mirage workspace's MCP tools over stdio.")
-    .action(
-      async (
-        config: string | undefined,
-        options: { workspace?: string; session?: string; allCalls?: boolean },
-      ) => {
-        if (options.workspace !== undefined && config !== undefined) {
-          fail('pass a config or --workspace, not both', 2)
-        }
-        let path: string | undefined
-        if (options.workspace === undefined) {
-          try {
-            path = resolveWorkspaceConfig(config, { envNames: MCP_ENV_NAMES })
-          } catch (error) {
-            fail(error instanceof Error ? error.message : String(error), 2)
-          }
-        }
-        const { relayStdio } = await import('@struktoai/mirage-server/mcp')
-        await relayWorkspace(
-          path,
-          options.workspace,
-          options.session,
-          'mcp',
-          relayStdio,
-          options.allCalls === true,
-        )
-      },
-    )
+    .action(mcpCmd)
+}
+
+async function mcpCmd(
+  config: string | undefined,
+  options: { workspace?: string; session?: string; allCalls?: boolean },
+): Promise<void> {
+  if (options.workspace !== undefined && config !== undefined) {
+    fail('pass a config or --workspace, not both', 2)
+  }
+  let path: string | undefined
+  if (options.workspace === undefined) {
+    try {
+      path = resolveWorkspaceConfig(config, { envNames: MCP_ENV_NAMES })
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error), 2)
+    }
+  }
+  const { relayStdio } = await import('@struktoai/mirage-server/mcp')
+  await relayWorkspace(
+    path,
+    options.workspace,
+    options.session,
+    'mcp',
+    relayStdio,
+    options.allCalls === true,
+  )
 }

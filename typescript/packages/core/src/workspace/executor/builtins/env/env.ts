@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { isProgramInvocation, runAsProgram } from '../../../../context/session_context.ts'
+import { isProgramInvocation, setProgramInvocation } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { BIN_PREFIX } from '../../../../shell/constants.ts'
@@ -191,7 +191,7 @@ export async function handleEnv(
   try {
     // env execs its command, so a builtin that is also a program answers as
     // the program.
-    const io = await runAsProgram(session, () =>
+    const io = await setProgramInvocation(session, () =>
       executeFn(shellJoin(command), { sessionId: session.sessionId, stdin }),
     )
     return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]

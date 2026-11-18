@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
@@ -30,6 +29,7 @@ from mirage.core.slack.formatters import (
 from mirage.core.slack.history import fetch_messages_for_day
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.scope import detect_scope
+from mirage.core.slack.types import SlackChannel
 from mirage.core.slack.users import list_users, user_json_bytes
 from mirage.core.time_range import guard_day
 from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
@@ -127,7 +127,7 @@ def _slack_modified(remote_time: str | int | float | None) -> str | None:
 
 
 def _conversation(
-    dirname: str, conversation: dict[str, Any], name: str
+    dirname: str, conversation: SlackChannel, name: str
 ) -> FileStat:
     created = int(conversation.get("created", 0) or 0)
     return FileStat(

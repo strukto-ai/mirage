@@ -20,7 +20,6 @@ from mirage.concurrency.limiter import settle
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import ENTRY_KINDS, NAME, NOUN
 from mirage.resources.errors import ResourceError
-from mirage.resources.refs import uses_of
 from mirage.resources.types import (
     Entry,
     EntryInput,
@@ -219,11 +218,6 @@ class RecordResourceStore(ResourceStore):
     async def delete_entry(self, kind: EntryKind, name: str) -> None:
         async with self._lock:
             await self._entry_record(kind, name)
-            used_by = uses_of(await self._templates()).get(name, [])
-            if used_by:
-                raise ResourceError(
-                    "conflict", f"{name} is used by {', '.join(used_by)}"
-                )
             delete = asyncio.ensure_future(self._delete_entry(kind, name))
             try:
                 await asyncio.shield(delete)

@@ -421,9 +421,9 @@ describe('ntn verbs', () => {
   })
 
   it('api prints compact JSON with sorted keys', async () => {
-    RESPONSE = { b: 1, a: { d: 2, c: 3 } }
+    RESPONSE = { b: 1, a: { '2': 2, '10': 10, ['__proto__']: 4, c: 3 } }
     const [out] = unwrap(await api(ACCESSOR, [], ['v1/users/me'], context()))
-    expect(DEC.decode(out as Uint8Array)).toBe('{"a":{"c":3,"d":2},"b":1}\n')
+    expect(DEC.decode(out as Uint8Array)).toBe('{"a":{"10":10,"2":2,"__proto__":4,"c":3},"b":1}\n')
     RESPONSE = { id: 'P1' }
   })
 })

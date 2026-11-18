@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -34,8 +35,8 @@ from mirage.utils.upload import upload_stat
 async def _clear_dest(
     accessor: BoxAccessor,
     dst: PathSpec,
-    existing: dict[str, Any] | None,
-    src: dict[str, Any],
+    existing: Mapping[str, Any] | None,
+    src: Mapping[str, Any],
 ) -> WriteCondition | None:
     # mv overwrites the destination; Box 409s on a name clash, so clear
     # an existing dst first. A type mismatch is refused with rename(2)'s own

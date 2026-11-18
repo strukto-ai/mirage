@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JsonValue } from '../../types.ts'
+import { DAY_MS, IntlZone, UTC_ZONE, utcFromWall } from '../../utils/timezone.ts'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const DEFAULT_TZ = 'UTC'
@@ -21,9 +22,7 @@ export const WINDOW_AHEAD_DAYS = 90
 const BUCKET_EPOCH = '1970-01-05'
 export const SPAN_SEP = '--'
 
-const DAY_MS = 86_400_000
-
-const formatters = new Map<string, Intl.DateTimeFormat>()
+const formatters = new Map<string, IntlZone>()
 
 /**
  * Resolve an IANA zone name, falling back to UTC when unknown.
@@ -32,65 +31,30 @@ const formatters = new Map<string, Intl.DateTimeFormat>()
  * Failing the whole listing over it would let one bad calendar hide every
  * other one, so fall back and keep going.
  */
-export function zone(tz: string): Intl.DateTimeFormat {
+export function zone(tz: string): IntlZone {
   const cached = formatters.get(tz)
   if (cached !== undefined) return cached
-  let made: Intl.DateTimeFormat
+  let made: IntlZone
   try {
-    made = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
+    made = new IntlZone(tz)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
     made = zone(DEFAULT_TZ)
   }
   formatters.set(tz, made)
   return made
 }
 
-/** The wall-clock reading an instant has in a zone. */
-export function wallParts(instant: number, tz: string) {
-  const parts = zone(tz).formatToParts(new Date(instant))
-  const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? '0')
-  return {
-    year: get('year'),
-    month: get('month'),
-    day: get('day'),
-    // Intl renders midnight as hour 24 under hour12:false in some ICU
-    // versions, which would push the date a day forward.
-    hour: get('hour') % 24,
-    minute: get('minute'),
-    second: get('second'),
-  }
-}
-
-/** A zone's UTC offset in milliseconds at one instant. */
-function zoneOffsetMs(instant: number, tz: string): number {
-  const w = wallParts(instant, tz)
-  return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) - instant
-}
-
-/**
- * A wall-clock reading resolved in a zone, as an absolute instant.
- *
- * Two passes because the offset itself depends on the instant: on a DST
- * boundary the first guess lands on the wrong side of the transition.
- */
-function wallClockMs(naive: string, tz: string): number {
-  const guess = Date.parse(`${naive}Z`)
-  const once = guess - zoneOffsetMs(guess, tz)
-  return guess - zoneOffsetMs(once, tz)
+/** Resolve a calendar wall time on the earlier side of a repeated hour, as Python's fold=0 does. */
+function wallClockMs(dt: Date, tz: string): number {
+  const calendar = zone(tz)
+  const before = calendar.parts(new Date(dt.getTime() - DAY_MS)).offsetSec
+  return calendar.fromWall(UTC_ZONE.parts(dt), before).getTime()
 }
 
 /** The instant at which a local calendar day begins. */
 export function localMidnight(day: string, tz: string): number {
-  return wallClockMs(`${day}T00:00:00`, tz)
+  return wallClockMs(new Date(`${day}T00:00:00Z`), tz)
 }
 
 function pad(value: number, width: number): string {
@@ -105,20 +69,18 @@ export function shiftDay(day: string, days: number): string {
 
 /** The local date an instant falls on, `YYYY-MM-DD`. */
 export function localDate(instant: number, tz: string): string {
-  const w = wallParts(instant, tz)
-  return `${pad(w.year, 4)}-${pad(w.month, 2)}-${pad(w.day, 2)}`
+  return utcFromWall(zone(tz).parts(new Date(instant)))
+    .toISOString()
+    .slice(0, 10)
 }
 
-/** An instant as RFC3339 in one zone, offset included. */
-function rfc3339(instant: number, tz: string): string {
-  const w = wallParts(instant, tz)
-  const offset = zoneOffsetMs(instant, tz) / 60_000
-  const sign = offset < 0 ? '-' : '+'
+/** Keep the floating midnight and its original offset, including when the clock skipped it. */
+function rfc3339(day: string, tz: string): string {
+  const offset = (Date.parse(`${day}T00:00:00Z`) - localMidnight(day, tz)) / 1000
   const abs = Math.abs(offset)
-  const head =
-    `${pad(w.year, 4)}-${pad(w.month, 2)}-${pad(w.day, 2)}` +
-    `T${pad(w.hour, 2)}:${pad(w.minute, 2)}:${pad(w.second, 2)}`
-  return `${head}${sign}${pad(Math.floor(abs / 60), 2)}:${pad(abs % 60, 2)}`
+  const seconds = abs % 60
+  const suffix = `${offset < 0 ? '-' : '+'}${pad(Math.floor(abs / 3600), 2)}:${pad(Math.floor(abs / 60) % 60, 2)}`
+  return `${day}T00:00:00${suffix}${seconds === 0 ? '' : `:${pad(seconds, 2)}`}`
 }
 
 /**
@@ -129,9 +91,7 @@ function rfc3339(instant: number, tz: string): string {
  * would drop or double an hour of events.
  */
 export function dayBounds(day: string, tz: string, days = 1): [string, string] {
-  const start = localMidnight(day, tz)
-  const next = localMidnight(shiftDay(day, days), tz)
-  return [rfc3339(start, tz), rfc3339(next, tz)]
+  return [rfc3339(day, tz), rfc3339(shiftDay(day, days), tz)]
 }
 
 /**
@@ -205,7 +165,7 @@ export function windowBounds(today: string, tz: string, size = 1): [null, string
  * stat report a directory that every later call then failed on.
  */
 export function validDay(day: string): boolean {
-  if (!DATE_RE.test(day)) return false
+  if (!DATE_RE.test(day) || day.startsWith('0000-')) return false
   const at = Date.parse(`${day}T00:00:00Z`)
   if (Number.isNaN(at)) return false
   return new Date(at).toISOString().slice(0, 10) === day
@@ -223,12 +183,16 @@ export function slotInstant(slot: Record<string, JsonValue>, tz: string): number
   if (typeof raw === 'string' && raw !== '') {
     // An offset is mandatory on dateTime UNLESS the slot names its own zone,
     // so a bare wall clock is a zoned event rather than an error.
-    if (/(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) return Date.parse(raw)
+    if (!validDay(raw.slice(0, 10))) return null
+    const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)
+    const instant = new Date(hasOffset ? raw : raw + 'Z')
+    if (!Number.isFinite(instant.getTime()) || raw.slice(11, 13) === '24') return null
+    if (hasOffset) return instant.getTime()
     const declared = slot.timeZone
-    return wallClockMs(raw, typeof declared === 'string' && declared !== '' ? declared : tz)
+    return wallClockMs(instant, typeof declared === 'string' && declared !== '' ? declared : tz)
   }
   const day = slot.date
-  if (typeof day === 'string' && DATE_RE.test(day)) return localMidnight(day, tz)
+  if (typeof day === 'string' && validDay(day)) return localMidnight(day, tz)
   return null
 }
 
@@ -284,10 +248,10 @@ export function daysCovered(span: [number, number], tz: string): string[] {
 export function clampedHhmm(span: [number, number], day: string, tz: string): string {
   const lo = localMidnight(day, tz)
   const hi = localMidnight(shiftDay(day, 1), tz)
-  const start = wallParts(Math.max(span[0], lo), tz)
+  const start = zone(tz).parts(new Date(Math.max(span[0], lo)))
   const head = `${pad(start.hour, 2)}${pad(start.minute, 2)}`
   const endAt = Math.min(span[1], hi)
   if (endAt >= hi) return `${head}-2400`
-  const end = wallParts(endAt, tz)
+  const end = zone(tz).parts(new Date(endAt))
   return `${head}-${pad(end.hour, 2)}${pad(end.minute, 2)}`
 }

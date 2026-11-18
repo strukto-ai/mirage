@@ -12,10 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from stat import S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG
+from stat import S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK
+from typing import Literal
 
 from mirage.types import DEVICE_NUMBERS_KEY, FileStat, FileType
 from mirage.utils.dates import iso_timestamp
+
+PrintfKind = Literal["f", "d", "l", "c", "b", "p", "s"]
+TYPE_CHARS: dict[FileType, PrintfKind] = {
+    FileType.DIRECTORY: "d",
+    FileType.SYMLINK: "l",
+    FileType.CHAR_DEVICE: "c",
+    FileType.BLOCK_DEVICE: "b",
+    FileType.FIFO: "p",
+    FileType.SOCKET: "s",
+}
 
 # The one spelling of "a directory looks like drwxr-xr-x and a file
 # like -rw-r--r--" for every stat translator (FUSE attrs, guest
@@ -32,6 +43,23 @@ FIFO_MODE = S_IFIFO | 0o600
 # by any POSIX system, so this is the one mode every translator reports
 # for one (FUSE's link_stat, find's -type l row, a guest's lstat).
 LINK_MODE = S_IFLNK | 0o777
+BASE_MODES = {
+    FileType.FILE: FILE_MODE,
+    FileType.DIRECTORY: DIR_MODE,
+    FileType.SYMLINK: LINK_MODE,
+    FileType.CHAR_DEVICE: CHAR_MODE,
+    FileType.FIFO: FIFO_MODE,
+    FileType.BLOCK_DEVICE: S_IFBLK | 0o644,
+    FileType.SOCKET: S_IFSOCK | 0o644,
+}
+MODE_TYPES = {mode & S_IFMT: kind for kind, mode in BASE_MODES.items()}
+
+
+def mode_type(mode: int) -> FileType | None:
+    """Read the POSIX node kind from a mode that may carry only permissions."""
+    return MODE_TYPES.get(mode & S_IFMT)
+
+
 # A directory is one ext4 block, the st_size GNU tools show for one,
 # whatever aggregate a backend reports; ls, stat, find and FUSE all
 # report this, so find -size agrees with what the listing shows.
@@ -129,12 +157,7 @@ def posix_mode(st: FileStat) -> int:
     """
     if is_link(st):
         return LINK_MODE
-    if is_char_device(st):
-        base = CHAR_MODE
-    elif is_fifo(st):
-        base = FIFO_MODE
-    else:
-        base = DIR_MODE if is_dir(st) else FILE_MODE
+    base = BASE_MODES[st.type]
     if st.mode is None:
         return base
     return (base & ~ALL_MODE_BITS) | (st.mode & ALL_MODE_BITS)

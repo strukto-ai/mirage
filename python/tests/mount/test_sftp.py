@@ -25,6 +25,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.errors.fs import strerror_of
+from mirage.mount.constants import POSIX_RENAME
 from mirage.mount.sftp import (
     MirageSFTPServer,
     PipeServer,
@@ -55,7 +56,9 @@ FXP_OPEN = 3
 FXP_CLOSE = 4
 FXP_WRITE = 6
 FXP_STAT = 17
+FXP_RENAME = 18
 FXP_SYMLINK = 20
+FXP_EXTENDED = 200
 FXP_VERSION = 2
 FXP_STATUS = 101
 FXP_HANDLE = 102
@@ -63,6 +66,7 @@ FXP_ATTRS = 105
 FXF_WRITE = 0x02
 FXF_CREAT = 0x08
 FXF_TRUNC = 0x10
+FX_FAILURE = 4
 FX_NO_SUCH_FILE = 2
 FX_OK = 0
 
@@ -78,6 +82,19 @@ def test_every_host_reaching_method_is_overridden():
         "asyncssh.SFTPServer serves the host filesystem from these; "
         f"override them on MirageSFTPServer: {exposed}"
     )
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (stat.S_IFBLK, asyncssh.FILEXFER_TYPE_BLOCK_DEVICE),
+        (stat.S_IFCHR, asyncssh.FILEXFER_TYPE_CHAR_DEVICE),
+        (stat.S_IFIFO, asyncssh.FILEXFER_TYPE_FIFO),
+        (stat.S_IFSOCK, asyncssh.FILEXFER_TYPE_SOCKET),
+    ],
+)
+def test_special_file_types_include_permissions(mode, expected):
+    assert filetype(mode | 0o755) == expected
 
 
 def test_attrs_carry_type_mode_size_and_split_times():
@@ -166,6 +183,49 @@ async def test_a_pipe_answers_as_its_session():
     requests.feed_eof()
     await asyncio.wait_for(served, 5)
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_names_posix_rename_and_renames_over_a_name_with_it():
+    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/notes/new", b"new\n")
+    await ws.vfs.write("/notes/old", b"old")
+    await ws.session("agent")
+    requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
+    served = asyncio.create_task(
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+            requests, Feed(answers)
+        )
+    )
+    paths = string(b"/notes/new") + string(b"/notes/old")
+    try:
+        requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
+        kind, body = await answer(answers)
+        assert kind == FXP_VERSION
+        assert string(POSIX_RENAME.encode()) in body
+        requests.feed_data(packet(FXP_RENAME, struct.pack(">I", 1) + paths))
+        kind, body = await answer(answers)
+        assert (kind, struct.unpack(">II", body[:8])) == (
+            FXP_STATUS,
+            (1, FX_FAILURE),
+        )
+        requests.feed_data(
+            packet(
+                FXP_EXTENDED,
+                struct.pack(">I", 2) + string(POSIX_RENAME.encode()) + paths,
+            )
+        )
+        kind, body = await answer(answers)
+        assert (kind, struct.unpack(">II", body[:8])) == (
+            FXP_STATUS,
+            (2, FX_OK),
+        )
+        result = await ws.shell("cat /notes/old; ls /notes")
+        assert await result.stdout_str() == "new\nold\n"
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
 
 
 @pytest.mark.asyncio

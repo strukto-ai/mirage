@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadWorkspaceConfig } from './config.ts'
+import { checkWorkspaceConfig, loadWorkspaceConfig } from './config.ts'
 import type { MachineVFS } from './vfs/machine/machine.ts'
 import { buildVfs } from './vfs/registry.ts'
 import { Workspace } from './workspace/workspace/workspace.ts'
@@ -45,6 +45,29 @@ describe('@<machine>', () => {
       }),
     ).toThrow("no machine 'cpu'")
   })
+
+  it('sends the user’s machine shorthand on the wire', () => {
+    const source = {
+      mounts: { '/tmp': '@gpu' },
+      machines: { gpu: { provider: 'docker', container: 'c' } },
+    }
+    const checked = checkWorkspaceConfig(source)
+    expect(checked).toEqual(source)
+    expect(loadWorkspaceConfig(checked).mounts['/tmp']?.config?.machines).toEqual(['gpu'])
+  })
+
+  it.each([{ selected: 'gpu' }, { selected: [1] }])(
+    'rejects an invalid list of selected machines',
+    ({ selected }) => {
+      const machines = { gpu: { provider: 'docker', container: 'c' } }
+      expect(() =>
+        loadWorkspaceConfig({
+          mounts: { '/tmp': { vfs: 'machine', config: { machines: selected } } },
+          machines,
+        }),
+      ).toThrow('machines must be a list of machine names')
+    },
+  )
 
   it("is that machine's files at its own path", async () => {
     const config = loadWorkspaceConfig({

@@ -28,7 +28,7 @@ import {
   currentCaller,
   effectivePathMode,
   getCurrentSession,
-  runWithCaller,
+  bindCaller,
   sessionVisibility,
 } from '../context/session_context.ts'
 import type { FollowOperands, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
@@ -440,7 +440,7 @@ export class Files {
       const bound = sessionId ?? this.sessionId
       const go = (): Promise<[unknown, IOResult]> =>
         this.bind === null ? run() : this.bind(bound, run)
-      const [value] = await (isolated ? runWithCaller(caller, go) : go())
+      const [value] = await (isolated ? bindCaller(caller, go) : go())
       result = value
     } catch (err) {
       // Anything thrown after the op ran (a postVfs deny, a hard

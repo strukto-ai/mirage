@@ -140,3 +140,11 @@ def test_the_default_shape_is_notions():
     assert has_more_cursor({"has_more": True, "next_cursor": "c"}) == "c"
     assert has_more_cursor({"has_more": False, "next_cursor": "c"}) is None
     assert offset_cursor({"offset": ""}) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1])
+async def test_empty_limit_avoids_the_request(limit):
+    pager = _Pager([])
+    assert await cursor_items(pager.fetch, max_results=limit) == []
+    assert pager.cursors == []

@@ -202,7 +202,11 @@ def slot_instant(slot: dict[str, JsonValue], tz: str) -> datetime | None:
     """
     raw = slot.get("dateTime")
     if isinstance(raw, str) and raw:
-        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        try:
+            stamp = datetime.fromisoformat(raw)
+        except ValueError:
+            logger.debug("gcal: invalid event dateTime %r", raw)
+            return None
         if stamp.tzinfo is not None:
             return stamp
         # Google requires an offset on dateTime UNLESS the slot names its
@@ -214,7 +218,7 @@ def slot_instant(slot: dict[str, JsonValue], tz: str) -> datetime | None:
         zone_name = declared if isinstance(declared, str) and declared else tz
         return stamp.replace(tzinfo=zone(zone_name))
     day = slot.get("date")
-    if isinstance(day, str) and DATE_RE.match(day):
+    if isinstance(day, str) and valid_day(day):
         return local_midnight(day, tz)
     return None
 

@@ -14,8 +14,7 @@
 
 import { LanceDBAccessor } from '@struktoai/mirage-core/accessor/lancedb'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
-import { resolveLanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
+import { LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
 import { REDACTED_SECRET, type RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { LanceDBVFS as CoreLanceDBVFS, VFS_MD } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
 import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
@@ -35,7 +34,7 @@ export class LanceDBVFS extends CoreLanceDBVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   override vfsMd: string = VFS_MD
-  readonly config: ReturnType<typeof resolveLanceDBConfig>
+  readonly config: ReturnType<typeof LanceDBConfig.parse>
   readonly store: LanceDBStore
   override readonly accessor: LanceDBAccessor
   // Only cards are searched: a blob file is the blob column's bytes.
@@ -44,7 +43,7 @@ export class LanceDBVFS extends CoreLanceDBVFS {
   constructor(options: LanceDBVFSOptions | LanceDBConfig) {
     super()
     const config = 'config' in options ? options.config : options
-    this.config = resolveLanceDBConfig(config)
+    this.config = LanceDBConfig.parse(config)
     this.cachesReads = REMOTE_SCHEMES.some((scheme) => this.config.uri.startsWith(scheme))
     this.store = new LanceDBStore(this.config)
     this.accessor = new LanceDBAccessor(this.store, this.config)

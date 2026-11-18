@@ -83,7 +83,7 @@ async function callTool(
  * Serve each tool at `POST /v1/workspaces/:wsId/tools/<tool>`, with the
  * MCP route's body limit, so an input MCP takes is one these take.
  */
-export function registerToolsRoutes(
+export function router(
   app: RouteApp,
   deps: {
     mcp: McpEndpoint

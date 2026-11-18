@@ -15,6 +15,7 @@
 // Repository arguments are read as go-gh v2.13.0 reads them (MIT; see
 // licenses/third_party/go-gh.txt).
 
+import type { GitHubAccessor } from '../../accessor/github.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { GitHubTransport } from './client.ts'
 import { GRAPHQL_PATH } from './constants.ts'
@@ -31,6 +32,26 @@ export async function fetchDefaultBranch(
 ): Promise<string> {
   const data = (await transport.get(`/repos/${owner}/${repo}`)) as { default_branch: string }
   return data.default_branch
+}
+
+/** Resolve the default branch once, including concurrent readers. */
+export async function ensureDefaultBranch(accessor: GitHubAccessor): Promise<string> {
+  if (accessor.defaultBranch !== null) return accessor.defaultBranch
+  accessor.branchPending ??= fetchDefaultBranch(
+    accessor.account.transport,
+    accessor.owner,
+    accessor.repo,
+  )
+    .then((branch) => (accessor.defaultBranch = branch))
+    .finally(() => {
+      accessor.branchPending = null
+    })
+  return accessor.branchPending
+}
+
+export async function ensureRef(accessor: GitHubAccessor): Promise<string> {
+  accessor.ref ??= await ensureDefaultBranch(accessor)
+  return accessor.ref
 }
 
 // go-gh's IsURL: a word that starts `git@` or with a scheme a git remote uses

@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
@@ -68,7 +68,7 @@ describe('a read against the wire', () => {
       const path = at('src/a.txt', prefix)
       const accessor = servedAccessor()
       const row = await entryAt(readdir, accessor, path)
-      const [data, records] = await runWithRecording(() => read(accessor, path, row))
+      const [data, records] = await recordingScope(() => read(accessor, path, row))
       expect(DEC.decode(data)).toBe('payload')
       const sha = await blobSha('payload')
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
@@ -84,7 +84,7 @@ describe('a read against the wire', () => {
     const accessor = servedAccessor()
     const path = at('a.txt', '/gh')
     const row = await entryAt(readdir, accessor, path)
-    const [chunks, records] = await runWithRecording(async () => {
+    const [chunks, records] = await recordingScope(async () => {
       const out: Uint8Array[] = []
       for await (const chunk of readStream(accessor, path, row)) out.push(chunk)
       return out
@@ -103,7 +103,7 @@ describe('a read against the wire', () => {
     await readdir(accessor, at('', '/gh'))
     expect(accessor.tree['a.txt']?.sha).toBe(await blobSha('reseated'))
     gh.set('a.txt', 'live')
-    const [data, records] = await runWithRecording(() => read(accessor, path, row))
+    const [data, records] = await recordingScope(() => read(accessor, path, row))
     // Three shas are in play: the handed row's, the accessor tree's and the
     // live one. Only the first names the bytes this read returned.
     expect(DEC.decode(data)).toBe('old')
@@ -128,7 +128,7 @@ describe('a read against the wire', () => {
     const paths = ['a.txt', 'b.txt', 'latin.txt', 'long.txt'].map((rel) => at(rel, '/gh'))
     const handed: Handed[] = []
     for (const path of paths) handed.push({ entry: await entryAt(readdir, accessor, path) })
-    const [got, records] = await runWithRecording(() => readMany(accessor, paths, 1 << 20, handed))
+    const [got, records] = await recordingScope(() => readMany(accessor, paths, 1 << 20, handed))
     expect([...got].map(([path, data]) => [path, DEC.decode(data)])).toEqual([
       ['/gh/a.txt', 'alpha\n'],
       ['/gh/b.txt', 'beta\r\n'],

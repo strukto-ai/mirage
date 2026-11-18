@@ -17,6 +17,7 @@ import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { FileStat } from '../../types.ts'
 import { ContentType, DirListing, FileType } from '../../types.ts'
+import { stringOf } from '../../utils/records.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
@@ -32,11 +33,6 @@ export const TABLE_JSON = entryStat('table_id', ContentType.JSON)
 export const RECORDS = entryStat('table_id', ContentType.TEXT)
 export const VIEWS = entryStat('table_id', FileType.DIRECTORY)
 export const VIEW = entryStat('view_id', ContentType.TEXT)
-
-function text(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 // The base listing row base.json renders, rebuilt from the directory's row
 // that listing wrote, so its size needs no second call.
@@ -54,7 +50,7 @@ function baseRow(entry: FileStat): Record<string, unknown> {
  * which only a paged read produces.
  */
 export function tableChildren(table: Record<string, unknown>, baseId: string): FileStat[] {
-  const tableId = text(table, 'id')
+  const tableId = stringOf(table, 'id')
   return [
     TABLE_JSON('table.json', tableId, {
       size: jsonBytes(normalizeTable(table, baseId)).byteLength,
@@ -66,14 +62,14 @@ export function tableChildren(table: Record<string, unknown>, baseId: string): F
 
 /** A table's saved views, one size-unknown .jsonl file each. */
 export function viewChildren(table: Record<string, unknown>): FileStat[] {
-  return asRows(table.views).map((view) => VIEW(viewFilename(view), text(view, 'id')))
+  return asRows(table.views).map((view) => VIEW(viewFilename(view), stringOf(view, 'id')))
 }
 
 async function listBasesDir(accessor: AirtableAccessor, _match: ScopeMatch): Promise<FileStat[]> {
   return (await listBases(accessor)).map((base) =>
-    BASE(baseDirname(base), text(base, 'id'), {
+    BASE(baseDirname(base), stringOf(base, 'id'), {
       extra: {
-        base_name: text(base, 'name') || text(base, 'id'),
+        base_name: stringOf(base, 'name') || stringOf(base, 'id'),
         permission_level: base.permissionLevel ?? null,
       },
     }),
@@ -94,7 +90,7 @@ async function listBase(
   const seeds = new Map<string, FileStat[]>()
   for (const table of tables) {
     const dirname = tableDirname(table)
-    rows.push(TABLE(dirname, text(table, 'id')))
+    rows.push(TABLE(dirname, stringOf(table, 'id')))
     seeds.set(dirname, tableChildren(table, baseId))
     seeds.set(`${dirname}/views`, viewChildren(table))
   }

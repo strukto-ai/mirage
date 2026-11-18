@@ -96,7 +96,7 @@ export function staleWrite(path: string | { virtual: string }, landed = false): 
  * `inner_suffix`.
  */
 export function innerSuffix(operand: { virtual: string }, err: unknown): string {
-  const name = (err as { virtualPath?: unknown }).virtualPath
+  const name = (err as { virtualPath?: unknown } | null | undefined)?.virtualPath
   const base = operand.virtual.replace(/\/+$/, '')
   if (typeof name !== 'string' || !name.startsWith(`${base}/`)) return ''
   return name.slice(base.length)
@@ -297,7 +297,7 @@ export function isNoMount(err: unknown): boolean {
 // same reason that tuple does: the dispatcher and the executor's probes both
 // read it and neither may import the other.
 export function isMissError(exc: unknown): boolean {
-  const code = (exc as { code?: string }).code
+  const code = (exc as { code?: string } | null | undefined)?.code
   if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return true
   const msg = exc instanceof Error ? exc.message : String(exc)
   return /not found|no such file|not a directory|is a directory/i.test(msg)
@@ -343,8 +343,8 @@ export function walkDeclined(
 // create/truncate) to distinguish "backend lacks the op" from a real
 // failure inside it.
 export function isMissingOp(err: unknown, op: string): boolean {
-  const stamped = err as { code?: unknown; op?: unknown }
-  return stamped.code === 'ENOTSUP' && stamped.op === op
+  const stamped = err as { code?: unknown; op?: unknown } | null | undefined
+  return stamped?.code === 'ENOTSUP' && stamped.op === op
 }
 
 /**
@@ -387,7 +387,7 @@ export function fsStrerror(err: unknown): string | null {
 // The user-facing path for an error: the stamped virtualPath when present,
 // else the raw message. Never a real fs path (backends never stamp those).
 export function errorVirtualPath(err: unknown): string {
-  const v = (err as { virtualPath?: unknown }).virtualPath
+  const v = (err as { virtualPath?: unknown } | null | undefined)?.virtualPath
   if (typeof v === 'string') return v
   return err instanceof Error ? err.message : String(err)
 }

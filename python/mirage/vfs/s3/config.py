@@ -42,7 +42,6 @@ class S3Config(AWSAuth, TimeoutConfig):
     """`Content-Type` stored with every object the mount writes. Unset
     sends none, so the store applies its own default."""
 
-    @field_validator("key_prefix")
-    @classmethod
-    def _normalize_key_prefix(cls, v: str | None) -> str | None:
-        return kp.normalize(v) or None
+    _normalize_key_prefix = field_validator("key_prefix")(
+        kp.normalize_key_prefix
+    )

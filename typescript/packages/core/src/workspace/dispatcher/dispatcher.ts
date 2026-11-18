@@ -35,7 +35,7 @@ import {
   getCurrentSession,
   hiddenRefusal,
   liveCallers,
-  runWithCaller,
+  bindCaller,
   sessionAccess,
   sessionVisibility,
 } from '../../context/session_context.ts'
@@ -77,7 +77,7 @@ import {
   lostPaths,
   record,
   recordIndex,
-  runWithRecording,
+  recordingScope,
   startOp,
 } from '../../observe/context.ts'
 import type { LostPaths, OpRecord } from '../../observe/record.ts'
@@ -801,7 +801,7 @@ export class Dispatcher {
         // task isolation that binding would reach other tasks' ops, so there
         // only the dispatcher's own checks read it.
         return await (asyncContextIsolatesTasks
-          ? runWithCaller({ ...caller, ruleGate: null }, run)
+          ? bindCaller({ ...caller, ruleGate: null }, run)
           : run())
       }
       // Only forSession and forCaller know the owner. An unbound browser
@@ -1669,8 +1669,8 @@ export class Dispatcher {
         }
       }
     }
-    await runWithCaller({ ...currentCaller(), versionReads: false }, async () => {
-      if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
+    await bindCaller({ ...currentCaller(), versionReads: false }, async () => {
+      if (activeRecords() === undefined) await recordingScope(warm, null, this.namespace.clock)
       else await warm()
     })
     return true
@@ -2531,7 +2531,7 @@ export class Dispatcher {
     // outside a line (FUSE, ws.vfs) records into a scope of its own for that.
     const recorded = <T>(fill: () => Promise<T>): Promise<T> =>
       filler !== null && activeRecords() === undefined
-        ? runWithRecording(fill, null, this.namespace.clock).then(([value]) => value)
+        ? recordingScope(fill, null, this.namespace.clock).then(([value]) => value)
         : fill()
     let result
     try {
@@ -2619,7 +2619,7 @@ export class Dispatcher {
             `${name} ${p.virtual}`,
             (onCall, holds) =>
               activeRecords() === undefined
-                ? runWithRecording(() => own(onCall, holds), null, this.namespace.clock).then(
+                ? recordingScope(() => own(onCall, holds), null, this.namespace.clock).then(
                     ([value]) => value,
                   )
                 : own(onCall, holds),

@@ -14,13 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseConfigWithSchema, REDACTED_SECRET } from '../secrets.ts'
-import { QdrantConfig, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
+import { QdrantConfig } from './config.ts'
+import { redactedConfigDump } from '../secrets.ts'
 
 const embed = (text: string): Promise<number[]> => Promise.resolve([text.length])
 
 describe('qdrant config embed hook', () => {
   it('keeps a function through the config loader and resolves it', () => {
-    const config = resolveQdrantConfig(
+    const config = QdrantConfig.parse(
       parseConfigWithSchema(QdrantConfig, { collection: 'c', embed }),
     )
     expect(config.embed).toBe(embed)
@@ -28,7 +29,7 @@ describe('qdrant config embed hook', () => {
 
   it('resolves to null when absent', () => {
     expect(
-      resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, { collection: 'c' })).embed,
+      QdrantConfig.parse(parseConfigWithSchema(QdrantConfig, { collection: 'c' })).embed,
     ).toBeNull()
   })
 
@@ -39,12 +40,14 @@ describe('qdrant config embed hook', () => {
   })
 
   it('redacts the hook so no snapshot carries it', () => {
-    const withHook = redactQdrantConfig(
-      resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, { embed })),
+    const withHook = redactedConfigDump(
+      QdrantConfig,
+      QdrantConfig.parse(parseConfigWithSchema(QdrantConfig, { embed })),
     )
     expect(withHook.embed).toBe(REDACTED_SECRET)
     expect(
-      redactQdrantConfig(resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, {}))).embed,
+      redactedConfigDump(QdrantConfig, QdrantConfig.parse(parseConfigWithSchema(QdrantConfig, {})))
+        .embed,
     ).toBeNull()
   })
 })
