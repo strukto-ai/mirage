@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
+import struct
 
 import pytest
 
@@ -23,6 +25,7 @@ from mirage.mount.fsproto import (
     Frame,
     FrameReader,
     FsprotoServer,
+    bounded,
     encode_frame,
 )
 from mirage.mount.types import ServedPrefix
@@ -267,5 +270,51 @@ async def test_another_s_change_is_pushed_and_a_barrier_waits_for_the_client():
     assert not barrier.done()
     begin = next(f for f in end.pushes if f.head.get("op") == "begin")
     end.send({"hid": begin.head["hid"]})
-    await barrier
+    assert await barrier is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_barrier_the_client_never_answers_is_refused(monkeypatch):
+    monkeypatch.setattr("mirage.mount.fsproto.BEGIN_WAIT_SECONDS", 0.01)
+    ws, server, end, serving = await served(RecentChanges(ManualClock(0), 1))
+    await end.call({"op": "hello", "proto": FSPROTO_VERSION})
+    assert await server.begin() is False
+    await end.end(serving)
+
+
+def test_a_reply_past_the_frame_limit_drops_its_tree_then_is_refused():
+    def head(frame: bytes) -> dict:
+        (length,) = struct.unpack(">I", frame[4:8])
+        return json.loads(frame[8 : 8 + length])
+
+    tree = {"id": 1, "e": [], "k": True, "d": [["/w/a", [["x" * 80, {}]]]]}
+    assert head(bounded(tree, b"", 64)) == {"id": 1, "e": [], "k": True}
+    big = {"id": 2, "e": [["x" * 80, {}]], "k": True}
+    assert head(bounded(big, b"", 64)) == {"id": 2, "errno": "EFBIG"}
+
+
+@pytest.mark.asyncio
+async def test_a_handle_stats_truncates_and_flushes_the_file_it_is_open_on():
+    ws, server, end, serving = await served()
+    opened = await end.call(
+        {"op": "open", "path": "/notes/plan.txt", "write": True}
+    )
+    fh = opened.head["fh"]
+    await end.call({"op": "write", "fh": fh, "offset": 4}, b"!")
+    seen = await end.call(
+        {"op": "getattr", "path": "/notes/plan.txt", "fh": fh}
+    )
+    assert seen.head["a"]["s"] == 5
+    flushed = await end.call({"op": "flush", "fh": fh})
+    assert "errno" not in flushed.head
+    assert await ws.vfs.read("/notes/plan.txt") == b"plan!"
+    await end.call({"op": "unlink", "path": "/notes/plan.txt"})
+    await ws.vfs.write("/notes/plan.txt", b"fresh")
+    cut = await end.call(
+        {"op": "setattr", "path": "/notes/plan.txt", "fh": fh, "size": 2}
+    )
+    assert cut.head["a"]["s"] == 2
+    await end.call({"op": "release", "fh": fh})
+    assert await ws.vfs.read("/notes/plan.txt") == b"fresh"
     await end.end(serving)

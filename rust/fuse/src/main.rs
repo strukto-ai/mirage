@@ -73,24 +73,25 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
     ];
     config.n_threads = Some(8);
     let fs = MirageFs::new(link.clone(), shared);
-    let mounted = match mount_direct(source, mountpoint) {
-        Ok(Some(fd)) => Session::from_fd(fs, fd, config.acl, config),
-        Ok(None) => Session::new(fs, mountpoint, &config),
-        Err(err) => Err(err),
+    let (mounted, direct) = match mount_direct(source, mountpoint) {
+        Ok(Some(fd)) => (Session::from_fd(fs, fd, config.acl, config), true),
+        Ok(None) => (Session::new(fs, mountpoint, &config), false),
+        Err(err) => (Err(err), false),
+    };
+    let failed = |doing: &str, err: io::Error| {
+        eprintln!("mirage-fuse: {doing} {mountpoint} failed: {err}");
+        if direct {
+            unmount(mountpoint);
+        }
+        ExitCode::from(1)
     };
     let session = match mounted {
         Ok(session) => session,
-        Err(err) => {
-            eprintln!("mirage-fuse: mounting {mountpoint} failed: {err}");
-            return ExitCode::from(1);
-        }
+        Err(err) => return failed("mounting", err),
     };
     let background = match session.spawn() {
         Ok(background) => background,
-        Err(err) => {
-            eprintln!("mirage-fuse: serving {mountpoint} failed: {err}");
-            return ExitCode::from(1);
-        }
+        Err(err) => return failed("serving", err),
     };
     let notifier = background.notifier();
     std::thread::spawn(move || {

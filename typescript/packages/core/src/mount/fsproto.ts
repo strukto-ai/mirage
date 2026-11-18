@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../errors/classify.ts'
-import { ebadf, eexist, efbig } from '../errors/fs.ts'
+import { ebadf, eexist, efbig, enoent } from '../errors/fs.ts'
 import { registerPipeServer } from '../machine/mounts.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import { READ, type OpenMode } from '../runtime/handles/index.ts'
@@ -39,7 +39,7 @@ import type { MountAttrs, ServedPrefix } from './types.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const EMPTY = new Uint8Array(0)
-// How long a barrier waits for the machine's answer before the line runs anyway.
+// How long a barrier waits for the machine's answer before the line is refused.
 const BEGIN_WAIT_SECONDS = 15
 
 type Head = Record<string, unknown>
@@ -65,6 +65,26 @@ export function encodeFrame(head: Head, body: Uint8Array = EMPTY): Uint8Array {
   out.set(json, 8)
   out.set(body, 8 + json.byteLength)
   return out
+}
+
+/**
+ * A reply as a frame the client accepts: one past `limit` goes without the
+ * folders a tree answer adds (`d`), and is refused as `EFBIG` when it is
+ * still too large, so the pipe stays usable. Mirrors Python's `bounded`.
+ */
+export function bounded(
+  head: Head,
+  body: Uint8Array = EMPTY,
+  limit: number = FSPROTO_FRAME_BYTES,
+): Uint8Array {
+  const frame = encodeFrame(head, body)
+  if (frame.byteLength - 4 <= limit) return frame
+  if ('d' in head) {
+    const rest = { ...head }
+    delete rest.d
+    return bounded(rest, body, limit)
+  }
+  return encodeFrame({ id: head.id, errno: 'EFBIG' })
 }
 
 /** The frames in a byte stream, as its chunks arrive. */
@@ -215,32 +235,39 @@ export class FsprotoServer {
       this.ended = true
       for (const ack of this.acks.values()) ack()
       this.acks.clear()
-      this.queue = this.queue.then(() => this.exit())
+      this.queue = this.queue
+        .catch((err: unknown) => {
+          console.debug('fsproto: a request failed past its reply', err)
+        })
+        .then(() => this.exit())
       await this.queue
     }
   }
 
   /**
-   * Resolve once the client has applied every change noted so far: the
-   * barrier a line passes before its program starts. A client that does
-   * not answer within BEGIN_WAIT_SECONDS is let go with a warning.
+   * Wait until the client has applied every change noted so far: the
+   * barrier a line passes before its program starts.
+   *
+   * @returns false when the client did not answer within
+   *   BEGIN_WAIT_SECONDS, so the line must not run on what it still keeps.
    */
-  async begin(): Promise<void> {
-    if (this.ended || this.writer === null) return
+  async begin(): Promise<boolean> {
+    if (this.ended || this.writer === null) return true
     this.flush()
     this.hid += 1
     const hid = this.hid
     let timer: ReturnType<typeof setTimeout> | undefined
-    await new Promise<void>((resolve) => {
-      this.acks.set(hid, resolve)
+    const confirmed = await new Promise<boolean>((resolve) => {
+      this.acks.set(hid, () => {
+        resolve(true)
+      })
       timer = setTimeout(() => {
-        if (!this.acks.delete(hid)) return
-        console.warn(`mirage-fuse did not answer a barrier on ${this.served?.prefix ?? '/'}`)
-        resolve()
+        if (this.acks.delete(hid)) resolve(false)
       }, BEGIN_WAIT_SECONDS * 1000)
       this.send({ hid, op: 'begin' })
     })
     clearTimeout(timer)
+    return confirmed
   }
 
   /**
@@ -263,8 +290,12 @@ export class FsprotoServer {
   }
 
   private send(head: Head, body: Uint8Array = EMPTY): void {
+    this.write(encodeFrame(head, body))
+  }
+
+  private write(frame: Uint8Array): void {
     if (this.writer === null || this.ended) return
-    this.writer.write(encodeFrame(head, body))
+    this.writer.write(frame)
   }
 
   private flush(): void {
@@ -285,13 +316,19 @@ export class FsprotoServer {
     if (id === null) return
     this.queue = this.queue.then(async () => {
       let answer: [Head, Uint8Array] = [{}, EMPTY]
+      let reply: Uint8Array
       try {
         await this.run(async () => {
           answer = await this.answer(frame)
         })
-        this.send({ ...answer[0], id }, answer[1])
+        reply = bounded({ ...answer[0], id }, answer[1])
       } catch (err) {
-        this.send({ id, errno: condition(err) })
+        reply = encodeFrame({ id, errno: condition(err) })
+      }
+      try {
+        this.write(reply)
+      } catch (err) {
+        console.debug(`fsproto: answering ${String(id)} failed`, err)
       }
     })
   }
@@ -361,8 +398,12 @@ export class FsprotoServer {
     switch (h.op) {
       case 'hello':
         return [{ proto: FSPROTO_VERSION }, EMPTY]
-      case 'getattr':
-        return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+      case 'getattr': {
+        const fd = num(h.fh)
+        if (fd === null) return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+        const held = this.pathOf(fd)
+        return [{ a: wire(await core.fgetattr(held, fd)), k: this.kept(held) }, EMPTY]
+      }
       case 'list': {
         const kept = this.kept(path)
         const rows = shown(await core.listing(path))
@@ -431,6 +472,11 @@ export class FsprotoServer {
         await core.write(this.pathOf(fd), fd, frame.body, whole(h.offset, 0))
         return [{}, EMPTY]
       }
+      case 'flush': {
+        const fd = whole(h.fh, -1)
+        await core.flush(this.pathOf(fd), fd)
+        return [{}, EMPTY]
+      }
       case 'release': {
         const fd = whole(h.fh, -1)
         const held = this.pathOf(fd)
@@ -462,14 +508,21 @@ export class FsprotoServer {
         return [{}, EMPTY]
       }
       case 'setattr': {
+        const fd = num(h.fh)
         const size = num(h.size)
-        if (size !== null) await core.truncate(path, size)
         const atime = num(h.atime)
         const mtime = num(h.mtime)
-        const fields = [num(h.mode), num(h.uid), num(h.gid), atime, mtime]
-        if (fields.some((field) => field !== null)) {
+        const rest = [num(h.mode), num(h.uid), num(h.gid), atime, mtime].some((v) => v !== null)
+        const target = fd === null ? path : this.pathOf(fd)
+        if (fd !== null) {
+          if (size !== null) await core.ftruncate(fd, size)
+          if (rest && core.handles.get(fd)?.detached !== undefined) throw enoent(target)
+        } else if (size !== null) {
+          await core.truncate(path, size)
+        }
+        if (rest) {
           await core.setattr(
-            path,
+            target,
             num(h.mode),
             num(h.uid),
             num(h.gid),
@@ -477,7 +530,8 @@ export class FsprotoServer {
             mtime === null ? null : new Date(mtime),
           )
         }
-        return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+        const attrs = fd === null ? await core.getattr(path) : await core.fgetattr(target, fd)
+        return [{ a: wire(attrs), k: this.kept(target) }, EMPTY]
       }
       case 'statfs': {
         const s = core.statfs()

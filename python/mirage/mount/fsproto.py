@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mirage.errors.fs import ebadf, eexist, efbig
+from mirage.errors.fs import ebadf, eexist, efbig, enoent
 from mirage.mount.constants import (
     FSPROTO_FETCH_DIR_BYTES,
     FSPROTO_FETCH_FILE_BYTES,
@@ -46,8 +46,8 @@ from mirage.workspace.session import SessionState
 logger = logging.getLogger(__name__)
 
 EMPTY = b""
-# How long a barrier waits for the machine's answer before the line runs
-# anyway.
+# How long a barrier waits for the machine's answer before the line is
+# refused.
 BEGIN_WAIT_SECONDS = 15.0
 
 Head = dict[str, Any]
@@ -78,6 +78,27 @@ def encode_frame(head: Head, body: bytes = EMPTY) -> bytes:
     raw = json.dumps(head, separators=(",", ":")).encode()
     total = 4 + len(raw) + len(body)
     return struct.pack(">II", total, len(raw)) + raw + body
+
+
+def bounded(
+    head: Head, body: bytes = EMPTY, limit: int = FSPROTO_FRAME_BYTES
+) -> bytes:
+    """A reply as a frame the client accepts: one past ``limit`` goes
+    without the folders a tree answer adds (``d``), and is refused as
+    ``EFBIG`` when it is still too large, so the pipe stays usable.
+
+    Args:
+        head (dict[str, Any]): the reply's header, its ``id`` included.
+        body (bytes): the reply's body.
+        limit (int): the largest frame the client reads.
+    """
+    frame = encode_frame(head, body)
+    if len(frame) - 4 <= limit:
+        return frame
+    if "d" in head:
+        rest = {k: v for k, v in head.items() if k != "d"}
+        return bounded(rest, body, limit)
+    return encode_frame({"id": head.get("id"), "errno": "EFBIG"})
 
 
 class FrameReader:
@@ -261,16 +282,22 @@ class FsprotoServer:
                     ack.set_result(None)
             self._acks.clear()
             await self._requests.put(None)
-            await worker
-            await self._exit()
+            try:
+                await worker
+            finally:
+                await self._exit()
 
-    async def begin(self) -> None:
-        """Return once the client has applied every change noted so far:
-        the barrier a line passes before its program starts. A client
-        that does not answer within BEGIN_WAIT_SECONDS is let go with a
-        warning."""
+    async def begin(self) -> bool:
+        """Wait until the client has applied every change noted so far:
+        the barrier a line passes before its program starts.
+
+        Returns:
+            bool: False when the client did not answer within
+            BEGIN_WAIT_SECONDS, so the line must not run on what it
+            still keeps.
+        """
         if self._ended or self._writer is None:
-            return
+            return True
         self._flush()
         self._hid += 1
         hid = self._hid
@@ -280,12 +307,10 @@ class FsprotoServer:
         try:
             await asyncio.wait_for(ack, BEGIN_WAIT_SECONDS)
         except TimeoutError:
-            logger.warning(
-                "mirage-fuse did not answer a barrier on %s",
-                self._served.prefix if self._served is not None else "/",
-            )
+            return False
         finally:
             self._acks.pop(hid, None)
+        return True
 
     async def sync(self) -> list[tuple[str, Exception]]:
         """Land every write the client has been told is done, as SFTP's
@@ -319,9 +344,12 @@ class FsprotoServer:
         self._flush()
 
     def _send(self, head: Head, body: bytes = EMPTY) -> None:
+        self._write(encode_frame(head, body))
+
+    def _write(self, frame: bytes) -> None:
         if self._writer is None or self._ended:
             return
-        self._writer.write(encode_frame(head, body))
+        self._writer.write(frame)
 
     def _flush(self) -> None:
         if not self._invalid:
@@ -351,9 +379,13 @@ class FsprotoServer:
                 head, body = await (
                     task if self._run is None else self._run(task)
                 )
-                self._send({**head, "id": rid}, body)
+                reply = bounded({**head, "id": rid}, body)
             except Exception as err:
-                self._send({"id": rid, "errno": condition(err)})
+                reply = encode_frame({"id": rid, "errno": condition(err)})
+            try:
+                self._write(reply)
+            except Exception as err:
+                logger.debug("fsproto: answering %s failed: %r", rid, err)
 
     def _kept(self, path: str) -> bool:
         row = reader_of(self._core.files).owner(path)
@@ -392,6 +424,13 @@ class FsprotoServer:
         if op == "hello":
             return {"proto": FSPROTO_VERSION}, EMPTY
         if op == "getattr":
+            fh = num(h.get("fh"))
+            if fh is not None:
+                held = self._path_of(int(fh))
+                return {
+                    "a": wire(await core.fgetattr(held, int(fh))),
+                    "k": self._kept(held),
+                }, EMPTY
             return {
                 "a": wire(await core.getattr(path)),
                 "k": self._kept(path),
@@ -461,6 +500,10 @@ class FsprotoServer:
                 whole(h.get("offset"), 0),
                 fh,
             )
+            return {}, EMPTY
+        if op == "flush":
+            fh = whole(h.get("fh"), -1)
+            await core.flush(self._path_of(fh), fh)
             return {}, EMPTY
         if op == "release":
             fh = whole(h.get("fh"), -1)
@@ -592,12 +635,21 @@ class FsprotoServer:
 
     async def _setattr(self, path: str, h: Head) -> tuple[Head, bytes]:
         core = self._core
+        fh = num(h.get("fh"))
         size = num(h.get("size"))
-        if size is not None:
-            await core.truncate(path, int(size))
         mode, uid, gid = (num(h.get(k)) for k in ("mode", "uid", "gid"))
         atime, mtime = num(h.get("atime")), num(h.get("mtime"))
-        if any(v is not None for v in (mode, uid, gid, atime, mtime)):
+        rest = any(v is not None for v in (mode, uid, gid, atime, mtime))
+        if fh is not None:
+            path = self._path_of(int(fh))
+            if size is not None:
+                await core.ftruncate(int(fh), int(size))
+            held = core.handles.get(int(fh))
+            if rest and held is not None and held.detached is not None:
+                raise enoent(path)
+        elif size is not None:
+            await core.truncate(path, int(size))
+        if rest:
             await core.setattr(
                 path,
                 None if mode is None else int(mode),
@@ -606,10 +658,12 @@ class FsprotoServer:
                 None if atime is None else int(atime * 1_000_000),
                 None if mtime is None else int(mtime * 1_000_000),
             )
-        return {
-            "a": wire(await core.getattr(path)),
-            "k": self._kept(path),
-        }, EMPTY
+        attrs = (
+            await core.getattr(path)
+            if fh is None
+            else await core.fgetattr(path, int(fh))
+        )
+        return {"a": wire(attrs), "k": self._kept(path)}, EMPTY
 
     async def _exists(self, path: str) -> bool:
         try:

@@ -66,8 +66,8 @@ export interface PipeServer {
   serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void>
   /** Land every write the client has been told is done; the path and error of each landing that failed since the last sync. */
   sync(): Promise<[string, unknown][]>
-  /** Resolve once the client has applied every change noted so far; sshfs keeps nothing to apply them to. */
-  begin?(): Promise<void>
+  /** Wait until the client has applied every change noted so far, false when it did not answer in time; sshfs keeps nothing to apply them to. */
+  begin?(): Promise<boolean>
 }
 
 const pipeServers = new Map<Transport, Parameters<typeof registerPipeServer>[1]>()
@@ -212,6 +212,15 @@ export function mirageFuseLine(source: string, prefix: string, log: string): str
 /** Why a line did not run: the machine no longer holds `prefix`. */
 function unmounted(provider: string, prefix: string): string {
   return `${provider}: ${prefix} is no longer mounted in the machine (did it restart?); the line did not run`
+}
+
+/**
+ * Why a line did not run: the machine's file client did not confirm in time
+ * that it dropped what the workspace changed under `prefix`. Mirrors
+ * Python's `unconfirmed`.
+ */
+function unconfirmed(provider: string, prefix: string): string {
+  return `${provider}: the machine did not confirm the workspace's changes under ${prefix} in time; the line did not run`
 }
 
 /**
@@ -501,9 +510,14 @@ export class MachineMounts {
     const changes = binding.changes
     if (refusal !== null || this.served.size === 0 || changes === null) return refusal
     if (this.transport === 'mirage') {
-      await Promise.all(
-        [...this.served.values()].map(({ server }) => server.begin?.() ?? Promise.resolve()),
+      const served = [...this.served]
+      const confirmed = await Promise.all(
+        served.map(([, { server }]) => server.begin?.() ?? Promise.resolve(true)),
       )
+      const late = served.find((_, i) => confirmed[i] === false)?.[0]
+      if (late !== undefined) {
+        return refuse(`${unconfirmed(this.provider, late)}\n`, CANNOT_EXECUTE_STATUS)
+      }
       return null
     }
     this.since = new Map(

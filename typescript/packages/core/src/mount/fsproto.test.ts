@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RecentChanges, SERVED_BY } from './changes.ts'
 import { FSPROTO_VERSION } from './constants.ts'
-import { type Frame, FrameReader, FsprotoServer, encodeFrame } from './fsproto.ts'
+import { type Frame, FrameReader, FsprotoServer, bounded, encodeFrame } from './fsproto.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -95,6 +95,19 @@ describe('encodeFrame', () => {
     expect(encodeFrame({ id: 1 }, ENC.encode('xy'))).toEqual(
       new Uint8Array([0, 0, 0, 14, 0, 0, 0, 8, ...ENC.encode('{"id":1}xy')]),
     )
+  })
+})
+
+describe('bounded', () => {
+  it('drops a tree past the frame limit, then refuses the reply', () => {
+    const head = (frame: Uint8Array): unknown => {
+      const length = new DataView(frame.buffer, frame.byteOffset).getUint32(4)
+      return JSON.parse(DEC.decode(frame.subarray(8, 8 + length)))
+    }
+    const tree = { id: 1, e: [], k: true, d: [['/w/a', [['x'.repeat(80), {}]]]] }
+    expect(head(bounded(tree, new Uint8Array(), 64))).toEqual({ id: 1, e: [], k: true })
+    const big = { id: 2, e: [['x'.repeat(80), {}]], k: true }
+    expect(head(bounded(big, new Uint8Array(), 64))).toEqual({ id: 2, errno: 'EFBIG' })
   })
 })
 
@@ -240,8 +253,8 @@ describe('FsprotoServer', () => {
     changes.note('/notes/plan.txt')
     changes.note('/elsewhere/x')
     let passed = false
-    const barrier = server.begin().then(() => {
-      passed = true
+    const barrier = server.begin().then((confirmed) => {
+      passed = confirmed
     })
     await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
     expect(end.pushes[0]?.head).toEqual({ push: 'inval', paths: ['/notes/plan.txt'] })
@@ -250,6 +263,41 @@ describe('FsprotoServer', () => {
     end.send({ hid: begin?.head.hid })
     await barrier
     expect(passed).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('refuses a barrier the client never answers', async () => {
+    const { server, end, serving } = await served(new RecentChanges(new ManualClock(0), 1))
+    await end.call({ op: 'hello', proto: FSPROTO_VERSION })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const barrier = server.begin()
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(await barrier).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+    end.close()
+    await serving
+  })
+
+  it('stats, truncates and flushes through the handle a file is open on', async () => {
+    const { ws, end, serving } = await served()
+    const opened = await end.call({ op: 'open', path: '/notes/plan.txt', write: true })
+    const fh = opened.head.fh
+    await end.call({ op: 'write', fh, offset: 4 }, ENC.encode('!'))
+    const seen = await end.call({ op: 'getattr', path: '/notes/plan.txt', fh })
+    expect((seen.head.a as { s: number }).s).toBe(5)
+    const flushed = await end.call({ op: 'flush', fh })
+    expect(flushed.head.errno).toBeUndefined()
+    expect(DEC.decode(await ws.vfs.read('/notes/plan.txt'))).toBe('plan!')
+    await end.call({ op: 'unlink', path: '/notes/plan.txt' })
+    await ws.vfs.write('/notes/plan.txt', 'fresh')
+    const cut = await end.call({ op: 'setattr', path: '/notes/plan.txt', fh, size: 2 })
+    expect((cut.head.a as { s: number }).s).toBe(2)
+    await end.call({ op: 'release', fh })
+    expect(DEC.decode(await ws.vfs.read('/notes/plan.txt'))).toBe('fresh')
     end.close()
     await serving
   })

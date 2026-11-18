@@ -3,15 +3,22 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
+
+/// How long a request waits for its reply: a host whose backend stalls
+/// fails the call rather than holding the machine's programs forever.
+pub const REPLY_WAIT: Duration = Duration::from_secs(300);
 
 /// Why a request got no answer: the host refused it with a condition such
-/// as `ENOENT`, or the pipe to the host is gone.
+/// as `ENOENT`, the pipe to the host is gone, or the host did not answer
+/// in time.
 #[derive(Debug)]
 pub enum Failure {
     Refused(String),
     Lost,
+    Late,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -26,18 +33,26 @@ pub struct Link {
     out: Mutex<Box<dyn Write + Send>>,
     pending: Mutex<Option<HashMap<u64, Sender<Frame>>>>,
     next: AtomicU64,
+    wait: Duration,
 }
 
 impl Link {
     pub fn new(out: Box<dyn Write + Send>) -> Link {
+        Link::waiting(out, REPLY_WAIT)
+    }
+
+    /// A link whose requests wait `wait` for their replies.
+    pub fn waiting(out: Box<dyn Write + Send>, wait: Duration) -> Link {
         Link {
             out: Mutex::new(out),
             pending: Mutex::new(Some(HashMap::new())),
             next: AtomicU64::new(0),
+            wait,
         }
     }
 
-    /// Send `op` with `args` and `body`, and wait for its reply.
+    /// Send `op` with `args` and `body`, and wait for its reply; a reply
+    /// later than the link's wait finds no one waiting and is dropped.
     pub fn call(&self, op: &str, args: Value, body: &[u8]) -> Result<Frame, Failure> {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let mut head = match args {
@@ -57,7 +72,16 @@ impl Link {
             }
             return Err(Failure::Lost);
         }
-        let reply = rx.recv().map_err(|_| Failure::Lost)?;
+        let reply = match rx.recv_timeout(self.wait) {
+            Ok(reply) => reply,
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(pending) = locked(&self.pending).as_mut() {
+                    pending.remove(&id);
+                }
+                return Err(Failure::Late);
+            }
+            Err(RecvTimeoutError::Disconnected) => return Err(Failure::Lost),
+        };
         match reply.str("errno") {
             Some(condition) => Err(Failure::Refused(condition.to_string())),
             None => Ok(reply),
@@ -154,6 +178,20 @@ mod tests {
         let input = frame(json!({"id": 1, "errno": "ENOENT"}), b"");
         link.serve(&mut input.as_slice(), |_| {}).unwrap();
         assert!(matches!(caller.join().unwrap(), Err(Failure::Refused(c)) if c == "ENOENT"));
+    }
+
+    #[test]
+    fn a_reply_later_than_the_wait_fails_its_request_and_goes_nowhere() {
+        let link = Link::waiting(Box::new(io::sink()), Duration::from_millis(20));
+        assert!(matches!(
+            link.call("statfs", json!({}), &[]),
+            Err(Failure::Late)
+        ));
+        assert!(locked(&link.pending).as_ref().is_some_and(|p| p.is_empty()));
+        let input = frame(json!({"id": 1}), b"");
+        let mut pushed = 0;
+        link.serve(&mut input.as_slice(), |_| pushed += 1).unwrap();
+        assert_eq!(pushed, 0);
     }
 
     #[test]

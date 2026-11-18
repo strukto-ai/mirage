@@ -16,10 +16,12 @@ import asyncio
 import contextlib
 import errno
 import io
+import json
 import os
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -61,6 +63,7 @@ from mirage.machine.mounts import (
 )
 from mirage.machine.types import MachinePipe
 from mirage.mount.changes import SERVED_BY
+from mirage.mount.fsproto import encode_frame
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import Limit
 from mirage.utils.clock import ManualClock
@@ -73,6 +76,30 @@ class Sink:
 
     def close(self) -> None:
         return None
+
+
+class Barriers(Sink):
+    """A mirage-fuse end that answers each barrier its server sends."""
+
+    def __init__(self, requests: asyncio.StreamReader) -> None:
+        self.requests = requests
+        self.got = b""
+        self.done = False
+
+    def close(self) -> None:
+        self.done = True
+
+    def write(self, data: bytes) -> None:
+        self.got += data
+        while not self.done and len(self.got) >= 4:
+            (total,) = struct.unpack(">I", self.got[:4])
+            if len(self.got) < 4 + total:
+                return
+            frame, self.got = self.got[4 : 4 + total], self.got[4 + total :]
+            (length,) = struct.unpack(">I", frame[:4])
+            head = json.loads(frame[4 : 4 + length])
+            if head.get("op") == "begin":
+                self.requests.feed_data(encode_frame({"hid": head["hid"]}))
 
 
 async def lent_a_line() -> bool:
@@ -118,6 +145,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.kills_stopped = 0
         self.commands: list[str] = []
         self.pipes: list[str] = []
+        self.ends: dict[str, Sink] = {}
         self.requests: dict[str, asyncio.StreamReader] = {}
         self.stopped: list[str] = []
         self.guards: list[tuple[str, ...]] = []
@@ -230,15 +258,19 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
             self.running.add(source)
         requests = asyncio.StreamReader()
         self.requests[prefix] = requests
+        writer = Barriers(requests) if " serve " in command else Sink()
+        self.ends[prefix] = writer
 
         async def stop() -> None:
             self.stopped.append(prefix)
+            writer.close()
             requests.feed_eof()
 
-        return MachinePipe(requests, Sink(), stop)
+        return MachinePipe(requests, writer, stop)
 
     def sshfs_exits(self, prefix):
         """End ``prefix``'s server: its sshfs then unmounts itself."""
+        self.ends[prefix].close()
         self.requests[prefix].feed_eof()
         source, _ = self.table.pop(prefix)
         self.running.discard(source)

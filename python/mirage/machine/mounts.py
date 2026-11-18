@@ -267,6 +267,20 @@ def unmounted(provider: str, prefix: str) -> str:
     )
 
 
+def unconfirmed(provider: str, prefix: str) -> str:
+    """Why a line did not run: the machine's file client did not confirm
+    in time that it dropped what the workspace changed under ``prefix``.
+
+    Args:
+        provider (str): the machine's provider, for the message.
+        prefix (str): the mountpoint.
+    """
+    return (
+        f"{provider}: the machine did not confirm the workspace's changes "
+        f"under {prefix} in time; the line did not run"
+    )
+
+
 def running_line(source: str) -> str:
     """The machine command that exits 0 while a program runs with
     ``source`` as one of its arguments, as an sshfs serving it does, 1
@@ -576,13 +590,22 @@ class MachineMounts:
             )
         if self._served and binding.changes is not None:
             if self._transport == "mirage":
-                await asyncio.gather(
-                    *(
-                        server.begin()
-                        for _, _, server, _ in self._served.values()
-                        if hasattr(server, "begin")
-                    )
+                prefixes = [
+                    prefix
+                    for prefix, (_, _, server, _) in self._served.items()
+                    if hasattr(server, "begin")
+                ]
+                confirmed = await asyncio.gather(
+                    *(self._served[prefix][2].begin() for prefix in prefixes)
                 )
+                late = next(
+                    (p for p, ok in zip(prefixes, confirmed) if not ok), None
+                )
+                if late is not None:
+                    await errors(
+                        f"{unconfirmed(self._provider, late)}\n".encode()
+                    )
+                    return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
                 return None
             self._since = {
                 source: self._since.get(source, begun)

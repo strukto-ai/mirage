@@ -23,6 +23,9 @@ const LONG: Duration = Duration::from_secs(86_400);
 const CACHE_BYTES: usize = 256 << 20;
 /// The largest file read whole into the cache; a larger one reads by range.
 const WHOLE_FILE: u64 = 8 << 20;
+/// How many times an answer a forget crossed is asked for before it is
+/// used once, unkept.
+const FILLS: u32 = 3;
 const ROOT: u64 = 1;
 
 /// One answer about a path: its attributes and whether the host said to
@@ -101,6 +104,7 @@ struct Open {
     path: String,
     host: Option<u64>,
     data: Option<Arc<Vec<u8>>>,
+    attrs: Option<Attrs>,
     writes: bool,
 }
 
@@ -126,8 +130,9 @@ struct State {
     bytes: usize,
     fetched: HashSet<String>,
     opens: HashMap<u64, Open>,
-    dirs: HashMap<u64, Vec<(String, Attrs)>>,
+    dirs: HashMap<u64, (u64, Vec<(String, Attrs)>)>,
     next_fh: u64,
+    epoch: u64,
 }
 
 /// A listing's rows from its JSON: `[[name, attrs], ...]`.
@@ -167,6 +172,27 @@ impl State {
                 at,
             },
         );
+    }
+
+    /// Keep `data` as `path`'s content at `version`, dropping the oldest
+    /// content past CACHE_BYTES.
+    fn store(&mut self, path: &str, version: (u64, u64), data: Arc<Vec<u8>>) {
+        if let Some(old) = self.content.remove(path) {
+            self.bytes -= old.data.len();
+        }
+        self.order.retain(|p| p != path);
+        self.bytes += data.len();
+        self.content
+            .insert(path.to_string(), Content { version, data });
+        self.order.push_back(path.to_string());
+        while self.bytes > CACHE_BYTES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(c) = self.content.remove(&oldest) {
+                self.bytes -= c.data.len();
+            }
+        }
     }
 }
 
@@ -242,6 +268,7 @@ fn failed(failure: Failure) -> Errno {
     match failure {
         Failure::Refused(condition) => errno(&condition),
         Failure::Lost => Errno::from_i32(libc::ENOTCONN),
+        Failure::Late => Errno::from_i32(libc::ETIMEDOUT),
     }
 }
 
@@ -333,12 +360,14 @@ impl Shared {
 
     /// Forget everything a change at `changed` reaches, in the client and
     /// in the kernel: the path, what is under it, and its folder's listing.
-    /// A change at or above the root reaches everything.
+    /// A change at or above the root reaches everything. It moves the
+    /// epoch, so an answer asked for before it is not kept after it.
     pub fn forget(&self, changed: &str) {
         let everything = reaches(changed, &self.root);
         let mut notes = Vec::new();
         {
             let mut st = locked(&self.state);
+            st.epoch += 1;
             let hit = |p: &str| everything || reaches(changed, p);
             st.known.retain(|p, _| !hit(p));
             st.listings.retain(|p, _| !hit(p));
@@ -446,14 +475,25 @@ impl MirageFs {
         self.link.call(op, args, body).map_err(failed)
     }
 
-    fn keep(&self, path: &str, attrs: &Attrs) {
-        self.st().known.insert(
+    /// Keep `attrs` for `path` unless a forget came since the epoch
+    /// `asked`: Ok with them, or Err with them unkept, for the caller to
+    /// ask again or answer once with the short time.
+    fn keep(&self, path: &str, attrs: Attrs, asked: u64) -> Result<Attrs, Attrs> {
+        let mut st = self.st();
+        if st.epoch != asked {
+            return Err(Attrs {
+                kept: false,
+                ..attrs
+            });
+        }
+        st.known.insert(
             path.to_string(),
             Known {
                 attrs: attrs.clone(),
                 at: Instant::now(),
             },
         );
+        Ok(attrs)
     }
 
     /// Drop what the client holds of `path` and its folder's listing after
@@ -480,31 +520,63 @@ impl MirageFs {
         Attrs::parse(frame.head.get("a")?, kept)
     }
 
-    /// `path`'s attributes, from what the client keeps or the host.
+    /// `path`'s attributes, from what the client keeps or the host; an
+    /// answer a forget crossed is asked for again.
     fn stat(&self, path: &str) -> Result<Attrs, Errno> {
-        {
-            let st = self.st();
-            if let Some(known) = st.known.get(path).filter(|k| k.fresh()) {
-                return Ok(known.attrs.clone());
+        let mut tries = 0;
+        loop {
+            let asked = {
+                let st = self.st();
+                if let Some(known) = st.known.get(path).filter(|k| k.fresh()) {
+                    return Ok(known.attrs.clone());
+                }
+                st.epoch
+            };
+            let frame = self.call("getattr", json!({ "path": path }), &[])?;
+            let attrs = self.reply_attrs(&frame).ok_or(Errno::EIO)?;
+            tries += 1;
+            match self.keep(path, attrs, asked) {
+                Ok(attrs) => return Ok(attrs),
+                Err(attrs) if tries >= FILLS => return Ok(attrs),
+                Err(_) => {}
             }
         }
-        let frame = self.call("getattr", json!({ "path": path }), &[])?;
-        let attrs = self.reply_attrs(&frame).ok_or(Errno::EIO)?;
-        self.keep(path, &attrs);
-        Ok(attrs)
     }
 
-    /// `dir`'s entries with their attributes, from a kept listing or the host.
-    /// The first listing of a folder asks for its tree: a kept mount answers
-    /// the folders under it too, so a walk costs a few round trips, not one
-    /// per folder. A folder a tree answer covered is listed alone after.
-    fn list(&self, dir: &str) -> Result<Vec<(String, Attrs)>, Errno> {
-        let deep = {
+    /// The attributes of a file open on `path` whose name went: through
+    /// its host handle, or those it was opened with.
+    fn held(&self, path: &str) -> Option<Result<Attrs, Errno>> {
+        let open = self.st().opens.values().find(|o| o.path == path).cloned()?;
+        if let Some(host) = open.host {
+            return Some(self.fstat(path, host));
+        }
+        open.attrs.map(|attrs| {
+            Ok(Attrs {
+                kept: false,
+                ..attrs
+            })
+        })
+    }
+
+    /// The attributes of the file the host handle `host` is open on.
+    fn fstat(&self, path: &str, host: u64) -> Result<Attrs, Errno> {
+        let frame = self.call("getattr", json!({ "path": path, "fh": host }), &[])?;
+        self.reply_attrs(&frame).ok_or(Errno::EIO)
+    }
+
+    /// `dir`'s entries with their attributes, from a kept listing or the
+    /// host, and the epoch they hold at. The first listing of a folder
+    /// asks for its tree: a kept mount answers the folders under it too, so
+    /// a walk costs a few round trips, not one per folder. A folder a tree
+    /// answer covered is listed alone after. An answer a forget crossed is
+    /// used once and not kept.
+    fn list(&self, dir: &str) -> Result<(Vec<(String, Attrs)>, u64), Errno> {
+        let (deep, asked) = {
             let st = self.st();
             if let Some(listing) = st.listings.get(dir).filter(|l| l.fresh()) {
-                return Ok(listing.rows.clone());
+                return Ok((listing.rows.clone(), st.epoch));
             }
-            !st.covered.contains(dir)
+            (!st.covered.contains(dir), st.epoch)
         };
         let frame = self.call("list", json!({ "path": dir, "deep": deep }), &[])?;
         let kept = frame
@@ -514,6 +586,9 @@ impl MirageFs {
             .unwrap_or(false);
         let rows = entries(frame.head.get("e"), kept);
         let mut st = self.st();
+        if st.epoch != asked {
+            return Ok((rows, asked));
+        }
         let now = Instant::now();
         st.listed(dir, &rows, kept, now);
         for folder in frame
@@ -531,7 +606,7 @@ impl MirageFs {
         if deep {
             st.covered.insert(dir.to_string());
         }
-        Ok(rows)
+        Ok((rows, asked))
     }
 
     /// Whether `dir`'s fresh listing holds `name`, and whether it is kept;
@@ -550,39 +625,38 @@ impl MirageFs {
         (content.version == attrs.version()).then(|| content.data.clone())
     }
 
-    fn store(&self, path: &str, attrs: &Attrs, data: Vec<u8>) -> Arc<Vec<u8>> {
-        let data = Arc::new(data);
+    /// `path`'s whole content, and the attributes it was read at; kept
+    /// unless a forget came while it was read.
+    fn whole(&self, path: &str, attrs: Attrs) -> Result<(Arc<Vec<u8>>, Attrs), Errno> {
+        let asked = self.st().epoch;
+        let frame = self.call("readall", json!({ "path": path }), &[])?;
+        let now = self.reply_attrs(&frame).unwrap_or(attrs);
+        let data = Arc::new(frame.body);
         let mut st = self.st();
-        if let Some(old) = st.content.remove(path) {
-            st.bytes -= old.data.len();
+        if st.epoch == asked {
+            st.store(path, now.version(), data.clone());
+            st.known.insert(
+                path.to_string(),
+                Known {
+                    attrs: now.clone(),
+                    at: Instant::now(),
+                },
+            );
         }
-        st.order.retain(|p| p != path);
-        st.bytes += data.len();
-        st.content.insert(
-            path.to_string(),
-            Content {
-                version: attrs.version(),
-                data: data.clone(),
-            },
-        );
-        st.order.push_back(path.to_string());
-        while st.bytes > CACHE_BYTES {
-            let Some(oldest) = st.order.pop_front() else {
-                break;
-            };
-            if let Some(c) = st.content.remove(&oldest) {
-                st.bytes -= c.data.len();
-            }
-        }
-        data
+        Ok((data, now))
     }
 
     /// Bring the small files of `dir` into the cache in one request, once
-    /// until a change reaches the folder.
+    /// until a change reaches the folder; an answer a forget crossed is
+    /// dropped, for a later open to ask again.
     fn prefetch(&self, dir: &str) {
-        if !self.st().fetched.insert(dir.to_string()) {
-            return;
-        }
+        let asked = {
+            let mut st = self.st();
+            if !st.fetched.insert(dir.to_string()) {
+                return;
+            }
+            st.epoch
+        };
         let Ok(frame) = self.call("fetchdir", json!({ "path": dir }), &[]) else {
             return;
         };
@@ -594,6 +668,12 @@ impl MirageFs {
         if !kept {
             return;
         }
+        let mut st = self.st();
+        if st.epoch != asked {
+            st.fetched.remove(dir);
+            return;
+        }
+        let now = Instant::now();
         let mut at = 0usize;
         for row in frame
             .head
@@ -613,8 +693,8 @@ impl MirageFs {
                 return;
             };
             let path = child(dir, name);
-            self.keep(&path, &attrs);
-            self.store(&path, &attrs, bytes.to_vec());
+            st.store(&path, attrs.version(), Arc::new(bytes.to_vec()));
+            st.known.insert(path, Known { attrs, at: now });
             at = end;
         }
     }
@@ -623,18 +703,20 @@ impl MirageFs {
         &self,
         path: &str,
         host: Option<u64>,
-        data: Option<Arc<Vec<u8>>>,
+        data: Option<(Arc<Vec<u8>>, Attrs)>,
         writes: bool,
     ) -> u64 {
         let mut st = self.st();
         let fh = st.next_fh;
         st.next_fh += 1;
+        let (data, attrs) = data.unzip();
         st.opens.insert(
             fh,
             Open {
                 path: path.to_string(),
                 host,
                 data,
+                attrs,
                 writes,
             },
         );
@@ -650,9 +732,11 @@ impl MirageFs {
         name.to_str().ok_or(Errno::EINVAL)
     }
 
-    fn rows(&self, ino: INodeNo, fh: FileHandle) -> Vec<(String, u64, Attrs)> {
+    /// The rows of the folder stream `fh`, and whether no forget came
+    /// since it was listed, so its attributes may still be kept.
+    fn rows(&self, ino: INodeNo, fh: FileHandle) -> (Vec<(String, u64, Attrs)>, bool) {
         let Some(dir) = self.path(ino) else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         let here = self.stat(&dir).ok();
         let up = split(&dir).map(|(p, _)| p).unwrap_or_else(|| dir.clone());
@@ -672,12 +756,16 @@ impl MirageFs {
             kept: false,
         });
         let mut out = vec![(".".into(), ino.0, dot.clone()), ("..".into(), parent, dot)];
-        let rows = self.st().dirs.get(&fh.0).cloned().unwrap_or_default();
+        let (listed, rows, now) = {
+            let st = self.st();
+            let (listed, rows) = st.dirs.get(&fh.0).cloned().unwrap_or_default();
+            (listed, rows, st.epoch)
+        };
         for (name, attrs) in rows {
             let ino = self.ino(&child(&dir, &name));
             out.push((name, ino, attrs));
         }
-        out
+        (out, listed == now)
     }
 }
 
@@ -719,11 +807,19 @@ impl Filesystem for MirageFs {
         }
     }
 
-    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
         let Some(path) = self.path(ino) else {
             return reply.error(Errno::ENOENT);
         };
-        match self.stat(&path) {
+        let host = fh.and_then(|fh| self.st().opens.get(&fh.0).and_then(|o| o.host));
+        let found = match host {
+            Some(host) => self.fstat(&path, host),
+            None => match self.stat(&path) {
+                Err(err) if err == Errno::ENOENT => self.held(&path).unwrap_or(Err(err)),
+                found => found,
+            },
+        };
+        match found {
             Ok(attrs) => reply.attr(&ttl(&attrs), &self.attr(ino.0, &attrs)),
             Err(err) => reply.error(err),
         }
@@ -740,7 +836,7 @@ impl Filesystem for MirageFs {
         atime: Option<TimeOrNow>,
         mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
-        _fh: Option<FileHandle>,
+        fh: Option<FileHandle>,
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
@@ -752,6 +848,10 @@ impl Filesystem for MirageFs {
         };
         let mut args = Map::new();
         args.insert("path".into(), path.clone().into());
+        let host = fh.and_then(|fh| self.st().opens.get(&fh.0).and_then(|o| o.host));
+        if let Some(host) = host {
+            args.insert("fh".into(), host.into());
+        }
         if let Some(mode) = mode {
             args.insert("mode".into(), (mode & 0o7777).into());
         }
@@ -771,10 +871,17 @@ impl Filesystem for MirageFs {
             args.insert("mtime".into(), ms(mtime));
         }
         self.changed(&path);
+        let asked = self.st().epoch;
         match self.call("setattr", Value::Object(args), &[]) {
             Ok(frame) => match self.reply_attrs(&frame) {
                 Some(attrs) => {
-                    self.keep(&path, &attrs);
+                    let attrs = match host {
+                        Some(_) => Attrs {
+                            kept: false,
+                            ..attrs
+                        },
+                        None => self.keep(&path, attrs, asked).unwrap_or_else(|a| a),
+                    };
                     reply.attr(&ttl(&attrs), &self.attr(ino.0, &attrs))
                 }
                 None => reply.error(Errno::EIO),
@@ -820,6 +927,7 @@ impl Filesystem for MirageFs {
         };
         let path = child(&dir, name);
         self.changed(&path);
+        let asked = self.st().epoch;
         match self.call(
             "mkdir",
             json!({ "path": path, "mode": mode & !umask & 0o7777 }),
@@ -827,7 +935,7 @@ impl Filesystem for MirageFs {
         ) {
             Ok(frame) => match self.reply_attrs(&frame) {
                 Some(attrs) => {
-                    self.keep(&path, &attrs);
+                    let attrs = self.keep(&path, attrs, asked).unwrap_or_else(|a| a);
                     self.entry(&path, &attrs, reply)
                 }
                 None => reply.error(Errno::EIO),
@@ -875,10 +983,11 @@ impl Filesystem for MirageFs {
         };
         let path = child(&dir, name);
         self.changed(&path);
+        let asked = self.st().epoch;
         match self.call("symlink", json!({ "path": path, "target": target }), &[]) {
             Ok(frame) => match self.reply_attrs(&frame) {
                 Some(attrs) => {
-                    self.keep(&path, &attrs);
+                    let attrs = self.keep(&path, attrs, asked).unwrap_or_else(|a| a);
                     self.entry(&path, &attrs, reply)
                 }
                 None => reply.error(Errno::EIO),
@@ -933,6 +1042,11 @@ impl Filesystem for MirageFs {
                     }
                     st.paths.insert(ino, new);
                 }
+                for open in st.opens.values_mut() {
+                    if reaches(&from, &open.path) {
+                        open.path = format!("{to}{}", &open.path[from.len()..]);
+                    }
+                }
                 drop(st);
                 reply.ok()
             }
@@ -963,24 +1077,20 @@ impl Filesystem for MirageFs {
             && attrs.size <= WHOLE_FILE
         {
             if let Some(data) = self.cached(&path, &attrs) {
-                let fh = self.opened(&path, None, Some(data), false);
+                let fh = self.opened(&path, None, Some((data, attrs)), false);
                 return reply.opened(FileHandle(fh), FopenFlags::FOPEN_KEEP_CACHE);
             }
             if let Some((dir, _)) = split(&path) {
                 self.prefetch(&dir);
             }
-            let data = match self.cached(&path, &attrs) {
-                Some(data) => data,
-                None => match self.call("readall", json!({ "path": path }), &[]) {
-                    Ok(frame) => {
-                        let now = self.reply_attrs(&frame).unwrap_or(attrs);
-                        self.keep(&path, &now);
-                        self.store(&path, &now, frame.body)
-                    }
+            let held = match self.cached(&path, &attrs) {
+                Some(data) => (data, attrs),
+                None => match self.whole(&path, attrs) {
+                    Ok(held) => held,
                     Err(err) => return reply.error(err),
                 },
             };
-            let fh = self.opened(&path, None, Some(data), false);
+            let fh = self.opened(&path, None, Some(held), false);
             return reply.opened(FileHandle(fh), FopenFlags::empty());
         }
         let args = json!({
@@ -1109,8 +1219,20 @@ impl Filesystem for MirageFs {
         reply.ok();
     }
 
-    fn fsync(&self, _req: &Request, _ino: INodeNo, _fh: FileHandle, _d: bool, reply: ReplyEmpty) {
-        reply.ok();
+    fn fsync(&self, _req: &Request, _ino: INodeNo, fh: FileHandle, _d: bool, reply: ReplyEmpty) {
+        let host = self
+            .st()
+            .opens
+            .get(&fh.0)
+            .filter(|o| o.writes)
+            .and_then(|o| o.host);
+        let Some(host) = host else {
+            return reply.ok();
+        };
+        match self.call("flush", json!({ "fh": host }), &[]) {
+            Ok(_) => reply.ok(),
+            Err(err) => reply.error(err),
+        }
     }
 
     fn opendir(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
@@ -1118,11 +1240,11 @@ impl Filesystem for MirageFs {
             return reply.error(Errno::ENOENT);
         };
         match self.list(&dir) {
-            Ok(rows) => {
+            Ok((rows, listed)) => {
                 let mut st = self.st();
                 let fh = st.next_fh;
                 st.next_fh += 1;
-                st.dirs.insert(fh, rows);
+                st.dirs.insert(fh, (listed, rows));
                 reply.opened(FileHandle(fh), FopenFlags::empty())
             }
             Err(err) => reply.error(err),
@@ -1137,12 +1259,8 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        for (i, (name, ino, attrs)) in self
-            .rows(ino, fh)
-            .into_iter()
-            .enumerate()
-            .skip(offset as usize)
-        {
+        let (rows, _) = self.rows(ino, fh);
+        for (i, (name, ino, attrs)) in rows.into_iter().enumerate().skip(offset as usize) {
             let kind = self.attr(ino, &attrs).kind;
             if reply.add(INodeNo(ino), (i + 1) as u64, kind, &name) {
                 break;
@@ -1159,18 +1277,15 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectoryPlus,
     ) {
-        for (i, (name, ino, attrs)) in self
-            .rows(ino, fh)
-            .into_iter()
-            .enumerate()
-            .skip(offset as usize)
-        {
+        let (rows, current) = self.rows(ino, fh);
+        for (i, (name, ino, attrs)) in rows.into_iter().enumerate().skip(offset as usize) {
             let attr = self.attr(ino, &attrs);
+            let held = if current { ttl(&attrs) } else { Duration::ZERO };
             if reply.add(
                 INodeNo(ino),
                 (i + 1) as u64,
                 &name,
-                &ttl(&attrs),
+                &held,
                 &attr,
                 Generation(0),
             ) {
@@ -1340,10 +1455,126 @@ impl Filesystem for MirageFs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::{read_frame, write_frame};
+    use std::os::unix::net::UnixStream;
     use std::sync::mpsc::channel;
 
     fn attrs(kept: bool) -> Attrs {
         Attrs::parse(&json!({"m": 0o100644, "s": 3, "t": 1000.0}), kept).unwrap()
+    }
+
+    /// The host end of a client's pipe, played by the test: each request
+    /// the client sends is read back, and each reply or push written.
+    struct Host {
+        requests: UnixStream,
+        replies: UnixStream,
+    }
+
+    impl Host {
+        fn next(&mut self) -> Frame {
+            read_frame(&mut self.requests).unwrap().unwrap()
+        }
+
+        fn send(&mut self, head: Value, body: &[u8]) {
+            let Value::Object(head) = head else {
+                unreachable!()
+            };
+            write_frame(&mut self.replies, &head, body).unwrap();
+        }
+    }
+
+    fn hosted() -> (Arc<MirageFs>, Host) {
+        let (client_out, requests) = UnixStream::pair().unwrap();
+        let (replies, mut client_in) = UnixStream::pair().unwrap();
+        let link = Arc::new(Link::new(Box::new(client_out)));
+        let (notes, _) = channel();
+        let shared = Arc::new(Shared::new("/w".into(), notes));
+        {
+            let (link, shared) = (link.clone(), shared.clone());
+            std::thread::spawn(move || link.serve(&mut client_in, |f| shared.push(f)));
+        }
+        (
+            Arc::new(MirageFs::new(link, shared)),
+            Host { requests, replies },
+        )
+    }
+
+    #[test]
+    fn attributes_a_forget_crossed_are_asked_for_again() {
+        let (fs, mut host) = hosted();
+        let asking = {
+            let fs = fs.clone();
+            std::thread::spawn(move || fs.stat("/w/a"))
+        };
+        let first = host.next();
+        assert_eq!(first.str("op"), Some("getattr"));
+        host.send(json!({"push": "inval", "paths": ["/w/a"]}), b"");
+        host.send(
+            json!({"id": first.u64("id"), "a": {"m": 0o100644, "s": 3}, "k": true}),
+            b"",
+        );
+        let second = host.next();
+        host.send(
+            json!({"id": second.u64("id"), "a": {"m": 0o100644, "s": 5}, "k": true}),
+            b"",
+        );
+        let found = asking.join().unwrap().unwrap();
+        assert_eq!((found.size, found.kept), (5, true));
+        assert_eq!(locked(&fs.shared.state).known["/w/a"].attrs.size, 5);
+    }
+
+    #[test]
+    fn a_whole_read_a_forget_crossed_is_not_kept_and_the_next_reads_anew() {
+        let (fs, mut host) = hosted();
+        let read = |fs: &Arc<MirageFs>| {
+            let fs = fs.clone();
+            std::thread::spawn(move || fs.whole("/w/a", attrs(true)))
+        };
+        let asking = read(&fs);
+        let first = host.next();
+        assert_eq!(first.str("op"), Some("readall"));
+        host.send(json!({"push": "inval", "paths": ["/w/a"]}), b"");
+        host.send(
+            json!({"id": first.u64("id"), "a": {"m": 0o100644, "s": 3, "t": 1.0}, "k": true}),
+            b"old",
+        );
+        assert_eq!(asking.join().unwrap().unwrap().0.as_slice(), b"old");
+        {
+            let st = locked(&fs.shared.state);
+            assert!(!st.content.contains_key("/w/a"));
+            assert!(!st.known.contains_key("/w/a"));
+        }
+        let asking = read(&fs);
+        let again = host.next();
+        host.send(
+            json!({"id": again.u64("id"), "a": {"m": 0o100644, "s": 3, "t": 2.0}, "k": true}),
+            b"new",
+        );
+        assert_eq!(asking.join().unwrap().unwrap().0.as_slice(), b"new");
+        assert_eq!(
+            locked(&fs.shared.state).content["/w/a"].data.as_slice(),
+            b"new"
+        );
+    }
+
+    #[test]
+    fn a_listing_a_forget_crossed_is_used_once_and_not_kept() {
+        let (fs, mut host) = hosted();
+        let asking = {
+            let fs = fs.clone();
+            std::thread::spawn(move || fs.list("/w"))
+        };
+        let first = host.next();
+        host.send(json!({"push": "inval", "paths": ["/w/b"]}), b"");
+        host.send(
+            json!({"id": first.u64("id"), "e": [["a", {"m": 0o100644}]], "k": true}),
+            b"",
+        );
+        let (rows, listed) = asking.join().unwrap().unwrap();
+        assert_eq!(rows.len(), 1);
+        let st = locked(&fs.shared.state);
+        assert!(!st.listings.contains_key("/w"));
+        assert_ne!(listed, st.epoch);
     }
 
     #[test]
