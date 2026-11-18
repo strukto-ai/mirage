@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import replace
 from types import MappingProxyType
 
 from mirage.commands.cli.walk import find_child
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import argument_dest, compile_spec
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.errors import PolicyError
 from mirage.policy.match.grammar import no_grammar, unread_names
 from mirage.policy.types import (
@@ -100,6 +100,16 @@ def _option_name(
     raise PolicyError(f"{at}: no option {key} at or below this command")
 
 
+def _declaring(name: str, specs: Iterable[CommandSpec]) -> list[Argument]:
+    return [
+        argument
+        for spec in specs
+        for argument in spec.arguments
+        if argument.names[0].startswith("-")
+        and argument_dest(argument) == name
+    ]
+
+
 def _check_values(
     name: str,
     words: Collection[str],
@@ -107,13 +117,9 @@ def _check_values(
     above: tuple[CommandSpec, ...],
     at: str,
 ) -> None:
-    arguments = [
-        argument
-        for spec in (*above, *_at_or_below(node))
-        for argument in spec.arguments
-        if argument.names[0].startswith("-")
-        and argument_dest(argument) == name
-    ]
+    arguments = _declaring(name, _at_or_below(node)) or _declaring(
+        name, reversed(above)
+    )
     if all(
         argument.action in VALUELESS_ACTIONS or argument.nargs == 0
         for argument in arguments

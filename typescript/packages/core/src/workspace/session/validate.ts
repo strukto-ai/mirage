@@ -15,7 +15,7 @@
 import { findChild } from '../../commands/cli/walk.ts'
 import { argumentDest, compileSpec } from '../../commands/spec/compile.ts'
 import { SPECS } from '../../commands/spec/index.ts'
-import type { CommandSpec } from '../../commands/spec/types.ts'
+import type { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { noGrammar, unreadNames } from '../../policy/match/grammar.ts'
 import type { AdmissionRules, CommandNode, Grammar, OptionRule } from '../../policy/types.ts'
@@ -84,6 +84,14 @@ function optionName(
   throw new PolicyError(`${at}: no option ${key} at or below this command`)
 }
 
+function declaring(name: string, specs: Iterable<CommandSpec>): Argument[] {
+  return [...specs].flatMap((spec) =>
+    spec.arguments.filter(
+      (argument) => argument.names[0]?.startsWith('-') === true && argumentDest(argument) === name,
+    ),
+  )
+}
+
 function checkValues(
   name: string,
   words: Iterable<string>,
@@ -91,11 +99,8 @@ function checkValues(
   above: readonly CommandSpec[],
   at: string,
 ): void {
-  const declared = [...above, ...atOrBelow(spec)].flatMap((below) =>
-    below.arguments.filter(
-      (argument) => argument.names[0]?.startsWith('-') === true && argumentDest(argument) === name,
-    ),
-  )
+  const own = declaring(name, atOrBelow(spec))
+  const declared = own.length > 0 ? own : declaring(name, [...above].reverse())
   if (declared.every((argument) => VALUELESS_ACTIONS.has(argument.action) || argument.nargs === 0))
     throw new PolicyError(`${at}: ${name} takes no value`)
   const choices = new Set(declared.flatMap((argument) => argument.choices))
