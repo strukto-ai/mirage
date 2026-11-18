@@ -131,9 +131,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
     // The machines' close removed the ones Mirage started and forgot each;
     // what the workspace still keeps outlives the drop.
     const left: Record<string, string> = {}
-    await settle([
-      async () => Object.assign(left, (await deps.machineMemory?.remembered()) ?? {}),
-    ])
+    await settle([async () => Object.assign(left, (await deps.machineMemory?.remembered()) ?? {})])
     await settle([() => dropState(deps)])
     await settle([() => keepMachines(deps.machineMemory, left)])
   }

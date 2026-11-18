@@ -101,7 +101,9 @@ export class WorkspaceMeta implements MachineMemory {
     const machines = (await this.store.loadMeta(this.wsId))?.machines
     if (!isRecord(machines)) return {}
     return Object.fromEntries(
-      Object.entries(machines).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      Object.entries(machines).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
     )
   }
 

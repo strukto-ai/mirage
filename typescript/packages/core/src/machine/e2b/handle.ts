@@ -286,7 +286,9 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     try {
       await sdk.Sandbox.kill(id, this.apiParams())
     } catch (error) {
-      logger.debug?.(`${this.machine.toString()}: unkept sandbox ${id} not killed: ${String(error)}`)
+      logger.debug?.(
+        `${this.machine.toString()}: unkept sandbox ${id} not killed: ${String(error)}`,
+      )
     }
   }
 
