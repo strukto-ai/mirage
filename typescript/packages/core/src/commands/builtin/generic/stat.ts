@@ -17,6 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { atOffsets, operandStat } from '../utils/operands.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
 import { checkMemory } from '../../../io/memory.ts'
 import { IOResult } from '../../../io/types.ts'
 import {
@@ -106,6 +107,9 @@ const PLACEHOLDERS = new Set(['-', '?'])
 // The widest field printf takes, INT_MAX: past it a directive prints nothing,
 // as GNU stat does.
 const FIELD_MAX = 2147483647
+// The longest field either host builds, V8's longest string: a longer one is
+// "memory exhausted" on both, whatever the workspace's max_memory.
+const FIELD_ROOM = 2 ** 29 - 24
 
 // The conversions %H and %L split into a device's major and minor; in
 // file-system mode they are no prefix at all.
@@ -240,7 +244,7 @@ function applyFlags(
   if (precision !== undefined && text) raw = raw.subarray(0, fieldNumber(precision))
   const pad = fieldNumber(width) - raw.length
   if (pad <= 0) return decodeText(raw)
-  checkMemory(raw.length + pad)
+  checkField(raw.length + pad)
   const fill = flags.includes('0') && !flags.includes('-') && !PLACEHOLDERS.has(value) ? '0' : ' '
   const padding = fill.repeat(pad)
   return flags.includes('-') ? decodeText(raw) + padding : padding + decodeText(raw)
@@ -250,6 +254,13 @@ function applyFlags(
 function pastFieldMax(digits: string | undefined): boolean {
   const significant = (digits ?? '').replace(/^0+/, '')
   return significant.length > String(FIELD_MAX).length || fieldNumber(significant) > FIELD_MAX
+}
+
+// Refuse a field too long to build: past the workspace's memory budget or
+// FIELD_ROOM. Throws MemoryExhausted.
+function checkField(size: number): void {
+  checkMemory(size)
+  if (size > FIELD_ROOM) throw new MemoryExhausted()
 }
 
 // A width or precision as a number, leading zeros and all; empty is 0, as
@@ -351,7 +362,7 @@ function renderDirective(
   let flags = d.flags
   if (ID_DIRECTIVES.has(d.spec) && d.precision !== undefined && /^[0-9]+$/.test(value)) {
     const digits = fieldNumber(d.precision)
-    checkMemory(digits)
+    checkField(digits)
     value = value === '0' && digits === 0 ? '' : value.padStart(digits, '0')
     flags = flags.replaceAll('0', '')
   }

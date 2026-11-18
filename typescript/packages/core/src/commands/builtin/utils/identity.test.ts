@@ -160,6 +160,10 @@ describe('identity in a workspace', () => {
     const io = await ws.shell("stat -c '%.9999999u' /data/f.txt")
     expect([io.exitCode, io.stderrText]).toEqual([1, 'stat: memory exhausted\n'])
     await ws.close()
+    const uncapped = makeWs({ maxMemory: null })
+    const wide = await uncapped.shell("stat -c '%.536870889u' /data/f.txt")
+    expect([wide.exitCode, wide.stderrText]).toEqual([1, 'stat: memory exhausted\n'])
+    await uncapped.close()
   })
 
   it('cuts a multibyte name by bytes for a precision', async () => {

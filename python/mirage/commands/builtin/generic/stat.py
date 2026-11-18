@@ -34,6 +34,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -89,6 +90,9 @@ _PLACEHOLDERS = frozenset({"-", "?"})
 # The widest field printf takes, INT_MAX: past it a directive prints
 # nothing, as GNU stat does.
 _FIELD_MAX = 2147483647
+# The longest field either host builds, V8's longest string: a longer one
+# is "memory exhausted" on both, whatever the workspace's max_memory.
+_FIELD_ROOM = (1 << 29) - 24
 
 _FORMAT_FLAGS = frozenset("'-+ #0I")
 
@@ -294,7 +298,7 @@ def _apply_flags(
         raw = raw[: _field_number(precision)]
     pad = _field_number(width) - len(raw)
     if pad > 0:
-        check_memory(len(raw) + pad)
+        _check_field(len(raw) + pad)
         if "-" in flags:
             raw += b" " * pad
         elif "0" in flags and value not in _PLACEHOLDERS:
@@ -314,6 +318,21 @@ def _past_field_max(digits: str | None) -> bool:
     return len(significant) > len(str(_FIELD_MAX)) or (
         _field_number(significant) > _FIELD_MAX
     )
+
+
+def _check_field(size: int) -> None:
+    """Refuse a field too long to build: past the workspace's memory
+    budget or :data:`_FIELD_ROOM`.
+
+    Args:
+        size (int): the field's bytes once padded.
+
+    Raises:
+        MemoryExhausted: the field does not fit.
+    """
+    check_memory(size)
+    if size > _FIELD_ROOM:
+        raise MemoryExhausted()
 
 
 def _field_number(digits: str | None) -> int:
@@ -456,7 +475,7 @@ def _render_directive(
         and value.isdigit()
     ):
         digits = _field_number(d.precision)
-        check_memory(digits)
+        _check_field(digits)
         value = "" if value == "0" and not digits else value.zfill(digits)
         flags = flags.replace("0", "")
     return _apply_flags(

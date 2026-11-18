@@ -163,6 +163,10 @@ async def test_a_field_past_the_memory_budget_is_refused():
     io = await ws.shell("stat -c '%.9999999u' /data/f.txt")
     err = await materialize(io.stderr) if io.stderr else b""
     assert (io.exit_code, err) == (1, b"stat: memory exhausted\n")
+    uncapped = _ws(max_memory=None)
+    io = await uncapped.shell("stat -c '%.536870889u' /data/f.txt")
+    err = await materialize(io.stderr) if io.stderr else b""
+    assert (io.exit_code, err) == (1, b"stat: memory exhausted\n")
 
 
 @pytest.mark.asyncio
