@@ -951,7 +951,7 @@ class ExitsFirstBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"0\n")
         for _ in range(200):
             await output(b"x" * 4096)
@@ -988,7 +988,7 @@ class LogsOnBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"3\n")
         await output(b"main\n" + run_done_mark(nonce) + b"3\n")
         while True:
@@ -1020,7 +1020,7 @@ class SpacedBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"0\n")
         for _ in range(40):
             await asyncio.sleep(0.05)

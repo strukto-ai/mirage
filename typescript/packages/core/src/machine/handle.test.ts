@@ -1025,7 +1025,7 @@ class ExitsFirstBox extends RecordingMachine {
     errors: OutputFn,
   ): Promise<RunResult> {
     if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
-    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    const nonce = argv[RUN_PROGRAM_AT - 5] ?? ''
     await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('0\n')]))
     for (let i = 0; i < 200; i++) await output(new Uint8Array(4096).fill(120))
     await output(new Uint8Array([...runDoneMark(nonce), ...ENC.encode('0\n')]))
@@ -1060,7 +1060,7 @@ class LogsOnBox extends RecordingMachine {
     signal?: AbortSignal,
   ): Promise<RunResult> {
     if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
-    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    const nonce = argv[RUN_PROGRAM_AT - 5] ?? ''
     await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('3\n')]))
     await output(
       new Uint8Array([...ENC.encode('main\n'), ...runDoneMark(nonce), ...ENC.encode('3\n')]),
@@ -1100,7 +1100,7 @@ class SpacedBox extends RecordingMachine {
     signal?: AbortSignal,
   ): Promise<RunResult> {
     if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
-    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    const nonce = argv[RUN_PROGRAM_AT - 5] ?? ''
     await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('0\n')]))
     for (let i = 0; i < 40; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50))
