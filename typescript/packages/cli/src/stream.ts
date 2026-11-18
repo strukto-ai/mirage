@@ -92,7 +92,7 @@ function decisionOf(result: Record<string, unknown> | null): PolicyDecision | nu
         reason: string
         policy: string
         ask_id: string | null
-        matched?: { command: string[]; flags: string[] } | null
+        matched?: { command: string[]; flags: string[]; keys: string[] } | null
       }
     | null
     | undefined
