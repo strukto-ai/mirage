@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import logging
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import facts, grep_generic
@@ -32,6 +34,9 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
+logger = logging.getLogger(__name__)
+
+
 async def grep(
     accessor: Accessor,
     paths: list[PathSpec],
@@ -43,7 +48,8 @@ async def grep(
     query_files = True
     try:
         matches = await matching_tree(files, resolved, texts, ctx)
-    except WalkDeclinedError:
+    except WalkDeclinedError as exc:
+        logger.debug("grep candidate search declined: %s", exc)
         matches = None
         query_files = False
     if matches is None:

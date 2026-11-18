@@ -34,6 +34,7 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
     matches = await matchingTree(files, resolved, texts, ctx)
   } catch (err) {
     if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+    console.debug('grep candidate search declined:', err)
     matches = null
     queryFiles = false
   }
