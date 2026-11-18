@@ -205,8 +205,9 @@
    "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"go": {"decision": "deny", "reason": "no go"}}}}}},
    "steps": [
     {"op": "register_command", "path": "/a", "name": "tool", "stdout": "ran\n", "expect": {"value": null}},
-    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
-    {"op": "exec", "command": "cd /a && tool other", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
+    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "commands.tool: go is no subcommand here; an operand goes under operands"}}},
+    {"op": "exec", "command": "cd /a && tool other", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "commands.tool: go is no subcommand here; an operand goes under operands"}}},
+    {"op": "explain", "command": "cd /a && tool go", "expect": {"value": {"outcome": "deny", "reason": "commands.tool: go is no subcommand here; an operand goes under operands", "answers": [], "decision": "deny", "exit_code": 126, "stderr": "tool: Permission denied\n", "commands": [{"command": "cd", "outcome": "allow", "answers": [], "machine": ""}, {"command": "tool", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "commands.tool: go is no subcommand here; an operand goes under operands"}], "machine": ""}]}}},
     {"op": "exec", "command": "echo still", "expect": {"value": {"exit_code": 0, "stdout": "still\n", "stderr": ""}}}
    ]
   },
@@ -215,10 +216,10 @@
    "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"go": {"decision": "deny", "reason": "no go"}}}}}},
    "steps": [
     {"op": "register_command", "path": "/a", "name": "tool", "stdout": "ran\n", "expect": {"value": null}},
-    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
+    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "commands.tool: go is no subcommand here; an operand goes under operands"}}},
     {"op": "load"},
     {"op": "register_command", "path": "/a", "name": "tool", "stdout": "ran\n", "expect": {"value": null}},
-    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
+    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "commands.tool: go is no subcommand here; an operand goes under operands"}}},
     {"op": "exec", "command": "echo still", "expect": {"value": {"exit_code": 0, "stdout": "still\n", "stderr": ""}}}
    ]
   },
@@ -227,7 +228,7 @@
    "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"walk": "deny"}}}}},
    "steps": [
     {"op": "register_command", "path": "/a", "name": "tool", "verbs": [{"name": "send", "aliases": ["go"]}], "stdout": "sent\n", "expect": {"error": "commands.tool: no subcommand walk"}},
-    {"op": "exec", "command": "cd /a && tool send x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}}
+    {"op": "exec", "command": "cd /a && tool send x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "commands.tool: walk is no subcommand here; an operand goes under operands"}}}
    ]
   },
   {
