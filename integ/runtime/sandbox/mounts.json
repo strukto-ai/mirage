@@ -720,16 +720,16 @@
       "entry": { "captures": ["dash"], "config": { "mount_type": "ssh" } },
       "steps": [
         {
-          "command": "dash -c 'stat -c %s /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
-          "expect": { "exit": 0, "stdout": "5\n7\nlonger\n", "stderr": "" }
+          "command": "dash -c 'cat /served/plan.txt; stat -c %s /served/plan.txt'; echo PLAN > /served/plan.txt; dash -c 'cat /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
+          "expect": { "exit": 0, "stdout": "plan\n5\nPLAN\n7\nlonger\n", "stderr": "" }
         },
         {
-          "command": "dash -c 'test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'cat /served/new.txt'",
-          "expect": { "exit": 0, "stdout": "missing\nmade\n", "stderr": "" }
+          "command": "dash -c 'ls /served; test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'ls /served; cat /served/new.txt'",
+          "expect": { "exit": 0, "stdout": "plan.txt\nmissing\nnew.txt\nplan.txt\nmade\n", "stderr": "" }
         },
         {
-          "command": "dash -c 'test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'test -e /served/new.txt || echo gone'",
-          "expect": { "exit": 0, "stdout": "there\ngone\n", "stderr": "" }
+          "command": "dash -c 'ls /served; test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'ls /served; test -e /served/new.txt || echo gone'",
+          "expect": { "exit": 0, "stdout": "new.txt\nplan.txt\nthere\nplan.txt\ngone\n", "stderr": "" }
         }
       ]
     },
@@ -765,26 +765,26 @@
       },
       "steps": [
         {
-          "command": "dash -c 'stat -c %s /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
+          "command": "dash -c 'cat /served/plan.txt; stat -c %s /served/plan.txt'; echo PLAN > /served/plan.txt; dash -c 'cat /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
           "expect": {
             "exit": 0,
-            "stdout": "5\n7\nlonger\n",
+            "stdout": "plan\n5\nPLAN\n7\nlonger\n",
             "stderr": ""
           }
         },
         {
-          "command": "dash -c 'test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'cat /served/new.txt'",
+          "command": "dash -c 'ls /served; test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'ls /served; cat /served/new.txt'",
           "expect": {
             "exit": 0,
-            "stdout": "missing\nmade\n",
+            "stdout": "plan.txt\nmissing\nnew.txt\nplan.txt\nmade\n",
             "stderr": ""
           }
         },
         {
-          "command": "dash -c 'test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'test -e /served/new.txt || echo gone'",
+          "command": "dash -c 'ls /served; test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'ls /served; test -e /served/new.txt || echo gone'",
           "expect": {
             "exit": 0,
-            "stdout": "there\ngone\n",
+            "stdout": "new.txt\nplan.txt\nthere\nplan.txt\ngone\n",
             "stderr": ""
           }
         }

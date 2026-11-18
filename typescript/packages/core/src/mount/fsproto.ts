@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../errors/classify.ts'
-import { ebadf, eexist, efbig, enoent } from '../errors/fs.ts'
+import { eacces, ebadf, eexist, efbig, enoent } from '../errors/fs.ts'
 import { registerPipeServer } from '../machine/mounts.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import { READ, type OpenMode } from '../runtime/handles/index.ts'
@@ -136,6 +136,12 @@ function overlaps(path: string, prefix: string): boolean {
   return a === b || b.startsWith(`${a}/`) || a.startsWith(`${b}/`)
 }
 
+/** Whether `path` is `prefix` or inside it. */
+function under(path: string, prefix: string): boolean {
+  const base = prefix.replace(/\/+$/, '')
+  return base === '' || path === base || path.startsWith(`${base}/`)
+}
+
 /** Attributes as fsproto carries them, times in milliseconds. */
 export function wire(a: MountAttrs): Head {
   return {
@@ -186,7 +192,7 @@ export class FsprotoServer {
   private queue: Promise<void> = Promise.resolve()
   private lost = new Map<number, [string, unknown]>()
   private readonly told = new Set<number>()
-  private readonly acks = new Map<number, () => void>()
+  private readonly acks = new Map<number, (confirmed: boolean) => void>()
   private readonly invalid = new Set<string>()
   private flushing = false
   private hid = 0
@@ -213,6 +219,7 @@ export class FsprotoServer {
     const unwatch =
       served?.changes?.watch((path, by) => {
         if (by === served.machine || !overlaps(path, served.prefix)) return
+        if (!this.core.visible(path)) return
         this.invalid.add(path)
         if (!this.flushing) {
           this.flushing = true
@@ -233,7 +240,7 @@ export class FsprotoServer {
     } finally {
       unwatch?.()
       this.ended = true
-      for (const ack of this.acks.values()) ack()
+      for (const ack of this.acks.values()) ack(false)
       this.acks.clear()
       this.queue = this.queue
         .catch((err: unknown) => {
@@ -249,7 +256,8 @@ export class FsprotoServer {
    * barrier a line passes before its program starts.
    *
    * @returns false when the client did not answer within
-   *   BEGIN_WAIT_SECONDS, so the line must not run on what it still keeps.
+   *   BEGIN_WAIT_SECONDS or its pipe ended first, so the line must not run
+   *   on what it still keeps.
    */
   async begin(): Promise<boolean> {
     if (this.ended || this.writer === null) return true
@@ -258,9 +266,7 @@ export class FsprotoServer {
     const hid = this.hid
     let timer: ReturnType<typeof setTimeout> | undefined
     const confirmed = await new Promise<boolean>((resolve) => {
-      this.acks.set(hid, () => {
-        resolve(true)
-      })
+      this.acks.set(hid, resolve)
       timer = setTimeout(() => {
         if (this.acks.delete(hid)) resolve(false)
       }, BEGIN_WAIT_SECONDS * 1000)
@@ -308,7 +314,7 @@ export class FsprotoServer {
   private take(frame: Frame): void {
     const hid = num(frame.head.hid)
     if (hid !== null) {
-      this.acks.get(hid)?.()
+      this.acks.get(hid)?.(true)
       this.acks.delete(hid)
       return
     }
@@ -334,8 +340,9 @@ export class FsprotoServer {
   }
 
   /**
-   * The listings of the kept folders under `root`, breadth first, until
-   * they carry FSPROTO_TREE_ENTRIES entries. Mirrors Python's `_tree`.
+   * The listings of the kept folders under `root`, breadth first, each
+   * whole and only while they fit in FSPROTO_TREE_ENTRIES entries. Mirrors
+   * Python's `_tree`.
    */
   private async tree(root: string, rows: [string, MountAttrs][]): Promise<[string, unknown[]][]> {
     const folders: [string, unknown[]][] = []
@@ -352,11 +359,18 @@ export class FsprotoServer {
         console.debug(`fsproto: listing ${folder} failed`, err)
         continue
       }
+      if (count + below.length > FSPROTO_TREE_ENTRIES) continue
       folders.push([folder, below.map(([name, a]) => [name, wire(a)])])
       count += below.length
       for (const [name, a] of below) if (isDir(a)) queue.push(child(folder, name))
     }
     return folders
+  }
+
+  /** `path`, refused as EACCES when it is outside the prefix the client mounts. */
+  private inside(path: string): string {
+    if (this.served === null || under(path, this.served.prefix)) return path
+    throw eacces(path)
   }
 
   private kept(path: string): boolean {
@@ -395,6 +409,7 @@ export class FsprotoServer {
     const h = frame.head
     const core = this.core
     const path = workspacePath(h.path)
+    if ('path' in h) this.inside(path)
     switch (h.op) {
       case 'hello':
         return [{ proto: FSPROTO_VERSION }, EMPTY]
@@ -421,6 +436,11 @@ export class FsprotoServer {
           if (total + a.size > FSPROTO_FETCH_DIR_BYTES) continue
           try {
             const [now, data] = await this.whole(child(path, name))
+            if (
+              data.byteLength > FSPROTO_FETCH_FILE_BYTES ||
+              total + data.byteLength > FSPROTO_FETCH_DIR_BYTES
+            )
+              continue
             files.push([name, wire(now)])
             parts.push(data)
             total += data.byteLength
@@ -501,8 +521,8 @@ export class FsprotoServer {
         await core.symlink(typeof h.target === 'string' ? h.target : '', path)
         return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
       case 'rename': {
-        const from = workspacePath(h.from)
-        const to = workspacePath(h.to)
+        const from = this.inside(workspacePath(h.from))
+        const to = this.inside(workspacePath(h.to))
         if (h.noreplace === true && (await this.exists(to))) throw eexist(to)
         await core.rename(from, to)
         return [{}, EMPTY]

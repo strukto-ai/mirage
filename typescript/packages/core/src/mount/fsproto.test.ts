@@ -267,6 +267,52 @@ describe('FsprotoServer', () => {
     await serving
   })
 
+  it('never pushes a change to a name the session hides', async () => {
+    const changes = new RecentChanges(new ManualClock(0), 1)
+    const ws = new Workspace(
+      { '/notes': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { hidden: { paths: { hide: ['/notes/secret.txt'] } } } },
+    )
+    await ws.session('agent', { profile: 'hidden' })
+    const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
+      prefix: '/notes',
+      machine: 'dev',
+      changes,
+    })
+    const end = client()
+    const serving = server.serve(end.reader, end.writer)
+    await end.call({ op: 'hello', proto: FSPROTO_VERSION })
+    changes.note('/notes/secret.txt')
+    changes.note('/notes/plan.txt')
+    const barrier = server.begin()
+    await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
+    expect(end.pushes[0]?.head).toEqual({ push: 'inval', paths: ['/notes/plan.txt'] })
+    const begin = end.pushes.find((f) => f.head.op === 'begin')
+    end.send({ hid: begin?.head.hid })
+    expect(await barrier).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('refuses a request outside the served prefix', async () => {
+    const { end, serving } = await served()
+    expect((await end.call({ op: 'getattr', path: '/elsewhere' })).head.errno).toBe('EACCES')
+    const moved = await end.call({ op: 'rename', from: '/notes/plan.txt', to: '/elsewhere' })
+    expect(moved.head.errno).toBe('EACCES')
+    end.close()
+    await serving
+  })
+
+  it('refuses a barrier the pipe ends under', async () => {
+    const { server, end, serving } = await served(new RecentChanges(new ManualClock(0), 1))
+    await end.call({ op: 'hello', proto: FSPROTO_VERSION })
+    const barrier = server.begin()
+    await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
+    end.close()
+    await serving
+    expect(await barrier).toBe(false)
+  })
+
   it('refuses a barrier the client never answers', async () => {
     const { server, end, serving } = await served(new RecentChanges(new ManualClock(0), 1))
     await end.call({ op: 'hello', proto: FSPROTO_VERSION })

@@ -75,6 +75,10 @@ struct Known {
     at: Instant,
 }
 
+/// One entry of a folder stream: the offset after it, its name, inode
+/// and attributes.
+type Row = (u64, String, u64, Attrs);
+
 impl Known {
     fn fresh(&self) -> bool {
         self.attrs.kept || self.at.elapsed() < SHORT
@@ -732,40 +736,55 @@ impl MirageFs {
         name.to_str().ok_or(Errno::EINVAL)
     }
 
-    /// The rows of the folder stream `fh`, and whether no forget came
-    /// since it was listed, so its attributes may still be kept.
-    fn rows(&self, ino: INodeNo, fh: FileHandle) -> (Vec<(String, u64, Attrs)>, bool) {
+    /// The folder stream `fh` from `offset`: each entry's next offset,
+    /// name, inode and attributes, `.` and `..` first, its inode resolved
+    /// only as the caller takes it; and whether no forget came since it
+    /// was listed, so its attributes may still be kept.
+    fn rows(
+        &self,
+        ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
+    ) -> (Box<dyn Iterator<Item = Row> + '_>, bool) {
         let Some(dir) = self.path(ino) else {
-            return (Vec::new(), false);
+            return (Box::new(std::iter::empty()), false);
         };
-        let here = self.stat(&dir).ok();
-        let up = split(&dir).map(|(p, _)| p).unwrap_or_else(|| dir.clone());
-        let parent = if dir == self.shared.root {
-            ino.0
-        } else {
-            self.ino(&up)
-        };
-        let dot = here.clone().unwrap_or(Attrs {
-            mode: libc::S_IFDIR | 0o755,
-            size: 0,
-            atime: 0.0,
-            mtime: 0.0,
-            ctime: 0.0,
-            nlink: 2,
-            rdev: 0,
-            kept: false,
-        });
-        let mut out = vec![(".".into(), ino.0, dot.clone()), ("..".into(), parent, dot)];
-        let (listed, rows, now) = {
-            let st = self.st();
-            let (listed, rows) = st.dirs.get(&fh.0).cloned().unwrap_or_default();
-            (listed, rows, st.epoch)
-        };
-        for (name, attrs) in rows {
-            let ino = self.ino(&child(&dir, &name));
-            out.push((name, ino, attrs));
+        let mut dots = Vec::new();
+        if offset < 2 {
+            let dot = self.stat(&dir).unwrap_or(Attrs {
+                mode: libc::S_IFDIR | 0o755,
+                size: 0,
+                atime: 0.0,
+                mtime: 0.0,
+                ctime: 0.0,
+                nlink: 2,
+                rdev: 0,
+                kept: false,
+            });
+            let parent = match split(&dir) {
+                Some((up, _)) if dir != self.shared.root => self.ino(&up),
+                _ => ino.0,
+            };
+            dots.push((1, ".".to_string(), ino.0, dot.clone()));
+            dots.push((2, "..".to_string(), parent, dot));
+            dots.drain(..offset as usize);
         }
-        (out, listed == now)
+        let start = offset.max(2);
+        let (rest, current) = {
+            let st = self.st();
+            match st.dirs.get(&fh.0) {
+                Some((listed, rows)) => (
+                    rows.get((start - 2) as usize..).unwrap_or(&[]).to_vec(),
+                    *listed == st.epoch,
+                ),
+                None => (Vec::new(), false),
+            }
+        };
+        let rest = rest.into_iter().enumerate().map(move |(i, (name, attrs))| {
+            let ino = self.ino(&child(&dir, &name));
+            (start + i as u64 + 1, name, ino, attrs)
+        });
+        (Box::new(dots.into_iter().chain(rest)), current)
     }
 }
 
@@ -1084,14 +1103,17 @@ impl Filesystem for MirageFs {
                 self.prefetch(&dir);
             }
             let held = match self.cached(&path, &attrs) {
-                Some(data) => (data, attrs),
+                Some(data) => Some((data, attrs)),
                 None => match self.whole(&path, attrs) {
-                    Ok(held) => held,
+                    Ok(held) => Some(held),
+                    Err(err) if err == Errno::EFBIG => None,
                     Err(err) => return reply.error(err),
                 },
             };
-            let fh = self.opened(&path, None, Some(held), false);
-            return reply.opened(FileHandle(fh), FopenFlags::empty());
+            if let Some(held) = held {
+                let fh = self.opened(&path, None, Some(held), false);
+                return reply.opened(FileHandle(fh), FopenFlags::empty());
+            }
         }
         let args = json!({
             "path": path,
@@ -1259,10 +1281,10 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let (rows, _) = self.rows(ino, fh);
-        for (i, (name, ino, attrs)) in rows.into_iter().enumerate().skip(offset as usize) {
+        let (rows, _) = self.rows(ino, fh, offset);
+        for (next, name, ino, attrs) in rows {
             let kind = self.attr(ino, &attrs).kind;
-            if reply.add(INodeNo(ino), (i + 1) as u64, kind, &name) {
+            if reply.add(INodeNo(ino), next, kind, &name) {
                 break;
             }
         }
@@ -1277,18 +1299,11 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectoryPlus,
     ) {
-        let (rows, current) = self.rows(ino, fh);
-        for (i, (name, ino, attrs)) in rows.into_iter().enumerate().skip(offset as usize) {
+        let (rows, current) = self.rows(ino, fh, offset);
+        for (next, name, ino, attrs) in rows {
             let attr = self.attr(ino, &attrs);
             let held = if current { ttl(&attrs) } else { Duration::ZERO };
-            if reply.add(
-                INodeNo(ino),
-                (i + 1) as u64,
-                &name,
-                &held,
-                &attr,
-                Generation(0),
-            ) {
+            if reply.add(INodeNo(ino), next, &name, &held, &attr, Generation(0)) {
                 break;
             }
         }

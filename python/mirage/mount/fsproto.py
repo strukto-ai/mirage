@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mirage.errors.fs import ebadf, eexist, efbig, enoent
+from mirage.errors.fs import eacces, ebadf, eexist, efbig, enoent
 from mirage.mount.constants import (
     FSPROTO_FETCH_DIR_BYTES,
     FSPROTO_FETCH_FILE_BYTES,
@@ -165,6 +165,17 @@ def overlaps(path: str, prefix: str) -> bool:
     return a == b or b.startswith(a + "/") or a.startswith(b + "/")
 
 
+def under(path: str, prefix: str) -> bool:
+    """Whether ``path`` is ``prefix`` or inside it.
+
+    Args:
+        path (str): a workspace path.
+        prefix (str): the served prefix.
+    """
+    base = prefix.rstrip("/")
+    return not base or path == base or path.startswith(base + "/")
+
+
 def wire(a: MountAttrs) -> Head:
     """Attributes as fsproto carries them, times in milliseconds.
 
@@ -247,7 +258,7 @@ class FsprotoServer:
         self._requests: asyncio.Queue[Frame | None] = asyncio.Queue()
         self._lost: dict[int, tuple[str, Exception]] = {}
         self._told: set[int] = set()
-        self._acks: dict[int, asyncio.Future[None]] = {}
+        self._acks: dict[int, asyncio.Future[bool]] = {}
         self._invalid: dict[str, None] = {}
         self._flushing = False
         self._hid = 0
@@ -279,7 +290,7 @@ class FsprotoServer:
             self._ended = True
             for ack in self._acks.values():
                 if not ack.done():
-                    ack.set_result(None)
+                    ack.set_result(False)
             self._acks.clear()
             await self._requests.put(None)
             try:
@@ -293,24 +304,23 @@ class FsprotoServer:
 
         Returns:
             bool: False when the client did not answer within
-            BEGIN_WAIT_SECONDS, so the line must not run on what it
-            still keeps.
+            BEGIN_WAIT_SECONDS or its pipe ended first, so the line must
+            not run on what it still keeps.
         """
         if self._ended or self._writer is None:
             return True
         self._flush()
         self._hid += 1
         hid = self._hid
-        ack: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        ack: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self._acks[hid] = ack
         self._send({"hid": hid, "op": "begin"})
         try:
-            await asyncio.wait_for(ack, BEGIN_WAIT_SECONDS)
+            return await asyncio.wait_for(ack, BEGIN_WAIT_SECONDS)
         except TimeoutError:
             return False
         finally:
             self._acks.pop(hid, None)
-        return True
 
     async def sync(self) -> list[tuple[str, Exception]]:
         """Land every write the client has been told is done, as SFTP's
@@ -332,7 +342,7 @@ class FsprotoServer:
         served = self._served
         if served is None or by == served.machine:
             return
-        if not overlaps(path, served.prefix):
+        if not overlaps(path, served.prefix) or not self._core.visible(path):
             return
         self._invalid[path] = None
         if not self._flushing:
@@ -363,7 +373,7 @@ class FsprotoServer:
         if hid is not None:
             ack = self._acks.pop(int(hid), None)
             if ack is not None and not ack.done():
-                ack.set_result(None)
+                ack.set_result(True)
             return
         if num(frame.head.get("id")) is not None:
             self._requests.put_nowait(frame)
@@ -416,10 +426,24 @@ class FsprotoServer:
         finally:
             await core.release(fh)
 
+    def _inside(self, path: str) -> str:
+        """``path``, refused as EACCES when it is outside the prefix the
+        client mounts.
+
+        Args:
+            path (str): a workspace path a request names.
+        """
+        served = self._served
+        if served is None or under(path, served.prefix):
+            return path
+        raise eacces(path)
+
     async def _answer(self, frame: Frame) -> tuple[Head, bytes]:
         h = frame.head
         core = self._core
         path = workspace_path(h.get("path"))
+        if "path" in h:
+            self._inside(path)
         op = h.get("op")
         if op == "hello":
             return {"proto": FSPROTO_VERSION}, EMPTY
@@ -536,8 +560,8 @@ class FsprotoServer:
                 "k": self._kept(path),
             }, EMPTY
         if op == "rename":
-            old = workspace_path(h.get("from"))
-            new = workspace_path(h.get("to"))
+            old = self._inside(workspace_path(h.get("from")))
+            new = self._inside(workspace_path(h.get("to")))
             if h.get("noreplace") is True and await self._exists(new):
                 raise eexist(new)
             await core.rename(old, new)
@@ -579,7 +603,8 @@ class FsprotoServer:
         self, root: str, rows: list[tuple[str, MountAttrs]]
     ) -> list[list[Any]]:
         """The listings of the kept folders under ``root``, breadth first,
-        until they carry FSPROTO_TREE_ENTRIES entries.
+        each whole and only while they fit in FSPROTO_TREE_ENTRIES
+        entries.
 
         Args:
             root (str): the folder whose listing is answered.
@@ -598,6 +623,8 @@ class FsprotoServer:
                 below = shown(await self._core.listing(folder))
             except Exception as err:
                 logger.debug("fsproto: listing %s failed: %r", folder, err)
+                continue
+            if count + len(below) > FSPROTO_TREE_ENTRIES:
                 continue
             folders.append([folder, [[name, wire(a)] for name, a in below]])
             count += len(below)
@@ -627,6 +654,11 @@ class FsprotoServer:
                     child(path, name),
                     err,
                 )
+                continue
+            if (
+                len(data) > FSPROTO_FETCH_FILE_BYTES
+                or total + len(data) > FSPROTO_FETCH_DIR_BYTES
+            ):
                 continue
             files.append([name, wire(attrs)])
             parts.append(data)

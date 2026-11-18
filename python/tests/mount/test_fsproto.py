@@ -275,6 +275,64 @@ async def test_another_s_change_is_pushed_and_a_barrier_waits_for_the_client():
 
 
 @pytest.mark.asyncio
+async def test_a_change_to_a_name_the_session_hides_is_never_pushed():
+    changes = RecentChanges(ManualClock(0), 1)
+    ws = Workspace(
+        {"/notes": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"hidden": {"paths": {"hide": ["/notes/secret.txt"]}}},
+    )
+    await ws.session("agent", profile="hidden")
+    server = FsprotoServer(
+        ws.vfs,
+        ws.get_session("agent"),
+        None,
+        ServedPrefix("/notes", "dev", changes),
+    )
+    end = Client()
+    serving = asyncio.create_task(server.serve(end.reader, end))
+    await end.call({"op": "hello", "proto": FSPROTO_VERSION})
+    changes.note("/notes/secret.txt")
+    changes.note("/notes/plan.txt")
+    barrier = asyncio.create_task(server.begin())
+    await end.until(
+        lambda: any(f.head.get("op") == "begin" for f in end.pushes)
+    )
+    assert end.pushes[0].head == {
+        "push": "inval",
+        "paths": ["/notes/plan.txt"],
+    }
+    begin = next(f for f in end.pushes if f.head.get("op") == "begin")
+    end.send({"hid": begin.head["hid"]})
+    assert await barrier is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_request_outside_the_served_prefix_is_refused():
+    ws, server, end, serving = await served()
+    outside = await end.call({"op": "getattr", "path": "/elsewhere"})
+    assert outside.head["errno"] == "EACCES"
+    moved = await end.call(
+        {"op": "rename", "from": "/notes/plan.txt", "to": "/elsewhere"}
+    )
+    assert moved.head["errno"] == "EACCES"
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_barrier_the_pipe_ends_under_is_refused():
+    ws, server, end, serving = await served(RecentChanges(ManualClock(0), 1))
+    await end.call({"op": "hello", "proto": FSPROTO_VERSION})
+    barrier = asyncio.create_task(server.begin())
+    await end.until(
+        lambda: any(f.head.get("op") == "begin" for f in end.pushes)
+    )
+    await end.end(serving)
+    assert await barrier is False
+
+
+@pytest.mark.asyncio
 async def test_a_barrier_the_client_never_answers_is_refused(monkeypatch):
     monkeypatch.setattr("mirage.mount.fsproto.BEGIN_WAIT_SECONDS", 0.01)
     ws, server, end, serving = await served(RecentChanges(ManualClock(0), 1))
