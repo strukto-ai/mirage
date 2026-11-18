@@ -50,7 +50,12 @@ function cluster(key: string, spec: CommandSpec): boolean {
   return true
 }
 
-function optionName(key: string, spec: CommandSpec, at: string): string {
+function optionName(
+  key: string,
+  spec: CommandSpec,
+  above: readonly CommandSpec[],
+  at: string,
+): string {
   const own = compileSpec(spec).dest.get(key)
   if (own !== undefined) return own
   const found = new Set<string>()
@@ -66,6 +71,10 @@ function optionName(key: string, spec: CommandSpec, at: string): string {
       `${at}: ${key} names different options below (${meanings.join(', ')}); ` +
         'write the long name you mean, or put the entry under its subcommand',
     )
+  for (const parent of [...above].reverse()) {
+    const inherited = compileSpec(parent).dest.get(key)
+    if (inherited !== undefined) return inherited
+  }
   if (cluster(key, spec)) {
     const letters: string[] = []
     for (const letter of key.slice(1)) letters.push(`-${letter}`)
@@ -75,8 +84,14 @@ function optionName(key: string, spec: CommandSpec, at: string): string {
   throw new PolicyError(`${at}: no option ${key} at or below this command`)
 }
 
-function checkValues(name: string, words: Iterable<string>, spec: CommandSpec, at: string): void {
-  const declared = [...atOrBelow(spec)].flatMap((below) =>
+function checkValues(
+  name: string,
+  words: Iterable<string>,
+  spec: CommandSpec,
+  above: readonly CommandSpec[],
+  at: string,
+): void {
+  const declared = [...above, ...atOrBelow(spec)].flatMap((below) =>
     below.arguments.filter(
       (argument) => argument.names[0]?.startsWith('-') === true && argumentDest(argument) === name,
     ),
@@ -96,6 +111,7 @@ function checkValues(name: string, words: Iterable<string>, spec: CommandSpec, a
 function options(
   entries: ReadonlyMap<string, OptionRule>,
   spec: CommandSpec,
+  above: readonly CommandSpec[],
   at: string,
   passthrough: boolean,
 ): Map<string, OptionRule> {
@@ -107,11 +123,11 @@ function options(
       throw new PolicyError(
         `${here}: this command's script reads its own words, so it has no option to name`,
       )
-    const name = optionName(key, spec, here)
+    const name = optionName(key, spec, above, here)
     const first = written.get(name)
     if (first !== undefined) throw new PolicyError(`${at}: ${first} and ${key} are the same option`)
     written.set(name, key)
-    if (rule.values.size > 0) checkValues(name, rule.values.keys(), spec, here)
+    if (rule.values.size > 0) checkValues(name, rule.values.keys(), spec, above, here)
     out.set(name, {
       decision: rule.decision,
       values: new Map(
@@ -119,11 +135,11 @@ function options(
           word,
           {
             decision: value.decision,
-            options: options(value.options, spec, `${here}.values.${word}`, false),
+            options: options(value.options, spec, above, `${here}.values.${word}`, false),
           },
         ]),
       ),
-      options: options(rule.options, spec, here, false),
+      options: options(rule.options, spec, above, here, false),
     })
   }
   return out
@@ -144,7 +160,13 @@ function plain(tree: CommandNode): boolean {
   return bare && tree.decision.every((leaf) => leaf.reason === '' && leaf.paths.length === 0)
 }
 
-function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boolean): CommandNode {
+function node(
+  tree: CommandNode,
+  spec: CommandSpec,
+  at: string,
+  passthrough: boolean,
+  above: readonly CommandSpec[] = [],
+): CommandNode {
   const word = reserved(spec)
   if (word !== null && !plain(tree))
     throw new PolicyError(
@@ -162,7 +184,10 @@ function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boo
     if (first !== undefined)
       throw new PolicyError(`${at}: ${first} and ${key} are the same subcommand`)
     written.set(found.name, key)
-    subcommands.set(found.name, node(child, found, `${at}.${found.name}`, passthrough))
+    subcommands.set(
+      found.name,
+      node(child, found, `${at}.${found.name}`, passthrough, [...above, spec]),
+    )
   }
   if (tree.operands.size > 0 && spec.subcommands.length > 0)
     throw new PolicyError(`${at}: this command takes a subcommand, so its operands go under one`)
@@ -173,12 +198,12 @@ function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boo
   return {
     decision: tree.decision,
     subcommands,
-    options: options(tree.options, spec, at, passthrough),
+    options: options(tree.options, spec, above, at, passthrough),
     otherOptions: tree.otherOptions,
     operands: new Map(
       [...tree.operands].map(([word, child]) => [
         word,
-        node(child, spec, `${at}.operands.${word}`, passthrough),
+        node(child, spec, `${at}.operands.${word}`, passthrough, above),
       ]),
     ),
   }

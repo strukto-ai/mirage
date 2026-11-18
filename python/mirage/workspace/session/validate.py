@@ -60,7 +60,9 @@ def _cluster(key: str, node: CommandSpec) -> bool:
     return all(f"-{letter}" in shorts for letter in key[1:])
 
 
-def _option_name(key: str, node: CommandSpec, at: str) -> str:
+def _option_name(
+    key: str, node: CommandSpec, above: tuple[CommandSpec, ...], at: str
+) -> str:
     own = compile_spec(node).dest.get(key)
     if own is not None:
         return own
@@ -79,6 +81,16 @@ def _option_name(key: str, node: CommandSpec, at: str) -> str:
             f"({', '.join(meanings)}); write the long name you mean, or "
             "put the entry under its subcommand"
         )
+    inherited = next(
+        (
+            dest
+            for spec in reversed(above)
+            if (dest := compile_spec(spec).dest.get(key)) is not None
+        ),
+        None,
+    )
+    if inherited is not None:
+        return inherited
     if _cluster(key, node):
         keys = " and ".join(f"-{letter}" for letter in key[1:])
         raise PolicyError(
@@ -89,11 +101,15 @@ def _option_name(key: str, node: CommandSpec, at: str) -> str:
 
 
 def _check_values(
-    name: str, words: Collection[str], node: CommandSpec, at: str
+    name: str,
+    words: Collection[str],
+    node: CommandSpec,
+    above: tuple[CommandSpec, ...],
+    at: str,
 ) -> None:
     arguments = [
         argument
-        for spec in _at_or_below(node)
+        for spec in (*above, *_at_or_below(node))
         for argument in spec.arguments
         if argument.names[0].startswith("-")
         and argument_dest(argument) == name
@@ -117,6 +133,7 @@ def _check_values(
 def _options(
     options: Mapping[str, OptionRule],
     node: CommandSpec,
+    above: tuple[CommandSpec, ...],
     at: str,
     passthrough: bool,
 ) -> dict[str, OptionRule]:
@@ -129,26 +146,30 @@ def _options(
                 f"{here}: this command's script reads its own words, so "
                 "it has no option to name"
             )
-        name = _option_name(key, node, here)
+        name = _option_name(key, node, above, here)
         if name in written:
             raise PolicyError(
                 f"{at}: {written[name]} and {key} are the same option"
             )
         written[name] = key
         if rule.values:
-            _check_values(name, rule.values, node, here)
+            _check_values(name, rule.values, node, above, here)
         out[name] = OptionRule(
             decision=rule.decision,
             values={
                 word: ValueRule(
                     decision=value.decision,
                     options=_options(
-                        value.options, node, f"{here}.values.{word}", False
+                        value.options,
+                        node,
+                        above,
+                        f"{here}.values.{word}",
+                        False,
                     ),
                 )
                 for word, value in rule.values.items()
             },
-            options=_options(rule.options, node, here, False),
+            options=_options(rule.options, node, above, here, False),
         )
     return out
 
@@ -175,7 +196,11 @@ def _plain(tree: CommandNode) -> bool:
 
 
 def _node(
-    tree: CommandNode, node: CommandSpec, at: str, passthrough: bool
+    tree: CommandNode,
+    node: CommandSpec,
+    at: str,
+    passthrough: bool,
+    above: tuple[CommandSpec, ...] = (),
 ) -> CommandNode:
     reserved = _reserved(node)
     if reserved is not None and not _plain(tree):
@@ -202,7 +227,7 @@ def _node(
             )
         written[found.name] = key
         subcommands[found.name] = _node(
-            child, found, f"{at}.{found.name}", passthrough
+            child, found, f"{at}.{found.name}", passthrough, (*above, node)
         )
     if tree.operands and node.subcommands:
         raise PolicyError(
@@ -217,10 +242,12 @@ def _node(
     return CommandNode(
         decision=tree.decision,
         subcommands=subcommands,
-        options=_options(tree.options, node, at, passthrough),
+        options=_options(tree.options, node, above, at, passthrough),
         other_options=tree.other_options,
         operands={
-            word: _node(child, node, f"{at}.operands.{word}", passthrough)
+            word: _node(
+                child, node, f"{at}.operands.{word}", passthrough, above
+            )
             for word, child in tree.operands.items()
         },
     )
