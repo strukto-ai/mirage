@@ -94,9 +94,17 @@ function usageError(message: string): RedirectResult {
   return refuse(encodeText(`timeout: ${message}\n${usageHint('timeout')}\n`))
 }
 
+/**
+ * What leads GNU's report of a command timeout cannot run, before the reason.
+ * Mirrors Python's `timeout_failure`.
+ */
+export function timeoutFailure(name: string): string {
+  return `timeout: failed to run command '${quoteText(name)}'`
+}
+
 /** GNU's report of a command timeout finds nothing to run for. */
 export function timeoutMissing(name: string): string {
-  return `timeout: failed to run command '${quoteText(name)}': No such file or directory\n`
+  return `${timeoutFailure(name)}: No such file or directory\n`
 }
 
 /**
@@ -401,8 +409,10 @@ export async function handleTimeout(
         // timeout execs its command, so a builtin that is also a program
         // answers as the program.
         try {
-          ran = await setProgramInvocation(child.session, () =>
-            executeDrained(executeFn, inner, child, stdin, sink, held, abort.signal),
+          ran = await setProgramInvocation(
+            child.session,
+            () => executeDrained(executeFn, inner, child, stdin, sink, held, abort.signal),
+            timeoutFailure(name),
           )
         } finally {
           await child.session.closeInputs()

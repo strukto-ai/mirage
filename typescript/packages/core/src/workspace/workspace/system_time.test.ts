@@ -144,3 +144,18 @@ describe('parseSystemTime', () => {
     expect(() => parseSystemTime(text)).toThrow('is not an ISO 8601 instant with an offset')
   })
 })
+
+describe('SECONDS on the system clock', () => {
+  it('counts on the line clock and keeps an assignment across lines', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = started('2026-03-02T09:00:00Z', clock)
+    try {
+      expect(await out(ws, 'echo $SECONDS')).toBe('0\n')
+      await ws.shell('SECONDS=100')
+      clock.advance(5)
+      expect(await out(ws, 'echo $SECONDS')).toBe('105\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})

@@ -36,7 +36,7 @@ import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { Limit, MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { SystemIdSource, secureDraw, type IdSource } from '../../utils/ids.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StatusWriter } from '../types.ts'
 import { STARTUP_VALUES } from './constants.ts'
@@ -209,6 +209,8 @@ export interface SessionInit {
   processes?: ProcessPermissions
   processId?: number | null
   shellPid?: number | null
+  /** When the running shell started, in epoch microseconds (`frame`). */
+  shellStartedUs?: number
   processDepth?: number
   shellNesting?: number
   /**
@@ -403,9 +405,9 @@ function restoredVars(
   return out
 }
 
-/** A shell's draw from an id source, which holds no session. */
+/** A shell's draw from an id source, which holds no session: its secure draw (`secureDraw`). */
 function drawFrom(ids: IdSource): () => number {
-  return () => ids.randomU32()
+  return secureDraw(ids)
 }
 
 export class SessionState {
@@ -623,6 +625,8 @@ export class SessionState {
   processes: ProcessPermissions
   processId: number | null
   shellPid: number | null
+  // When the running shell started, in epoch microseconds (`frame`).
+  shellStartedUs: number
   processDepth: number
   // How deep the shell this session runs is nested: the levels the shells
   // that started it had re-entered, which its call stack counts on from
@@ -653,6 +657,7 @@ export class SessionState {
     this.scripts = init.scripts ?? {}
     this.processId = init.processId ?? null
     this.shellPid = init.shellPid ?? null
+    this.shellStartedUs = init.shellStartedUs ?? 0
     this.processDepth = init.processDepth ?? 0
     this.shellNesting = init.shellNesting ?? 0
     this.profile = init.profile ?? null
@@ -792,6 +797,7 @@ export class SessionState {
       processes: overrides.processes ?? this.processes,
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
+      shellStartedUs: overrides.shellStartedUs ?? this.shellStartedUs,
       processDepth: overrides.processDepth ?? this.processDepth,
       shellNesting: overrides.shellNesting ?? this.shellNesting,
       decisions: overrides.decisions ?? this.decisions,

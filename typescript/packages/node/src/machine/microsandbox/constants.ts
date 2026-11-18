@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RUN_PROGRAM_AT, isRun } from '@struktoai/mirage-core/machine/constants'
+import { PROGRAM_CHECK, RUN_PROGRAM_AT, isRun } from '@struktoai/mirage-core/machine/constants'
 import type { PauseAction } from '@struktoai/mirage-core/machine/types'
 
 export const MICROSANDBOX_HINT =
@@ -33,9 +33,15 @@ export const INSPECT_TIMEOUT_SECONDS = 10
  * msb ends the session of an exec whose client goes, and a run's exec is let
  * go once its program has ended, so a program leads a session of its own:
  * what it left running stays, as on any machine. The run is not a group
- * leader there, so setsid keeps its pid.
+ * leader there, so setsid keeps its pid. The run's three report words come
+ * first, so a program the machine cannot run is reported in bash's words
+ * (`PROGRAM_CHECK`) rather than setsid's.
  */
-export const OWN_SESSION = 'command -v setsid >/dev/null 2>&1 && exec setsid "$@"; exec "$@"'
+export const OWN_SESSION =
+  '( ' +
+  PROGRAM_CHECK +
+  ' ) || exit $?; shift 3; ' +
+  'command -v setsid >/dev/null 2>&1 && exec setsid "$@"; exec "$@"'
 
 /**
  * Start a run's program in a session of its own (`OWN_SESSION`). Mirage's
@@ -49,6 +55,7 @@ export function ownSession(argv: readonly string[]): readonly string[] {
     '-c',
     OWN_SESSION,
     'sh',
+    ...argv.slice(RUN_PROGRAM_AT - 4, RUN_PROGRAM_AT - 1),
     ...argv.slice(RUN_PROGRAM_AT),
   ]
 }

@@ -470,9 +470,13 @@ export class MachineMounts {
 
   /**
    * `argv` under `MOUNT_GUARD`, holding every mount the machine had at the
-   * line's admit; unchanged when it had none.
+   * line's admit; unchanged when it had none. `missing` holds the words a
+   * program the machine cannot run is reported in (`PROGRAM_CHECK`).
    */
-  guarded(argv: readonly string[]): readonly string[] {
+  guarded(
+    argv: readonly string[],
+    missing: readonly [string, string, string] = ['', 'command not found', ''],
+  ): readonly string[] {
     const held = new Map<string, [string, string]>(
       [...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]),
     )
@@ -486,7 +490,7 @@ export class MachineMounts {
         kind,
         unmounted(this.provider, prefix),
       ])
-    return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', '/proc/mounts', ...words, '--', ...argv]
+    return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', ...missing, '/proc/mounts', ...words, '--', ...argv]
   }
 
   /**

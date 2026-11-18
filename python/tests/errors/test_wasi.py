@@ -97,6 +97,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EFBIG: 22,
         FsCondition.EDQUOT: 19,
         FsCondition.EPIPE: 64,
+        FsCondition.ENXIO: 60,
         FsCondition.NO_XATTR: 58,
         FsCondition.STALE_WRITE: 72,
     }

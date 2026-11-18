@@ -307,7 +307,13 @@ describe('MicrosandboxMachine', () => {
             EXEC_PRELUDE,
             'sh',
             '/work',
-            ...ownSession(runArgv('runid', 'runid', words)),
+            ...ownSession(
+              runArgv('runid', 'runid', words, [
+                `bash: ${words[0]}: `,
+                'command not found',
+                'bash: ',
+              ]),
+            ),
           ],
           input,
         ],

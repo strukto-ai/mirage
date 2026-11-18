@@ -923,7 +923,7 @@ async def test_the_status_waits_for_the_output_written_with_it():
 
 class LeftOpenBox(RecordingMachine):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"3\n")
+        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 5]) + b"3\n")
         await asyncio.Event().wait()
 
 
@@ -951,7 +951,7 @@ class ExitsFirstBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"0\n")
         for _ in range(200):
             await output(b"x" * 4096)
@@ -988,7 +988,7 @@ class LogsOnBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"3\n")
         await output(b"main\n" + run_done_mark(nonce) + b"3\n")
         while True:
@@ -1020,7 +1020,7 @@ class SpacedBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        nonce = argv[RUN_PROGRAM_AT - 2]
+        nonce = argv[RUN_PROGRAM_AT - 5]
         await errors(run_exit_mark(nonce) + b"0\n")
         for _ in range(40):
             await asyncio.sleep(0.05)
@@ -1059,7 +1059,7 @@ class SlowStopBox(RecordingMachine):
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"0\n")
+            await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 5]) + b"0\n")
             await asyncio.sleep(RUN_DRAIN_SECONDS + 0.3)
             raise
 
@@ -1091,7 +1091,7 @@ class PidLineBox(RecordingMachine):
                 argv, stdin, env, cwd, output, errors
             )
         if self.joins_streams:
-            mark = run_exit_mark(argv[RUN_PROGRAM_AT - 2])
+            mark = run_exit_mark(argv[RUN_PROGRAM_AT - 5])
             await output(RUN_PID_MARK + b"812 99\nran:train" + mark + b"0\n")
             return RunResult(exit_code=0)
         await errors(RUN_PID_MARK + b"812 99\n")
@@ -1133,7 +1133,7 @@ class JoinedBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        mark = run_exit_mark(argv[RUN_PROGRAM_AT - 2])
+        mark = run_exit_mark(argv[RUN_PROGRAM_AT - 5])
         await output(RUN_PID_MARK + b"812 99\nout\nerr\n" + mark + b"3\n")
         return RunResult(exit_code=3)
 

@@ -48,9 +48,10 @@ impl Store {
     pub fn leave(&mut self, outer: Option<usize>) {
         if let Some(frame) = self.frames.pop() {
             let random = frame.saved.contains_key(RANDOM);
-            let specials = [LINENO, BASHPID]
-                .iter()
-                .filter(|name| frame.saved.contains_key(**name))
+            let specials = frame
+                .saved
+                .keys()
+                .filter(|name| ends_at_unset(name))
                 .count();
             for (name, old) in frame.saved {
                 self.place(&name, old);
@@ -110,7 +111,7 @@ impl Store {
         if name == RANDOM {
             let seed = std::mem::replace(&mut self.random_seed, Seed::Off);
             self.local_random.push(seed);
-        } else if name == LINENO || name == BASHPID {
+        } else if ends_at_unset(name) {
             let plain = self.plain.iter().any(|held| held == name);
             self.local_plain.push((name.to_owned(), plain));
             if !inherit {
@@ -132,6 +133,7 @@ impl Store {
     /// Save `name`'s record in the prefix scope `index`, once; an index no
     /// frame holds saves nothing.
     pub fn save_temp(&mut self, index: usize, name: &str) {
+        let seconds = self.seconds;
         let Some(frame) = self.frames.get_mut(index) else {
             return;
         };
@@ -139,6 +141,9 @@ impl Store {
             frame
                 .saved
                 .insert(name.to_owned(), self.vars.get(name).cloned());
+        }
+        if name == SECONDS && frame.seconds.is_none() {
+            frame.seconds = Some(seconds);
         }
     }
 
@@ -148,6 +153,9 @@ impl Store {
             let frame = self.frames.remove(index);
             for (name, old) in frame.saved {
                 self.place(&name, old);
+            }
+            if let Some(seconds) = frame.seconds {
+                self.seconds = seconds;
             }
         }
     }

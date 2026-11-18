@@ -14,9 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { FD_BOTH, FD_CLOSE } from './constants.ts'
-import { badDescriptorLine, unsupportedDescriptor } from './descriptors.ts'
+import {
+  badDescriptorLine,
+  descriptorOf,
+  namedDescriptor,
+  unsupportedDescriptor,
+} from './descriptors.ts'
 import { getRedirects } from './helpers.ts'
-import { RedirectKind, type Redirect, type TSNodeLike } from './types.ts'
+import { Redirect, RedirectKind, type TSNodeLike } from './types.ts'
 import { parse } from './parse/parse.ts'
 
 function redirects(line: string): Redirect[] {
@@ -81,5 +86,37 @@ describe('unsupportedDescriptor', () => {
       expect(unsupportedDescriptor(redirects(line))).toBeNull()
     }
     expect(new TextDecoder().decode(badDescriptorLine(3))).toBe('bash: 3: Bad file descriptor\n')
+  })
+})
+
+describe('descriptor paths', () => {
+  it.each<[string, number | null]>([
+    ['/dev/stdin', 0],
+    ['/dev/stdout', 1],
+    ['/dev/stderr', 2],
+    ['/dev/fd/0', 0],
+    ['/dev/fd/2', 2],
+    ['/dev/fd/3', 3],
+    ['/dev/fd/9', null],
+    ['/dev/fd/x', null],
+    ['/dev/fd/', null],
+    ['/dev/null', null],
+  ])('%s names descriptor %s', (path, fd) => {
+    expect(descriptorOf(path, (n) => n === 3)).toBe(fd)
+  })
+
+  it('duplicates the descriptor a redirect names by path', () => {
+    const none = (): boolean => false
+    expect(namedDescriptor(new Redirect({ fd: 1, target: '/dev/stderr' }), none)).toEqual([
+      new Redirect({ fd: 1, target: 2, kind: RedirectKind.DUP_OUTPUT }),
+    ])
+    expect(namedDescriptor(new Redirect({ fd: FD_BOTH, target: '/dev/stdout' }), none)).toEqual([
+      new Redirect({ fd: 1, target: 1, kind: RedirectKind.DUP_OUTPUT }),
+      new Redirect({ fd: 2, target: 1, kind: RedirectKind.DUP_OUTPUT }),
+    ])
+    expect(
+      namedDescriptor(new Redirect({ fd: 0, target: '/dev/fd/0', kind: RedirectKind.STDIN }), none),
+    ).toEqual([new Redirect({ fd: 0, target: 0, kind: RedirectKind.DUP_INPUT })])
+    expect(namedDescriptor(new Redirect({ fd: 1, target: '/tmp/f' }), none)).toBeNull()
   })
 })

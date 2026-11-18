@@ -6,12 +6,27 @@ import { Workspace } from '../workspace/workspace.ts'
 import { argsBytes, entryBytes } from './budget.ts'
 import { MAX_ENV } from './constants.ts'
 import { ShellArray } from '../../shell/array.ts'
+import {
+  BASH_VERSINFO,
+  BASH_VERSION,
+  SHLVL,
+  VERSION_PARTS,
+  VERSION_TEXT,
+} from '../../shell/constants.ts'
 
 const DEC = new TextDecoder()
 
+// The max_env these lines run under: 200 bytes for what each line grows,
+// past the variables every shell starts with (`seedShell`).
+const LIMIT =
+  200 +
+  entryBytes(BASH_VERSION, VERSION_TEXT) +
+  entryBytes(BASH_VERSINFO, new ShellArray(VERSION_PARTS.map((part, i) => [i, part]))) +
+  entryBytes(SHLVL, '1')
+
 async function run(
   line: string,
-  maxEnv: number | string | null = 200,
+  maxEnv: number | string | null = LIMIT,
 ): Promise<[string, string, number]> {
   const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, maxEnv })
   try {
@@ -43,7 +58,7 @@ describe('max_env', () => {
     const [out, err, code] = await run('x=a; while :; do x=$x$x; done; echo after')
     expect([out, code]).toEqual(['', 2])
     expect(err).toBe(
-      'bash: xmalloc: cannot allocate 257 bytes (past max_env of 200 bytes, a mirage workspace setting)\n',
+      `bash: xmalloc: cannot allocate 257 bytes (past max_env of ${String(LIMIT)} bytes, a mirage workspace setting)\n`,
     )
   })
 
@@ -52,7 +67,7 @@ describe('max_env', () => {
     for (const line of [`f() { echo ${body}; }`, `alias a='${body}'`, `set -- ${body}`]) {
       const [, err, code] = await run(`${line}; echo after`)
       expect(code).toBe(2)
-      expect(err).toContain('past max_env of 200 bytes')
+      expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
     }
   })
 
@@ -78,7 +93,7 @@ describe('max_env', () => {
     ]) {
       const [, err, code] = await run(`${line} echo after`)
       expect(code).toBe(2)
-      expect(err).toContain('past max_env of 200 bytes')
+      expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
     }
   })
 
@@ -91,7 +106,7 @@ describe('max_env', () => {
     ]) {
       const [, err, code] = await run(line)
       expect(code).toBe(2)
-      expect(err).toContain('past max_env of 200 bytes')
+      expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
     }
   })
 
@@ -99,7 +114,7 @@ describe('max_env', () => {
     const refused = await run(`bash -c 'set -- $(seq 1 100)'; echo rc=$?`)
     expect(refused).toEqual([
       'rc=2\n',
-      'bash: xmalloc: cannot allocate 292 bytes (past max_env of 200 bytes, a mirage workspace setting)\n',
+      `bash: xmalloc: cannot allocate 292 bytes (past max_env of ${String(LIMIT)} bytes, a mirage workspace setting)\n`,
       0,
     ])
     expect(await run('bash -c : _ $(seq 1 100); echo rc=$?')).toEqual(refused)
@@ -109,7 +124,7 @@ describe('max_env', () => {
       `echo '[ $# -ge 100 ] && { echo reached; exit; }; bash /x.sh "$@" "$@"' > /x.sh; bash /x.sh aaaaaaaa; echo rc=$?`,
     )
     expect([out, code]).toEqual(['rc=2\n', 0])
-    expect(err).toContain('past max_env of 200 bytes')
+    expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
   })
 
   it('counts a prefix assignment', async () => {
@@ -122,7 +137,7 @@ describe('max_env', () => {
     ] as const) {
       expect(await run(line)).toEqual([
         '',
-        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of 200 bytes, a mirage workspace setting)\n`,
+        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of ${String(LIMIT)} bytes, a mirage workspace setting)\n`,
         2,
       ])
     }
@@ -136,7 +151,7 @@ describe('max_env', () => {
     ] as const) {
       expect(await run(line)).toEqual([
         '',
-        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of 200 bytes, a mirage workspace setting)\n`,
+        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of ${String(LIMIT)} bytes, a mirage workspace setting)\n`,
         2,
       ])
     }
@@ -145,7 +160,7 @@ describe('max_env', () => {
   it('counts the record a global declaration reaches past a prefix once', async () => {
     const [out, , code] = await run(
       'X=$(printf %0100d 0); f() { declare -g X=$(printf %0150d 0); }; X= f; echo ${#X}',
-      300,
+      LIMIT + 100,
     )
     expect([out, code]).toEqual(['150\n', 0])
   })
@@ -155,7 +170,7 @@ describe('max_env', () => {
       'f() { declare -g X=1 Y=$(printf %0100d 0); }; X=$(printf %0100d 0) f; echo after',
     )
     expect([out, code]).toEqual(['', 2])
-    expect(err).toContain('past max_env of 200 bytes')
+    expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
   })
 
   it('counts the global while arithmetic a global declaration runs steps back', async () => {
@@ -163,7 +178,7 @@ describe('max_env', () => {
       `X=$(printf %0100d 0); Y=11; f() { declare -gi Y='Z=1234567890123456789,0' X; }; X= f; echo after`,
     )
     expect([out, code]).toEqual(['', 2])
-    expect(err).toContain('past max_env of 200 bytes')
+    expect(err).toContain(`past max_env of ${String(LIMIT)} bytes`)
   })
 
   it('stops counting the set-aside value once the prefix is restored', async () => {

@@ -30,7 +30,11 @@ from mirage.shell.errors import (
     ReadonlyVariableError,
     UnboundVariable,
 )
+from mirage.utils.clock import system_now
 from mirage.workspace.session.session import SessionState
+
+# Microseconds in a second, the unit of the clock the shell reads.
+MICROS = 1_000_000
 
 
 class TaskHost(Protocol):
@@ -195,8 +199,14 @@ async def drive(
                         finally:
                             # The child shell ends with its substitution.
                             ask[1].close()
+                        # The words after it read the time it ended at
+                        # (`"$(sleep 1)$SECONDS"`).
                         answer = partial(
-                            task.answer_substituted, out, err, status
+                            task.answer_substituted,
+                            out,
+                            err,
+                            status,
+                            clock=int(system_now() * MICROS),
                         )
                     case ("process", _, node):
                         path = await host.process(ask[1], node)

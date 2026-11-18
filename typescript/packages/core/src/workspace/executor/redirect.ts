@@ -21,7 +21,7 @@ import {
   setRedirectPaths,
   type RedirectGuard,
 } from '../../context/session_context.ts'
-import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
+import { enoent, isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { share, SharedInput } from '../../io/async_line_iterator.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
@@ -48,9 +48,11 @@ import {
 import {
   badDescriptorLine,
   deliver,
+  descriptorOf,
   FileDescription,
   FileInput,
   Inherited,
+  namedDescriptor,
   Recorder,
   redirectOperations,
   unreadableStdin,
@@ -83,7 +85,7 @@ import { descriptorName, routeRebound } from './builtins/exec/index.ts'
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
-import { createFile, soleStream, writeDescription } from './create.ts'
+import { createFile, openRead, soleStream, writeDescription } from './create.ts'
 import { drained, pump } from './background.ts'
 import { writeErrorLine } from './statement.ts'
 
@@ -817,6 +819,11 @@ class Opened {
     readonly closed: Set<number>,
   ) {}
 
+  /** Whether a descriptor is open here. */
+  holds(fd: number): boolean {
+    return this.outputs.has(fd) && !this.closed.has(fd)
+  }
+
   /** Forget what a descriptor had closed or was reading. */
   reopen(fd: number): void {
     this.closed.delete(fd)
@@ -920,16 +927,10 @@ async function openInput(
   owned: SharedInput[],
 ): Promise<RedirectResult | null> {
   const { dispatch, session, inputs, outputs } = opened
-  let source: ByteSource | null
+  let source: ByteSource
+  let endless = false
   try {
-    if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
-      opened.reopen(r.fd)
-      outputs.set(r.fd, CLOSED)
-      inputs.set(r.fd, opened.stdin)
-      return null
-    }
-    const read = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-    source = read ?? new Uint8Array()
+    ;[source, endless] = await openRead(dispatch, scope)
   } catch (error) {
     if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
     else {
@@ -957,8 +958,8 @@ async function openInput(
     return null
   }
   opened.readPaths.set(r.fd, scope.virtual)
-  if (data instanceof PipeStream) opened.piped.add(r.fd)
-  const reading = new SharedInput(data, null, !(data instanceof PipeStream))
+  if (endless || data instanceof PipeStream) opened.piped.add(r.fd)
+  const reading = new SharedInput(data, null, !(endless || data instanceof PipeStream))
   if (!(data instanceof PipeStream)) owned.push(reading)
   if (
     !(data instanceof PipeStream) &&
@@ -1178,6 +1179,18 @@ async function runRedirects(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
+    const named = namedDescriptor(r, (fd) => opened.holds(fd))
+    if (named !== null && !opened.holds(named[0]?.target as number)) {
+      return opened.failed(unnamed(r.target))
+    }
+    if (named !== null) {
+      expanded.push(...named)
+      for (const operation of named) {
+        const bad = duplicate(opened, operation, operation.target as number)
+        if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      }
+      continue
+    }
     expanded.push(...redirectOperations(r))
     const refused = unusable(r)
     if (refused !== null) return opened.failed(refused)
@@ -1476,6 +1489,19 @@ function redirectFailure(scope: PathSpec, err: unknown): RedirectResult {
 }
 
 /**
+ * The failure of a redirect onto the path of a descriptor the command has
+ * closed (`0<&- </dev/fd/0`): bash opens the path, which names nothing then,
+ * where `0<&0` copies a closed descriptor onto itself. Mirrors Python's
+ * `_unnamed`.
+ *
+ * @param target the descriptor's path.
+ */
+function unnamed(target: unknown): RedirectResult {
+  const scope = ensureScope(target)
+  return redirectFailure(scope, enoent(scope))
+}
+
+/**
  * Shell-attributed IOResult that replaces the command's whole run.
  *
  * bash never runs the command and stops processing redirects at the first
@@ -1519,7 +1545,7 @@ export async function redirectStdin(
       const scope = PathSpec.fromStrPath(target as string | PathSpec, undefined, session.cwd)
       sources.set(
         r.fd,
-        scope.virtual === '/dev/stdin'
+        descriptorOf(scope.virtual, noneOpen) === FD_STDIN
           ? stdin
           : (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
             ? new DeviceInput()
@@ -1655,4 +1681,12 @@ function ensureScope(target: unknown): PathSpec {
   if (target instanceof PathSpec) return target
   if (typeof target === 'string') return toScope(target)
   return toScope(String(target))
+}
+
+/**
+ * No descriptor past the standard three is open: what the admission pass,
+ * which opens none, asks of `/dev/fd/N`. Mirrors Python's `_none_open`.
+ */
+function noneOpen(_fd: number): boolean {
+  return false
 }

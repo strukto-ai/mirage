@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-import { activeDevice, activePipe } from '../dev/device.ts'
+import { activeDevice, activePipe, refuseTty } from '../dev/device.ts'
 import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
 
 /**
@@ -46,7 +46,9 @@ export async function pwrite(
   }
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
-  if (activeDevice(accessor, p) === null) {
+  const device = activeDevice(accessor, p)
+  refuseTty(device, path.virtual)
+  if (device === null) {
     const size = accessor.store.files.get(p)?.byteLength ?? 0
     if (data.byteLength > 0) {
       const end = Math.max(size, offset + data.byteLength)

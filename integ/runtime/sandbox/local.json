@@ -135,6 +135,14 @@
           }
         },
         {
+          "command": "touch $d/older && sleep 0.3 && touch $d/newer && [ $d/newer -nt $d/older ] && echo newer",
+          "expect": {
+            "exit": 0,
+            "stdout": "newer\n",
+            "stderr": ""
+          }
+        },
+        {
           "command": "cd / && rm -r $d && test ! -e $d && echo gone",
           "expect": {
             "exit": 0,

@@ -43,4 +43,7 @@ pub struct Draws {
     pub(super) state: u32,
     pub(super) last: u32,
     pub(super) count: usize,
+    /// The count a pending `SECONDS=` write restarts at, which reads later
+    /// in the expression see; the session's restarts when the write lands.
+    pub(super) seconds: Option<i64>,
 }

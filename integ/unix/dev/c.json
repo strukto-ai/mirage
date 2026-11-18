@@ -31,7 +31,7 @@
       "command": "ls /dev/",
       "expect": {
         "exit": 0,
-        "stdout": "null\nzero\n",
+        "stdout": "null\nrandom\ntty\nurandom\nzero\n",
         "stderr": ""
       }
     },

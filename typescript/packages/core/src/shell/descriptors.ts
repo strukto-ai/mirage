@@ -17,10 +17,17 @@ import { ByteSpool } from '../io/spool.ts'
 import { chunks } from '../io/cooperative.ts'
 import { OutputStream } from '../io/stream.ts'
 import type { ByteSource } from '../io/types.ts'
-import { FD_BOTH, FD_CLOSE } from './constants.ts'
+import {
+  DESCRIPTOR_FOLDER,
+  DESCRIPTOR_PATHS,
+  FD_BOTH,
+  FD_CLOSE,
+  FD_STDERR,
+  FD_STDOUT,
+} from './constants.ts'
 import { SharedInput } from '../io/async_line_iterator.ts'
 import { type Channel, JobConsole, type OwnedStream, Terminal } from './console/index.ts'
-import type { PathSpec } from '../types.ts'
+import { PathSpec } from '../types.ts'
 import { ebadf } from '../errors/fs.ts'
 import { Redirect, RedirectKind } from './types.ts'
 import { encodeText } from './bytes.ts'
@@ -47,6 +54,60 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
     }
   }
   return null
+}
+
+/**
+ * The descriptor a path names, null for any other path: a standard one by its
+ * name (`/dev/stderr`), or `/dev/fd/N`, always for 0 to 2 and past them only
+ * while the shell holds N open, so the pipe a process substitution puts there
+ * stays the path it is. Mirrors Python's `descriptor_of`.
+ */
+export function descriptorOf(path: string, isOpen: (fd: number) => boolean): number | null {
+  const named = Object.hasOwn(DESCRIPTOR_PATHS, path) ? DESCRIPTOR_PATHS[path] : undefined
+  if (named !== undefined) return named
+  if (!path.startsWith(DESCRIPTOR_FOLDER)) return null
+  const digits = path.slice(DESCRIPTOR_FOLDER.length)
+  if (!/^[0-9]{1,9}$/.test(digits)) return null
+  const fd = Number(digits)
+  return fd <= FD_STDERR || isOpen(fd) ? fd : null
+}
+
+/**
+ * The duplications a redirect onto a descriptor's path makes, as bash opens
+ * one on Linux (`> /dev/stderr` is `>&2`, `< /dev/fd/3` is `<&3`,
+ * `&> /dev/stdout` is `>&1 2>&1`, `< /dev/stdin` keeps the fd 0 the redirects
+ * before it left); null for any other target. Deliberate divergence: Linux reopens a descriptor's file, so
+ * `> /dev/stdout` on a stdout redirected to a file truncates it there; this
+ * duplicates, as bash does where the system has no such paths. Mirrors
+ * Python's `named_descriptor`.
+ */
+export function namedDescriptor(
+  redirect: Redirect,
+  isOpen: (fd: number) => boolean,
+): readonly Redirect[] | null {
+  if (
+    redirect.kind !== RedirectKind.STDOUT &&
+    redirect.kind !== RedirectKind.STDERR &&
+    redirect.kind !== RedirectKind.STDIN
+  ) {
+    return null
+  }
+  const target: unknown = redirect.target
+  const path =
+    target instanceof PathSpec ? target.virtual : typeof target === 'string' ? target : null
+  if (path === null) return null
+  const fd = descriptorOf(path, isOpen)
+  if (fd === null) return null
+  if (redirect.kind === RedirectKind.STDIN) {
+    return [new Redirect({ fd: redirect.fd, target: fd, kind: RedirectKind.DUP_INPUT })]
+  }
+  if (redirect.fd === FD_BOTH) {
+    return [
+      new Redirect({ fd: FD_STDOUT, target: fd, kind: RedirectKind.DUP_OUTPUT }),
+      new Redirect({ fd: FD_STDERR, target: FD_STDOUT, kind: RedirectKind.DUP_OUTPUT }),
+    ]
+  }
+  return [new Redirect({ fd: redirect.fd, target: fd, kind: RedirectKind.DUP_OUTPUT })]
 }
 
 /**

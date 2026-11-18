@@ -2,21 +2,26 @@
 
 use super::quote;
 use crate::vars::{
-    BASH_LINENO, BASH_SOURCE, BASHPID, INTEGER, LINENO, RANDOM, Store, UNASSIGNED, Value, Var,
+    BASH_LINENO, BASH_SOURCE, BASHPID, EPOCHREALTIME, EPOCHSECONDS, INTEGER, LINENO, RANDOM,
+    SECONDS, SRANDOM, Store, UNASSIGNED, Value, Var, ends_at_unset,
 };
 
 /// The bytes a bare `set` single-quotes a value for.
 const SET_QUOTED: &[u8] = b" \t\n'\"\\|&;()<>!{}*[?]^$`";
 
 /// The names the shell computes, which a listing shows with no record.
-const COMPUTED: [&str; 7] = [
+const COMPUTED: [&str; 11] = [
     BASHPID,
     BASH_LINENO,
     BASH_SOURCE,
+    EPOCHREALTIME,
+    EPOCHSECONDS,
     "FUNCNAME",
     LINENO,
     "PIPESTATUS",
     RANDOM,
+    SECONDS,
+    SRANDOM,
 ];
 
 /// The attribute letters a bare `declare` listing narrows to.
@@ -97,6 +102,16 @@ pub fn line(name: &str, var: &Var) -> Vec<u8> {
 /// `BASHPID` and `RANDOM` integers, `RANDOM` holding its last draw. None
 /// for any other name, or one no longer computed.
 pub fn computed(vars: &Store, name: &str) -> Option<Var> {
+    shaped(vars, name, Store::dynamic)
+}
+
+/// What `computed` makes of `name` for a bare listing, which reads
+/// `SECONDS` without making it an integer (`Store::peek`).
+fn shown(vars: &Store, name: &str) -> Option<Var> {
+    shaped(vars, name, Store::peek)
+}
+
+fn shaped(vars: &Store, name: &str, read: fn(&Store, &str) -> Option<Vec<u8>>) -> Option<Var> {
     let (value, base) = match name {
         RANDOM => {
             let held = vars.record(name).and_then(|var| var.value.clone());
@@ -115,8 +130,12 @@ pub fn computed(vars: &Store, name: &str) -> Option<Var> {
             let base = if array.is_empty() { UNASSIGNED } else { 0 };
             (Value::Indexed(array), base)
         }
-        LINENO => (Value::Scalar(vars.dynamic(name)?), 0),
-        BASHPID => (Value::Scalar(vars.dynamic(name)?), INTEGER),
+        LINENO | EPOCHSECONDS | EPOCHREALTIME => (Value::Scalar(read(vars, name)?), 0),
+        SECONDS => (
+            Value::Scalar(read(vars, name)?),
+            if vars.seconds_assigned() { INTEGER } else { 0 },
+        ),
+        BASHPID | SRANDOM => (Value::Scalar(read(vars, name)?), INTEGER),
         _ => return None,
     };
     Some(Var {
@@ -138,9 +157,9 @@ pub fn listing(vars: &Store, letters: &str, skip: &[String]) -> Vec<Vec<u8>> {
         .into_iter()
         .filter(|name| !vars.hidden(name))
         .filter_map(|name| {
-            let var = match computed(vars, name) {
+            let var = match shown(vars, name) {
                 Some(mut var) => {
-                    if matches!(name, LINENO | BASHPID) {
+                    if ends_at_unset(name) && !(name == SECONDS && vars.seconds_assigned()) {
                         var.attrs |= UNASSIGNED;
                     }
                     var
@@ -180,7 +199,7 @@ pub fn assignments(vars: &Store, skip: &[String]) -> Vec<Vec<u8>> {
         .into_iter()
         .filter_map(|name| {
             let array =
-                computed(vars, name).filter(|var| matches!(var.value, Some(Value::Indexed(_))));
+                shown(vars, name).filter(|var| matches!(var.value, Some(Value::Indexed(_))));
             let var = match &array {
                 Some(var) => var,
                 None => vars.visible(name)?,
@@ -232,6 +251,19 @@ mod tests {
     use super::*;
     use crate::vars::{Assoc, Indexed, READONLY, Var};
     use std::sync::Arc;
+
+    #[test]
+    fn a_bare_listing_leaves_seconds_as_it_was() {
+        let mut vars = Store::new(Arc::new(|| 7));
+        vars.set_clock(4_000_000, 1_000_000);
+        vars.set_seconds(10);
+        listing(&vars, "a", &[]);
+        listing(&vars, "", &[]);
+        assignments(&vars, &[]);
+        assert!(!vars.seconds_read());
+        declaration(&mut vars, SECONDS);
+        assert!(vars.seconds_read());
+    }
 
     #[test]
     fn lines_as_bash_prints_them() {
@@ -314,6 +346,7 @@ mod tests {
                 "declare -- LINENO",
                 "declare -a PIPESTATUS=([0]=\"0\")",
                 "declare -i RANDOM",
+                "declare -i SRANDOM",
                 "declare -i n=\"1\"",
             ]
         );
@@ -322,9 +355,26 @@ mod tests {
             [
                 "declare -i BASHPID",
                 "declare -i RANDOM",
+                "declare -i SRANDOM",
                 "declare -i n=\"1\""
             ]
         );
+        vars.set_clock(4_000_000, 1_000_000);
+        let clocked = listed(&vars, "");
+        for line in [
+            "declare -- EPOCHREALTIME",
+            "declare -- EPOCHSECONDS",
+            "declare -- SECONDS",
+        ] {
+            assert!(clocked.iter().any(|l| l == line), "{line}");
+        }
+        vars.set_seconds(5);
+        assert!(
+            listed(&vars, "")
+                .iter()
+                .any(|l| l == "declare -i SECONDS=\"5\"")
+        );
+        vars.set_clock(0, 0);
         assert_eq!(listed(&vars, "pa").len(), 4);
         assert!(listed(&vars, "aA").is_empty());
         let drawn = String::from_utf8(declaration(&mut vars, RANDOM).unwrap()).unwrap();

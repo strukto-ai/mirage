@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { activeDevice, activePipe } from '../dev/device.ts'
+import { activeDevice, activePipe, refuseTty } from '../dev/device.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -66,7 +66,9 @@ export async function write(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   const { files, modified } = accessor.store
-  if (activeDevice(accessor, p) !== null) {
+  const device = activeDevice(accessor, p)
+  refuseTty(device, path.virtual)
+  if (device !== null) {
     if (data instanceof Uint8Array) size = data.byteLength
     else for await (const chunk of chunks(data)) size += chunk.byteLength
     if (size > 0 || !append) modified.set(p, nowIso())

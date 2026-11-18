@@ -269,7 +269,7 @@ impl Shell {
             None => None,
         };
         self.store_mut()?
-            .place(name, var.map(Arc::new))
+            .place_written(name, var.map(Arc::new))
             .map(|old| py_of(py, &host::record_out(&old)))
             .transpose()
     }
@@ -556,9 +556,10 @@ impl Shell {
     /// `${FUNCNAME[@]}` (None once unset made it an ordinary name),
     /// `${BASH_LINENO[@]}`, `${BASH_SOURCE[@]}`, whether the shell is a
     /// `( )` subshell or a forked stage, the bytes left under `max_memory`
-    /// (None for no cap), `$LINENO`, `$BASHPID`, and the voice the shell's
-    /// own diagnostics lead with.
-    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, source_files, paren, memory_room, line, bash_pid, voice, err_trap))]
+    /// (None for no cap), `$LINENO`, `$BASHPID`, the voice the shell's
+    /// own diagnostics lead with, and the time now and when the running
+    /// shell started in epoch microseconds (0 for no clock).
+    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, source_files, paren, memory_room, line, bash_pid, voice, err_trap, clock=0, started=0))]
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
@@ -582,6 +583,8 @@ impl Shell {
         bash_pid: u32,
         voice: Bound<'_, PyAny>,
         err_trap: bool,
+        clock: i64,
+        started: i64,
     ) -> PyResult<()> {
         let texts =
             |list: &[Bound<'_, PyAny>]| list.iter().map(bytes_of).collect::<PyResult<Vec<_>>>();
@@ -638,6 +641,8 @@ impl Shell {
             bash_pid,
             voice: bytes_of(&voice)?,
             err_trap,
+            clock,
+            started,
         };
         self.shell_mut()?.apply(frame);
         self.1 = framed;
@@ -1234,20 +1239,27 @@ impl ShellTask {
         self.asked.as_ref().map(|ask| ask.bind(py).clone())
     }
 
+    /// `clock` is the time the substitution ended, in epoch microseconds
+    /// (0 for no clock), which the words after it read.
+    #[pyo3(signature = (stdout, stderr, status, clock=0))]
     fn answer_substituted(
         &mut self,
         py: Python<'_>,
         stdout: &[u8],
         stderr: &[u8],
         status: i32,
+        clock: i64,
     ) -> PyResult<()> {
         self.answer(
             py,
-            Answer::Substituted(Substitution {
-                stdout: stdout.to_vec(),
-                stderr: stderr.to_vec(),
-                status,
-            }),
+            Answer::Substituted {
+                ran: Substitution {
+                    stdout: stdout.to_vec(),
+                    stderr: stderr.to_vec(),
+                    status,
+                },
+                now_us: clock,
+            },
         )
     }
 

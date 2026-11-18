@@ -55,7 +55,12 @@ pub enum Ask {
 
 /// The host's answer to an `Ask`.
 pub enum Answer {
-    Substituted(Substitution),
+    /// How a command substitution ran, and the host's clock when it ended
+    /// in epoch microseconds (0 for none), which the words after it read.
+    Substituted {
+        ran: Substitution,
+        now_us: i64,
+    },
     Path(Vec<u8>, Option<u32>),
     Resumed,
     /// The subscript's text, None when the host failed, and the shell it
@@ -146,7 +151,10 @@ impl Host for Line {
             read: read.map(<[Field]>::to_vec),
         };
         match self.ask(ask).await {
-            Answer::Substituted(ran) => Ok(ran),
+            Answer::Substituted { ran, now_us } => {
+                shell.vars.set_now(now_us);
+                Ok(ran)
+            }
             Answer::Failed(fault) => Err(fault),
             _ => Err(Fault::Host("an answer that is no substitution")),
         }
@@ -613,11 +621,14 @@ mod tests {
         };
         assert_eq!(body, b"hi");
         assert_eq!(shell.vars.scalar("x"), Some(&b"a b"[..]));
-        task.answer(Answer::Substituted(Substitution {
-            stdout: b"out\n".to_vec(),
-            stderr: Vec::new(),
-            status: 4,
-        }));
+        task.answer(Answer::Substituted {
+            ran: Substitution {
+                stdout: b"out\n".to_vec(),
+                stderr: Vec::new(),
+                status: 4,
+            },
+            now_us: 0,
+        });
         assert!(task.step().is_none());
         let ended = task.output().unwrap();
         let Ok(Expanded::Fields(fields)) = ended.result else {
@@ -626,6 +637,35 @@ mod tests {
         let texts: Vec<Vec<u8>> = fields.iter().map(Field::text).collect();
         assert_eq!(texts, vec![b"outa".to_vec(), b"b".to_vec()]);
         assert_eq!(ended.shell.status, 4);
+    }
+
+    #[test]
+    fn a_substitution_brings_the_time_it_ended_at_to_the_words_after_it() {
+        let tree = Arc::new(crate::shell::parse(b"echo $(sleep 2)$SECONDS"));
+        let word = (0..tree.nodes.len())
+            .find(|&n| tree.kind(n) == "concatenation")
+            .unwrap();
+        let mut shell = shell();
+        shell.vars.set_clock(10_000_000, 10_000_000);
+        let mut task = expand(shell, Arc::clone(&tree), word, Mode::Fields);
+        let Some(Ask::Substitute { .. }) = task.step() else {
+            panic!("expected a substitution");
+        };
+        task.answer(Answer::Substituted {
+            ran: Substitution {
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                status: 0,
+            },
+            now_us: 12_000_000,
+        });
+        assert!(task.step().is_none());
+        let ended = task.output().unwrap();
+        let Ok(Expanded::Fields(fields)) = ended.result else {
+            panic!("expected fields");
+        };
+        let texts: Vec<Vec<u8>> = fields.iter().map(Field::text).collect();
+        assert_eq!(texts, vec![b"2".to_vec()]);
     }
 
     #[test]

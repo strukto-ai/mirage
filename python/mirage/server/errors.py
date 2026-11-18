@@ -117,6 +117,7 @@ ERRNO_CODE: dict[FsCondition, ErrorCode] = {
     FsCondition.EDQUOT: ErrorCode.STORAGE_FULL,
     FsCondition.EIO: ErrorCode.INTERNAL,
     FsCondition.EPIPE: ErrorCode.INTERNAL,
+    FsCondition.ENXIO: ErrorCode.INVALID_REQUEST,
     FsCondition.EBADF: ErrorCode.INTERNAL,
 }
 

@@ -23,6 +23,7 @@ from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.rs.stream import OpenStream, close_stream, stream_output_chunks
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import STDIN_PATHS
 from mirage.types import (
     FileStat,
     FileType,
@@ -48,9 +49,10 @@ def is_stdin(path: PathSpec, dash: bool = True) -> bool:
         path (PathSpec): the operand.
         dash (bool): a literal ``-`` names stdin, as it does for most
             GNU tools; util-linux ``rev`` and binutils ``strings`` open it
-            as a file, so only ``/dev/stdin`` is stdin to them.
+            as a file, so only ``/dev/stdin`` (or ``/dev/fd/0``) is stdin
+            to them.
     """
-    return (dash and path.raw_path == "-") or path.virtual == "/dev/stdin"
+    return (dash and path.raw_path == "-") or path.virtual in STDIN_PATHS
 
 
 def never_opened(

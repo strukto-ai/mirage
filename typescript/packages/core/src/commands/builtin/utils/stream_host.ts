@@ -26,6 +26,7 @@ import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 import { openStream, serveRequests, type OpenStream, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
+import { STDIN_PATHS } from '../../../shell/constants.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -37,7 +38,9 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { dispatchOf, linkLocation, linksOf, mountsOf } from './links.ts'
 import { isStdin, rangedStream, resolveSource } from './stream.ts'
 
-const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
+// The operands a program reads its standard input by: `-`, and the paths that
+// name descriptor 0.
+const STDIN_NAMES: ReadonlySet<string> = new Set(['-', ...STDIN_PATHS])
 
 async function* spooled(spool: ByteSpool): AsyncIterable<Uint8Array> {
   try {

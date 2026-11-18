@@ -117,6 +117,7 @@ from mirage.workspace.session.state import (
     deciding,
     env_is_readonly,
     seed_parent,
+    seed_shell,
     visible_env,
 )
 from mirage.workspace.snapshot import ContentDriftError
@@ -766,6 +767,7 @@ async def _run_as_shell(
         session.process_id = session.shell_pid = process.record.pid
         if not env_is_readonly(session, PPID):
             seed_parent(session, 0)
+        seed_shell(session)
 
     try:
         process = ws.processes.start(

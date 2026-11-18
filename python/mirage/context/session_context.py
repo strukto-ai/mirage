@@ -48,7 +48,7 @@ from mirage.rs.policy import visibility_matcher
 from mirage.shell.console import JobConsole
 from mirage.shell.descriptors import FileDescription
 from mirage.shell.types import Redirect
-from mirage.shell.voice import use_voice
+from mirage.shell.voice import shell_voice, use_voice
 from mirage.types import (
     Limit,
     MountMode,
@@ -138,6 +138,10 @@ class Caller:
             targets, keyed by its command node.
         program (SessionState | None): the session a program line (find
             -exec) runs in.
+        exec_failure (str | None): what leads the report of a program a
+            program line cannot run, in the words of the program that
+            execs it (``timeout: failed to run command 'x'``); None for
+            the shell's own.
         call (tuple[DecisionOwner, HandOff, str] | None): the call an
             op-level answer covers: its ledger, hand-off and session.
         policy_read (bool): whether the call is a policy program's own
@@ -207,6 +211,7 @@ class Caller:
         | None
     ) = None
     program: SessionState | None = None
+    exec_failure: str | None = None
     call: tuple[DecisionOwner, HandOff, str] | None = None
     policy_read: bool = False
     version_reads: bool = True
@@ -924,7 +929,9 @@ def redirect_runner_for(node_id: int) -> RedirectRunner | None:
     return bound[2]
 
 
-def set_program_invocation(session: SessionState) -> CallerToken:
+def set_program_invocation(
+    session: SessionState, failure: str | None = None
+) -> CallerToken:
     """Mark the line about to run in a session as a program run.
 
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
@@ -936,15 +943,37 @@ def set_program_invocation(session: SessionState) -> CallerToken:
 
     Args:
         session (SessionState): the session the program line runs in.
+        failure (str | None): what leads the report of a program the
+            line cannot run, in the words of the program that execs it
+            (``timeout: failed to run command 'x'``); None keeps the
+            shell's.
     """
-    return _bind_changes(program=session)
+    return _bind_changes(program=session, exec_failure=failure)
 
 
 def clear_program_invocation() -> CallerToken:
     """Mark the line about to run as a shell's own again: a nested shell
     (``-exec sh -c ...``) is a program, and the builtins it runs are its
     builtins, ``printf -v`` included."""
-    return _bind_changes(program=None)
+    return _bind_changes(program=None, exec_failure=None)
+
+
+def missing_program(name: str) -> tuple[str, str, str]:
+    """How a program the line cannot run is reported: what leads the line
+    before its colon, why for a name no folder on PATH holds, and what
+    leads a file PATH holds that cannot run, which bash names by its path
+    (empty to lead with the first). The shell's voice and ``command not
+    found``; in a line a program execs (``timeout``), that program's
+    words, which name the word, and execvp's reason.
+
+    Args:
+        name (str): the program's word.
+    """
+    failure = current_caller().exec_failure
+    if failure is None:
+        voice = shell_voice()
+        return f"{voice}{name}", "command not found", voice
+    return failure, "No such file or directory", ""
 
 
 def is_program_invocation(session: SessionState) -> bool:

@@ -179,7 +179,14 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 EXEC_PRELUDE,
                 "sh",
                 "/work",
-                *own_session(run_argv("run", "run", words)),
+                *own_session(
+                    run_argv(
+                        "run",
+                        "run",
+                        words,
+                        (f"bash: {words[0]}: ", "command not found", "bash: "),
+                    )
+                ),
             ],
             stdin,
         ),

@@ -59,6 +59,7 @@ class FsCondition(StrEnum):
     EFBIG = "efbig"
     EDQUOT = "edquot"
     EPIPE = "epipe"
+    ENXIO = "enxio"
     NO_XATTR = "no_xattr"
     STALE_WRITE = "stale_write"
 

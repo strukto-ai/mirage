@@ -11,11 +11,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import errno
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 
 from mirage.context import DEFAULT_UMASK
+from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
 from mirage.io.stream import drain, slice_stream
@@ -311,6 +313,65 @@ async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
         logger.debug("write target %s has no stat: %s", scope.raw_path, exc)
         return None
     return stat.size if isinstance(stat, FileStat) else None
+
+
+async def open_read(
+    dispatch: DispatchFn, scope: PathSpec
+) -> tuple[ByteSource, bool]:
+    """Open ``scope`` for an input redirect: its stream, and whether it
+    is a character device that refuses a whole read, as an endless one
+    does (``/dev/zero``, ``/dev/urandom``), read instead as a kernel
+    answers each read of one (``_device_ranges``).
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        scope (PathSpec): the file read.
+    """
+    try:
+        data, _ = await dispatch("read", scope, stream=True)
+    except OSError as exc:
+        if exc.errno != errno.EINVAL or not await _is_device(dispatch, scope):
+            raise
+        return _device_ranges(dispatch, scope), True
+    return (b"" if data is None else data), False
+
+
+async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:
+    """Whether ``scope`` is a character device.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        scope (PathSpec): the file.
+    """
+    try:
+        stat, _ = await dispatch("stat", scope)
+    except FS_ERRORS as exc:
+        logger.debug("read target %s has no stat: %s", scope.raw_path, exc)
+        return False
+    return isinstance(stat, FileStat) and stat.type is FileType.CHAR_DEVICE
+
+
+async def _device_ranges(
+    dispatch: DispatchFn, scope: PathSpec
+) -> AsyncIterator[bytes]:
+    """A character device read in successive ranges, endless until the
+    reader stops, ended by a short one. Each range is a dispatcher read,
+    so hides, path rules and policies judge it.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        scope (PathSpec): the device.
+    """
+    offset = 0
+    while True:
+        chunk, _ = await dispatch(
+            "read", scope, offset=offset, size=ZERO_CHUNK_SIZE, filetype=None
+        )
+        if chunk:
+            yield chunk
+        if len(chunk) < ZERO_CHUNK_SIZE:
+            return
+        offset += len(chunk)
 
 
 async def create_counted(

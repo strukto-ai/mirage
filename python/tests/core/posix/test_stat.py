@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.core.posix.stat import parse_tree, tree_command
 from mirage.core.posix.types import TreeRow
 
@@ -33,9 +35,44 @@ def test_tree_command_bounds_the_depth():
 def test_parse_tree_reads_each_record():
     out = b"d 755 4096 1700000000.5 1700000001.0 root root \0f 644 3 1 2 a b x y\0"
     assert parse_tree(out) == [
-        TreeRow("d", 0o755, 4096, 1700000000, 1700000001, "root", "root", ""),
-        TreeRow("f", 0o644, 3, 1, 2, "a", "b", "x y"),
+        TreeRow(
+            "d",
+            0o755,
+            4096,
+            1700000000,
+            1700000001,
+            1700000000500,
+            1700000001000,
+            "root",
+            "root",
+            "",
+        ),
+        TreeRow("f", 0o644, 3, 1, 2, 1000, 2000, "a", "b", "x y"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("stamp", "want"),
+    [
+        ("1700000000.1234567890", 1700000000123),
+        ("1.0004999999", 1000),
+        ("1.0005000000", 1001),
+        ("1.", 1000),
+        ("-1.5000000000", -1500),
+    ],
+)
+def test_parse_tree_keeps_the_time_to_the_millisecond(stamp, want):
+    rows = parse_tree(f"f 644 0 {stamp} {stamp} a b x\0".encode())
+    assert rows is not None
+    assert (rows[0].mtime_ms, rows[0].atime_ms) == (want, want)
+
+
+# The whole seconds stay those SFTP reports, never rounded across a second
+# as the milliseconds are.
+def test_parse_tree_keeps_sftp_s_whole_seconds():
+    rows = parse_tree(b"f 644 0 1700000000.9996 1700000000.9996 a b x\0")
+    assert rows is not None
+    assert (rows[0].mtime, rows[0].mtime_ms) == (1700000000, 1700000001000)
 
 
 def test_parse_tree_refuses_a_cut_record():

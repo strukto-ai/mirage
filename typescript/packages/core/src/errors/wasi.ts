@@ -40,6 +40,7 @@ export const WASI: Record<FsCondition, number> = {
   EFBIG: 22,
   EDQUOT: 19,
   EPIPE: 64,
+  ENXIO: 60,
   // preview1 has no xattr syscalls, so this row is unreachable from a
   // guest; ENOTSUP is the honest answer if a future host ever asks.
   NO_XATTR: 58,
