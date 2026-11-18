@@ -157,12 +157,13 @@ impl<T> WordMap<T> {
                 map.fallback = Some(at);
                 continue;
             }
-            map.exact.insert(word.clone(), at);
             if word
                 .iter()
                 .any(|&unit| matches!(char::from_u32(unit), Some('*' | '?' | '[')))
             {
                 map.globs.push((CompiledGlob::new(word.clone()), at));
+            } else {
+                map.exact.insert(word.clone(), at);
             }
         }
         Some(map)
@@ -852,6 +853,12 @@ mod tests {
         assert_eq!(outcome(&exception, "git checkout", &[], &["dev"]), Deny);
         let star = json!({"git": {"add": {"operands": {"[*]": "allow", "*": "deny"}}}});
         assert_eq!(outcome(&star, "git add", &[], &["*"]), Allow);
+        assert_eq!(outcome(&star, "git add", &[], &["[*]"]), Deny);
+        let tags = json!({"git": {"checkout": {"operands": {"v[0-9]*": "allow", "*": "deny"}}}});
+        assert_eq!(outcome(&tags, "git checkout", &[], &["v2.1"]), Allow);
+        assert_eq!(outcome(&tags, "git checkout", &[], &["v[0-9]*"]), Deny);
+        let bracket = json!({"echo": {"operands": {"[": "deny"}}});
+        assert_eq!(outcome(&bracket, "echo", &[], &["["]), Deny);
         let values =
             json!({"curl": {"--request": {"values": {"GET": "allow", "G*": "ask", "*": "deny"}}}});
         assert_eq!(outcome(&values, "curl", &["--request=GET"], &[]), Allow);

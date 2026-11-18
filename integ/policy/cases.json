@@ -669,6 +669,21 @@
    ]
   },
   {
+   "id": "a_glob_key_matches_as_a_glob_and_never_as_its_own_text",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "tags", "profile": {"commands": {"echo": {"operands": {"v[0-9]*": "allow", "*": "deny"}}}}},
+    {"op": "session", "id": "star", "profile": {"commands": {"echo": {"operands": {"[*]": "deny"}}}}},
+    {"op": "session", "id": "only_star", "profile": {"commands": {"echo": {"operands": {"[*]": "allow", "*": "deny"}}}}},
+    {"op": "exec", "session": "tags", "command": "echo v2", "expect": {"value": {"exit_code": 0, "stdout": "v2\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "tags", "command": "echo 'v[0-9]*'", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo * is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["*"]}}}},
+    {"op": "exec", "session": "star", "command": "echo '*'", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo [*] is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["[*]"]}}}},
+    {"op": "exec", "session": "star", "command": "echo '[*]'", "expect": {"value": {"exit_code": 0, "stdout": "[*]\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "only_star", "command": "echo '*'", "expect": {"value": {"exit_code": 0, "stdout": "*\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "only_star", "command": "echo '[*]'", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo * is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["*"]}}}}
+   ]
+  },
+  {
    "id": "a_rule_matches_an_option_in_any_spelling",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
