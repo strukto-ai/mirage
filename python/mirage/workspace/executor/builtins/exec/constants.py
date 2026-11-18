@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.types import RedirectKind
+
 # What `exec >&-` leaves a stream pointing at: a closed descriptor,
 # whose writes are dropped. bash makes them fail with `Bad file
 # descriptor`; mirage has no descriptor to fail, so it drops instead,
@@ -68,3 +70,15 @@ EXEC_STREAM_UNBOUND: dict[int, dict[str, bool | None]] = {
         "exec_stderr_input": None,
     },
 }
+
+# The redirects that name no file to open: a body the shell feeds
+# (heredoc, herestring), a word that did not expand to one target, or
+# one only the runtime could expand. The redirect gate is not asked.
+OPENS_NO_FILE = frozenset(
+    {
+        RedirectKind.HEREDOC,
+        RedirectKind.HERESTRING,
+        RedirectKind.AMBIGUOUS,
+        RedirectKind.UNEXPANDED,
+    }
+)

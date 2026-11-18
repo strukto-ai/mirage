@@ -72,12 +72,14 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
     Refused,
+    admit_redirect,
     classified_words,
     gate,
     redirect_paths,
     resolved,
     statement_redirects,
     statement_stdin,
+    unowned_redirects,
 )
 from mirage.workspace.node.inner_lines import (
     InnerLine,
@@ -1452,7 +1454,9 @@ async def admit_line(
     installed CLI's verb path walked) where it stands, a ``cd`` before
     it on the line included, and the first refusal is the line's. A
     statement's redirect targets are read as words of its command, so
-    ``cat < /data/secret`` is judged on the file it opens; the lines a
+    ``cat < /data/secret`` is judged on the file it opens, and a redirect
+    no command owns (``{ cat; } < f``, ``> f``) is judged on its target
+    as the shell would open it (``admit_redirect``); the lines a
     command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
     ``inner_lines``) are judged in turn; and what the runtime would do
     past the gate is refused under a rule, or a user ``pre_command``
@@ -1495,7 +1499,10 @@ async def admit_line(
             refused = await off_line_refusal(one, off_line)
         if refused is not None:
             return refused
-    return None
+    targets = redirect_paths(
+        unowned_redirects(ast, tilde_home(session)), registry, session.cwd
+    )
+    return await admit_redirect(targets, session, registry, namespace)
 
 
 async def off_line_refusal(

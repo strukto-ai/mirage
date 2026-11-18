@@ -75,6 +75,9 @@ enum Request {
     Decide {
         facts: CommandFacts,
     },
+    Redirect {
+        paths: Vec<Text>,
+    },
     NamingRules {
         tokens: Vec<Text>,
         #[serde(default)]
@@ -191,6 +194,7 @@ impl Policy {
             Request::ReadsArgs { name } => reply(out, rules.reads_args(&name)),
             Request::ScopesPaths { name } => reply(out, rules.scopes_paths(&name)),
             Request::Decide { facts } => reply(out, rules.decide(&facts)),
+            Request::Redirect { paths } => reply(out, rules.redirect(&paths)),
             Request::NamingRules { tokens, line, tool } => {
                 reply(out, rules.naming(&tokens, line.as_ref(), tool))
             }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../../../shell/voice.ts'
-import type { RedirectResult } from '../../../../context/session_context.ts'
+import type { RedirectGuard, RedirectResult } from '../../../../context/session_context.ts'
 import { callerSignal, runAsProgram } from '../../../../context/session_context.ts'
 import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
 import { PipeInput, share, SharedInput } from '../../../../io/async_line_iterator.ts'
@@ -81,6 +81,7 @@ import {
   CLOSED,
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
+  OPENS_NO_FILE,
   TO_STDERR,
   TO_STDIN,
   TO_STDOUT,
@@ -423,6 +424,9 @@ export async function installExecRedirects(
   redirects: Redirect[],
   stdin: ByteSource | null = null,
   expand?: (redirect: Redirect) => Promise<Redirect>,
+  // Admits each file target before it opens; a refusal rolls back as a
+  // failed open does, its decision kept on the result.
+  guard?: RedirectGuard,
 ): Promise<RedirectResult> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
@@ -440,9 +444,9 @@ export async function installExecRedirects(
     execStdinUnreadable: session.execStdinUnreadable,
     execStdinIdentity: session.execStdinIdentity,
   }
-  let err: Uint8Array | null
+  let err: Uint8Array | RedirectResult | null
   try {
-    err = await install(owned, dispatch, session, redirects, stdin, expand)
+    err = await install(owned, dispatch, session, redirects, stdin, expand, guard)
   } catch (error) {
     Object.assign(session, saved)
     await session.releaseInputs(owned)
@@ -454,7 +458,11 @@ export async function installExecRedirects(
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   }
   try {
-    return await rollBack(dispatch, session, saved, err)
+    if (err instanceof Uint8Array) return await rollBack(dispatch, session, saved, err)
+    const refused = err[1]
+    const rolled = await rollBack(dispatch, session, saved, await materialize(refused.stderr))
+    rolled[1].decision = refused.decision
+    return rolled
   } finally {
     await session.releaseInputs([...before, ...owned])
   }
@@ -470,9 +478,19 @@ async function install(
   redirects: readonly Redirect[],
   stdin: ByteSource | null,
   expand?: (redirect: Redirect) => Promise<Redirect>,
-): Promise<Uint8Array | null> {
+  guard?: RedirectGuard,
+): Promise<Uint8Array | RedirectResult | null> {
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
+    const target = redirect.target
+    if (
+      guard !== undefined &&
+      (typeof target === 'string' || target instanceof PathSpec) &&
+      !OPENS_NO_FILE.has(redirect.kind)
+    ) {
+      const refused = await guard([typeof target === 'string' ? toScope(target) : target], stdin)
+      if (refused !== null) return refused
+    }
     for (const operation of redirectOperations(redirect)) {
       const error = await installDescriptor(owned, dispatch, session, operation, stdin)
       if (error !== null) return error

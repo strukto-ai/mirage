@@ -935,7 +935,11 @@ mod tests {
         );
         assert_eq!(
             keys("cp", &["--force"], &["/data/a", "/tmp/b"]),
-            (vec![text("cp")], vec![text("--force")], vec![text("/data/*")])
+            (
+                vec![text("cp")],
+                vec![text("--force")],
+                vec![text("/data/*")]
+            )
         );
     }
 

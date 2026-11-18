@@ -1082,3 +1082,109 @@ async def test_a_shell_test_is_answered_by_its_own_name_in_an_allow_list(
         }
     }
     assert await _tested(listed, line) == (0, "0\n", "")
+
+
+SEALED = {
+    "commands": {
+        "*": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret.txt"],
+            },
+        ]
+    }
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "{ cat; } < /data/secret.txt",
+        'while read -r l; do echo "$l"; done < /data/secret.txt',
+        "(cat) < /data/secret.txt",
+        "if true; then cat; fi < /data/secret.txt",
+        "> /data/secret.txt",
+        "x=1 > /data/secret.txt",
+        "exec > /data/secret.txt",
+        "{ cat; } < /data/link",
+    ],
+)
+async def test_a_redirect_no_command_owns_meets_the_root_path_leaf(line):
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"sealed": SEALED},
+    )
+    try:
+        await ws.shell(
+            "echo top > /data/secret.txt; ln -s /data/secret.txt /data/link"
+        )
+        ws.create_session("s", profile="sealed")
+        io = await ws.shell(line, session_id="s")
+        named = "/data/link" if "link" in line else "/data/secret.txt"
+        assert (io.exit_code, await io.materialize_stdout()) == (1, b"")
+        assert await io.materialize_stderr() == (
+            f"bash: line 1: {named}: Permission denied\n".encode()
+        )
+        assert io.decision is not None
+        assert (io.decision.kind, io.decision.reason) == ("deny", "sealed")
+        kept = await ws.shell("cat /data/secret.txt")
+        assert await kept.materialize_stdout() == b"top\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_no_command_owns_meets_no_leaf_about_commands():
+    closed = {"commands": {"*": "deny", "ls": "allow", "cat": "allow"}}
+    named = {
+        "commands": {
+            "cat": {"decision": "deny", "paths": ["/data/secret.txt"]}
+        }
+    }
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"closed": closed, "named": named},
+    )
+    try:
+        await ws.shell("echo top > /data/secret.txt")
+        ws.create_session("closed", profile="closed")
+        ws.create_session("named", profile="named")
+        io = await ws.shell("{ ls /data; } > /data/out", session_id="closed")
+        assert io.exit_code == 0
+        io = await ws.shell("{ cat; } < /data/secret.txt", session_id="named")
+        assert (io.exit_code, await io.materialize_stdout()) == (0, b"top\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_admit_line_judges_a_redirect_no_command_owns():
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": SEALED},
+    )
+    try:
+        session = ws._session_mgr.get(ws._session_mgr.default_id)
+        registry, namespace = ws._registry, ws._namespace
+        for line in ("{ cat; } < /data/secret.txt", "> /data/secret.txt"):
+            refused = await admit_line(
+                parse(line), session, registry, namespace
+            )
+            assert refused is not None
+            assert refused.exit_code == 1
+            assert refused.stderr.endswith(
+                b": /data/secret.txt: Permission denied\n"
+            )
+        for line in ("{ cat; } < /data/other", "cat < /data/other"):
+            assert (
+                await admit_line(parse(line), session, registry, namespace)
+                is None
+            )
+    finally:
+        await ws.close()

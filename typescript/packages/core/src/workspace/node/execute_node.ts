@@ -16,7 +16,7 @@ import { caseHead, loopHead } from '../../shell/printer.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { traceLine } from '../../shell/xtrace.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
-import type { RedirectResult } from '../../context/session_context.ts'
+import type { RedirectGuard, RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
   isProgramInvocation,
@@ -111,7 +111,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry, type SessionState } from '../session/session.ts'
 import { bindLastWord, positionalParams, sessionArith } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { type Admitted, admitTest } from './admission.ts'
+import { type Admitted, admitRedirect, admitTest } from './admission.ts'
 import { executeAssignment } from './assignment.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { executeDeclaration } from './declaration.ts'
@@ -586,7 +586,14 @@ async function runRedirected(
         new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
       ]
     }
-    return await installExecRedirects(dispatch, session, redirects, stdin, expand)
+    return await installExecRedirects(
+      dispatch,
+      session,
+      redirects,
+      stdin,
+      expand,
+      redirectGate(context, registry, namespace),
+    )
   }
   // A heredoc's operator line reads the routed stdout, so then it is
   // returned rather than written. A simple command expands its words
@@ -655,7 +662,7 @@ async function runRedirected(
         false,
         sink,
         expand,
-        undefined,
+        redirectGate(context, registry, namespace),
         '',
         [],
         forked,
@@ -676,6 +683,36 @@ async function runRedirected(
     context.frame.diagnostics = outer
   }
   return [stdout, io, execNode]
+}
+
+/**
+ * The gate of a redirect no command owns (a compound's, a bare one,
+ * `exec`'s): the session's trees judge each target before it opens
+ * (`admitRedirect`), and a refusal replaces the statement's run as a
+ * failed open does. Mirrors Python's _redirect_gate.
+ */
+function redirectGate(
+  context: EvaluationContext,
+  registry: MountRegistry,
+  namespace: Namespace,
+): RedirectGuard {
+  return async (paths) => {
+    const refused = await admitRedirect(paths, context.session, registry, namespace)
+    if (refused === null) return null
+    const io = new IOResult({
+      exitCode: refused.exitCode,
+      stderr: refused.stderr,
+      decision: refused.decision,
+    })
+    const node = new ExecutionNode({
+      command: 'redirect',
+      exitCode: refused.exitCode,
+      stderr: refused.stderr,
+      refused: true,
+      unopened: true,
+    })
+    return [null, io, node]
+  }
 }
 
 async function recursePipeStderr(

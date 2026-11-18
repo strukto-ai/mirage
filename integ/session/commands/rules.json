@@ -40,7 +40,7 @@
       }
     },
     {
-      "id": "cmd_a_command_path_rule_says_nothing_for_a_bare_redirect",
+      "id": "cmd_a_root_path_rule_refuses_a_bare_redirect",
       "seq": 923020,
       "targets": [
         "ram-commands"
@@ -49,7 +49,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: line 1: /repo/sealed/x: No such file or directory\n"
+        "stderr": "bash: line 1: /repo/sealed/x: Permission denied\n"
       }
     },
     {

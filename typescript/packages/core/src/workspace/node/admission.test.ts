@@ -914,3 +914,75 @@ describe("the shell's own tests", () => {
     expect(await tested(listed, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
   })
 })
+
+const SEALED = SessionProfile({
+  commands: {
+    '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] }],
+  },
+})
+
+describe('a redirect no command owns', () => {
+  it.each([
+    '{ cat; } < /data/secret.txt',
+    'while read -r l; do echo "$l"; done < /data/secret.txt',
+    '(cat) < /data/secret.txt',
+    'if true; then cat; fi < /data/secret.txt',
+    '> /data/secret.txt',
+    'x=1 > /data/secret.txt',
+    'exec > /data/secret.txt',
+    '{ cat; } < /data/link',
+  ])('meets the root path leaf: %s', async (line) => {
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { sealed: SEALED } },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/secret.txt; ln -s /data/secret.txt /data/link')
+    w.createSession('s', { profile: 'sealed' })
+    const io = await w.shell(line, { sessionId: 's' })
+    const named = line.includes('link') ? '/data/link' : '/data/secret.txt'
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([1, ''])
+    expect(io.stderrText).toBe(`bash: line 1: ${named}: Permission denied\n`)
+    expect([io.decision?.kind, io.decision?.reason]).toEqual(['deny', 'sealed'])
+    const kept = await w.shell('cat /data/secret.txt')
+    expect(new TextDecoder().decode(kept.stdout)).toBe('top\n')
+  })
+
+  it('meets no leaf about commands', async () => {
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          closed: SessionProfile({ commands: { '*': 'deny', ls: 'allow', cat: 'allow' } }),
+          named: SessionProfile({
+            commands: { cat: { decision: 'deny', paths: ['/data/secret.txt'] } },
+          }),
+        },
+      },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/secret.txt')
+    w.createSession('closed', { profile: 'closed' })
+    w.createSession('named', { profile: 'named' })
+    expect((await w.shell('{ ls /data; } > /data/out', { sessionId: 'closed' })).exitCode).toBe(0)
+    const io = await w.shell('{ cat; } < /data/secret.txt', { sessionId: 'named' })
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'top\n'])
+  })
+
+  it('is judged by admitLine', async () => {
+    const w = ws(SEALED)
+    const session = w.sessionManager.get(w.sessionManager.defaultId)
+    const reparse = (text: string) => parse(text)
+    for (const text of ['{ cat; } < /data/secret.txt', '> /data/secret.txt']) {
+      const refused = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
+      expect(refused?.exitCode).toBe(1)
+      expect(new TextDecoder().decode(refused?.stderr)).toMatch(
+        /: \/data\/secret\.txt: Permission denied\n$/,
+      )
+    }
+    for (const text of ['{ cat; } < /data/other', 'cat < /data/other']) {
+      expect(await admitLine(parse(text), session, w.registry, w.namespace, reparse)).toBeNull()
+    }
+  })
+})

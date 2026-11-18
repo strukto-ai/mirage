@@ -57,12 +57,14 @@ import type { SessionState } from '../session/session.ts'
 import { tildeHome } from '../session/shell_dirs.ts'
 import { envIsReadonly, seedVar, setAttr } from '../session/state.ts'
 import {
+  admitRedirect,
   classifiedWords,
   gate,
   redirectPaths,
   resolved,
   statementRedirects,
   statementStdin,
+  unownedRedirects,
   type Refused,
 } from './admission.ts'
 import {
@@ -1179,7 +1181,9 @@ async function admitted(
  * path-shaped word a path, an installed CLI's verb path walked) where it
  * stands, a `cd` before it on the line included, and the first refusal is
  * the line's. A statement's redirect targets are read as words of its
- * command, so `cat < /data/secret` is judged on the file it opens; the lines
+ * command, so `cat < /data/secret` is judged on the file it opens, and a
+ * redirect no command owns (`{ cat; } < f`, `> f`) is judged on its target
+ * as the shell would open it (`admitRedirect`); the lines
  * a command runs (`eval`, `sh -c`, `xargs`, `env` ... see `innerLines`) are
  * judged in turn; and what the runtime would do past the gate is refused
  * under a rule, or a user `preCommand` policy, that would have read it
@@ -1226,7 +1230,8 @@ export async function admitLine(
       (offLine === null ? null : await offLineRefusal(one, offLine))
     if (refused !== null) return refused
   }
-  return null
+  const targets = redirectPaths(unownedRedirects(root, tildeHome(session)), registry, session.cwd)
+  return admitRedirect(targets, session, registry, namespace)
 }
 
 /**

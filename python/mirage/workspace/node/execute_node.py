@@ -142,7 +142,7 @@ from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.admission import admit_test
+from mirage.workspace.node.admission import admit_redirect, admit_test
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
@@ -709,7 +709,12 @@ async def _run_redirected(
                 ExecutionNode(command="exec", exit_code=2, stderr=err),
             )
         return await install_exec_redirects(
-            dispatch, session, redirects, stdin, expand=expand
+            dispatch,
+            session,
+            redirects,
+            stdin,
+            expand=expand,
+            guard=_redirect_gate(context, registry, namespace),
         )
     # A heredoc's operator line reads the routed stdout, so then it is
     # returned rather than written. A simple command expands its words
@@ -790,6 +795,7 @@ async def _run_redirected(
                 call_stack,
                 sink=sink,
                 expand=expand,
+                guard=_redirect_gate(context, registry, namespace),
                 forked=forked,
                 follow=namespace.session_links(context.session).follow,
             )
@@ -804,6 +810,45 @@ async def _run_redirected(
     finally:
         context.frame.diagnostics = outer
     return stdout, io, exec_node
+
+
+def _redirect_gate(
+    context: EvaluationContext, registry: MountRegistry, namespace: Namespace
+) -> RedirectGuard:
+    """The gate of a redirect no command owns (a compound's, a bare
+    one, ``exec``'s): the session's trees judge each target before it
+    opens (``admit_redirect``), and a refusal replaces the statement's
+    run as a failed open does.
+
+    Args:
+        context (EvaluationContext): the evaluation's session.
+        registry (MountRegistry): registry holding the decision ledger.
+        namespace (Namespace): the link table.
+    """
+
+    async def gate(
+        paths: tuple[PathSpec, ...], given: ByteSource | None
+    ) -> RedirectResult | None:
+        refused = await admit_redirect(
+            paths, context.session, registry, namespace
+        )
+        if refused is None:
+            return None
+        io = IOResult(
+            exit_code=refused.exit_code,
+            stderr=refused.stderr,
+            decision=refused.decision,
+        )
+        node = ExecutionNode(
+            command="redirect",
+            exit_code=refused.exit_code,
+            stderr=refused.stderr,
+            refused=True,
+        )
+        node.unopened = True
+        return None, io, node
+
+    return gate
 
 
 def _is_bare_exec(command: TSNodeLike | None) -> bool:

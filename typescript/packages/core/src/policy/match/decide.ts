@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fromUnits } from '../../rs/document.ts'
+import { fromUnits, units } from '../../rs/document.ts'
 import { admissionMatcher, ruleTable } from '../../rs/policy.ts'
 import {
   Outcome,
@@ -21,6 +21,7 @@ import {
   type CommandRule,
   type Ruling,
 } from '../types.ts'
+import type { PathSpec } from '../../types.ts'
 import { commandFacts, reasonOf } from './rule.ts'
 
 /**
@@ -101,5 +102,50 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
     asks: answer.asks.map(ruleAt),
     matched,
     reason: rule === null ? '' : reasonOf(rule, matched),
+  }
+}
+
+/**
+ * The profile's answer about the files a redirect opens that no command
+ * owns: a compound statement's (`{ cat; } < f`, a loop, a subshell) or
+ * a bare one (`> f`). Only a root leaf scoped to a path the redirect
+ * opens speaks; a leaf with no paths is about commands, so under
+ * `{"*": deny, ls: allow}` the group `{ ls; } > out` meets the same
+ * answer as `ls > out`. Mirrors Python's redirect_ruling.
+ */
+export function redirectRuling(paths: readonly PathSpec[], rules: AdmissionRules | null): Ruling {
+  if (rules === null || paths.length === 0)
+    return {
+      outcome: Outcome.ALLOW,
+      rule: null,
+      matchedPath: null,
+      source: '',
+      asks: [],
+      matched: null,
+      reason: '',
+    }
+  const answer = admissionMatcher(rules).ask('redirect', {
+    paths: paths.map((p) => units(p.virtual)),
+  }) as {
+    readonly outcome: Outcome
+    readonly rule: number | null
+    readonly matched_path: number[] | null
+    readonly asks: readonly number[]
+  }
+  const table = ruleTable(rules)
+  const ruleAt = (id: number): CommandRule => {
+    const rule = table[id]
+    if (rule === undefined) throw new Error('Invalid policy rule reply')
+    return rule
+  }
+  const rule = answer.rule === null ? null : ruleAt(answer.rule)
+  return {
+    outcome: answer.outcome,
+    rule,
+    matchedPath: answer.matched_path === null ? null : fromUnits(answer.matched_path),
+    source: rule === null ? '' : sourceOf(rule),
+    asks: answer.asks.map(ruleAt),
+    matched: null,
+    reason: rule === null ? '' : reasonOf(rule, null),
   }
 }

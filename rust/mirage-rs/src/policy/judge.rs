@@ -227,6 +227,60 @@ impl AdmissionMatcher {
         }
     }
 
+    /// Judge the files a redirect opens that no command owns: a compound
+    /// statement's (`{ cat; } < f`, a loop, a subshell) or a bare one
+    /// (`> f`). There is no command to walk, so only a root leaf scoped
+    /// to a path the redirect opens speaks; a root leaf with no paths
+    /// is about commands and says nothing here. Each tree that applies
+    /// is judged on its own and the strictest wins, as in `decide`.
+    pub fn redirect(&self, paths: &[Text]) -> Ruling {
+        let read = Read::new(&[], None);
+        let line = read.line(true);
+        let mut best: Option<(Verdict, &Text)> = None;
+        let mut asks: Vec<usize> = Vec::new();
+        for scoped in &self.trees {
+            let branches = scoped.tree.walk(&line);
+            for path in paths {
+                if scoped
+                    .mount
+                    .as_ref()
+                    .is_some_and(|mount| !under(path, mount))
+                {
+                    continue;
+                }
+                let verdict = resolve(&branches, &self.table, &|id| {
+                    !self.rules[id].paths.is_empty() && self.covers(id, path)
+                });
+                for &id in &verdict.asks {
+                    if !asks.contains(&id) {
+                        asks.push(id);
+                    }
+                }
+                if best
+                    .as_ref()
+                    .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
+                {
+                    best = Some((verdict, path));
+                }
+            }
+        }
+        let Some((verdict, path)) = best else {
+            return Ruling::default();
+        };
+        let refuses = verdict.outcome != Outcome::Allow;
+        Ruling {
+            outcome: verdict.outcome,
+            rule: verdict.leaf.filter(|_| refuses),
+            matched_path: refuses.then(|| path.clone()),
+            asks: if verdict.outcome == Outcome::Ask {
+                asks
+            } else {
+                Vec::new()
+            },
+            matched: None,
+        }
+    }
+
     /// A line's walk through every tree, which the host keeps for the
     /// files the line reaches (`io_reach`, `io_refusal`).
     pub fn naming(&self, tokens: &[Text], reading: Option<&Reading>, tool: bool) -> Vec<Walked> {
@@ -637,5 +691,34 @@ mod tests {
         assert!(m.scopes_paths(&text("cat")) && !m.scopes_paths(&text("ls")));
         assert!(m.reads_args(&text("gh")) && !m.reads_args(&text("ls")));
         assert!(m.has_rules() && !AdmissionMatcher::new(Trees::default()).has_rules());
+    }
+
+    #[test]
+    fn a_redirect_meets_only_the_root_leaves_scoped_to_its_paths() {
+        let sealed = matcher(
+            json!({"*": {"decision": "deny", "paths": ["/d/secret.txt"]}}),
+            &[],
+        );
+        let ruling = sealed.redirect(&[text("/d/out"), text("/d/secret.txt")]);
+        assert_eq!(ruling.outcome, Deny);
+        assert_eq!(ruling.matched_path, Some(text("/d/secret.txt")));
+        assert_eq!(sealed.redirect(&[text("/d/out")]).outcome, Allow);
+        let closed = matcher(json!({"*": "deny", "ls": "allow"}), &[]);
+        assert_eq!(closed.redirect(&[text("/d/out")]).outcome, Allow);
+        let named = matcher(
+            json!({"cat": {"decision": "deny", "paths": ["/d/secret.txt"]}}),
+            &[],
+        );
+        assert_eq!(named.redirect(&[text("/d/secret.txt")]).outcome, Allow);
+        let asks = matcher(
+            json!({"*": {"decision": "ask", "paths": ["/d/*"]}}),
+            &[(
+                "/d",
+                json!({"*": {"decision": "ask", "paths": ["secret.txt"]}}),
+            )],
+        );
+        let ruling = asks.redirect(&[text("/d/secret.txt")]);
+        assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 2));
+        assert_eq!(asks.redirect(&[text("/e/x")]).outcome, Allow);
     }
 }

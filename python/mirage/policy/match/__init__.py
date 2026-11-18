@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy.match.allow import line_tokens, runs
-from mirage.policy.match.decide import decide
+from mirage.policy.match.decide import decide, redirect_ruling
 from mirage.policy.match.reads import (
     closed,
     closed_by_default,
@@ -38,6 +38,7 @@ __all__ = [
     "closed",
     "closed_by_default",
     "decide",
+    "redirect_ruling",
     "has_rules",
     "io_reach",
     "io_refusal",

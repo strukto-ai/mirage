@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
+
 from mirage.policy.match.rule import command_facts, reason_of
 from mirage.policy.types import (
     AdmissionRules,
@@ -20,9 +22,9 @@ from mirage.policy.types import (
     Outcome,
     Ruling,
 )
-from mirage.rs.document import from_units
+from mirage.rs.document import from_units, units
 from mirage.rs.policy import admission_matcher, rule_table
-from mirage.types import Matched
+from mirage.types import Matched, PathSpec
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
@@ -81,6 +83,39 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         asks=tuple(table[index] for index in result["asks"]),
         matched=matched,
         reason="" if rule is None else reason_of(rule, matched),
+    )
+
+
+def redirect_ruling(
+    paths: Sequence[PathSpec], rules: AdmissionRules | None
+) -> Ruling:
+    """The profile's answer about the files a redirect opens that no
+    command owns: a compound statement's (``{ cat; } < f``, a loop, a
+    subshell) or a bare one (``> f``). Only a root leaf scoped to a path
+    the redirect opens speaks; a leaf with no paths is about commands,
+    so under ``{"*": deny, ls: allow}`` the group ``{ ls; } > out``
+    meets the same answer as ``ls > out``.
+
+    Args:
+        paths (Sequence[PathSpec]): the redirect's targets, links
+            followed.
+        rules (AdmissionRules | None): the session's command trees.
+    """
+    if rules is None or not paths:
+        return Ruling(Outcome.ALLOW)
+    result = admission_matcher(rules).ask(
+        "redirect", paths=[units(p.virtual) for p in paths]
+    )
+    table = rule_table(rules)
+    rule = None if result["rule"] is None else table[result["rule"]]
+    path = result["matched_path"]
+    return Ruling(
+        outcome=Outcome(result["outcome"]),
+        rule=rule,
+        matched_path=None if path is None else from_units(path),
+        source="" if rule is None else source_of(rule),
+        asks=tuple(table[index] for index in result["asks"]),
+        reason="" if rule is None else reason_of(rule, None),
     )
 
 

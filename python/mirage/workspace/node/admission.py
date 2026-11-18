@@ -21,7 +21,7 @@ from typing import Any
 from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import leaf_options, walk
 from mirage.commands.spec.types import ValueType
-from mirage.context.session_context import session_access
+from mirage.context.session_context import current_caller, session_access
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
@@ -33,6 +33,7 @@ from mirage.policy import (
     CommandRule,
     CommandWord,
     Deny,
+    Occurrence,
     Pending,
     Route,
     Scope,
@@ -42,22 +43,26 @@ from mirage.policy import (
     render_command_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
+from mirage.policy.decisions import call_of
 from mirage.policy.match import (
     Outcome,
     io_reach,
     io_refusal,
     naming_rules,
     not_allowed,
+    redirect_ruling,
 )
 from mirage.policy.policies import command_route, settled
 from mirage.policy.types import CommandNode
 from mirage.rs.policy import Encoded
+from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
     get_redirects,
     literal_word,
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.voice import shell_voice
 from mirage.types import Follow, LineFacts, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
@@ -116,6 +121,12 @@ from mirage.workspace.session import SessionState, env_snapshot
 # one the redirect binds to. A `!` wraps one command, so it is its own
 # last one: `! cat < f` parses as redirected(negated(cat), < f).
 REDIRECT_CHAIN = frozenset({NT.LIST, NT.PIPELINE, NT.NEGATED_COMMAND})
+
+# The nodes a redirect binds to as their own, judged with them: the
+# chain's last command, or the shell's test. Any other statement under a
+# redirect (a group, a loop, a subshell, an ``if``, an assignment, or
+# none) leaves its redirect to ``admit_redirect``.
+REDIRECT_OWNERS = frozenset({NT.COMMAND, NT.TEST_COMMAND})
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,6 +771,94 @@ async def admit(
     return Refused(err, code, decision_of(action))
 
 
+async def admit_redirect(
+    targets: Sequence[PathSpec],
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+) -> Refused | None:
+    """The gate of the files a redirect opens that no command owns: a
+    compound statement's (``{ cat; } < f``, a loop, a subshell, an
+    ``if``) or a bare one (``> f``, ``exec 3< f``). A command's own
+    redirects are judged with the command; these have no command, so
+    the session's trees alone are asked, and only a root leaf scoped to
+    a path the redirect opens speaks (``redirect_ruling``). A coded
+    policy is not asked: it judges the open itself, at the dispatcher.
+
+    A hidden target is dropped first, so the open answers ENOENT; links
+    are followed as a command's redirect targets are. A deny, or an ask
+    the host did not grant, refuses in bash's voice for a redirect it
+    could not open (``bash: line 1: f: Permission denied``, exit 1),
+    with the decision on the result.
+
+    Args:
+        targets (Sequence[PathSpec]): the redirect's targets so far,
+            expanded.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the decision ledger.
+        namespace (Namespace | None): the link table.
+    """
+    rules = session.commands
+    if rules is None or not targets:
+        return None
+    links = (
+        namespace.session_links(session)
+        if namespace is not None and namespace.nodes
+        else None
+    )
+    paths = list(targets)
+    if links is not None:
+        paths.extend(
+            p
+            for p in follow_paths(links, list(targets), True)
+            if isinstance(p, PathSpec)
+        )
+    seen = _seen(session, paths)
+    ruling = redirect_ruling(seen, rules)
+    if ruling.outcome is Outcome.ALLOW:
+        return None
+    rule = ruling.rule
+    assert rule is not None
+    named = ruling.matched_path or seen[0].virtual
+    question = CommandContext(
+        command="",
+        paths=seen,
+        argv=tuple(p.virtual for p in seen),
+        cwd=session.cwd,
+        session_id=session.session_id,
+    )
+    action: Deny | Pending | None
+    if ruling.outcome is Outcome.ASK:
+        caller = current_caller()
+        call = call_of(caller, registry.decisions, session.session_id)
+        claimant = (
+            None
+            if call is None
+            else Claimant(call, Occurrence(None, named, 0, 0))
+        )
+        asked = Ask(
+            ruling.reason,
+            rule,
+            ruling.asks,
+            policy=PermissionsPolicy.__name__,
+        )
+        action = await resolved(
+            question, asked, registry, caller.stop, claimant
+        )
+        if action is None:
+            return None
+    else:
+        action = Deny(
+            ruling.reason,
+            path=named,
+            policy=PermissionsPolicy.__name__,
+            rule=rule,
+        )
+    shown = next((p for p in targets if p.virtual == named), targets[0])
+    err = encode_text(f"{shell_voice()}{shown.raw_path}: Permission denied\n")
+    return Refused(err, 1, decision_of(action))
+
+
 async def admit_test(
     name: str,
     words: list[str],
@@ -933,6 +1032,57 @@ def statement_redirects_raw(node: Any) -> list[Redirect]:
     return redirects
 
 
+def _opens_file(r: Redirect) -> bool:
+    """Whether a redirect names a file to open, not a body or a
+    descriptor.
+
+    Args:
+        r (Redirect): the parsed redirect.
+    """
+    return (
+        r.kind
+        not in (
+            RedirectKind.HEREDOC,
+            RedirectKind.HERESTRING,
+            RedirectKind.AMBIGUOUS,
+        )
+        and not isinstance(r.target, int)
+        and r.target_node is not None
+    )
+
+
+def unowned_redirects(node: Any, home: str | None) -> list[Word]:
+    """The literal targets of every redirect in a parsed line that no
+    command owns: a compound statement's, a bare one's, an
+    assignment's. A command's own redirects are its words
+    (``statement_redirects``); these are read for a line a runtime
+    takes whole, where no executor opens them.
+
+    Args:
+        node (Any): the parsed line, or any node in it.
+        home (str | None): the home directory a leading ``~`` names.
+    """
+    out: list[Word] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        stack.extend(reversed(current.named_children))
+        if current.type != NT.REDIRECTED_STATEMENT:
+            continue
+        inner, redirects = get_redirects(current)
+        owner = inner
+        while owner is not None and owner.type in REDIRECT_CHAIN:
+            owner = owner.named_children[-1] if owner.named_children else None
+        if owner is not None and owner.type in REDIRECT_OWNERS:
+            continue
+        out.extend(
+            Word(str(r.target), literal_word(r.target_node, home))
+            for r in redirects
+            if _opens_file(r)
+        )
+    return out
+
+
 def statement_stdin(node: Any) -> bytes | None:
     """Mark redirected input without opening or expanding its source.
 
@@ -960,7 +1110,9 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     The walk climbs the last-command chain instead, which is bash's own
     rule for a list, a pipeline and a ``!``. A compound (``{ }``, a loop, a
     subshell) redirects every command inside it, which is not a chain,
-    so none is claimed here and the dispatcher judges the write.
+    so none is claimed here: ``admit_redirect`` judges it as the shell
+    opens it, and ``unowned_redirects`` reads it for a line a runtime
+    takes whole.
 
     Args:
         node (Any): the command's parsed node.
@@ -969,12 +1121,5 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     return tuple(
         Word(str(r.target), literal_word(r.target_node, home))
         for r in statement_redirects_raw(node)
-        if r.kind
-        not in (
-            RedirectKind.HEREDOC,
-            RedirectKind.HERESTRING,
-            RedirectKind.AMBIGUOUS,
-        )
-        and not isinstance(r.target, int)
-        and r.target_node is not None
+        if _opens_file(r)
     )

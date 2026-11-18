@@ -15,7 +15,7 @@
 import { leafOptions, walk } from '../../commands/cli/walk.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
-import { callerSignal, sessionAccess } from '../../context/session_context.ts'
+import { callerSignal, currentCaller, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type {
@@ -37,13 +37,17 @@ import {
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
+import { callOf } from '../../policy/decisions.ts'
+import { redirectRuling } from '../../policy/match/decide.ts'
 import { ioReach, ioRefusal, namingRules, notAllowed } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import { type CommandNode, CommandWord, type EntryGate } from '../../policy/types.ts'
 import type { Encoded } from '../../rs/policy.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
+import { shellVoice } from '../../shell/voice.ts'
 import { Follow, PathSpec, type LineFacts, type PolicyDecision } from '../../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { getExtension } from '../../utils/filetype.ts'
@@ -110,6 +114,25 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
   NodeType.PIPELINE,
   NodeType.NEGATED_COMMAND,
 ])
+
+/**
+ * The nodes a redirect binds to as their own, judged with them: the
+ * chain's last command, or the shell's test. Any other statement under a
+ * redirect (a group, a loop, a subshell, an `if`, an assignment, or none)
+ * leaves its redirect to `admitRedirect`.
+ */
+const REDIRECT_OWNERS: ReadonlySet<string> = new Set([NodeType.COMMAND, NodeType.TEST_COMMAND])
+
+/** Whether a redirect names a file to open, not a body or a descriptor. */
+function opensFile(r: Redirect): boolean {
+  return (
+    r.kind !== RedirectKind.HEREDOC &&
+    r.kind !== RedirectKind.HERESTRING &&
+    r.kind !== RedirectKind.AMBIGUOUS &&
+    typeof r.target !== 'number' &&
+    r.targetNode !== null
+  )
+}
 
 /**
  * A command the gate let through, and what its own I/O may touch.
@@ -741,7 +764,8 @@ function wordHints(
  * the last-command chain instead, which is bash's own rule for a list,
  * a pipeline and a `!`. A compound (`{ }`, a loop, a subshell) redirects
  * every command inside it, which is not a chain, so none is claimed
- * here and the dispatcher judges the write.
+ * here: `admitRedirect` judges it as the shell opens it, and
+ * `unownedRedirects` reads it for a line a runtime takes whole.
  */
 function statementRedirectsRaw(node: TSNodeLike): Redirect[] {
   let owner = node
@@ -766,17 +790,109 @@ export function statementStdin(node: TSNodeLike): Uint8Array | null {
 }
 
 export function statementRedirects(node: TSNodeLike, home: string | null): Word[] {
-  const words: Word[] = []
-  for (const r of statementRedirectsRaw(node)) {
-    if (
-      r.kind === RedirectKind.HEREDOC ||
-      r.kind === RedirectKind.HERESTRING ||
-      r.kind === RedirectKind.AMBIGUOUS
-    )
-      continue
-    if (typeof r.target === 'number' || r.targetNode === null) continue
-    const target = r.targetNode as TSNodeLike
-    words.push({ raw: String(r.target), text: literalWord(target, home) })
+  return statementRedirectsRaw(node)
+    .filter(opensFile)
+    .map((r) => ({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, home) }))
+}
+
+/**
+ * The literal targets of every redirect in a parsed line that no command
+ * owns: a compound statement's, a bare one's, an assignment's. A
+ * command's own redirects are its words (`statementRedirects`); these are
+ * read for a line a runtime takes whole, where no executor opens them.
+ * Mirrors Python's unowned_redirects.
+ */
+export function unownedRedirects(node: TSNodeLike, home: string | null): Word[] {
+  const out: Word[] = []
+  const stack: TSNodeLike[] = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    stack.push(...[...current.namedChildren].reverse())
+    if (current.type !== NodeType.REDIRECTED_STATEMENT) continue
+    const [inner, redirects] = getRedirects(current)
+    let owner: TSNodeLike | null = inner
+    while (owner !== null && REDIRECT_CHAIN.has(owner.type)) {
+      owner = owner.namedChildren[owner.namedChildren.length - 1] ?? null
+    }
+    if (owner !== null && REDIRECT_OWNERS.has(owner.type)) continue
+    for (const r of redirects.filter(opensFile)) {
+      out.push({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, home) })
+    }
   }
-  return words
+  return out
+}
+
+/**
+ * The gate of the files a redirect opens that no command owns: a
+ * compound statement's (`{ cat; } < f`, a loop, a subshell, an `if`) or
+ * a bare one (`> f`, `exec 3< f`). A command's own redirects are judged
+ * with the command; these have no command, so the session's trees alone
+ * are asked, and only a root leaf scoped to a path the redirect opens
+ * speaks (`redirectRuling`). A coded policy is not asked: it judges the
+ * open itself, at the dispatcher. A hidden target is dropped first, so
+ * the open answers ENOENT; links are followed as a command's redirect
+ * targets are. A deny, or an ask the host did not grant, refuses in
+ * bash's voice for a redirect it could not open (`bash: line 1: f:
+ * Permission denied`, exit 1), with the decision on the result. Mirrors
+ * Python's admit_redirect.
+ */
+export async function admitRedirect(
+  targets: readonly PathSpec[],
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+): Promise<Refused | null> {
+  const rules = session.commands
+  if (rules === null || targets.length === 0) return null
+  const links =
+    namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null
+  const paths = [...targets]
+  if (links !== null) {
+    for (const p of followPaths(links, [...targets], true)) if (p instanceof PathSpec) paths.push(p)
+  }
+  const shown = seen(session, paths)
+  const ruling = redirectRuling(shown, rules)
+  if (ruling.outcome === Outcome.ALLOW) return null
+  const rule = ruling.rule
+  if (rule === null) throw new Error('a tree refused a redirect with no leaf')
+  const named = ruling.matchedPath ?? shown[0]?.virtual ?? ''
+  const question: CommandContext = {
+    command: '',
+    paths: shown,
+    argv: shown.map((p) => p.virtual),
+    cwd: session.cwd,
+    sessionId: session.sessionId,
+  }
+  let action: Deny | Pending | null
+  if (ruling.outcome === Outcome.ASK) {
+    const caller = currentCaller()
+    const call = callOf(caller, registry.decisions, session.sessionId)
+    const claimant: Claimant | null =
+      call === null
+        ? null
+        : { line: call, occurrence: { parent: null, source: named, start: 0, end: 0 } }
+    const asked: Ask = {
+      kind: 'ask',
+      reason: ruling.reason,
+      rule,
+      rules: ruling.asks,
+      policy: PermissionsPolicy.name,
+    }
+    action = await resolved(question, asked, registry, callerSignal(), claimant)
+    if (action === null) return null
+  } else {
+    action = {
+      kind: 'deny',
+      reason: ruling.reason,
+      path: named,
+      policy: PermissionsPolicy.name,
+      rule,
+    }
+  }
+  const target = targets.find((p) => p.virtual === named) ?? targets[0]
+  const raw = target?.rawPath ?? named
+  return {
+    stderr: encodeText(`${shellVoice()}${raw}: Permission denied\n`),
+    exitCode: 1,
+    decision: decisionOf(action),
+  }
 }
