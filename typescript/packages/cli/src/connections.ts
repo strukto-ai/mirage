@@ -520,9 +520,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
 
   group
     .command('delete')
-    .description(
-      'Delete an entry and wipe its sealed values; there is no restore. Refused while a saved template uses it.',
-    )
+    .description('Delete an entry and wipe its sealed values; there is no restore.')
     .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       const c = makeClient()

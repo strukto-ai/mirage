@@ -389,7 +389,7 @@ export function app(program: Command): Command {
     .argument('<id>', 'Workspace id.')
     .action(startCmd)
 
-  ws.command('set-profile')
+  ws.command('set-profile', { hidden: true })
     .description(
       'Define or replace a named profile on the live workspace. Sessions keep ' +
         'their rules until `session update` moves them, and the workspace ' +

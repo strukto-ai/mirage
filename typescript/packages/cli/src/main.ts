@@ -32,7 +32,6 @@ import { registerPolicyCommands } from './policy.ts'
 import { registerRpcCommand } from './rpc.ts'
 import { registerCodexExecCommand, registerSshProxyCommand } from './ssh.ts'
 import { app as registerSessionCommands } from './session.ts'
-import { registerTemplateCommands } from './template.ts'
 import { app as registerWorkspaceCommands } from './workspace.ts'
 
 function resolveVersion(): string {
@@ -88,7 +87,6 @@ export function buildProgram(): Command {
   registerLoginCommands(program)
   registerDaemonCommands(program)
   registerContextCommands(program)
-  registerTemplateCommands(program)
   return program
 }
 

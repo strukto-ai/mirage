@@ -54,7 +54,6 @@ CLI_GROUPS = (
     "workspace",
     "daemon",
     "context",
-    "template",
     "policy",
     "vfs",
     "cli",

@@ -563,7 +563,7 @@ def kind_app(kind: Kind) -> typer.Typer:
         name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
     ) -> None:
         """Delete an entry and wipe its sealed values; there is no
-        restore. Refused while a saved template uses it."""
+        restore."""
         with make_client() as client:
             client.ensure_running(allow_spawn=False)
             r = client.request("DELETE", entry_path(name))
