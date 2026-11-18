@@ -122,7 +122,9 @@ from mirage.policy import (
 )
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
+from mirage.policy.match.grammar import unread_names
 from mirage.policy.types import (
+    AdmissionRules,
     DryRun,
     Grammar,
     PolicyCaller,
@@ -735,6 +737,7 @@ class Workspace:
         self._trees_changed()
         for mounted in self._registry.mounts():
             mounted.trees_changed = self._trees_changed
+        self._session_mgr.rules_read = self._read_back
         self.machine_table.hold_handles()
 
     def _apply_limits(
@@ -2754,6 +2757,19 @@ class Workspace:
             PolicyError: a tree names something a grammar lacks.
         """
         self._restate_trees(self._check_trees(self._grammars()))
+
+    def _read_back(self, rules: AdmissionRules) -> AdmissionRules:
+        """Rules a session record held, marked again with the commands
+        whose options or subcommands no grammar here reads, which a
+        record does not keep.
+
+        Args:
+            rules (AdmissionRules): the trees the record held.
+        """
+        unread = unread_names(rules.trees, self._grammars())
+        return (
+            rules if unread == rules.unread else replace(rules, unread=unread)
+        )
 
     def _restate_trees(self, grammars: Mapping[str, Grammar]) -> None:
         """Hold every live session's command trees by the names the

@@ -118,6 +118,12 @@ export class SessionManager extends SessionOwner {
    */
   maxEnv: number | null = null
 
+  /**
+   * How the workspace reads back the rules a record held, which keeps only
+   * their trees; null keeps them as stored. Mirrors Python's `rules_read`.
+   */
+  rulesRead: ((rules: AdmissionRules) => AdmissionRules) | null = null
+
   // The workspace's env block, translated: seeded onto the default
   // session now and copied into every created session as its template.
   // The records are frozen, so sharing them across sessions is safe;
@@ -225,6 +231,10 @@ export class SessionManager extends SessionOwner {
       if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
       return session
     })
+  }
+
+  private readBack(rules: AdmissionRules | null): AdmissionRules | null {
+    return rules === null || this.rulesRead === null ? rules : this.rulesRead(rules)
   }
 
   /**
@@ -363,6 +373,7 @@ export class SessionManager extends SessionOwner {
       .filter(([sid]) => sid === this.defaultId || !this.sessions.has(sid))
       .map(([sid, fields]) => [sid, SessionState.fromDict(fields as StoredSession)] as const)
     for (const [, record] of records) {
+      record.commands = this.readBack(record.commands)
       checkEnvFits(record, this.maxEnv, seedBytes(record, this.seedVarsInternal))
     }
     for (const [sid, stored] of records) {
@@ -519,7 +530,10 @@ export class SessionManager extends SessionOwner {
       made.get(s.sessionId)?.[0].close()
       made.set(s.sessionId, [s.vars.shell.fork(), s.toDict() as RecordFields])
     }
-    for (const s of sessions) this.hasManaged = this.hasManaged || holdsManaged(s)
+    for (const s of sessions) {
+      s.commands = this.readBack(s.commands)
+      this.hasManaged = this.hasManaged || holdsManaged(s)
+    }
     await this.sessionStore.replaceAll(new Map([...made].map(([sid, [, fields]]) => [sid, fields])))
     for (const sid of [...this.persisted.keys()]) this.rebase(sid, undefined)
     for (const [sid, [saved, fields]] of made) this.persisted.set(sid, written(saved, fields))

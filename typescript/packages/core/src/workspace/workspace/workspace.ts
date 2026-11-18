@@ -62,8 +62,10 @@ import {
   type CompiledProfile,
   type SessionProfile,
 } from '../../policy/profile.ts'
+import { unreadNames } from '../../policy/match/grammar.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import {
+  type AdmissionRules,
   DryRun,
   type Grammar,
   Outcome,
@@ -743,6 +745,7 @@ export class Workspace {
       mount.treesChanged = () => {
         this.treesChanged()
       }
+    this.sessionManager.rulesRead = (rules) => this.readBack(rules)
     this.machineTable.holdHandles()
   }
 
@@ -1472,6 +1475,18 @@ export class Workspace {
    */
   private treesChanged(): void {
     this.restateTrees(this.checkTrees(this.grammars()))
+  }
+
+  /**
+   * Rules a session record held, marked again with the commands whose
+   * options or subcommands no grammar here reads, which a record does not
+   * keep. Mirrors Python's `_read_back`.
+   */
+  private readBack(rules: AdmissionRules): AdmissionRules {
+    const unread = unreadNames(rules.trees, this.grammars())
+    const held = rules.unread ?? new Set<string>()
+    const same = unread.size === held.size && [...unread].every((name) => held.has(name))
+    return same ? rules : { ...rules, unread }
   }
 
   /**
