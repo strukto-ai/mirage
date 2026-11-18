@@ -25,12 +25,12 @@ from mirage.core.slack.client import (
     refusals_denied,
 )
 from mirage.core.slack.history import (
-    SlackMessage,
     fetch_messages_for_day,
     get_history_jsonl,
     stream_messages_for_day,
 )
 from mirage.core.slack.scope import detect_scope
+from mirage.core.slack.types import SlackMessage
 from mirage.core.slack.users import get_user_profile, user_json_bytes
 from mirage.core.time_range import (
     day_channel_id,

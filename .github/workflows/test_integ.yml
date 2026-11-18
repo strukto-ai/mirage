@@ -299,6 +299,7 @@ jobs:
               - 'python/mirage/workspace/documentation/**'
               - 'typescript/packages/core/src/{accessor,core,commands/builtin,vfs}/document{.ts,/**}'
               - 'typescript/packages/core/src/workspace/documentation/**'
+              # Includes the message types shared by Discord's cache and history reader.
               - 'python/mirage/{accessor,core,vfs}/discord{.py,/**}'
               - 'typescript/packages/core/src/{accessor,core}/discord{.ts,/**}'
               - 'typescript/packages/node/src/vfs/discord/**'

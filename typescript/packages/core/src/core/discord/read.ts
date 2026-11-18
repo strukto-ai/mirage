@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DiscordMessage } from './types.ts'
 import { chunks } from '../../io/cooperative.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
@@ -27,7 +28,6 @@ import {
   getHistoryJsonl,
   snowflakeAt,
   streamMessagesForDay,
-  type DiscordMessage,
 } from './history.ts'
 import { listMembers } from './members.ts'
 import { compactJsonBytes } from '../render/json.ts'

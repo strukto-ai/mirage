@@ -44,6 +44,7 @@ import {
   ALL_MODE_BITS,
   contentSize,
   deviceRdev,
+  isCharDevice,
   posixMode,
   sizeUnknown,
 } from '../../../utils/stat_view.ts'
@@ -512,10 +513,9 @@ function renderStat(s: FileStat, name: string, identity: Identity | null): strin
   const gid = String(s.gid ?? '-').padStart(5)
   const owner = ownerName(s.uid, identity).padStart(8)
   const group = groupName(s.gid, identity).padStart(8)
-  const links =
-    s.type === FileType.CHAR_DEVICE
-      ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
-      : 'Links: ?'
+  const links = isCharDevice(s)
+    ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
+    : 'Links: ?'
   const device = s.dev === null ? '?' : deviceHalves(s.dev).join(',')
   return [
     `  File: ${nameParts(s, name, false).join(' -> ')}`,

@@ -20,7 +20,6 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import refusals_denied
 from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import (
-    DiscordMessage,
     get_history_jsonl,
     list_messages_for_day,
     snowflake_at,
@@ -28,6 +27,7 @@ from mirage.core.discord.history import (
 )
 from mirage.core.discord.members import list_members
 from mirage.core.discord.scope import detect_scope
+from mirage.core.discord.types import DiscordMessage
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes

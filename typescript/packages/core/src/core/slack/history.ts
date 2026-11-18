@@ -15,14 +15,9 @@
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { cursorPages } from './paginate.ts'
+import type { SlackMessage } from './types.ts'
 
-export interface SlackMessage {
-  ts: string
-  user?: string
-  text?: string
-  thread_ts?: string
-  [key: string]: unknown
-}
+export type { SlackMessage }
 
 export async function* streamMessagesForDay(
   accessor: SlackAccessor,

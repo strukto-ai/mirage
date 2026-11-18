@@ -16,16 +16,9 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import { heldPages } from '../hierarchy/readdir.ts'
 import { cursorPages } from './paginate.ts'
 import { compactJsonBytes } from '../render/json.ts'
+import type { SlackUser } from './types.ts'
 
-export interface SlackUser {
-  id: string
-  name?: string
-  real_name?: string
-  deleted?: boolean
-  is_bot?: boolean
-  profile?: { email?: string; [key: string]: unknown }
-  [key: string]: unknown
-}
+export type { SlackUser }
 
 function isRealUser(m: SlackUser): boolean {
   return m.deleted !== true && m.is_bot !== true && m.id !== 'USLACKBOT'

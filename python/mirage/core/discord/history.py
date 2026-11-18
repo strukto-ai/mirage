@@ -14,22 +14,15 @@
 
 from collections.abc import AsyncGenerator, AsyncIterator
 from functools import partial
-from typing import Any, NotRequired, TypedDict, cast
+from typing import cast
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.scope import sole_command_started
 from mirage.core.discord.client import discord_request
 from mirage.core.discord.paginate import after_id_pages
+from mirage.core.discord.types import DiscordMessage
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import TimeRange
-
-
-class DiscordMessage(TypedDict):
-    id: str
-    attachments: NotRequired[list[dict[str, Any]]]
-    author: NotRequired[dict[str, str]]
-    content: NotRequired[str]
-
 
 DISCORD_EPOCH = 1420070400000
 

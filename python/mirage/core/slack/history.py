@@ -13,21 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncGenerator
-from typing import Any, NotRequired, TypedDict, cast
+from typing import cast
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.paginate import cursor_pages
+from mirage.core.slack.types import SlackMessage
 from mirage.core.time_range import TimeRange
-
-
-class SlackMessage(TypedDict):
-    ts: str
-    user: NotRequired[str]
-    text: NotRequired[str]
-    thread_ts: NotRequired[str]
-    files: NotRequired[list[dict[str, Any]]]
 
 
 async def stream_messages_for_day(

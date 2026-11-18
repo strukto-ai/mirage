@@ -18,7 +18,7 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
-from mirage.core.slack.channels import SlackChannel, list_channels, list_dms
+from mirage.core.slack.channels import list_channels, list_dms
 from mirage.core.slack.client import refusals_denied, slack_get
 from mirage.core.slack.formatters import (
     channel_dirname,
@@ -29,6 +29,7 @@ from mirage.core.slack.formatters import (
 from mirage.core.slack.history import fetch_messages_for_day
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.scope import detect_scope
+from mirage.core.slack.types import SlackChannel
 from mirage.core.slack.users import list_users, user_json_bytes
 from mirage.core.time_range import guard_day
 from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec

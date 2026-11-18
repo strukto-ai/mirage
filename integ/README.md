@@ -521,7 +521,7 @@ The Cloudflare filter includes the Wasm build scripts in both the core and Cloud
 | the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py`                                                        | fuse                                                |
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language                                                                      | fuse                                                |
 | `vfs/capacity`, the `core/ram` writers (`dest`, `write`, `pwrite`, `truncate`, `copy`) and `vfs/ram/ram`, `vfs/ram/store` in either language                                | fuse                                                |
-| Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                                                                         | fuse                                                |
+| Discord accessor/core/VFS modules, including message types; dispatcher, policy and runtime handle modules in either language                                                | fuse                                                |
 | `rust/`, the shared command streams including colrm and envsubst, date formatter, JSON validation, Lance SQL and jq both hosts run (`rust/python/` skips ts and cloudflare) | ts, battery, hosting, cloudflare, database, runtime |
 | `test_integ.yml`                                                                                                                                                            | every filter                                        |
 

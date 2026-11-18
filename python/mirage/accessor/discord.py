@@ -13,16 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.accessor.base import SessionAccessor
 from mirage.accessor.responses import ResponseCache
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.discord.config import DiscordConfig
+from mirage.core.discord.types import DiscordMessage
 from mirage.core.time_range import TimeRange
-
-if TYPE_CHECKING:
-    from mirage.core.discord.history import DiscordMessage
 
 
 class DiscordAccessor(SessionAccessor):

@@ -15,7 +15,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from mirage.core.slack.users import SlackUser
+from mirage.core.slack.types import SlackUser
 from mirage.utils.naming import file_id_name, make_id_name
 
 

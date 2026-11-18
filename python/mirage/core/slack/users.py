@@ -13,22 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import NotRequired, TypedDict, cast
+from typing import cast
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.paginate import cursor_pages
-
-
-class SlackUser(TypedDict):
-    id: NotRequired[str]
-    name: NotRequired[str]
-    real_name: NotRequired[str]
-    deleted: NotRequired[bool]
-    is_bot: NotRequired[bool]
-    profile: NotRequired[dict[str, str]]
+from mirage.core.slack.types import SlackUser
 
 
 def _is_real_user(m: SlackUser) -> bool:

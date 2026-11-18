@@ -13,19 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any, NotRequired, TypedDict
+from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.slack.paginate import cursor_pages
-
-
-class SlackChannel(TypedDict):
-    id: str
-    name: NotRequired[str]
-    user: NotRequired[str]
-    is_archived: NotRequired[bool]
-    created: NotRequired[int]
+from mirage.core.slack.types import SlackChannel
 
 
 def _channel_base_params(types: str, limit: int) -> dict[str, Any]:
