@@ -248,7 +248,7 @@
     },
     {
       "id": "a_program_the_machine_lacks_is_reported_in_bash_s_words",
-      "note": "A captured program the machine cannot run is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, a file PATH holds that cannot run named by its path with `Permission denied` (126), and under `timeout` GNU timeout's own words. The wrapper that reports it leaves the program's environment as it was. Each run makes its own folder, as the Python and TypeScript drivers share one container.",
+      "note": "A captured program the machine cannot run is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, a file PATH holds that cannot run named by its path with `Permission denied` (126), and under `timeout` GNU timeout's own words. The wrapper that reports it leaves the program's environment as it was. Each run makes its own folder, as the Python and TypeScript drivers share one container; its name holds no character a sed pattern reads specially, so the check matches the real path.",
       "runtimes": [
         "docker",
         "ssh",
@@ -297,7 +297,7 @@
           }
         },
         {
-          "command": "d=$(dash -c 'mktemp -d /tmp/mirage-np.XXXXXX') && dash -c 'printf \"echo x\\\\n\" > \"$1/mirage-np-prog\"' dash \"$d\" && echo made",
+          "command": "d=$(dash -c 'mktemp -d /tmp/mirage-np-XXXXXX') && dash -c 'printf \"echo x\\\\n\" > \"$1/mirage-np-prog\"' dash \"$d\" && echo made",
           "expect": {
             "exit": 0,
             "stdout": "made\n",

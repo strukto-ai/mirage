@@ -239,8 +239,25 @@ impl Store {
     /// the time now and when the running shell started, in epoch
     /// microseconds; a `now_us` of 0 leaves the three unset.
     pub fn set_clock(&mut self, now_us: i64, started_us: i64) {
+        let first = self.now_us == 0 && now_us != 0;
         self.now_us = now_us;
         self.started_us = started_us;
+        if first && self.seconds.is_none() {
+            self.import_seconds();
+        }
+    }
+
+    /// Start the count from a `SECONDS` the shell's environment handed it
+    /// (`export SECONDS=40; bash -c 'echo $SECONDS'` prints 40), as bash's
+    /// startup assigns an imported one: the record landed before the shell
+    /// had a clock, so no write restarted the count then.
+    fn import_seconds(&mut self) {
+        let text = match self.record(SECONDS).and_then(|var| var.value.as_ref()) {
+            Some(Value::Scalar(text)) if self.counts_seconds(SECONDS) => text.clone(),
+            _ => return,
+        };
+        let count = self.seconds_from(&text);
+        self.seconds = Some((count, self.started_us));
     }
 
     /// Move the clock to `now_us` microseconds, the shell's start kept: a
@@ -352,6 +369,12 @@ impl Store {
     /// integer: `SECONDS+=5` adds then, and appends before.
     pub fn seconds_read(&self) -> bool {
         self.seconds_read.0.load(Ordering::Relaxed)
+    }
+
+    /// Put back whether `$SECONDS` was read, for an evaluation a caller
+    /// declined and so never ran (`clean_arith`).
+    pub fn set_seconds_read(&self, read: bool) {
+        self.seconds_read.0.store(read, Ordering::Relaxed);
     }
 
     /// Whether bash takes `SECONDS` as an integer: once it was read, or
@@ -1617,6 +1640,16 @@ mod tests {
         store.place_written(SECONDS, Some(Arc::new(Var::scalar("100"))));
         store.set_clock(10_000_000, 1_000_000);
         assert_eq!(store.dynamic(SECONDS), Some(b"101".to_vec()));
+    }
+
+    #[test]
+    fn a_shell_starts_counting_from_an_imported_seconds() {
+        let mut store = store();
+        store.seed(SECONDS, Value::Scalar(b"40".to_vec()));
+        store.set_clock(10_000_000, 10_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"40".to_vec()));
+        store.set_clock(11_000_000, 10_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"41".to_vec()));
     }
 
     #[test]

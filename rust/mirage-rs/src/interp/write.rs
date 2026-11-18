@@ -845,8 +845,18 @@ impl<'a> Writer<'a> {
     }
 
     /// Evaluate `text` when all of it can land. None leaves the session
-    /// as it was, for the host to evaluate it and report what it finds.
+    /// as it was, for the host to evaluate it and report what it finds: a
+    /// `$SECONDS` it read does not make `SECONDS` an integer then.
     pub fn clean_arith(&mut self, text: &[u8]) -> Option<i64> {
+        let read = self.store.seconds_read();
+        let value = self.clean_arith_landed(text);
+        if value.is_none() {
+            self.store.set_seconds_read(read);
+        }
+        value
+    }
+
+    fn clean_arith_landed(&mut self, text: &[u8]) -> Option<i64> {
         let mut draws = Draws::default();
         let outcome = self
             .store
@@ -1066,6 +1076,7 @@ mod tests {
         store.set_clock(9_000_000, 1_000_000);
         store.set_seconds(10);
         assert_eq!(writer(&mut store).clean_arith(b"SECONDS=20, 1/0"), None);
+        assert!(!store.seconds_read());
         assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
         assert_eq!(
             writer(&mut store).clean_arith(b"SECONDS=20, SECONDS+1"),
