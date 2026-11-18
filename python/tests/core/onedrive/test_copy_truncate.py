@@ -276,7 +276,7 @@ async def test_cp_recursive_uses_server_side_folder_copy():
         ws = Workspace(
             {"/": (vfs_over(OneDriveVFS, _accessor()), MountMode.WRITE)}
         )
-        _out, io = await run_on_mount(ws, "cp", [src, dst], flags={"r": True})
+        _out, io = await run_on_mount(ws, "cp", [src, dst], flags={"recursive": True})
     assert (io.exit_code, io.stderr) == (0, None)
 
 

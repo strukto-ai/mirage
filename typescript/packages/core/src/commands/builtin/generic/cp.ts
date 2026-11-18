@@ -749,7 +749,7 @@ export function parseFlags(fl: FlagView): CpFlags {
     )
   }
   const [targetDir, noTargetDir] = targetFlags('cp', fl)
-  const recursive = fl.asBool('r') || fl.asBool('recursive') || fl.asBool('archive')
+  const recursive = fl.asBool('recursive') || fl.asBool('archive')
   const last = fl.typedOrder(...Object.keys(DEREF_OPTIONS)).at(-1)
   // With no link option a recursive copy copies links as links and any other
   // copy follows them (GNU cp 9.7 with none of -H, -L, -P, -d).
@@ -2600,7 +2600,7 @@ export async function cpGeneric(
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({
-    readsSubtree: ['r', 'recursive', 'archive'].some((dest) => fl.asBool(dest)),
+    readsSubtree: ['recursive', 'archive'].some((dest) => fl.asBool(dest)),
     moveTarget: fl.asStr('target_directory') ?? null,
   })
 }

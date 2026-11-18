@@ -214,9 +214,7 @@ async def transfer_lines(
         return f"{goal.rstrip('/')}/{name.rstrip('/').rsplit('/', 1)[-1]}"
 
     recursive = subject == "cp" and (
-        flags.as_bool("r")
-        or flags.as_bool("recursive")
-        or flags.as_bool("archive")
+        flags.as_bool("recursive") or flags.as_bool("archive")
     )
     typed = (
         flags.typed_order("dereference", "no_dereference", "H", "d", "archive")

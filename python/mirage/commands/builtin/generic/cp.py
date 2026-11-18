@@ -626,9 +626,7 @@ def parse_flags(fl: FlagView) -> CpFlags:
             1,
         )
     target_dir, no_target = target_flags("cp", fl)
-    recursive = (
-        fl.as_bool("r") or fl.as_bool("recursive") or fl.as_bool("archive")
-    )
+    recursive = fl.as_bool("recursive") or fl.as_bool("archive")
     typed = fl.typed_order(*_DEREF_OPTIONS)
     # With no link option a recursive copy copies links as links and any
     # other copy follows them (GNU cp 9.7 with none of -H, -L, -P, -d).
@@ -3355,7 +3353,7 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """
     return LineFacts(
         reads_subtree=any(
-            fl.as_bool(dest) for dest in ("r", "recursive", "archive")
+            fl.as_bool(dest) for dest in ("recursive", "archive")
         ),
         move_target=fl.as_str("target_directory"),
     )
