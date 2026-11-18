@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.builder import (
@@ -27,11 +26,11 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
     deliver,
     save_sent_copy,
 )
-from mirage.commands.cli.builtin.himalaya.printer import notice, rendered
+from mirage.commands.cli.builtin.himalaya.printer import notice
 from mirage.commands.cli.operand import read_operand
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_raw_message
-from mirage.core.email.mime import parse_mime
+from mirage.core.email.mime import render_mime
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.filetype import mime_type_for
@@ -41,8 +40,6 @@ from mirage.workspace.files import Files
 NO_ENTRY = 2
 NOT_A_DIRECTORY = 20
 NO_BODY = "FETCH returned no body for the requested message"
-PARSE_FAILURE = "Failed to parse composed message"
-ADDRESS_SPECIALS = frozenset('()<>[]:;@\\,."')
 
 
 async def fetch_source(
@@ -114,70 +111,6 @@ async def _read_named(
     return (await _read_file(vfs, path, flag, label)).decode(errors="replace")
 
 
-def _mailbox_text(entry: dict[str, Any]) -> str:
-    email = entry["address"] or ""
-    name = entry["name"]
-    if not name:
-        return email
-    if any(char in ADDRESS_SPECIALS for char in name):
-        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}" <{email}>'
-    return f"{name} <{email}>"
-
-
-def _addresses_of(value: Any) -> list[str]:
-    if not (
-        isinstance(value, dict) and isinstance(value.get("Address"), dict)
-    ):
-        return []
-    address = value["Address"]
-    if "List" in address:
-        return [_mailbox_text(entry) for entry in address["List"]]
-    return [
-        _mailbox_text(entry)
-        for group in address["Group"]
-        for entry in group["addresses"]
-    ]
-
-
-def template_document(raw: bytes) -> dict[str, Any]:
-    """The decoded fields of a composed message.
-
-    Args:
-        raw (bytes): the composed RFC 5322 bytes.
-
-    Raises:
-        ValueError: the message does not parse.
-    """
-    message = parse_mime(raw)
-    if message is None:
-        raise ValueError(PARSE_FAILURE)
-    headers = message.parts[0]["headers"]
-
-    def field(name: str) -> Any:
-        for header in headers:
-            if header["name"] == name:
-                return header["value"]
-        return None
-
-    document: dict[str, Any] = {}
-    senders = _addresses_of(field("from"))
-    if senders:
-        document["from"] = senders[0]
-    document["to"] = _addresses_of(field("to"))
-    document["cc"] = _addresses_of(field("cc"))
-    document["bcc"] = _addresses_of(field("bcc"))
-    subject = field("subject")
-    if isinstance(subject, dict) and "Text" in subject:
-        document["subject"] = subject["Text"]
-    body = ""
-    if message.text_body:
-        text = message.parts[message.text_body[0]]["body"].get("Text", "")
-        body = text if isinstance(text, str) else ""
-    document["body"] = body
-    return document
-
-
 async def finish_message(
     accessor: EmailAccessor,
     fl: FlagView,
@@ -196,7 +129,7 @@ async def finish_message(
     no_save = fl.as_bool("no_save")
     if not send and save is None:
         if fl.as_bool("json"):
-            return rendered(fl, template_document(raw), ""), IOResult()
+            return render_mime(raw, "template"), IOResult()
         return raw, IOResult()
     if not send:
         await save_sent_copy(accessor, raw, save)

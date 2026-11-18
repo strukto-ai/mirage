@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.email.mime import Stream
+from mirage.core.email.mime import parse_addresses
 from mirage.io.types import ByteSource, materialize
 from mirage.utils.ids import IdSource, SystemIdSource
 
@@ -116,15 +116,7 @@ def parse_mailboxes(value: str) -> list[Mailbox]:
     Raises:
         ValueError: no mailbox parses, or one has no address.
     """
-    parsed = Stream(f"{value}\n".encode()).parse_address()
-    entries: list[dict[str, Any]] = []
-    if isinstance(parsed, dict) and isinstance(parsed.get("Address"), dict):
-        address = parsed["Address"]
-        if "List" in address:
-            entries = address["List"]
-        else:
-            for group in address["Group"]:
-                entries.extend(group["addresses"])
+    entries = parse_addresses(value)
     if not entries:
         raise ValueError(f"Could not parse address `{value}`")
     mailboxes: list[Mailbox] = []

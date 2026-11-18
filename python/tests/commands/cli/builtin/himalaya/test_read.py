@@ -19,10 +19,9 @@ import pytest
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import read
 from mirage.commands.cli.builtin.himalaya.printer import guarded
-from mirage.commands.cli.builtin.himalaya.read import message_view
 from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
-from mirage.core.email.mime import parse_mime
+from mirage.core.email.mime import render_mime
 from mirage.io.types import materialize
 
 EMAIL = EmailAccessor(
@@ -58,9 +57,7 @@ def fetched(monkeypatch):
 
 
 def test_the_view_walks_each_part():
-    message = parse_mime(RAW)
-    assert message is not None
-    assert message_view(message) == (
+    assert render_mime(RAW, "read").decode() == (
         "Date: Mon, 5 Jan 2026 09:30:00 +0000\n"
         "From: Alice <a@b.c>\n"
         "To: d@e.f\n"

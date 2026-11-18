@@ -18,15 +18,7 @@ import { PathSpec as PathSpecClass } from '../../../../types.ts'
 import { FlagView } from '../../../spec/index.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
-import {
-  attributeOf,
-  contentTypeOf,
-  parseMime,
-  partAt,
-  type MimeBody,
-  type MimeHeader,
-  type MimeMessage,
-} from '../../../../core/email/mime.ts'
+import { parseAttachments, type Attachment } from '../../../../core/email/mime.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { ensureDir } from '../../operand.ts'
@@ -35,73 +27,21 @@ import { cell, formatSize, renderTable, row } from './table.ts'
 import { fetchSource } from './util.ts'
 
 const MAX_NAME_TRIES = 1024
-export const PARSE_FAILURE = 'Failed to parse RFC 5322 message'
-const ENC = new TextEncoder()
-
-export interface AttachmentRow {
-  id: string
-  filename: string | null
-  mime: string | null
-  payload: Uint8Array
-  inline: boolean
-}
-
-/** The file name a part carries. */
-export function partName(headers: MimeHeader[]): string | null {
-  return (
-    attributeOf(contentTypeOf(headers, 'content_disposition'), 'filename') ??
-    attributeOf(contentTypeOf(headers, 'content_type'), 'name')
-  )
-}
-
-/** A part's MIME type as `type/subtype`. */
-export function partMime(headers: MimeHeader[]): string | null {
-  const content = contentTypeOf(headers, 'content_type')
-  if (content === null) return null
-  return content.c_subtype !== null ? `${content.c_type}/${content.c_subtype}` : content.c_type
-}
-
-/** A part's decoded contents. */
-export function partPayload(body: MimeBody): Uint8Array {
-  if ('Text' in body) return ENC.encode(body.Text)
-  if ('Html' in body) return ENC.encode(body.Html)
-  if ('Binary' in body) return Uint8Array.from(body.Binary)
-  if ('InlineBinary' in body) return Uint8Array.from(body.InlineBinary)
-  return 'Message' in body ? body.Message.raw : new Uint8Array(0)
-}
-
-/** Every attachment of a parsed message, in order. */
-export function attachmentRows(message: MimeMessage): AttachmentRow[] {
-  return message.attachments.map((partId) => {
-    const part = partAt(message, partId)
-    const disposition = contentTypeOf(part.headers, 'content_disposition')
-    return {
-      id: String(partId + 1),
-      filename: partName(part.headers),
-      mime: partMime(part.headers),
-      payload: partPayload(part.body),
-      inline: disposition !== null && disposition.c_type.toLowerCase() === 'inline',
-    }
-  })
-}
-
 async function rowsOf(
   accessor: EmailAccessor,
   mailbox: string,
   uid: string,
-): Promise<AttachmentRow[]> {
-  const raw = await fetchSource(accessor, mailbox, uid)
-  const message = parseMime(raw)
-  if (message === null) throw new Error(PARSE_FAILURE)
-  return attachmentRows(message)
+  payloads: boolean,
+): Promise<Attachment[]> {
+  return parseAttachments(await fetchSource(accessor, mailbox, uid), payloads)
 }
 
-function document(entry: AttachmentRow, path: string | null): Record<string, unknown> {
+function document(entry: Attachment, path: string | null): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: entry.id,
     filename: entry.filename,
     mime: entry.mime,
-    size: entry.payload.length,
+    size: entry.size,
     inline: entry.inline,
   }
   if (path !== null) out.path = path
@@ -109,7 +49,7 @@ function document(entry: AttachmentRow, path: string | null): Record<string, unk
 }
 
 function table(
-  rows: readonly AttachmentRow[],
+  rows: readonly Attachment[],
   paths: readonly string[] | null,
   withInline: boolean,
 ): string {
@@ -121,7 +61,7 @@ function table(
       cell(entry.id),
       cell(entry.filename ?? ''),
       cell(entry.mime ?? ''),
-      cell(formatSize(entry.payload.length)),
+      cell(formatSize(entry.size)),
     ]
     if (withInline) cells.push(cell(entry.inline ? 'yes' : 'no'))
     if (paths !== null) cells.push(cell(paths[index] ?? ''))
@@ -168,7 +108,7 @@ export async function attachmentList(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const withInline = fl.asBool('inline')
-  const rows = (await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), texts[0] ?? '')).filter(
+  const rows = (await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), texts[0] ?? '', false)).filter(
     (entry) => withInline || !entry.inline,
   )
   const out = rendered(
@@ -188,18 +128,19 @@ export async function attachmentDownload(
   const fl = new FlagView(ctx.flags, ctx.spec)
   const uid = texts[0] ?? ''
   if (ctx.vfs === undefined) throw new Error('attachment download needs a workspace')
-  const rows = await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), uid)
+  const rows = await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), uid, true)
   const directory = fl.asPath('dir') ?? PathSpecClass.fromStrPath('.', ctx.cwd.virtual)
   await ensureDir(ctx.vfs, directory)
   const remaining = new Set(texts.slice(1))
-  const written: AttachmentRow[] = []
+  const written: Attachment[] = []
   const writtenPaths: string[] = []
   for (const entry of rows) {
     if (texts.length > 1 && !remaining.has(entry.id)) continue
     remaining.delete(entry.id)
     const name = safeName(entry.filename ?? `attachment-${entry.id}`)
     const path = await uniquePath(ctx.vfs, directory, name)
-    await ctx.vfs.write(path, entry.payload)
+    // A copy, so a store that keeps the bytes does not keep the whole message.
+    await ctx.vfs.write(path, entry.payload.slice())
     written.push(entry)
     writtenPaths.push(path.virtual)
   }
