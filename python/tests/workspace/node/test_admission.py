@@ -22,6 +22,7 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
+from mirage.machine.handle import MachineHandle
 from mirage.policy import (
     Action,
     Decision,
@@ -34,6 +35,7 @@ from mirage.policy import (
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import CommandContext
 from mirage.rs.policy import rule_table
+from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -1255,5 +1257,47 @@ async def test_each_redirect_no_command_owns_needs_a_nod_of_its_own(line):
         assert len(asked) == 2
         kept = await ws.shell("cat /data/f")
         assert await kept.materialize_stdout() == b""
+    finally:
+        await ws.close()
+
+
+class _LineBox(MachineHandle):
+    provider = "box"
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        await output(b"ran\n")
+        return RunResult(exit_code=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["{ cat; } < /data/f; > /data/f", "{ cat; } < /data/f > /data/f"],
+)
+async def test_a_line_run_whole_asks_each_redirect_no_command_owns(line):
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(
+            record, outcome=Outcome.ALLOW, scope=Scope.ONCE
+        )
+
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.EXEC,
+        machines={"box": _LineBox("box", {"captures": ["@line"]})},
+        profiles={"asks": ASKS},
+        on_ask=allows_once,
+    )
+    try:
+        ws.create_session("s", profile="asks")
+        io = await ws.shell(line, session_id="s")
+        assert io.exit_code == 0
+        assert await io.materialize_stdout() == b"ran\n"
+        assert len(asked) == 2
     finally:
         await ws.close()

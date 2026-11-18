@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
-import { command, type CommandFn } from '../../commands/config.ts'
+import { command, type CommandFn, type Context } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -24,9 +24,12 @@ import { Outcome, PolicyDenied, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import type { CommandContext } from '../../policy/types.ts'
 import { ruleTable } from '../../rs/policy.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { trees } from '../../test-utils.ts'
 import { parse } from '../../shell/parse/parse.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -1004,6 +1007,26 @@ const ASKS = SessionProfile({
   },
 })
 
+class LineBox extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  readonly name = 'box'
+
+  constructor() {
+    super({ captures: ['@line'] })
+  }
+
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    _ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode('ran\n'))
+    return { exitCode: 0 }
+  }
+}
+
 describe('each redirect no command owns', () => {
   it.each([
     '{ cat; } < /data/f; > /data/f',
@@ -1031,4 +1054,30 @@ describe('each redirect no command owns', () => {
     const kept = await w.shell('cat /data/f')
     expect(new TextDecoder().decode(kept.stdout)).toBe('')
   })
+
+  it.each(['{ cat; } < /data/f; > /data/f', '{ cat; } < /data/f > /data/f'])(
+    'needs a nod of its own on a line run whole: %s',
+    async (line) => {
+      const asked: string[] = []
+      const allowsOnce: AskHandler = (record) => {
+        asked.push(record.id)
+        return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+      }
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          machines: [new LineBox()],
+          profiles: { asks: ASKS },
+          onAsk: allowsOnce,
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'asks' })
+      const io = await w.shell(line, { sessionId: 's' })
+      expect(io.exitCode).toBe(0)
+      expect(new TextDecoder().decode(io.stdout)).toBe('ran\n')
+      expect(asked).toHaveLength(2)
+    },
+  )
 })
