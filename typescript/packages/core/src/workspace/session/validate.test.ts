@@ -126,6 +126,44 @@ describe('a workspace checks command trees against its grammars', () => {
     ws.createSession('late', { profile: 'default' })
   })
 
+  it('a mount serving a CLI later renames the rules naming it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { default: SessionProfile({ commands: { prog: { go: 'deny' } } }) },
+      },
+    )
+    try {
+      ws.mount('/data').registerCommands([prog()])
+      for (const verb of ['go', 'run']) {
+        const ran = await ws.shell(`cd /data && prog ${verb}`)
+        expect(ran.exitCode).toBe(126)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount refuses a CLI a profile names wrongly', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { p: SessionProfile({ commands: { prog: { walk: 'deny' } } }) },
+      },
+    )
+    try {
+      expect(() => {
+        ws.mount('/data').registerCommands([prog()])
+      }).toThrow('no subcommand walk')
+      const ran = await ws.shell('cd /data && prog run')
+      expect(ran.exitCode).toBe(127)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('registerCli refuses a CLI a profile names wrongly', () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },

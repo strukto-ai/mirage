@@ -137,6 +137,38 @@ def test_a_profile_naming_a_cli_registered_later_waits_for_it():
     ws.create_session("late", profile="default")
 
 
+@pytest.mark.asyncio
+async def test_a_mount_serving_a_cli_later_renames_the_rules_naming_it():
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"prog": {"go": "deny"}}}},
+    )
+    try:
+        ws.mount("/data").register_commands([_prog()])
+        for verb in ("go", "run"):
+            ran = await ws.shell(f"cd /data && prog {verb}")
+            assert ran.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_refuses_a_cli_a_profile_names_wrongly():
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"p": {"commands": {"prog": {"walk": "deny"}}}},
+    )
+    try:
+        with pytest.raises(PolicyError, match="no subcommand walk"):
+            ws.mount("/data").register_commands([_prog()])
+        ran = await ws.shell("cd /data && prog run")
+        assert ran.exit_code == 127
+    finally:
+        await ws.close()
+
+
 def test_register_cli_refuses_a_cli_a_profile_names_wrongly():
     ws = Workspace(
         {"/data/": RAMVFS()},
