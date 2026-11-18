@@ -59,7 +59,10 @@ const MICROS: i64 = 1_000_000;
 /// The names whose special meaning `unset` and an unadorned `local` end:
 /// the running command's line and process, the clock's and `SRANDOM`.
 pub fn ends_at_unset(name: &str) -> bool {
-    matches!(name, LINENO | BASHPID | SECONDS | EPOCHSECONDS | EPOCHREALTIME | SRANDOM)
+    matches!(
+        name,
+        LINENO | BASHPID | SECONDS | EPOCHSECONDS | EPOCHREALTIME | SRANDOM
+    )
 }
 
 /// The seed word `$RANDOM`'s generator last consumed. `Fresh` has none and
@@ -265,7 +268,9 @@ impl Store {
                     Some((value, at, started)) if started == self.started_us => (value, at),
                     _ => (0, self.started_us),
                 };
-                value.saturating_add((now - at).div_euclid(MICROS)).to_string()
+                value
+                    .saturating_add((now - at).div_euclid(MICROS))
+                    .to_string()
             }
             EPOCHSECONDS => now.div_euclid(MICROS).to_string(),
             EPOCHREALTIME => format!("{}.{:06}", now.div_euclid(MICROS), now.rem_euclid(MICROS)),

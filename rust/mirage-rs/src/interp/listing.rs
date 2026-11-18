@@ -338,11 +338,19 @@ mod tests {
         );
         vars.set_clock(4_000_000, 1_000_000);
         let clocked = listed(&vars, "");
-        for line in ["declare -- EPOCHREALTIME", "declare -- EPOCHSECONDS", "declare -- SECONDS"] {
+        for line in [
+            "declare -- EPOCHREALTIME",
+            "declare -- EPOCHSECONDS",
+            "declare -- SECONDS",
+        ] {
             assert!(clocked.iter().any(|l| l == line), "{line}");
         }
         vars.set_seconds(5);
-        assert!(listed(&vars, "").iter().any(|l| l == "declare -i SECONDS=\"5\""));
+        assert!(
+            listed(&vars, "")
+                .iter()
+                .any(|l| l == "declare -i SECONDS=\"5\"")
+        );
         vars.set_clock(0, 0);
         assert_eq!(listed(&vars, "pa").len(), 4);
         assert!(listed(&vars, "aA").is_empty());

@@ -268,7 +268,9 @@ impl<'a> Writer<'a> {
                     let state = parse_decimal::<i64>(&text).unwrap_or(0).rem_euclid(1 << 32) as u32;
                     self.store.seed_random(word.clone(), state);
                 }
-                Ok(text) => self.store.set_seconds(parse_decimal::<i64>(&text).unwrap_or(0)),
+                Ok(text) => self
+                    .store
+                    .set_seconds(parse_decimal::<i64>(&text).unwrap_or(0)),
                 Err(error) => {
                     self.land_coercion(&mut coercion)?;
                     let subscript = matches!(
