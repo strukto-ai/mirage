@@ -186,6 +186,7 @@ function pdfBattery(): [string, Check][] {
         ws.registerCli('pdfinfo', PDFINFO)
         for (const name of [
           'cjk.pdf',
+          'far.pdf',
           'locked.pdf',
           'notes.pdf',
           'report.pdf',
