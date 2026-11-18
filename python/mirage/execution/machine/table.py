@@ -592,7 +592,8 @@ class MachineTable:
                 line=owner.line,
                 machine=owner.machine,
             )
-        except (RuntimeError, BlockingIOError) as exc:
+        # start is synchronous, so its CancelledError is a stopping parent.
+        except (RuntimeError, BlockingIOError, asyncio.CancelledError) as exc:
             logger.debug(
                 "%s: process %d not placed: %s", machine, row.pid, exc
             )

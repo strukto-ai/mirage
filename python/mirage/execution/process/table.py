@@ -206,10 +206,21 @@ class ProcessTable:
         Raises:
             BlockingIOError: the session already holds ``limit``
                 runners, the EAGAIN fork(2) answers at ``ulimit -u``.
+            asyncio.CancelledError: the parent is stopping; a killed
+                process never forks, so the fork ends it as its kill
+                does, a turn before the cancel ``terminate`` queued.
+            RuntimeError: the parent has exited or is not in the table.
         """
         with self._lock:
             if self._stopped:
                 raise RuntimeError("process table is stopped")
+            above = self._live.get(parent) if parent is not None else None
+            if (
+                above is not None
+                and above[1].record.state == ProcessState.STOPPING
+            ):
+                # A killed process never forks: the cancel terminate queued.
+                raise asyncio.CancelledError
             limit = under_ceiling(limit, self.ceiling)
             if (
                 limit is not None
@@ -230,7 +241,6 @@ class ProcessTable:
             if pid is None or pid in self._live:
                 pid = self._next_pid
             self._next_pid = max(self._next_pid, pid + 1)
-            above = self._live.get(parent) if parent is not None else None
             if parent is not None and (
                 above is None or above[1].record.state != ProcessState.RUNNING
             ):

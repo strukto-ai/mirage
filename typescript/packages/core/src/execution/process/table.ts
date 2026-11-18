@@ -9,6 +9,7 @@ import { type LineId, type MachineName, type MachineResources, ProcessId } from 
 import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
+import { SignalStop } from '../../utils/abort.ts'
 
 /**
  * Deliver a signal to one runner of a group: one that ignores it hands it to
@@ -102,6 +103,9 @@ export class ProcessTable {
    * held under `ceiling`;
    * stopping runners count until they finish cleanup and leave the live registry.
    * Past it this throws EAGAIN, what fork(2) answers at `ulimit -u`.
+   * Under a stopping parent it throws `SignalStop`: a killed process never
+   * forks, so the fork ends it as its kill does; under an exited or unknown
+   * parent it throws an Error.
    * `started` is what the caller sets up from the process before its runner
    * runs (the session's `$$`, the shell its programs run in); a caller that
    * passes it has nothing left to do first, so the runner then starts at
@@ -150,6 +154,9 @@ export class ProcessTable {
   }): ProcessHandle {
     const traits = init.traits ?? PLAIN_TRAITS
     if (this.stopped) throw new Error('process table is stopped')
+    const above = init.parent == null ? undefined : this.runners.get(init.parent)
+    // A killed process never forks: the stop terminate requested.
+    if (above?.handle.record.state === 'stopping') throw new SignalStop(above.handle.signal ?? 9)
     const limit = underCeiling(init.limit ?? null, this.ceiling)
     if (
       limit !== null &&
@@ -160,7 +167,6 @@ export class ProcessTable {
       ).length >= limit
     )
       throw Object.assign(new Error('Resource temporarily unavailable'), { code: 'EAGAIN' })
-    const above = init.parent == null ? undefined : this.runners.get(init.parent)
     if (init.parent != null && above?.handle.record.state !== 'running')
       throw new Error('parent process is no longer accepting children')
     const pid = init.pid == null || this.runners.has(init.pid) ? this.nextPid : init.pid

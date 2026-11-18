@@ -6,6 +6,9 @@ import { LineId } from '../types.ts'
 import { currentProcessId, runAsProcess } from '../../context/session_context.ts'
 import type { ProcessHandle } from './handle.ts'
 import { FIRST_PID } from './constants.ts'
+import { MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 function gate() {
   let release: () => void = () => undefined
@@ -362,12 +365,65 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   expect(leaf.record.group).toBe(root.record.id.pid)
   root.terminate()
   expect(() => processes.start({ ...init, parent: root.record.id.pid })).toThrow(
-    'accepting children',
+    expect.objectContaining({ name: 'AbortError' }),
   )
   await processes.drain()
   await leaf.join()
   expect(leaf.signal).not.toBeNull()
   expect(processes.live()).toEqual([])
+  expect(() => processes.start({ ...init, parent: root.record.id.pid })).toThrow(
+    'accepting children',
+  )
+})
+
+// A shell killed before its stop lands cannot fork, even at its cap: the
+// fork ends it as the kill does, with 128 plus the signal and no error.
+it('ends a stopping shell that forks as killed', async () => {
+  const processes = new ProcessTable()
+  const init = { sessionId: 'a', cwd: PathSpec.fromStrPath('/'), cancel: () => undefined }
+  const shell: ProcessHandle = processes.start({
+    ...init,
+    command: 'sh',
+    run: () => {
+      shell.terminate(15)
+      processes.start({
+        ...init,
+        command: 'child',
+        run: () => Promise.resolve(0),
+        parent: shell.record.id.pid,
+        limit: 1,
+      })
+      return Promise.resolve(0)
+    },
+  })
+  const record = await shell.join()
+  expect([record.exit, record.signal, record.error]).toEqual([143, 15, null])
+})
+
+// The integ race: a kill lands on timeout's `sh` as it forks a
+// subshell or a job, and the line reports the kill, not the refused fork.
+it.each([
+  ['(true); echo x', '(true)'],
+  ['true & wait', 'true'],
+])('reports the kill of a shell killed as it forks: %s', async (script, fork) => {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const table = ws.processTable
+  const start = table.start.bind(table)
+  table.start = (init) => {
+    if (init.command === fork)
+      table
+        .live()
+        .find((h) => h.record.id.pid === init.parent)
+        ?.terminate()
+    return start(init)
+  }
+  try {
+    const io = await ws.shell(`timeout 5 sh -c '${script}'; echo $?`)
+    const decode = (b: Uint8Array | null) => new TextDecoder().decode(b ?? new Uint8Array())
+    expect([decode(io.stdout), decode(io.stderr)]).toEqual(['137\n', ''])
+  } finally {
+    await ws.close()
+  }
 })
 
 it('cancellation reaches a grandchild past an exited parent below the group leader', async () => {

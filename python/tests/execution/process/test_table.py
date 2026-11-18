@@ -16,7 +16,10 @@ from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import ProcessState
 from mirage.execution.types import LineId
-from mirage.types import PathSpec
+from mirage.io.stream import materialize
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 
 @pytest.mark.asyncio
@@ -412,7 +415,7 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     await middle.join()
     assert leaf.record.group == root.record.pid
     root.terminate()
-    with pytest.raises(RuntimeError, match="accepting children"):
+    with pytest.raises(asyncio.CancelledError):
         processes.start(
             session_id="a",
             command="late",
@@ -423,6 +426,74 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     await processes.drain()
     assert (await leaf.join()).signal is not None
     assert processes.live() == ()
+    with pytest.raises(RuntimeError, match="accepting children"):
+        processes.start(
+            session_id="a",
+            command="late",
+            cwd=PathSpec.from_str_path("/"),
+            run=run,
+            parent=root.record.pid,
+        )
+
+
+# A shell killed before its cancel lands cannot fork, even at its cap: the
+# fork ends it as the kill does, with 128 plus the signal and no error.
+@pytest.mark.asyncio
+async def test_a_fork_from_a_stopping_shell_ends_it_as_killed():
+    processes = ProcessTable()
+    shell: list[ProcessHandle] = []
+
+    async def child():
+        return 0
+
+    async def run():
+        shell[0].terminate(15)
+        processes.start(
+            session_id="a",
+            command="child",
+            cwd=PathSpec.from_str_path("/"),
+            run=child,
+            parent=shell[0].record.pid,
+            limit=1,
+        )
+        return 0
+
+    shell.append(
+        processes.start(
+            session_id="a",
+            command="sh",
+            cwd=PathSpec.from_str_path("/"),
+            run=run,
+        )
+    )
+    record = await shell[0].join()
+    assert (record.exit, record.signal, record.error) == (143, 15, None)
+
+
+# The integ race: a kill lands on timeout's `sh` as it forks a
+# subshell or a job, and the line reports the kill, not the refused fork.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "script,fork", [("(true); echo x", "(true)"), ("true & wait", "true")]
+)
+async def test_a_shell_killed_as_it_forks_reports_the_kill(script, fork):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    table = ws.process_table
+    start = table.start
+
+    def killing_start(**kwargs):
+        if kwargs.get("command") == fork:
+            parent = kwargs["parent"]
+            next(h for h in table.live() if h.record.pid == parent).terminate()
+        return start(**kwargs)
+
+    table.start = killing_start
+    try:
+        io = await ws.shell(f"timeout 5 sh -c '{script}'; echo $?")
+        out, err = await io.stdout_str(), await materialize(io.stderr)
+    finally:
+        await ws.close()
+    assert (out, err) == ("137\n", b"")
 
 
 @pytest.mark.asyncio
