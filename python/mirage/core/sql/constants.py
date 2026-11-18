@@ -201,6 +201,14 @@ def clear_under(ino: int) -> tuple[str, ...]:
     )
 
 
+def children_of(count: int) -> str:
+    """Direct children of a bounded batch of parents, with their inode rows."""
+    slots = ", ".join("?" for _ in range(count))
+    return f"""SELECT d.parent_ino, d.name, {columns("i")}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN ({slots}) LIMIT ?"""
+
+
 def candidate_files(ignore_case: bool) -> str:
     """SQLite candidate files, including matches split across two storage rows."""
     body = "CAST(lower(b.data) AS BLOB)" if ignore_case else "b.data"

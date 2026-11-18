@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { sortedPrefix } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
 
@@ -24,18 +25,7 @@ class KeyIndex {
       return
     }
     const ordered = (this.ordered ??= [...keys].sort(compareCodePoints))
-    let lo = 0
-    let hi = ordered.length
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2)
-      if (compareCodePoints(ordered[mid] ?? '', prefix) < 0) lo = mid + 1
-      else hi = mid
-    }
-    for (let i = lo; i < ordered.length; i++) {
-      const key = ordered[i]
-      if (!key?.startsWith(prefix)) break
-      yield key
-    }
+    yield* sortedPrefix(ordered, prefix)
   }
 }
 

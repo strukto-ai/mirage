@@ -14,6 +14,7 @@
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import type { PathSpec } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { SqlDialect } from '../../vfs/sql/types.ts'
 import { candidateFiles } from './constants.ts'
@@ -63,6 +64,6 @@ export async function filesContaining(
     MAX_CANDIDATES + 1,
   ])
   if (rows.length > MAX_CANDIDATES) return null
-  const base = path.mountPath === '/' ? '' : path.mountPath
+  const base = rstripSlash(path.mountPath)
   return rows.map((row) => mountedPath(path, `${base}/${String(row.rel)}`))
 }

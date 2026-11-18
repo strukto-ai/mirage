@@ -146,7 +146,7 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     await ops(vfs).write(at('/src/wide'), Buffer.from('\uFEFFABCDEF', 'utf16le'))
     await ops(vfs).write(at('/src/miss'), enc.encode('other'))
     await ops(vfs).write(at('/outside'), enc.encode('ABCDEF'))
-    const scope = new PathSpec({ virtual: '/review/src', directory: '/review', vfsPath: 'src' })
+    const scope = new PathSpec({ virtual: '/review/src/', directory: '/review', vfsPath: 'src/' })
     const flags = { wholeWord: false, ignoreCase: false }
     const hits = await vfs.filesContaining(scope, 'ABCDEF', flags)
     if (driver.dialect === SqlDialect.SQLITE) {
@@ -309,7 +309,21 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
   })
 }
 
-it('walks after one declined candidate query and short-circuits a short quiet search', async () => {
+it('finds a short quiet match behind a one-file walk limit', async () => {
+  const vfs = new SqlVFS()
+  vfs.walkLimit = 1
+  const ws = new Workspace({ '/work': vfs }, { mode: MountMode.WRITE })
+  try {
+    await ops(vfs).write(at('/a'), enc.encode('other'))
+    await ops(vfs).write(at('/b'), enc.encode('Z'))
+    const result = await ws.shell('grep -rqF Z /work')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, '', ''])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('reuses an identical decline and allows a distinct whole-word query', async () => {
   const vfs = new SqlVFS()
   const ws = new Workspace({ '/work': vfs }, { mode: MountMode.WRITE })
   try {
@@ -320,7 +334,10 @@ it('walks after one declined candidate query and short-circuits a short quiet se
     expect(candidates).toHaveBeenCalledTimes(1)
     candidates.mockClear()
     expect((await ws.shell('grep -rqF n /work')).exitCode).toBe(0)
-    expect(candidates).not.toHaveBeenCalled()
+    expect(candidates).toHaveBeenCalledTimes(1)
+    candidates.mockClear()
+    expect((await ws.shell('grep -rwF needle /work')).exitCode).toBe(0)
+    expect(candidates.mock.calls.map(([, , flags]) => flags.wholeWord)).toEqual([false, true])
   } finally {
     await ws.close()
   }
@@ -333,6 +350,7 @@ it.each(['UTF-16le', 'UTF-16be'])('keeps folded candidates in a %s database', as
     const vfs = new SqlVFS({ driver })
     await ops(vfs).mkdir(at('/sub'))
     await ops(vfs).write(at('/sub/file'), enc.encode('NEEDLE!'))
+    expect((await driver.query('PRAGMA encoding'))[0]?.encoding).toBe(encoding)
     const hits = await vfs.filesContaining(at('/'), 'needle', {
       wholeWord: false,
       ignoreCase: true,

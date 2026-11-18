@@ -13,11 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
+from redis.exceptions import NoPermissionError
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index.scope import command_scope
 from mirage.core.redis.readdir import readdir, tree
 from mirage.core.redis.stat import stat
 from mirage.types import PathSpec
@@ -219,3 +222,45 @@ async def test_tree_of_no_directory_is_none(accessor):
 async def test_tree_declines_a_file_whose_folder_is_missing(accessor):
     await accessor.store.set_file("/missing/a.txt", b"x")
     assert await tree(accessor, PathSpec.from_str_path("/")) is None
+
+
+@pytest.mark.asyncio
+async def test_declined_walk_shares_one_scan_and_expires_with_the_command(
+    accessor, monkeypatch
+):
+    store = accessor.store
+    scans = Mock(wraps=store.scan_paths)
+    monkeypatch.setattr(store, "scan_paths", scans)
+    root = PathSpec.from_str_path("/")
+    async with command_scope():
+        assert await tree(accessor, root, limit=2) is None
+        assert len(await readdir(accessor, root)) == 3
+        for directory in ("/sub", "/sub/deep"):
+            assert await tree(
+                accessor, PathSpec.from_str_path(directory), limit=4
+            )
+        assert [call.args[0] for call in scans.call_args_list] == ["/", "/"]
+    await store.set_file("/sub/deep/new", b"x")
+    async with command_scope():
+        entries = await tree(
+            accessor, PathSpec.from_str_path("/sub/deep"), limit=4
+        )
+        assert entries is not None and "new" in entries
+        assert scans.call_args.args == ("/sub/deep/",)
+
+
+@pytest.mark.asyncio
+async def test_directory_scan_falls_back_when_only_smembers_is_allowed(
+    accessor, monkeypatch
+):
+    monkeypatch.setattr(
+        accessor.store._client,
+        "sscan",
+        Mock(
+            side_effect=NoPermissionError(
+                "no permissions to run the 'sscan' command"
+            )
+        ),
+    )
+    entries = await tree(accessor, PathSpec.from_str_path("/sub"), limit=4)
+    assert entries is not None and "deep/e.txt" in entries

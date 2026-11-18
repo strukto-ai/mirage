@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../../types.ts'
+import { commandKey } from '../../cache/index/scope.ts'
+import { sortedPrefix } from '../../utils/key_prefix.ts'
 import { keyStats } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -38,23 +40,61 @@ export async function readdir(accessor: RedisAccessor, path: PathSpec): Promise<
     )
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
-  const seen = new Set<string>()
-  const files = await store.listFiles(dirPrefix)
-  const dirs = await store.listDirs()
-  for (const keys of [files, dirs]) {
-    for (const key of keys) {
-      if (key === p || !key.startsWith(dirPrefix)) continue
-      const slash = key.indexOf('/', dirPrefix.length)
-      if (key.length > dirPrefix.length && slash !== dirPrefix.length) {
-        seen.add(slash === -1 ? key : key.slice(0, slash))
-      }
+  const seen = new Map<string, boolean>()
+  for await (const [key, isDir] of walkPaths(accessor, dirPrefix)) {
+    const slash = key.indexOf('/', dirPrefix.length)
+    const child = slash === -1 ? key : key.slice(0, slash)
+    if (child.length > dirPrefix.length) {
+      seen.set(child, (seen.get(child) ?? true) && (slash !== -1 || isDir))
     }
   }
-  const fileSet = new Set(files)
   return keyStats(
     store,
-    [...seen].sort(compareCodePoints).map((key) => [key, !fileSet.has(key)]),
+    [...seen].sort(([a], [b]) => compareCodePoints(a, b)),
   )
+}
+
+async function* scanPaths(
+  accessor: RedisAccessor,
+  base: string,
+): AsyncGenerator<[string, boolean]> {
+  const { store } = accessor
+  if (store.scanPaths !== undefined) {
+    try {
+      yield* store.scanPaths(base)
+      return
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (!/\bsscan\b/i.test(message) || !/\b(?:noperm|unknown command)\b/i.test(message))
+        throw error
+      console.debug('Redis directory scan unavailable:', error)
+    }
+  } else {
+    for (const key of await store.listFiles(base)) yield [key, false]
+  }
+  for (const key of await store.listDirs()) if (key.startsWith(base)) yield [key, true]
+}
+
+/** Reuse a single paged list of names when a bounded snapshot sends this command back to the walk. */
+async function* walkPaths(
+  accessor: RedisAccessor,
+  base: string,
+): AsyncGenerator<[string, boolean]> {
+  const scope = commandKey()
+  const walk = scope === null ? undefined : accessor.walks.get(scope)
+  if (walk !== undefined && base.startsWith(walk.base)) {
+    if (walk.names === null) {
+      const names: string[] = []
+      for await (const [key, isDir] of scanPaths(accessor, walk.base))
+        names.push(isDir ? key + '/' : key)
+      walk.names = names.sort(compareCodePoints)
+    }
+    for (const name of sortedPrefix(walk.names, base)) {
+      yield name.endsWith('/') ? [name.slice(0, -1), true] : [name, false]
+    }
+  } else {
+    yield* scanPaths(accessor, base)
+  }
 }
 
 /**
@@ -86,9 +126,17 @@ export async function tree(
   } else {
     if (store.scanPaths === undefined) return null
     const found = new Map<string, boolean>()
-    for await (const [key, isDir] of store.scanPaths(base)) {
+    for await (const [key, isDir] of walkPaths(accessor, base)) {
       if (key === p) continue
-      if (!found.has(key) && found.size >= limit) return null
+      if (!found.has(key) && found.size >= limit) {
+        const scope = commandKey()
+        if (scope !== null) {
+          const walk = accessor.walks.get(scope)
+          if (walk === undefined || !base.startsWith(walk.base))
+            accessor.walks.set(scope, { base, names: null })
+        }
+        return null
+      }
       found.set(key, isDir)
     }
     keys = [...found].sort(([a], [b]) => compareCodePoints(a, b))

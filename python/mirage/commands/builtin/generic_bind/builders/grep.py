@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import logging
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import facts, grep_generic
@@ -28,13 +26,9 @@ from mirage.commands.builtin.generic_bind.search import (
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
-from mirage.errors.types import WalkDeclinedError
 from mirage.io.memory import memory_room
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-logger = logging.getLogger(__name__)
 
 
 async def grep(
@@ -45,17 +39,9 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths) if paths else []
-    query_files = True
-    try:
-        matches = await matching_tree(files, resolved, texts, ctx)
-    except WalkDeclinedError as exc:
-        logger.debug("grep candidate search declined: %s", exc)
-        matches = None
-        query_files = False
+    matches = await matching_tree(files, resolved, texts, ctx)
     if matches is None:
-        read = await search_reads(
-            files, "grep", resolved, texts, ctx, query_files=query_files
-        )
+        read = await search_reads(files, "grep", resolved, texts, ctx)
         room = memory_room()
         readdir, stat = tree_walk(
             files.read_tree,

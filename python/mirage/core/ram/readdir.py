@@ -22,10 +22,12 @@ from mirage.utils.path import norm
 from mirage.vfs.ram.store import RAMDirs, RAMFiles, RAMStore
 
 
-def keys_under(store: RAMStore, prefix: str) -> Iterator[str]:
+def keys_under(
+    store: RAMStore, prefix: str, limit: int | None = None
+) -> Iterator[str]:
     for table in (store.files, store.dirs):
         if isinstance(table, (RAMFiles, RAMDirs)):
-            yield from table.index.under(table, prefix)
+            yield from table.index.under(table, prefix, limit)
         else:
             yield from (key for key in table if key.startswith(prefix))
 
@@ -85,7 +87,7 @@ async def tree(
         return None
     base = p.rstrip("/") + "/"
     found: dict[str, FileStat] = {}
-    for key in keys_under(store, base):
+    for key in keys_under(store, base, limit):
         if key == p:
             continue
         if limit is not None and len(found) >= limit:

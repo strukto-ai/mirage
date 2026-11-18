@@ -364,7 +364,7 @@ export async function matchingTree(
       flags.filesWithoutMatch
     )
       return null
-    if (!flags.fixedString || flags.quiet) {
+    if (!flags.fixedString) {
       const terms = grepTerms(flags, fl, texts, utf8Locale(ctx.env))
       text = terms?.texts.length === 1 ? (terms.texts[0] ?? null) : null
     }
@@ -431,7 +431,6 @@ export async function searchReads(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  queryFiles = true,
 ): Promise<ReadStreamFn> {
   const fl = new FlagView(ctx.flags, name === 'rg' ? specOf('rg') : specOf('grep'))
   const [first] = paths
@@ -451,7 +450,7 @@ export async function searchReads(
   const walked = grep === null || grep.recursive
   const mounts = mountsOf(ctx)
   const [stream, charge] = cappedReads(files.read, walked ? paths : [], mounts)
-  const narrows = queryFiles && files.answers('files_containing')
+  const narrows = files.answers('files_containing')
   const lines = files.answers('lines_containing') ? files.linesContaining : undefined
   if (!narrows && lines === undefined) return stream
   const searchable = mounts?.searchable(first.virtual) ?? null

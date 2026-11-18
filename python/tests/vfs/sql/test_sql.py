@@ -163,7 +163,7 @@ async def test_search_keeps_chunk_edge_matches_and_bom_files(vfs: SqlVFS):
     await vfs.write(at("/src/miss"), b"other")
     await vfs.write(at("/outside"), b"ABCDEF")
     scope = PathSpec(
-        virtual="/review/src", directory="/review", vfs_path="src"
+        virtual="/review/src/", directory="/review", vfs_path="src/"
     )
     flags = {"whole_word": False, "ignore_case": False}
     hits = await vfs.files_containing(scope, "ABCDEF", **flags)
@@ -198,6 +198,7 @@ async def test_case_insensitive_candidates_in_a_utf16_database(encoding):
         vfs = SqlVFS(driver=driver)
         await vfs.mkdir(at("/sub"))
         await vfs.write(at("/sub/file"), b"NEEDLE!")
+        assert driver.query("PRAGMA encoding")[0]["encoding"] == encoding
         hits = await vfs.files_containing(
             at("/"), "needle", whole_word=False, ignore_case=True
         )
@@ -206,6 +207,24 @@ async def test_case_insensitive_candidates_in_a_utf16_database(encoding):
         ]
     finally:
         driver.close()
+
+
+@pytest.mark.asyncio
+async def test_quiet_short_literal_finds_the_only_candidate_with_a_one_file_limit():
+    vfs = SqlVFS(":memory:")
+    vfs.walk_limit = 1
+    ws = Workspace({"/work": vfs}, mode=MountMode.WRITE)
+    try:
+        await vfs.write(at("/a"), b"other")
+        await vfs.write(at("/b"), b"Z")
+        result = await ws.shell("grep -rqF Z /work")
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            0,
+            b"",
+            None,
+        )
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -224,7 +243,13 @@ async def test_recursive_grep_walks_after_one_declined_candidate_query(
         candidates.reset_mock()
         quiet = await ws.shell("grep -rqF n /work")
         assert quiet.exit_code == 0
-        candidates.assert_not_awaited()
+        candidates.assert_awaited_once()
+        candidates.reset_mock()
+        word = await ws.shell("grep -rwF needle /work")
+        assert word.exit_code == 0
+        assert [
+            call.kwargs["whole_word"] for call in candidates.await_args_list
+        ] == [False, True]
     finally:
         await ws.close()
 

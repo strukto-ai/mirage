@@ -192,6 +192,14 @@ export function clearUnder(ino: number): string[] {
   ]
 }
 
+/** Direct children of a bounded batch of parents, with their inode rows. */
+export function childrenOf(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT d.parent_ino, d.name, ${columns('i')}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN (${slots}) LIMIT ?`
+}
+
 /** SQLite candidate files, including matches split across two storage rows. */
 export function candidateFiles(ignoreCase: boolean): string {
   const body = ignoreCase ? 'CAST(lower(b.data) AS BLOB)' : 'b.data'

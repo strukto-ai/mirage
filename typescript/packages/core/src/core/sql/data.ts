@@ -43,7 +43,8 @@ export async function readBytes(
       Math.floor(offset / cs),
     ])
     const data = bytesOf(row?.data)
-    if (data.length === stop - offset) return data
+    if (data.length === stop - offset)
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
     const out = new Uint8Array(stop - offset)
     out.set(data)
     return out

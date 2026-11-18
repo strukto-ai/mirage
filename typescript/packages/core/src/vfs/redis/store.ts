@@ -52,9 +52,9 @@ export interface RedisStoreLike {
   truncateFile(path: string, length: number, modified: string, noCreate?: boolean): Promise<boolean>
   delFile(path: string): Promise<void>
   hasFile(path: string): Promise<boolean>
-  /** Every file path on the mount sorted by code point, narrowed by `prefix` when given. */
   /** Paged file and directory keys matched by literal path prefix. */
   scanPaths?(prefix: string): AsyncIterable<[string, boolean]>
+  /** Every file path on the mount sorted by code point, narrowed by `prefix` when given. */
   listFiles(prefix?: string): Promise<string[]>
   fileLen(path: string): Promise<number>
   hasDir(path: string): Promise<boolean>

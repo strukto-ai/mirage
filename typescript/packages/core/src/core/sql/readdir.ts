@@ -16,7 +16,7 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { memoryRoom } from '../../io/memory.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { SQL, TREE_ENTRY_BYTES } from './constants.ts'
+import { SQL, TREE_ENTRY_BYTES, childrenOf } from './constants.ts'
 import { inodeOf, inodeStat, isDir, type Inode } from './inode.ts'
 import { notListable, target, walk } from './path.ts'
 
@@ -40,7 +40,7 @@ export async function readdir(accessor: SqlAccessor, path: PathSpec): Promise<Fi
 }
 
 /**
- * Every entry under a directory from one query, each as `stat` answers it,
+ * Every entry under a directory, each as `stat` answers it,
  * keyed by its relative path. Decline an oversized snapshot so the walk can list directories.
  * Mirrors Python's `tree`.
  */
@@ -57,12 +57,8 @@ export async function tree(
     limit !== undefined && limit >= 0 ? limit : Infinity,
     room === null ? Infinity : Math.floor(room / TREE_ENTRY_BYTES),
   )
-  const rows = Number.isFinite(ceiling)
-    ? await accessor.query(SQL.subtree + ' LIMIT ?', [node.ino, ceiling + 1])
-    : await accessor.query(SQL.subtree, [node.ino])
-  const remaining = memoryRoom()
-  if (rows.length > ceiling || (remaining !== null && rows.length * TREE_ENTRY_BYTES > remaining))
-    return null
+  if (Number.isFinite(ceiling)) return boundedTree(accessor, node, under(w.p), ceiling)
+  const rows = await accessor.query(SQL.subtree, [node.ino])
   rows.sort((a, b) => compareCodePoints(String(a.rel), String(b.rel)))
   const found = new Map<string, FileStat>()
   const prefix = under(w.p)
@@ -74,4 +70,38 @@ export async function tree(
     }
   }
   return found
+}
+
+async function boundedTree(
+  accessor: SqlAccessor,
+  root: Inode,
+  prefix: string,
+  limit: number,
+): Promise<Map<string, FileStat> | null> {
+  const pending: [number, string][] = [[root.ino, '']]
+  const entries: [string, FileStat][] = []
+  const encoder = new TextEncoder()
+  let used = 0
+  for (let start = 0; start < pending.length;) {
+    const batch = pending.slice(start, start + 64)
+    start += batch.length
+    const parents = new Map(batch)
+    const remaining = limit - entries.length
+    const rows = await accessor.query(childrenOf(parents.size), [...parents.keys(), remaining + 1])
+    if (rows.length > remaining) return null
+    const room = memoryRoom()
+    if (room !== null && used > room) return null
+    for (const row of rows) {
+      const child = inodeOf(row)
+      if (child === null) continue
+      const parent = parents.get(Number(row.parent_ino)) ?? ''
+      const name = String(row.name)
+      const rel = parent ? parent + '/' + name : name
+      used += TREE_ENTRY_BYTES + encoder.encode(rel).byteLength
+      if (room !== null && used > room) return null
+      entries.push([rel, inodeStat(prefix + rel, child)])
+      if (isDir(child)) pending.push([child.ino, rel])
+    }
+  }
+  return new Map(entries.sort(([a], [b]) => compareCodePoints(a, b)))
 }

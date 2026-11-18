@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { callsAs, currentCaller, sessionVisibility } from '../../../context/session_context.ts'
 import { eacces, eisdir, enoent, isDotWalkError, isEnoent } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
@@ -679,6 +680,8 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   const home = mountRoot(ctx)
   const anchor = `${home}/`
   const mounts = mountsOf(ctx)
+  let declined: { path: string; text: string; wholeWord: boolean; ignoreCase: boolean } | null =
+    null
   const call = (
     name: string,
     path: PathSpec,
@@ -816,11 +819,30 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     ),
     filesContaining: async (path, text, opts) => {
       if (opts.prune && (crossing || reading?.stream != null)) return null
-      return (await call('files_containing', path, [text], {
-        whole_word: opts.wholeWord,
-        ignore_case: opts.ignoreCase,
-        ...(opts.prune ? { prune: true } : {}),
-      })) as PathSpec[] | null
+      if (
+        declined?.path === path.virtual &&
+        declined.text === text &&
+        declined.wholeWord === opts.wholeWord &&
+        declined.ignoreCase === opts.ignoreCase
+      )
+        return null
+      try {
+        return (await call('files_containing', path, [text], {
+          whole_word: opts.wholeWord,
+          ignore_case: opts.ignoreCase,
+          ...(opts.prune ? { prune: true } : {}),
+        })) as PathSpec[] | null
+      } catch (err) {
+        if (!opts.prune || (err as Partial<WalkDeclinedError>).declined !== true) throw err
+        console.debug('grep candidate search declined:', err)
+        declined = {
+          path: path.virtual,
+          text,
+          wholeWord: opts.wholeWord,
+          ignoreCase: opts.ignoreCase,
+        }
+        return null
+      }
     },
     linesContaining: async (path, text, opts) =>
       (await call('lines_containing', path, [text], {

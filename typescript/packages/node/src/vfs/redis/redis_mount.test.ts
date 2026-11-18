@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandScope } from '@struktoai/mirage-core/cache/index/scope'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { sizeOf } from '@struktoai/mirage-core/core/redis/capacity'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -41,6 +42,29 @@ describe.skipIf(skip)('RedisVFS as mount', () => {
   afterEach(async () => {
     await vfs.store.clear()
     await ws.close()
+  })
+
+  it('shares a paged scan across fallback branches for one command', async () => {
+    for (const dir of ['/a', '/b']) {
+      await vfs.store.addDir(dir)
+      await vfs.store.setFile(dir + '/file', new Uint8Array([1]))
+    }
+    const scans = vi.spyOn(vfs.store, 'scanPaths')
+    await commandScope(async () => {
+      const root = PathSpec.fromStrPath('/')
+      expect(await vfs.readTree(root, { limit: 1 })).toBeNull()
+      expect((await vfs.readdir(root)).length).toBe(2)
+      for (const dir of ['/a', '/b']) {
+        expect((await vfs.readTree(PathSpec.fromStrPath(dir), { limit: 1 }))?.has('file')).toBe(
+          true,
+        )
+      }
+      expect(scans.mock.calls).toEqual([['/'], ['/']])
+    })
+    await vfs.store.setFile('/a/new', new Uint8Array([2]))
+    const entries = await commandScope(() => vfs.readTree(PathSpec.fromStrPath('/a'), { limit: 2 }))
+    expect(entries?.has('new')).toBe(true)
+    expect(scans.mock.lastCall).toEqual(['/a/'])
   })
 
   it('tee writes to Redis then cat reads it back', async () => {

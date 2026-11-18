@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections import deque
+
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import SQL, TREE_ENTRY_BYTES
+from mirage.core.sql.constants import SQL, TREE_ENTRY_BYTES, children_of
 from mirage.core.sql.inode import Inode, inode_of, inode_stat, is_dir
 from mirage.core.sql.path import not_listable, target, walk
 from mirage.io.memory import memory_room
@@ -45,7 +47,7 @@ async def tree(
     path: PathSpec,
     limit: int | None = None,
 ) -> dict[str, FileStat] | None:
-    """Every entry under a directory from one query, each as ``stat``
+    """Every entry under a directory, each as ``stat``
     answers it, keyed by its relative path. Decline an oversized snapshot
     so the walk can list directories. Mirrors TypeScript's ``tree``."""
     w = await walk(accessor, path)
@@ -57,17 +59,9 @@ async def tree(
     if room is not None:
         entries = room // TREE_ENTRY_BYTES
         ceiling = entries if ceiling is None else min(ceiling, entries)
-    if ceiling is None:
-        rows = await accessor.query(SQL["subtree"], (node.ino,))
-    else:
-        rows = await accessor.query(
-            SQL["subtree"] + " LIMIT ?", (node.ino, ceiling + 1)
-        )
-        if len(rows) > ceiling:
-            return None
-    room = memory_room()
-    if room is not None and len(rows) * TREE_ENTRY_BYTES > room:
-        return None
+    if ceiling is not None:
+        return await _bounded_tree(accessor, node, _under(w.p), ceiling)
+    rows = await accessor.query(SQL["subtree"], (node.ino,))
     rows.sort(key=lambda row: str(row["rel"]))
     found: dict[str, FileStat] = {}
     prefix = _under(w.p)
@@ -77,3 +71,39 @@ async def tree(
             rel = str(row["rel"])
             found[rel] = inode_stat(prefix + rel, child)
     return found
+
+
+async def _bounded_tree(
+    accessor: SqlAccessor, root: Inode, prefix: str, limit: int
+) -> dict[str, FileStat] | None:
+    """Fetch only direct names in indexed batches. A wide directory never
+    fills a recursive SQL queue, and deep relative paths count against room
+    before they enter the snapshot."""
+    pending = deque([(root.ino, "")])
+    entries: list[tuple[str, FileStat]] = []
+    used = 0
+    while pending:
+        parents = dict(pending.popleft() for _ in range(min(len(pending), 64)))
+        remaining = limit - len(entries)
+        rows = await accessor.query(
+            children_of(len(parents)), (*parents, remaining + 1)
+        )
+        if len(rows) > remaining:
+            return None
+        room = memory_room()
+        if room is not None and used > room:
+            return None
+        for row in rows:
+            child = inode_of(row)
+            if child is None:
+                continue
+            parent = parents[int(row["parent_ino"] or 0)]
+            name = str(row["name"])
+            rel = f"{parent}/{name}" if parent else name
+            used += TREE_ENTRY_BYTES + len(rel.encode())
+            if room is not None and used > room:
+                return None
+            entries.append((rel, inode_stat(prefix + rel, child)))
+            if is_dir(child):
+                pending.append((child.ino, rel))
+    return dict(sorted(entries, key=lambda entry: entry[0]))

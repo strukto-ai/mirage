@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import threading
-from bisect import bisect_left
 from collections.abc import Iterable, Iterator, MutableMapping, MutableSet
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import Protocol, TypedDict, TypeVar, overload
 
+from mirage.utils.key_prefix import sorted_prefix
 from mirage.vfs.capacity import StorageUsage
 
 _T = TypeVar("_T")
@@ -68,19 +69,21 @@ class _KeyIndex:
         self.ordered: list[str] | None = None
         self.lock = threading.Lock()
 
-    def under(self, keys: Iterable[str], prefix: str) -> Iterator[str]:
+    def under(
+        self, keys: Iterable[str], prefix: str, limit: int | None
+    ) -> Iterator[str]:
         if prefix == "/":
-            yield from keys
+            with self.lock:
+                snapshot = list(
+                    keys if limit is None else islice(keys, max(0, limit) + 2)
+                )
+            yield from snapshot
             return
         with self.lock:
             if self.ordered is None:
                 self.ordered = sorted(keys)
             ordered = self.ordered
-        for index in range(bisect_left(ordered, prefix), len(ordered)):
-            key = ordered[index]
-            if not key.startswith(prefix):
-                break
-            yield key
+        yield from sorted_prefix(ordered, prefix)
 
 
 class RAMDirs(MutableSet[str]):
