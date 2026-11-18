@@ -827,6 +827,11 @@ async def _apply_find_actions(
         return stdout
     await materialize(stdout)
     io.stderr = warned + await materialize(io.stderr) or None
+    if sink is not None and expr.execs and io.stderr:
+        # The walk ended before any -exec runs, so what it said goes out
+        # first, ahead of the runs that now write to the sink as they go.
+        await sink.emit(Channel.STDERR, io.stderr)
+        io.stderr = None
     records = io.records
     if expr.execs and execute_fn is None:
         _refuse(io, b"find: -exec: no shell to run the command\n")
@@ -918,10 +923,12 @@ async def _apply_find_actions(
         held.clear()
         size = 0
         for channel, parts in taken:
-            if channel is Channel.STDERR:
-                io.add_stderr(b"".join(parts))
-            else:
+            if channel is not Channel.STDERR:
                 yield b"".join(parts)
+            elif sink is not None and expr.execs:
+                await sink.emit(Channel.STDERR, b"".join(parts))
+            else:
+                io.add_stderr(b"".join(parts))
 
     async def ran(run: IOResult) -> AsyncGenerator[bytes, None]:
         try:

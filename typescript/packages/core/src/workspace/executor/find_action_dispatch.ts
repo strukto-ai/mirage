@@ -636,6 +636,12 @@ export async function applyFindActions(
   io.stderr = said.byteLength > 0 ? said : null
   const executeFn = options.executeFn
   const hasExec = expr.actions.some((a) => a.kind === 'exec')
+  // The walk ended before any -exec runs, so what it said goes out first,
+  // ahead of the runs that now write to the sink as they go.
+  if (options.sink !== undefined && hasExec && said.byteLength > 0) {
+    await options.sink.emit(Channel.STDERR, said)
+    io.stderr = null
+  }
   if (hasExec && executeFn === undefined) {
     refuse(io, encodeText('find: -exec: no shell to run the command\n'))
     return null
@@ -715,12 +721,14 @@ export async function applyFindActions(
   const heard = (): void => {
     for (const line of errors.splice(0)) put(Channel.STDERR, line)
   }
-  function* flushed(): Generator<Uint8Array> {
+  async function* flushed(): AsyncGenerator<Uint8Array> {
     const taken = held.splice(0)
     size = 0
     for (const [channel, parts] of taken) {
-      if (channel === Channel.STDERR) io.addStderr(concat(parts))
-      else yield concat(parts)
+      if (channel !== Channel.STDERR) yield concat(parts)
+      else if (options.sink !== undefined && hasExec)
+        await options.sink.emit(Channel.STDERR, concat(parts))
+      else io.addStderr(concat(parts))
     }
   }
   async function* ran(run: IOResult): AsyncGenerator<Uint8Array> {
