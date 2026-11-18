@@ -733,7 +733,11 @@ export class Workspace {
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld, this.namespace)
     this.registry.bindClocks()
-    this.restateTrees(this.checkTrees(this.grammars()))
+    this.treesChanged()
+    for (const mount of this.registry.allMounts())
+      mount.treesChanged = () => {
+        this.treesChanged()
+      }
     this.machineTable.holdHandles()
   }
 
@@ -1457,6 +1461,15 @@ export class Workspace {
   }
 
   /**
+   * Check and restate every command tree against the grammars the
+   * workspace has now: at construction, and as a mount serves a command
+   * tree. Mirrors Python's `_trees_changed`.
+   */
+  private treesChanged(): void {
+    this.restateTrees(this.checkTrees(this.grammars()))
+  }
+
+  /**
    * Hold every live session's command trees by the names the grammars
    * `checkTrees` passed give them.
    */
@@ -2043,6 +2056,9 @@ export class Workspace {
       write: resolvedWrite,
     })
     prepareAddedMount(this.registry, m, previous)
+    m.treesChanged = () => {
+      this.treesChanged()
+    }
     return m
   }
 

@@ -723,7 +723,9 @@ class Workspace:
         self._router = Router(self._registry, self._runtimes, self._namespace)
 
         self._start_installs(clis, specs)
-        self._restate_trees(self._check_trees(self._grammars()))
+        self._trees_changed()
+        for mounted in self._registry.mounts():
+            mounted.trees_changed = self._trees_changed
         self.machine_table.hold_handles()
 
     def _apply_limits(
@@ -1423,6 +1425,7 @@ class Workspace:
         )
         prepare_added_mount(self._registry, entry, previous)
         self._registry.rows_changed()
+        entry.trees_changed = self._trees_changed
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -2727,6 +2730,16 @@ class Workspace:
         for session in self._session_mgr.list():
             renormalized(session.commands, grammars)
         return grammars
+
+    def _trees_changed(self) -> None:
+        """Check and restate every command tree against the grammars the
+        workspace has now: at construction, and as a mount serves a
+        command tree.
+
+        Raises:
+            PolicyError: a tree names something a grammar lacks.
+        """
+        self._restate_trees(self._check_trees(self._grammars()))
 
     def _restate_trees(self, grammars: Mapping[str, Grammar]) -> None:
         """Hold every live session's command trees by the names the

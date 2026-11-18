@@ -408,6 +408,11 @@ function namedSpec(cmd: Command, cmdName: string): CommandSpec {
   return new CommandSpec({ ...spec, name: cmdName })
 }
 
+function refill<K, V>(target: Map<K, V>, from: ReadonlyMap<K, V>): void {
+  target.clear()
+  for (const [key, value] of from) target.set(key, value)
+}
+
 export class MountEntry {
   visible: ((sessionId: string | null) => boolean) | null = null
   readonly mountId: string
@@ -453,6 +458,7 @@ export class MountEntry {
   private readonly trees = new Map<string, [Command, CLI]>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
+  treesChanged: (() => void) | null = null
 
   /**
    * The functions the VFS answers itself, read when it is mounted and again
@@ -792,11 +798,32 @@ export class MountEntry {
    * mount, under its root's name: a line naming it walks the tree as an
    * installed CLI's does and runs the leaf on this mount's accessor
    * (`runLeaf`); a tree that declares an installation's own setting throws.
+   * A tree the workspace's command rules name is checked against its
+   * grammar as it arrives (`treesChanged`); one a rule no longer fits
+   * throws `PolicyError` and is not served.
    */
   registerCommands(items: readonly (Command | CLI)[]): void {
     const [commands, trees] = this.ownCommands(items)
+    const held = {
+      cmds: new Map(this.cmds),
+      cmdSpecs: new Map(this.cmdSpecs),
+      userKeys: new Set(this.userKeys),
+      trees: new Map(this.trees),
+    }
     for (const cmd of commands) this.register(cmd)
     for (const [root, cli] of trees) this.trees.set(root.name, [root, cli])
+    if (trees.length === 0 || this.treesChanged === null) return
+    try {
+      this.treesChanged()
+    } catch (err) {
+      refill(this.cmds, held.cmds)
+      refill(this.cmdSpecs, held.cmdSpecs)
+      refill(this.trees, held.trees)
+      this.userKeys.clear()
+      for (const key of held.userKeys) this.userKeys.add(key)
+      this.prefixIndex = null
+      throw err
+    }
   }
 
   /**
