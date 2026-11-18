@@ -180,9 +180,9 @@ impl Store {
             kept: None,
         };
         let store = &reading.store;
-        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID]
+        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID, SECONDS, EPOCHSECONDS, EPOCHREALTIME, SRANDOM]
             .into_iter()
-            .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
+            .filter(|&name| store.random_special(name) || store.is_dynamic(name))
             .map(str::to_owned)
             .collect();
         reading.evaluate(text, added, nounset, &dynamic, expand)

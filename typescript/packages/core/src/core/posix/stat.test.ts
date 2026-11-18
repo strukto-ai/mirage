@@ -39,14 +39,34 @@ describe('parseTree', () => {
         kind: 'd',
         mode: 0o755,
         size: 4096,
-        mtime: 1700000000,
-        atime: 1700000001,
+        mtimeMs: 1700000000500,
+        atimeMs: 1700000001000,
         user: 'root',
         group: 'root',
         rel: '',
       },
-      { kind: 'f', mode: 0o644, size: 3, mtime: 1, atime: 2, user: 'a', group: 'b', rel: 'x y' },
+      {
+        kind: 'f',
+        mode: 0o644,
+        size: 3,
+        mtimeMs: 1000,
+        atimeMs: 2000,
+        user: 'a',
+        group: 'b',
+        rel: 'x y',
+      },
     ])
+  })
+
+  it.each<[string, number]>([
+    ['1700000000.1234567890', 1700000000123],
+    ['1.0004999999', 1000],
+    ['1.0005000000', 1001],
+    ['1.', 1000],
+    ['-1.5000000000', -1500],
+  ])('keeps %s to the millisecond', (stamp, want) => {
+    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} a b x\0`))
+    expect(rows?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
   })
 
   it('refuses a cut record', () => {

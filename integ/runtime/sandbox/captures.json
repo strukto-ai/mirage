@@ -245,6 +245,50 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_program_the_machine_lacks_is_reported_in_bash_s_words",
+      "note": "A captured program the machine has no file for is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, and under `timeout` GNU timeout's own words.",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "mirage-no-such-program a b",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "bash: line 1: mirage-no-such-program: command not found\n"
+          }
+        },
+        {
+          "command": "echo a\nmirage-no-such-program",
+          "expect": {
+            "exit": 127,
+            "stdout": "a\n",
+            "stderr": "bash: line 2: mirage-no-such-program: command not found\n"
+          }
+        },
+        {
+          "command": "timeout 5 mirage-no-such-program",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "timeout: failed to run command 'mirage-no-such-program': No such file or directory\n"
+          }
+        }
+      ]
     }
   ]
 }

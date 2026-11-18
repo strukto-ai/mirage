@@ -41,9 +41,26 @@ pub const RANDOM: &str = "RANDOM";
 /// shell computes at each read until `unset` makes them ordinary names.
 pub const LINENO: &str = "LINENO";
 pub const BASHPID: &str = "BASHPID";
+/// The clock's names: seconds since the shell started, or since a value
+/// was assigned to it, and the time now in whole seconds and to the
+/// microsecond. `SRANDOM` draws 32 random bits at each read. Each ends its
+/// special meaning at `unset`, as `LINENO` does.
+pub const SECONDS: &str = "SECONDS";
+pub const EPOCHSECONDS: &str = "EPOCHSECONDS";
+pub const EPOCHREALTIME: &str = "EPOCHREALTIME";
+pub const SRANDOM: &str = "SRANDOM";
 pub const BASH_LINENO: &str = "BASH_LINENO";
 pub const BASH_SOURCE: &str = "BASH_SOURCE";
 pub const PIPESTATUS: &str = "PIPESTATUS";
+
+/// Microseconds in a second, the clock's unit.
+const MICROS: i64 = 1_000_000;
+
+/// The names whose special meaning `unset` and an unadorned `local` end:
+/// the running command's line and process, the clock's and `SRANDOM`.
+pub fn ends_at_unset(name: &str) -> bool {
+    matches!(name, LINENO | BASHPID | SECONDS | EPOCHSECONDS | EPOCHREALTIME | SRANDOM)
+}
 
 /// The seed word `$RANDOM`'s generator last consumed. `Fresh` has none and
 /// draws its first seed from the host; `Off` is after `unset RANDOM`, or
@@ -119,6 +136,12 @@ pub struct Store {
     /// running it.
     line: usize,
     bash_pid: u32,
+    /// The time now and when the running shell started, in epoch
+    /// microseconds, 0 from a host that keeps no clock; and the value last
+    /// assigned to `SECONDS`, with when and in which shell.
+    now_us: i64,
+    started_us: i64,
+    seconds: Option<(i64, i64, i64)>,
     /// `LINENO` and `BASHPID` once unset: ordinary names from then on.
     plain: Vec<String>,
     /// Whether `LINENO` or `BASHPID` was plain where a frame made it
@@ -159,6 +182,9 @@ impl Store {
             call_lines: Vec::new(),
             line: 0,
             bash_pid: 0,
+            now_us: 0,
+            started_us: 0,
+            seconds: None,
             plain: Vec::new(),
             local_plain: Vec::new(),
             voice: b"bash: ".to_vec(),
@@ -186,6 +212,14 @@ impl Store {
         self.voice = voice;
     }
 
+    /// Set the clock `SECONDS`, `EPOCHSECONDS` and `EPOCHREALTIME` read:
+    /// the time now and when the running shell started, in epoch
+    /// microseconds; a `now_us` of 0 leaves the three unset.
+    pub fn set_clock(&mut self, now_us: i64, started_us: i64) {
+        self.now_us = now_us;
+        self.started_us = started_us;
+    }
+
     /// The line a statement run inside a loop stands on, `$LINENO`.
     pub fn set_line(&mut self, line: usize) {
         self.line = line;
@@ -211,26 +245,68 @@ impl Store {
         &self.voice
     }
 
-    /// What a read of `$LINENO` or `$BASHPID` computes, through a
-    /// reference: the running command's line, the process running it;
-    /// None for any other name, a hidden one, or one unset or made local
-    /// since, which reads as it was assigned.
+    /// What a read of `$LINENO`, `$BASHPID`, one of the clock's names or
+    /// `$SRANDOM` computes, through a reference: the running command's
+    /// line, the process running it, the seconds since the shell started
+    /// (or since `SECONDS` was assigned, plus the value), the time now, 32
+    /// fresh random bits; None for any other name, a hidden one, or one
+    /// unset or made local since, which reads as it was assigned.
     pub fn dynamic(&self, name: &str) -> Option<Vec<u8>> {
         let name = self.target(name);
-        if self.hidden(&name) || self.plain.contains(&name) {
+        if !self.is_dynamic(&name) {
             return None;
         }
-        match name.as_str() {
-            LINENO => Some(self.line.to_string().into_bytes()),
-            BASHPID => Some(self.bash_pid.to_string().into_bytes()),
-            _ => None,
-        }
+        let now = self.now_us;
+        let text = match name.as_str() {
+            LINENO => self.line.to_string(),
+            BASHPID => self.bash_pid.to_string(),
+            SECONDS => {
+                let (value, at) = match self.seconds {
+                    Some((value, at, started)) if started == self.started_us => (value, at),
+                    _ => (0, self.started_us),
+                };
+                value.saturating_add((now - at).div_euclid(MICROS)).to_string()
+            }
+            EPOCHSECONDS => now.div_euclid(MICROS).to_string(),
+            EPOCHREALTIME => format!("{}.{:06}", now.div_euclid(MICROS), now.rem_euclid(MICROS)),
+            SRANDOM => (self.ids)().to_string(),
+            _ => return None,
+        };
+        Some(text.into_bytes())
     }
 
-    /// End `LINENO`'s or `BASHPID`'s special meaning; no other name has one
-    /// to end.
+    /// Whether a read of `name` computes its value now (`dynamic`), with
+    /// nothing drawn: special, not hidden, not unset or made local, and a
+    /// clock's name only while the host keeps a clock.
+    pub fn is_dynamic(&self, name: &str) -> bool {
+        let name = self.target(name);
+        let clock = matches!(name.as_str(), SECONDS | EPOCHSECONDS | EPOCHREALTIME);
+        ends_at_unset(&name)
+            && !self.hidden(&name)
+            && !self.plain.contains(&name)
+            && (!clock || self.now_us != 0)
+    }
+
+    /// Whether a write to `SECONDS` sets the count now.
+    pub fn counts_seconds(&self, name: &str) -> bool {
+        name == SECONDS && self.is_dynamic(name)
+    }
+
+    /// Restart the count at a `SECONDS=` write: `value` now, counting on.
+    pub fn set_seconds(&mut self, value: i64) {
+        self.seconds = Some((value, self.now_us, self.started_us));
+    }
+
+    /// Whether `SECONDS` was assigned in the running shell, which makes it
+    /// an integer in a listing.
+    pub fn seconds_assigned(&self) -> bool {
+        matches!(self.seconds, Some((_, _, started)) if started == self.started_us)
+    }
+
+    /// End the special meaning of a name `unset` makes ordinary
+    /// (`ends_at_unset`); no other name has one to end.
     fn make_plain(&mut self, name: &str) {
-        if (name == LINENO || name == BASHPID) && !self.plain.iter().any(|plain| plain == name) {
+        if ends_at_unset(name) && !self.plain.iter().any(|plain| plain == name) {
             self.plain.push(name.to_owned());
         }
     }
@@ -269,6 +345,10 @@ impl Store {
             RANDOM,
             LINENO,
             BASHPID,
+            SECONDS,
+            EPOCHSECONDS,
+            EPOCHREALTIME,
+            SRANDOM,
             "PIPESTATUS",
             "FUNCNAME",
             BASH_LINENO,
@@ -277,7 +357,7 @@ impl Store {
         .into_iter()
         .filter(|&name| {
             self.random_special(name)
-                || self.dynamic(name).is_some()
+                || self.is_dynamic(name)
                 || self.special(name).is_some_and(|array| {
                     !array.is_empty() || name == BASH_LINENO || name == BASH_SOURCE
                 })
@@ -737,6 +817,9 @@ impl Store {
         forked.call_lines = self.call_lines.clone();
         forked.line = self.line;
         forked.bash_pid = self.bash_pid;
+        forked.now_us = self.now_us;
+        forked.started_us = self.started_us;
+        forked.seconds = self.seconds;
         forked.plain = self.plain.clone();
         forked.voice = self.voice.clone();
         if self.random_seed == Seed::Off {
@@ -1390,6 +1473,56 @@ mod tests {
         assert_eq!(store.subshell().dynamic(LINENO), None);
         store.hide_vars(&[BASHPID.to_owned()], &[]);
         assert_eq!(store.dynamic(BASHPID), None);
+    }
+
+    #[test]
+    fn the_clock_s_names_read_the_host_s_clock() {
+        let mut store = store();
+        assert_eq!(store.dynamic(SECONDS), None);
+        assert_eq!(store.dynamic(EPOCHSECONDS), None);
+        assert!(!store.is_dynamic(EPOCHREALTIME));
+        store.set_clock(1_700_000_003_250_000, 1_700_000_000_500_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"2".to_vec()));
+        assert_eq!(store.dynamic(EPOCHSECONDS), Some(b"1700000003".to_vec()));
+        assert_eq!(
+            store.dynamic(EPOCHREALTIME),
+            Some(b"1700000003.250000".to_vec())
+        );
+        assert_eq!(store.dynamic(SRANDOM), Some(b"7".to_vec()));
+        let mut draws = Draws::default();
+        let outcome = store.arith(&mut draws, b"SECONDS + 1", None, false, false);
+        assert_eq!(outcome.value.unwrap(), 3);
+        assert!(store.computed().any(|name| name == EPOCHSECONDS));
+    }
+
+    #[test]
+    fn seconds_counts_on_from_what_was_assigned_in_the_running_shell() {
+        let mut store = store();
+        store.set_clock(10_000_000, 1_000_000);
+        store.set_seconds(100);
+        store.set_clock(12_500_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"102".to_vec()));
+        assert!(store.seconds_assigned());
+        store.set_clock(15_000_000, 14_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"1".to_vec()));
+        assert!(!store.seconds_assigned());
+    }
+
+    #[test]
+    fn the_clock_s_names_end_at_unset_and_an_unadorned_local() {
+        let mut store = store();
+        store.set_clock(5_000_000, 1_000_000);
+        let outer = store.enter();
+        store.shadow(SECONDS, false);
+        assert_eq!(store.dynamic(SECONDS), None);
+        store.leave(outer);
+        assert_eq!(store.dynamic(SECONDS), Some(b"4".to_vec()));
+        store.drop_var(EPOCHSECONDS);
+        assert_eq!(store.dynamic(EPOCHSECONDS), None);
+        assert!(!store.computed().any(|name| name == EPOCHSECONDS));
+        assert!(store.fork().dynamic(SECONDS).is_some());
+        store.hide_vars(&[SRANDOM.to_owned()], &[]);
+        assert_eq!(store.dynamic(SRANDOM), None);
     }
 
     #[test]

@@ -989,7 +989,7 @@ class LeftOpenBox extends RecordingMachine {
     errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 4] ?? '')
     await errors(new Uint8Array([...mark, ...ENC.encode('3\n')]))
     return new Promise((_, reject) => {
       signal?.addEventListener('abort', () => {
@@ -1150,7 +1150,7 @@ class SlowStopBox extends RecordingMachine {
         resolve()
       })
     })
-    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 4] ?? '')
     await errors(new Uint8Array([...mark, ...ENC.encode('0\n')]))
     await new Promise((resolve) => setTimeout(resolve, (RUN_DRAIN_SECONDS + 0.3) * 1000))
     throw new DOMException('execute aborted', 'AbortError')
@@ -1209,7 +1209,7 @@ class PidLineBox extends RecordingMachine {
     const keep: OutputFn = (data) => Promise.resolve(void own.push(data))
     await super.execArgv(argv, stdin, env, cwd, keep, ignore)
     const line = new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')])
-    const exit = new Uint8Array([...runExitMark(argv[RUN_PROGRAM_AT - 2] ?? ''), 0x30, 0x0a])
+    const exit = new Uint8Array([...runExitMark(argv[RUN_PROGRAM_AT - 4] ?? ''), 0x30, 0x0a])
     if (this.joinsStreams) {
       await output(concat([line, ...own]))
       await output(exit)

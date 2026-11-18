@@ -2,11 +2,27 @@ import pytest
 
 from mirage.io.stream import materialize
 from mirage.shell.array import ShellArray
+from mirage.shell.constants import (
+    BASH_VERSINFO,
+    BASH_VERSION,
+    SHLVL,
+    VERSION_PARTS,
+    VERSION_TEXT,
+)
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session.budget import args_bytes, entry_bytes
 from mirage.workspace.session.constants import MAX_ENV
+
+# The max_env these lines run under: 200 bytes for what each line grows,
+# past the variables every shell starts with (``seed_shell``).
+LIMIT = (
+    200
+    + entry_bytes(BASH_VERSION, VERSION_TEXT)
+    + entry_bytes(BASH_VERSINFO, ShellArray(dict(enumerate(VERSION_PARTS))))
+    + entry_bytes(SHLVL, "1")
+)
 
 
 def test_entries_count_their_utf8_bytes():
@@ -18,7 +34,7 @@ def test_entries_count_their_utf8_bytes():
 
 
 async def run(
-    line: str, max_env: int | str | None = 200
+    line: str, max_env: int | str | None = LIMIT
 ) -> tuple[str, str, int]:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, max_env=max_env)
     try:
@@ -34,7 +50,7 @@ async def test_a_doubling_variable_stops_the_line_at_max_env():
     out, err, code = await run("x=a; while :; do x=$x$x; done; echo after")
     assert (out, code) == ("", 2)
     assert err == (
-        "bash: xmalloc: cannot allocate 257 bytes (past max_env of 200"
+        f"bash: xmalloc: cannot allocate 257 bytes (past max_env of {LIMIT}"
         " bytes, a mirage workspace setting)\n"
     )
 
@@ -48,7 +64,7 @@ async def test_functions_aliases_and_parameters_count_too():
         f"set -- {body}",
     ):
         _, err, code = await run(f"{line}; echo after")
-        assert code == 2 and "past max_env of 200 bytes" in err
+        assert code == 2 and f"past max_env of {LIMIT} bytes" in err
 
 
 @pytest.mark.asyncio
@@ -77,7 +93,7 @@ async def test_fresh_names_count_with_no_value():
         "export " + " ".join(names) + ";",
     ):
         _, err, code = await run(f"{line} echo after")
-        assert code == 2 and "past max_env of 200 bytes" in err, line
+        assert code == 2 and f"past max_env of {LIMIT} bytes" in err, line
 
 
 @pytest.mark.asyncio
@@ -89,7 +105,7 @@ async def test_arguments_a_call_or_source_passes_count():
         "set -- aaaaaaaa; echo 'source /s' > /s; source /s",
     ):
         _, err, code = await run(line)
-        assert code == 2 and "past max_env of 200 bytes" in err, line
+        assert code == 2 and f"past max_env of {LIMIT} bytes" in err, line
 
 
 @pytest.mark.asyncio
@@ -97,7 +113,7 @@ async def test_a_nested_shell_s_arguments_count_and_it_dies_alone():
     refused = await run("bash -c 'set -- $(seq 1 100)'; echo rc=$?")
     assert refused == (
         "rc=2\n",
-        "bash: xmalloc: cannot allocate 292 bytes (past max_env of 200"
+        f"bash: xmalloc: cannot allocate 292 bytes (past max_env of {LIMIT}"
         " bytes, a mirage workspace setting)\n",
         0,
     )
@@ -111,7 +127,7 @@ async def test_a_nested_shell_s_arguments_count_and_it_dies_alone():
         ' bash /x.sh "$@" "$@"\' > /x.sh; bash /x.sh aaaaaaaa; echo rc=$?'
     )
     assert (out, code) == ("rc=2\n", 0)
-    assert "past max_env of 200 bytes" in err
+    assert f"past max_env of {LIMIT} bytes" in err
 
 
 @pytest.mark.asyncio
@@ -129,7 +145,7 @@ async def test_a_nested_shell_s_arguments_count_and_it_dies_alone():
 async def test_a_prefix_assignment_counts(line: str, size: int):
     assert await run(line) == (
         "",
-        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of 200"
+        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of {LIMIT}"
         " bytes, a mirage workspace setting)\n",
         2,
     )
@@ -153,7 +169,7 @@ async def test_a_prefix_assignment_counts(line: str, size: int):
 async def test_the_value_a_prefix_sets_aside_counts(line: str, size: int):
     assert await run(line) == (
         "",
-        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of 200"
+        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of {LIMIT}"
         " bytes, a mirage workspace setting)\n",
         2,
     )
@@ -164,7 +180,7 @@ async def test_a_global_declaration_past_a_prefix_counts_the_record_once():
     out, _, code = await run(
         "X=$(printf %0100d 0); f() { declare -g X=$(printf %0150d 0); };"
         " X= f; echo ${#X}",
-        300,
+        LIMIT + 100,
     )
     assert (out, code) == ("150\n", 0)
 
@@ -176,7 +192,7 @@ async def test_a_global_declaration_counts_the_prefix_value_it_holds_aside():
         " X=$(printf %0100d 0) f; echo after"
     )
     assert (out, code) == ("", 2)
-    assert "past max_env of 200 bytes" in err
+    assert f"past max_env of {LIMIT} bytes" in err
 
 
 @pytest.mark.asyncio
@@ -186,7 +202,7 @@ async def test_arithmetic_a_global_declaration_runs_counts_the_global():
         " f() { declare -gi Y='Z=1234567890123456789,0' X; }; X= f; echo after"
     )
     assert (out, code) == ("", 2)
-    assert "past max_env of 200 bytes" in err
+    assert f"past max_env of {LIMIT} bytes" in err
 
 
 @pytest.mark.asyncio

@@ -687,7 +687,12 @@ describe('E2BMachine', () => {
       [
         encodeOutput(
           wrapLine(
-            runArgv('runid', 'runid', ['/bin/sh', '-c', 'wc -l | cat']),
+            runArgv(
+              'runid',
+              'runid',
+              ['/bin/sh', '-c', 'wc -l | cat'],
+              ['bash: /bin/sh: ', 'command not found'],
+            ),
             { E: '1' },
             '/workspace',
           ),

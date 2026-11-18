@@ -537,12 +537,19 @@ class MachineMounts:
             )
         return None
 
-    def guarded(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+    def guarded(
+        self,
+        argv: tuple[str, ...],
+        missing: tuple[str, str] = ("", "command not found"),
+    ) -> tuple[str, ...]:
         """``argv`` under ``MOUNT_GUARD``, holding every mount the machine
         had at the line's ``validate``; unchanged when it had none.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
+            missing (tuple[str, str]): what leads the report of a program
+                the machine cannot run, and why for a name no folder on
+                PATH holds (``missing_program``).
         """
         held = {
             p: (source, "fuse.sshfs")
@@ -563,6 +570,7 @@ class MachineMounts:
             "-c",
             MOUNT_GUARD,
             "sh",
+            *missing,
             "/proc/mounts",
             *words,
             "--",

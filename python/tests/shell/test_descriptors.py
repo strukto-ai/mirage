@@ -17,11 +17,14 @@ import pytest
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
 from mirage.shell.descriptors import (
     bad_descriptor_line,
+    descriptor_of,
+    named_descriptor,
     unsupported_descriptor,
 )
 from mirage.shell.helpers import get_redirects
 from mirage.shell.parse import parse
 from mirage.shell.types import Redirect, RedirectKind
+from mirage.types import PathSpec
 
 
 def _redirects(line: str) -> list[Redirect]:
@@ -88,3 +91,50 @@ def test_parser_append_and_clobber_flags():
 def test_descriptors_are_supported(line):
     assert unsupported_descriptor(_redirects(line)) is None
     assert bad_descriptor_line(3) == b"bash: 3: Bad file descriptor\n"
+
+
+@pytest.mark.parametrize(
+    ("path", "fd"),
+    [
+        ("/dev/stdin", 0),
+        ("/dev/stdout", 1),
+        ("/dev/stderr", 2),
+        ("/dev/fd/0", 0),
+        ("/dev/fd/2", 2),
+        ("/dev/fd/3", 3),
+        ("/dev/fd/9", None),
+        ("/dev/fd/x", None),
+        ("/dev/fd/", None),
+        ("/dev/null", None),
+    ],
+)
+def test_a_path_names_a_descriptor_past_two_only_while_it_is_open(path, fd):
+    assert descriptor_of(path, lambda n: n == 3) == fd
+
+
+def test_a_redirect_onto_a_descriptor_s_path_duplicates_it():
+    assert named_descriptor(
+        Redirect(fd=1, target=PathSpec.from_str_path("/dev/stderr")),
+        lambda n: False,
+    ) == (Redirect(fd=1, target=2, kind=RedirectKind.DUP_OUTPUT),)
+    assert named_descriptor(
+        Redirect(fd=FD_BOTH, target="/dev/stdout"), lambda n: False
+    ) == (
+        Redirect(fd=1, target=1, kind=RedirectKind.DUP_OUTPUT),
+        Redirect(fd=2, target=1, kind=RedirectKind.DUP_OUTPUT),
+    )
+    assert named_descriptor(
+        Redirect(fd=0, target="/dev/fd/3", kind=RedirectKind.STDIN),
+        lambda n: True,
+    ) == (Redirect(fd=0, target=3, kind=RedirectKind.DUP_INPUT),)
+    assert (
+        named_descriptor(
+            Redirect(fd=0, target="/dev/fd/0", kind=RedirectKind.STDIN),
+            lambda n: True,
+        )
+        is None
+    )
+    assert (
+        named_descriptor(Redirect(fd=1, target="/tmp/f"), lambda n: True)
+        is None
+    )

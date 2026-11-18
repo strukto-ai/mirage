@@ -39,8 +39,10 @@ from mirage.context import (
 from mirage.context.session_context import (
     Caller,
     bind_caller,
+    clear_program_invocation,
     current_caller,
     in_landing,
+    missing_program,
     run_landing,
     session_voice,
     with_caller,
@@ -561,3 +563,21 @@ def test_a_session_speaks_as_what_it_is_reading():
     session._parse_name = "environment"
     session._line_row = 2
     assert session_voice(session) == "environment: line 3: "
+
+
+def test_a_missing_program_is_worded_by_whatever_execs_it():
+    assert missing_program("x") == ("bash: x", "command not found")
+    session = SessionState(session_id="s")
+    token = set_program_invocation(
+        session, "timeout: failed to run command 'x'"
+    )
+    try:
+        assert missing_program("x") == (
+            "timeout: failed to run command 'x'",
+            "No such file or directory",
+        )
+        inner = clear_program_invocation()
+        assert missing_program("x") == ("bash: x", "command not found")
+        reset_caller(inner)
+    finally:
+        reset_caller(token)

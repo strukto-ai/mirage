@@ -28,7 +28,7 @@ import { PLAIN_TRAITS, type ProcessTraits } from '../execution/process/types.ts'
 import type { MachineName, ProcessId } from '../execution/types.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
-import { useVoice } from '../shell/voice.ts'
+import { shellVoice, useVoice } from '../shell/voice.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { FileDescription } from '../shell/descriptors.ts'
 import type { Redirect } from '../shell/types.ts'
@@ -126,6 +126,10 @@ export interface Caller {
     | readonly [object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]
     | null
   readonly program: SessionState | null
+  // What leads the report of a program a program line cannot run, in the
+  // words of the program that execs it (`timeout: failed to run command
+  // 'x'`); null for the shell's own.
+  readonly execFailure: string | null
   readonly stop: AbortController | null
   readonly writeHeld: boolean
   readonly versionReads: boolean
@@ -189,6 +193,7 @@ const UNBOUND: Caller = {
   walkProbe: null,
   redirects: null,
   program: null,
+  execFailure: null,
   call: null,
   stop: null,
   writeHeld: false,
@@ -923,17 +928,36 @@ export function sessionCaller(session: SessionState, owner?: SessionOwner): Call
  * shell's builtin of the same name (`printf -v` is a format string there,
  * not an assignment). Keyed by the session object, which the child shells
  * it starts inherit, and cleared again by a nested shell the line starts
- * (`-exec sh -c ...`), so that shell's builtins are its own.
+ * (`-exec sh -c ...`), so that shell's builtins are its own. `failure` leads
+ * the report of a program the line cannot run, in the words of the program
+ * that execs it (`timeout: failed to run command 'x'`); null keeps the
+ * shell's.
  */
-export function setProgramInvocation<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
-  return bindChanges({ program: session }, fn)
+export function setProgramInvocation<T>(
+  session: SessionState,
+  fn: () => Promise<T>,
+  failure: string | null = null,
+): Promise<T> {
+  return bindChanges({ program: session, execFailure: failure }, fn)
 }
 
 /** Run a nested shell's script as the shell's own again: a nested shell
  * is a program, and the builtins it runs are its builtins, `printf -v`
  * included. */
 export function clearProgramInvocation<T>(fn: () => Promise<T>): Promise<T> {
-  return bindChanges({ program: null }, fn)
+  return bindChanges({ program: null, execFailure: null }, fn)
+}
+
+/**
+ * How a program the line cannot run is reported: what leads the line before
+ * its colon, and why for a name no folder on PATH holds. The shell's voice
+ * and `command not found`; in a line a program execs (`timeout`), that
+ * program's words and execvp's reason. Mirrors Python's `missing_program`.
+ */
+export function missingProgram(name: string): [string, string] {
+  const failure = currentCaller().execFailure
+  if (failure === null) return [`${shellVoice()}${name}`, 'command not found']
+  return [failure, 'No such file or directory']
 }
 
 /** Whether the line running in this session is a program run. */

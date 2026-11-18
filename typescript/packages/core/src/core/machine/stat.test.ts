@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { failed, ok, ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { bound, DIR, ROW, spec } from '../../../tests/fixtures/machine_files.ts'
 import { FileType } from '../../types.ts'
-import { epochToIso } from '../../utils/dates.ts'
 import { rowStat, stat, tree } from './stat.ts'
 
 const ENC = new TextEncoder()
@@ -33,8 +32,8 @@ describe('rowStat', () => {
       kind: 'f',
       mode: 0o640,
       size: 12,
-      mtime: 1700000000,
-      atime: 1700000001,
+      mtimeMs: 1700000000123,
+      atimeMs: 1700000001000,
       user: 'app',
       group: 'staff',
       rel: '',
@@ -47,8 +46,8 @@ describe('rowStat', () => {
       'app',
       'staff',
     ])
-    expect(got.modified).toBe(epochToIso(1700000000))
-    expect(got.atime).toBe(epochToIso(1700000001))
+    expect(got.modified).toBe('2023-11-14T22:13:20.123Z')
+    expect(got.atime).toBe('2023-11-14T22:13:21.000Z')
   })
 
   it.each<[string, FileType, number | null]>([
@@ -62,8 +61,8 @@ describe('rowStat', () => {
       kind,
       mode: 0o755,
       size: 7,
-      mtime: 0,
-      atime: 0,
+      mtimeMs: 0,
+      atimeMs: 0,
       user: 'root',
       group: 'root',
       rel: '',

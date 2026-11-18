@@ -17,13 +17,14 @@ import pytest
 from mirage.core.machine.stat import row_stat, stat, tree
 from mirage.core.posix.types import TreeRow
 from mirage.types import FileType
-from mirage.utils.dates import epoch_to_iso
 from tests.fixtures.machine import ScriptedMachine, failed, ok
 from tests.fixtures.machine_files import DIR, ROW, bound, spec
 
 
 def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
-    row = TreeRow("f", 0o640, 12, 1700000000, 1700000001, "app", "staff", "")
+    row = TreeRow(
+        "f", 0o640, 12, 1700000000123, 1700000001000, "app", "staff", ""
+    )
     got = row_stat("x.py", row)
     assert (got.type, got.size, got.mode, got.uid, got.gid) == (
         FileType.FILE,
@@ -32,8 +33,8 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         "app",
         "staff",
     )
-    assert got.modified == epoch_to_iso(1700000000)
-    assert got.atime == epoch_to_iso(1700000001)
+    assert got.modified == "2023-11-14T22:13:20.123Z"
+    assert got.atime == "2023-11-14T22:13:21.000Z"
 
 
 @pytest.mark.parametrize(

@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.device import active_device, active_pipe
+from mirage.context import get_current_session
+from mirage.core.dev.constants import RANDOM_DEVICES
+from mirage.core.dev.device import active_device, active_pipe, refuse_tty
 from mirage.core.ram.read import read as ram_read
 from mirage.errors.fs import einval
 from mirage.types import PathSpec
+from mirage.utils.ids import SystemIdSource
 from mirage.utils.path import norm
 
 
@@ -30,8 +33,10 @@ async def read(
 
     ``/dev/null`` is always empty. ``/dev/zero`` answers a ranged read
     (``size`` given) with exactly that many zeros at any offset, and
+    ``/dev/random`` and ``/dev/urandom`` with as many random bytes; each
     refuses a whole read (``size`` is None) with EINVAL: an endless
-    device cannot be materialized. A recreated real file reads normally.
+    device cannot be materialized. ``/dev/tty`` is ENXIO. A recreated
+    real file reads normally.
     """
     pipe = active_pipe(accessor, norm(path.mount_path))
     if pipe is not None:
@@ -41,8 +46,24 @@ async def read(
         return await ram_read(accessor, path, offset, size)
     if device == "null":
         return b""
+    refuse_tty(device, path.virtual)
     if size is None:
         raise einval(
             path.virtual, "cannot read an endless device without a size"
         )
+    if device in RANDOM_DEVICES:
+        return random_bytes(size)
     return b"\x00" * size
+
+
+def random_bytes(size: int) -> bytes:
+    """``size`` random bytes, as /dev/urandom reads them, drawn from the
+    running session's ids, so a seeded workspace reads the same bytes
+    again. Mirrors TypeScript's ``randomBytes``.
+
+    Args:
+        size (int): how many bytes.
+    """
+    session = get_current_session()
+    ids = session.ids if session is not None else SystemIdSource()
+    return ids.random_words(-(-size // 4))[:size]

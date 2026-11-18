@@ -49,6 +49,7 @@ from mirage.shell.descriptors import (
     Inherited,
     Recorder,
     bad_descriptor_line,
+    named_descriptor,
     redirect_operations,
     unsupported_descriptor,
 )
@@ -243,7 +244,10 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
-        for operation in redirect_operations(redirect):
+        named = named_descriptor(
+            redirect, lambda fd: fd in session.descriptors
+        )
+        for operation in named or redirect_operations(redirect):
             error = await _install_descriptor(
                 owned, dispatch, session, operation, stdin
             )

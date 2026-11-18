@@ -55,6 +55,7 @@ from mirage.workspace.executor.control import ended
 from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.session.state import (
     seed_parent,
+    seed_shell,
     set_positional_params,
 )
 from mirage.workspace.types import ExecutionNode
@@ -297,11 +298,13 @@ async def handle_bash(
         if runner is not None:
             session.shell_pid = runner.record.pid
             seed_parent(session, runner.record.parent or 0)
+            seed_shell(session, nested=True)
             if job_table is not None:
                 context.frame.shell = runner
         io = await run()
     else:
         seed_parent(session, parent_pid or 0)
+        seed_shell(session, nested=True)
         io = await _in_process(
             job_table, context, caller, parent_pid, label, run
         )

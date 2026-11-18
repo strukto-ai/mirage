@@ -31,8 +31,16 @@ from mirage.rs.session import raw_value, var_of
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import PPID
+from mirage.shell.constants import (
+    BASH_VERSINFO,
+    BASH_VERSION,
+    PPID,
+    SHLVL,
+    VERSION_PARTS,
+    VERSION_TEXT,
+)
 from mirage.shell.variable import ShellValue, VarAttr
+from mirage.utils.clock import system_now
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
     args_bytes,
@@ -46,13 +54,18 @@ from mirage.workspace.session.budget import (
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.task import fault_error
 
+# Microseconds in a second, the unit of the clock the shell reads.
+MICROS = 1_000_000
+
 
 def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
     """Hand the session's shell the state around it that a task reads:
     the positional parameters in scope, the special parameters, the
     options, ``max_env`` and the bytes the session holds beside its
     variables, the bytes left under ``max_memory``, the running command's
-    line and process, and the voice the shell's diagnostics lead with.
+    line and process, the voice the shell's diagnostics lead with, and
+    the time now and when the running shell started, which ``$SECONDS``
+    and ``$EPOCHSECONDS`` read.
 
     Args:
         session (SessionState): the session.
@@ -87,6 +100,8 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         bash_pid=session.bash_pid,
         voice=session_voice(session),
         err_trap=bool(session.err_trap),
+        clock=int(system_now() * MICROS),
+        started=session.shell_started_us,
     )
 
 
@@ -773,6 +788,34 @@ def seed_parent(session: SessionState, pid: int) -> None:
     seed_var(session, PPID, str(pid))
     set_attr(session, PPID, VarAttr.INTEGER)
     set_attr(session, PPID, VarAttr.READONLY)
+
+
+def seed_shell(session: SessionState, nested: bool = False) -> None:
+    """Start what a bash shell sets of itself as it starts: when it
+    started, which ``$SECONDS`` counts from, its version
+    (``BASH_VERSION`` and the readonly ``BASH_VERSINFO``), and ``SHLVL``,
+    exported: one deeper than the one it was handed for a nested shell,
+    and 1 for a top one handed none. A name made readonly stays as it is.
+
+    Args:
+        session (SessionState): the shell.
+        nested (bool): another shell started it (``bash script.sh``).
+    """
+    session.shell_started_us = int(system_now() * MICROS)
+    if not env_is_readonly(session, BASH_VERSINFO):
+        seed_var(session, BASH_VERSION, VERSION_TEXT)
+        seed_var(
+            session, BASH_VERSINFO, ShellArray(dict(enumerate(VERSION_PARTS)))
+        )
+        set_attr(session, BASH_VERSINFO, VarAttr.READONLY)
+    if env_is_readonly(session, SHLVL):
+        return
+    held = env_get(session, SHLVL)
+    if held is not None and not nested:
+        return
+    level = int(held) if held is not None and held.isdigit() else 0
+    seed_var(session, SHLVL, str(level + 1))
+    set_attr(session, SHLVL, VarAttr.EXPORT)
 
 
 def set_attr(

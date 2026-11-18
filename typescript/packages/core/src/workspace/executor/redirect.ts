@@ -48,9 +48,11 @@ import {
 import {
   badDescriptorLine,
   deliver,
+  descriptorOf,
   FileDescription,
   FileInput,
   Inherited,
+  namedDescriptor,
   Recorder,
   redirectOperations,
   unreadableStdin,
@@ -817,6 +819,11 @@ class Opened {
     readonly closed: Set<number>,
   ) {}
 
+  /** Whether a descriptor is open here. */
+  holds(fd: number): boolean {
+    return this.outputs.has(fd) && !this.closed.has(fd)
+  }
+
   /** Forget what a descriptor had closed or was reading. */
   reopen(fd: number): void {
     this.closed.delete(fd)
@@ -922,7 +929,10 @@ async function openInput(
   const { dispatch, session, inputs, outputs } = opened
   let source: ByteSource | null
   try {
-    if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
+    if (
+      r.kind === RedirectKind.STDIN &&
+      descriptorOf(scope.virtual, (fd) => opened.holds(fd)) === FD_STDIN
+    ) {
       opened.reopen(r.fd)
       outputs.set(r.fd, CLOSED)
       inputs.set(r.fd, opened.stdin)
@@ -1178,6 +1188,15 @@ async function runRedirects(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
+    const named = namedDescriptor(r, (fd) => opened.holds(fd))
+    if (named !== null) {
+      expanded.push(...named)
+      for (const operation of named) {
+        const bad = duplicate(opened, operation, operation.target as number)
+        if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      }
+      continue
+    }
     expanded.push(...redirectOperations(r))
     const refused = unusable(r)
     if (refused !== null) return opened.failed(refused)
@@ -1519,7 +1538,7 @@ export async function redirectStdin(
       const scope = PathSpec.fromStrPath(target as string | PathSpec, undefined, session.cwd)
       sources.set(
         r.fd,
-        scope.virtual === '/dev/stdin'
+        descriptorOf(scope.virtual, noneOpen) === FD_STDIN
           ? stdin
           : (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
             ? new DeviceInput()
@@ -1655,4 +1674,12 @@ function ensureScope(target: unknown): PathSpec {
   if (target instanceof PathSpec) return target
   if (typeof target === 'string') return toScope(target)
   return toScope(String(target))
+}
+
+/**
+ * No descriptor past the standard three is open: what the admission pass,
+ * which opens none, asks of `/dev/fd/N`. Mirrors Python's `_none_open`.
+ */
+function noneOpen(_fd: number): boolean {
+  return false
 }

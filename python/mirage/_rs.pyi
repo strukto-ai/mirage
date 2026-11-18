@@ -205,6 +205,8 @@ class Shell:
         bash_pid: int,
         voice: str,
         err_trap: bool,
+        clock: int = 0,
+        started: int = 0,
     ) -> None: ...
     def conversion_scalar(
         self, name: str

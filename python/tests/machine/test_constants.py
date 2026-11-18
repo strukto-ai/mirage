@@ -228,7 +228,16 @@ def test_the_stop_line_matches_its_process_tag_whole():
 
 def guarded(table, *entries):
     return subprocess.run(
-        ["/bin/sh", "-c", MOUNT_GUARD, "sh", str(table), *entries]
+        [
+            "/bin/sh",
+            "-c",
+            MOUNT_GUARD,
+            "sh",
+            "",
+            "command not found",
+            str(table),
+            *entries,
+        ]
         + ["--", "/bin/echo", "ran"],
         capture_output=True,
         env={"PATH": "/nowhere"},
@@ -300,7 +309,15 @@ def test_the_mount_guard_hands_the_program_its_environment(tmp_path):
     table.write_text("mirage-x:/data /data fuse.sshfs rw 0 0\n")
     words = ("t", "f", "s", "m", "k", "o")
     done = subprocess.run(
-        ["/bin/sh", "-c", MOUNT_GUARD, "sh", str(table)]
+        [
+            "/bin/sh",
+            "-c",
+            MOUNT_GUARD,
+            "sh",
+            "",
+            "command not found",
+            str(table),
+        ]
         + list(expected("/data", "mirage-x:/data", "fuse.sshfs"))
         + ["--", "/usr/bin/env"],
         capture_output=True,

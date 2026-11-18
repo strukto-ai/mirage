@@ -37,6 +37,7 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EFBIG: PosixErrno(errno.EFBIG, "File too large"),
     FsCondition.EDQUOT: PosixErrno(errno.EDQUOT, "Disk quota exceeded"),
     FsCondition.EPIPE: PosixErrno(errno.EPIPE, "Broken pipe"),
+    FsCondition.ENXIO: PosixErrno(errno.ENXIO, "No such device or address"),
     # "attribute not set": ENOATTR on macOS, ENODATA on Linux. One
     # condition, resolved once; the phrase follows the number so a raw
     # strerror on either platform reads consistently.
@@ -74,6 +75,7 @@ LINUX_ERRNO: dict[FsCondition, int] = {
     FsCondition.EFBIG: 27,
     FsCondition.EDQUOT: 122,
     FsCondition.EPIPE: 32,
+    FsCondition.ENXIO: 6,
     FsCondition.NO_XATTR: 61,
     FsCondition.STALE_WRITE: 116,
 }

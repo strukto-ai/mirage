@@ -19,6 +19,7 @@ import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { STDIN_PATHS } from '../../../shell/constants.ts'
 import { STDIN_HEADER_NAME } from './constants.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
 import { chunks } from '../../../io/cooperative.ts'
@@ -38,7 +39,7 @@ export function resolveSource(stdin: ByteSource | null): AsyncIterable<Uint8Arra
  * as a file, so only /dev/stdin is stdin to them.
  */
 export function isStdin(path: PathSpec, dash = true): boolean {
-  return (dash && path.rawPath === '-') || path.virtual === '/dev/stdin'
+  return (dash && path.rawPath === '-') || STDIN_PATHS.has(path.virtual)
 }
 
 /**

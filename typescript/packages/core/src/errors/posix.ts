@@ -39,6 +39,7 @@ export const POSIX: Record<FsCondition, PosixErrno> = {
   EFBIG: { errno: 27, phrase: 'File too large' },
   EDQUOT: { errno: 122, phrase: 'Disk quota exceeded' },
   EPIPE: { errno: 32, phrase: 'Broken pipe' },
+  ENXIO: { errno: 6, phrase: 'No such device or address' },
   NO_XATTR: { errno: 61, phrase: 'No data available' },
   STALE_WRITE: { errno: 116, phrase: 'changed since it was read; read it again before writing' },
 }

@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context import (
+    missing_program,
     reset_caller,
     set_current_evaluation,
     set_program_invocation,
@@ -164,7 +165,8 @@ async def handle_exec_path(
             if isinstance(exc, FileNotFoundError)
             else CANNOT_EXECUTE_STATUS
         )
-        return script_error(f"{shell_voice()}{path}", strerror, code, path)
+        lead, _ = missing_program(path)
+        return script_error(lead, strerror, code, path)
     if is_binary(data):
         return script_error(
             f"{shell_voice()}{path}",

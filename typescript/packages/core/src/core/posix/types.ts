@@ -26,10 +26,10 @@ export interface TreeRow {
   readonly mode: number
   /** The size in bytes. */
   readonly size: number
-  /** The modification time, in whole seconds. */
-  readonly mtime: number
-  /** The access time, in whole seconds. */
-  readonly atime: number
+  /** The modification time, in epoch milliseconds. */
+  readonly mtimeMs: number
+  /** The access time, in epoch milliseconds. */
+  readonly atimeMs: number
   /** The owner's name, or its number when it has none. */
   readonly user: string
   /** The group's name, or its number. */

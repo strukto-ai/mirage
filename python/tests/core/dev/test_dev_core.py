@@ -1,3 +1,5 @@
+import errno
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
@@ -20,7 +22,16 @@ def _spec(name: str):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,rdev", [("null", [1, 3]), ("zero", [1, 5])])
+@pytest.mark.parametrize(
+    "name,rdev",
+    [
+        ("null", [1, 3]),
+        ("zero", [1, 5]),
+        ("random", [1, 8]),
+        ("urandom", [1, 9]),
+        ("tty", [5, 0]),
+    ],
+)
 async def test_stat_is_char_device(name, rdev):
     s = await stat(_accessor(), _spec(name))
     assert s.type is FileType.CHAR_DEVICE
@@ -41,6 +52,24 @@ async def test_zero_ranged_read_is_exact():
     a = _accessor()
     assert await read(a, _spec("zero"), size=17) == b"\x00" * 17
     assert await read(a, _spec("zero"), offset=9, size=3) == b"\x00" * 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["random", "urandom"])
+async def test_random_ranged_read_is_exact_and_whole_read_refuses(name):
+    a = _accessor()
+    first = await read(a, _spec(name), size=64)
+    assert len(first) == 64
+    assert first != await read(a, _spec(name), size=64)
+    with pytest.raises(OSError):
+        await read(a, _spec(name))
+
+
+@pytest.mark.asyncio
+async def test_tty_read_is_enxio():
+    with pytest.raises(OSError) as caught:
+        await read(_accessor(), _spec("tty"), size=1)
+    assert caught.value.errno == errno.ENXIO
 
 
 @pytest.mark.asyncio

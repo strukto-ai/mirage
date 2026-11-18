@@ -88,7 +88,7 @@ function guardedPoints(argv: readonly string[]): string[] {
   let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
   if (isRun(inner)) inner = inner.slice(RUN_PROGRAM_AT)
   if (inner[2] !== MOUNT_GUARD) return []
-  return inner.slice(5, inner.indexOf('--', 5)).filter((_, at) => at % 4 === 0)
+  return inner.slice(7, inner.indexOf('--', 7)).filter((_, at) => at % 4 === 0)
 }
 
 type Program = (proc: FakeProcess) => Promise<number> | number

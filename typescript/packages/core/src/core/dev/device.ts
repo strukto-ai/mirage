@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fsError } from '../../errors/fs.ts'
+import { TTY } from './constants.ts'
 import { PipeFiles } from './mixin.ts'
 import type { DevicePipe } from './pipe.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
@@ -32,4 +34,13 @@ export function activePipe(accessor: RAMAccessor, key: string): DevicePipe | nul
 export function pipeBelow(accessor: RAMAccessor, key: string): boolean {
   const files = accessor.store.files
   return files instanceof PipeFiles && files.holdsPipe(key)
+}
+
+/**
+ * Refuse the terminal a shell with none cannot open: a read or a write of
+ * `tty` is ENXIO, which every other device takes. Mirrors Python's
+ * `refuse_tty`.
+ */
+export function refuseTty(device: string | null, path: string): void {
+  if (device === TTY) throw fsError(path, 'ENXIO')
 }

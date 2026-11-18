@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.device import active_device, active_pipe
+from mirage.core.dev.device import active_device, active_pipe, refuse_tty
 from mirage.core.ram.dest import (
     check_capacity,
     check_dest_parents,
@@ -53,7 +53,9 @@ async def pwrite(
         return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
-    if active_device(accessor, p) is None:
+    device = active_device(accessor, p)
+    refuse_tty(device, path_spec.virtual)
+    if device is None:
         with store.lock:
             if data:
                 end = max(store.files.size(p), offset + len(data))

@@ -17,6 +17,8 @@ from enum import Enum
 from typing import TypeVar, overload
 
 from mirage.context import get_current_session
+from mirage.core.dev.constants import DEV_RDEV
+from mirage.core.dev.device import refuse_tty
 from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, einval, enoent, fs_error
@@ -25,7 +27,7 @@ from mirage.utils.ranges import slice_window
 from mirage.vfs.dev.types import DevFileState, PipeRow
 from mirage.vfs.ram.store import RAMStore
 
-_DEV_NAMES = frozenset({"null", "zero"})
+_DEV_NAMES = frozenset(DEV_RDEV)
 _T = TypeVar("_T")
 
 
@@ -34,10 +36,12 @@ class _PopMissing(Enum):
 
 
 class DevFiles(PipeFiles):
-    """Real backing store plus a synthetic /null, /zero overlay.
+    """Real backing store plus a synthetic overlay of the devices
+    ``DEV_RDEV`` names.
 
-    The synthetic device names read as empty/zeros and swallow writes until
-    they are deleted (GNU: ``rm /dev/null`` succeeds and the path is gone).
+    The synthetic device names read as empty, zeros or random bytes and
+    swallow writes until they are deleted, but for ``tty``, which refuses
+    both with ENXIO (GNU: ``rm /dev/null`` succeeds and the path is gone).
     A deleted name is tombstoned; the next write stores real bytes, which
     is GNU's rm-then-redirect recreation as a regular file.
 
@@ -88,7 +92,9 @@ class DevFiles(PipeFiles):
         )
 
     def _listed_bytes(self, key: str) -> bytes:
-        return b"" if key.startswith("/fd/") else self[key]
+        if key.startswith("/fd/") or self.device_of(key) is not None:
+            return b""
+        return self[key]
 
     def allocate_input(self, pipe: DevicePipe) -> tuple[str, int]:
         owner = self._owner()
@@ -120,7 +126,7 @@ class DevFiles(PipeFiles):
     def _synthetic_names(self) -> list[str]:
         return [
             "/" + name
-            for name in ("null", "zero")
+            for name in sorted(DEV_RDEV)
             if self._synthetic_active(name)
         ]
 
@@ -148,6 +154,7 @@ class DevFiles(PipeFiles):
             return self.state.files[key]
         name = key.strip("/")
         if self._synthetic_active(name):
+            refuse_tty(name, f"/dev/{name}")
             return b""
         raise KeyError(key)
 
@@ -158,6 +165,7 @@ class DevFiles(PipeFiles):
             raise einval(f"/dev{key}")
         name = key.strip("/")
         if self._synthetic_active(name):
+            refuse_tty(name, f"/dev/{name}")
             return
         self.state.files[key] = value
         self.state.tombstones.discard(name)
@@ -205,6 +213,7 @@ class DevFiles(PipeFiles):
             return
         name = key.strip("/")
         if self._synthetic_active(name):
+            refuse_tty(name, f"/dev/{name}")
             return
         self.state.files.splice(key, offset, data)
         self.state.tombstones.discard(name)

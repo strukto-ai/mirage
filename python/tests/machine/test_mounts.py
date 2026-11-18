@@ -200,14 +200,14 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
 
     async def run_guard(self, argv):
         """Run a line's mount guard through /bin/sh over this table."""
-        entries = argv[5 : argv.index("--", 5)]
+        entries = argv[7 : argv.index("--", 7)]
         self.guards.append(entries)
         fd, path = tempfile.mkstemp()
         with os.fdopen(fd, "w") as table:
             table.write(self.rows())
         try:
             done = await asyncio.create_subprocess_exec(
-                *argv[:4],
+                *argv[:6],
                 path,
                 *entries,
                 "--",

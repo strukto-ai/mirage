@@ -119,16 +119,23 @@ def _refuse(
     )
 
 
+def timeout_failure(name: str) -> str:
+    """What leads GNU's report of a command timeout cannot run, before
+    the reason.
+
+    Args:
+        name (str): the command word.
+    """
+    return f"timeout: failed to run command '{quote_text(name)}'"
+
+
 def timeout_missing(name: str) -> str:
     """GNU's report of a command timeout finds nothing to run for.
 
     Args:
         name (str): the command word.
     """
-    return (
-        f"timeout: failed to run command '{quote_text(name)}': "
-        "No such file or directory\n"
-    )
+    return f"{timeout_failure(name)}: No such file or directory\n"
 
 
 def duration_seconds(raw: str) -> float | None:
@@ -414,7 +421,7 @@ async def _supervise(
         token = set_current_evaluation(child)
         # timeout execs its command, so a builtin that is also a program
         # answers as the program.
-        program = set_program_invocation(child.session)
+        program = set_program_invocation(child.session, timeout_failure(name))
         try:
             ran.append(
                 await _execute_drained(

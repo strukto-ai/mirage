@@ -12,20 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DEV_RDEV } from '../../core/dev/constants.ts'
+import { refuseTty } from '../../core/dev/device.ts'
 import { PipeFiles } from '../../core/dev/mixin.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
 import { RAMFiles, type RAMAttrs } from '../ram/store.ts'
 
-const DEV_NAMES = new Set(['null', 'zero'])
+const DEV_NAMES: ReadonlySet<string> = new Set(Object.keys(DEV_RDEV))
 
-// Real backing store plus a synthetic /null, /zero overlay. The synthetic
-// device names read as empty/zeros and swallow writes until they are
-// deleted (GNU: `rm /dev/null` succeeds and the path is gone). A deleted
+// Real backing store plus a synthetic overlay of the devices `DEV_RDEV`
+// names. The synthetic device names read as empty, zeros or random bytes
+// and swallow writes, but for `tty`, which refuses both with ENXIO, until
+// they are deleted (GNU: `rm /dev/null` succeeds and the path is gone). A deleted
 // name is tombstoned; the next write stores real bytes, which is GNU's
 // rm-then-redirect recreation as a regular file.
 //
@@ -127,7 +131,10 @@ export class DevFiles extends PipeFiles {
     }
     if (this.state.files.has(key)) return this.state.files.get(key)
     const name = stripSlash(key)
-    if (this.syntheticActive(name)) return this.syntheticBytes(name)
+    if (this.syntheticActive(name)) {
+      refuseTty(name, `/dev/${name}`)
+      return this.syntheticBytes(name)
+    }
     return undefined
   }
 
@@ -137,7 +144,10 @@ export class DevFiles extends PipeFiles {
       throw einval(`/dev${key}`)
     }
     const name = stripSlash(key)
-    if (this.syntheticActive(name)) return this
+    if (this.syntheticActive(name)) {
+      refuseTty(name, `/dev/${name}`)
+      return this
+    }
     this.state.files.set(key, value)
     this.state.tombstones.delete(name)
     return this
@@ -156,7 +166,10 @@ export class DevFiles extends PipeFiles {
       return
     }
     const name = stripSlash(key)
-    if (this.syntheticActive(name)) return
+    if (this.syntheticActive(name)) {
+      refuseTty(name, `/dev/${name}`)
+      return
+    }
     this.state.files.splice(key, offset, data)
     this.state.tombstones.delete(name)
   }
@@ -185,7 +198,7 @@ export class DevFiles extends PipeFiles {
 
   override get size(): number {
     let synthetic = 0
-    for (const name of ['null', 'zero']) {
+    for (const name of [...DEV_NAMES].sort(compareCodePoints)) {
       if (this.syntheticActive(name)) synthetic += 1
     }
     return synthetic + this.state.files.size + this.visibleInputs().size
@@ -200,7 +213,7 @@ export class DevFiles extends PipeFiles {
   }
 
   override *entries(): MapIterator<[string, Uint8Array]> {
-    for (const name of ['null', 'zero']) {
+    for (const name of [...DEV_NAMES].sort(compareCodePoints)) {
       if (this.syntheticActive(name)) yield ['/' + name, this.syntheticBytes(name)]
     }
     yield* this.state.files.entries()

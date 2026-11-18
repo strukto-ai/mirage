@@ -874,6 +874,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,
                 err_trap: args.flag()?,
+                clock: args.int()?,
+                started: args.int()?,
             };
             shell.shell_mut()?.apply(frame);
             Item::Nil

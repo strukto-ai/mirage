@@ -30,6 +30,24 @@ export function treeCommand(scope: string, depth: number | null = null): string 
 }
 
 /**
+ * A `%T@` time, seconds with a fraction, in epoch milliseconds, rounded as
+ * `msToRfc3339` rounds; exact, with no float between. Mirrors Python's
+ * `_milliseconds`.
+ *
+ * @param stamp what find printed, such as `1700000000.1234567890`.
+ */
+function milliseconds(stamp: string): number {
+  const [whole = '', fraction = ''] = stamp.split('.')
+  const negative = whole.startsWith('-')
+  const seconds = BigInt(negative ? whole.slice(1) : whole)
+  let nanoseconds = seconds * 1_000_000_000n + BigInt(`${fraction}000000000`.slice(0, 9))
+  if (negative) nanoseconds = -nanoseconds
+  const shifted = nanoseconds + 500_000n
+  const ms = shifted / 1_000_000n
+  return Number(shifted % 1_000_000n < 0n ? ms - 1n : ms)
+}
+
+/**
  * The records a `treeCommand` printed, null when the output is not whole
  * records.
  *
@@ -56,8 +74,8 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
       kind,
       mode: Number.parseInt(mode, 8),
       size: Number(size),
-      mtime: Number(mtime.split('.')[0]),
-      atime: Number(atime.split('.')[0]),
+      mtimeMs: milliseconds(mtime),
+      atimeMs: milliseconds(atime),
       user,
       group,
       rel: fields.slice(7).join(' '),

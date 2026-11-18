@@ -470,9 +470,14 @@ export class MachineMounts {
 
   /**
    * `argv` under `MOUNT_GUARD`, holding every mount the machine had at the
-   * line's admit; unchanged when it had none.
+   * line's admit; unchanged when it had none. `missing` leads the report of
+   * a program the machine cannot run, and says why for a name no folder on
+   * PATH holds (`missingProgram`).
    */
-  guarded(argv: readonly string[]): readonly string[] {
+  guarded(
+    argv: readonly string[],
+    missing: readonly [string, string] = ['', 'command not found'],
+  ): readonly string[] {
     const held = new Map<string, [string, string]>(
       [...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]),
     )
@@ -486,7 +491,7 @@ export class MachineMounts {
         kind,
         unmounted(this.provider, prefix),
       ])
-    return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', '/proc/mounts', ...words, '--', ...argv]
+    return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', ...missing, '/proc/mounts', ...words, '--', ...argv]
   }
 
   /**

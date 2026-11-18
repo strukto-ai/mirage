@@ -28,7 +28,7 @@ from mirage.core.posix.errors import refusal
 from mirage.core.posix.stat import parse_tree, tree_command
 from mirage.core.posix.types import TreeRow
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import epoch_to_iso
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.utils.path import norm
@@ -46,7 +46,7 @@ def row_stat(name: str, row: TreeRow) -> FileStat:
         row (TreeRow): what find printed for it.
     """
     kind = KINDS.get(row.kind, FileType.FILE)
-    modified = epoch_to_iso(row.mtime)
+    modified = ms_to_rfc3339(row.mtime_ms)
     regular = kind is FileType.FILE
     return FileStat(
         name=name,
@@ -58,7 +58,7 @@ def row_stat(name: str, row: TreeRow) -> FileStat:
         mode=row.mode,
         uid=row.user,
         gid=row.group,
-        atime=epoch_to_iso(row.atime),
+        atime=ms_to_rfc3339(row.atime_ms),
     )
 
 

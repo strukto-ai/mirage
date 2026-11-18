@@ -37,6 +37,27 @@ def tree_command(scope: str, depth: int | None = None) -> str:
     )
 
 
+def _milliseconds(stamp: str) -> int:
+    """A ``%T@`` time, seconds with a fraction, in epoch milliseconds,
+    rounded as ``ms_to_rfc3339`` rounds; exact, with no float between.
+
+    Args:
+        stamp (str): what find printed, such as ``1700000000.1234567890``.
+
+    Raises:
+        ValueError: the text is not such a time.
+    """
+    whole, _, fraction = stamp.partition(".")
+    negative = whole.startswith("-")
+    digits = whole[1:] if negative else whole
+    if not digits.isdigit() or (fraction and not fraction.isdigit()):
+        raise ValueError(f"not a time: {stamp!r}")
+    nanoseconds = int(digits) * 1_000_000_000 + int((fraction + "0" * 9)[:9])
+    if negative:
+        nanoseconds = -nanoseconds
+    return (nanoseconds + 500_000) // 1_000_000
+
+
 def parse_tree(out: bytes) -> list[TreeRow] | None:
     """The records a ``tree_command`` printed, None when the output is not
     whole records.
@@ -57,8 +78,8 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
                     kind=kind,
                     mode=int(mode, 8),
                     size=int(size),
-                    mtime=int(mtime.split(".")[0]),
-                    atime=int(atime.split(".")[0]),
+                    mtime_ms=_milliseconds(mtime),
+                    atime_ms=_milliseconds(atime),
                     user=user,
                     group=group,
                     rel=rel,

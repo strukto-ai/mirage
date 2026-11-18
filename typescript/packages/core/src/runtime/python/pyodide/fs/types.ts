@@ -96,6 +96,7 @@ export interface ErrnoCodes {
   readonly EFBIG?: number
   readonly EDQUOT?: number
   readonly EPIPE?: number
+  readonly ENXIO?: number
   readonly ENODATA?: number
   readonly ESTALE?: number
   readonly ENETUNREACH?: number

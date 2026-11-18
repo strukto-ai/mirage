@@ -16,8 +16,11 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { read as ramRead } from '../ram/read.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
+import { getCurrentSession } from '../../context/session_context.ts'
 import { einval } from '../../errors/fs.ts'
-import { activeDevice, activePipe } from './device.ts'
+import { SystemIdSource } from '../../utils/ids.ts'
+import { RANDOM_DEVICES } from './constants.ts'
+import { activeDevice, activePipe, refuseTty } from './device.ts'
 
 export function read(
   accessor: RAMAccessor,
@@ -33,6 +36,18 @@ export function read(
     return ramRead(accessor, path, { offset, ...(size !== null ? { size } : {}) })
   }
   if (device === 'null') return Promise.resolve(new Uint8Array(0))
+  refuseTty(device, path.virtual)
   if (size === null) throw einval(path, 'cannot read an endless device without a size')
+  if (RANDOM_DEVICES.has(device)) return Promise.resolve(randomBytes(size))
   return Promise.resolve(new Uint8Array(size))
+}
+
+/**
+ * `size` random bytes, as /dev/urandom reads them, drawn from the running
+ * session's ids, so a seeded workspace reads the same bytes again. Mirrors
+ * Python's `random_bytes`.
+ */
+export function randomBytes(size: number): Uint8Array {
+  const ids = getCurrentSession()?.ids ?? new SystemIdSource()
+  return ids.randomWords(Math.ceil(size / 4)).slice(0, size)
 }

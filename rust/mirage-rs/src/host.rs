@@ -164,7 +164,7 @@ impl Host {
                 return (failure("EISDIR", "Is a directory"), Vec::new());
             }
             let source = match path {
-                "-" | "/dev/stdin" if !file => {
+                "-" | "/dev/stdin" | "/dev/fd/0" if !file => {
                     self.stdin_fd = Some(fd);
                     Some(std::mem::take(&mut self.stdin))
                 }
@@ -175,7 +175,8 @@ impl Host {
                 // A range opens past `skip`, at most `size` bytes, saying
                 // how far it skipped and the file's length.
                 (Some(source), _)
-                    if request["skip"].is_u64() && !matches!(path, "-" | "/dev/stdin") =>
+                    if request["skip"].is_u64()
+                        && !matches!(path, "-" | "/dev/stdin" | "/dev/fd/0") =>
                 {
                     let length = source.len();
                     let start = (request["skip"].as_u64().unwrap_or(0) as usize).min(length);

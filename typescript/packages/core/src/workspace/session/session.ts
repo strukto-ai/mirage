@@ -209,6 +209,8 @@ export interface SessionInit {
   processes?: ProcessPermissions
   processId?: number | null
   shellPid?: number | null
+  /** When the running shell started, in epoch microseconds, which `$SECONDS` counts from. */
+  shellStartedUs?: number
   processDepth?: number
   shellNesting?: number
   /**
@@ -623,6 +625,9 @@ export class SessionState {
   processes: ProcessPermissions
   processId: number | null
   shellPid: number | null
+  // When the running shell started, in epoch microseconds, which `$SECONDS`
+  // counts from; 0 before a shell started (`seedShell`).
+  shellStartedUs: number
   processDepth: number
   // How deep the shell this session runs is nested: the levels the shells
   // that started it had re-entered, which its call stack counts on from
@@ -653,6 +658,7 @@ export class SessionState {
     this.scripts = init.scripts ?? {}
     this.processId = init.processId ?? null
     this.shellPid = init.shellPid ?? null
+    this.shellStartedUs = init.shellStartedUs ?? 0
     this.processDepth = init.processDepth ?? 0
     this.shellNesting = init.shellNesting ?? 0
     this.profile = init.profile ?? null
@@ -792,6 +798,7 @@ export class SessionState {
       processes: overrides.processes ?? this.processes,
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
+      shellStartedUs: overrides.shellStartedUs ?? this.shellStartedUs,
       processDepth: overrides.processDepth ?? this.processDepth,
       shellNesting: overrides.shellNesting ?? this.shellNesting,
       decisions: overrides.decisions ?? this.decisions,

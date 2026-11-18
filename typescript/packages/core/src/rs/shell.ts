@@ -798,6 +798,9 @@ export interface ShellFrame {
   readonly bashPid: number
   readonly voice: string
   readonly errTrap: boolean
+  /** The time now and when the running shell started, in epoch microseconds; 0 for no clock. */
+  readonly clock: number
+  readonly started: number
 }
 
 const shells = new FinalizationRegistry<number>((handle) => {
@@ -918,6 +921,8 @@ export class Shell {
       frame.bashPid,
       frame.voice,
       frame.errTrap,
+      frame.clock,
+      frame.started,
     ]
   }
 

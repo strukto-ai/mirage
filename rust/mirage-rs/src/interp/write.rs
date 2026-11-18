@@ -255,15 +255,20 @@ impl<'a> Writer<'a> {
             }
         }
         let seeding = match &value {
-            Value::Scalar(word) if self.store.seeds_random(&name) => Some(word),
+            Value::Scalar(word)
+                if self.store.seeds_random(&name) || self.store.counts_seconds(&name) =>
+            {
+                Some(word)
+            }
             _ => None,
         };
         if let Some(word) = seeding {
             match self.store.evaluate_integer(&mut coercion, word, None) {
-                Ok(text) => {
+                Ok(text) if name == RANDOM => {
                     let state = parse_decimal::<i64>(&text).unwrap_or(0).rem_euclid(1 << 32) as u32;
                     self.store.seed_random(word.clone(), state);
                 }
+                Ok(text) => self.store.set_seconds(parse_decimal::<i64>(&text).unwrap_or(0)),
                 Err(error) => {
                     self.land_coercion(&mut coercion)?;
                     let subscript = matches!(
@@ -867,7 +872,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED, UPPER, Var};
+    use crate::vars::{EXPORT, RANDOM, READONLY, SECONDS, UNASSIGNED, UPPER, Var};
 
     fn writer(store: &mut Store) -> Writer<'_> {
         Writer {
@@ -947,6 +952,21 @@ mod tests {
             .set(RANDOM, scalar("42"), true, None, None)
             .unwrap();
         assert_eq!(store.next_random().unwrap(), Some(17772));
+    }
+
+    #[test]
+    fn a_seconds_write_restarts_the_count_from_its_value() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar("2+3"), true, None, None)
+            .unwrap();
+        store.set_clock(11_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"7".to_vec()));
+        writer(&mut store)
+            .set(SECONDS, scalar("abc"), true, None, None)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"0".to_vec()));
     }
 
     #[test]

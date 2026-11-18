@@ -230,7 +230,7 @@ const tables: string[] = []
 function guarded(table: string, ...entries: string[]): ReturnType<typeof spawnSync> {
   return spawnSync(
     '/bin/sh',
-    ['-c', MOUNT_GUARD, 'sh', table, ...entries, '--', '/bin/echo', 'ran'],
+    ['-c', MOUNT_GUARD, 'sh', '', 'command not found', table, ...entries, '--', '/bin/echo', 'ran'],
     {
       env: { PATH: '/nowhere' },
       encoding: 'utf8',
@@ -303,6 +303,8 @@ describe('MOUNT_GUARD', () => {
         '-c',
         MOUNT_GUARD,
         'sh',
+        '',
+        'command not found',
         tableOf('mirage-x:/data /data fuse.sshfs rw 0 0\n'),
         ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'),
         '--',

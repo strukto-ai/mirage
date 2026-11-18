@@ -3184,6 +3184,111 @@
         "stdout": "same=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "param_clock_names_read_the_clock",
+      "seq": 500691,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ${#EPOCHSECONDS} ${#EPOCHREALTIME}; [[ $EPOCHREALTIME =~ ^[0-9]+[.][0-9]{6}$ ]] && echo realtime; echo $SECONDS; SECONDS=100; echo $SECONDS; [[ $SRANDOM =~ ^[0-9]+$ ]] && echo srandom",
+      "expect": {
+        "exit": 0,
+        "stdout": "10 17\nrealtime\n0\n100\nsrandom\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "param_clock_names_end_at_unset_and_local",
+      "seq": 500692,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "unset EPOCHSECONDS; echo \"[$EPOCHSECONDS]\"; f() { local SECONDS; echo \"[$SECONDS]\"; }; f; echo ${!EPOCH*}",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n[]\nEPOCHREALTIME\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "param_bash_version_and_shlvl",
+      "seq": 500693,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo $BASH_VERSION ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}; echo $SHLVL; bash -c 'echo $SHLVL'; env | grep -c '^SHLVL='; BASH_VERSINFO=1",
+      "expect": {
+        "exit": 1,
+        "stdout": "5.2.37(1)-release 5.2.37\n1\n2\n1\n",
+        "stderr": "bash: line 1: BASH_VERSINFO: readonly variable\n"
+      }
     }
   ]
 }

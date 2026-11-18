@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.dev.constants import TTY
 from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
+from mirage.errors.fs import fs_error
+from mirage.errors.types import FsCondition
 
 
 def active_device(accessor: RAMAccessor, key: str) -> str | None:
@@ -32,3 +35,18 @@ def pipe_below(accessor: RAMAccessor, key: str) -> bool:
     """Whether a live pipe sits at ``key`` or below it in the RAM store."""
     files = accessor.store.files
     return isinstance(files, PipeFiles) and files.holds_pipe(key)
+
+
+def refuse_tty(device: str | None, path: str) -> None:
+    """Refuse the terminal a shell with none cannot open: a read or a
+    write of ``tty`` is ENXIO, which every other device takes.
+
+    Args:
+        device (str | None): the device at the path, None for none.
+        path (str): the path, as the error names it.
+
+    Raises:
+        OSError: ENXIO, for ``tty``.
+    """
+    if device == TTY:
+        raise fs_error(path, FsCondition.ENXIO)

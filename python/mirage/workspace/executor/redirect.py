@@ -63,6 +63,8 @@ from mirage.shell.descriptors import (
     StreamOwner,
     bad_descriptor_line,
     deliver,
+    descriptor_of,
+    named_descriptor,
     redirect_operations,
     unreadable_stdin,
     unsupported_descriptor,
@@ -1037,6 +1039,14 @@ class _Opened:
     opening_stderr: _FdDest = _TO_STDERR
     complete_output: FileDescription | None = None
 
+    def holds(self, fd: int) -> bool:
+        """Whether a descriptor is open here.
+
+        Args:
+            fd (int): the descriptor.
+        """
+        return fd in self.outputs and fd not in self.closed
+
     def reopen(self, fd: int) -> None:
         """Forget what a descriptor had closed or was reading.
 
@@ -1189,7 +1199,10 @@ async def _open_input(
     dispatch, session = opened.dispatch, opened.session
     inputs, outputs = opened.inputs, opened.outputs
     try:
-        if scope.virtual == "/dev/stdin" and r.kind == RedirectKind.STDIN:
+        if (
+            r.kind == RedirectKind.STDIN
+            and descriptor_of(scope.virtual, opened.holds) == FD_STDIN
+        ):
             opened.reopen(r.fd)
             inputs[r.fd], outputs[r.fd] = opened.stdin, _CLOSED
             return None
@@ -1502,6 +1515,16 @@ async def _handle_redirect(
     )
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
+        named = named_descriptor(r, opened.holds)
+        if named is not None:
+            expanded.extend(named)
+            for operation in named:
+                bad = _duplicate(opened, operation, operation.target)
+                if bad is not None:
+                    return await opened.failed(
+                        _shell_failure(bad_descriptor_line(bad))
+                    )
+            continue
         expanded.extend(redirect_operations(r))
         unusable = _unusable(r)
         if unusable is not None:
@@ -1947,7 +1970,7 @@ async def redirect_stdin(
             scope = PathSpec.from_str_path(target, cwd=session.cwd)
             sources[r.fd] = (
                 stdin
-                if scope.virtual == "/dev/stdin"
+                if descriptor_of(scope.virtual, _none_open) == FD_STDIN
                 else DeviceInput()
                 if await _stat_type(dispatch, scope) == FileType.CHAR_DEVICE
                 else b""
@@ -1955,6 +1978,16 @@ async def redirect_stdin(
         else:
             sources[r.fd] = DeviceInput()
     return sources.get(FD_STDIN)
+
+
+def _none_open(fd: int) -> bool:
+    """No descriptor past the standard three is open: what the admission
+    pass, which opens none, asks of ``/dev/fd/N``.
+
+    Args:
+        fd (int): the descriptor.
+    """
+    return False
 
 
 async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:

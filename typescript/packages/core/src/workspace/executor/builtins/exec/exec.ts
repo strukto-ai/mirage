@@ -43,6 +43,7 @@ import {
   FileDescription,
   FileInput,
   Inherited,
+  namedDescriptor,
   Recorder,
   redirectOperations,
   unsupportedDescriptor,
@@ -473,7 +474,8 @@ async function install(
 ): Promise<Uint8Array | null> {
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
-    for (const operation of redirectOperations(redirect)) {
+    const named = namedDescriptor(redirect, (fd) => session.descriptors.has(fd))
+    for (const operation of named ?? redirectOperations(redirect)) {
       const error = await installDescriptor(owned, dispatch, session, operation, stdin)
       if (error !== null) return error
     }
