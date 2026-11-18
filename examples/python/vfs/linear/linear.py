@@ -85,7 +85,7 @@ async def main() -> None:
     print(f"=== metadata overlay on /linear/teams/{first_team}/team.json ===")
     meta_res = await ws.shell(
         f"chmod 640 {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
-        " && chown 500:dev"
+        " && chown 500:nogroup"
         f" {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
         " && touch -t 202601021530"
         f" {shlex.quote(f'/linear/teams/{first_team}/team.json')}"

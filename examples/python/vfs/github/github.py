@@ -87,7 +87,7 @@ async def main() -> None:
     print("=== metadata overlay on /github/python/mirage/types.py ===")
     meta_res = await ws.shell(
         'chmod 640 "/github/python/mirage/types.py"'
-        ' && chown 500:dev "/github/python/mirage/types.py"'
+        ' && chown 500:nogroup "/github/python/mirage/types.py"'
         ' && touch -t 202601021530 "/github/python/mirage/types.py"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

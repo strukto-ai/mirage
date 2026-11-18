@@ -77,11 +77,14 @@ async def test_cd_slash_and_pwd():
 
 
 @pytest.mark.asyncio
-async def test_cd_tilde_unset_home_goes_to_root():
+async def test_cd_tilde_unset_home_goes_to_the_users_home():
     ws = _make_ws()
     r = await ws.shell("cd /ram/subdir && cd ~ && pwd")
-    assert r.exit_code == 0
-    assert await r.stdout_str() == "/\n"
+    assert r.exit_code == 1
+    assert (
+        await r.stderr_str()
+        == "bash: line 1: cd: /root: No such file or directory\n"
+    )
 
 
 @pytest.mark.asyncio

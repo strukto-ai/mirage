@@ -79,7 +79,7 @@ async def main() -> None:
     print("=== metadata overlay on /ssh/readme.txt ===")
     meta_res = await ws.shell(
         'chmod 640 "/ssh/readme.txt"'
-        ' && chown 500:dev "/ssh/readme.txt"'
+        ' && chown 500:nogroup "/ssh/readme.txt"'
         ' && touch -t 202601021530 "/ssh/readme.txt"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

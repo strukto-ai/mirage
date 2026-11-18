@@ -384,12 +384,12 @@ async function checkMetadata(
   await run(ws, `printf 'mmm\n' > ${dst}/copied/m.txt`)
   await run(
     ws,
-    `chmod 601 ${dst}/copied/m.txt && chown 500:dev ${dst}/copied/m.txt` +
+    `chmod 601 ${dst}/copied/m.txt && chown 500:nogroup ${dst}/copied/m.txt` +
       ` && touch -t 202601021530 ${dst}/copied/m.txt`,
   )
   let st = await statOf(ws, `${dst}/copied/m.txt`)
   check(`${label}: chmod lands on dst mount`, st.mode === 0o601)
-  check(`${label}: chown lands on dst mount`, st.uid === 500 && st.gid === 'dev')
+  check(`${label}: chown lands on dst mount`, st.uid === 500 && st.gid === 65534)
   check(`${label}: touch stamps dst mtime`, (st.modified ?? '').startsWith('2026-01-02T15:30'))
   await run(ws, `ln -s ${dst}/copied/m.txt /ram/ml.txt`)
   await run(ws, 'chmod 640 /ram/ml.txt && touch -t 202603041200 /ram/ml.txt')
@@ -415,7 +415,7 @@ async function checkMetadata(
   await run(ws, `chmod g+w ${dst}/copied/n.txt`)
   st = await statOf(ws, `${dst}/copied/n.txt`)
   check(`${label}: symbolic chmod applies against 644 base`, st.mode === 0o664)
-  await run(ws, `chown 500:dev ${dst}/copied/n.txt`)
+  await run(ws, `chown 500:nogroup ${dst}/copied/n.txt`)
   await run(ws, `touch -t 202603041200 ${dst}/copied/n.txt`)
   // ls builds rows from the backend stat, which carries chmod/chown/touch
   // only when the backend applies setattr natively. Pure-overlay backends
@@ -424,7 +424,7 @@ async function checkMetadata(
   if (nativeAttrs) {
     const [lsOut] = await run(ws, `ls -l ${dst}/copied`)
     check(`${label}: ls -l renders overlay bits`, lsOut.includes('-rw-rw-r--'))
-    check(`${label}: ls -l renders overlay owner`, lsOut.includes(' 500 dev '))
+    check(`${label}: ls -l renders overlay owner`, lsOut.includes(' 500 nogroup '))
     check(`${label}: ls -l renders touched mtime`, lsOut.includes('Mar  4  2026'))
   }
   await run(ws, `touch -r ${dst}/copied/n.txt /ram/tref.txt`)
@@ -440,7 +440,7 @@ async function checkMetadata(
   await run(ws, `ln -s ${dst}/copied/n.txt /ram/nl.txt`)
   await run(ws, 'chown -h 501:ops /ram/nl.txt')
   st = await statOf(ws, `${dst}/copied/n.txt`)
-  check(`${label}: chown -h leaves target owner`, st.uid === 500 && st.gid === 'dev')
+  check(`${label}: chown -h leaves target owner`, st.uid === 500 && st.gid === 65534)
   await run(ws, "printf 'x\n' >> /ram/nl.txt")
   st = await statOf(ws, `${dst}/copied/n.txt`)
   check(

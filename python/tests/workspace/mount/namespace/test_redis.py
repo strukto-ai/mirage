@@ -115,7 +115,7 @@ async def test_namespace_survives_workspace_restart(prefix):
         namespace_store=RedisNamespaceStore(url=REDIS_URL, key_prefix=prefix),
     )
     await ws.shell("echo alpha > /data/f.txt")
-    await ws.shell("chmod 601 /data/f.txt && chown 500:dev /data/f.txt")
+    await ws.shell("chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt")
     await ws.shell("ln -s /data/f.txt /data/link")
     await ws.close()
 
@@ -130,7 +130,7 @@ async def test_namespace_survives_workspace_restart(prefix):
     )
     assert st.mode == 0o601
     assert st.uid == 500
-    assert st.gid == "dev"
+    assert st.gid == 65534
     result = await reborn.shell("readlink /data/link")
     assert (await result.stdout_str()) == "/data/f.txt\n"
     store = RedisNamespaceStore(url=REDIS_URL, key_prefix=prefix)

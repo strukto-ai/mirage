@@ -95,7 +95,7 @@ async def main() -> None:
     print(f"=== metadata overlay on /gslides/owned/{first} ===")
     r = await ws.shell(
         f"chmod 640 {shlex.quote(f'/gslides/owned/{first}')}"
-        f" && chown 500:dev {shlex.quote(f'/gslides/owned/{first}')}"
+        f" && chown 500:nogroup {shlex.quote(f'/gslides/owned/{first}')}"
         f" && touch -t 202601021530 {shlex.quote(f'/gslides/owned/{first}')}"
     )
     print(f"  chmod/chown/touch exit={r.exit_code}")

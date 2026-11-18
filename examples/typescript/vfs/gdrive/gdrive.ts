@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gdrive/${first} ===`)
     r = await ws.shell(
-      `chmod 640 ${shellQuote(`/gdrive/${first}`)} && chown 500:dev ${shellQuote(`/gdrive/${first}`)} && touch -t 202601021530 ${shellQuote(`/gdrive/${first}`)}`,
+      `chmod 640 ${shellQuote(`/gdrive/${first}`)} && chown 500:nogroup ${shellQuote(`/gdrive/${first}`)} && touch -t 202601021530 ${shellQuote(`/gdrive/${first}`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await ws.dispatch('stat', `/gdrive/${first}`)) as FileStat

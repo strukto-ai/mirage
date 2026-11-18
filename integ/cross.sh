@@ -43,7 +43,7 @@ seed() {
   $cli shell -w "$id" -c "printf 'minio-1\nminio-2\n' > /minio/data/x.txt" >/dev/null
   $cli shell -w "$id" -c "printf '1\n2\n3\n4\n5\n' > /guard/big.txt" >/dev/null
   $cli shell -w "$id" -c "ln -s /ram/f.txt /ram/l.txt" >/dev/null
-  $cli shell -w "$id" -c "chmod 640 /ram/f.txt && chown 500:dev /ram/f.txt" >/dev/null
+  $cli shell -w "$id" -c "chmod 640 /ram/f.txt && chown 500:nogroup /ram/f.txt" >/dev/null
   $cli shell -w "$id" -c "touch -t 202601021530 /ram/f.txt" >/dev/null
   $cli shell -w "$id" -c "echo cross-history-marker" >/dev/null
 }

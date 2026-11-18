@@ -178,7 +178,7 @@ async def main():
     print("=== metadata overlay on /langfuse/prompts/summarize ===")
     meta_res = await ws.shell(
         'chmod 640 "/langfuse/prompts/summarize"'
-        ' && chown 500:dev "/langfuse/prompts/summarize"'
+        ' && chown 500:nogroup "/langfuse/prompts/summarize"'
         ' && touch -t 202601021530 "/langfuse/prompts/summarize"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

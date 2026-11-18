@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   // dispatch-level stat.
   console.log('=== metadata overlay on /ds/README.md ===')
   const metaRes = await ws.shell(
-    'chmod 640 "/ds/README.md" && chown 500:dev "/ds/README.md" && touch -t 202601021530 "/ds/README.md"',
+    'chmod 640 "/ds/README.md" && chown 500:nogroup "/ds/README.md" && touch -t 202601021530 "/ds/README.md"',
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', '/ds/README.md')) as FileStat

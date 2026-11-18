@@ -468,7 +468,7 @@ async function crossMountMove(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge
     // into dispatch-level stat.
     r = await mvWs.shell(
-      `chmod 640 ${remote} && chown 500:dev ${remote} && touch -t 202601021530 ${remote}`,
+      `chmod 640 ${remote} && chown 500:nogroup ${remote} && touch -t 202601021530 ${remote}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await mvWs.dispatch('stat', remote)) as FileStat

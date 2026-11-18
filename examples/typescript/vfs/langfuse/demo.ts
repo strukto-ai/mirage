@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     console.log('=== metadata overlay on /langfuse/prompts/summarize ===')
     const metaRes = await ws.shell(
       'chmod 640 "/langfuse/prompts/summarize"' +
-        ' && chown 500:dev "/langfuse/prompts/summarize"' +
+        ' && chown 500:nogroup "/langfuse/prompts/summarize"' +
         ' && touch -t 202601021530 "/langfuse/prompts/summarize"',
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
