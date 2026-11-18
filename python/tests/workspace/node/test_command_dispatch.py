@@ -19,7 +19,7 @@ from mirage.execution.types import MachineName
 from mirage.io.types import materialize
 from mirage.machine.handle import MachineHandle
 from mirage.policy import CommandExplanation, Deny, Route, ShellNode
-from mirage.policy.types import AdmissionRules, CommandRule, Outcome, Scope
+from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.language import LanguageRuntime
@@ -31,6 +31,7 @@ from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.node.command_dispatch import parser_aliases
+from tests.fixtures.command_trees import trees
 
 
 def _ws() -> Workspace:
@@ -179,14 +180,19 @@ WRAPPERS = ["nohup", "nice", "stdbuf", "setsid", "ionice"]
         ("nohup time env tool -c x", "time env tool -c x"),
     ],
 )
-async def test_a_wrapper_runs_no_program_the_allow_list_leaves_out(line, bare):
+async def test_a_wrapper_runs_no_program_the_tree_closes(line, bare):
     box = Box()
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s",
             profile={
-                "commands": {"allow": [*WRAPPERS, "wait", "time", "env"]}
+                "commands": {
+                    "*": "deny",
+                    **dict.fromkeys(
+                        (*WRAPPERS, "wait", "time", "env"), "allow"
+                    ),
+                }
             },
         )
         alone = await ws.shell(bare, session_id="s")
@@ -205,7 +211,10 @@ async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
-            "s", profile={"commands": {"allow": ["nohup", "python3"]}}
+            "s",
+            profile={
+                "commands": {"*": "deny", "nohup": "allow", "python3": "allow"}
+            },
         )
         r = await ws.shell("nohup nice python3 -c x", session_id="s")
         assert r.exit_code == 126
@@ -231,7 +240,15 @@ async def test_a_wrapper_hands_a_machine_its_words_before_a_listed_program(
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
-            "s", profile={"commands": {"allow": ["nohup", "nice", "tool"]}}
+            "s",
+            profile={
+                "commands": {
+                    "*": "deny",
+                    "nohup": "allow",
+                    "nice": "allow",
+                    "tool": "allow",
+                }
+            },
         )
         r = await ws.shell(line, session_id="s")
         assert r.exit_code == 0
@@ -262,9 +279,11 @@ async def test_an_outside_wrapper_reads_its_program_s_operands():
             "s",
             profile={
                 "commands": {
-                    "deny": [
-                        {"reason": "secret", "paths": ["/data/secret.py"]}
-                    ]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "secret",
+                        "paths": ["/data/secret.py"],
+                    }
                 }
             },
         )
@@ -289,7 +308,7 @@ async def test_an_outside_wrapper_s_program_is_asked_once():
         ws.create_session(
             "s",
             profile={
-                "commands": {"ask": [{"reason": "nod", "commands": ["tool"]}]}
+                "commands": {"tool": {"decision": "ask", "reason": "nod"}}
             },
         )
         line = "nohup tool -c x"
@@ -309,8 +328,8 @@ async def test_an_outside_wrapper_s_program_is_asked_once():
 @pytest.mark.parametrize(
     ("profile", "refused"),
     [
-        ({"commands": {"allow": ["nohup"]}}, True),
-        ({"commands": {"deny": [{"reason": "r", "commands": ["rm"]}]}}, False),
+        ({"commands": {"*": "deny", "nohup": "allow"}}, True),
+        ({"commands": {"rm": {"decision": "deny", "reason": "r"}}}, False),
         ({}, False),
     ],
 )
@@ -360,7 +379,15 @@ async def test_a_wrapper_s_program_answers_as_it_does_bare(setup, line, bare):
     try:
         ws.create_session(
             "s",
-            profile={"commands": {"allow": ["nohup", "time", "env", "echo"]}},
+            profile={
+                "commands": {
+                    "*": "deny",
+                    "nohup": "allow",
+                    "time": "allow",
+                    "env": "allow",
+                    "echo": "allow",
+                }
+            },
         )
         if setup:
             await ws.shell(setup, session_id="s")
@@ -493,9 +520,7 @@ SPELLED = [
 ]
 
 NO_PYTHON_PROFILES = {
-    "default": {
-        "commands": {"deny": [{"reason": "no", "commands": ["python3"]}]}
-    }
+    "default": {"commands": {"python3": {"decision": "deny", "reason": "no"}}}
 }
 
 
@@ -582,9 +607,9 @@ async def test_a_wrapper_s_route_yields_to_its_path_spelled_program_s():
 @pytest.mark.asyncio
 async def test_a_wrapper_leaves_a_path_the_view_does_not_list_to_the_machine():
     # Only a listed /usr/bin file is a program; any other path is the
-    # machine's own file under a wrapper as on the plain path, which only an
-    # allow list refuses.
-    deny = {"deny": [{"reason": "no", "commands": ["nosuch"]}]}
+    # machine's own file under a wrapper as on the plain path, which only a
+    # closed tree refuses.
+    deny = {"nosuch": {"decision": "deny", "reason": "no"}}
     ws = _spelled(profiles={"default": {"commands": deny}})
     try:
         bare = await ws.shell("/usr/bin/nosuch -c 1")
@@ -603,9 +628,7 @@ async def test_a_path_spelled_program_is_asked_once(line):
     ws = _spelled(
         profiles={
             "default": {
-                "commands": {
-                    "ask": [{"reason": "nod", "commands": ["python3"]}]
-                }
+                "commands": {"python3": {"decision": "ask", "reason": "nod"}}
             }
         }
     )
@@ -780,8 +803,8 @@ async def test_a_route_into_mirage_runs_the_wrapper_s_program_there():
 @pytest.mark.parametrize(
     ("profile", "refused"),
     [
-        ({"commands": {"allow": ["echo"]}}, True),
-        ({"commands": {"deny": [{"reason": "r", "commands": ["rm"]}]}}, False),
+        ({"commands": {"*": "deny", "echo": "allow"}}, True),
+        ({"commands": {"rm": {"decision": "deny", "reason": "r"}}}, False),
         ({}, False),
     ],
 )
@@ -887,8 +910,8 @@ async def test_a_function_runs_no_words_the_builtin_would_have_run(
     ws = _ws()
     ws.create_session("s")
     await ws.shell(f"echo x > /data/f; {function}() {{ :; }}", session_id="s")
-    ws.get_session("s").commands = AdmissionRules(
-        deny=(CommandRule(reason="no rm", commands=("rm",)),)
+    ws.get_session("s").commands = trees(
+        {"rm": {"decision": "deny", "reason": "no rm"}}
     )
     r = await ws.shell(line, session_id="s")
     assert r.exit_code == 0

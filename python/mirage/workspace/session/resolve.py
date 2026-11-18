@@ -20,9 +20,7 @@ from typing import Any
 from mirage.execution.process.config import ProcessPermissions
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import (
-    CommandsBlock,
     CompiledProfile,
-    MountCommandsBlock,
     PathsBlock,
     ProfileMount,
     ProfilePolicies,
@@ -33,25 +31,24 @@ from mirage.policy.profile import (
 )
 from mirage.policy.types import (
     AdmissionRules,
-    AllowFlags,
-    CommandRule,
+    Grammar,
     HideReason,
     ProfileScript,
     ProfileScripts,
+    ScopedTree,
 )
 from mirage.rs.document import from_units, units
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.policy import (
     Wire,
     admission_matcher,
-    rules_wire,
     visibility_from,
 )
 from mirage.types import MountMode, ShowEntry, weaker_mode
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.session import SessionState, vars_from_entries
 from mirage.workspace.session.shell_dirs import set_cwd
-from mirage.workspace.session.validate import check_rules
+from mirage.workspace.session.validate import normalize_tree
 
 
 def resolve_profile(
@@ -107,13 +104,7 @@ def _paths_wire(block: PathsBlock | None) -> Wire | None:
 
 
 def _profile_wire(profile: SessionProfile) -> Wire:
-    block = profile.commands
     return {
-        "commands": None
-        if block is None
-        else rules_wire(
-            AdmissionRules(allow=block.allow, deny=block.deny, ask=block.ask)
-        ),
         "paths": _paths_wire(profile.paths),
         "vars": None
         if profile.vars is None
@@ -124,47 +115,11 @@ def _profile_wire(profile: SessionProfile) -> Wire:
             {
                 "prefix": units(prefix),
                 "mode": entry.mode,
-                "commands": None
-                if entry.commands is None
-                else rules_wire(
-                    AdmissionRules(
-                        deny=entry.commands.deny, ask=entry.commands.ask
-                    )
-                ),
                 "paths": _paths_wire(entry.paths),
             }
             for prefix, entry in profile.mounts.items()
         ],
     }
-
-
-def _rule_from(value: Mapping[str, Any]) -> CommandRule:
-    return CommandRule(
-        reason=from_units(value["reason"]),
-        commands=tuple(from_units(v) for v in value["commands"]),
-        paths=tuple(from_units(v) for v in value["paths"]),
-        mount=from_units(value["mount"]) if value["mount"] is not None else "",
-    )
-
-
-def _rules_from(value: Mapping[str, Any] | None) -> AdmissionRules | None:
-    if value is None:
-        return None
-    return AdmissionRules(
-        allow=None
-        if value["allow"] is None
-        else tuple(
-            from_units(v)
-            if isinstance(v, list)
-            else AllowFlags(
-                from_units(v["command"]),
-                tuple(from_units(f) for f in v["flags"]),
-            )
-            for v in value["allow"]
-        ),
-        deny=tuple(_rule_from(v) for v in value["deny"]),
-        ask=tuple(_rule_from(v) for v in value["ask"]),
-    )
 
 
 def _reason_from(value: Mapping[str, Any]) -> HideReason:
@@ -193,34 +148,26 @@ def _paths_from(value: Mapping[str, Any] | None) -> PathsBlock | None:
 
 
 def _profile_fields(
-    value: Mapping[str, Any],
+    value: Mapping[str, Any], base: SessionProfile
 ) -> tuple[
-    CommandsBlock | None,
     PathsBlock | None,
     VarsBlock | None,
     dict[str, ProfileMount] | None,
 ]:
-    rules = _rules_from(value["commands"])
     mounts = None
     if value["mounts"] is not None:
         mounts = {}
         for mount in value["mounts"]:
-            mount_rules = _rules_from(mount["commands"])
-            mounts[from_units(mount["prefix"])] = ProfileMount(
+            prefix = from_units(mount["prefix"])
+            held = (base.mounts or {}).get(prefix)
+            mounts[prefix] = ProfileMount(
                 mode=None
                 if mount["mode"] is None
                 else MountMode(mount["mode"]),
-                commands=MountCommandsBlock(
-                    deny=mount_rules.deny, ask=mount_rules.ask
-                )
-                if mount_rules is not None
-                else None,
+                commands=held.commands if held is not None else None,
                 paths=_paths_from(mount["paths"]),
             )
     return (
-        CommandsBlock(allow=rules.allow, deny=rules.deny, ask=rules.ask)
-        if rules is not None
-        else None,
         _paths_from(value["paths"]),
         VarsBlock(hide=tuple(from_units(v) for v in value["vars"]))
         if value["vars"] is not None
@@ -258,13 +205,18 @@ def with_inline(
     """A profile with the inline document of one ``create_session`` added.
 
     The one rule about combining two documents: an inline document may
-    add ask and deny rules and hides, never an allow list and never a
-    script, and that holds even when there is no profile to add to.
-    Modes take the weaker of the two, ``cwd`` and ``env`` are the
-    inline document's when it states them (they are session presets,
-    not permissions). Either side None returns the other unchanged; the
-    profile's policy survives the merge, since the inline document can
-    only add rules beside it.
+    add command trees and hides, never a show entry and never a script,
+    and that holds even when there is no profile to add to. Modes take
+    the weaker of the two, ``cwd`` and ``env`` are the inline document's
+    when it states them (they are session presets, not permissions).
+    Either side None returns the other unchanged; the profile's policy
+    survives the merge, since the inline document can only add rules
+    beside it.
+
+    The result carries the base's command trees only. A tree cannot
+    absorb another without changing what it means, so the inline
+    document's trees are judged beside the base's (``command_rules``
+    reads both documents).
 
     Args:
         base (SessionProfile | None): the resolved profile.
@@ -274,7 +226,7 @@ def with_inline(
             profile states none.
 
     Raises:
-        PolicyError: the inline document states an allow list or a
+        PolicyError: the inline document states a show entry or a
             script.
     """
     if inline is None:
@@ -290,7 +242,7 @@ def with_inline(
         )
     if inline.policy is not None:
         raise PolicyError(
-            "inline permissions may add ask and deny rules, "
+            "inline permissions may add command rules and hides, "
             "not a policy; state one on the profile"
         )
     processes = base.processes if base is not None else None
@@ -305,7 +257,7 @@ def with_inline(
             else inline.model_copy(update={"processes": processes})
         )
     assert value is not None
-    commands, paths, variables, mounts = _profile_fields(value)
+    paths, variables, mounts = _profile_fields(value, base)
     env = (
         None
         if base.env is None and inline.env is None
@@ -314,7 +266,7 @@ def with_inline(
     return SessionProfile(
         cwd=inline.cwd if inline.cwd is not None else base.cwd,
         env=env,
-        commands=commands,
+        commands=base.commands,
         paths=paths,
         vars=variables,
         mounts=mounts,
@@ -352,10 +304,48 @@ def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
     return compiled
 
 
+def command_rules(
+    base: SessionProfile | None,
+    inline: SessionProfile | None,
+    grammars: Mapping[str, Grammar],
+    defer: bool = False,
+) -> AdmissionRules | None:
+    """A session's command trees: each document's top-level tree and
+    each of its mounts' trees, every name checked against its command's
+    grammar and held by its canonical name. None when no document states
+    a tree.
+
+    Args:
+        base (SessionProfile | None): the profile.
+        inline (SessionProfile | None): the inline document
+            ``create_session`` adds.
+        grammars (Mapping[str, Grammar]): each command's grammar by name.
+        defer (bool): keep a command with no grammar as written, for a
+            check made before every CLI is registered.
+
+    Raises:
+        PolicyError: a name does not fit its command's grammar.
+    """
+    trees: list[ScopedTree] = []
+    for doc, stated in ((base, False), (inline, True)):
+        if doc is None:
+            continue
+        if doc.commands is not None:
+            tree = normalize_tree(doc.commands, grammars, "commands", defer)
+            trees.append(ScopedTree(tree, "", stated))
+        for prefix, entry in (doc.mounts or {}).items():
+            if entry.commands is not None:
+                where = f"mounts[{prefix}].commands"
+                tree = normalize_tree(entry.commands, grammars, where, defer)
+                trees.append(ScopedTree(tree, prefix, stated))
+    return AdmissionRules(tuple(trees)) if trees else None
+
+
 def compile_profile(
     effective: SessionProfile | None,
     name: str = "",
     workspace_processes: ProcessPermissions | None = None,
+    commands: AdmissionRules | None = None,
 ) -> CompiledProfile:
     """The session fields a profile compiles to.
 
@@ -369,6 +359,9 @@ def compile_profile(
             owner-rendering command shows.
         workspace_processes (ProcessPermissions | None): the workspace's
             ``processes``, which the profile's overrides field by field.
+        commands (AdmissionRules | None): the session's command trees,
+            read off the profile and the inline document
+            (``command_rules``).
     """
     processes = ProcessPermissions.layered(
         (
@@ -382,8 +375,6 @@ def compile_profile(
             profile=name or None,
         )
     value = _compile_plan(effective)
-    commands = _rules_from(value["commands"])
-    check_rules(commands)
     return CompiledProfile(
         setup=ProfileSetup(
             env=dict(effective.env) if effective.env is not None else None,

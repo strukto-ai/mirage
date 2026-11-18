@@ -1,0 +1,374 @@
+{
+  "note": "Workspace configs both loaders must accept, for a profile's commands tree and a mount section's tree: names, subcommands, options and their combinations, values, operands, and every leaf form. Read with blocks.json by the same gate in both languages; see blocks.json for what the pair is for. Names are checked against command grammars when a workspace is built, not here, so a key here only has to have the right shape.",
+  "cases": [
+    {
+      "name": "tree: a bare decision for a command",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "shred": "deny",
+              "ls": "allow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: the root's own decision closes the tree",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "*": "deny",
+              "ls": "allow",
+              "cat": "allow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a subcommand and its own default",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "git": {
+                "*": "allow",
+                "push": "ask",
+                "fetch": "deny"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: an option, and an option combination",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "--recursive": {
+                  "*": "ask",
+                  "--force": "deny"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a short option name is accepted as written",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "-r": "deny"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: any other option",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "-*": "deny",
+                "--force": "allow",
+                "--verbose": "allow"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: an option's values, and another option under a value",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "curl": {
+                "--request": {
+                  "values": {
+                    "DELETE": "deny",
+                    "POST": {
+                      "--insecure": "deny"
+                    },
+                    "*": "ask"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: operands, nested one per position",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "git": {
+                "checkout": {
+                  "operands": {
+                    "main": "deny",
+                    "release/*": "ask",
+                    "*": {
+                      "operands": {
+                        "draft": "ask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: an operand holds an option",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "gh": {
+                "pr": {
+                  "merge": {
+                    "operands": {
+                      "5": {
+                        "--admin": "deny"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a leaf object with a reason",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "reason": "no deletes"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a leaf scoped to paths, a name pattern among them",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "reason": "prod",
+                "paths": [
+                  "/d/prod/*",
+                  "*.pem"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a leaf list, each leaf applying on its own",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "*": [
+                  "ask",
+                  {
+                    "decision": "deny",
+                    "reason": "kept",
+                    "paths": [
+                      "/d/keep/*"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: an option's leaf takes paths too",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "--recursive": {
+                  "decision": "deny",
+                  "paths": [
+                    "/d/tmp/*"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a key spelled like a field is a name under operands",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "gh": {
+                "pr": {
+                  "view": {
+                    "operands": {
+                      "decision": "deny"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: a mount section takes a tree, its paths under that root",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "mounts": {
+              "/d": {
+                "commands": {
+                  "rm": {
+                    "decision": "deny",
+                    "reason": "shared",
+                    "paths": [
+                      "/d/shared/*"
+                    ]
+                  },
+                  "git": {
+                    "push": "ask"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tree: an empty tree states nothing",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {}
+          }
+        }
+      }
+    }
+  ]
+}

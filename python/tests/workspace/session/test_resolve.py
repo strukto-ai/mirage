@@ -2,40 +2,34 @@ import pytest
 
 from mirage.execution.process.config import ProcessPermissions
 from mirage.policy.errors import PolicyError
-from mirage.policy.match.rule import op_ruling
 from mirage.policy.profile import (
-    CommandsBlock,
-    MountCommandsBlock,
     PathsBlock,
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    tree_doc,
 )
-from mirage.policy.types import (
-    AdmissionRules,
-    CommandRule,
-    HideReason,
-    VfsContext,
-)
+from mirage.policy.types import HideReason
+from mirage.rs.policy import rule_table
 from mirage.shell.variable import VarAttr
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
     MountMode,
-    PathSpec,
     ShowEntry,
     ShownPaths,
 )
 from mirage.utils.hidden import path_visible
-from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.session.resolve import (
     apply_profile,
+    command_rules,
     compile_profile,
     narrow,
     resolve_profile,
     with_inline,
 )
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.validate import BUILTIN_GRAMMARS
 
 PROFILES = {
     "default": SessionProfile(
@@ -62,18 +56,22 @@ def test_resolve_profile_refuses_an_unknown_name():
         resolve_profile(PROFILES, "nope")
 
 
-def test_compile_preserves_empty_mount_through_inline_restrictions():
-    rule = CommandRule(reason="permission", commands=("git push",))
-    base = SessionProfile(commands=CommandsBlock(ask=(rule,)))
-    restricted = with_inline(
-        base, SessionProfile(paths=PathsBlock(hide=("/secret",)))
+def test_with_inline_keeps_the_profiles_tree_and_command_rules_reads_both():
+    base = SessionProfile(commands={"rm": {"-r": "ask"}})
+    inline = SessionProfile(
+        commands={"rm": "deny"}, paths=PathsBlock(hide=("/secret",))
     )
-    assert restricted is not None
-    for profile in (base, restricted):
-        compiled = compile_profile(profile).policies.commands
-        assert compiled is not None
-        assert compiled.ask[0] == rule
-        assert compiled.ask[0].mount == ""
+    merged = with_inline(base, inline)
+    assert merged is not None and merged.commands == base.commands
+    rules = command_rules(base, inline, BUILTIN_GRAMMARS)
+    assert rules is not None
+    assert [(t.mount, t.inline) for t in rules.trees] == [
+        ("", False),
+        ("", True),
+    ]
+    assert tree_doc(rules.trees[1].tree) == {"rm": "deny"}
+    compiled = compile_profile(merged, commands=rules).policies.commands
+    assert compiled is rules
 
 
 def test_with_inline_takes_the_weaker_mode_per_mount():
@@ -117,7 +115,7 @@ def test_with_inline_merges_one_mount_section():
         mounts={
             "/repo": ProfileMount(
                 mode=MountMode.WRITE,
-                commands=MountCommandsBlock(deny=("rm",)),
+                commands={"rm": "deny"},
                 paths=PathsBlock(hide=("/repo/.env",)),
             )
         }
@@ -125,7 +123,7 @@ def test_with_inline_merges_one_mount_section():
     inline = SessionProfile(
         mounts={
             "/repo": ProfileMount(
-                commands=MountCommandsBlock(ask=("git push",)),
+                commands={"cp": "ask"},
                 paths=PathsBlock(hide=("/repo/secrets",)),
             )
         }
@@ -133,8 +131,13 @@ def test_with_inline_merges_one_mount_section():
     entry = with_inline(base, inline).mounts["/repo"]
     assert entry.mode is MountMode.WRITE
     assert entry.commands is not None
-    assert [r.commands for r in entry.commands.deny] == [("rm",)]
-    assert [r.commands for r in entry.commands.ask] == [("git push",)]
+    assert tree_doc(entry.commands) == {"rm": "deny"}
+    rules = command_rules(base, inline, BUILTIN_GRAMMARS)
+    assert rules is not None
+    assert [(t.mount, t.inline) for t in rules.trees] == [
+        ("/repo", False),
+        ("/repo", True),
+    ]
     assert entry.paths == PathsBlock(hide=("/repo/.env", "/repo/secrets"))
 
 
@@ -145,138 +148,37 @@ def test_with_inline_with_one_side_missing_is_the_other():
     assert with_inline(None, None) is None
 
 
-def test_with_inline_adds_ask_and_deny_but_refuses_an_allow_list():
-    base = SessionProfile(
-        commands=CommandsBlock(
-            allow=("ls", "git", "cat"), ask=("git push",), deny=("rm",)
-        )
-    )
-    inline = SessionProfile(
-        commands=CommandsBlock(
-            deny=(CommandRule(reason="no", commands=("mv",)),)
-        )
-    )
-    out = with_inline(base, inline)
-    assert out is not None and out.commands is not None
-    # The allow list is the profile's alone, and the added rules land after
-    # it: an inline document restricts, it never installs.
-    assert out.commands.allow == ("ls", "git", "cat")
-    assert [r.commands for r in out.commands.ask] == [("git push",)]
-    assert [r.commands for r in out.commands.deny] == [("rm",), ("mv",)]
-    with pytest.raises(PolicyError, match="not an allow list"):
-        with_inline(
-            base, SessionProfile(commands=CommandsBlock(allow=("wc",)))
-        )
-    # And with no profile to add to: the refusal belongs to where the
-    # document was written, so a workspace that happens to declare no
-    # default profile must not quietly accept what one with a profile refuses.
-    with pytest.raises(PolicyError, match="not an allow list"):
-        with_inline(
-            None, SessionProfile(commands=CommandsBlock(allow=("wc",)))
-        )
-
-
-def test_with_inline_leaves_a_stated_block_alone_when_the_other_is_bare():
-    base = SessionProfile(commands=CommandsBlock(allow=("ls",)))
-    assert with_inline(base, SessionProfile(cwd="/x")).commands == (
-        base.commands
-    )
-    inline = SessionProfile(commands=CommandsBlock(deny=("rm",)))
-    assert (
-        with_inline(SessionProfile(cwd="/x"), inline).commands
-        == inline.commands
-    )
-
-
-def test_compile_profile_commands_lists_mount_rules_before_the_role_s_own():
-    rules = compile_profile(
+def test_command_rules_holds_each_mounts_tree_with_its_prefix():
+    rules = command_rules(
         SessionProfile(
-            commands=CommandsBlock(
-                allow=("ls", "rm", "git"), deny=("shutdown",)
-            ),
+            commands={"*": "deny", "ls": "allow"},
             mounts={
                 "/repo": ProfileMount(
-                    commands=MountCommandsBlock(
-                        ask=("git rebase",),
-                        deny=(
-                            CommandRule(
-                                reason="ro",
-                                commands=("rm",),
-                                paths=("/repo/*.lock",),
-                            ),
-                        ),
-                    )
+                    commands={
+                        "rm": {"decision": "deny", "paths": ["*.pem"]},
+                        "git": {"push": "ask"},
+                    }
                 ),
                 "/scratch": ProfileMount(mode=MountMode.READ),
             },
-        )
-    ).policies.commands
-    assert rules is not None
-    assert rules.allow == ("ls", "rm", "git")
-    # Every mount rule carries the root it was written under, which is
-    # what scopes it to a line working inside that mount; its paths are
-    # kept exactly as typed.
-    assert rules.deny[0] == CommandRule(
-        reason="ro", commands=("rm",), paths=("/repo/*.lock",), mount="/repo"
-    )
-    assert rules.deny[1].commands == ("shutdown",) and not rules.deny[1].mount
-    assert rules.ask[0].commands == ("git rebase",)
-    assert rules.ask[0].mount == "/repo" and not rules.ask[0].paths
-
-
-def test_compile_profile_commands_anchors_a_name_pattern_to_its_mount():
-    rules = compile_profile(
-        SessionProfile(
-            mounts={
-                "/repo": ProfileMount(
-                    commands=MountCommandsBlock(
-                        deny=(CommandRule(reason="no pems", paths=("*.pem",)),)
-                    )
-                )
-            }
-        )
-    ).policies.commands
-    assert rules is not None
-    rule = rules.deny[0]
-    assert rule.paths == ("/repo/*.pem",)
-    # The stamp scopes the rule at admission, but the dispatcher reads the
-    # paths alone, so a raw name pattern refused a read in every other
-    # mount too.
-    assert op_ruling(rules, _read_op("/repo/deep/key.pem"), ()) == (
-        rule,
-        False,
-    )
-    assert op_ruling(rules, _read_op("/other/key.pem"), ()) is None
-
-
-def _read_op(virtual: str) -> VfsContext:
-    return VfsContext(
-        call=CALLS["read"],
-        path=PathSpec(
-            virtual=virtual,
-            directory=virtual.rsplit("/", 1)[0],
-            vfs_path=virtual,
-            raw_path=virtual,
         ),
-        write=False,
-        prefix="/other",
+        None,
+        BUILTIN_GRAMMARS,
+        defer=True,
     )
+    assert rules is not None
+    assert [t.mount for t in rules.trees] == ["", "/repo"]
+    leaves = {rule.at: rule for rule in rule_table(rules)}
+    assert leaves["/rm/*"].paths == ("/repo/*.pem",)
+    assert leaves["/rm/*"].mount == "/repo"
+    assert leaves["/*"].mount == ""
 
 
-def test_compile_profile_commands_is_none_when_the_role_states_no_rules():
+def test_command_rules_is_none_when_no_document_states_a_tree():
+    bare = SessionProfile(mounts={"/repo": ProfileMount(mode=MountMode.READ)})
+    assert command_rules(bare, None, BUILTIN_GRAMMARS) is None
+    assert command_rules(None, None, BUILTIN_GRAMMARS) is None
     assert compile_profile(SessionProfile()).policies.commands is None
-    assert (
-        compile_profile(
-            SessionProfile(commands=CommandsBlock())
-        ).policies.commands
-        is None
-    )
-    assert (
-        compile_profile(
-            SessionProfile(mounts={"/repo": ProfileMount(mode=MountMode.READ)})
-        ).policies.commands
-        is None
-    )
 
 
 def test_compile_profile_turns_the_document_into_session_fields():
@@ -375,18 +277,15 @@ def test_narrow_stamps_the_uneditable_fields_and_apply_seeds_the_rest():
     assert VarAttr.EXPORT in applied.vars["ROLE"].attrs
 
 
-def test_narrow_carries_the_role_s_admission_rules_onto_the_session():
+def test_narrow_carries_the_profiles_trees_onto_the_session():
+    doc = SessionProfile(commands={"*": "deny", "ls": "allow"})
     compiled = compile_profile(
-        SessionProfile(commands=CommandsBlock(allow=("ls",), ask=("git",)))
+        doc, commands=command_rules(doc, None, BUILTIN_GRAMMARS)
     )
-    assert compiled.policies.commands == AdmissionRules(
-        allow=("ls",),
-        ask=(CommandRule(reason="no standing approval", commands=("git",)),),
-    )
+    assert compiled.policies.commands is not None
     session = SessionState(session_id="s")
     narrow(session, compiled)
     assert session.commands == compiled.policies.commands
-    assert compile_profile(SessionProfile(cwd="/x")).policies.commands is None
 
 
 def test_the_process_list_scope_is_part_of_what_a_session_sees():
@@ -476,7 +375,7 @@ def test_with_inline_cannot_add_show_and_the_bases_survives():
                 }
             ),
         )
-    # And with no profile to add to, same rule as the allow list.
+    # And with no profile to add to, the same rule.
     with pytest.raises(PolicyError, match="not show entries"):
         with_inline(
             None,

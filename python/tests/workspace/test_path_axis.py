@@ -613,13 +613,11 @@ def test_a_command_rule_on_a_hidden_remnant_keeps_the_refusal():
         {
             "paths": {"hide": ["/repo/only/h"]},
             "commands": {
-                "deny": [
-                    {
-                        "reason": "kept",
-                        "command": "rmdir",
-                        "paths": ["/repo/only/h"],
-                    }
-                ]
+                "rmdir": {
+                    "decision": "deny",
+                    "reason": "kept",
+                    "paths": ["/repo/only/h"],
+                }
             },
         }
     )

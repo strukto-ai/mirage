@@ -23,7 +23,8 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
-from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
+from mirage.policy.types import CommandContext
+from mirage.rs.policy import rule_table
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -35,43 +36,53 @@ from mirage.workspace.node.admission import (
 )
 from mirage.workspace.node.explain import admit_line
 from mirage.workspace.tools.io_text import with_decision
+from tests.fixtures.command_trees import trees
 
 DOC = {
     "commands": {
-        "allow": [
-            "cat",
-            "rm",
-            "ls",
-            "ln",
-            "echo",
-            "head",
-            "grep",
-            "rg",
-            "cd",
-            "xargs",
-            "sh",
-            "mkdir",
-            "eval",
-            "source",
+        "*": "deny",
+        "cat": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret*"],
+            },
         ],
-        "deny": [
-            {"reason": "sealed", "command": "cat", "paths": ["/data/secret*"]},
+        "rm": "allow",
+        "ls": [
+            "allow",
             {
+                "decision": "deny",
                 "reason": "private",
-                "command": "ls",
-                "paths": ["/data/private"],
-            },
-            {
-                "reason": "private",
-                "command": "grep",
-                "paths": ["/data/private"],
-            },
-            {
-                "reason": "private",
-                "command": "rg",
                 "paths": ["/data/private"],
             },
         ],
+        "ln": "allow",
+        "echo": "allow",
+        "head": "allow",
+        "grep": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/data/private"],
+            },
+        ],
+        "rg": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/data/private"],
+            },
+        ],
+        "cd": "allow",
+        "xargs": "allow",
+        "sh": "allow",
+        "mkdir": "allow",
+        "eval": "allow",
+        "source": "allow",
     }
 }
 
@@ -269,7 +280,7 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         )
         assert await line("sh -c 'rm /data/x'; sh -c 'sort'") == (
             126,
-            "sort: Permission denied\npolicy denied: sort is not allowed\n",
+            "sort: Permission denied\npolicy denied: denied by policy\n",
         )
     finally:
         await ws.close()
@@ -314,7 +325,11 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [{"reason": "sealed", "paths": ["/data/secret*"]}]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data/secret*"],
+                    }
                 }
             }
         },
@@ -584,11 +599,23 @@ def _gate_ctx(tokens: tuple[str, ...]) -> CommandContext:
 
 
 def test_the_admitted_gate_judges_what_the_line_did_not_name():
-    deny = CommandRule(reason="sealed", paths=("/data/sealed",))
-    ask = CommandRule(
-        reason="nod", commands=("grep",), paths=("/data/asked/*",)
+    rules = trees(
+        {
+            "grep": [
+                {
+                    "decision": "deny",
+                    "reason": "sealed",
+                    "paths": ["/data/sealed"],
+                },
+                {
+                    "decision": "ask",
+                    "reason": "nod",
+                    "paths": ["/data/asked/*"],
+                },
+            ]
+        }
     )
-    rules = AdmissionRules(ask=(ask,), deny=(deny,))
+    (ask,) = [r for r in rule_table(rules) if r.reason == "nod"]
     gate = Admitted(
         rules=rules,
         ctx=_gate_ctx(("grep", "-r", "x", "/data")),
@@ -629,8 +656,14 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
 def test_the_admitted_gate_scopes_each_start_point_on_its_own():
     # A walk keeps its native op where no rule could reach: the gate of
     # `find /data /other` sets aside only the walk of /data.
-    rules = AdmissionRules(
-        deny=(CommandRule(reason="sealed", paths=("/data/sealed",)),)
+    rules = trees(
+        {
+            "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/sealed"],
+            }
+        }
     )
     gate = Admitted(
         rules=rules,
@@ -813,7 +846,7 @@ async def test_fallback_tree_policy_matches_the_verb_after_group_options(
     ws = Workspace(
         {"/reader": RAMVFS(), "/write": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {decision: ["remote send"]}}},
+        profiles={"default": {"commands": {"remote": {"send": decision}}}},
     )
     try:
         ws.mount("/reader").register_commands([reader])
@@ -957,7 +990,13 @@ async def test_a_command_reads_as_writing_when_its_handler_says_so():
 # is: a path rule reads a file operand however it is spelled, and an
 # allow list answers each name for itself.
 DENY_SECRET = {
-    "commands": {"deny": [{"reason": "secret", "paths": ["/data/secret.txt"]}]}
+    "commands": {
+        "*": {
+            "decision": "deny",
+            "reason": "secret",
+            "paths": ["/data/secret.txt"],
+        }
+    }
 }
 
 
@@ -1028,11 +1067,18 @@ async def test_a_shell_test_is_answered_by_its_own_name_in_an_allow_list(
     name,
 ):
     line = "cd /data && " + _spell(name, "-e a.txt")
-    without = {"commands": {"allow": ["echo", "cd"]}}
+    without = {"commands": {"*": "deny", "echo": "allow", "cd": "allow"}}
     assert await _tested(without, line) == (
         0,
         "126\n",
         f"{name}: Permission denied\n",
     )
-    listed = {"commands": {"allow": ["echo", "cd", name]}}
+    listed = {
+        "commands": {
+            "*": "deny",
+            "echo": "allow",
+            "cd": "allow",
+            name: "allow",
+        }
+    }
     assert await _tested(listed, line) == (0, "0\n", "")

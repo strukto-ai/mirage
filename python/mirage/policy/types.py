@@ -50,11 +50,10 @@ class Outcome(StrEnum):
     """What the profile's rules say about one line: the document's own
     three verbs and nothing else.
 
-    ALLOW is silence as well as consent, since a line no rule speaks
-    about runs. DENY covers both refusals, and ``Ruling.rule`` tells
-    them apart: a rule refused it, or, with no rule, the allow list did.
-    Both exit 126 and print the same line; the ``decision`` record
-    carries the operator's reason when there is one.
+    ALLOW is silence as well as consent, since a line no tree speaks
+    about runs. DENY exits 126 and prints the same line whichever leaf
+    refused; the ``decision`` record carries the operator's reason when
+    there is one.
     """
 
     ALLOW = "allow"
@@ -90,9 +89,9 @@ class Deny:
             None refuses the command whole.
         rule (CommandRule | None): the profile rule that refused, as an
             Ask carries the rule that asked; None for a coded condition.
-        matched (Matched | None): what fired in that rule, or in the
-            allow list; not part of what the refusal is, so two denials
-            differing only here compare equal.
+        matched (Matched | None): what fired in that rule; not part of
+            what the refusal is, so two denials differing only here
+            compare equal.
     """
 
     kind: ClassVar[str] = "deny"
@@ -135,47 +134,38 @@ class Route:
 
 @dataclass(frozen=True, slots=True)
 class CommandRule:
-    """One admission rule of the permissions document: refuse (or ask
-    about) matching commands, on matching paths when it names any.
+    """The rule an ask or a refusal is keyed on: a leaf of a profile's
+    command tree, or, for a coded Ask, one synthesized over what was
+    asked about.
 
-    It is the compiled element of ``commands.deny`` and ``commands.ask``
-    wherever the profile writes one, and reaches the workspace only inside
-    that document; ``PermissionsPolicy`` is what evaluates it. The
-    document writes a rule in one of three shapes, and each compiles to
-    rules of this class: a list of command patterns (a whole-line rule
-    on each, no paths), a mapping of command pattern to its paths (one
-    command to many paths, one rule per command, so a path is never
-    stated beside a command it was not meant for), or paths alone (a
-    rule on every command, at the dispatcher too). A command entry is a
-    token-prefix pattern over the line as the entry point normalizes it (``rm``
-    is every rm line, ``git push`` every ``git push ...``, a ``*`` token
-    any one token). Path entries use the document's one grammar: an
-    entry with ``*``, ``?`` or ``[`` is a pattern (repo fnmatch dialect,
-    ``*`` crossing ``/``, a slashless pattern matching any name
-    component), anything else is an exact path and its subtree. Every
-    entry is absolute or a name pattern, holds a token (a blank one
-    would be the root), and inside a mount section must name something
-    under that mount root.
+    A leaf is named by its place in the canonical tree, the mount its
+    tree belongs to, and its decision, reason and paths. Editing any of
+    them makes another rule, so an approval given to the old one no
+    longer holds. A coded Ask's rule names the program, path, line or
+    host it asked about, in ``commands`` or ``paths``.
 
     Args:
-        reason (str): why the command is refused, carried on the
-            result's decision record.
-        commands (tuple[str, ...]): command patterns the rule applies
-            to; empty means every command. A path-scoped rule carries
-            exactly one.
-        paths (tuple[str, ...]): path entries; empty refuses the
-            command regardless of its operands.
-        mount (str): set by the compiler for a rule written under a
-            ``mounts.<prefix>`` section, the mount root it is scoped to:
-            it applies only to a line whose cwd or paths lie under it.
-            Empty for a rule written at the top level; never typed in
-            the document.
+        reason (str): why, carried on the refusal or the ask.
+        decision (Outcome): what the leaf decides; ASK for a coded Ask's
+            rule.
+        at (str): the leaf's place, a JSON Pointer over the canonical
+            tree (``/rm/--recursive/*``, a node's own decision at
+            ``/rm/*``); empty for a coded Ask's rule.
+        paths (tuple[str, ...]): the paths the leaf covers, anchored to
+            its mount; empty covers every path.
+        mount (str): the mount prefix of the tree the leaf belongs to;
+            empty for a profile's top-level tree and for inline
+            permissions.
+        commands (tuple[str, ...]): what a coded Ask asked about; empty
+            for a leaf.
     """
 
     reason: str
-    commands: tuple[str, ...] = ()
+    decision: Outcome = Outcome.ASK
+    at: str = ""
     paths: tuple[str, ...] = ()
     mount: str = ""
+    commands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,26 +195,22 @@ class Ruling:
 
     Args:
         outcome (Outcome): which verb spoke.
-        rule (CommandRule | None): the rule that spoke; None on ALLOW,
-            and on the DENY the allow list produces, which is not a
-            rule and so has no reason of its own to print.
+        rule (CommandRule | None): the leaf that spoke; None on ALLOW.
         matched_path (str | None): the operand a path-scoped rule
             matched, as typed, which the GNU line names
             (``rm: cannot remove 'letters.txt': Permission denied``);
             None when the rule reaches the whole line.
-        source (str): where in the document the rule was written, for a
+        source (str): where in the document the leaf was written, for a
             host reading a decision: ``top`` or ``mounts./repo``. Empty
-            on ALLOW, and ``commands.allow`` on the DENY the allow list
-            produces, which is the one place a source names no rule.
-        asks (tuple[CommandRule, ...]): every ask that won at a subject
-            of its own, ``rule`` among them, in the order the subjects
-            were read. Only ASK fills it, and the line runs only once
-            each has been answered: one nod covers the subject it was
-            given for and no other, so a deeper ask on a destination
-            cannot carry a source past the ask written for it. One
-            entry is the ordinary case.
-        matched (Matched | None): the path and options that fired; None
-            on ALLOW and for a rule naming no command.
+            on ALLOW.
+        asks (tuple[CommandRule, ...]): every ask leaf that spoke for
+            the line, over every tree and every path it names, ``rule``
+            among them. Only ASK fills it, and the line runs only once
+            each has been answered: one nod covers its own leaf and no
+            other, so an ask on a destination cannot carry a source past
+            the ask written for it. One entry is the ordinary case.
+        matched (Matched | None): the subcommand path and options that
+            fired; None on ALLOW.
     """
 
     outcome: Outcome
@@ -239,8 +225,8 @@ class Ruling:
 class Ask:
     """Go on only with a host approval.
 
-    Every method may answer one. ``PermissionsPolicy`` returns one for a
-    ``commands.ask`` rule, a custom policy for a coded condition, and
+    Every method may answer one. ``PermissionsPolicy`` returns one for an
+    ask leaf of a command tree, a custom policy for a coded condition, and
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
     for a Deny, so an approval can never re-open a refusal. A later
@@ -554,55 +540,6 @@ class SessionDecisionsQuery(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class AllowFlags:
-    """A ``commands.allow`` entry that runs a command only with options
-    from a set: ``{command: rm, flags: [-f, -v]}`` runs ``rm -f`` and
-    ``rm -vf`` and refuses ``rm -r``. An empty set runs the command with
-    no option at all. Where a pattern string means "has these options",
-    this means "has nothing but these".
-
-    Args:
-        command (str): the command, and its subcommands, the entry names.
-        flags (tuple[str, ...]): the options a line may carry, in any
-            spelling the command's grammar reads as the same option.
-    """
-
-    command: str
-    flags: tuple[str, ...] = ()
-
-    @property
-    def pattern(self) -> str:
-        """The command and its options as one pattern, which the
-        command's grammar reads to name the options."""
-        return " ".join((self.command, *self.flags))
-
-
-@dataclass(frozen=True, slots=True)
-class AdmissionRules:
-    """One profile's admission rules, compiled: the whole permission
-    document a session runs under.
-
-    A session is evaluated against exactly one of these. It holds the
-    profile's allow list, its ask and deny rules, and the rules its mount
-    entries carry, each stamped with the mount it was written under so
-    it applies to a line working inside that mount. There is nothing
-    above it and nothing beside it: two rules that both match are
-    resolved by anchor depth, then by verb (``policy/match/decide``).
-
-    Args:
-        allow (tuple[str | AllowFlags, ...] | None): the profile's allow
-            entries; None when it states no list (everything visible).
-        ask (tuple[CommandRule, ...]): rules admitted only with an
-            approval.
-        deny (tuple[CommandRule, ...]): rules refused with a reason.
-    """
-
-    allow: tuple[str | AllowFlags, ...] | None = None
-    ask: tuple[CommandRule, ...] = ()
-    deny: tuple[CommandRule, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class RuleLeaf:
     """One decision a command tree states at one place.
 
@@ -636,6 +573,9 @@ class ValueRule:
     decision: tuple[RuleLeaf, ...] = ()
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
 
+    def __hash__(self) -> int:
+        return hash((self.decision, frozenset(self.options.items())))
+
 
 @dataclass(frozen=True, slots=True)
 class OptionRule:
@@ -653,6 +593,15 @@ class OptionRule:
     decision: tuple[RuleLeaf, ...] = ()
     values: Mapping[str, ValueRule] = field(default_factory=dict)
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.decision,
+                frozenset(self.values.items()),
+                frozenset(self.options.items()),
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,6 +631,52 @@ class CommandNode:
     options: Mapping[str, OptionRule] = field(default_factory=dict)
     other_options: tuple[RuleLeaf, ...] = ()
     operands: Mapping[str, "CommandNode"] = field(default_factory=dict)
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.decision,
+                frozenset(self.subcommands.items()),
+                frozenset(self.options.items()),
+                self.other_options,
+                frozenset(self.operands.items()),
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedTree:
+    """One command tree of a session and where it applies.
+
+    Args:
+        tree (CommandNode): the tree, every name canonical.
+        mount (str): the mount prefix whose tree it is, which applies to
+            a line working inside the mount; empty for a tree that
+            applies everywhere (a profile's top-level tree, inline
+            permissions).
+        inline (bool): whether inline permissions stated it rather than
+            the profile; such a tree only tightens, so it never names a
+            command into a session.
+    """
+
+    tree: CommandNode
+    mount: str = ""
+    inline: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissionRules:
+    """A session's command trees, compiled: the profile's top-level
+    tree, each of its mounts' trees, and the inline permissions' trees.
+
+    Each tree is judged on its own and the strictest result wins, so a
+    mount's tree or inline permissions only tighten.
+
+    Args:
+        trees (tuple[ScopedTree, ...]): the trees, in document order.
+    """
+
+    trees: tuple[ScopedTree, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -950,13 +945,13 @@ class CommandContext:
             words; for anything else the name and the raw argv.
         program (tuple[str, ...]): the head of ``tokens`` that names
             what runs: the name plus a CLI's verb path.
-        tool (bool): whether the word is a tool the allow lists govern,
-            which every named command is, shell builtins included. The
-            entry point clears it for the agent's own function where the
-            function is what runs, and for an executed path: neither is
-            a name a list could hold, and every line either runs passes
-            the gate itself, so an allow list never refuses them,
-            though a deny rule still can.
+        tool (bool): whether the word is a tool a tree's root decision
+            governs, which every named command is, shell builtins
+            included. The entry point clears it for the agent's own
+            function where the function is what runs, and for an
+            executed path: neither is a name a tree could hold, and
+            every line either runs passes the gate itself, so a tree's
+            root never decides them.
         walks (bool): whether the command descends its directory
             operands (``find``, ``du``, ``tree``, ``rg``, ``grep -r``,
             ``ls -R``), so a mount whose root sits under one of its
@@ -979,12 +974,8 @@ class CommandContext:
             its grammar reads the line and resolved in ``cwd``; None
             when it names none.
         read (CommandRead | None): the line as its grammar reads it, the
-            facts a rule pattern is compared on; None for a command no
-            spec describes or a line its spec refuses, which a pattern
-            matches word by word.
-        grammar (Grammar | None): the grammar that read the line, which
-            reads each rule pattern on the same command; None with
-            ``read``.
+            facts a tree walks; None for a command no spec describes or a
+            line its spec refuses, which a tree walks by its name.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
         vfs (FileView | None): the session's files, read only: a write is
@@ -1010,7 +1001,6 @@ class CommandContext:
     subtree: bool = False
     move_target: str | None = None
     read: CommandRead | None = None
-    grammar: Grammar | None = None
     session: SessionView | None = None
     vfs: FileView | None = None
     caller: PolicyCaller | None = None
@@ -1278,8 +1268,9 @@ class Explanation:
         reason (str): why, in the deciding policy's words; empty when
             nothing refuses or asks.
         source (str): where in the profile the deciding rule is written
-            (``top``, ``mounts./runbook``, ``commands.allow`` for the
-            allow list); empty when no rule decided.
+            (``top``, ``mounts./runbook``, ``commands`` for a CLI that
+            reaches a service and no tree names); empty when no rule
+            decided.
         answers (tuple[Deny | Ask | Route, ...]): every policy's answer,
             in the order the chain asks them, each naming its policy;
             the profile's rules answer as ``PermissionsPolicy``. A hide

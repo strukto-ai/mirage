@@ -54,8 +54,6 @@ from mirage.mount.changes import SERVED_BY
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
-    AdmissionRules,
-    CommandRule,
     Deny,
     Policies,
     Policy,
@@ -64,7 +62,6 @@ from mirage.policy import (
     VfsResultContext,
 )
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
-from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
     DirListing,
@@ -259,27 +256,6 @@ async def test_readlink_answers_from_the_namespace():
     result, _ = await dispatcher.dispatch("readlink", _path("/data/lk"))
     assert result == "x.txt"
     ns.follow.assert_not_called()
-
-
-class _OneRule:
-    """Every session's compiled profile: one deny rule."""
-
-    def __init__(self, rule: CommandRule) -> None:
-        self.rules = AdmissionRules(deny=(rule,))
-
-    def commands_of(self, session_id: str) -> AdmissionRules:
-        return self.rules
-
-
-@pytest.mark.asyncio
-async def test_a_profile_path_rule_holds_on_the_dispatcher():
-    policies = Policies()
-    frozen = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    policies.add(PermissionsPolicy(_OneRule(frozen)))
-    dispatcher, _ = _dispatcher(policies)
-    with pytest.raises(PolicyDenied) as excinfo:
-        await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
-    assert excinfo.value.decision and "frozen" in excinfo.value.decision.reason
 
 
 def _structure_only(dispatcher) -> None:
@@ -4151,7 +4127,13 @@ async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
         ws.create_session(
             "agent",
             profile={
-                "commands": {"deny": [{"paths": [sealed], "reason": "sealed"}]}
+                "commands": {
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": [sealed],
+                    }
+                }
             },
         )
         await ws.shell("mkdir -p /d/t/a && echo hi > /d/t/a/f")

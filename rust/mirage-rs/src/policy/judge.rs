@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::admission::{subjects, touches, under};
 use super::profile::anchored;
 use super::tree::{Branch, CompiledTree, Line, Node, Placed, Verdict, rank, resolve};
 use super::visibility::norm_abs;
 use super::{
-    CommandFacts, FlagFact, Matched, Outcome, Reading, Subject, Text, Visibility,
+    CommandFacts, FlagFact, Matched, Outcome, PathFact, Reading, Subject, Text, Visibility,
     VisibilityMatcher, classify_paths,
 };
 
@@ -28,7 +27,7 @@ pub struct Trees {
 
 /// A leaf as a host names it: its decision, why, the paths it covers,
 /// its place in its tree and the mount that tree belongs to. Its index
-/// in `TreeMatcher::rules` is the id a ruling gives.
+/// in `AdmissionMatcher::rules` is the id a ruling gives.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RuleLeaf {
     pub decision: Outcome,
@@ -50,7 +49,7 @@ pub struct Walked {
 /// The answer for one line: the strictest decision over every tree that
 /// applies and every path the line names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct TreeRuling {
+pub struct Ruling {
     pub outcome: Outcome,
     pub rule: Option<usize>,
     pub matched_path: Option<Text>,
@@ -97,14 +96,14 @@ struct Scoped {
     tree: CompiledTree,
 }
 
-pub struct TreeMatcher {
+pub struct AdmissionMatcher {
     trees: Vec<Scoped>,
     table: Vec<Placed>,
     rules: Vec<RuleLeaf>,
     scopes: Vec<Option<VisibilityMatcher>>,
 }
 
-impl TreeMatcher {
+impl AdmissionMatcher {
     /// Compile a session's trees into one leaf table. A mount tree's
     /// paths are anchored to the mount, as a mount section's paths are.
     pub fn new(trees: Trees) -> Self {
@@ -149,6 +148,10 @@ impl TreeMatcher {
         &self.rules
     }
 
+    pub fn tree_count(&self) -> usize {
+        self.trees.len()
+    }
+
     pub fn has_rules(&self) -> bool {
         !self.trees.is_empty()
     }
@@ -174,7 +177,7 @@ impl TreeMatcher {
     /// names (once when it names none), the strictest result winning.
     /// Every ask behind an ask result is reported, since the host needs
     /// each one answered.
-    pub fn decide(&self, facts: &CommandFacts) -> TreeRuling {
+    pub fn decide(&self, facts: &CommandFacts) -> Ruling {
         let read = Read::new(&facts.tokens, facts.line.as_ref());
         let line = read.line(facts.tool);
         let subjects = subjects(facts);
@@ -205,9 +208,9 @@ impl TreeMatcher {
             }
         }
         let Some((verdict, subject)) = best else {
-            return TreeRuling::default();
+            return Ruling::default();
         };
-        TreeRuling {
+        Ruling {
             outcome: verdict.outcome,
             rule: verdict.leaf.filter(|_| verdict.outcome != Outcome::Allow),
             matched_path: verdict
@@ -320,17 +323,100 @@ impl TreeMatcher {
     }
 }
 
+fn destination(facts: &CommandFacts) -> Option<&PathFact> {
+    (facts.moves && facts.operands.len() >= 2 && facts.move_target.is_none())
+        .then(|| facts.operands.last())
+        .flatten()
+}
+
+pub fn subjects(facts: &CommandFacts) -> Vec<Subject> {
+    if facts.paths.is_empty() {
+        return vec![Subject::default()];
+    }
+    let mut subjects: Vec<Subject> = facts
+        .paths
+        .iter()
+        .cloned()
+        .map(|path| Subject {
+            path: Some(path),
+            ..Subject::default()
+        })
+        .collect();
+    if facts.subtree {
+        let dst = destination(facts);
+        let count = facts.operands.len() - usize::from(dst.is_some());
+        subjects.extend(facts.operands[..count].iter().cloned().map(|path| Subject {
+            path: Some(path),
+            holds: true,
+            ancestors: true,
+        }));
+        if let Some(path) = dst {
+            subjects.push(Subject {
+                path: Some(path.clone()),
+                holds: true,
+                ancestors: false,
+            });
+        }
+    }
+    subjects
+}
+
+pub(crate) fn under(path: &[u32], root: &[u32]) -> bool {
+    root == [47] || path == root || (path.starts_with(root) && path.get(root.len()) == Some(&47))
+}
+
+fn basename(path: &[u32]) -> &[u32] {
+    let end = path
+        .iter()
+        .rposition(|&unit| unit != 47)
+        .map_or(0, |at| at + 1);
+    let value = &path[..end];
+    value.rsplit(|&unit| unit == 47).next().unwrap_or_default()
+}
+
+pub(crate) fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
+    if under(&facts.cwd, mount) || facts.paths.iter().any(|p| under(&p.virtual_path, mount)) {
+        return true;
+    }
+    if facts.walks {
+        return facts.paths.iter().any(|p| under(mount, &p.virtual_path));
+    }
+    if !facts.subtree {
+        return false;
+    }
+    let mut targets: Vec<&[u32]> = facts.move_target.as_deref().into_iter().collect();
+    if let Some(dst) = destination(facts) {
+        let name = basename(&dst.virtual_path);
+        if facts.operands[..facts.operands.len() - 1]
+            .iter()
+            .all(|p| basename(&p.virtual_path) != name)
+        {
+            targets.extend(
+                facts
+                    .paths
+                    .iter()
+                    .filter(|p| basename(&p.virtual_path) == name)
+                    .map(|p| p.virtual_path.as_slice()),
+            );
+        }
+        targets.push(&dst.virtual_path);
+    }
+    facts
+        .paths
+        .iter()
+        .any(|p| !targets.contains(&p.virtual_path.as_slice()) && under(mount, &p.virtual_path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::PathFact;
     use serde_json::{Value, json};
 
     fn text(value: &str) -> Text {
         value.chars().map(u32::from).collect()
     }
 
-    fn matcher(top: Value, mounts: &[(&str, Value)]) -> TreeMatcher {
+    fn matcher(top: Value, mounts: &[(&str, Value)]) -> AdmissionMatcher {
         let mut trees = vec![ScopedTree {
             mount: None,
             root: crate::document::tree_of(&top).unwrap(),
@@ -341,7 +427,7 @@ mod tests {
                 root: crate::document::tree_of(tree).unwrap(),
             });
         }
-        TreeMatcher::new(Trees { trees })
+        AdmissionMatcher::new(Trees { trees })
     }
 
     fn path(value: &str) -> PathFact {
@@ -361,7 +447,80 @@ mod tests {
         }
     }
 
-    fn outcome(m: &TreeMatcher, cwd: &str, words: &[&str], paths: &[&str]) -> Outcome {
+    fn strings(value: &Value) -> Vec<Text> {
+        value
+            .as_array()
+            .map(|items| items.iter().map(|v| text(v.as_str().unwrap())).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn frozen_admission_corpus() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../../../integ/policy/matching.json")).unwrap();
+        for case in corpus["admissions"].as_array().unwrap() {
+            let name = &case["name"];
+            let trees = case["trees"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tree| ScopedTree {
+                    mount: tree["mount"].as_str().map(text),
+                    root: crate::document::tree_of(&tree["commands"]).unwrap(),
+                })
+                .collect();
+            let m = AdmissionMatcher::new(Trees { trees });
+            let facts = &case["facts"];
+            let ruling = m.decide(&CommandFacts {
+                tokens: strings(&facts["tokens"]),
+                tool: facts["tool"].as_bool().unwrap(),
+                cwd: text(facts["cwd"].as_str().unwrap()),
+                paths: strings(&facts["paths"])
+                    .iter()
+                    .map(|p| path_of(p))
+                    .collect(),
+                operands: strings(&facts["operands"])
+                    .iter()
+                    .map(|p| path_of(p))
+                    .collect(),
+                walks: facts["walks"].as_bool().unwrap(),
+                subtree: facts["subtree"].as_bool().unwrap(),
+                moves: facts["command"] == "mv",
+                ..CommandFacts::default()
+            });
+            let expected = &case["expected"];
+            let at = |id: usize| m.rules()[id].at.clone();
+            assert_eq!(
+                ruling.outcome,
+                serde_json::from_value::<Outcome>(expected["outcome"].clone()).unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                ruling.rule.map(at),
+                expected["at"].as_str().map(text),
+                "{name}"
+            );
+            assert_eq!(
+                ruling.matched_path,
+                expected["matched_path"].as_str().map(text),
+                "{name}"
+            );
+            assert_eq!(
+                ruling.asks.into_iter().map(at).collect::<Vec<_>>(),
+                strings(&expected["asks"]),
+                "{name}"
+            );
+        }
+    }
+
+    fn path_of(value: &[u32]) -> PathFact {
+        PathFact {
+            virtual_path: value.to_vec(),
+            display_path: value.to_vec(),
+        }
+    }
+
+    fn outcome(m: &AdmissionMatcher, cwd: &str, words: &[&str], paths: &[&str]) -> Outcome {
         m.decide(&facts(cwd, words, paths)).outcome
     }
 
@@ -477,6 +636,6 @@ mod tests {
         assert!(!m.runs(&text("rm")) && !m.runs(&text("cat")));
         assert!(m.scopes_paths(&text("cat")) && !m.scopes_paths(&text("ls")));
         assert!(m.reads_args(&text("gh")) && !m.reads_args(&text("ls")));
-        assert!(m.has_rules() && !TreeMatcher::new(Trees::default()).has_rules());
+        assert!(m.has_rules() && !AdmissionMatcher::new(Trees::default()).has_rules());
     }
 }

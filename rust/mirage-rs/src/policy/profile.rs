@@ -1,7 +1,7 @@
 use super::visibility::norm_abs;
 use super::{
-    HideReason, Mount, Paths, Profile, RestrictionPlan, Rule, Rules, Text, Visibility,
-    classify_paths, classify_vars,
+    HideReason, Mount, Paths, Profile, RestrictionPlan, Text, Visibility, classify_paths,
+    classify_vars,
 };
 
 pub(crate) fn anchored(entries: &[Text], root: &[u32]) -> Vec<Text> {
@@ -22,26 +22,7 @@ pub(crate) fn anchored(entries: &[Text], root: &[u32]) -> Vec<Text> {
         .collect()
 }
 
-fn scoped(rules: &[Rule], root: &[u32]) -> Vec<Rule> {
-    rules
-        .iter()
-        .map(|rule| Rule {
-            reason: rule.reason.clone(),
-            commands: rule.commands.clone(),
-            paths: anchored(&rule.paths, root),
-            mount: Some(root.to_vec()),
-        })
-        .collect()
-}
-
 pub fn compile_profile(profile: &Profile) -> RestrictionPlan {
-    let mut rules = Rules {
-        allow: profile
-            .commands
-            .as_ref()
-            .and_then(|commands| commands.allow.clone()),
-        ..Rules::default()
-    };
     let mut hidden = Vec::new();
     let mut shown = Vec::new();
     let mut reasons = Vec::new();
@@ -53,10 +34,6 @@ pub fn compile_profile(profile: &Profile) -> RestrictionPlan {
     }
     for entry in profile.mounts.as_deref().unwrap_or_default() {
         let root = norm_abs(&entry.prefix);
-        if let Some(commands) = &entry.commands {
-            rules.ask.extend(scoped(&commands.ask, &root));
-            rules.deny.extend(scoped(&commands.deny, &root));
-        }
         if let Some(paths) = &entry.paths {
             hidden.extend(anchored(&paths.hide, &root));
             shown.extend_from_slice(&paths.show);
@@ -69,16 +46,7 @@ pub fn compile_profile(profile: &Profile) -> RestrictionPlan {
             modes.push((entry.prefix.clone(), mode));
         }
     }
-    if let Some(commands) = &profile.commands {
-        rules.ask.extend_from_slice(&commands.ask);
-        rules.deny.extend_from_slice(&commands.deny);
-    }
     RestrictionPlan {
-        commands: if rules.allow.is_none() && rules.ask.is_empty() && rules.deny.is_empty() {
-            None
-        } else {
-            Some(rules)
-        },
         visibility: Visibility {
             hidden: classify_paths(&hidden),
             shown,
@@ -97,20 +65,6 @@ fn union(left: &[Text], right: &[Text]) -> Vec<Text> {
         }
     }
     out
-}
-
-fn add_commands(base: Option<&Rules>, inline: Option<&Rules>) -> Option<Rules> {
-    let Some(inline) = inline else {
-        return base.cloned();
-    };
-    let Some(base) = base else {
-        return Some(inline.clone());
-    };
-    Some(Rules {
-        allow: base.allow.clone(),
-        ask: base.ask.iter().chain(&inline.ask).cloned().collect(),
-        deny: base.deny.iter().chain(&inline.deny).cloned().collect(),
-    })
 }
 
 fn add_paths(base: Option<&Paths>, inline: Option<&Paths>) -> Option<Paths> {
@@ -142,15 +96,12 @@ fn add_mount(base: Option<&Mount>, inline: Option<&Mount>) -> Mount {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
-    let commands = add_commands(base.commands.as_ref(), inline.commands.as_ref())
-        .filter(|commands| !commands.ask.is_empty() || !commands.deny.is_empty());
     let paths = add_paths(base.paths.as_ref(), inline.paths.as_ref()).filter(|paths| {
         !paths.hide.is_empty() || !paths.show.is_empty() || !paths.reasons.is_empty()
     });
     Mount {
         prefix: base.prefix.clone(),
         mode,
-        commands,
         paths,
     }
 }
@@ -162,13 +113,6 @@ pub fn restrict_profile(
     let Some(inline) = inline else {
         return Ok(base.cloned());
     };
-    if inline
-        .commands
-        .as_ref()
-        .is_some_and(|commands| commands.allow.is_some())
-    {
-        return Err("inline permissions may add ask and deny rules, not an allow list");
-    }
     if inline
         .paths
         .as_ref()
@@ -185,7 +129,7 @@ pub fn restrict_profile(
                     .is_some_and(|paths| !paths.show.is_empty())
             })
     {
-        return Err("inline permissions may add ask and deny rules and hides, not show entries");
+        return Err("inline permissions may add command rules and hides, not show entries");
     }
     let Some(base) = base else {
         return Ok(Some(inline.clone()));
@@ -212,7 +156,6 @@ pub fn restrict_profile(
         None
     };
     Ok(Some(Profile {
-        commands: add_commands(base.commands.as_ref(), inline.commands.as_ref()),
         paths: add_paths(base.paths.as_ref(), inline.paths.as_ref()),
         vars: if base.vars.is_some() || inline.vars.is_some() {
             Some(union(
@@ -234,22 +177,10 @@ mod tests {
     fn text(value: &str) -> Text {
         value.chars().map(u32::from).collect()
     }
-    fn rule(reason: &str, paths: &[&str]) -> Rule {
-        Rule {
-            reason: text(reason),
-            paths: paths.iter().map(|path| text(path)).collect(),
-            ..Rule::default()
-        }
-    }
 
     #[test]
     fn compiler_retains_mount_scopes_shows_modes_and_reasons() {
         let profile = Profile {
-            commands: Some(Rules {
-                allow: Some(vec![]),
-                deny: vec![rule("top", &["/top"])],
-                ..Rules::default()
-            }),
             paths: Some(Paths {
                 hide: vec![text("/global")],
                 reasons: vec![HideReason {
@@ -262,11 +193,6 @@ mod tests {
             mounts: Some(vec![Mount {
                 prefix: text("/repo/"),
                 mode: Some(Mode::Read),
-                commands: Some(Rules {
-                    ask: vec![rule("ask", &["*.key"])],
-                    deny: vec![rule("mount", &["/repo/private"])],
-                    ..Rules::default()
-                }),
                 paths: Some(Paths {
                     hide: vec![text("*.pem")],
                     show: vec![Show {
@@ -281,18 +207,6 @@ mod tests {
             }]),
         };
         let plan = compile_profile(&profile);
-        let rules = plan.commands.unwrap();
-        assert_eq!(rules.allow, Some(vec![]));
-        assert_eq!(
-            rules
-                .deny
-                .iter()
-                .map(|rule| &rule.reason)
-                .collect::<Vec<_>>(),
-            vec![&text("mount"), &text("top")]
-        );
-        assert_eq!(rules.ask[0].paths, vec![text("/repo/*.key")]);
-        assert_eq!(rules.ask[0].mount, Some(text("/repo")));
         assert_eq!(
             plan.visibility.hidden,
             PathScope {
@@ -320,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn root_mount_anchors_names_and_empty_rules_remain_unrestricted() {
+    fn root_mount_anchors_names() {
         let profile = Profile {
             mounts: Some(vec![Mount {
                 prefix: text("/"),
@@ -336,37 +250,11 @@ mod tests {
             compile_profile(&profile).visibility.hidden.patterns,
             vec![text("/*.pem")]
         );
-        assert_eq!(
-            compile_profile(&Profile {
-                commands: Some(Rules::default()),
-                ..Profile::default()
-            })
-            .commands,
-            None
-        );
-        assert_eq!(
-            compile_profile(&Profile {
-                commands: Some(Rules {
-                    allow: Some(vec![]),
-                    ..Rules::default()
-                }),
-                ..Profile::default()
-            })
-            .commands
-            .unwrap()
-            .allow,
-            Some(vec![])
-        );
     }
 
     #[test]
     fn restriction_merge_keeps_order_and_weakens_mount_caps() {
         let base = Profile {
-            commands: Some(Rules {
-                allow: Some(vec![text("ls").into()]),
-                ask: vec![rule("base", &[])],
-                ..Rules::default()
-            }),
             paths: Some(Paths {
                 hide: vec![text("/a"), text("/b")],
                 show: vec![Show {
@@ -382,18 +270,10 @@ mod tests {
             mounts: Some(vec![Mount {
                 prefix: text("/repo"),
                 mode: Some(Mode::Exec),
-                commands: Some(Rules {
-                    deny: vec![rule("base", &["*.key"])],
-                    ..Rules::default()
-                }),
                 ..Mount::default()
             }]),
         };
         let inline = Profile {
-            commands: Some(Rules {
-                ask: vec![rule("inline", &[])],
-                ..Rules::default()
-            }),
             paths: Some(Paths {
                 hide: vec![text("/b"), text("/c")],
                 reasons: vec![HideReason {
@@ -407,10 +287,6 @@ mod tests {
                 Mount {
                     prefix: text("/repo"),
                     mode: Some(Mode::Read),
-                    commands: Some(Rules {
-                        deny: vec![rule("inline", &["*.pem"])],
-                        ..Rules::default()
-                    }),
                     ..Mount::default()
                 },
                 Mount {
@@ -422,21 +298,6 @@ mod tests {
         let merged = restrict_profile(Some(&base), Some(&inline))
             .unwrap()
             .unwrap();
-        assert_eq!(
-            merged.commands.as_ref().unwrap().allow,
-            base.commands.as_ref().unwrap().allow
-        );
-        assert_eq!(
-            merged
-                .commands
-                .as_ref()
-                .unwrap()
-                .ask
-                .iter()
-                .map(|rule| &rule.reason)
-                .collect::<Vec<_>>(),
-            vec![&text("base"), &text("inline")]
-        );
         assert_eq!(
             merged.paths.as_ref().unwrap().hide,
             vec![text("/a"), text("/b"), text("/c")]
@@ -453,7 +314,6 @@ mod tests {
             vec![&text("/repo"), &text("/other")]
         );
         assert_eq!(mounts[0].mode, Some(Mode::Read));
-        assert_eq!(mounts[0].commands.as_ref().unwrap().deny.len(), 2);
         assert_eq!(base.mounts.as_ref().unwrap()[0].mode, Some(Mode::Exec));
     }
 
@@ -461,12 +321,10 @@ mod tests {
     fn restrictions_preserve_omission_and_normalize_only_merged_mounts() {
         assert_eq!(restrict_profile(None, None).unwrap(), None);
         let stated = Profile {
-            commands: Some(Rules::default()),
             paths: Some(Paths::default()),
             vars: Some(vec![]),
             mounts: Some(vec![Mount {
                 prefix: text("/repo"),
-                commands: Some(Rules::default()),
                 paths: Some(Paths::default()),
                 ..Mount::default()
             }]),
@@ -478,27 +336,14 @@ mod tests {
         let merged = restrict_profile(Some(&stated), Some(&stated))
             .unwrap()
             .unwrap();
-        assert!(merged.commands.is_some());
         assert!(merged.paths.is_some());
         assert_eq!(merged.vars, Some(vec![]));
         let mount = &merged.mounts.unwrap()[0];
-        assert_eq!(mount.commands, None);
         assert_eq!(mount.paths, None);
     }
 
     #[test]
-    fn inline_allow_and_show_fail_even_without_a_base() {
-        let inline = Profile {
-            commands: Some(Rules {
-                allow: Some(vec![]),
-                ..Rules::default()
-            }),
-            ..Profile::default()
-        };
-        assert_eq!(
-            restrict_profile(None, Some(&inline)),
-            Err("inline permissions may add ask and deny rules, not an allow list")
-        );
+    fn inline_show_fails_even_without_a_base() {
         let inline = Profile {
             mounts: Some(vec![Mount {
                 paths: Some(Paths {
@@ -514,7 +359,7 @@ mod tests {
         };
         assert_eq!(
             restrict_profile(None, Some(&inline)),
-            Err("inline permissions may add ask and deny rules and hides, not show entries")
+            Err("inline permissions may add command rules and hides, not show entries")
         );
     }
 }

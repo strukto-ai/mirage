@@ -1057,7 +1057,7 @@ async def test_prior_line_nameref_fetches_its_target():
 
 
 def _ruled(verb: str, name: str, reason: str) -> dict[str, Any]:
-    return {"commands": {verb: [{"reason": reason, "commands": [name]}]}}
+    return {"commands": {name: {"decision": verb, "reason": reason}}}
 
 
 def _policed_ws(deny: str, env) -> Workspace:
@@ -1678,7 +1678,7 @@ async def test_a_cli_the_allow_list_refuses_never_fetches():
         profiles={
             "p": {
                 "paths": {"hide": ["/secret"]},
-                "commands": {"allow": ["*"]},
+                "commands": {"*": "allow"},
             }
         },
         profile="p",
@@ -1711,14 +1711,21 @@ def _probe_cli() -> CLI:
 
 
 @pytest.mark.asyncio
-async def test_a_glob_the_allow_list_may_admit_keeps_its_fetch():
-    # The allow list reads a glob unexpanded, and the run may expand it
-    # to the word a pattern names, so the command keeps its fetch.
+async def test_a_glob_a_tree_may_admit_keeps_its_fetch():
+    # A tree reads a glob unexpanded, and the run may expand it to the
+    # operand a tree names, so the command keeps its fetch.
     calls, fetch = counting_source({"CLI_ROOT": "r0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws(
         {"CLI_ROOT": {"from": "fake", "ref": "root"}},
-        profiles={"p": {"commands": {"allow": ["probe /open.txt"]}}},
+        profiles={
+            "p": {
+                "commands": {
+                    "*": "deny",
+                    "probe": {"operands": {"/open.txt": "allow"}},
+                }
+            }
+        },
         profile="p",
     )
     try:
@@ -1752,7 +1759,7 @@ async def test_a_runtime_line_keeps_its_fetch_past_an_inner_refusal():
         {"TOKEN": {"from": "fake", "ref": "r"}},
         mode=MountMode.EXEC,
         machines=[NiceBox()],
-        profiles={"p": {"commands": {"allow": ["nice"]}}},
+        profiles={"p": {"commands": {"*": "deny", "nice": "allow"}}},
         profile="p",
     )
     try:

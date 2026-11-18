@@ -1142,7 +1142,7 @@ async def handle_command(
         )
 
     # A wrapper execs the program it names, past every function and CLI;
-    # the session's allow list judges the name it typed.
+    # the session's command trees judge the name it typed.
     typed = cmd_name
     if runs_as(cmd_name, registry) != cmd_name:
         cmd_name, option = EXEC_WRAPPERS[cmd_name]

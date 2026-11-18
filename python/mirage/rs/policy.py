@@ -20,7 +20,15 @@ from collections.abc import Iterable, Mapping
 from functools import lru_cache
 from typing import Any, TypeAlias, assert_never
 
-from mirage.policy.types import AdmissionRules, CommandRule
+from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
+from mirage.policy.types import (
+    AdmissionRules,
+    CommandNode,
+    CommandRule,
+    OptionRule,
+    Outcome,
+    RuleLeaf,
+)
 from mirage.rs.document import from_units, units
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import (
@@ -46,7 +54,7 @@ CACHE_SIZE = 1024
 
 
 def _open(config: Mapping[str, Any]) -> OpenStream:
-    return open_stream("policy", {**config, "dialect": "python"})
+    return open_stream("policy", config)
 
 
 class Encoded:
@@ -113,42 +121,109 @@ class PolicyMatcher:
             return json.loads(self._stream.finish())
 
 
-def rule_wire(rule: CommandRule) -> Wire:
-    """One rule in the stream's wire shape.
+def _leaves_wire(leaves: tuple[RuleLeaf, ...]) -> list[Wire]:
+    return [
+        {
+            "decision": leaf.decision.value,
+            "reason": units(leaf.reason),
+            "paths": [units(v) for v in leaf.paths],
+        }
+        for leaf in leaves
+    ]
+
+
+def _option_wire(rule: OptionRule) -> Wire:
+    return {
+        "decision": _leaves_wire(rule.decision),
+        "values": [
+            [
+                units(word),
+                {
+                    "decision": _leaves_wire(value.decision),
+                    "options": [
+                        [units(name), _option_wire(option)]
+                        for name, option in value.options.items()
+                    ],
+                },
+            ]
+            for word, value in rule.values.items()
+        ],
+        "options": [
+            [units(name), _option_wire(option)]
+            for name, option in rule.options.items()
+        ],
+    }
+
+
+def tree_wire(node: CommandNode) -> Wire:
+    """A command tree in the stream's wire shape: each map a list of
+    pairs, text as code points.
 
     Args:
-        rule (CommandRule): the rule.
+        node (CommandNode): the tree, or one node of it.
     """
     return {
-        "reason": units(rule.reason),
-        "commands": [units(v) for v in rule.commands],
-        "paths": [units(v) for v in rule.paths],
-        "mount": units(rule.mount),
+        "decision": _leaves_wire(node.decision),
+        "subcommands": [
+            [units(name), tree_wire(child)]
+            for name, child in node.subcommands.items()
+        ],
+        "options": [
+            [units(name), _option_wire(option)]
+            for name, option in node.options.items()
+        ],
+        "other_options": _leaves_wire(node.other_options),
+        "operands": [
+            [units(word), tree_wire(child)]
+            for word, child in node.operands.items()
+        ],
     }
 
 
 def rules_wire(rules: AdmissionRules) -> Wire:
-    """A rule set in the stream's wire shape.
+    """A session's command trees in the stream's wire shape.
 
     Args:
-        rules (AdmissionRules): the allow list and the deny and ask
-            rules.
+        rules (AdmissionRules): the trees, each with its mount.
     """
     return {
-        "allow": None
-        if rules.allow is None
-        else [
-            units(v)
-            if isinstance(v, str)
-            else {
-                "command": units(v.command),
-                "flags": [units(f) for f in v.flags],
+        "trees": [
+            {
+                "mount": units(scoped.mount) if scoped.mount else None,
+                "root": tree_wire(scoped.tree),
             }
-            for v in rules.allow
-        ],
-        "deny": [rule_wire(rule) for rule in rules.deny],
-        "ask": [rule_wire(rule) for rule in rules.ask],
+            for scoped in rules.trees
+        ]
     }
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def rule_table(rules: AdmissionRules) -> tuple[CommandRule, ...]:
+    """Every leaf of a session's trees as the rule a ruling names, in
+    the order the stream numbers them; an empty reason reads as the
+    default one for the leaf's decision.
+
+    Args:
+        rules (AdmissionRules): the trees.
+    """
+    out: list[CommandRule] = []
+    for row in admission_matcher(rules).ask("rules"):
+        decision = Outcome(row["decision"])
+        reason = from_units(row["reason"]) or (
+            DEFAULT_ASK_REASON
+            if decision is Outcome.ASK
+            else DEFAULT_DENY_REASON
+        )
+        out.append(
+            CommandRule(
+                reason=reason,
+                decision=decision,
+                at=from_units(row["at"]),
+                paths=tuple(from_units(v) for v in row["paths"]),
+                mount=from_units(row["mount"] or []),
+            )
+        )
+    return tuple(out)
 
 
 def visibility_wire(vis: Visibility) -> Wire:

@@ -20,8 +20,8 @@ from mirage.accessor.base import Accessor
 class BinAccessor(Accessor):
     """Accessor over the workspace's command lookup for the /usr/bin view.
 
-    Both answers are the calling session's, so a program its allow list
-    hides has no file either.
+    Both answers are the calling session's, so a program its command
+    trees close has no file either.
 
     Args:
         programs (Callable[[], list[str]]): every program name the

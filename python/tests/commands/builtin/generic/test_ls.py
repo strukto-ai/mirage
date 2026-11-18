@@ -500,12 +500,11 @@ async def test_a_directory_it_cannot_open_is_reported_in_its_place():
 
 _SEALED_DOC = {
     "commands": {
-        "deny": [
-            {
-                "reason": "sealed",
-                "paths": ["/s/d/hdir", "/s/d/hdir/*", "/v/ax/hl"],
-            }
-        ]
+        "*": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/s/d/hdir", "/s/d/hdir/*", "/v/ax/hl"],
+        }
     }
 }
 _SEALED_SEED = (

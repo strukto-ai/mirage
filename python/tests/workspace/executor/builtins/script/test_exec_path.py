@@ -16,8 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.policy import CommandRule
-from mirage.policy.profile import CommandsBlock, SessionProfile
+from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs import RAMVFS
@@ -141,12 +140,11 @@ def test_shebang_words_consumes_env_split_string():
     assert shebang_words("#!/usr/bin/env -S /bin/bash -x\n") == ["bash", "-x"]
 
 
-def test_path_guard_sees_the_executed_file():
-    # The executed file lives in argv[0], not the operands, so the
-    # admission context must carry it or a path-pattern guard never
-    # fires on direct execution.
-    # A command-less guard also seals the op layer, so the script is
-    # seeded through an unguarded workspace sharing the same VFS.
+def test_a_hide_sees_the_executed_file():
+    # The executed file lives in argv[0], not the operands, so a hide
+    # must reach it there or direct execution would run a hidden script.
+    # The script is seeded through a workspace without the hide, sharing
+    # the same VFS.
     prod = RAMVFS()
     seed = Workspace(mounts={"/data/": (prod, MountMode.WRITE)})
     _run(seed, "mkdir -p /data/prod")
@@ -159,26 +157,15 @@ def test_path_guard_sees_the_executed_file():
         },
         profiles={
             "default": SessionProfile(
-                commands=CommandsBlock(
-                    deny=(
-                        CommandRule(
-                            reason="production scripts are sealed",
-                            paths=("/data/prod/*",),
-                        ),
-                    )
-                )
+                paths=PathsBlock(hide=("/data/prod/run.sh",))
             )
         },
     )
-    result = _run(ws, "/data/prod/run.sh")
-    assert result.exit_code == 1
-    assert result.decision is not None
-    assert "production scripts are sealed" in result.decision.reason
-    assert result.stdout == b""
-    relative = _run(ws, "cd /data/prod && ./run.sh")
-    assert relative.exit_code == 1
-    assert relative.decision is not None
-    assert "production scripts are sealed" in relative.decision.reason
+    for line in ("/data/prod/run.sh", "cd /data/prod && ./run.sh"):
+        result = _run(ws, line)
+        assert result.exit_code == 127, line
+        assert b"No such file or directory" in result.stderr, line
+        assert result.stdout == b"", line
     outside = _run(ws, "/data/ok.sh")
     assert outside.exit_code == 0
     assert outside.stdout == b"fine\n"
@@ -194,7 +181,9 @@ def test_env_split_string_shebang_runs_with_options(ws):
 @pytest.mark.asyncio
 async def test_virtual_program_needs_only_its_own_permission(ws):
     await ws.shell("ln -s /usr/bin/echo /work/say")
-    ws.create_session("narrow", profile={"commands": {"allow": ["echo"]}})
+    ws.create_session(
+        "narrow", profile={"commands": {"*": "deny", "echo": "allow"}}
+    )
     for path in ("/usr/bin/echo", "/usr/bin/../bin/echo", "/work/say"):
         io = await ws.shell(f"{path} 'two words'", session_id="narrow")
         assert io.exit_code == 0
@@ -207,7 +196,12 @@ async def test_virtual_program_needs_only_its_own_permission(ws):
 async def test_virtual_program_still_checks_target_policy(ws):
     ws.create_session(
         "narrow",
-        profile={"commands": {"allow": ["echo"], "deny": ["echo blocked"]}},
+        profile={
+            "commands": {
+                "*": "deny",
+                "echo": {"*": "allow", "operands": {"blocked": "deny"}},
+            }
+        },
     )
     io = await ws.shell("/usr/bin/echo blocked", session_id="narrow")
     assert io.exit_code == 126

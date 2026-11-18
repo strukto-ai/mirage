@@ -857,7 +857,7 @@ class Policies:
         """Register a policy after the existing ones.
 
         Code only: a declarative rule belongs in the permissions
-        document (``commands.deny``), which the workspace compiles.
+        document (a ``commands`` tree), which the workspace compiles.
 
         Args:
             policy (Policy): the policy to consult after the rest.

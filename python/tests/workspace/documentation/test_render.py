@@ -314,7 +314,11 @@ async def test_vfs_md_names_no_command_the_profile_denies():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"deny": ["rm", "grep", "tree"]}}},
+        profiles={
+            "default": {
+                "commands": {"rm": "deny", "grep": "deny", "tree": "deny"}
+            }
+        },
     )
     markdown = await ws.vfs_md()
     assert "`rm`" not in markdown
@@ -331,7 +335,7 @@ async def test_vfs_md_names_each_search_command_the_profile_allows():
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"deny": ["rg"]}}},
+        profiles={"default": {"commands": {"rg": "deny"}}},
     )
     markdown = await ws.vfs_md()
     assert "`rg`" not in markdown
@@ -351,7 +355,7 @@ async def test_vfs_md_follows_a_rule_written_for_paths():
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {"deny": [{"command": "rm", "paths": ["/data/*"]}]}
+                "commands": {"rm": {"decision": "deny", "paths": ["/data/*"]}}
             }
         },
     )
@@ -367,7 +371,7 @@ async def test_vfs_md_summarizes_nothing_for_an_allow_list():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"allow": ["cat"]}}},
+        profiles={"default": {"commands": {"*": "deny", "cat": "allow"}}},
     )
     markdown = await ws.vfs_md()
     assert row(markdown, "## Supported Unix Commands for VFS", "/") == (
@@ -376,12 +380,20 @@ async def test_vfs_md_summarizes_nothing_for_an_allow_list():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_counts_a_longer_form_the_allow_list_names():
+async def test_vfs_md_counts_a_command_an_option_only_tightens():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"allow": ["cat", "rm -f"]}}},
+        profiles={
+            "default": {
+                "commands": {
+                    "*": "deny",
+                    "cat": "allow",
+                    "rm": {"*": "allow", "-r": "deny"},
+                }
+            }
+        },
     )
     markdown = await ws.vfs_md()
     assert "| `/docs` | `gdocs`, write |" in markdown
@@ -391,7 +403,7 @@ async def test_vfs_md_counts_a_longer_form_the_allow_list_names():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_keeps_the_denied_words_inside_a_longer_form():
+async def test_vfs_md_names_no_option_the_tree_denies():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
@@ -399,8 +411,9 @@ async def test_vfs_md_keeps_the_denied_words_inside_a_longer_form():
         profiles={
             "default": {
                 "commands": {
-                    "allow": ["cat", "grep * needle"],
-                    "deny": ["grep -r"],
+                    "*": "deny",
+                    "cat": "allow",
+                    "grep": {"*": "allow", "-r": "deny"},
                 }
             }
         },
@@ -409,27 +422,19 @@ async def test_vfs_md_keeps_the_denied_words_inside_a_longer_form():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_counts_no_help_request_as_a_write():
-    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
-    ws = Workspace(
-        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
-        mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"allow": ["cat", "rm --help"]}}},
-    )
-    markdown = await ws.vfs_md()
-    assert "| `/docs` | `gdocs`, read |" in markdown
-    assert "`rm`" not in row(
-        markdown, "## Supported Unix Commands for VFS", "/docs"
-    )
-
-
-@pytest.mark.asyncio
 async def test_vfs_md_names_no_search_whose_whole_word_form_is_denied():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"deny": ["grep -r -w", "rg -w"]}}},
+        profiles={
+            "default": {
+                "commands": {
+                    "grep": {"-r": {"-w": "deny"}},
+                    "rg": {"-w": "deny"},
+                }
+            }
+        },
     )
     markdown = await ws.vfs_md()
     assert "`gdocs` search" not in markdown
@@ -465,7 +470,15 @@ async def test_vfs_md_reads_a_tree_leaf_by_leaf():
     ws = Workspace(
         {"/kb": (dify(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"allow": ["cat", "notes show"]}}},
+        profiles={
+            "default": {
+                "commands": {
+                    "*": "deny",
+                    "cat": "allow",
+                    "notes": {"show": "allow"},
+                }
+            }
+        },
     )
     ws.mount("/kb").register_commands([NOTES])
     markdown = await ws.vfs_md()
@@ -481,7 +494,11 @@ async def test_vfs_md_counts_unlink_as_a_change():
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"allow": ["cat", "unlink"]}}},
+        profiles={
+            "default": {
+                "commands": {"*": "deny", "cat": "allow", "unlink": "allow"}
+            }
+        },
     )
     markdown = await ws.vfs_md()
     assert "| `/docs` | `gdocs`, write |" in markdown
@@ -527,7 +544,7 @@ async def test_vfs_md_names_no_search_a_mount_turned_off():
 async def test_skill_md_lists_the_clis_the_profile_allows():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"deny": ["hidden"]}}},
+        profiles={"default": {"commands": {"hidden": "deny"}}},
     )
     for name in ("shown", "hidden"):
         ws.register_cli(
@@ -571,7 +588,11 @@ def gws() -> CLI:
 async def test_skill_md_keeps_the_path_to_an_allowed_leaf():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"allow": ["gws drive list"]}}},
+        profiles={
+            "default": {
+                "commands": {"*": "deny", "gws": {"drive": {"list": "allow"}}}
+            }
+        },
     )
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
@@ -582,10 +603,17 @@ async def test_skill_md_keeps_the_path_to_an_allowed_leaf():
 
 
 @pytest.mark.asyncio
-async def test_skill_md_keeps_a_leaf_its_allow_list_names_with_arguments():
+async def test_skill_md_keeps_a_leaf_its_tree_allows():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"allow": ["gws drive list --id"]}}},
+        profiles={
+            "default": {
+                "commands": {
+                    "*": "deny",
+                    "gws": {"drive": {"list": "allow"}},
+                }
+            }
+        },
     )
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
@@ -597,7 +625,9 @@ async def test_skill_md_keeps_a_leaf_its_allow_list_names_with_arguments():
 async def test_skill_md_keeps_the_options_of_a_group_above_an_allowed_leaf():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"allow": ["tool run"]}}},
+        profiles={
+            "default": {"commands": {"*": "deny", "tool": {"run": "allow"}}}
+        },
     )
     ws.register_cli("tool", TOOL)
     skill = await ws.skill_md()
@@ -613,7 +643,7 @@ async def test_skill_md_names_no_service_cli_a_path_hiding_profile_leaves_out():
         profiles={
             "default": {
                 "paths": {"hide": ["/vault"]},
-                "commands": {"allow": ["*"]},
+                "commands": {"*": "allow"},
             }
         },
     )
@@ -671,7 +701,9 @@ async def test_skill_md_keeps_the_page_of_a_subcommand_with_no_help():
 async def test_skill_md_stops_below_the_top_where_the_profile_allows_a_group():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"allow": ["gws drive"]}}},
+        profiles={
+            "default": {"commands": {"*": "deny", "gws": {"drive": "allow"}}}
+        },
     )
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
@@ -687,8 +719,8 @@ async def test_skill_md_lists_no_denied_subcommand():
         profiles={
             "default": {
                 "commands": {
-                    "allow": ["gws drive"],
-                    "deny": ["gws drive delete"],
+                    "*": "deny",
+                    "gws": {"drive": {"*": "allow", "delete": "deny"}},
                 }
             }
         },
@@ -788,7 +820,8 @@ async def test_vfs_md_says_cp_r_copies_a_whole_tree_in_one_call():
 @pytest.mark.asyncio
 async def test_vfs_md_judges_tee_a_by_its_own_ops():
     ws = await seeded(
-        ("write",), profile={"commands": {"allow": ["cat", "tee -a"]}}
+        ("write",),
+        profile={"commands": {"*": "deny", "cat": "allow", "tee": "allow"}},
     )
     markdown = await ws.vfs_md()
     assert "`tee -a`" in row(
@@ -796,14 +829,14 @@ async def test_vfs_md_judges_tee_a_by_its_own_ops():
     )
     assert row(
         markdown, "## Limitations of Unix Commands for VFS", "/m"
-    ).startswith("Not supported: `>`. ")
+    ).startswith("Not supported: `>`, `tee`. ")
 
 
 @pytest.mark.asyncio
 async def test_vfs_md_counts_rm_r_on_a_file_where_only_unlink_works():
     ws = await seeded(
         ("write", "append", "rmdir", "rm_r"),
-        profile={"commands": {"allow": ["cat", "rm -r"]}},
+        profile={"commands": {"*": "deny", "cat": "allow", "rm": "allow"}},
     )
     assert row(await ws.vfs_md(), "", "/m") == "write"
     assert (await ws.shell("rm -r /m/f")).exit_code == 0
@@ -856,7 +889,7 @@ async def test_the_skill_names_only_the_mcp_tools_a_profile_allows():
     tools = tuple(_issue_tool(i) for i in range(3))
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"deny": ["fx issue-action-1"]}}},
+        profiles={"default": {"commands": {"fx": {"issue-action-1": "deny"}}}},
     )
     ws.register_cli(
         "fx",

@@ -199,7 +199,15 @@ async def test_a_path_rule_refuses_the_stand_ins_through_a_link():
         assert (await ws.shell("ln -s /m/f /m/l")).exit_code == 0
         await ws.set_session_profile(
             ws.default_session_id,
-            {"commands": {"deny": [{"paths": ["/m/f"], "reason": "sealed"}]}},
+            {
+                "commands": {
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/m/f"],
+                    }
+                }
+            },
         )
         for line in ("head -n 2 /m/l", "tail -n 1 /m/l", "wc -l /m/l"):
             refused = await ws.shell(line)

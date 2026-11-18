@@ -383,9 +383,7 @@ async def test_copy_keeps_profiles_and_the_default_profile():
         mode=MountMode.WRITE,
         profiles={
             "ro": {
-                "commands": {
-                    "deny": [{"reason": "read-only", "commands": ["rm"]}]
-                }
+                "commands": {"rm": {"decision": "deny", "reason": "read-only"}}
             }
         },
         profile="ro",
@@ -412,7 +410,7 @@ async def test_load_keeps_inline_documents_limits_and_the_default_profile():
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
         profiles={
-            "default": {"commands": {"deny": ["rm"]}},
+            "default": {"commands": {"rm": "deny"}},
             "ro": {"paths": {"hide": ["/data/secrets"]}},
         },
         command_limits={"cat": Limit(max_bytes=2)},

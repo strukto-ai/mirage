@@ -24,7 +24,6 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
-    Collection,
     Iterable,
     Mapping,
     Sequence,
@@ -124,7 +123,6 @@ from mirage.policy import (
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import (
-    AdmissionRules,
     DryRun,
     Grammar,
     PolicyCaller,
@@ -230,6 +228,7 @@ from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
 from mirage.workspace.session.resolve import (
+    command_rules,
     compile_profile,
     resolve_profile,
     with_inline,
@@ -237,9 +236,8 @@ from mirage.workspace.session.resolve import (
 from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.validate import (
-    check_cli_patterns,
-    env_filled,
-    unread_patterns,
+    BUILTIN_GRAMMARS,
+    renormalized,
 )
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import (
@@ -724,6 +722,7 @@ class Workspace:
         self._router = Router(self._registry, self._runtimes, self._namespace)
 
         self._start_installs(clis, specs)
+        self._restate_trees(self._check_trees(self._grammars()))
         self.machine_table.hold_handles()
 
     def _apply_limits(
@@ -1510,7 +1509,14 @@ class Workspace:
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        return self._registry.clis.install(name, spec, config)
+        grammars = {
+            **self._grammars(),
+            name: Grammar(spec.spec, tree=True, passthrough=owns_argv(spec)),
+        }
+        self._check_trees(grammars)
+        install = self._registry.clis.install(name, spec, config)
+        self._restate_trees(grammars)
+        return install
 
     async def unregister_cli(self, name: str) -> None:
         """Remove an installed CLI and close its accessor; its head word
@@ -2630,7 +2636,7 @@ class Workspace:
 
         Raises:
             PolicyError: an unknown profile name, or an inline document
-                that states an allow list or a script.
+                that states a script.
         """
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
@@ -2644,12 +2650,7 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
-        compiled = self._compile(
-            with_inline(base, inline, self._workspace_processes), profile
-        )
-        self._check_cli_patterns(
-            compiled.policies.commands, compiled.setup.env or {}
-        )
+        compiled = self._compile(base, profile, inline, defer=False)
         return self._session_mgr.create(session_id, profile=compiled)
 
     async def session(
@@ -2702,25 +2703,48 @@ class Workspace:
         )
         return Session(self, session_id)
 
-    def _check_cli_patterns(
-        self, rules: AdmissionRules | None, env: Collection[str] = ()
-    ) -> None:
-        """Refuse a pattern an installed CLI cannot read, and warn of one
-        whose options no grammar reads, or of a ``{command, flags}`` entry
-        the session's starting env closes (``env_filled``).
+    def _check_trees(
+        self, grammars: Mapping[str, Grammar]
+    ) -> Mapping[str, Grammar]:
+        """Check every profile's and live session's command trees
+        against the commands and CLIs the workspace will have, and
+        return those grammars for ``_restate_trees``.
+
+        A command no grammar reads yet is left as written, for
+        ``register_cli`` to check when it arrives and for
+        ``create_session`` to refuse if it never does.
 
         Args:
-            rules (AdmissionRules | None): the session's compiled rules.
-            env (Collection[str]): the variable names the session starts
-                with, empty where no session starts.
+            grammars (Mapping[str, Grammar]): each command's grammar by
+                name.
+
+        Raises:
+            PolicyError: a tree names something a grammar lacks.
         """
-        grammars = self._cli_grammars()
-        check_cli_patterns(rules, grammars)
-        for warning in [
-            *unread_patterns(rules, grammars),
-            *env_filled(rules, env, grammars),
-        ]:
-            logger.warning(warning)
+        for doc in self._profiles.values():
+            command_rules(doc, None, grammars, defer=True)
+        for session in self._session_mgr.list():
+            renormalized(session.commands, grammars)
+        return grammars
+
+    def _restate_trees(self, grammars: Mapping[str, Grammar]) -> None:
+        """Hold every live session's command trees by the names the
+        grammars ``_check_trees`` passed give them.
+
+        Args:
+            grammars (Mapping[str, Grammar]): each command's grammar by
+                name.
+        """
+        self._session_mgr.restate_commands(
+            lambda rules: renormalized(rules, grammars)
+        )
+
+    def _grammars(self) -> dict[str, Grammar]:
+        """The grammar each command name is read by: a command tree's
+        (``_cli_grammars``), else the built-in command's spec, as the
+        line reader picks one.
+        """
+        return {**BUILTIN_GRAMMARS, **self._cli_grammars()}
 
     def _cli_grammars(self) -> dict[str, Grammar]:
         """The grammar of each command tree, keyed by head word: an
@@ -2758,22 +2782,29 @@ class Workspace:
 
     def _compile(
         self,
-        effective: SessionProfile | None,
+        base: SessionProfile | None,
         profile: str | SessionProfile | None,
+        inline: SessionProfile | None = None,
+        defer: bool = True,
     ) -> CompiledProfile:
         """A session's profile compiled over the workspace's
         ``processes``, the one way a profile reaches a session.
 
         Args:
-            effective (SessionProfile | None): the profile with any
-                inline document added.
+            base (SessionProfile | None): the resolved profile.
             profile (str | SessionProfile | None): what the caller
                 named, for the profile's name.
+            inline (SessionProfile | None): the inline document
+                ``create_session`` adds.
+            defer (bool): keep a command no grammar reads yet as
+                written, where a CLI may still be registered; a session
+                being created refuses its options and subcommands.
         """
         return compile_profile(
-            effective,
+            with_inline(base, inline, self._workspace_processes),
             self._profile_name(profile),
             self._workspace_processes,
+            command_rules(base, inline, self._grammars(), defer),
         )
 
     def _profile_name(self, profile: str | SessionProfile | None) -> str:
@@ -2828,9 +2859,7 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
-        check_cli_patterns(
-            self._compile(doc, name).policies.commands, self._cli_grammars()
-        )
+        self._compile(doc, name)
         self._profiles[name] = doc
 
     async def set_session_profile(
@@ -2854,8 +2883,9 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        compiled = self._compile(self._base_profile(profile), profile)
-        self._check_cli_patterns(compiled.policies.commands)
+        compiled = self._compile(
+            self._base_profile(profile), profile, defer=False
+        )
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:

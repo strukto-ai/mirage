@@ -46,7 +46,6 @@ def validate_document(
     *,
     names: str | None = None,
     root: str = "",
-    reason: str = "",
 ) -> Any:
     """Validate and normalize one field in the shared document engine.
 
@@ -56,7 +55,6 @@ def validate_document(
         where (str): field location for diagnostics.
         names (str | None): what a nonblank string field names.
         root (str): the enclosing mount for an under-mount check.
-        reason (str): the reason used by a rule that does not state one.
     """
     stream = open_stream(
         "document",
@@ -67,7 +65,6 @@ def validate_document(
             "dialect": "python",
             "names": names,
             "root": list(map(ord, root)),
-            "reason": list(map(ord, reason)),
         },
     )
     answer = json.loads(stream.finish())

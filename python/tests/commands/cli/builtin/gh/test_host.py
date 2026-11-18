@@ -94,14 +94,15 @@ async def test_a_subcommand_runs_through_the_host_call(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "denied, line",
-    [("gh pr view", "gh pr view 5"), ("gh pr list", "gh pr ls")],
+    [("view", "gh pr view 5"), ("list", "gh pr ls"), ("ls", "gh pr list")],
 )
 async def test_a_denied_subcommand_never_reaches_github(
     monkeypatch, denied, line
 ):
     github = _Github()
     monkeypatch.setattr(HOST, github)
-    ws = _workspace(profiles={"p": {"commands": {"deny": [denied]}}})
+    tree = {"gh": {"pr": {denied: "deny"}}}
+    ws = _workspace(profiles={"p": {"commands": tree}})
     ws.create_session("s", profile="p")
     code, _, _ = await _line(ws, line, "s")
     await ws.close()

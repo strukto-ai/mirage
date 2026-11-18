@@ -24,7 +24,7 @@ from mirage.context import strongest_under_session
 from mirage.errors.types import StaleWriteError
 from mirage.io.types import IOResult
 from mirage.policy.decisions import Decisions
-from mirage.policy.match import runs
+from mirage.policy.match import closed, runs
 from mirage.shell.errors import TooManyMatches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
@@ -243,8 +243,8 @@ class MirageToolOperations:
         them.
 
         Read off the session's profile, so no entry point offers a tool every
-        call of which would be refused: ``shell`` needs a command the
-        allow list installs, ``ls`` and ``grep`` run those commands and
+        call of which would be refused: ``shell`` needs a command no
+        top-level tree closes (``closed``), ``ls`` and ``grep`` run those commands and
         need them, and ``write`` and ``edit`` need somewhere the session
         may write. ``read`` and ``glob`` are always offered; what they
         cannot reach answers as the error it is.
@@ -261,9 +261,8 @@ class MirageToolOperations:
         except KeyError:
             return TOOL_NAMES
         rules = session.commands
-        allow = rules.allow if rules is not None else None
         offered = {
-            "shell": allow is None or len(allow) > 0,
+            "shell": not closed(rules),
             "read": True,
             "write": writes(session, self._session.mounts()),
             "ls": runs("ls", rules),

@@ -93,7 +93,9 @@ def test_columns_sets_the_width_as_a_leading_integer(columns, width):
 def test_a_command_the_profile_refuses_is_starred():
     out = _run(
         "help",
-        profiles={"p": {"commands": {"allow": ["help", "echo"]}}},
+        profiles={
+            "p": {"commands": {"*": "deny", "help": "allow", "echo": "allow"}}
+        },
         profile="p",
     )[0][0]
     rows = out.split("\n")[7:]

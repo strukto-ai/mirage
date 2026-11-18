@@ -104,11 +104,10 @@ class TestPatchedOpen:
     [
         ("/data/secret.txt", "r", errno.ENOENT),
         ("/ro/new.txt", "w", errno.EROFS),
-        ("/data/sealed/f.txt", "r", errno.EACCES),
     ],
 )
 def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
-    # A hide, a read-only mount and a path rule: both entry points ask the
+    # A hide and a read-only mount: both entry points ask the
     # dispatcher, so the one refusal comes back through either, open()'s
     # as the class CPython builds for its errno.
     ws = Workspace(
@@ -116,14 +115,7 @@ def test_open_refuses_what_ws_vfs_refuses(path, mode, code):
         mode=MountMode.WRITE,
     )
     asyncio.run(ws.vfs.write("/data/secret.txt", b"s"))
-    asyncio.run(ws.vfs.mkdir("/data/sealed"))
-    asyncio.run(ws.vfs.write("/data/sealed/f.txt", b"f"))
-    profile = {
-        "paths": {"hide": ["/data/secret.txt"]},
-        "commands": {
-            "deny": [{"reason": "sealed", "paths": ["/data/sealed/*"]}]
-        },
-    }
+    profile = {"paths": {"hide": ["/data/secret.txt"]}}
     asyncio.run(ws.set_session_profile(ws.default_session_id, profile))
     with pytest.raises(OSError) as direct:
         if mode == "r":

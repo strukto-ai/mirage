@@ -201,7 +201,14 @@ def test_man_lists_every_cli_verb_whatever_the_profile():
     ws = _cli_ws()
     ws.create_session(
         "narrow",
-        profile={"commands": {"allow": ["man", "linear issue", "which"]}},
+        profile={
+            "commands": {
+                "*": "deny",
+                "man": "allow",
+                "linear": {"issue": "allow"},
+                "which": "allow",
+            }
+        },
     )
     page = _out(_run(ws.shell("man linear", session_id="narrow")))
     assert "issue" in page

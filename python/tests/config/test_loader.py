@@ -42,14 +42,13 @@ from mirage.config import (
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.redis import RedisExecutionStore
 from mirage.io.memory import MAX_MEMORY
-from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.policy.profile import (
-    CommandsBlock,
     PathsBlock,
     ProfileMount,
     ProfilePolicy,
     SessionProfile,
     VarsBlock,
+    command_tree,
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
@@ -749,6 +748,13 @@ clis:
     assert modpager.script == ScriptSource("null", language="js", module=True)
 
 
+PROTECTED = {
+    "decision": "deny",
+    "reason": "production data is protected",
+    "paths": ["/repo/prod/*"],
+}
+
+
 def test_permissions_document_maps_to_workspace_kwargs(tmp_path):
     # `mounts:` is infrastructure and `profiles:` is every permission
     # the deployment states, including the per-mount ones; there is no
@@ -770,14 +776,15 @@ profiles:
       /repo: r
       /scratch: rwx
     commands:
-      deny:
-        - reason: production data is protected
-          command: rm
-          paths: ["/repo/prod/*"]
-        - reason: production data is protected
-          command: mv
-          paths: ["/repo/prod/*"]
-        - python3
+      rm:
+        decision: deny
+        reason: production data is protected
+        paths: ["/repo/prod/*"]
+      mv:
+        decision: deny
+        reason: production data is protected
+        paths: ["/repo/prod/*"]
+      python3: deny
     paths:
       hide: ["/scratch/finance"]
   reviewer:
@@ -802,20 +809,12 @@ profiles:
             "/repo": ProfileMount(mode=MountMode.READ),
             "/scratch": ProfileMount(mode=MountMode.EXEC),
         },
-        commands=CommandsBlock(
-            deny=(
-                CommandRule(
-                    reason="production data is protected",
-                    commands=("rm",),
-                    paths=("/repo/prod/*",),
-                ),
-                CommandRule(
-                    reason="production data is protected",
-                    commands=("mv",),
-                    paths=("/repo/prod/*",),
-                ),
-                CommandRule(reason=DEFAULT_DENY_REASON, commands=("python3",)),
-            )
+        commands=command_tree(
+            {
+                "rm": PROTECTED,
+                "mv": PROTECTED,
+                "python3": "deny",
+            }
         ),
         paths=PathsBlock(hide=("/scratch/finance",)),
     )
@@ -847,10 +846,10 @@ profiles:
         paths:
           hide: ["/repo/.env"]
     commands:
-      deny:
-        - reason: no deletes in the repo
-          command: rm
-          paths: ["/repo"]
+      rm:
+        decision: deny
+        reason: no deletes in the repo
+        paths: ["/repo"]
   reviewer:
     cwd: /repo
     mounts: {/repo: r}
@@ -889,7 +888,7 @@ def test_unknown_profile_fields_fail_loud(tmp_path):
     # A mount states infrastructure only, and there is no workspace
     # permissions block: both used to be a second place to write a rule.
     for bad in (
-        {"permissions": {"commands": {"allow": ["ls"]}}},
+        {"permissions": {"commands": {"*": "deny", "ls": "allow"}}},
         {"profiles": {"a": {"extends": "default"}}},
     ):
         with pytest.raises(ValueError):
@@ -1453,7 +1452,7 @@ def test_clis_block_refuses_unknown_keys():
 
 # The accepted half of the shared contract, one file per subject:
 # every config block that is not a permission verb, then a verb each.
-ACCEPTED_FIXTURES = ("blocks", "allow", "ask", "deny")
+ACCEPTED_FIXTURES = ("blocks", "commands")
 
 
 def _shared_fixture_cases(name: str) -> list[dict]:

@@ -45,6 +45,7 @@ from mirage.machine.constants import (
 )
 from mirage.machine.types import MachinePipe, MountType
 from mirage.mount.changes import SERVED_BY
+from mirage.rs.policy import rule_table
 from mirage.runtime.binding import (
     WorkspaceBinding,
     refused_run,
@@ -436,8 +437,7 @@ class MachineMounts:
             )
         rules = current.commands
         if rules is not None and any(
-            rule.commands and (rule.paths or rule.mount)
-            for rule in (*rules.ask, *rules.deny)
+            rule.paths or rule.mount for rule in rule_table(rules)
         ):
             return await refused_run(
                 self._provider,

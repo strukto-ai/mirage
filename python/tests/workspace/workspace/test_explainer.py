@@ -20,17 +20,12 @@ import pytest_asyncio
 from mirage import Session, Workspace
 from mirage.policy import CommandContext, Deny, Policy, VfsContext
 from mirage.policy.match import Outcome
-from mirage.policy.types import Scope
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 
 PROFILE = {
     "mounts": {"/data": "write", "/ro": "read"},
     "paths": {"hide": ["/data/vault"]},
-    "commands": {
-        "deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}],
-        "ask": [{"reason": "nod", "paths": ["/data/out/*"]}],
-    },
 }
 
 
@@ -90,7 +85,7 @@ async def test_a_policy_reads_for_real_while_it_decides(ws):
 
 class _Busy(Policy):
     """Deciding a write to ``/data/new``, or the line ``ls /data/new``,
-    reads an asked file as the agent and stamps one."""
+    reads a hidden file as the agent and stamps one."""
 
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
@@ -98,8 +93,8 @@ class _Busy(Policy):
 
     async def _busy(self) -> None:
         try:
-            await Session(self.ws, "agent").vfs.read("/data/out/q")
-        except PermissionError as exc:
+            await Session(self.ws, "agent").vfs.read("/data/vault/v")
+        except OSError as exc:
             self.errors.append(exc.errno)
         try:
             await self.ws.vfs.write("/data/stamp", b"seen")
@@ -122,7 +117,7 @@ async def test_a_policy_changes_nothing_while_it_decides(ws):
     busy = _Busy(ws)
     ws.policies.add(busy)
     await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
-    assert busy.errors == [errno.EACCES, errno.EROFS]
+    assert busy.errors == [errno.ENOENT, errno.EROFS]
     assert ws.decisions.pending("agent") == ()
     assert not await ws.vfs.exists("/data/stamp")
 
@@ -132,40 +127,6 @@ async def test_a_line_s_policies_change_nothing_either(ws):
     busy = _Busy(ws)
     ws.policies.add(busy)
     await Session(ws, "agent").explain.shell("ls /data/new")
-    assert busy.errors == [errno.EACCES, errno.EROFS]
+    assert busy.errors == [errno.ENOENT, errno.EROFS]
     assert ws.decisions.pending("agent") == ()
     assert not await ws.vfs.exists("/data/stamp")
-
-
-@pytest.mark.asyncio
-async def test_a_standing_approval_covers_a_deciding_read(ws):
-    await ws.vfs.mkdir("/data/out")
-    await ws.vfs.write("/data/out/q", b"q")
-    with pytest.raises(PermissionError):
-        await Session(ws, "agent").vfs.read("/data/out/q")
-    [asked] = ws.decisions.pending("agent")
-    await ws.decisions.answer(asked.id, Outcome.ALLOW, Scope.SESSION)
-    busy = _Busy(ws)
-    ws.policies.add(busy)
-    await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
-    assert busy.errors == [errno.EROFS]
-
-
-@pytest.mark.asyncio
-async def test_a_line_s_policy_reads_as_the_running_line_does(ws):
-    await ws.vfs.mkdir("/data/out")
-    await ws.vfs.write("/data/out/q", b"q")
-    with pytest.raises(PermissionError):
-        await Session(ws, "agent").vfs.read("/data/out/q")
-    [asked] = ws.decisions.pending("agent")
-    await ws.decisions.answer(asked.id, Outcome.ALLOW, Scope.SESSION)
-    busy = _Busy(ws)
-    ws.policies.add(busy)
-    # Inside a line an ask refuses like a deny, approved or not, and a
-    # method writes nothing there either.
-    await Session(ws, "agent").shell("ls /data/new")
-    assert set(busy.errors) == {errno.EACCES, errno.EROFS}
-    assert not await ws.vfs.exists("/data/stamp")
-    busy.errors.clear()
-    await Session(ws, "agent").explain.shell("ls /data/new")
-    assert busy.errors == [errno.EACCES, errno.EROFS]

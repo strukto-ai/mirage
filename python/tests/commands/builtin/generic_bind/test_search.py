@@ -131,12 +131,16 @@ def _run(
             session = None
             if hide or deny:
                 session = "agent"
-                rules = [{"reason": "sealed", "paths": list(deny)}]
+                sealed = {
+                    "decision": "deny",
+                    "reason": "sealed",
+                    "paths": list(deny),
+                }
                 ws.create_session(
                     session,
                     profile={
                         "paths": {"hide": list(hide)},
-                        "commands": {"deny": rules if deny else []},
+                        **({"commands": {"*": sealed}} if deny else {}),
                     },
                 )
             result = await ws.shell(line, session_id=session)

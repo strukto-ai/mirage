@@ -1,6 +1,4 @@
-import asyncio
 import errno
-from dataclasses import replace
 
 import pytest
 
@@ -9,7 +7,7 @@ from mirage.context.session_context import (
     reset_caller,
     set_current_session,
 )
-from mirage.policy import Decision, Outcome, VfsContext
+from mirage.policy import VfsContext
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import Limit
 from mirage.workspace.files import Files
@@ -499,17 +497,17 @@ async def test_a_stored_session_serves_the_first_call():
         (None, MountMode.WRITE, TOOL_NAMES),
         (None, MountMode.READ, ("shell", "read", "ls", "grep", "glob")),
         (
-            {"commands": {"allow": ["cat"]}},
+            {"commands": {"*": "deny", "cat": "allow"}},
             MountMode.WRITE,
             ("shell", "read", "write", "edit", "glob"),
         ),
         (
-            {"commands": {"allow": []}},
+            {"commands": {"*": "deny"}},
             MountMode.WRITE,
             ("read", "write", "edit", "glob"),
         ),
         (
-            {"commands": {"deny": [{"reason": "no", "commands": ["grep"]}]}},
+            {"commands": {"grep": {"decision": "deny", "reason": "no"}}},
             MountMode.WRITE,
             ("shell", "read", "write", "edit", "ls", "glob"),
         ),
@@ -537,7 +535,7 @@ def test_a_deny_written_under_one_mount_keeps_the_tool():
     # `deny: [ls]` under /data refuses ls on a line inside /data only,
     # so the ls tool still runs elsewhere; under / it is every line.
     ws = Workspace({"/": RAMVFS(), "/data": RAMVFS()}, mode=MountMode.WRITE)
-    no_ls = {"commands": {"deny": [{"reason": "no", "commands": ["ls"]}]}}
+    no_ls = {"commands": {"ls": {"decision": "deny", "reason": "no"}}}
     ws.create_session("scoped", profile={"mounts": {"/data": no_ls}})
     ws.create_session("rooted", profile={"mounts": {"/": no_ls}})
     assert "ls" in Session(ws, "scoped").tools.names()
@@ -552,87 +550,6 @@ async def test_a_tool_the_profile_does_not_offer_is_no_tool():
         await Session(ws, "ro").tools.call(
             "write", {"path": "/x", "content": "y"}
         )
-
-
-@pytest.mark.asyncio
-async def test_one_calls_nod_stays_off_the_same_sessions_next_calls():
-    # A read waits on the host while the same session's write is answered
-    # once: the nod covers that write, not the read and write after it.
-    reached = asyncio.Event()
-    held = asyncio.Event()
-    asked: list[tuple[str, ...]] = []
-
-    async def answer(record: Decision) -> Decision:
-        asked.append(record.paths)
-        if len(asked) == 1:
-            reached.set()
-            await held.wait()
-        return replace(record, outcome=Outcome.ALLOW)
-
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, on_ask=answer)
-    ws.create_session(
-        "agent",
-        profile={
-            "commands": {
-                "ask": [
-                    {"reason": "outbox needs a nod", "paths": ["/data/out/*"]}
-                ]
-            }
-        },
-    )
-    await ws.shell("mkdir -p /data/out && echo x > /data/out/f.txt")
-    tools = Session(ws, "agent").tools
-    try:
-        slow = asyncio.create_task(tools.read("/data/out/f.txt"))
-        await reached.wait()
-        assert not (await tools.write("/data/out/a.txt", "one")).is_error
-        assert not (await tools.read("/data/out/a.txt")).is_error
-        assert not (await tools.write("/data/out/a.txt", "two")).is_error
-        assert asked == [
-            ("/data/out/f.txt",),
-            ("/data/out/a.txt",),
-            ("/data/out/a.txt",),
-            ("/data/out/a.txt",),
-        ]
-        held.set()
-        assert not (await slow).is_error
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_path_ask_waits_on_the_host_outside_a_line():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    ws.create_session(
-        "agent",
-        profile={
-            "commands": {
-                "ask": [
-                    {"reason": "outbox needs a nod", "paths": ["/data/out/*"]}
-                ]
-            }
-        },
-    )
-    tools = Session(ws, "agent").tools
-    asked = await tools.write("/data/out/a.txt", "hi")
-    assert asked.is_error
-    [record] = ws.decisions.pending("agent")
-    assert (record.command, record.paths) == ("", ("/data/out/a.txt",))
-    assert asked.text == (
-        "Error: /data/out/a.txt: Permission denied\n"
-        f"requires approval: outbox needs a nod (ask {record.id})\n"
-    )
-    # Asking again quotes the same question.
-    await tools.write("/data/out/a.txt", "hi")
-    assert [r.id for r in ws.decisions.pending("agent")] == [record.id]
-    await ws.decisions.answer(record.id, Outcome.ALLOW)
-    assert not (await tools.write("/data/out/a.txt", "hi")).is_error
-    # The nod was for one op on that path, and it is spent.
-    assert (await tools.write("/data/out/a.txt", "again")).is_error
-    # A line holds no question for its ops: the redirect is the line's
-    # to ask about, at command admission.
-    io = await ws.shell("echo hi > /data/out/b.txt", session_id="agent")
-    assert io.exit_code != 0
 
 
 @pytest.mark.asyncio

@@ -495,32 +495,23 @@ async def test_http_refused_day_fails_getattr_and_does_not_cache_empty(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kind,code", [("hide", errno.ENOENT), ("deny", errno.EACCES)]
-)
 async def test_http_hydrated_handle_obeys_new_policy_before_retained_bytes(
-    http_reader, kind, code
+    http_reader,
 ):
     reader = http_reader
     await reader.list_day()
     fh = await reader.open()
     assert await reader.read(fh) == HTTP_JSONL
     before = len(reader.http.requests)
-    profile = (
-        {"paths": {"hide": [HTTP_PATH]}}
-        if kind == "hide"
-        else {
-            "commands": {"deny": [{"paths": [HTTP_PATH], "reason": "sealed"}]}
-        }
+    await reader.ws.set_session_profile(
+        "reader", {"paths": {"hide": [HTTP_PATH]}}
     )
-    await reader.ws.set_session_profile("reader", profile)
     with pytest.raises(OSError) as failure:
         await reader.read(fh)
-    assert failure.value.errno == code
-    if kind == "hide":
-        with pytest.raises(OSError) as hidden:
-            await reader.size(fh)
-        assert hidden.value.errno == errno.ENOENT
+    assert failure.value.errno == errno.ENOENT
+    with pytest.raises(OSError) as hidden:
+        await reader.size(fh)
+    assert hidden.value.errno == errno.ENOENT
     assert len(reader.http.requests) == before
     await reader.ws.set_session_profile("reader", {})
     assert await reader.read(fh) == HTTP_JSONL

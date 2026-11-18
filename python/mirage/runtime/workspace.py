@@ -26,7 +26,7 @@ class WorkspaceRuntime(Runtime[Any]):
     captures (cat, ls, echo, and anything unknown): it is the catch-all.
     Every workspace world contains exactly one, appended when its
     machines are wired; it is never a machine entry, and a session's
-    ``commands.allow`` is what narrows the commands it serves.
+    command trees are what narrow the commands it serves.
 
     It is a pure routing marker, so it carries no capability mixin: a
     line resolved to workspace runs on the workspace executor inline, the

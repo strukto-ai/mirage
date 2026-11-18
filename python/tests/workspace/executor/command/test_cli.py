@@ -1635,8 +1635,10 @@ async def test_a_mounts_tree_runs_like_an_installed_cli_on_its_mount():
         )
         ws.set_mount_mode("/n/", MountMode.READ)
         ws.create_session("hidden", profile={"paths": {"hide": ["/n/x"]}})
-        rule = {"reason": "no tagging", "commands": ["notes add"]}
-        ws.create_session("ruled", profile={"commands": {"deny": [rule]}})
+        rule = {"decision": "deny", "reason": "no tagging"}
+        ws.create_session(
+            "ruled", profile={"commands": {"notes": {"add": rule}}}
+        )
         for line, session, code in (
             ("notes show /n/a.md", None, 0),
             ("notes add /n/a.md w", None, 1),

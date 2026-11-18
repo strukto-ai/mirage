@@ -19,13 +19,10 @@ from dataclasses import replace
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.commands.cli.walk import node_help, owns_argv
-from mirage.commands.spec.standard import standard_request
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.policy.match.decide import decide
-from mirage.policy.match.grammar import allow_patterns
-from mirage.policy.match.pattern import pattern_reaches, split_pattern
-from mirage.policy.types import CommandContext, Outcome
+from mirage.policy.types import CommandContext, CommandRead, Outcome
 from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.workspace.documentation.constants import (
@@ -37,6 +34,7 @@ from mirage.workspace.documentation.constants import (
     WALKS,
 )
 from mirage.workspace.documentation.types import Change
+from mirage.workspace.executor.command.reading import read_line
 from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
@@ -77,102 +75,98 @@ def listed(
 
 def allowed(
     session: SessionState,
+    registry: MountRegistry,
     cwd: str,
     words: Sequence[str],
     inside: bool = False,
-    registry: MountRegistry | None = None,
+    node: bool = False,
 ) -> bool:
     """Whether the session's profile lets a line of ``words`` run in
     ``cwd``: the documents name nothing the profile refuses.
 
     Args:
         session (SessionState): the session the documents are for.
+        registry (MountRegistry): the mounts and CLIs, whose grammars
+            read the line as execution reads it, and which refuse a CLI
+            reaching a service as execution refuses it under a profile
+            that hides paths.
         cwd (str): where the line would run.
         words (Sequence[str]): the command and its words; empty for a
             redirection, which no rule names.
         inside (bool): whether the line names a file under ``cwd``, so
             that a rule written for paths there speaks; a CLI names none.
-        registry (MountRegistry | None): the CLIs, so that a CLI reaching
-            a service is refused as execution refuses it under a profile
-            that hides paths; None for a file command.
+        node (bool): whether ``words`` are a command tree's name and a
+            subcommand path from its spec, judged as that node: the
+            options a node requires are no part of the question, so no
+            line is read.
     """
     if not words:
         return True
+    name, argv = words[0], list(words[1:])
     paths = (
         (PathSpec.from_str_path(cwd.rstrip("/") + "/<file>"),)
         if inside
         else ()
     )
-    facts = line_facts(words[0], words, cwd)
+    facts = line_facts(name, words, cwd)
+    tokens: tuple[str, ...]
+    program: tuple[str, ...]
+    read: CommandRead | None
+    if node:
+        path = tuple(words)
+        tokens, program, read = path, path, CommandRead(path)
+    else:
+        reading = read_line(registry, name, argv, argv, cwd)
+        tokens, program, read = (
+            reading.tokens,
+            reading.program,
+            reading.read,
+        )
     ctx = CommandContext(
-        command=words[0],
+        command=name,
         paths=paths,
-        argv=tuple(words[1:]),
+        argv=tuple(argv),
         cwd=cwd,
+        tokens=tokens,
+        program=program,
+        read=read,
         subtree=facts.subtree,
         move_target=facts.move_target,
     )
-    if registry is not None and unlisted_service(ctx, registry, session):
+    if unlisted_service(ctx, registry, session):
         return False
     return decide(ctx, session.commands).outcome is not Outcome.DENY
 
 
-def forms(
-    session: SessionState, words: Sequence[str], spec: CommandSpec | None
-) -> list[tuple[str, ...]]:
-    """The lines that stand for ``words`` under the session's profile:
-    the words as they stand, and followed by what each longer pattern in
-    its allow list adds (``rm -f`` where the list holds only that),
-    unless ``spec`` answers that line with ``--help`` or ``--version``.
-
-    Args:
-        session (SessionState): the session the document is for.
-        words (Sequence[str]): the command and its words.
-        spec (CommandSpec | None): the command's grammar; None to count
-            every form.
-    """
-    found = [tuple(words)]
-    rules = session.commands
-    if words and rules is not None and rules.allow is not None:
-        for pattern in allow_patterns(rules):
-            form = (*words, *split_pattern(pattern)[len(words) :])
-            if (
-                len(form) > len(words)
-                and pattern_reaches(pattern, words)
-                and standard_request(words[0], spec, list(form[1:])) is None
-            ):
-                found.append(form)
-    return found
-
-
 def runnable(
     session: SessionState,
-    mount: MountEntry,
+    registry: MountRegistry,
     path: str,
     words: Sequence[str],
     claimed: Sequence[tuple[str, ...]] = (),
+    node: bool = False,
 ) -> bool:
     """Whether the profile lets some line of ``words`` do its work on a
     file under ``path``.
 
     Args:
         session (SessionState): the session the document is for.
-        mount (MountEntry): the mount holding ``path``.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         path (str): the path described.
         words (Sequence[str]): the command and its words.
         claimed (Sequence[tuple[str, ...]]): longer commands answered on
             their own, so a form starting with one does not count here.
+        node (bool): whether ``words`` name a command tree's node
+            (``allowed``).
     """
-    spec = mount.spec_for(words[0]) if words else None
-    return any(
-        allowed(session, path, form, True)
-        for form in forms(session, words, spec)
-        if not any(form[: len(k)] == k for k in claimed)
+    line = tuple(words)
+    return not any(line[: len(k)] == k for k in claimed) and allowed(
+        session, registry, path, line, True, node
     )
 
 
 def admitted(
-    session: SessionState, mount: MountEntry, path: str, change: Change
+    session: SessionState, registry: MountRegistry, path: str, change: Change
 ) -> bool:
     """Whether the profile lets ``change`` run at ``path``. A longer form
     another change names counts for that change alone where it runs on
@@ -181,7 +175,7 @@ def admitted(
 
     Args:
         session (SessionState): the session the document is for.
-        mount (MountEntry): the mount holding ``path``.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         path (str): the path described.
         change (Change): the change.
     """
@@ -196,11 +190,15 @@ def admitted(
             for ops in change.needs
         )
     ]
-    return runnable(session, mount, path, change.command, claimed)
+    return runnable(session, registry, path, change.command, claimed)
 
 
 def uses(
-    session: SessionState, mount: MountEntry, path: str, name: str
+    session: SessionState,
+    registry: MountRegistry,
+    mount: MountEntry,
+    path: str,
+    name: str,
 ) -> tuple[bool, bool]:
     """Whether the profile lets the mount's own command ``name`` run at
     ``path`` without changing files, and whether it lets it change them.
@@ -208,19 +206,22 @@ def uses(
 
     Args:
         session (SessionState): the session the document is for.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         name (str): the command.
     """
     tree = mount.cli_for(name)
     if tree is None:
-        ok = runnable(session, mount, path, (name,))
+        ok = runnable(session, registry, path, (name,))
         writes = mount.may_write(name)
         return ok and not writes, ok and writes
     leaves = [
         (
             handler.write,
-            runnable(session, mount, path, (name, *verbs.split())),
+            runnable(
+                session, registry, path, (name, *verbs.split()), node=True
+            ),
         )
         for verbs, handler in tree.handlers.items()
         if handler.fn is not None
@@ -231,19 +232,25 @@ def uses(
     )
 
 
-def writers(session: SessionState, mount: MountEntry, path: str) -> list[str]:
+def writers(
+    session: SessionState,
+    registry: MountRegistry,
+    mount: MountEntry,
+    path: str,
+) -> list[str]:
     """The mount's own commands that the profile lets change files at
     ``path``.
 
     Args:
         session (SessionState): the session the document is for.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
     """
     return [
         name
         for name in sorted(set(mount.commands()) - SHARED)
-        if uses(session, mount, path, name)[1]
+        if uses(session, registry, mount, path, name)[1]
     ]
 
 
@@ -288,7 +295,11 @@ def table(head: tuple[str, str], rows: Sequence[tuple[str, str]]) -> str:
 
 
 def granted(
-    session: SessionState, mount: MountEntry, path: str, mode: MountMode
+    session: SessionState,
+    registry: MountRegistry,
+    mount: MountEntry,
+    path: str,
+    mode: MountMode,
 ) -> MountMode:
     """The mode VFS.md states for ``path``: ``read`` where a write mode
     lets no command the profile allows change a file there, neither a
@@ -296,17 +307,18 @@ def granted(
 
     Args:
         session (SessionState): the session the document is for.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         mode (MountMode): the mode in force at ``path``.
     """
     if (
         mode == MountMode.WRITE
-        and not writers(session, mount, path)
+        and not writers(session, registry, mount, path)
         and not any(
             works(mount, c)
             for c in CHANGES
-            if admitted(session, mount, path, c)
+            if admitted(session, registry, path, c)
         )
     ):
         return MountMode.READ
@@ -341,22 +353,27 @@ def description(mount: MountEntry, mode: MountMode) -> str:
 
 
 def supported(
-    session: SessionState, mount: MountEntry, path: str, mode: MountMode
+    session: SessionState,
+    registry: MountRegistry,
+    mount: MountEntry,
+    path: str,
+    mode: MountMode,
 ) -> str:
     """What one path supports, as VFS.md states it.
 
     Args:
         session (SessionState): the session the document is for.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         mode (MountMode): the mode VFS.md states for it.
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return runnable(session, mount, path, words)
+        return runnable(session, registry, path, words)
 
     reads = [code(c) for c in READS if runs((c,))]
-    changes = [c for c in CHANGES if admitted(session, mount, path, c)]
+    changes = [c for c in CHANGES if admitted(session, registry, path, c)]
     working = [
         c.label for c in changes if mode != MountMode.READ and works(mount, c)
     ]
@@ -397,7 +414,7 @@ def supported(
         )
 
     def offered(name: str) -> bool:
-        reads, writes = uses(session, mount, path, name)
+        reads, writes = uses(session, registry, mount, path, name)
         return reads or (writes and mode != MountMode.READ)
 
     own = [
@@ -409,25 +426,30 @@ def supported(
 
 
 def limitations(
-    session: SessionState, mount: MountEntry, path: str, mode: MountMode
+    session: SessionState,
+    registry: MountRegistry,
+    mount: MountEntry,
+    path: str,
+    mode: MountMode,
 ) -> str:
     """Where one path differs from a local filesystem.
 
     Args:
         session (SessionState): the session the document is for.
+        registry (MountRegistry): the mounts and CLIs that read a line.
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         mode (MountMode): the mode VFS.md states for it.
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return runnable(session, mount, path, words)
+        return runnable(session, registry, path, words)
 
     parts: list[str] = []
     if mode == MountMode.READ:
         parts.append("Read only: no command changes files.")
     else:
-        changes = [c for c in CHANGES if admitted(session, mount, path, c)]
+        changes = [c for c in CHANGES if admitted(session, registry, path, c)]
         missing = [c.label for c in changes if not works(mount, c)]
         if missing and len(missing) == len(changes):
             parts.append("No Unix command changes files.")
@@ -477,13 +499,16 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
     limits: list[tuple[str, str]] = []
     vis = session.visibility
     for mount, prefix, mode in listed(registry, session):
-        shown = granted(session, mount, prefix, mode)
+        shown = granted(session, registry, mount, prefix, mode)
         paths.append((code(prefix), description(mount, shown)))
         commands.append(
-            (code(prefix), supported(session, mount, prefix, shown))
+            (code(prefix), supported(session, registry, mount, prefix, shown))
         )
         limits.append(
-            (code(prefix), limitations(session, mount, prefix, shown))
+            (
+                code(prefix),
+                limitations(session, registry, mount, prefix, shown),
+            )
         )
         # Backend prose is not a permission document. Under a restricted
         # view it can advertise hidden paths or verbs, so describe only
@@ -516,6 +541,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                 if registry.try_mount_for(entry.path) is mount:
                     effective = granted(
                         session,
+                        registry,
                         mount,
                         entry.path,
                         effective_path_mode(
@@ -527,13 +553,17 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                     commands.append(
                         (
                             at,
-                            supported(session, mount, entry.path, effective),
+                            supported(
+                                session, registry, mount, entry.path, effective
+                            ),
                         )
                     )
                     limits.append(
                         (
                             at,
-                            limitations(session, mount, entry.path, effective),
+                            limitations(
+                                session, registry, mount, entry.path, effective
+                            ),
                         )
                     )
     parts = [
@@ -578,8 +608,7 @@ def cli_pages(
     documented; a page lists only the children leading to an allowed
     one. A node the profile allows answers ``--help`` for what is under
     it, so it stops there, but for a child built with no ``--help``,
-    which keeps its page. A leaf counts a longer form its allow list
-    names (``gws gmail read --id``).
+    which keeps its page.
 
     Args:
         head (str): the CLI's installed name.
@@ -601,16 +630,13 @@ def cli_pages(
     pages: list[str] = []
     words = (head, *path)
     kept = tuple(child for child, found in children if found)
-    if kept or any(
-        allowed(session, session.cwd, form, registry=registry)
-        for form in (forms(session, words, None) if not children else [words])
-    ):
+    helps = allowed(session, registry, session.cwd, words, node=True)
+    if kept or helps:
         name = " ".join(words)
         help_text = node_help(
             name, replace(node, subcommands=kept), style
         ).rstrip()
         pages.append(f"## `{name}`\n\n{fenced(help_text, 'text')}")
-    helps = allowed(session, session.cwd, words, registry=registry)
     for child, found in children:
         pages.extend(found[1:] if helps and child.add_help else found)
     return pages

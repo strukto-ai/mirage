@@ -47,10 +47,10 @@ from mirage.policy.match import (
     io_reach,
     io_refusal,
     naming_rules,
-    split_pattern,
 )
-from mirage.policy.match.grammar import allow_patterns
 from mirage.policy.policies import command_route, settled
+from mirage.policy.types import CommandNode
+from mirage.rs.policy import Encoded
 from mirage.shell.helpers import (
     get_redirects,
     literal_word,
@@ -171,13 +171,14 @@ class Admitted:
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
     route: Route | None = None
-    _named: list[tuple[int, ...]] = field(
+    _named: list[Encoded | None] = field(
         default_factory=list, init=False, repr=False, compare=False
     )
 
-    def named(self) -> tuple[int, ...]:
-        """The rules that name the command (``naming_rules``), asked on
-        the first entry it reaches and kept for the rest of its run."""
+    def named(self) -> Encoded | None:
+        """The command's walk through the trees (``naming_rules``),
+        asked on the first entry it reaches and kept for the rest of its
+        run."""
         if not self._named:
             self._named.append(naming_rules(self.rules, self.ctx))
         return self._named[0]
@@ -281,14 +282,15 @@ def _seen_words(
 def unlisted_service(
     ctx: CommandContext, registry: MountRegistry, session: SessionState
 ) -> bool:
-    """Whether the allow list refuses a CLI that reaches a service.
+    """Whether the profile leaves out a CLI that reaches a service.
 
     Such a CLI (an account or script CLI) reaches its service by id, past
     every hide, so under a profile that hides paths it runs only where
-    an entry starting with its own name matches the line. ``*`` does
-    not count. An entry that names the command closes it to the entries
-    naming it, which the allow list itself holds the line to, so what is
-    left here is whether any entry names it at all.
+    the profile's top-level tree names it at its root with an allow
+    somewhere in that node. ``*`` does not count, and neither does
+    inline permissions' tree, which only tightens. What the node says of
+    the line is the tree's to judge, so what is left here is whether the
+    profile names the command at all.
 
     Args:
         ctx (CommandContext): the classified command.
@@ -305,7 +307,19 @@ def unlisted_service(
         return False
     rules = session.commands
     return rules is None or not any(
-        split_pattern(p)[:1] == (ctx.command,) for p in allow_patterns(rules)
+        _yields_allow(scoped.tree.subcommands[ctx.command])
+        for scoped in rules.trees
+        if not scoped.mount
+        and not scoped.inline
+        and ctx.command in scoped.tree.subcommands
+    )
+
+
+def _yields_allow(node: CommandNode) -> bool:
+    return (
+        any(leaf.decision is Outcome.ALLOW for leaf in node.decision)
+        or any(map(_yields_allow, node.subcommands.values()))
+        or any(map(_yields_allow, node.operands.values()))
     )
 
 
@@ -593,7 +607,6 @@ async def gate(
         tokens=reading.tokens,
         program=reading.program,
         read=reading.read,
-        grammar=reading.grammar,
         tool=tool,
         walks=facts.walks,
         write=write,
@@ -670,8 +683,8 @@ async def admit(
     The one gate every command class passes through, in the tree
     (``_run_argv``, once the words are expanded) and for a line a
     runtime takes whole (``admit_line``, per parsed command). A word
-    the session's allow list leaves out is the profile's Deny, like any
-    other rule's; a path the session cannot see is dropped before any
+    a closed tree names nothing for is the profile's Deny, like any
+    other leaf's; a path the session cannot see is dropped before any
     method, so a rule never names it and the dispatcher answers ENOENT; a Deny
     renders in the outcome table's voice; an Ask is answered by the
     entry point from the session's grants or the host. A command that gets
@@ -695,7 +708,7 @@ async def admit(
             that raised it. Nothing else here waits on anything outside
             mirage.
         intrinsic (bool): the shell provides the operation directly, so
-            a function of the same name cannot bypass its tool allow list.
+            a function of the same name cannot bypass a tree's root.
         claimant (Claimant | None): the command and its line, None
             outside a line. On a line, every grant behind the command
             is claimed on the line's hand-off for that occurrence,
@@ -757,7 +770,7 @@ async def admit_test(
 ) -> Admitted:
     """Admit a ``[ ]`` test, or one ``[[ ]]`` leaf, as the command it
     is: the shell evaluates it itself, so no command gate saw its words,
-    and a rule, an allow list or a policy answers it by its own name as
+    and a tree or a policy answers it by its own name as
     it answers ``test`` on the same words.
 
     Args:

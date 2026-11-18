@@ -52,9 +52,7 @@ if TYPE_CHECKING:
         render_deny,
     )
     from mirage.policy.profile import (
-        CommandsBlock,
         CompiledProfile,
-        MountCommandsBlock,
         PathsBlock,
         ProfileMount,
         SessionProfile,
@@ -140,9 +138,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "render_deny",
     ),
     "mirage.policy.profile": (
-        "CommandsBlock",
         "CompiledProfile",
-        "MountCommandsBlock",
         "PathsBlock",
         "ProfileMount",
         "SessionProfile",
@@ -202,7 +198,6 @@ __all__ = [
     "CommandResultContext",
     "CommandRule",
     "CommandWord",
-    "CommandsBlock",
     "CompiledProfile",
     "covers",
     "Decision",
@@ -219,7 +214,6 @@ __all__ = [
     "HandOff",
     "Occurrence",
     "Limit",
-    "MountCommandsBlock",
     "MountRootPolicy",
     "MountRootQuery",
     "VfsContext",

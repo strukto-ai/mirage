@@ -1,5 +1,5 @@
 {
-  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis and the top level. The counterpart to rejected.json, and the reason it exists: the shared Rust validator checks keys against tables that mirror the host config models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. The three verbs of a role's commands block have a file each (allow.json, ask.json, deny.json), because a rule grammar accepted for one verb and refused for another is exactly the kind of drift a single mixed file hides. Values are only as real as validation demands — no VFS is built and no script is read, both loaders stop at the shape.",
+  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis and the top level. The counterpart to rejected.json, and the reason it exists: the shared Rust validator checks keys against tables that mirror the host config models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. A profile's commands tree has its own file (commands.json), which covers every leaf form and key kind. Values are only as real as validation demands — no VFS is built and no script is read, both loaders stop at the shape.",
   "cases": [
     {
       "name": "top level: every key",
@@ -38,32 +38,31 @@
               "/d": "rw"
             },
             "commands": {
-              "allow": [
-                "ls",
-                "cat",
-                "git",
-                "rm"
-              ],
-              "ask": [
-                "git push",
+              "*": "deny",
+              "ls": "allow",
+              "cat": "allow",
+              "git": {
+                "*": "allow",
+                "push": "ask"
+              },
+              "rm": [
+                "allow",
                 {
+                  "decision": "ask",
                   "reason": "sign-off",
-                  "command": "rm",
                   "paths": [
                     "/d/shared/*"
                   ]
-                }
-              ],
-              "deny": [
+                },
                 {
+                  "decision": "deny",
                   "reason": "no rm here",
-                  "command": "rm",
                   "paths": [
                     "/d/*"
                   ]
-                },
-                "shred"
-              ]
+                }
+              ],
+              "shred": "deny"
             },
             "paths": {
               "hide": [
@@ -83,17 +82,13 @@
                   ]
                 },
                 "commands": {
-                  "ask": [
-                    "git rebase"
-                  ],
-                  "deny": [
-                    {
-                      "reason": "read-only history",
-                      "commands": [
-                        "git push"
-                      ]
+                  "git": {
+                    "rebase": "ask",
+                    "push": {
+                      "decision": "deny",
+                      "reason": "read-only history"
                     }
-                  ]
+                  }
                 }
               }
             },
@@ -108,16 +103,12 @@
               ]
             },
             "commands": {
-              "allow": [
-                "ls",
-                "git log"
-              ],
-              "ask": [
-                "git *"
-              ],
-              "deny": [
-                "rm"
-              ]
+              "*": "deny",
+              "ls": "allow",
+              "git": {
+                "*": "ask",
+                "log": "allow"
+              }
             }
           }
         },

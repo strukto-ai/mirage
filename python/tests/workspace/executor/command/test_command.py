@@ -310,7 +310,9 @@ async def test_an_allowed_wrapper_runs_without_the_program_it_names():
         {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
     )
     await ws.shell("printf 'a|b\\nx\\n' > /data/e.txt")
-    ws.create_session("narrow", profile={"commands": {"allow": ["egrep"]}})
+    ws.create_session(
+        "narrow", profile={"commands": {"*": "deny", "egrep": "allow"}}
+    )
     io = await ws.shell("egrep 'a|x' /data/e.txt", session_id="narrow")
     assert (io.exit_code, io.stdout) == (0, b"a|b\nx\n")
     io = await ws.shell("grep x /data/e.txt", session_id="narrow")
@@ -355,9 +357,7 @@ async def test_a_recursive_wrapper_meets_a_child_mounts_rule():
                 "mounts": {
                     "/scratch/child": {
                         "commands": {
-                            "deny": [
-                                {"reason": "boxed", "commands": ["egrep"]}
-                            ]
+                            "egrep": {"decision": "deny", "reason": "boxed"}
                         }
                     }
                 }
@@ -389,13 +389,11 @@ async def test_a_wrappers_pattern_is_no_path_to_a_path_rule():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "sealed",
-                            "command": "fgrep",
-                            "paths": ["/private/*"],
-                        }
-                    ]
+                    "fgrep": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/private/*"],
+                    }
                 }
             }
         },

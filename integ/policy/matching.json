@@ -1,122 +1,4 @@
 {
-  "patterns": [
-    {
-      "pattern": "git push",
-      "tokens": [
-        "git",
-        "push",
-        "origin"
-      ],
-      "split": [
-        "git",
-        "push"
-      ],
-      "matches": true,
-      "reaches": true
-    },
-    {
-      "pattern": "git push",
-      "tokens": [
-        "git",
-        "pull"
-      ],
-      "split": [
-        "git",
-        "push"
-      ],
-      "matches": false,
-      "reaches": false
-    },
-    {
-      "pattern": "git push",
-      "tokens": [
-        "git"
-      ],
-      "split": [
-        "git",
-        "push"
-      ],
-      "matches": false,
-      "reaches": true
-    },
-    {
-      "pattern": "git * --hard",
-      "tokens": [
-        "git",
-        "reset",
-        "--hard"
-      ],
-      "split": [
-        "git",
-        "*",
-        "--hard"
-      ],
-      "matches": true,
-      "reaches": true
-    },
-    {
-      "pattern": "git * --hard",
-      "tokens": [
-        "git",
-        "--hard"
-      ],
-      "split": [
-        "git",
-        "*",
-        "--hard"
-      ],
-      "matches": false,
-      "reaches": true
-    },
-    {
-      "pattern": "git * *",
-      "tokens": [
-        "git"
-      ],
-      "split": [
-        "git"
-      ],
-      "matches": true,
-      "reaches": true
-    },
-    {
-      "pattern": "*",
-      "tokens": [
-        "anything"
-      ],
-      "split": [],
-      "matches": true,
-      "reaches": true
-    },
-    {
-      "pattern": "rm -rf",
-      "tokens": [
-        "rm",
-        "-r",
-        "-f"
-      ],
-      "split": [
-        "rm",
-        "-rf"
-      ],
-      "matches": false,
-      "reaches": false
-    },
-    {
-      "pattern": "linear issue list",
-      "tokens": [
-        "linear",
-        "issue"
-      ],
-      "split": [
-        "linear",
-        "issue",
-        "list"
-      ],
-      "matches": false,
-      "reaches": true
-    }
-  ],
   "visibility": [
     {
       "hide": [
@@ -327,25 +209,29 @@
   "admissions": [
     {
       "name": "per_subject_deny",
-      "rules": {
-        "allow": null,
-        "deny": [
-          {
-            "reason": "sealed",
-            "paths": [
-              "/sealed/*"
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "cp": [
+              {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/sealed/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "review",
+                "paths": [
+                  "/review/deep/*"
+                ]
+              }
             ]
           }
-        ],
-        "ask": [
-          {
-            "reason": "review",
-            "paths": [
-              "/review/deep/*"
-            ]
-          }
-        ]
-      },
+        }
+      ],
       "facts": {
         "command": "cp",
         "tokens": [
@@ -369,7 +255,7 @@
       },
       "expected": {
         "outcome": "deny",
-        "rule": 0,
+        "at": "/cp/*/0",
         "matched_path": "/sealed/x",
         "source": "top",
         "asks": []
@@ -377,24 +263,29 @@
     },
     {
       "name": "all_winning_asks",
-      "rules": {
-        "allow": null,
-        "deny": [],
-        "ask": [
-          {
-            "reason": "source",
-            "paths": [
-              "/a/*"
-            ]
-          },
-          {
-            "reason": "destination",
-            "paths": [
-              "/deep/b/*"
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "cp": [
+              {
+                "decision": "ask",
+                "reason": "source",
+                "paths": [
+                  "/a/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "destination",
+                "paths": [
+                  "/deep/b/*"
+                ]
+              }
             ]
           }
-        ]
-      },
+        }
+      ],
       "facts": {
         "command": "cp",
         "tokens": [
@@ -418,36 +309,40 @@
       },
       "expected": {
         "outcome": "ask",
-        "rule": 1,
-        "matched_path": "/deep/b/y",
+        "at": "/cp/*/0",
+        "matched_path": "/a/x",
         "source": "top",
         "asks": [
-          0,
-          1
+          "/cp/*/0",
+          "/cp/*/1"
         ]
       }
     },
     {
-      "name": "deeper_ask",
-      "rules": {
-        "allow": null,
-        "deny": [
-          {
-            "reason": "broad",
-            "paths": [
-              "/repo/*"
+      "name": "list_leaf_takes_its_strictest",
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "cp": [
+              {
+                "decision": "deny",
+                "reason": "broad",
+                "paths": [
+                  "/repo/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "deep",
+                "paths": [
+                  "/repo/outbox/*"
+                ]
+              }
             ]
           }
-        ],
-        "ask": [
-          {
-            "reason": "deep",
-            "paths": [
-              "/repo/outbox/*"
-            ]
-          }
-        ]
-      },
+        }
+      ],
       "facts": {
         "command": "cp",
         "tokens": [
@@ -467,36 +362,38 @@
         "move_target": null
       },
       "expected": {
-        "outcome": "ask",
-        "rule": 1,
+        "outcome": "deny",
+        "at": "/cp/*/0",
         "matched_path": "/repo/outbox/x",
         "source": "top",
-        "asks": [
-          1
-        ]
+        "asks": []
       }
     },
     {
       "name": "deny_tie",
-      "rules": {
-        "allow": null,
-        "deny": [
-          {
-            "reason": "deny",
-            "paths": [
-              "/repo/*"
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "cp": [
+              {
+                "decision": "deny",
+                "reason": "deny",
+                "paths": [
+                  "/repo/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "ask",
+                "paths": [
+                  "/repo/*"
+                ]
+              }
             ]
           }
-        ],
-        "ask": [
-          {
-            "reason": "ask",
-            "paths": [
-              "/repo/*"
-            ]
-          }
-        ]
-      },
+        }
+      ],
       "facts": {
         "command": "cp",
         "tokens": [
@@ -517,19 +414,22 @@
       },
       "expected": {
         "outcome": "deny",
-        "rule": 0,
+        "at": "/cp/*/0",
         "matched_path": "/repo/x",
         "source": "top",
         "asks": []
       }
     },
     {
-      "name": "empty_allow",
-      "rules": {
-        "allow": [],
-        "deny": [],
-        "ask": []
-      },
+      "name": "closed_root",
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "*": "deny"
+          }
+        }
+      ],
       "facts": {
         "command": "ls",
         "tokens": [
@@ -545,19 +445,15 @@
       },
       "expected": {
         "outcome": "deny",
-        "rule": null,
+        "at": "/*",
         "matched_path": null,
-        "source": "commands.allow",
+        "source": "top",
         "asks": []
       }
     },
     {
-      "name": "omitted_allow",
-      "rules": {
-        "allow": null,
-        "deny": [],
-        "ask": []
-      },
+      "name": "no_trees",
+      "trees": [],
       "facts": {
         "command": "ls",
         "tokens": [
@@ -573,7 +469,7 @@
       },
       "expected": {
         "outcome": "allow",
-        "rule": null,
+        "at": null,
         "matched_path": null,
         "source": "",
         "asks": []
@@ -581,16 +477,17 @@
     },
     {
       "name": "mount_ancestor",
-      "rules": {
-        "allow": null,
-        "deny": [
-          {
-            "reason": "mount",
-            "mount": "/scratch/child"
+      "trees": [
+        {
+          "mount": "/scratch/child",
+          "commands": {
+            "*": {
+              "decision": "deny",
+              "reason": "mount"
+            }
           }
-        ],
-        "ask": []
-      },
+        }
+      ],
       "facts": {
         "command": "grep",
         "tokens": [
@@ -611,7 +508,7 @@
       },
       "expected": {
         "outcome": "deny",
-        "rule": 0,
+        "at": "/*",
         "matched_path": null,
         "source": "mounts./scratch/child",
         "asks": []
@@ -619,18 +516,20 @@
     },
     {
       "name": "subtree_source",
-      "rules": {
-        "allow": null,
-        "deny": [
-          {
-            "reason": "inside",
-            "paths": [
-              "/repo/locked/*"
-            ]
+      "trees": [
+        {
+          "mount": null,
+          "commands": {
+            "mv": {
+              "decision": "deny",
+              "reason": "inside",
+              "paths": [
+                "/repo/locked/*"
+              ]
+            }
           }
-        ],
-        "ask": []
-      },
+        }
+      ],
       "facts": {
         "command": "mv",
         "tokens": [
@@ -654,7 +553,7 @@
       },
       "expected": {
         "outcome": "deny",
-        "rule": 0,
+        "at": "/mv/*",
         "matched_path": "/repo",
         "source": "top",
         "asks": []

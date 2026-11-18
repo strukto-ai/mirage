@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::admission::Line;
+use super::judge::{Trees, Walked};
 use super::{
-    AdmissionMatcher, CommandFacts, LinkCandidate, LinkStep, Mode, PatternRead, Profile, Reading,
-    Rules, Text, Visibility, VisibilityMatcher, Whitespace, classify_paths, compile_profile,
-    expand_pattern, is_glob, pattern_matches, pattern_reaches, restrict_profile, show_head,
-    split_pattern,
+    AdmissionMatcher, CommandFacts, LinkCandidate, LinkStep, Mode, Profile, Reading, Text,
+    Visibility, VisibilityMatcher, classify_paths, compile_profile, is_glob, restrict_profile,
+    show_head,
 };
 use crate::{Stream, StreamError, parse_config};
 
@@ -13,11 +12,9 @@ use crate::{Stream, StreamError, parse_config};
 #[serde(deny_unknown_fields)]
 struct Config {
     #[serde(default)]
-    rules: Rules,
+    rules: Trees,
     #[serde(default)]
     visibility: Visibility,
-    #[serde(default)]
-    dialect: Whitespace,
 }
 
 /// One question for the compiled rules, as the JSON a host feeds; `finish`
@@ -64,10 +61,11 @@ enum Request {
         configured: Mode,
         cap: Option<Mode>,
     },
-    HeadAllowed {
+    Rules,
+    HasRules,
+    Runs {
         name: Text,
     },
-    HasRules,
     ReadsArgs {
         name: Text,
     },
@@ -81,25 +79,17 @@ enum Request {
         tokens: Vec<Text>,
         #[serde(default)]
         line: Option<Reading>,
-        #[serde(default)]
-        reads: Vec<PatternRead>,
+        #[serde(default = "tool")]
+        tool: bool,
     },
     IoReach {
-        named: Vec<usize>,
+        walked: Vec<Walked>,
         path: Text,
     },
     IoRefusal {
-        named: Vec<usize>,
+        walked: Vec<Walked>,
         path: Text,
         granted: Vec<usize>,
-    },
-    OpRuling {
-        subtree: bool,
-        path: Text,
-        granted: Vec<usize>,
-    },
-    PosixLevel {
-        rule: usize,
     },
     Compile {
         profile: Profile,
@@ -117,20 +107,10 @@ enum Request {
     ShowHead {
         entry: Text,
     },
-    SplitPattern {
-        pattern: Text,
-    },
-    ExpandPattern {
-        pattern: Text,
-    },
-    PatternMatches {
-        pattern: Text,
-        tokens: Vec<Text>,
-    },
-    PatternReaches {
-        pattern: Text,
-        tokens: Vec<Text>,
-    },
+}
+
+fn tool() -> bool {
+    true
 }
 
 /// A profile's rules and visibility compiled once: each request is fed as
@@ -138,22 +118,34 @@ enum Request {
 struct Policy {
     admission: AdmissionMatcher,
     visibility: VisibilityMatcher,
-    dialect: Whitespace,
     request: Vec<u8>,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     Ok(Box::new(Policy {
-        admission: AdmissionMatcher::new(config.rules, config.dialect),
+        admission: AdmissionMatcher::new(config.rules),
         visibility: VisibilityMatcher::new(config.visibility),
-        dialect: config.dialect,
         request: Vec::new(),
     }))
 }
 
-fn in_range(ids: &[usize], count: usize) -> Result<(), StreamError> {
-    if ids.iter().any(|&id| id >= count) {
+fn in_range(
+    walked: &[Walked],
+    ids: &[usize],
+    trees: usize,
+    rules: usize,
+) -> Result<(), StreamError> {
+    let leaves = walked.iter().flat_map(|w| {
+        w.branches.iter().flat_map(|branch| {
+            branch
+                .steps
+                .iter()
+                .chain(&branch.groups)
+                .flat_map(|group| group.first.iter().chain(&group.then))
+        })
+    });
+    if walked.iter().any(|w| w.tree >= trees) || leaves.chain(ids).any(|&id| id >= rules) {
         return Err(StreamError::new("policy rule index is out of range"));
     }
     Ok(())
@@ -193,41 +185,26 @@ impl Policy {
                 configured,
                 cap,
             } => reply(out, vis.readonly_below(&path, &prefix, configured, cap)),
-            Request::HeadAllowed { name } => reply(out, rules.head_allowed(&name)),
+            Request::Rules => reply(out, rules.rules()),
             Request::HasRules => reply(out, rules.has_rules()),
+            Request::Runs { name } => reply(out, rules.runs(&name)),
             Request::ReadsArgs { name } => reply(out, rules.reads_args(&name)),
             Request::ScopesPaths { name } => reply(out, rules.scopes_paths(&name)),
             Request::Decide { facts } => reply(out, rules.decide(&facts)),
-            Request::NamingRules {
-                tokens,
-                line,
-                reads,
-            } => reply(
-                out,
-                rules.naming(&Line::new(&tokens, line.as_ref(), &reads)),
-            ),
-            Request::IoReach { named, path } => {
-                in_range(&named, rules.rule_count())?;
-                reply(out, rules.io_reach(&named, &path))
+            Request::NamingRules { tokens, line, tool } => {
+                reply(out, rules.naming(&tokens, line.as_ref(), tool))
+            }
+            Request::IoReach { walked, path } => {
+                in_range(&walked, &[], rules.tree_count(), rules.rules().len())?;
+                reply(out, rules.io_reach(&walked, &path))
             }
             Request::IoRefusal {
-                named,
+                walked,
                 path,
                 granted,
             } => {
-                in_range(&named, rules.rule_count())?;
-                reply(out, rules.io_refusal(&named, &path, &granted))
-            }
-            Request::OpRuling {
-                subtree,
-                path,
-                granted,
-            } => reply(out, rules.op_ruling(subtree, &path, &granted)),
-            Request::PosixLevel { rule } => {
-                if rule >= rules.rule_count() {
-                    return Err(StreamError::new("policy rule index is out of range"));
-                }
-                reply(out, rules.posix_level(rule))
+                in_range(&walked, &granted, rules.tree_count(), rules.rules().len())?;
+                reply(out, rules.io_refusal(&walked, &path, &granted))
             }
             Request::Compile { profile } => reply(out, compile_profile(&profile)),
             Request::Restrict { base, inline } => reply(
@@ -237,17 +214,6 @@ impl Policy {
             Request::ClassifyPaths { entries } => reply(out, classify_paths(&entries)),
             Request::IsGlob { entry } => reply(out, is_glob(&entry)),
             Request::ShowHead { entry } => reply(out, show_head(&entry)),
-            Request::SplitPattern { pattern } => reply(out, split_pattern(&pattern, self.dialect)),
-            Request::ExpandPattern { pattern } => match expand_pattern(&pattern, self.dialect) {
-                Ok(patterns) => reply(out, patterns),
-                Err(problem) => reply(out, problem),
-            },
-            Request::PatternMatches { pattern, tokens } => {
-                reply(out, pattern_matches(&pattern, &tokens, self.dialect))
-            }
-            Request::PatternReaches { pattern, tokens } => {
-                reply(out, pattern_reaches(&pattern, &tokens, self.dialect))
-            }
         }
     }
 }
@@ -296,9 +262,17 @@ mod tests {
         assert_eq!(out, b"true");
     }
 
+    fn tree(commands: &str) -> String {
+        let root = crate::document::tree_of(&serde_json::from_str(commands).unwrap()).unwrap();
+        serde_json::to_string(
+            &serde_json::json!({"rules": {"trees": [{"mount": null, "root": root}]}}),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn decides_with_host_supplied_subtree_facts() {
-        let config = r#"{"rules": {"deny": [{"reason": [110,111], "paths": [[47,114,47,42]]}]}}"#;
+        let config = tree(r#"{"rm": {"decision": "deny", "reason": "no", "paths": ["/r/*"]}}"#);
         let facts = |subtree: bool| {
             format!(
                 r#"{{"op": "decide", "facts": {{"tokens": [[114,109],[47,114]], "tool": true,
@@ -307,35 +281,34 @@ mod tests {
                 "walks": false, "subtree": {subtree}, "moves": false, "move_target": null}}}}"#
             )
         };
-        assert!(ask(config, &facts(true)).contains(r#""outcome":"deny""#));
-        assert!(ask(config, &facts(false)).contains(r#""outcome":"allow""#));
+        assert!(ask(&config, &facts(true)).contains(r#""outcome":"deny""#));
+        assert!(ask(&config, &facts(false)).contains(r#""outcome":"allow""#));
     }
 
     #[test]
-    fn judges_an_entry_under_the_rules_naming_the_line() {
-        let config = r#"{"rules": {"deny": [
-            {"reason": [110,111], "commands": [[114,109]], "paths": [[47,114,47,42]]},
-            {"reason": [110,111], "commands": [[99,112]], "paths": [[47,114,47,42]]}]}}"#;
-        let rm = r#"{"op": "naming_rules", "tokens": [[114,109],[47,114]]}"#;
-        assert_eq!(ask(config, rm), "[0]");
-        let entry = |named: &str| {
-            format!(
-                r#"{{"op": "io_refusal", "named": {named}, "path": [47,114,47,120], "granted": []}}"#
-            )
-        };
-        assert_eq!(ask(config, &entry("[0]")), "0");
-        assert_eq!(ask(config, &entry("[]")), "null");
-        let reach = r#"{"op": "io_reach", "named": [1], "path": [47,114]}"#;
-        assert_eq!(ask(config, reach), "true");
+    fn judges_a_reached_file_under_the_line_walk() {
+        let config = tree(
+            r#"{"cp": {"decision": "ask", "reason": "no", "paths": ["/r/*"]},
+                "rm": {"decision": "deny", "reason": "no", "paths": ["/r/*"]}}"#,
+        );
+        let walked = ask(
+            &config,
+            r#"{"op": "naming_rules", "tokens": [[114,109],[47,114]]}"#,
+        );
+        let entry = format!(
+            r#"{{"op": "io_refusal", "walked": {walked}, "path": [47,114,47,120], "granted": []}}"#
+        );
+        assert_eq!(ask(&config, &entry), "1");
+        let reach = format!(r#"{{"op": "io_reach", "walked": {walked}, "path": [47,114]}}"#);
+        assert_eq!(ask(&config, &reach), "true");
+        assert!(ask(&config, r#"{"op": "rules"}"#).contains(r#""at":[47,114,109,47,42]"#));
     }
 
     #[test]
     fn refuses_a_bad_request_or_rule_index() {
         let (_, err) = crate::run("policy", "{}", &[b"{\"op\": \"nope\"}"]);
         assert!(err.unwrap().message.starts_with("bad policy request"));
-        let (_, err) = crate::run("policy", "{}", &[b"{\"op\": \"posix_level\", \"rule\": 0}"]);
-        assert_eq!(err.unwrap().message, "policy rule index is out of range");
-        let entry = br#"{"op": "io_refusal", "named": [0], "path": [47], "granted": []}"#;
+        let entry = br#"{"op": "io_refusal", "walked": [], "path": [47], "granted": [0]}"#;
         let (_, err) = crate::run("policy", "{}", &[entry]);
         assert_eq!(err.unwrap().message, "policy rule index is out of range");
         let refused = crate::open("policy", br#"{"bogus": 1}"#).err().unwrap();

@@ -166,15 +166,15 @@ class Judgment:
     share, which :func:`explained_line` turns into the public tree.
 
     ``outcome`` is the document's answer and ``rule`` says who gave it.
-    A line the allow list does not cover arrives as ``DENY`` with no
-    rule, at 126.
+    A line a closed tree names nothing for arrives as ``DENY`` with the
+    root's own leaf as its rule, at 126.
 
     Args:
         command (str): the head word, as the gate read it.
         argv (tuple[str, ...]): the words after it.
         outcome (Outcome): what the profile's rules say.
-        rule (CommandRule | None): the rule that spoke, None when the
-            allow list did or when nothing did.
+        rule (CommandRule | None): the leaf that spoke, None when a
+            coded condition did or when nothing did.
         reason (str): the rule's reason, empty when there is no rule.
         source (str): where in the document the rule was written.
         matched_path (str | None): the operand a path-scoped rule
@@ -283,7 +283,7 @@ async def _explained(
         source=(
             source_of(rule)
             if rule is not None
-            else "commands.allow"
+            else "commands"
             if document is not None
             else ""
         ),
@@ -696,18 +696,20 @@ def _is_verdict(expl: Judgment) -> bool:
     """Whether an explanation refuses the line's intent, rather than
     just failing one command.
 
-    Explicit deny rules and whole-command policy refusals hold the line.
-    Filesystem refusals, about a path or carrying an error, wait for the
-    per-command gate, where earlier commands have established the live
-    cwd and namespace.
-    Rule-less DENY results also wait: an unavailable head word, an
-    uncovered command, or words only the runtime can expand fail where
-    they occur rather than against the whole line.
+    A deny a tree states for a command it names, and whole-command
+    policy refusals, hold the line. Filesystem refusals, about a path or
+    carrying an error, wait for the per-command gate, where earlier
+    commands have established the live cwd and namespace.
+    Rule-less DENY results also wait, and so does a tree root's own
+    decision (``_by_default``): an unavailable head word, a command no
+    tree names (a function the line defines first, say), or words only
+    the runtime can expand fail where they occur rather than against
+    the whole line.
 
     Args:
         expl (Judgment): one command's explanation.
     """
-    if expl.exit_code == 0:
+    if expl.exit_code == 0 or _by_default(expl):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
         return True
@@ -720,16 +722,34 @@ def _is_verdict(expl: Judgment) -> bool:
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
 
 
+def _by_default(expl: Judgment) -> bool:
+    """Whether a tree's root decided the command by its own decision,
+    which speaks for every command the tree names nothing for. A root
+    leaf with paths states a rule about those paths, and holds the line.
+
+    Args:
+        expl (Judgment): one command's explanation.
+    """
+    rule = expl.rule
+    return (
+        rule is not None
+        and not rule.paths
+        and rule.at.split("/")[1:2] == ["*"]
+    )
+
+
 def _uncovered(expl: Judgment) -> bool:
-    """Whether the allow list refuses a command on its own words, which
-    nothing that runs before it on the line can change.
+    """Whether the profile refuses a command no tree names (by a root's
+    own decision, or a CLI that reaches a service, ``unlisted_service``),
+    on its own words, which nothing that runs before it on the line can
+    change.
 
     Args:
         expl (Judgment): one command's explanation.
     """
     return (
         expl.outcome is Outcome.DENY
-        and expl.source == "commands.allow"
+        and (expl.source == "commands" or _by_default(expl))
         and _refuses(expl)
     )
 
@@ -1256,7 +1276,7 @@ async def prejudge_line(
     rule: only a refusal that names a rule is a verdict about the
     intent.
 
-    - A word the allow list leaves out is refused where it stands,
+    - A word a closed tree names nothing for is refused where it stands,
       not with the line: the stage fails with ``Permission denied`` and
       the rest of the line does what bash does, so a typo cannot cost
       an agent the work the line already did.
@@ -1269,7 +1289,7 @@ async def prejudge_line(
     a ``cd`` whose argument is a variable) is invisible here. The rule
     is still enforced, by the gate, but the earlier commands have run
     by then. For a deny that costs allowed side effects and nothing
-    more, since the commands that ran were on the allow list. For an
+    more, since the commands that ran were ones the trees allow. For an
     ask it costs the replay: the question is recorded after part of the
     line already happened, so approving it re-runs a line whose first
     half is done. Closing that would mean asking whenever a word cannot
@@ -1642,7 +1662,7 @@ async def _command_refused(
         handed (HandOff): the line's hand-off.
         cancel (asyncio.Event | None): the run's kill channel.
         line (bool): whether the command is the whole line, which runs
-            nothing at all once the allow list refuses it.
+            nothing at all once a tree's root refuses it.
     """
     explained = [
         one
@@ -1658,7 +1678,7 @@ async def _command_refused(
             lost=item.lost,
         )
     ]
-    # The allow list refusing the line's one command on words no glob
+    # The profile refusing the line's one command on words no glob
     # can change means nothing runs. A line it hands on, or a line handed
     # on to it, is not enough: what runs it may not ask the gate.
     globbed = any(word.glob for word in (*item.words, *item.redirects))
@@ -1855,7 +1875,7 @@ async def line_held(
     that later runs the command finds the answer claimed for it and
     does not ask again; one still waiting holds the line, and a question
     the gate will ask about other words (``Judged.stated`` False) is
-    left to it. A word the allow list leaves out fails where it stands
+    left to it. A word a closed tree names nothing for fails where it stands
     while the rest of its line runs, so it does not hold the line.
 
     Args:
@@ -2053,8 +2073,8 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     """A command's outcome, reason and source as its explanation states
     them: the refusal it meets (``ASK`` for a question waiting on the
     host, ``DENY`` for any other, a policy that failed included), else
-    the ask an approval lets through, else ``DENY`` for a word the allow
-    list refuses. The reason and source are the deciding answer's,
+    the ask an approval lets through, else ``DENY`` for a command no
+    tree names. The reason and source are the deciding answer's,
     which a coded policy may give over the document's own.
 
     Args:
@@ -2064,9 +2084,7 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     if decider is not None and decider.rule is not None:
         source = source_of(decider.rule)
     else:
-        source = (
-            "commands.allow" if judgment.source == "commands.allow" else ""
-        )
+        source = "commands" if judgment.source == "commands" else ""
     refused = judgment.decision
     if refused is not None:
         outcome = Outcome.ASK if is_pending(refused) else Outcome.DENY

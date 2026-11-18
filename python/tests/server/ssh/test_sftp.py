@@ -320,12 +320,14 @@ async def test_sftp_runs_under_the_key_profile(tmp_path):
                 content = await f.read()
         async with harness.connect(key=guarded) as conn:
             async with conn.start_sftp_client() as sftp:
-                with pytest.raises(asyncssh.SFTPPermissionDenied):
-                    async with sftp.open("/vault/secret", "rb") as f:
-                        await f.read()
+                async with sftp.open("/vault/secret", "rb") as f:
+                    guarded_content = await f.read()
     finally:
         await stop_harness(harness)
     assert content == b"token\n"
+    # A command tree judges lines; SFTP's file calls are ops, which only
+    # a hide or a mode refuses.
+    assert guarded_content == b"token\n"
 
 
 @pytest.mark.asyncio

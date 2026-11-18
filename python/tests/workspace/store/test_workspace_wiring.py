@@ -24,6 +24,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.store.base import WorkspaceFields
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
+from tests.fixtures.command_trees import trees
 
 
 class ClosingStore(RAMWorkspaceStateStore):
@@ -215,14 +216,16 @@ async def test_profile_change_targets_the_session_after_hydration(target):
     expected = writer.default_session_id if target == "default" else "named"
     try:
         session = await attached.set_session_profile(
-            requested, {"commands": {"allow": ["cat"]}}
+            requested, {"commands": {"*": "deny", "cat": "allow"}}
         )
         assert session.session_id == expected
         assert attached.default_session_id == writer.default_session_id
         assert attached.default_session_id != provisional
-        assert session.commands.allow == ("cat",)
+        assert session.commands == trees({"*": "deny", "cat": "allow"})
         persisted = await store.sessions("shared").load()
-        assert persisted[expected]["commands"]["allow"] == ["cat"]
+        assert persisted[expected]["command_trees"] == [
+            {"mount": "", "commands": {"*": "deny", "cat": "allow"}}
+        ]
     finally:
         await writer.close()
         await attached.close()
@@ -247,7 +250,7 @@ async def test_profile_change_refuses_shutdown_during_hydration(monkeypatch):
     commands = session.commands
     changing = asyncio.create_task(
         ws.set_session_profile(
-            ws.default_session_id, {"commands": {"allow": ["cat"]}}
+            ws.default_session_id, {"commands": {"*": "deny", "cat": "allow"}}
         )
     )
     try:

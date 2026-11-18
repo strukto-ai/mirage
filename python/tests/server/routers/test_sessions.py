@@ -338,7 +338,7 @@ async def test_update_session_takes_a_profile_document(tmp_path):
         )
         r = await client.patch(
             f"/v1/workspaces/{wid}/sessions/a",
-            json={"profile": {"commands": {"allow": ["whoami"]}}},
+            json={"profile": {"commands": {"*": "deny", "whoami": "allow"}}},
         )
         assert r.status_code == 200, r.text
         r = await client.post(

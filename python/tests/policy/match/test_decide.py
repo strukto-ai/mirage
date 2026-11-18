@@ -12,161 +12,110 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import WordKind
 from mirage.policy.match.decide import decide, source_of
-from mirage.policy.types import (
-    AdmissionRules,
-    CommandContext,
-    CommandRule,
-    CommandWord,
-    Outcome,
-    Ruling,
-)
-from mirage.types import PathSpec
+from mirage.policy.types import AdmissionRules, Outcome, Ruling
+from tests.fixtures.command_trees import line, trees
 
 
-def _path(virtual: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0] or "/",
-        vfs_path=virtual,
-        resolved=True,
-        raw_path=virtual,
-    )
+def test_no_tree_allows_every_line():
+    assert decide(line("ls"), None) == Ruling(Outcome.ALLOW)
+    assert decide(line("ls"), AdmissionRules()) == Ruling(Outcome.ALLOW)
 
 
-def _ctx(command: str, *paths: str, cwd: str = "/") -> CommandContext:
-    specs = tuple(_path(p) for p in paths)
-    return CommandContext(
-        command=command,
-        paths=specs,
-        words=(
-            CommandWord(command, WordKind.NAME),
-            *(CommandWord(p.virtual, WordKind.OPERAND, path=p) for p in specs),
-        ),
-        argv=paths,
-        cwd=cwd,
-        tokens=(command, *paths),
-    )
-
-
-def test_silence_and_the_allow_list_answer_before_any_rule():
-    assert decide(_ctx("ls"), None) == Ruling(Outcome.ALLOW)
-    assert decide(_ctx("ls"), AdmissionRules()) == Ruling(Outcome.ALLOW)
-    listed = AdmissionRules(allow=("cat",))
-    assert decide(_ctx("cat", "/x"), listed).outcome is Outcome.ALLOW
-    refused = decide(_ctx("rm", "/x"), listed)
-    # The allow list refuses as DENY like any rule; the empty ``rule``
-    # is the only thing separating it from one, and is what leaves the
-    # refusal with no operator reason to print.
+def test_a_closed_root_denies_what_it_names_no_allow_for():
+    rules = trees({"*": "deny", "cat": "allow"})
+    assert decide(line("cat", "/x"), rules).outcome is Outcome.ALLOW
+    refused = decide(line("rm", "/x"), rules)
     assert refused.outcome is Outcome.DENY
-    assert refused.rule is None
-    assert refused.source == "commands.allow"
+    assert refused.rule is not None and refused.rule.at == "/*"
+    assert refused.source == "top"
 
 
-def test_the_deeper_entry_wins_and_deny_breaks_a_tie():
-    broad = CommandRule(reason="broad", commands=("cat",), paths=("/a/*",))
-    deep = CommandRule(reason="deep", commands=("cat",), paths=("/a/b/c/*",))
-    rules = AdmissionRules(ask=(deep,), deny=(broad,))
-    assert decide(_ctx("cat", "/a/b/c/x"), rules).rule is deep
-    assert decide(_ctx("cat", "/a/other"), rules).rule is broad
-    tied = CommandRule(reason="tied", commands=("cat",), paths=("/a/*",))
-    both = AdmissionRules(ask=(tied,), deny=(broad,))
-    assert decide(_ctx("cat", "/a/x"), both).rule is broad
+def test_an_option_tightens_its_command():
+    rules = trees({"rm": {"-r": {"decision": "deny", "reason": "no trees"}}})
+    assert decide(line("rm", "/x"), rules).outcome is Outcome.ALLOW
+    for words in (("rm", "-r", "/x"), ("rm", "-rf", "/x"), ("rm", "-R", "/x")):
+        ruling = decide(line(*words), rules)
+        assert ruling.outcome is Outcome.DENY
+        assert ruling.rule is not None
+        assert ruling.rule.reason == "no trees"
+        assert ruling.rule.at == "/rm/--recursive/*"
 
 
 def test_one_operands_ask_never_answers_for_another_operands_deny():
-    # The whole reason a line is judged subject by subject: reading one
-    # best match for the line let the destination's deeper ask carry the
-    # source out of a deny written for it.
-    deny = CommandRule(
-        reason="protected", commands=("cp",), paths=("/protected/*",)
+    rules = trees(
+        {
+            "cp": [
+                {"decision": "deny", "reason": "sealed", "paths": ["/p/*"]},
+                {"decision": "ask", "reason": "nod", "paths": ["/review/*"]},
+            ]
+        }
     )
-    ask = CommandRule(
-        reason="review nod", commands=("cp",), paths=("/review/deep/*",)
-    )
-    rules = AdmissionRules(ask=(ask,), deny=(deny,))
-    decision = decide(
-        _ctx("cp", "/protected/secret", "/review/deep/out"), rules
-    )
-    assert decision.outcome is Outcome.DENY
-    assert decision.rule is deny
-    assert decision.matched_path == "/protected/secret"
-    # Each operand on its own still reads as it always did.
-    assert (
-        decide(_ctx("cp", "/protected/secret", "/elsewhere/out"), rules).rule
-        is deny
-    )
-    assert (
-        decide(_ctx("cp", "/review/deep/x", "/elsewhere/out"), rules).rule
-        is ask
-    )
+    ruling = decide(line("cp", "/p/secret", "/review/out"), rules)
+    assert ruling.outcome is Outcome.DENY
+    assert ruling.matched_path == "/p/secret"
+    assert ruling.asks == ()
+    asked = decide(line("cp", "/review/x", "/elsewhere"), rules)
+    assert asked.outcome is Outcome.ASK
+    assert asked.rule is not None and asked.rule.reason == "nod"
 
 
-def test_a_carve_out_still_reopens_the_operand_it_was_written_for():
-    # The per-subject law must not undo the deeper-wins law: one operand
-    # covered by both rules is still the deeper one's.
-    deny = CommandRule(reason="sealed", commands=("cat",), paths=("/a/*",))
-    ask = CommandRule(reason="nod", commands=("cat",), paths=("/a/open/*",))
-    rules = AdmissionRules(ask=(ask,), deny=(deny,))
-    assert decide(_ctx("cat", "/a/open/x"), rules).rule is ask
-    # A second operand the carve-out says nothing about brings the deny
-    # back, because the line has to survive every path it names.
-    assert decide(_ctx("cat", "/a/open/x", "/a/sealed"), rules).rule is deny
+def test_the_strictest_leaf_covering_a_path_decides_it():
+    rules = trees(
+        {
+            "cat": [
+                {"decision": "deny", "paths": ["/a/*"]},
+                {"decision": "ask", "paths": ["/a/open/*"]},
+            ]
+        }
+    )
+    assert decide(line("cat", "/a/open/x"), rules).outcome is Outcome.DENY
+    assert decide(line("cat", "/b"), rules).outcome is Outcome.ALLOW
 
 
-def test_a_pathless_rule_reaches_every_subject_at_depth_zero():
-    # It is off the path axis, so an entry naming a place outranks it,
-    # but it still speaks about an operand no entry covers.
-    pathless = CommandRule(reason="no rm", commands=("rm",))
-    ask = CommandRule(reason="wip nod", commands=("rm",), paths=("/wip/*",))
-    rules = AdmissionRules(ask=(ask,), deny=(pathless,))
-    assert decide(_ctx("rm", "/wip/x"), rules).rule is ask
-    assert decide(_ctx("rm", "/wip/x", "/elsewhere"), rules).rule is pathless
-    # A line naming no path at all is one subject, itself.
-    whole = decide(_ctx("rm"), rules)
-    assert whole.rule is pathless
+def test_a_leaf_with_paths_says_nothing_for_a_line_naming_none():
+    rules = trees({"rm": {"decision": "deny", "paths": ["/wip/*"]}})
+    assert decide(line("rm", "/wip/x"), rules).outcome is Outcome.DENY
+    whole = decide(line("rm"), rules)
+    assert whole.outcome is Outcome.ALLOW
     assert whole.matched_path is None
 
 
-def test_the_decision_reports_the_rule_and_where_it_was_written():
-    top = CommandRule(reason="top", commands=("rm",), paths=("/a/*",))
-    inside = CommandRule(
-        reason="mount", commands=("rm",), paths=("/a/b/*",), mount="/a"
+def test_a_mount_tree_reports_where_it_was_written():
+    rules = trees(
+        mounts={"/a": {"rm": {"decision": "deny", "paths": ["b/*"]}}}
     )
-    decision = decide(_ctx("rm", "/a/b/x"), AdmissionRules(deny=(top, inside)))
-    assert decision.rule is inside
-    assert decision.source == "mounts./a"
-    assert source_of(top) == "top"
+    ruling = decide(line("rm", "/a/b/x"), rules)
+    assert ruling.outcome is Outcome.DENY
+    assert ruling.rule is not None and ruling.rule.paths == ("/a/b/*",)
+    assert ruling.source == "mounts./a"
+    assert decide(line("rm", "/c/x"), rules).outcome is Outcome.ALLOW
 
 
 def test_every_subjects_ask_is_reported_not_just_the_winner():
-    source = CommandRule(
-        reason="source nod", commands=("cp",), paths=("/a/*",)
+    rules = trees(
+        {
+            "cp": [
+                {"decision": "ask", "reason": "source", "paths": ["/a/*"]},
+                {"decision": "ask", "reason": "dest", "paths": ["/b/*"]},
+            ]
+        }
     )
-    dest = CommandRule(
-        reason="dest nod", commands=("cp",), paths=("/deep/b/*",)
-    )
-    rules = AdmissionRules(ask=(source, dest))
-    decision = decide(_ctx("cp", "/a/x", "/deep/b/y"), rules)
-    # The deeper anchor is still the decision, which is what the agent is
-    # told; both are what the entry point has to collect.
-    assert decision.outcome is Outcome.ASK
-    assert decision.rule is dest
-    assert decision.asks == (source, dest)
-    # One rule covering two operands is one question, not two.
-    both = CommandRule(reason="either", commands=("cp",), paths=("/a/*",))
-    one = decide(_ctx("cp", "/a/x", "/a/y"), AdmissionRules(ask=(both,)))
-    assert one.asks == (both,)
-    # A deny anywhere refuses the line, so there is nothing to ask about.
-    stopped = decide(
-        _ctx("cp", "/a/x", "/deep/b/y"),
-        AdmissionRules(
-            ask=(dest,),
-            deny=(
-                CommandRule(reason="no", commands=("cp",), paths=("/a/*",)),
-            ),
-        ),
-    )
-    assert stopped.outcome is Outcome.DENY
-    assert stopped.asks == ()
+    ruling = decide(line("cp", "/a/x", "/b/y"), rules)
+    assert ruling.outcome is Outcome.ASK
+    assert {a.reason for a in ruling.asks} == {"source", "dest"}
+    one = decide(line("cp", "/a/x", "/a/y"), rules)
+    assert [a.reason for a in one.asks] == ["source"]
+
+
+def test_the_top_tree_and_inline_tree_are_judged_apart():
+    rules = trees({"rm": "allow"}, inline={"rm": "deny"})
+    assert decide(line("rm", "/x"), rules).outcome is Outcome.DENY
+
+
+def test_source_of_names_the_section():
+    rules = trees({"rm": "deny"}, mounts={"/a": {"cp": "deny"}})
+    top = decide(line("rm"), rules).rule
+    inside = decide(line("cp", "/a/x"), rules).rule
+    assert top is not None and source_of(top) == "top"
+    assert inside is not None and source_of(inside) == "mounts./a"

@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from mirage._rs import Shell
@@ -252,6 +253,35 @@ class SessionManager(SessionOwner):
             default = self._sessions[self._default_id]
             apply_profile(default, compiled)
             self._has_managed = self._has_managed or _holds_managed(default)
+
+    def restate_commands(
+        self,
+        restate: Callable[[AdmissionRules | None], AdmissionRules | None],
+    ) -> None:
+        """Hold every live session's command trees, and the default
+        profile's, as ``restate`` gives them back: how a CLI registered
+        after the trees were compiled has their names read by its
+        grammar.
+
+        Args:
+            restate (Callable): the trees as they should be held.
+        """
+        restated = {
+            key: restate(session.commands)
+            for key, session in self._sessions.items()
+        }
+        default = self._default_profile
+        if default is not None:
+            policies = default.policies
+            default = replace(
+                default,
+                policies=replace(
+                    policies, commands=restate(policies.commands)
+                ),
+            )
+        for key, rules in restated.items():
+            self._sessions[key].commands = rules
+        self._default_profile = default
 
     def commands_of(self, session_id: str) -> AdmissionRules | None:
         """The admission rules one session runs under

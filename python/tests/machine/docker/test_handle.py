@@ -244,7 +244,6 @@ class MountingDockerMachine(FakeDockerMachine):
 
 RESTRICTIONS = [
     {"paths": {"hide": ["/data/secret"]}},
-    {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "sealed"}]}},
     {"mounts": {"/data": "r"}},
 ]
 

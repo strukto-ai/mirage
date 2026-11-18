@@ -12,20 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.constants import METADATA_OPS, SUBTREE_OPS
+from mirage.policy.constants import METADATA_OPS
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import call_names, declared_calls
-from mirage.vfs.types import Effect, Target
+from mirage.vfs.types import Effect
 
 _CALLS = declared_calls(BaseVFS)
-
-
-def test_subtree_ops_are_what_the_functions_declare():
-    # A rename and a directory removal take everything under them along.
-    declared = call_names(_CALLS, effects={Effect.RENAME}) | call_names(
-        _CALLS, effects={Effect.REMOVE}, targets={Target.DIR}
-    )
-    assert SUBTREE_OPS == declared
 
 
 def test_metadata_ops_are_what_the_functions_declare():

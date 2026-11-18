@@ -2016,7 +2016,9 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
             await client.post("/v1/workspaces", json=_minimal_config())
         ).json()["id"]
         route = f"/v1/workspaces/{wid}/profiles/reader"
-        r = await client.put(route, json={"commands": {"allow": ["whoami"]}})
+        r = await client.put(
+            route, json={"commands": {"*": "deny", "whoami": "allow"}}
+        )
         assert r.status_code == 200 and r.json() == {"name": "reader"}
         await client.post(
             f"/v1/workspaces/{wid}/sessions",
@@ -2027,7 +2029,10 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
         r = await client.post(shell, params={"session_id": "a"}, json=line)
         assert r.json()["stdout"] == "reader\n"
         await client.put(
-            route, json={"commands": {"allow": ["whoami", "echo"]}}
+            route,
+            json={
+                "commands": {"*": "deny", "whoami": "allow", "echo": "allow"}
+            },
         )
         r = await client.patch(
             f"/v1/workspaces/{wid}/sessions/a", json={"profile": "reader"}
@@ -2035,14 +2040,10 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
         assert r.status_code == 200
         r = await client.post(shell, params={"session_id": "a"}, json=line)
         assert r.json()["stdout"] == "reader\nhi\n"
-        refused = {
-            "commands": {
-                "allow": ["ls"],
-                "deny": [{"commands": ["cat *"], "reason": "sealed"}],
-            }
-        }
+        refused = {"commands": {"*": "deny", "rm": {"-rf": "deny"}}}
         r = await client.put(route, json=refused)
         assert r.status_code == 400
+        assert "a cluster of options" in r.json()["error"]["message"]
         r = await client.put(f"{route}x", json={"bogus": 1})
         assert r.status_code == 400
         (tmp_path / "guard.py").mkdir()

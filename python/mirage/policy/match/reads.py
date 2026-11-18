@@ -12,35 +12,65 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.types import AdmissionRules
+from mirage.policy.types import AdmissionRules, Outcome, ScopedTree
 from mirage.rs.document import units
 from mirage.rs.policy import admission_matcher
 
 
 def has_rules(rules: AdmissionRules | None) -> bool:
-    """Whether the profile states any admission rule at all: an allow
-    list, an ask or a deny.
+    """Whether the profile states any command tree at all.
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
+        rules (AdmissionRules | None): the session's command trees.
     """
-    return rules is not None and (
-        rules.allow is not None or bool(rules.ask) or bool(rules.deny)
+    return rules is not None and bool(rules.trees)
+
+
+def _root_denies(scoped: ScopedTree) -> bool:
+    return not scoped.mount and any(
+        leaf.decision is Outcome.DENY and not leaf.paths
+        for leaf in scoped.tree.decision
+    )
+
+
+def closed_by_default(rules: AdmissionRules | None) -> bool:
+    """Whether a top-level tree denies, on every path, each line it
+    names no command for: its root's own decision is a deny with no
+    paths.
+
+    Args:
+        rules (AdmissionRules | None): the session's command trees.
+    """
+    return rules is not None and any(map(_root_denies, rules.trees))
+
+
+def closed(rules: AdmissionRules | None) -> bool:
+    """Whether a top-level tree denies every line: closed by default
+    (``closed_by_default``) and naming no command.
+
+    Args:
+        rules (AdmissionRules | None): the session's command trees.
+    """
+    return rules is not None and any(
+        _root_denies(scoped)
+        and not scoped.tree.subcommands
+        and not scoped.tree.operands
+        for scoped in rules.trees
     )
 
 
 def reads_args(rules: AdmissionRules | None, name: str) -> bool:
-    """Whether a rule in force reads a command's words past its name.
+    """Whether a tree in force reads a command's words past its name.
 
     The whole-line gate asks this for a word the runtime, not the gate,
-    will expand: the head of every command is read by every rule, but an
-    argument only matters to a pattern with a token after the name
-    (``git push``), a path-scoped rule, or a mount-scoped one, so a
-    dynamic argument to a command no such rule names is nothing a rule
+    will expand: the head of every command is read by every tree, but an
+    argument only matters to a node below the command (a subcommand, an
+    option, an operand), a leaf with paths, or a mount's tree, so a
+    dynamic argument to a command no such node names is nothing a tree
     would have seen anyway.
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
+        rules (AdmissionRules | None): the session's command trees.
         name (str): the command name, as typed.
     """
     return (
@@ -51,19 +81,19 @@ def reads_args(rules: AdmissionRules | None, name: str) -> bool:
 
 
 def scopes_paths(rules: AdmissionRules | None, name: str) -> bool:
-    """Whether a path rule in force reads this command's paths.
+    """Whether a leaf with paths in force reads this command's paths.
 
     The argv builder asks this before deciding who resolves a glob
     operand: a mount command's pattern is normally pushed down to the
     backend, so the gate would see the pattern, not the matches, and
-    ``cat /scratch/*/k`` would pass a rule on ``/scratch/private``
-    that ``cat /scratch/private/k`` fails. When a rule that reads
-    paths (or a mount) applies to the command, whether it names the
-    command or every command, the shell expands the glob first, so
+    ``cat /scratch/*/k`` would pass a leaf on ``/scratch/private``
+    that ``cat /scratch/private/k`` fails. When a leaf that reads
+    paths (or a mount's tree) applies to the command, whether it names
+    the command or every command, the shell expands the glob first, so
     the gate judges the paths the command will touch.
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
+        rules (AdmissionRules | None): the session's command trees.
         name (str): the command name, as typed.
     """
     return (

@@ -266,7 +266,11 @@ async def test_an_allow_list_narrows_what_the_workspace_runs():
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines=[AlphaRuntime()],
-        profiles={"narrow": {"commands": {"allow": ["echo", "python3"]}}},
+        profiles={
+            "narrow": {
+                "commands": {"*": "deny", "echo": "allow", "python3": "allow"}
+            }
+        },
         profile="narrow",
     )
     try:
@@ -495,7 +499,7 @@ async def test_admission_comes_before_placement():
             "agent",
             profile={
                 "commands": {
-                    "deny": [{"reason": "no deletes", "commands": ["rm"]}]
+                    "rm": {"decision": "deny", "reason": "no deletes"}
                 }
             },
         )

@@ -956,8 +956,7 @@ WalkErrno = Literal["ENOENT", "ELOOP"]
 @dataclass(frozen=True, slots=True)
 class Matched:
     """What fired in a profile rule: the subcommand path and the options
-    of the pattern that matched the line, or the line's own path when
-    the allow list refused it.
+    of the tree node whose leaf decided the line.
 
     Args:
         command (tuple[str, ...]): the command name and its canonical
