@@ -151,7 +151,7 @@ def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
     credentials, or ``(None, None)`` to connect directly, so the line
     takes the route every other command takes through httpx: a proxy
     without a scheme is ``http://``, and a ``NO_PROXY`` entry may name a
-    port. aiohttp's
+    port or a bare IPv6 address. aiohttp's
     ``trust_env`` is not used: it also reads ``.netrc``, which clashes with
     the bearer header, and the macOS system proxies. A SOCKS proxy is not
     followed: aiohttp has none. The bearer header must go on the request,
@@ -173,7 +173,10 @@ def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
     )
     if proxy.scheme not in ("http", "https"):
         return None, None
-    if urllib.request.proxy_bypass(target.netloc.rpartition("@")[2]):
+    authority = target.netloc.rpartition("@")[2]
+    if urllib.request.proxy_bypass(authority) or urllib.request.proxy_bypass(
+        target.hostname or ""
+    ):
         return None, None
     bare = proxy._replace(netloc=proxy.netloc.rpartition("@")[2]).geturl()
     if proxy.username is None:

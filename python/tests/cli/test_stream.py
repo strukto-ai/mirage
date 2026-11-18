@@ -630,6 +630,7 @@ async def test_the_proxy_tunnel_never_carries_the_daemon_token(
             "http://p:1",
         ),
         ("http://127.0.0.1:8765", "http://p:1", "127.0.0.1", None),
+        ("http://[::1]:8765", "http://p:1", "::1", None),
     ],
 )
 def test_the_proxy_is_the_one_httpx_picks(
