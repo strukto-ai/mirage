@@ -38,15 +38,16 @@ export function notAllowed(words: readonly string[]): string {
 
 /**
  * Why a leaf refuses or asks: the reason written on it, else, for a deny
- * that covers every path, the command path and options that fired
- * (`rm --recursive is not allowed`), else the default. A deny scoped to
+ * that covers every path, the command path, options and keys that fired
+ * (`rm --recursive is not allowed`, `echo secret* is not allowed`), else
+ * the default. A deny scoped to
  * paths keeps the default: the line's own error names the path it
  * refused. `matched` is null when what fired is unknown.
  */
 export function reasonOf(rule: CommandRule, matched: Matched | null): string {
   if (rule.reason !== '') return rule.reason
   if (rule.decision === Outcome.DENY && (rule.paths ?? []).length === 0 && matched !== null) {
-    return notAllowed([...matched.command, ...matched.flags])
+    return notAllowed([...matched.command, ...matched.flags, ...matched.keys])
   }
   return DEFAULT_DENY_REASON
 }

@@ -543,13 +543,16 @@ export type PolicyDecisionKind = 'deny' | 'pending' | 'failed'
 
 /**
  * What fired in a profile rule: the subcommand path and the options of
- * the tree node whose leaf decided the line. `command` is the command name
- * and its canonical subcommands; `flags` the options by canonical
- * spelling, empty when the node names none. Mirrors the Python `Matched`.
+ * the tree node whose leaf decided the line, and the operand and value
+ * keys on the way to that leaf. `command` is the command name and its
+ * canonical subcommands; `flags` the options by canonical spelling, empty
+ * when the node names none; `keys` the operand and value keys as written
+ * (`secret*`), empty when it names none. Mirrors the Python `Matched`.
  */
 export interface Matched {
   readonly command: readonly string[]
   readonly flags: readonly string[]
+  readonly keys: readonly string[]
 }
 
 /**

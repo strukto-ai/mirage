@@ -600,7 +600,7 @@ describe('workspace policies', () => {
         reason: 'disabled',
         policy: 'PermissionsPolicy',
         askId: null,
-        matched: { command: ['source'], flags: [] },
+        matched: { command: ['source'], flags: [], keys: [] },
       })
       const frozen = await ws.shell('touch /data/prod/x')
       expect(frozen.exitCode).toBe(1)

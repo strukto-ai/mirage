@@ -192,10 +192,12 @@ pub enum Outcome {
     Ask = 2,
 }
 
-/// What fired: the subcommand path the deciding entry sits at, and the
-/// options that fired it.
+/// What fired: the subcommand path the deciding entry sits at, the
+/// options that fired it, and the operand and value keys on the way to
+/// its leaf, as the tree spells them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Matched {
     pub command: Vec<Text>,
     pub flags: Vec<Text>,
+    pub keys: Vec<Text>,
 }

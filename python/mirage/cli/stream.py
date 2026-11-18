@@ -158,7 +158,9 @@ def decision_of(result: dict[str, Any] | None) -> PolicyDecision | None:
         **{
             **decision,
             "matched": Matched(
-                tuple(matched["command"]), tuple(matched["flags"])
+                tuple(matched["command"]),
+                tuple(matched["flags"]),
+                tuple(matched["keys"]),
             )
             if isinstance(matched, dict)
             else None,

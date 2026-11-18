@@ -70,6 +70,7 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         else Matched(
             command=tuple(from_units(v) for v in fired["command"]),
             flags=tuple(from_units(v) for v in fired["flags"]),
+            keys=tuple(from_units(v) for v in fired["keys"]),
         )
     )
     return Ruling(

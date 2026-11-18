@@ -613,20 +613,38 @@
    ]
   },
   {
+   "id": "a_deny_leaf_without_a_reason_names_the_rule_that_fired",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "plain", "profile": {"commands": {"rm": "deny"}}},
+    {"op": "session", "id": "option", "profile": {"commands": {"rm": {"--recursive": "deny"}}}},
+    {"op": "session", "id": "operand", "profile": {"commands": {"echo": {"operands": {"secret*": "deny"}}}}},
+    {"op": "session", "id": "value", "profile": {"commands": {"head": {"--lines": {"values": {"1*": "deny"}}}}}},
+    {"op": "session", "id": "written", "profile": {"commands": {"echo": {"operands": {"secret*": {"decision": "deny", "reason": "no secrets"}}}}}},
+    {"op": "exec", "session": "plain", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": [], "keys": []}}}},
+    {"op": "exec", "session": "option", "command": "rm -r /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
+    {"op": "exec", "session": "operand", "command": "echo secret1", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "echo secret* is not allowed", "matched": {"command": ["echo"], "flags": [], "keys": ["secret*"]}}}},
+    {"op": "exec", "session": "operand", "command": "echo public", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "value", "command": "head -n 10 /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1* is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1*"]}}}},
+    {"op": "exec", "session": "value", "command": "head --lines=12 /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1* is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1*"]}}}},
+    {"op": "exec", "session": "written", "command": "echo secret1", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "no secrets", "matched": {"command": ["echo"], "flags": [], "keys": ["secret*"]}}}}
+   ]
+  },
+  {
    "id": "a_rule_matches_an_option_in_any_spelling",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"commands": {"rm": {"--recursive": {"--force": "deny"}}}}},
-    {"op": "exec", "session": "agent", "command": "rm -rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm -fr /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm -r -f /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm -R --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm --recursive --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm --rec --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm -Rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm -vrf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "rm /data/a -rf", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "sh -c 'rm -fr /data/a'", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"]}}}},
+    {"op": "exec", "session": "agent", "command": "rm -rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm -fr /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm -r -f /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm -R --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm --recursive --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm --rec --force /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm -Rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm -vrf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/a -rf", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "sh -c 'rm -fr /data/a'", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive --force is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive", "--force"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "rm -- -rf", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '-rf': No such file or directory\n", "decision": null, "matched": null}}},
     {"op": "exec", "command": "mkdir -p /data/a", "expect": {"value": {"exit_code": 0}}},
     {"op": "exec", "session": "agent", "command": "rm -r /data/a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}}
@@ -639,10 +657,10 @@
     {"op": "exec", "command": "printf 'one\\ntwo\\n' > /data/f", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "agent", "profile": {"commands": {"grep": {"--recursive": "deny"}, "head": {"--lines": {"values": {"1": "deny"}}}}}},
     {"op": "exec", "session": "agent", "command": "grep -e -r /data/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
-    {"op": "exec", "session": "agent", "command": "grep x -r /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "grep --recursive is not allowed", "matched": {"command": ["grep"], "flags": ["--recursive"]}}}},
-    {"op": "exec", "session": "agent", "command": "grep --recursive x /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "grep --recursive is not allowed", "matched": {"command": ["grep"], "flags": ["--recursive"]}}}},
-    {"op": "exec", "session": "agent", "command": "head -n1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines is not allowed", "matched": {"command": ["head"], "flags": ["--lines"]}}}},
-    {"op": "exec", "session": "agent", "command": "head --lines=1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines is not allowed", "matched": {"command": ["head"], "flags": ["--lines"]}}}},
+    {"op": "exec", "session": "agent", "command": "grep x -r /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "grep --recursive is not allowed", "matched": {"command": ["grep"], "flags": ["--recursive"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "grep --recursive x /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "grep --recursive is not allowed", "matched": {"command": ["grep"], "flags": ["--recursive"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "head -n1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
+    {"op": "exec", "session": "agent", "command": "head --lines=1 /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "head: Permission denied\n", "decision": "head --lines 1 is not allowed", "matched": {"command": ["head"], "flags": ["--lines"], "keys": ["1"]}}}},
     {"op": "exec", "session": "agent", "command": "head -n 2 /data/f", "expect": {"value": {"exit_code": 0, "stdout": "one\ntwo\n", "stderr": "", "decision": null, "matched": null}}}
    ]
   },
@@ -652,7 +670,7 @@
    "steps": [
     {"op": "exec", "command": "mkdir -p /data/keep /data/a && touch /data/keep/k /data/a/f", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "agent", "profile": {"commands": {"rm": {"--recursive": {"decision": "deny", "reason": "kept", "paths": ["/data/keep"]}}}}},
-    {"op": "exec", "session": "agent", "command": "rm -fr /data/keep", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/keep': Permission denied\n", "decision": "kept", "matched": {"command": ["rm"], "flags": ["--recursive"]}}}},
+    {"op": "exec", "session": "agent", "command": "rm -fr /data/keep", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/keep': Permission denied\n", "decision": "kept", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "rm -r /data/a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}}
    ]
   },
@@ -665,12 +683,12 @@
     {"op": "exec", "session": "agent", "command": "rm -f /data/a/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
     {"op": "exec", "session": "agent", "command": "rm -vf /data/b/f", "expect": {"value": {"exit_code": 0, "stdout": "removed '/data/b/f'\n", "stderr": "", "decision": null, "matched": null}}},
     {"op": "exec", "session": "agent", "command": "rm /data/b/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
-    {"op": "exec", "session": "agent", "command": "rm -rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"]}}}},
+    {"op": "exec", "session": "agent", "command": "rm -rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "explain", "session": "agent", "command": "cat /data/a/f", "expect": {"value": {"commands": [{"command": "cat", "outcome": "allow"}]}}},
     {"op": "exec", "command": "mkdir -p /data/c && touch /data/c/f /data/x", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "has", "profile": {"commands": {"*": "allow", "rm": {"*": "deny", "--force": "allow"}}}},
-    {"op": "exec", "session": "has", "command": "rm -rf /data/c", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": []}}}},
-    {"op": "exec", "session": "has", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": []}}}}
+    {"op": "exec", "session": "has", "command": "rm -rf /data/c", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": [], "keys": []}}}},
+    {"op": "exec", "session": "has", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": [], "keys": []}}}}
    ]
   },
   {
@@ -679,8 +697,8 @@
    "steps": [
     {"op": "exec", "command": "mkdir -p /data/a && touch /data/a/f", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "agent", "profile": {"commands": {"cp": {"-R": "deny"}}}},
-    {"op": "exec", "session": "agent", "command": "cp -r /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "cp --recursive is not allowed", "matched": {"command": ["cp"], "flags": ["--recursive"]}}}},
-    {"op": "exec", "session": "agent", "command": "cp --recursive /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "cp --recursive is not allowed", "matched": {"command": ["cp"], "flags": ["--recursive"]}}}},
+    {"op": "exec", "session": "agent", "command": "cp -r /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "cp --recursive is not allowed", "matched": {"command": ["cp"], "flags": ["--recursive"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "cp --recursive /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "cp --recursive is not allowed", "matched": {"command": ["cp"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "cp /data/a/f /data/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}}
    ]
   },
@@ -705,13 +723,13 @@
    "steps": [
     {"op": "exec", "command": "cd /data && git init -q .", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "plain", "profile": {"cwd": "/data", "commands": {"*": "allow", "git": {"-*": "deny"}}}},
-    {"op": "exec", "session": "plain", "command": "git status --porcelain", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --porcelain is not allowed", "matched": {"command": ["git"], "flags": ["--porcelain"]}}}},
+    {"op": "exec", "session": "plain", "command": "git status --porcelain", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --porcelain is not allowed", "matched": {"command": ["git"], "flags": ["--porcelain"], "keys": []}}}},
     {"op": "exec", "session": "plain", "command": "git status", "expect": {"value": {"exit_code": 0, "stderr": "", "decision": null, "matched": null}}},
-    {"op": "exec", "session": "plain", "command": "GIT_DIR=/data/.git git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --git-dir is not allowed", "matched": {"command": ["git"], "flags": ["--git-dir"]}}}},
-    {"op": "exec", "session": "plain", "command": "export GIT_DIR=/data/.git; git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --git-dir is not allowed", "matched": {"command": ["git"], "flags": ["--git-dir"]}}}},
+    {"op": "exec", "session": "plain", "command": "GIT_DIR=/data/.git git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --git-dir is not allowed", "matched": {"command": ["git"], "flags": ["--git-dir"], "keys": []}}}},
+    {"op": "exec", "session": "plain", "command": "export GIT_DIR=/data/.git; git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --git-dir is not allowed", "matched": {"command": ["git"], "flags": ["--git-dir"], "keys": []}}}},
     {"op": "session", "id": "seeded", "profile": {"cwd": "/data", "env": {"GIT_DIR": "/data/.git"}, "commands": {"*": "allow", "git": {"-*": "deny", "--git-dir": "allow"}}}},
     {"op": "exec", "session": "seeded", "command": "git status", "expect": {"value": {"exit_code": 0, "stderr": "", "decision": null, "matched": null}}},
-    {"op": "exec", "session": "seeded", "command": "git status --short", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --short is not allowed", "matched": {"command": ["git"], "flags": ["--short"]}}}}
+    {"op": "exec", "session": "seeded", "command": "git status --short", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git --short is not allowed", "matched": {"command": ["git"], "flags": ["--short"], "keys": []}}}}
    ]
   },
   {
@@ -719,22 +737,22 @@
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"gh": {"cli": "gh", "machine": "in_process", "config": {"token": "t"}}, "git": {"cli": "git", "machine": "in_process"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"commands": {"gh": {"pr": {"merge": {"--admin": "deny"}, "close": "deny", "reopen": "deny", "list": {"--state": "deny"}}, "issue": {"list": {"--state": "deny"}}}, "git": {"add": {"--force": "deny"}, "status": "deny"}}}},
-    {"op": "exec", "session": "agent", "command": "gh pr merge 5 --squash --admin", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr merge --admin is not allowed", "matched": {"command": ["gh", "pr", "merge"], "flags": ["--admin"]}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr merge 5 --squash --admin", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr merge --admin is not allowed", "matched": {"command": ["gh", "pr", "merge"], "flags": ["--admin"], "keys": []}}}},
     {"op": "explain", "session": "agent", "command": "gh pr merge 5 --squash", "expect": {"value": {"commands": [{"command": "gh", "outcome": "allow"}]}}},
-    {"op": "exec", "session": "agent", "command": "gh pr close 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr close is not allowed", "matched": {"command": ["gh", "pr", "close"], "flags": []}}}},
-    {"op": "exec", "session": "agent", "command": "gh pr reopen 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr reopen is not allowed", "matched": {"command": ["gh", "pr", "reopen"], "flags": []}}}},
-    {"op": "exec", "session": "agent", "command": "git add -f x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "git add --force x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
-    {"op": "exec", "session": "agent", "command": "git add --forc x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr close 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr close is not allowed", "matched": {"command": ["gh", "pr", "close"], "flags": [], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr reopen 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr reopen is not allowed", "matched": {"command": ["gh", "pr", "reopen"], "flags": [], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "git add -f x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "git add --force x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "git add --forc x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "gh pr merge 5 --admin --bogus", "expect": {"value": {"exit_code": 1, "stdout": "", "decision": null, "matched": null}}},
-    {"op": "exec", "session": "agent", "command": "gh issue list --state=closed", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh issue list --state is not allowed", "matched": {"command": ["gh", "issue", "list"], "flags": ["--state"]}}}},
-    {"op": "exec", "session": "agent", "command": "gh pr list --state open", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr list --state is not allowed", "matched": {"command": ["gh", "pr", "list"], "flags": ["--state"]}}}},
+    {"op": "exec", "session": "agent", "command": "gh issue list --state=closed", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh issue list --state is not allowed", "matched": {"command": ["gh", "issue", "list"], "flags": ["--state"], "keys": []}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr list --state open", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr list --state is not allowed", "matched": {"command": ["gh", "pr", "list"], "flags": ["--state"], "keys": []}}}},
     {"op": "explain", "session": "agent", "command": "git log", "expect": {"value": {"commands": [{"command": "git", "outcome": "allow"}]}}},
-    {"op": "exec", "session": "agent", "command": "git -C /data status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": []}}}},
+    {"op": "exec", "session": "agent", "command": "git -C /data status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": [], "keys": []}}}},
     {"op": "session", "id": "viewer", "profile": {"commands": {"*": "allow", "gh": {"*": "deny", "pr": {"view": "allow"}}}}},
     {"op": "explain", "session": "viewer", "command": "gh pr view 5", "expect": {"value": {"commands": [{"command": "gh", "outcome": "allow"}]}}},
-    {"op": "exec", "session": "viewer", "command": "gh pr list", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh is not allowed", "matched": {"command": ["gh"], "flags": []}}}},
-    {"op": "exec", "session": "viewer", "command": "gh --help", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh is not allowed", "matched": {"command": ["gh"], "flags": []}}}},
+    {"op": "exec", "session": "viewer", "command": "gh pr list", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh is not allowed", "matched": {"command": ["gh"], "flags": [], "keys": []}}}},
+    {"op": "exec", "session": "viewer", "command": "gh --help", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh is not allowed", "matched": {"command": ["gh"], "flags": [], "keys": []}}}},
     {"op": "explain", "session": "viewer", "command": "cat /data/x", "expect": {"value": {"commands": [{"command": "cat", "outcome": "allow"}]}}}
    ]
   },

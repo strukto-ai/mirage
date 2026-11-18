@@ -470,7 +470,9 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
 /** What fired in the profile rule that refused, as a case pins it. */
 function matchedOf(decision: PolicyDecision | null): Record<string, string[]> | null {
   const matched = decision?.matched ?? null
-  return matched === null ? null : { command: [...matched.command], flags: [...matched.flags] }
+  return matched === null
+    ? null
+    : { command: [...matched.command], flags: [...matched.flags], keys: [...matched.keys] }
 }
 
 function explained(expl: ShellExplanation | VfsExplanation): Record<string, unknown> {

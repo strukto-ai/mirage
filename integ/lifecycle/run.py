@@ -307,6 +307,7 @@ def matched_of(decision: PolicyDecision | None) -> dict[str, Any] | None:
     return {
         "command": list(decision.matched.command),
         "flags": list(decision.matched.flags),
+        "keys": list(decision.matched.keys),
     }
 
 

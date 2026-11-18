@@ -72,7 +72,11 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
     readonly rule: number | null
     readonly matched_path: number[] | null
     readonly asks: readonly number[]
-    readonly matched: { readonly command: number[][]; readonly flags: number[][] } | null
+    readonly matched: {
+      readonly command: number[][]
+      readonly flags: number[][]
+      readonly keys: number[][]
+    } | null
   }
   const table = ruleTable(rules)
   const ruleAt = (id: number): CommandRule => {
@@ -87,6 +91,7 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       : {
           command: answer.matched.command.map(fromUnits),
           flags: answer.matched.flags.map(fromUnits),
+          keys: answer.matched.keys.map(fromUnits),
         }
   return {
     outcome: answer.outcome,

@@ -50,7 +50,11 @@ export function decisionToDict(decision: PolicyDecision | null): Record<string, 
         matched:
           decision.matched == null
             ? null
-            : { command: [...decision.matched.command], flags: [...decision.matched.flags] },
+            : {
+                command: [...decision.matched.command],
+                flags: [...decision.matched.flags],
+                keys: [...decision.matched.keys],
+              },
       }
 }
 

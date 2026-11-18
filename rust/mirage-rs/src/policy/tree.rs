@@ -51,11 +51,14 @@ pub struct Node {
 
 /// A leaf as compiled: the leaf and its place in the commands block, a
 /// JSON Pointer over the canonical tree (`/gh/pr/merge/--admin`, a
-/// node's own decision at `/rm/*`, an index after a list's place).
+/// node's own decision at `/rm/*`, an index after a list's place), and
+/// the operand and value keys on the way to it (`secret*` for
+/// `/echo/operands/secret*/*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Placed {
     pub leaf: Leaf,
     pub at: Text,
+    pub keys: Vec<Text>,
 }
 
 /// What the tree reads a line by: its command and canonical subcommand
@@ -210,6 +213,7 @@ struct CompiledNode {
 struct Placing<'t> {
     table: &'t mut Vec<Placed>,
     at: Vec<Text>,
+    keys: Vec<Text>,
 }
 
 impl Placing<'_> {
@@ -217,6 +221,13 @@ impl Placing<'_> {
         self.at.push(key.to_vec());
         let out = inner(self);
         self.at.pop();
+        out
+    }
+
+    fn keyed<T>(&mut self, key: &[u32], inner: impl FnOnce(&mut Self) -> T) -> T {
+        self.keys.push(key.to_vec());
+        let out = self.within(key, inner);
+        self.keys.pop();
         out
     }
 
@@ -233,6 +244,7 @@ impl Placing<'_> {
                     this.table.push(Placed {
                         leaf: leaf.clone(),
                         at: pointer(&at),
+                        keys: this.keys.clone(),
                     });
                     this.table.len() - 1
                 })
@@ -254,7 +266,7 @@ impl Placing<'_> {
         let decision = self.leaves(&rule.decision, "*");
         let values = self.within(&word("values"), |this| {
             WordMap::new(&rule.values, |value, target| {
-                this.within(value, |this| CompiledValue {
+                this.keyed(value, |this| CompiledValue {
                     decision: this.leaves(&target.decision, "*"),
                     options: this.options(&target.options),
                 })
@@ -281,7 +293,7 @@ impl Placing<'_> {
             .collect();
         let operands = self.within(&word("operands"), |this| {
             WordMap::new(&node.operands, |operand, child| {
-                this.within(operand, |this| this.node(child))
+                this.keyed(operand, |this| this.node(child))
             })
         });
         CompiledNode {
@@ -311,6 +323,7 @@ impl CompiledTree {
         let mut placing = Placing {
             table,
             at: Vec::new(),
+            keys: Vec::new(),
         };
         Self {
             root: placing.node(root),
@@ -606,6 +619,7 @@ pub fn resolve(branches: &[Branch], table: &[Placed], applies: &dyn Fn(usize) ->
         matched: (outcome != Outcome::Allow).then(|| Matched {
             command: group.command.clone(),
             flags: group.flags.clone(),
+            keys: table[leaf].keys.clone(),
         }),
     }
 }
@@ -870,7 +884,7 @@ mod tests {
             verdict.matched,
             Some(Matched {
                 command: vec![text("gh")],
-                flags: Vec::new()
+                ..Matched::default()
             })
         );
         let verdict = judge(&tree, "rm", &["--force", "--recursive"], &["x"]);
@@ -892,6 +906,36 @@ mod tests {
         assert_eq!(
             verdict.matched.unwrap().command,
             [text("gh"), text("pr"), text("list")]
+        );
+    }
+
+    #[test]
+    fn matched_names_the_operand_and_value_keys_that_fired() {
+        let tree = json!({
+            "echo": {"operands": {"secret*": "deny"}},
+            "head": {"--lines": {"values": {"1*": "deny"}}},
+            "gh": {"pr": {"comment": {"operands": {"*": {"operands": {"draft": "deny"}}}}}},
+            "cp": {"operands": {"/data/*": {"--force": "deny"}}},
+        });
+        let keys = |line: &str, flags: &[&str], operands: &[&str]| {
+            let matched = judge(&tree, line, flags, operands).matched.unwrap();
+            (matched.command, matched.flags, matched.keys)
+        };
+        assert_eq!(
+            keys("echo", &[], &["secret1"]),
+            (vec![text("echo")], Vec::new(), vec![text("secret*")])
+        );
+        assert_eq!(
+            keys("head", &["--lines=10"], &["/data/x"]),
+            (vec![text("head")], vec![text("--lines")], vec![text("1*")])
+        );
+        assert_eq!(
+            keys("gh pr comment", &[], &["9", "draft"]).2,
+            [text("*"), text("draft")]
+        );
+        assert_eq!(
+            keys("cp", &["--force"], &["/data/a", "/tmp/b"]),
+            (vec![text("cp")], vec![text("--force")], vec![text("/data/*")])
         );
     }
 

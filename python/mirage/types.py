@@ -956,17 +956,22 @@ WalkErrno = Literal["ENOENT", "ELOOP"]
 @dataclass(frozen=True, slots=True)
 class Matched:
     """What fired in a profile rule: the subcommand path and the options
-    of the tree node whose leaf decided the line.
+    of the tree node whose leaf decided the line, and the operand and
+    value keys on the way to that leaf.
 
     Args:
         command (tuple[str, ...]): the command name and its canonical
             subcommands, as the pattern names them.
         flags (tuple[str, ...]): the options the pattern names, by
             canonical spelling; empty when it names none.
+        keys (tuple[str, ...]): the operand and value keys the tree
+            names on the way to the leaf, as written (``secret*``);
+            empty when it names none.
     """
 
     command: tuple[str, ...]
     flags: tuple[str, ...] = ()
+    keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

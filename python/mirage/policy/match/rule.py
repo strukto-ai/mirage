@@ -43,8 +43,9 @@ def not_allowed(words: Sequence[str]) -> str:
 
 def reason_of(rule: CommandRule, matched: Matched | None) -> str:
     """Why a leaf refuses or asks: the reason written on it, else, for
-    a deny that covers every path, the command path and options that
-    fired (``rm --recursive is not allowed``), else the default.
+    a deny that covers every path, the command path, options and keys
+    that fired (``rm --recursive is not allowed``, ``echo secret* is not
+    allowed``), else the default.
 
     A deny scoped to paths keeps the default: the line's own error
     names the path it refused.
@@ -60,7 +61,7 @@ def reason_of(rule: CommandRule, matched: Matched | None) -> str:
         and not rule.paths
         and matched is not None
     ):
-        return not_allowed((*matched.command, *matched.flags))
+        return not_allowed((*matched.command, *matched.flags, *matched.keys))
     return DEFAULT_DENY_REASON
 
 
