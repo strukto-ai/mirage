@@ -21,6 +21,8 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from mirage.errors import FsCondition, classify
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import check_memory
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.python.monty.constants import (
@@ -329,10 +331,19 @@ class MontyFs(AbstractOS):
         return self.path_read_bytes(path).decode()
 
     def path_read_bytes(self, path: PurePosixPath | MontyFileHandle) -> bytes:
+        # Monty reads a file whole, read(1) included, so one past the
+        # workspace's memory room is refused before it is fetched.
         target = path_from_arg(path)
         files = self._files_for(target)
-        with as_guest_error(str(target)):
-            return files.read(str(target))
+        row = self._row(target)
+        try:
+            check_memory(row.size if row is not None else 0)
+            with as_guest_error(str(target)):
+                data = files.read(str(target))
+            check_memory(len(data))
+        except MemoryExhausted as exc:
+            raise MemoryError(str(exc)) from exc
+        return data
 
     def path_write_text(
         self, path: PurePosixPath | MontyFileHandle, data: str
