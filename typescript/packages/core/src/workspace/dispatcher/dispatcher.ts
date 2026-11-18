@@ -1016,6 +1016,11 @@ export class Dispatcher {
       const kept = await this.readMany([path, ...(paths ?? [])], issuer, caller, stats ?? new Map())
       return [kept, new IOResult()]
     }
+    const prune = name === 'files_containing' && kwargs?.prune === true
+    if (prune) {
+      kwargs = { ...kwargs }
+      delete kwargs.prune
+    }
     const { scopes, ...searched } = (kwargs ?? {}) as { scopes?: PathSpec[] }
     if (name === 'search' && scopes !== undefined) {
       kwargs = searched
@@ -1113,6 +1118,19 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
+    // A pruned walk cannot stop at an omitted entry to check its access,
+    // consult a cached or pinned body, or cross into another filesystem.
+    if (
+      prune &&
+      (!owner?.vfs.searchCoversTree ||
+        owner.vfs.cachesReads ||
+        owner.vfs.searchable !== null ||
+        owner.revisions.size > 0 ||
+        this.namespace.registry.descendantMounts(call.path.virtual).length > 0 ||
+        hiddenUnder(call.vis, call.path.virtual) ||
+        this.caller?.ruleGate?.scopes(call.path.virtual))
+    )
+      return [null, new IOResult()]
     // A mount with no walk guard has nothing to refuse, so a command asks
     // every mount it walks and only a guard costs a call.
     if (

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from itertools import chain
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
@@ -40,7 +42,7 @@ async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
         raise await readdir_error(path, p, is_file, is_dir)
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
-    for key in list(store.files) + list(store.dirs):
+    for key in chain(store.files, store.dirs):
         if key == p:
             continue
         if key.startswith(dir_prefix):
@@ -61,7 +63,7 @@ async def readdir(accessor: RAMAccessor, path: PathSpec) -> list[FileStat]:
 
 
 async def tree(
-    accessor: RAMAccessor, path: PathSpec
+    accessor: RAMAccessor, path: PathSpec, limit: int | None = None
 ) -> dict[str, FileStat] | None:
     """Every key under a directory, each as ``stat`` answers it; None
     when ``path`` is no directory, or when a key's parent is none (a
@@ -77,15 +79,14 @@ async def tree(
     if p not in store.dirs:
         return None
     base = p.rstrip("/") + "/"
-    keys = [
-        key
-        for key in [*store.files, *store.dirs]
-        if key.startswith(base) and key != p
-    ]
-    if any((key.rsplit("/", 1)[0] or "/") not in store.dirs for key in keys):
-        return None
     found: dict[str, FileStat] = {}
-    for key in keys:
+    for key in chain(store.files, store.dirs):
+        if key == p or not key.startswith(base):
+            continue
+        if limit is not None and len(found) >= limit:
+            return None
+        if (key.rsplit("/", 1)[0] or "/") not in store.dirs:
+            return None
         entry = key_stat(store, key)
         if entry is not None:
             found[key[len(base) :]] = entry

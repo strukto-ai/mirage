@@ -15,11 +15,12 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import FLUSH_BYTES
+from mirage.core.sql.constants import FLUSH_BYTES, READ_BYTES
 from mirage.core.sql.data import read_bytes
 from mirage.core.sql.inode import is_dir
 from mirage.core.sql.path import found, walk
 from mirage.errors.fs import eisdir
+from mirage.io.memory import memory_room
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec, VFSName
 
@@ -28,14 +29,20 @@ async def read_stream(
     accessor: SqlAccessor,
     path: PathSpec,
 ) -> AsyncIterator[bytes]:
-    """A file's bytes, ``FLUSH_BYTES`` at a time, so a large one never
-    sits whole in memory."""
+    """Stream smaller pages on tight heaps and amortize remote SQL calls
+    on larger ones."""
     node = found(await walk(accessor, path), path)
     if is_dir(node):
         raise eisdir(path)
     rec = record_stream("read", path.virtual, VFSName.SQL)
-    for offset in range(0, node.size, FLUSH_BYTES):
-        data = await read_bytes(accessor, node, offset, FLUSH_BYTES)
+    room = memory_room()
+    window = (
+        READ_BYTES
+        if room is not None and room <= 32 * FLUSH_BYTES
+        else FLUSH_BYTES
+    )
+    for offset in range(0, node.size, window):
+        data = await read_bytes(accessor, node, offset, window)
         if rec is not None:
             rec.bytes += len(data)
         yield data

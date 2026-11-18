@@ -58,7 +58,9 @@ interface Exports {
 // Movable streams (the matchers a cache keeps) do not hold it: they close
 // with it, and their owners open them again on the next instance. One in the
 // middle of a search (busy) does hold it, so the search keeps its progress.
-const RECYCLE_BYTES = 32 * 1024 * 1024
+// A long-lived Workers isolate shares its heap budget with later requests.
+const userAgent = (globalThis as { navigator?: { userAgent: string } }).navigator?.userAgent
+const RECYCLE_BYTES = (userAgent === 'Cloudflare-Workers' ? 8 : 32) * 1024 * 1024
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -119,9 +121,9 @@ export class StreamModule {
     this.compiled ??= module
   }
 
-  /** The instance the next stream opens on and the one to replace it, both made asynchronously. */
+  /** Prepare the instance asynchronously, with a spare on browser main threads. */
   ready(): Promise<void> {
-    if (this.exports !== undefined && this.next !== undefined) return Promise.resolve()
+    if (this.exports !== undefined && (!AHEAD || this.next !== undefined)) return Promise.resolve()
     this.making ??= this.make().finally(() => {
       this.making = undefined
     })
@@ -129,14 +131,14 @@ export class StreamModule {
   }
 
   private async make(): Promise<void> {
-    while (this.exports === undefined || this.next === undefined) {
+    while (this.exports === undefined || (AHEAD && this.next === undefined)) {
       const instance = await WebAssembly.instantiate(
         this.compiledModule(),
         unbound(this.compiledModule()),
       )
       const made = instance.exports as unknown as Exports
       if (this.exports === undefined) this.exports = made
-      else this.next ??= made
+      else if (AHEAD) this.next ??= made
       if (this.retiring !== undefined && this.next !== undefined) {
         const retiring = this.retiring
         this.retiring = undefined
@@ -162,7 +164,7 @@ export class StreamModule {
   // cannot stay.
   retire(exports: Exports, trapped: boolean): void {
     if (this.exports === exports) {
-      if (this.next === undefined && !trapped) {
+      if (AHEAD && this.next === undefined && !trapped) {
         this.retiring = exports
         this.refill()
         return
@@ -170,7 +172,7 @@ export class StreamModule {
       this.retiring = undefined
       this.exports = this.next
       this.next = undefined
-      this.refill()
+      if (AHEAD) this.refill()
     }
     for (const stream of movables.get(exports) ?? []) stream.drop(!trapped)
     movables.delete(exports)
@@ -234,6 +236,7 @@ export function adoptModule(module: WebAssembly.Module): void {
 }
 
 function bytesAt(exports: Exports, ptr: number, len: number): Uint8Array {
+  if (len === 0) return new Uint8Array(0)
   const bytes = new Uint8Array(exports.memory.buffer, ptr, len).slice()
   SEALED.add(bytes.buffer)
   return bytes
@@ -439,14 +442,22 @@ export class OpenStream {
   }
 
   private push(chunk: Uint8Array, feed: (len: number) => number): Uint8Array {
-    // An empty chunk still reaches the stream: a sort starts a buffered run.
-    if (chunk.byteLength === 0) return this.collect(feed(0), [])
+    const { exports, handle } = this
+    if (chunk.byteLength <= this.capacity) {
+      // An empty chunk still reaches the stream: a sort starts a buffered run.
+      if (chunk.byteLength !== 0) {
+        const window = exports.mirage_rs_input(handle)
+        new Uint8Array(exports.memory.buffer, window, chunk.byteLength).set(chunk)
+      }
+      return this.collect(feed(chunk.byteLength), [])
+    }
     const parts: Uint8Array[] = []
     for (let offset = 0; offset < chunk.byteLength; offset += this.capacity) {
       const piece = chunk.subarray(offset, offset + this.capacity)
-      const window = this.exports.mirage_rs_input(this.handle)
-      new Uint8Array(this.exports.memory.buffer, window, piece.byteLength).set(piece)
-      parts.push(this.collect(feed(piece.byteLength), parts))
+      const window = exports.mirage_rs_input(handle)
+      new Uint8Array(exports.memory.buffer, window, piece.byteLength).set(piece)
+      const out = this.collect(feed(piece.byteLength), parts)
+      if (out.byteLength) parts.push(out)
     }
     const [only] = parts
     return parts.length === 1 && only !== undefined ? only : concat(parts)

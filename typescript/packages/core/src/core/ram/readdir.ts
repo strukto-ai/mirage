@@ -38,12 +38,14 @@ export async function childKeys(accessor: RAMAccessor, path: PathSpec): Promise<
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
   const seen = new Set<string>()
-  const keys = [...accessor.store.files.keys(), ...accessor.store.dirs]
-  for (const key of keys) {
-    if (key === p) continue
-    if (!key.startsWith(dirPrefix)) continue
-    const first = key.slice(dirPrefix.length).split('/')[0]
-    if (first) seen.add(`${dirPrefix}${first}`)
+  for (const keys of [accessor.store.files.keys(), accessor.store.dirs]) {
+    for (const key of keys) {
+      if (key === p || !key.startsWith(dirPrefix)) continue
+      const slash = key.indexOf('/', dirPrefix.length)
+      if (key.length > dirPrefix.length && slash !== dirPrefix.length) {
+        seen.add(slash === -1 ? key : key.slice(0, slash))
+      }
+    }
   }
   return [...seen].sort(compareCodePoints)
 }
@@ -63,21 +65,27 @@ export async function readdir(accessor: RAMAccessor, path: PathSpec): Promise<Fi
  * folder), so the walk's readdir and stat report what is there. Mirrors
  * Python's `tree`.
  */
-export function tree(accessor: RAMAccessor, path: PathSpec): Promise<Map<string, FileStat> | null> {
+export function tree(
+  accessor: RAMAccessor,
+  path: PathSpec,
+  limit?: number,
+): Promise<Map<string, FileStat> | null> {
   const store = accessor.store
   const p = norm(path.mountPath)
   if (!store.dirs.has(p)) return Promise.resolve(null)
   const base = rstripSlash(p) + '/'
-  const keys = [...store.files.keys(), ...store.dirs].filter(
-    (key) => key.startsWith(base) && key !== p,
-  )
-  if (keys.some((key) => !store.dirs.has(key.slice(0, key.lastIndexOf('/')) || '/'))) {
-    return Promise.resolve(null)
-  }
   const found = new Map<string, FileStat>()
-  for (const key of keys) {
-    const entry = keyStat(store, key)
-    if (entry !== null) found.set(key.slice(base.length), entry)
+  for (const keys of [store.files.keys(), store.dirs.values()]) {
+    for (const key of keys) {
+      if (key === p || !key.startsWith(base)) continue
+      if (
+        (limit !== undefined && found.size >= limit) ||
+        !store.dirs.has(key.slice(0, key.lastIndexOf('/')) || '/')
+      )
+        return Promise.resolve(null)
+      const entry = keyStat(store, key)
+      if (entry !== null) found.set(key.slice(base.length), entry)
+    }
   }
   return Promise.resolve(found)
 }

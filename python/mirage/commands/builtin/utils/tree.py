@@ -208,19 +208,27 @@ def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:
     Args:
         found (dict[str, FileStat]): the ``read_tree`` answer.
     """
-    children: dict[str, set[str]] = {"": set()}
+    children: dict[str, list[str]] = {"": []}
     for key, st in found.items():
-        parts = key.split("/")
-        for depth in range(1, len(parts) + 1):
-            rel = "/".join(parts[:depth])
-            children.setdefault("/".join(parts[: depth - 1]), set()).add(rel)
+        if key in children:
+            continue
         if st.type is FileType.DIRECTORY:
-            children.setdefault(key, set())
-    for rel in [r for r in children if r and r not in found]:
-        found[rel] = FileStat(
-            name=rel.rsplit("/", 1)[-1], type=FileType.DIRECTORY
-        )
-    return {rel: sorted(names) for rel, names in children.items()}
+            children[key] = []
+        rel = key
+        while True:
+            parent = rel.rpartition("/")[0]
+            if parent in children:
+                children[parent].append(rel)
+                break
+            children[parent] = [rel]
+            rel = parent
+    for rel, names in children.items():
+        names.sort()
+        if rel and rel not in found:
+            found[rel] = FileStat(
+                name=rel.rpartition("/")[2], type=FileType.DIRECTORY
+            )
+    return children
 
 
 def _answerable(path: PathSpec) -> bool:
@@ -276,6 +284,8 @@ def tree_walk(
     readdir: WalkCall,
     stat: WalkCall,
     whole: bool = True,
+    *,
+    subtree_limit: int | None = None,
 ) -> tuple[WalkCall, WalkCall]:
     """A walk's ``readdir`` and ``stat``, answered from the mount's
     ``read_tree``.
@@ -309,12 +319,15 @@ def tree_walk(
         stat (WalkCall): the walk's own stat.
         whole (bool): ask for whole subtrees; False reads one level at a
             time, for a walk a depth bounds or a single listing.
+        subtree_limit (int | None): batch size for a serial depth-first walk
+            that releases completed subtrees.
     """
     if read_tree is None:
         return readdir, stat
     roots: dict[str, tuple[dict[str, FileStat], dict[str, list[str]]]] = {}
     levels: dict[str, tuple[dict[str, FileStat], list[str]] | None] = {}
     asked: set[str] = set()
+    ancestors: list[str] = []
     budget = YieldBudget()
 
     def covering(virtual: str) -> tuple[str, str] | None:
@@ -331,18 +344,39 @@ def tree_walk(
     ) -> Any:
         await budget.run()
         virtual = path.virtual.rstrip("/") or "/"
+        if subtree_limit is not None:
+            while (
+                ancestors
+                and virtual != ancestors[-1]
+                and not virtual.startswith(ancestors[-1].rstrip("/") + "/")
+            ):
+                done = ancestors.pop()
+                roots.pop(done, None)
+                levels.pop(done, None)
+                asked.discard(done)
+            if not ancestors or ancestors[-1] != virtual:
+                ancestors.append(virtual)
         hit = covering(virtual) if _answerable(path) else None
         if hit is None and whole and virtual not in asked and not path.pattern:
             asked.add(virtual)
+            bound = (
+                limit
+                if subtree_limit is None
+                else subtree_limit
+                if limit is None
+                else min(limit, subtree_limit)
+            )
             try:
                 found = await (
                     read_tree(path)
-                    if limit is None
-                    else read_tree(path, limit=limit)
+                    if bound is None
+                    else read_tree(path, limit=bound)
                 )
             except (WalkDeclinedError, NotADirectoryError):
                 found = None
-            if found is not None:
+            if found is not None and (
+                subtree_limit is None or len(found) <= subtree_limit
+            ):
                 found = dict(found)
                 roots[virtual] = (found, _listings(found))
                 hit = virtual, ""

@@ -39,14 +39,16 @@ export async function readdir(accessor: RedisAccessor, path: PathSpec): Promise<
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
   const seen = new Set<string>()
-  const files = await store.listFiles()
+  const files = await store.listFiles(dirPrefix)
   const dirs = await store.listDirs()
-  for (const key of [...files, ...dirs]) {
-    if (key === p) continue
-    if (!key.startsWith(dirPrefix)) continue
-    const remainder = key.slice(dirPrefix.length)
-    const first = remainder.split('/')[0]
-    if (first !== undefined && first.length > 0) seen.add(dirPrefix + first)
+  for (const keys of [files, dirs]) {
+    for (const key of keys) {
+      if (key === p || !key.startsWith(dirPrefix)) continue
+      const slash = key.indexOf('/', dirPrefix.length)
+      if (key.length > dirPrefix.length && slash !== dirPrefix.length) {
+        seen.add(slash === -1 ? key : key.slice(0, slash))
+      }
+    }
   }
   const fileSet = new Set(files)
   return keyStats(
@@ -64,6 +66,7 @@ export async function readdir(accessor: RedisAccessor, path: PathSpec): Promise<
 export async function tree(
   accessor: RedisAccessor,
   path: PathSpec,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const store = accessor.store
   const p = norm(path.mountPath)
@@ -74,6 +77,7 @@ export async function tree(
     ...(await store.listFiles(base)).map((key): [string, boolean] => [key, false]),
     ...dirs.filter((key) => key.startsWith(base)).map((key): [string, boolean] => [key, true]),
   ].filter(([key]) => key !== p)
+  if (limit !== undefined && keys.length > limit) return null
   const known = new Set(dirs)
   if (keys.some(([key]) => !known.has(key.slice(0, key.lastIndexOf('/')) || '/'))) return null
   const stats = await keyStats(store, keys)

@@ -262,6 +262,21 @@ describe('mirage in workerd', () => {
       expect(size?.stdout.trim()).toBe('3000000')
     })
 
+    it(`searches a SQLite checkout across chunk boundaries on ${on}`, async () => {
+      const id = `t-${on}-${crypto.randomUUID()}`
+      const base = `/s/${id}`
+      const results = await sql(id, [
+        `mkdir -p ${base}/src && printf '%4093sReviewNeedle' '' > ${base}/src/hit && printf other > ${base}/miss`,
+        `grep -rlF ReviewNeedle ${base}`,
+        `rg -lF ReviewNeedle ${base}`,
+        `grep -rilF reviewneedle ${base}`,
+      ])
+      expect(results.map((r) => [r.exit, r.stdout, r.stderr])).toEqual([
+        [0, '', ''],
+        ...Array.from({ length: 3 }, () => [0, `${base}/src/hit\n`, '']),
+      ])
+    })
+
     // A path of `depth` names past the mount: workerd's SQLite answers at
     // most 100 result columns and an expression 100 deep, which every op's
     // walk and `mkdir -p`'s batch have to stay under.

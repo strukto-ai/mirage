@@ -138,6 +138,89 @@ async def test_a_file_across_chunk_boundaries_reads_whole_and_in_windows(
 
 
 @pytest.mark.asyncio
+async def test_subtree_limit_declines_instead_of_returning_a_partial_tree(
+    vfs: SqlVFS,
+):
+    await vfs.mkdir(at("/folder"))
+    await vfs.write(at("/folder/a"), b"a")
+    await vfs.write(at("/folder/b"), b"b")
+    assert await vfs.read_tree(at("/folder"), limit=1) is None
+    assert list(await vfs.read_tree(at("/folder"), limit=2) or {}) == [
+        "a",
+        "b",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_chunk_edge_matches_and_bom_files(vfs: SqlVFS):
+    await vfs.mkdir(at("/src"))
+    for position in (1, 3, 5):
+        await vfs.write(
+            at(f"/src/{position}"), b"." * (CS - position) + b"ABCDEF"
+        )
+    await vfs.write(at("/src/wide"), "ABCDEF".encode("utf-16"))
+    await vfs.write(at("/src/miss"), b"other")
+    await vfs.write(at("/outside"), b"ABCDEF")
+    scope = PathSpec(
+        virtual="/review/src", directory="/review", vfs_path="src"
+    )
+    flags = {"whole_word": False, "ignore_case": False}
+    hits = await vfs.files_containing(scope, "ABCDEF", **flags)
+    if vfs.accessor.driver.dialect == SqlDialect.SQLITE:
+        assert sorted(p.virtual for p in hits or []) == [
+            "/review/src/1",
+            "/review/src/3",
+            "/review/src/5",
+            "/review/src/wide",
+        ]
+    else:
+        assert hits is None
+    assert await vfs.files_containing(scope, "é", **flags) is None
+    folded = await vfs.files_containing(
+        scope, "abcdef", whole_word=False, ignore_case=True
+    )
+    assert folded == hits
+    assert (
+        await vfs.files_containing(
+            scope, "KIS", whole_word=False, ignore_case=True
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_recursive_grep_keeps_file_diagnostics_and_zero_counts():
+    ws = Workspace({"/work": SqlVFS(":memory:")}, mode=MountMode.WRITE)
+    try:
+        seeded = await ws.shell(
+            "mkdir -p /work/d/sub && echo none >/work/d/a && echo Needle >/work/d/sub/b"
+        )
+        assert seeded.exit_code == 0
+        first = await ws.shell("grep -rinF needle /work/d")
+        assert first.stdout == b"/work/d/sub/b:1:Needle\n"
+        assert first.exit_code == 0
+        absent = await ws.shell("grep -rlF absent /work/d")
+        assert (absent.stdout, absent.exit_code) == (b"", 1)
+        counts = await ws.shell("grep -ricF needle /work/d")
+        assert counts.stdout == b"/work/d/a:0\n/work/d/sub/b:1\n"
+        ws.create_session(
+            "agent",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "sealed", "paths": ["/work/d/a"]}]
+                }
+            },
+        )
+        refused = await ws.shell(
+            "grep -rilF needle /work/d", session_id="agent"
+        )
+        assert (refused.stdout, refused.exit_code) == (b"/work/d/sub/b\n", 2)
+        assert b"/work/d/a: Permission denied" in (refused.stderr or b"")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_append_crosses_a_chunk_edge_and_truncate_pads_zeros(
     vfs: SqlVFS,
 ):

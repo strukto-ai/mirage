@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
+import { memoryRoom } from '../../io/memory.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { SQL } from './constants.ts'
+import { SQL, TREE_ENTRY_BYTES } from './constants.ts'
 import { inodeOf, inodeStat, isDir, type Inode } from './inode.ts'
 import { notListable, target, walk } from './path.ts'
 
@@ -40,22 +41,35 @@ export async function readdir(accessor: SqlAccessor, path: PathSpec): Promise<Fi
 
 /**
  * Every entry under a directory from one query, each as `stat` answers it,
- * keyed by its path below the directory; null when `path` is no directory.
+ * keyed by its relative path. Decline an oversized snapshot so the walk can list directories.
  * Mirrors Python's `tree`.
  */
 export async function tree(
   accessor: SqlAccessor,
   path: PathSpec,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const w = await walk(accessor, path)
   const node = target(w)
   if (node === null || !isDir(node)) return null
-  const rows = await accessor.query(SQL.subtree, [node.ino])
-  const entries: [string, Inode][] = []
+  const room = memoryRoom()
+  const ceiling = Math.min(
+    limit !== undefined && limit >= 0 ? limit : Infinity,
+    room === null ? Infinity : Math.floor(room / TREE_ENTRY_BYTES),
+  )
+  const rows = Number.isFinite(ceiling)
+    ? await accessor.query(SQL.subtree + ' LIMIT ?', [node.ino, ceiling + 1])
+    : await accessor.query(SQL.subtree, [node.ino])
+  if (rows.length > ceiling) return null
+  rows.sort((a, b) => compareCodePoints(String(a.rel), String(b.rel)))
+  const found = new Map<string, FileStat>()
+  const prefix = under(w.p)
   for (const row of rows) {
     const child = inodeOf(row)
-    if (child !== null) entries.push([String(row.rel), child])
+    if (child !== null) {
+      const rel = String(row.rel)
+      found.set(rel, inodeStat(prefix + rel, child))
+    }
   }
-  entries.sort(([a], [b]) => compareCodePoints(a, b))
-  return new Map(entries.map(([rel, child]) => [rel, inodeStat(under(w.p) + rel, child)]))
+  return found
 }

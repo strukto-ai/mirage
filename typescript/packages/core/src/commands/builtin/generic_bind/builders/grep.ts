@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { searchReads } from '../search.ts'
+import { memoryRoom } from '../../../../io/memory.ts'
+import { matchingTree, cappedReads, searchReads } from '../search.ts'
+import { mountsOf } from '../../utils/links.ts'
 import { treeWalk } from '../../utils/tree.ts'
-import type { FileStat } from '../../../../types.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 
 import { prefixAggregate } from '../../aggregators.ts'
 import { facts, grepGeneric } from '../../generic/grep.ts'
@@ -25,13 +27,19 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const [readdir, stat] = treeWalk<string[], FileStat>(
-    files.readTree,
-    (p) => files.readdir(p),
-    files.stat,
-    files.answers('read_tree'),
-    files.signal,
-  )
+  const matches = await matchingTree(files, resolved, texts, ctx)
+  const room = memoryRoom()
+  const [readdir, stat] =
+    matches !== null
+      ? ([(p: PathSpec) => Promise.resolve(matches.get(p.virtual) ?? []), files.stat] as const)
+      : treeWalk<string[], FileStat>(
+          files.readTree,
+          (p) => files.readdir(p),
+          files.stat,
+          files.answers('read_tree'),
+          files.signal,
+          room !== null && room <= 32 * 1024 * 1024 ? 256 : undefined,
+        )
   return grepGeneric(
     'grep',
     resolved,
@@ -39,7 +47,9 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
     ctx,
     stat,
     readdir,
-    await searchReads(files, 'grep', resolved, texts, ctx),
+    matches === null
+      ? await searchReads(files, 'grep', resolved, texts, ctx)
+      : cappedReads(files.read, resolved, mountsOf(ctx))[0],
   )
 }
 

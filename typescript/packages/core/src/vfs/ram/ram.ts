@@ -86,8 +86,8 @@ export class RAMVFS extends BaseVFS {
     return files instanceof RAMFiles ? files.held : 0
   }
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return ramTree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return ramTree(this.accessor, path, handed?.limit)
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

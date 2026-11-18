@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { currentCaller } from '../../../context/session_context.ts'
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
@@ -19,6 +20,7 @@ import { concat } from '../../../utils/bytes.ts'
 import { bomOf } from '../../../utils/encoding.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { CycleError, globPrefixMatch } from '../../../utils/path.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -323,6 +325,84 @@ export function cappedReads(
     },
     charge,
   ]
+}
+
+/**
+ * Directory listings for a positive recursive search with one required literal on a
+ * mount that can rule out whole branches. Rust still matches each candidate.
+ * The dispatcher declines when any omitted file would need an individual
+ * access or cache check. Only -r may skip namespace links.
+ */
+export async function matchingTree(
+  files: CommandFiles,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<Map<string, string[]> | null> {
+  const [root] = paths
+  if (
+    paths.length !== 1 ||
+    root?.pattern !== null ||
+    root.dotted !== null ||
+    root.walkError !== null ||
+    !files.answers('files_containing')
+  )
+    return null
+  const fl = new FlagView(ctx.flags, specOf('grep'))
+  // Counts and -L can print a row for a nonmatch. An output file in the
+  // tree may itself need a diagnostic even when it cannot match.
+  if (fl.raw('file') !== undefined || currentCaller().outputFile !== null) return null
+  let flags: GrepFlags
+  let text = patternArg(texts, fl)
+  try {
+    flags = parseGrepFlags(fl)
+    if (
+      !flags.recursive ||
+      flags.dereference ||
+      flags.countOnly ||
+      flags.invert ||
+      flags.filesWithoutMatch
+    )
+      return null
+    if (!flags.fixedString) {
+      const terms = grepTerms(flags, fl, texts, utf8Locale(ctx.env))
+      text = terms?.texts.length === 1 ? (terms.texts[0] ?? null) : null
+    }
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err
+    console.debug(`grep search left to the scan: ${err.message}`)
+    return null
+  }
+  const links = linksOf(ctx)
+  if (
+    !text ||
+    text.includes('\n') ||
+    linked(links, root.virtual) ||
+    (await directories(files, paths)).length === 0
+  )
+    return null
+  const hits = await files.filesContaining(root, text, {
+    wholeWord: false,
+    ignoreCase: flags.ignoreCase,
+    prune: true,
+  })
+  if (hits === null) return null
+  const base = rstripSlash(root.virtual) || '/'
+  const prefix = rstripSlash(base) + '/'
+  const tree = new Map<string, Set<string>>()
+  for (const hit of hits) {
+    let child = hit.virtual
+    if (!child.startsWith(prefix) || linked(links, child)) return null
+    while (child !== base) {
+      const parent = child.slice(0, child.lastIndexOf('/')) || '/'
+      const siblings = tree.get(parent) ?? new Set<string>()
+      if (siblings.has(child)) break
+      siblings.add(child)
+      tree.set(parent, siblings)
+      child = parent
+    }
+  }
+  return new Map([...tree].map(([dir, children]) => [dir, [...children].sort(compareCodePoints)]))
 }
 
 /**

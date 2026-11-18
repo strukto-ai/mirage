@@ -18,11 +18,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
 import { materialize } from '@struktoai/mirage-core/io/types'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { CapacityState, FileType, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
-import type { SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
+import { SqlDialect, type SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -97,6 +98,65 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
       data.slice(DEFAULT_CHUNK_SIZE * 2),
     )
     expect((await chunks()) - before).toBe(3)
+  })
+
+  it('declines a subtree over the listing limit and never returns a partial tree', async () => {
+    await ops(vfs).mkdir(at('/folder'))
+    await ops(vfs).write(at('/folder/a'), enc.encode('a'))
+    await ops(vfs).write(at('/folder/b'), enc.encode('b'))
+    expect(await vfs.readTree(at('/folder'), { limit: 1 })).toBeNull()
+    const tree = await vfs.readTree(at('/folder'), { limit: 2 })
+    expect(Array.from(tree?.keys() ?? [])).toEqual(['a', 'b'])
+  })
+
+  it('retains denied file diagnostics and counts for files without matches in recursive grep', async () => {
+    const ws = new Workspace({ '/work': vfs }, { mode: MountMode.WRITE })
+    try {
+      const seed = await ws.shell(
+        'mkdir -p /work/d/sub && echo none >/work/d/a && echo Needle >/work/d/sub/b',
+      )
+      expect(seed.exitCode).toBe(0)
+      const first = await ws.shell('grep -rinF needle /work/d')
+      expect([first.stdoutText, first.exitCode]).toEqual(['/work/d/sub/b:1:Needle\n', 0])
+      const absent = await ws.shell('grep -rlF absent /work/d')
+      expect([absent.stdoutText, absent.exitCode]).toEqual(['', 1])
+      const counts = await ws.shell('grep -ricF needle /work/d')
+      expect(counts.stdoutText).toBe('/work/d/a:0\n/work/d/sub/b:1\n')
+      ws.createSession('agent', {
+        profile: SessionProfile({
+          commands: { deny: [{ reason: 'sealed', paths: ['/work/d/a'] }] },
+        }),
+      })
+      const refused = await ws.shell('grep -rilF needle /work/d', { sessionId: 'agent' })
+      expect([refused.stdoutText, refused.exitCode]).toEqual(['/work/d/sub/b\n', 2])
+      expect(refused.stderrText).toContain('/work/d/a: Permission denied')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps chunk-edge matches and UTF-16 files in SQLite search results', async () => {
+    await ops(vfs).mkdir(at('/src'))
+    for (const position of [1, 3, 5]) {
+      await ops(vfs).write(
+        at('/src/' + String(position)),
+        enc.encode('.'.repeat(DEFAULT_CHUNK_SIZE - position) + 'ABCDEF'),
+      )
+    }
+    await ops(vfs).write(at('/src/wide'), Buffer.from('\uFEFFABCDEF', 'utf16le'))
+    await ops(vfs).write(at('/src/miss'), enc.encode('other'))
+    await ops(vfs).write(at('/outside'), enc.encode('ABCDEF'))
+    const scope = new PathSpec({ virtual: '/review/src', directory: '/review', vfsPath: 'src' })
+    const flags = { wholeWord: false, ignoreCase: false }
+    const hits = await vfs.filesContaining(scope, 'ABCDEF', flags)
+    if (driver.dialect === SqlDialect.SQLITE) {
+      expect(new Set(hits?.map((p) => p.virtual))).toEqual(
+        new Set(['/review/src/1', '/review/src/3', '/review/src/5', '/review/src/wide']),
+      )
+    } else expect(hits).toBeNull()
+    expect(await vfs.filesContaining(scope, 'é', flags)).toBeNull()
+    expect(await vfs.filesContaining(scope, 'abcdef', { ...flags, ignoreCase: true })).toEqual(hits)
+    expect(await vfs.filesContaining(scope, 'KIS', { ...flags, ignoreCase: true })).toBeNull()
   })
 
   it('appends across a chunk edge, and truncates down and back up as zeros', async () => {

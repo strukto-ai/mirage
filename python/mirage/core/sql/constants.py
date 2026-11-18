@@ -36,6 +36,12 @@ MAX_PARAMS = 100
 # 100.
 MAX_COLUMNS = 100
 
+# Allow room for each eager subtree row, its path, stat and walk indexes.
+TREE_ENTRY_BYTES = 4096
+
+# The bytes fetched per streamed read when workspace memory is tight.
+READ_BYTES = 64 * 1024
+
 # The bytes a streamed write gathers before it lands them.
 FLUSH_BYTES = 1024 * 1024
 
@@ -191,3 +197,22 @@ def clear_under(ino: int) -> tuple[str, ...]:
         f" OR ino = {_RESTORE_BASE}",
         f"DELETE FROM fs_dentry WHERE id IN ({tree} SELECT id FROM tree)",
     )
+
+
+def candidate_files(ignore_case: bool) -> str:
+    """SQLite candidate files, including matches split across two storage rows."""
+    body = "CAST(lower(b.data) AS BLOB)" if ignore_case else "b.data"
+    binary = "instr(b.data, X'00') > 0 OR " if ignore_case else ""
+    return f"""WITH RECURSIVE tree(ino, rel) AS (
+      SELECT ino, name FROM fs_dentry WHERE parent_ino = ?
+      UNION ALL
+      SELECT d.ino, t.rel || '/' || d.name
+      FROM tree t JOIN fs_dentry d ON d.parent_ino = t.ino)
+    SELECT t.rel FROM tree t WHERE EXISTS (
+      SELECT 1 FROM fs_data b WHERE b.ino = t.ino AND
+      (instr({body}, ?) > 0 OR
+       (length(b.data) = ? AND instr(substr({body}, ?), ?) > 0) OR
+       (b.chunk_index > 0 AND instr(substr({body}, 1, ?), ?) > 0) OR
+       {binary}
+       (b.chunk_index = 0 AND substr(b.data, 1, 1) IN (X'FE', X'FF'))))
+    LIMIT ?"""

@@ -1381,6 +1381,7 @@ class Dispatcher:
             raise TypeError(
                 "retained is only valid for read bytes or a stat row"
             )
+        prune = name == "files_containing" and kwargs.pop("prune", False)
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         warm = name == "read" and bool(kwargs.pop("warm", False))
@@ -1472,6 +1473,19 @@ class Dispatcher:
         if name == "statfs":
             return await self._statfs(call.path, caller), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
+        if prune and (
+            mount is None
+            or not mount.vfs.search_covers_tree
+            or mount.vfs.caches_reads
+            or mount.vfs.searchable is not None
+            or mount.revisions
+            or self._namespace.registry.descendant_mounts(call.path.virtual)
+            or hidden_under(call.vis, call.path.virtual)
+            or (
+                caller.rule_gate and caller.rule_gate.scopes(call.path.virtual)
+            )
+        ):
+            return None, IOResult()
         # A mount with no walk guard has nothing to refuse, so a command
         # asks every mount it walks and only a guard costs a call.
         if name == "before_full_walk" and (

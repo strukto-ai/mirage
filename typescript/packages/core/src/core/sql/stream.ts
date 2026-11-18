@@ -14,14 +14,15 @@
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { eisdir } from '../../errors/fs.ts'
+import { memoryRoom } from '../../io/memory.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { FLUSH_BYTES } from './constants.ts'
+import { FLUSH_BYTES, READ_BYTES } from './constants.ts'
 import { readBytes } from './data.ts'
 import { isDir } from './inode.ts'
 import { found, walk } from './path.ts'
 
-/** A file's bytes, `FLUSH_BYTES` at a time, so a large one never sits whole in memory. */
+/** Stream smaller pages on tight heaps and amortize remote SQL calls on larger ones. */
 export async function* readStream(
   accessor: SqlAccessor,
   path: PathSpec,
@@ -29,8 +30,10 @@ export async function* readStream(
   const node = found(await walk(accessor, path), path)
   if (isDir(node)) throw eisdir(path)
   const rec = recordStream('read', path.virtual, VFSName.SQL)
-  for (let offset = 0; offset < node.size; offset += FLUSH_BYTES) {
-    const data = await readBytes(accessor, node, offset, FLUSH_BYTES)
+  const room = memoryRoom()
+  const window = room !== null && room <= 32 * FLUSH_BYTES ? READ_BYTES : FLUSH_BYTES
+  for (let offset = 0; offset < node.size; offset += window) {
+    const data = await readBytes(accessor, node, offset, window)
     if (rec !== null) rec.bytes += data.byteLength
     yield data
   }

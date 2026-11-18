@@ -63,6 +63,23 @@ it('instantiates nothing synchronously where the loader compiled asynchronously,
       stream.close()
       return exports
     }
+    const deferred = new StreamModule(module)
+    await deferred.ready()
+    const initial = deferred.openSync('digest', md5, false)
+    const original = instance(initial)
+    initial.close()
+    deferred.retire(original as never, false)
+    const next = deferred.openSync('digest', md5, false)
+    const grown = instance(next) as { memory: WebAssembly.Memory }
+    grown.memory.grow(513)
+    next.close()
+    const pin = deferred.openSync('digest', md5, false)
+    await deferred.ready()
+    expect(instance(pin)).toBe(grown)
+    pin.close()
+    const fresh = await deferred.open('digest', md5)
+    expect(instance(fresh)).not.toBe(grown)
+    fresh.close()
     const first = used()
     streams.retire(first as never, false)
     const second = used()

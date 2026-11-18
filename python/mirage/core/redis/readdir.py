@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from itertools import chain
+
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.stat import key_stats
 from mirage.errors.fs import readdir_error
@@ -31,14 +33,14 @@ async def readdir(
         raise await readdir_error(virtual, p, store.has_file, store.has_dir)
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
-    all_files = await store.list_files()
+    all_files = await store.list_files(dir_prefix)
     all_dirs = await store.list_dirs()
-    for key in all_files + list(all_dirs):
+    for key in chain(all_files, all_dirs):
         if key == p:
             continue
         if key.startswith(dir_prefix):
             remainder = key[len(dir_prefix) :]
-            child = remainder.split("/")[0]
+            child = remainder.partition("/")[0]
             if child:
                 seen.add(dir_prefix + child)
     file_set = set(all_files)
@@ -48,7 +50,7 @@ async def readdir(
 
 
 async def tree(
-    accessor: RedisAccessor, path: PathSpec
+    accessor: RedisAccessor, path: PathSpec, limit: int | None = None
 ) -> dict[str, FileStat] | None:
     """Every key under a directory from one scan, each as ``stat``
     answers it, fetched in one pipeline; None when ``path`` is no
@@ -69,6 +71,8 @@ async def tree(
     keys = [(key, False) for key in await store.list_files(base)]
     keys += [(key, True) for key in sorted(dirs) if key.startswith(base)]
     keys = [(key, is_dir) for key, is_dir in keys if key != p]
+    if limit is not None and len(keys) > limit:
+        return None
     if any((key.rsplit("/", 1)[0] or "/") not in dirs for key, _ in keys):
         return None
     stats = await key_stats(store, keys)

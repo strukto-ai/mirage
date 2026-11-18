@@ -320,6 +320,8 @@ class ReadAhead:
         ):
             await self._warmed(path)
         result, io = await self.inner(name, path, **options)
+        if not self.kept:
+            return result, io
         folder = path.virtual.rstrip("/") or "/"
         if name == "stat" and path.virtual in self.specs:
             if isinstance(result, FileStat):
@@ -363,6 +365,7 @@ class ReadAhead:
                 run.warming[name] = task
         if pending is not None and not await asyncio.shield(pending):
             self.kept = False
+            self.trees.clear()
 
     def _paced(self, run: _Run, at: int, hit: bool) -> int:
         """How many files a walk's read at ``at`` warms: twice the pace on
@@ -995,8 +998,17 @@ def command_files(
         )
 
     async def files_containing(
-        path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+        path: PathSpec,
+        text: str,
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        prune: bool = False,
     ) -> list[PathSpec] | None:
+        if prune and (
+            crossing or (reading is not None and reading.stream is not None)
+        ):
+            return None
         return cast(
             list[PathSpec] | None,
             await call(
@@ -1005,6 +1017,7 @@ def command_files(
                 text=text,
                 whole_word=whole_word,
                 ignore_case=ignore_case,
+                **({"prune": True} if prune else {}),
             ),
         )
 
