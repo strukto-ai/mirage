@@ -678,11 +678,24 @@ class AdmissionRules:
     Each tree is judged on its own and the strictest result wins, so a
     mount's tree or inline permissions only tighten.
 
+    Its hash keys the compiled matcher a line asks, so it is taken
+    once: a tree's hash walks every node.
+
     Args:
         trees (tuple[ScopedTree, ...]): the trees, in document order.
     """
 
     trees: tuple[ScopedTree, ...] = ()
+    _hash: int | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def __hash__(self) -> int:
+        held = self._hash
+        if held is None:
+            held = hash(self.trees)
+            object.__setattr__(self, "_hash", held)
+        return held
 
 
 @dataclass(frozen=True, slots=True)
