@@ -270,7 +270,7 @@
       "command": "du /trunc/src 2>/dev/null | grep '/cache$'",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/trunc/src/cache\n",
+        "stdout": "4\t/trunc/src/cache\n",
         "stderr": ""
       },
       "note": "A truncated GitHub tree uses the generic folder walk: an unreadable subtree keeps its zero-byte directory row and du exits 1, as GNU coreutils 9.7 does."
@@ -299,7 +299,7 @@
       "command": "du -a /trunc/src",
       "expect": {
         "exit": 1,
-        "stdout": "20\t/trunc/src/auth/__init__.py\n182\t/trunc/src/auth/step_1.py\n144\t/trunc/src/auth/step_2.py\n144\t/trunc/src/auth/step_3.py\n144\t/trunc/src/auth/step_4.py\n144\t/trunc/src/auth/step_5.py\n144\t/trunc/src/auth/step_6.py\n144\t/trunc/src/auth/step_7.py\n144\t/trunc/src/auth/step_8.py\n1210\t/trunc/src/auth\n0\t/trunc/src/cache\n21\t/trunc/src/codec/__init__.py\n146\t/trunc/src/codec/step_1.py\n146\t/trunc/src/codec/step_2.py\n146\t/trunc/src/codec/step_3.py\n146\t/trunc/src/codec/step_4.py\n146\t/trunc/src/codec/step_5.py\n146\t/trunc/src/codec/step_6.py\n146\t/trunc/src/codec/step_7.py\n146\t/trunc/src/codec/step_8.py\n1189\t/trunc/src/codec\n21\t/trunc/src/index/__init__.py\n146\t/trunc/src/index/step_1.py\n146\t/trunc/src/index/step_2.py\n146\t/trunc/src/index/step_3.py\n146\t/trunc/src/index/step_4.py\n146\t/trunc/src/index/step_5.py\n146\t/trunc/src/index/step_6.py\n146\t/trunc/src/index/step_7.py\n146\t/trunc/src/index/step_8.py\n1189\t/trunc/src/index\n21\t/trunc/src/mount/__init__.py\n146\t/trunc/src/mount/step_1.py\n146\t/trunc/src/mount/step_2.py\n146\t/trunc/src/mount/step_3.py\n146\t/trunc/src/mount/step_4.py\n146\t/trunc/src/mount/step_5.py\n146\t/trunc/src/mount/step_6.py\n146\t/trunc/src/mount/step_7.py\n146\t/trunc/src/mount/step_8.py\n1189\t/trunc/src/mount\n21\t/trunc/src/parse/__init__.py\n146\t/trunc/src/parse/step_1.py\n146\t/trunc/src/parse/step_2.py\n146\t/trunc/src/parse/step_3.py\n146\t/trunc/src/parse/step_4.py\n146\t/trunc/src/parse/step_5.py\n146\t/trunc/src/parse/step_6.py\n146\t/trunc/src/parse/step_7.py\n146\t/trunc/src/parse/step_8.py\n1189\t/trunc/src/parse\n21\t/trunc/src/query/__init__.py\n146\t/trunc/src/query/step_1.py\n146\t/trunc/src/query/step_2.py\n146\t/trunc/src/query/step_3.py\n146\t/trunc/src/query/step_4.py\n146\t/trunc/src/query/step_5.py\n146\t/trunc/src/query/step_6.py\n146\t/trunc/src/query/step_7.py\n146\t/trunc/src/query/step_8.py\n1189\t/trunc/src/query\n21\t/trunc/src/route/__init__.py\n146\t/trunc/src/route/step_1.py\n146\t/trunc/src/route/step_2.py\n171\t/trunc/src/route/step_3.py\n146\t/trunc/src/route/step_4.py\n146\t/trunc/src/route/step_5.py\n146\t/trunc/src/route/step_6.py\n146\t/trunc/src/route/step_7.py\n146\t/trunc/src/route/step_8.py\n1214\t/trunc/src/route\n21\t/trunc/src/shell/__init__.py\n146\t/trunc/src/shell/step_1.py\n146\t/trunc/src/shell/step_2.py\n146\t/trunc/src/shell/step_3.py\n146\t/trunc/src/shell/step_4.py\n146\t/trunc/src/shell/step_5.py\n146\t/trunc/src/shell/step_6.py\n146\t/trunc/src/shell/step_7.py\n146\t/trunc/src/shell/step_8.py\n1189\t/trunc/src/shell\n21\t/trunc/src/store/__init__.py\n146\t/trunc/src/store/step_1.py\n146\t/trunc/src/store/step_2.py\n146\t/trunc/src/store/step_3.py\n146\t/trunc/src/store/step_4.py\n173\t/trunc/src/store/step_5.py\n146\t/trunc/src/store/step_6.py\n146\t/trunc/src/store/step_7.py\n146\t/trunc/src/store/step_8.py\n1216\t/trunc/src/store\n20\t/trunc/src/sync/__init__.py\n144\t/trunc/src/sync/step_1.py\n144\t/trunc/src/sync/step_2.py\n144\t/trunc/src/sync/step_3.py\n144\t/trunc/src/sync/step_4.py\n144\t/trunc/src/sync/step_5.py\n144\t/trunc/src/sync/step_6.py\n144\t/trunc/src/sync/step_7.py\n144\t/trunc/src/sync/step_8.py\n1172\t/trunc/src/sync\n21\t/trunc/src/watch/__init__.py\n146\t/trunc/src/watch/step_1.py\n146\t/trunc/src/watch/step_2.py\n146\t/trunc/src/watch/step_3.py\n146\t/trunc/src/watch/step_4.py\n146\t/trunc/src/watch/step_5.py\n146\t/trunc/src/watch/step_6.py\n146\t/trunc/src/watch/step_7.py\n146\t/trunc/src/watch/step_8.py\n1189\t/trunc/src/watch\n13135\t/trunc/src\n",
+        "stdout": "4\t/trunc/src/auth/__init__.py\n4\t/trunc/src/auth/step_1.py\n4\t/trunc/src/auth/step_2.py\n4\t/trunc/src/auth/step_3.py\n4\t/trunc/src/auth/step_4.py\n4\t/trunc/src/auth/step_5.py\n4\t/trunc/src/auth/step_6.py\n4\t/trunc/src/auth/step_7.py\n4\t/trunc/src/auth/step_8.py\n40\t/trunc/src/auth\n4\t/trunc/src/cache\n4\t/trunc/src/codec/__init__.py\n4\t/trunc/src/codec/step_1.py\n4\t/trunc/src/codec/step_2.py\n4\t/trunc/src/codec/step_3.py\n4\t/trunc/src/codec/step_4.py\n4\t/trunc/src/codec/step_5.py\n4\t/trunc/src/codec/step_6.py\n4\t/trunc/src/codec/step_7.py\n4\t/trunc/src/codec/step_8.py\n40\t/trunc/src/codec\n4\t/trunc/src/index/__init__.py\n4\t/trunc/src/index/step_1.py\n4\t/trunc/src/index/step_2.py\n4\t/trunc/src/index/step_3.py\n4\t/trunc/src/index/step_4.py\n4\t/trunc/src/index/step_5.py\n4\t/trunc/src/index/step_6.py\n4\t/trunc/src/index/step_7.py\n4\t/trunc/src/index/step_8.py\n40\t/trunc/src/index\n4\t/trunc/src/mount/__init__.py\n4\t/trunc/src/mount/step_1.py\n4\t/trunc/src/mount/step_2.py\n4\t/trunc/src/mount/step_3.py\n4\t/trunc/src/mount/step_4.py\n4\t/trunc/src/mount/step_5.py\n4\t/trunc/src/mount/step_6.py\n4\t/trunc/src/mount/step_7.py\n4\t/trunc/src/mount/step_8.py\n40\t/trunc/src/mount\n4\t/trunc/src/parse/__init__.py\n4\t/trunc/src/parse/step_1.py\n4\t/trunc/src/parse/step_2.py\n4\t/trunc/src/parse/step_3.py\n4\t/trunc/src/parse/step_4.py\n4\t/trunc/src/parse/step_5.py\n4\t/trunc/src/parse/step_6.py\n4\t/trunc/src/parse/step_7.py\n4\t/trunc/src/parse/step_8.py\n40\t/trunc/src/parse\n4\t/trunc/src/query/__init__.py\n4\t/trunc/src/query/step_1.py\n4\t/trunc/src/query/step_2.py\n4\t/trunc/src/query/step_3.py\n4\t/trunc/src/query/step_4.py\n4\t/trunc/src/query/step_5.py\n4\t/trunc/src/query/step_6.py\n4\t/trunc/src/query/step_7.py\n4\t/trunc/src/query/step_8.py\n40\t/trunc/src/query\n4\t/trunc/src/route/__init__.py\n4\t/trunc/src/route/step_1.py\n4\t/trunc/src/route/step_2.py\n4\t/trunc/src/route/step_3.py\n4\t/trunc/src/route/step_4.py\n4\t/trunc/src/route/step_5.py\n4\t/trunc/src/route/step_6.py\n4\t/trunc/src/route/step_7.py\n4\t/trunc/src/route/step_8.py\n40\t/trunc/src/route\n4\t/trunc/src/shell/__init__.py\n4\t/trunc/src/shell/step_1.py\n4\t/trunc/src/shell/step_2.py\n4\t/trunc/src/shell/step_3.py\n4\t/trunc/src/shell/step_4.py\n4\t/trunc/src/shell/step_5.py\n4\t/trunc/src/shell/step_6.py\n4\t/trunc/src/shell/step_7.py\n4\t/trunc/src/shell/step_8.py\n40\t/trunc/src/shell\n4\t/trunc/src/store/__init__.py\n4\t/trunc/src/store/step_1.py\n4\t/trunc/src/store/step_2.py\n4\t/trunc/src/store/step_3.py\n4\t/trunc/src/store/step_4.py\n4\t/trunc/src/store/step_5.py\n4\t/trunc/src/store/step_6.py\n4\t/trunc/src/store/step_7.py\n4\t/trunc/src/store/step_8.py\n40\t/trunc/src/store\n4\t/trunc/src/sync/__init__.py\n4\t/trunc/src/sync/step_1.py\n4\t/trunc/src/sync/step_2.py\n4\t/trunc/src/sync/step_3.py\n4\t/trunc/src/sync/step_4.py\n4\t/trunc/src/sync/step_5.py\n4\t/trunc/src/sync/step_6.py\n4\t/trunc/src/sync/step_7.py\n4\t/trunc/src/sync/step_8.py\n40\t/trunc/src/sync\n4\t/trunc/src/watch/__init__.py\n4\t/trunc/src/watch/step_1.py\n4\t/trunc/src/watch/step_2.py\n4\t/trunc/src/watch/step_3.py\n4\t/trunc/src/watch/step_4.py\n4\t/trunc/src/watch/step_5.py\n4\t/trunc/src/watch/step_6.py\n4\t/trunc/src/watch/step_7.py\n4\t/trunc/src/watch/step_8.py\n40\t/trunc/src/watch\n448\t/trunc/src\n",
         "stderr": "du: cannot read directory '/trunc/src/cache': Permission denied\n"
       }
     },
@@ -312,7 +312,7 @@
       "command": "du /data/mods; du -a /data/mods; find /data/mods; find /data/mods -empty; ls -A /data/mods; ls -la /data/mods | awk 'NR==1 {print} NR>1 {print $NF}'",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/mods\n0\t/data/mods\n/data/mods\n/data/mods\ntotal ?\n.\n..\n",
+        "stdout": "4\t/data/mods\n4\t/data/mods\n/data/mods\n/data/mods\ntotal 8\n.\n..\n",
         "stderr": ""
       },
       "note": "data-v1's SUBMODULES puts the gitlink mods/lib in a directory that holds nothing else. The tree drops a gitlink, so mods is an empty directory: du keeps its 0 row with and without -a (bytes, as GNU coreutils 9.7 du -b counts it), find names it and calls it -empty as GNU findutils 4.10.0 does, and ls lists only . and .. under the total ls -la cannot know."
@@ -340,7 +340,7 @@
       "command": "du -a /repo/docs; du -s /repo/src; du /repo/README.md",
       "expect": {
         "exit": 0,
-        "stdout": "77\t/repo/docs/architecture.md\n77\t/repo/docs/contributing.md\n73\t/repo/docs/release.md\n227\t/repo/docs\n14364\t/repo/src\n62\t/repo/README.md\n",
+        "stdout": "4\t/repo/docs/architecture.md\n4\t/repo/docs/contributing.md\n4\t/repo/docs/release.md\n16\t/repo/docs\n484\t/repo/src\n4\t/repo/README.md\n",
         "stderr": ""
       }
     },
@@ -420,7 +420,7 @@
       "command": "du -s /repo/src",
       "expect": {
         "exit": 1,
-        "stdout": "13135\t/repo/src\n",
+        "stdout": "448\t/repo/src\n",
         "stderr": "du: cannot read directory '/repo/src/cache': Permission denied\n"
       }
     },
@@ -476,7 +476,7 @@
       "command": "du -s /trunc/src",
       "expect": {
         "exit": 1,
-        "stdout": "13135\t/trunc/src\n",
+        "stdout": "448\t/trunc/src\n",
         "stderr": "du: cannot read directory '/trunc/src/cache': Permission denied\n"
       }
     },

@@ -522,7 +522,7 @@
       "command": "du -h /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
       "expect": {
         "exit": 0,
-        "stdout": "36\t/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+        "stdout": "4.0K\t/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
         "stderr": ""
       }
     },
@@ -535,7 +535,7 @@
       "command": "ls -l /mail/INBOX/2026-01-05/Q2_Budget_Review__1",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n-rw-r--r-- 1 root root 36 - budget.csv\n-rw-r--r-- 1 root root 37 - notes.txt\n",
+        "stdout": "total 8\n-rw-r--r-- 1 root root 36 - budget.csv\n-rw-r--r-- 1 root root 37 - notes.txt\n",
         "stderr": ""
       }
     },

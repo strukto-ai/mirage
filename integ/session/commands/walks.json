@@ -79,7 +79,7 @@
       "command": "du -a /scratch/wk",
       "expect": {
         "exit": 1,
-        "stdout": "2\t/scratch/wk/open/o\n2\t/scratch/wk/open\n0\t/scratch/wk/sealed\n2\t/scratch/wk\n",
+        "stdout": "4\t/scratch/wk/open/o\n8\t/scratch/wk/open\n4\t/scratch/wk/sealed\n16\t/scratch/wk\n",
         "stderr": "du: cannot read directory '/scratch/wk/sealed': Permission denied\n"
       },
       "note": "GNU du still prints the row of a directory it may not open, at 0 bytes under -ab since it counted nothing below it."
@@ -247,7 +247,7 @@
       "command": "echo before; du -s /scratch/wk 2>/dev/null; echo after=$?",
       "expect": {
         "exit": 0,
-        "stdout": "before\n2\t/scratch/wk\nafter=1\n",
+        "stdout": "before\n16\t/scratch/wk\nafter=1\n",
         "stderr": ""
       },
       "session": "frozen"

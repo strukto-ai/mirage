@@ -217,7 +217,7 @@
       "command": "du -s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02'",
       "expect": {
         "exit": 0,
-        "stdout": "374\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02\n",
+        "stdout": "12\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02\n",
         "stderr": ""
       }
     },
@@ -230,7 +230,7 @@
       "command": "du -sh '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files'",
       "expect": {
         "exit": 0,
-        "stdout": "29\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files\n",
+        "stdout": "8.0K\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files\n",
         "stderr": ""
       }
     },

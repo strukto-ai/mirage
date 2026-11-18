@@ -258,7 +258,7 @@
       "command": "du /data/i*; du -x /data; du /data; du -a /data; du -s /data; du -c /data",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/inner\n4\t/data\n5\t/data/inner\n9\t/data\n5\t/data/inner/leaf.txt\n5\t/data/inner\n4\t/data/top.txt\n9\t/data\n9\t/data\n5\t/data/inner\n9\t/data\n9\ttotal\n",
+        "stdout": "8\t/data/inner\n8\t/data\n8\t/data/inner\n16\t/data\n4\t/data/inner/leaf.txt\n8\t/data/inner\n4\t/data/top.txt\n16\t/data\n16\t/data\n8\t/data/inner\n16\t/data\n16\ttotal\n",
         "stderr": ""
       }
     },
@@ -320,10 +320,10 @@
       "targets": [
         "ram-nested"
       ],
-      "command": "stat /ghost",
+      "command": "stat /ghost | sed -E 's/^(Access|Modify): [0-9].*/\\1: T/'",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /ghost\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 44166,4131005441\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /ghost\n  Size: 4096      \tBlocks: 8          IO Block: 4096   directory\nDevice: 44166,4131005441\tInode: ?           Links: 3\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: T\nModify: T\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },
@@ -372,10 +372,10 @@
       "targets": [
         "ram-nested"
       ],
-      "command": "stat /data/inner",
+      "command": "stat /data/inner | sed -E 's/^(Access|Modify): [0-9].*/\\1: T/'",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /data/inner\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 62676,3919759232\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /data/inner\n  Size: 4096      \tBlocks: 8          IO Block: 4096   directory\nDevice: 62676,3919759232\tInode: ?           Links: 2\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: T\nModify: T\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },
@@ -385,10 +385,10 @@
       "targets": [
         "ram-nested"
       ],
-      "command": "stat /ghost/deep",
+      "command": "stat /ghost/deep | sed -E 's/^(Access|Modify): [0-9].*/\\1: T/'",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /ghost/deep\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 42659,980895000\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /ghost/deep\n  Size: 4096      \tBlocks: 8          IO Block: 4096   directory\nDevice: 42659,980895000\tInode: ?           Links: 2\nAccess: (0755/drwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: T\nModify: T\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },
@@ -443,7 +443,7 @@
       "command": "du /ghost",
       "expect": {
         "exit": 0,
-        "stdout": "6\t/ghost/deep\n6\t/ghost\n",
+        "stdout": "8\t/ghost/deep\n12\t/ghost\n",
         "stderr": ""
       }
     },
@@ -456,7 +456,7 @@
       "command": "du -s /ghost",
       "expect": {
         "exit": 0,
-        "stdout": "6\t/ghost\n",
+        "stdout": "12\t/ghost\n",
         "stderr": ""
       }
     },
@@ -1164,7 +1164,7 @@
       "command": "mkdir -p /data/xm_depth/a /data/inner/xm_depth/b/c; printf 1 > /data/xm_depth/a/f; printf 22 > /data/inner/xm_depth/b/c/g; find /data -mindepth 3 -maxdepth 4 -path '*xm_depth*' | sort; du -d 2 /data | grep xm_depth; du -c -s /data/inner/xm_depth /data/xm_depth; rm -r /data/xm_depth /data/inner/xm_depth",
       "expect": {
         "exit": 0,
-        "stdout": "/data/inner/xm_depth/b\n/data/inner/xm_depth/b/c\n/data/xm_depth/a/f\n2\t/data/inner/xm_depth\n1\t/data/xm_depth/a\n1\t/data/xm_depth\n2\t/data/inner/xm_depth\n1\t/data/xm_depth\n3\ttotal\n",
+        "stdout": "/data/inner/xm_depth/b\n/data/inner/xm_depth/b/c\n/data/xm_depth/a/f\n16\t/data/inner/xm_depth\n8\t/data/xm_depth/a\n12\t/data/xm_depth\n16\t/data/inner/xm_depth\n12\t/data/xm_depth\n28\ttotal\n",
         "stderr": ""
       }
     },
