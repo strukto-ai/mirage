@@ -443,3 +443,32 @@ def test_requests_carry_the_trace_context_in_the_environment(
         server.shutdown()
         server.server_close()
     assert seen == [traceparent]
+
+
+# Claude Code's sandbox sets a SOCKS ALL_PROXY and lists local and private
+# addresses in NO_PROXY; a command must still reach the server.
+def test_a_socks_proxy_in_the_environment_does_not_stop_a_command(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:9")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+
+    class Ok(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Ok)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with DaemonClient(DaemonSettings(url=url, auth_token="t")) as client:
+            r = client.request("GET", "/v1/health")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert r.status_code == 200
