@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::io::{self, Write};
 
 use mail_parser::{
-    Addr, ContentType, Header, HeaderName, HeaderValue, Message, MessageParser, MessagePart,
-    PartType, parsers::MessageStream,
+    Addr, ContentType, GetHeader, Header, HeaderName, HeaderValue, Message, MessageParser,
+    MessagePart, PartType, decoders::charsets::map::charset_decoder, parsers::MessageStream,
 };
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +80,9 @@ impl Stream for Mime {
 
 fn strip_bom(message: &mut Message<'_>) {
     for part in &mut message.parts {
+        if decoder_strips_bom(part) {
+            continue;
+        }
         match &mut part.body {
             PartType::Message(nested) => strip_bom(nested),
             PartType::Text(text) | PartType::Html(text) if text.starts_with('\u{feff}') => {
@@ -92,6 +95,15 @@ fn strip_bom(message: &mut Message<'_>) {
             _ => {}
         }
     }
+}
+
+// A charset decoder that already consumed a byte-order mark, as plain
+// UTF-16's does, leaves any further U+FEFF as text, which Node keeps too.
+fn decoder_strips_bom(part: &MessagePart<'_>) -> bool {
+    content(part, HeaderName::ContentType)
+        .and_then(|value| value.attribute("charset"))
+        .and_then(|charset| charset_decoder(charset.as_bytes()))
+        .is_some_and(|decode| decode(&[0xff, 0xfe, b'A', 0]) == "A")
 }
 
 fn json(out: &mut Vec<u8>, value: &impl Serialize) -> Result<(), StreamError> {
@@ -108,11 +120,13 @@ fn header<'m, 'raw>(
         .map(|header| &header.value)
 }
 
+// The parser decides a part's type and disposition from the last field of a
+// name, so the projection reads that same field.
 fn content<'m, 'raw>(
     part: &'m MessagePart<'raw>,
     name: HeaderName<'_>,
 ) -> Option<&'m ContentType<'raw>> {
-    header(&part.headers, name)?.as_content_type()
+    part.headers.header_value(&name)?.as_content_type()
 }
 
 fn media_type(content: &ContentType<'_>) -> String {

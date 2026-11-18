@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { renderMime } from './mime.ts'
+import { parseAttachments, renderMime } from './mime.ts'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -18,4 +18,39 @@ test('the default view preserves Node whitespace and size formatting', () => {
   const result = decoder.decode(renderMime(raw, 'read'))
   expect(result).toContain('[1] text/plain (1.13 KiB)')
   expect(result.endsWith('a'.repeat(1149) + '\n')).toBe(true)
+})
+
+interface Projection {
+  parts: { headers: { name: unknown }[]; body: unknown }[]
+}
+
+test('a decoder that consumed a UTF-16 BOM keeps a second one, like Node', () => {
+  const raw = encoder.encode(
+    'Content-Type: text/plain; charset=UTF-16\r\nContent-Transfer-Encoding: base64\r\n\r\n//7//kEA\r\n',
+  )
+  const result = JSON.parse(decoder.decode(renderMime(raw, 'json'))) as Projection
+  expect(result.parts[0]?.body).toEqual({ Text: '﻿A' })
+})
+
+test('header names follow the reference parser, known names included', () => {
+  const raw = encoder.encode(
+    'DKIM-Signature: v=1; d=example.com\r\nAuthentication-Results: mx.example.com; dkim=pass\r\nX-Custom: 1\r\n' +
+      headers +
+      'body',
+  )
+  const result = JSON.parse(decoder.decode(renderMime(raw, 'json'))) as Projection
+  expect(result.parts[0]?.headers.slice(0, 3).map((header) => header.name)).toEqual([
+    'dkim_signature',
+    'authentication_results',
+    { other: 'X-Custom' },
+  ])
+})
+
+test('an attachment reports the Content-Type field the parser decoded', () => {
+  const raw = encoder.encode(
+    'Content-Type: multipart/mixed; boundary="b"\r\n\r\n--b\r\n' +
+      'Content-Type: text/plain\r\nContent-Type: application/octet-stream\r\n' +
+      'Content-Disposition: attachment; filename=a.bin\r\n\r\nxyz\r\n--b--\r\n',
+  )
+  expect(parseAttachments(raw, false).map((row) => row.mime)).toEqual(['application/octet-stream'])
 })

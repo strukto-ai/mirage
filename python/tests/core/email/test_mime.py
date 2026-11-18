@@ -66,3 +66,30 @@ def test_an_attached_message_keeps_its_bytes_on_every_path():
     for raw in (multipart, encoded):
         (attachment,) = parse_attachments(raw, payloads=True)
         assert attachment.payload == inner
+
+
+def test_header_names_follow_the_reference_parser():
+    raw = (
+        b"DKIM-Signature: v=1; d=example.com\r\n"
+        b"Authentication-Results: mx.example.com; dkim=pass\r\n"
+        b"X-Custom: 1\r\n" + PLAIN
+    )
+    part = json.loads(render_mime(raw, "json"))["parts"][0]
+    names = [header["name"] for header in part["headers"][:3]]
+    assert names == [
+        "dkim_signature",
+        "authentication_results",
+        {"other": "X-Custom"},
+    ]
+
+
+def test_an_attachment_reports_the_content_type_the_parser_decoded():
+    raw = (
+        b'Content-Type: multipart/mixed; boundary="b"\r\n\r\n--b\r\n'
+        b"Content-Type: text/plain\r\n"
+        b"Content-Type: application/octet-stream\r\n"
+        b"Content-Disposition: attachment; filename=a.bin\r\n\r\n"
+        b"xyz\r\n--b--\r\n"
+    )
+    (attachment,) = parse_attachments(raw, payloads=False)
+    assert attachment.mime == "application/octet-stream"

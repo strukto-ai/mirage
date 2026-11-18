@@ -139,7 +139,8 @@ export async function attachmentDownload(
     remaining.delete(entry.id)
     const name = safeName(entry.filename ?? `attachment-${entry.id}`)
     const path = await uniquePath(ctx.vfs, directory, name)
-    await ctx.vfs.write(path, entry.payload)
+    // A copy, so a store that keeps the bytes does not keep the whole message.
+    await ctx.vfs.write(path, entry.payload.slice())
     written.push(entry)
     writtenPaths.push(path.virtual)
   }
