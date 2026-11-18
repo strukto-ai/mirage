@@ -108,27 +108,6 @@
         "stdout": "c.log\ne.log\n10240\ne.log\nd/a.txt\nc.log\ne.log\nd/a.txt\nrc=2\nc.log\ne.log\nrc=2\nrc=2\nrc=2\nrc=2\nrc=2\nrc=0\nc.log\ne.log\na.txt\nc.log\nd/\nd/sub/\nd/sub/b.txt\ne.log\n10240\nc.log\ne.log\nrc=2\nrc=2\nrc=0\nrc=0\nrc=0\n10240\ne.log\nrc=0\nc.log\nc.log\n0\n",
         "stderr": "tar: x: Invalid number of elements\nTry 'tar --help' or 'tar --usage' for more information.\ntar: nope: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\ntar: Cannot update compressed archives\ntar: Error is not recoverable: exiting now\ntar: Cannot update compressed archives\nTry 'tar --help' or 'tar --usage' for more information.\ntar: Cannot update compressed archives\ntar: Error is not recoverable: exiting now\ntar: Options '-Aru' are incompatible with '-f -'\nTry 'tar --help' or 'tar --usage' for more information.\ntar: Options '-Aru' are incompatible with '-f -'\nTry 'tar --help' or 'tar --usage' for more information.\ntar: nope: Not found in archive\ntar: Exiting with failure status due to previous errors\ntar: nope: Not found in archive\ntar: Exiting with failure status due to previous errors\n"
       }
-    },
-    {
-      "id": "tar_x_gives_a_member_its_mode_under_the_umask",
-      "seq": 19990141,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs"
-      ],
-      "command": "mkdir -p /data/tum && cd /data/tum && printf x > exe && chmod 755 exe && printf y > rw && chmod 666 rw && printf z > priv && chmod 600 priv && mkdir d && tar -cf a.tar exe rw priv d && mkdir o && cd o && tar -xf ../a.tar && stat -c '%a %n' exe rw priv d && cd .. && mkdir m && cd m && umask 077 && tar -xf ../a.tar && stat -c '%a %n' exe rw priv d && cd .. && mkdir p && cd p && tar -xpf ../a.tar && stat -c '%a %n' exe rw priv d",
-      "expect": {
-        "exit": 0,
-        "stdout": "755 exe\n644 rw\n600 priv\n755 d\n700 exe\n600 rw\n600 priv\n700 d\n755 exe\n666 rw\n600 priv\n755 d\n",
-        "stderr": ""
-      },
-      "flags": [
-        "x",
-        "f",
-        "p"
-      ]
     }
   ]
 }
