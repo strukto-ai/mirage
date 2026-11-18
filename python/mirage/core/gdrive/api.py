@@ -18,7 +18,12 @@ from typing import Any, Protocol
 
 from mirage.core.google import drive
 from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import ITEM_FIELDS
+from mirage.core.google.drive import (
+    ITEM_FIELDS,
+    DriveChange,
+    DriveFile,
+    SharedDrive,
+)
 from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 
@@ -36,23 +41,23 @@ class DriveApi(Protocol):
         folder_id: str,
         drive_id: str | None = None,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[DriveFile]: ...
 
     async def list_children(
         self,
         folder_ids: list[str],
         drive_id: str | None,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[DriveFile]: ...
 
-    async def list_shared_drives(self) -> list[dict[str, Any]]: ...
+    async def list_shared_drives(self) -> list[SharedDrive]: ...
 
     async def list_all_files(
         self,
         mime_type: str | None = None,
         modified_after: str | None = None,
         modified_before: str | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]: ...
+    ) -> tuple[list[DriveFile], bool]: ...
 
     async def search_files(
         self, text: str, parent_ids: list[str], mime_type: str | None = None
@@ -102,7 +107,7 @@ class DriveApi(Protocol):
 
     async def list_changes(
         self, page_token: str
-    ) -> tuple[list[dict[str, Any]], str]: ...
+    ) -> tuple[list[DriveChange], str]: ...
 
     async def capture_file_metadata(
         self, file_id: str
@@ -132,7 +137,7 @@ class DriveClient:
         folder_id: str,
         drive_id: str | None = None,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[DriveFile]:
         return await drive.list_files(
             self.token_manager, folder_id, drive_id=drive_id, limit=limit
         )
@@ -142,12 +147,12 @@ class DriveClient:
         folder_ids: list[str],
         drive_id: str | None,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[DriveFile]:
         return await drive.list_children(
             self.token_manager, folder_ids, drive_id, limit=limit
         )
 
-    async def list_shared_drives(self) -> list[dict[str, Any]]:
+    async def list_shared_drives(self) -> list[SharedDrive]:
         return await drive.list_shared_drives(self.token_manager)
 
     async def list_all_files(
@@ -155,7 +160,7 @@ class DriveClient:
         mime_type: str | None = None,
         modified_after: str | None = None,
         modified_before: str | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
+    ) -> tuple[list[DriveFile], bool]:
         return await drive.list_all_files(
             self.token_manager,
             mime_type=mime_type,
@@ -235,7 +240,7 @@ class DriveClient:
 
     async def list_changes(
         self, page_token: str
-    ) -> tuple[list[dict[str, Any]], str]:
+    ) -> tuple[list[DriveChange], str]:
         return await drive.list_changes(self.token_manager, page_token)
 
     async def capture_file_metadata(

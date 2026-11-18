@@ -102,3 +102,26 @@ export const VFSStateKey = Object.freeze({
   DIRS: 'dirs',
   MODIFIED: 'modified',
 } as const)
+
+export const FingerprintKey = Object.freeze({
+  PATH: 'path',
+  MOUNT_PREFIX: 'mount_prefix',
+  FINGERPRINT: 'fingerprint',
+  REVISION: 'revision',
+} as const)
+
+export const CLIKey = Object.freeze({
+  NAME: 'name',
+  SPEC: 'spec',
+  CONFIG: 'config',
+  SCRIPT: 'script',
+  MACHINE: 'machine',
+  RUNTIME: 'runtime',
+  MCP: 'mcp',
+} as const)
+
+export const ScriptKey = Object.freeze({
+  SOURCE: 'source',
+  LANGUAGE: 'language',
+  MODULE: 'module',
+} as const)

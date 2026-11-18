@@ -117,7 +117,7 @@ function openStdin(
   return job.stdin
 }
 
-export function registerLinesRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

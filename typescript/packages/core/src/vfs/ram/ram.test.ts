@@ -332,6 +332,12 @@ describe('RAMVFS capacity', () => {
     expect((await vfs.capacity()).used).toBe(3)
   })
 
+  it.each([{}, { dirs: [] }, { dirs: ['/child'] }])('restores the mount root from %o', (state) => {
+    const vfs = new RAMVFS()
+    vfs.loadState({ type: 'ram', files: {}, ...state })
+    expect(vfs.getState().dirs).toContain('/')
+  })
+
   it('saves its capacity in its state only when capped', () => {
     expect(new RAMVFS().getState().config).toBeUndefined()
     expect(new RAMVFS({ capacity: 10 }).getState().config).toEqual({ capacity: 10 })

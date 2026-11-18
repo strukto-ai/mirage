@@ -23,7 +23,7 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import * as client from './client.ts'
@@ -37,7 +37,7 @@ function names(listed: readonly FileStat[] | DirListing): string[] {
 const STUB_DRIVER = stubMongoDriver()
 
 function makeAccessor(): MongoDBAccessor {
-  return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+  return new MongoDBAccessor(STUB_DRIVER, MongoDBConfig.parse({ uri: 'mongodb://h' }))
 }
 
 function ps(p: string): PathSpec {

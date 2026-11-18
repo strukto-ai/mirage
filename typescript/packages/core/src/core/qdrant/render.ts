@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { compactJsonText, valueText } from '../render/json.ts'
 import { fieldValue, withoutField } from './payload.ts'
 import type { QdrantRow } from './types.ts'
@@ -22,7 +22,7 @@ const SKIP_KEYS = new Set(['_score', '_rowid', '_distance'])
 
 export function renderJson(
   row: QdrantRow,
-  config: ReturnType<typeof resolveQdrantConfig>,
+  config: ReturnType<typeof QdrantConfig.parse>,
 ): Uint8Array {
   let data = Object.fromEntries(Object.entries(row).filter(([key]) => !SKIP_KEYS.has(key)))
   data = withoutField(data, config.vectorField)
@@ -32,7 +32,7 @@ export function renderJson(
 
 export function renderText(
   row: QdrantRow,
-  config: ReturnType<typeof resolveQdrantConfig>,
+  config: ReturnType<typeof QdrantConfig.parse>,
 ): Uint8Array {
   const value = fieldValue(row, config.textField)
   if (value === undefined || value === null) return new Uint8Array()

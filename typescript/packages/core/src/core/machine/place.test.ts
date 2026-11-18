@@ -15,12 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { bound, holding, spec } from '../../../tests/fixtures/machine_files.ts'
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
 import { MachineName } from '../../execution/types.ts'
 import { holder, holders, lands, stage } from './place.ts'
 
 function runningOn<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  return runWithCaller({ ...currentCaller(), machine: new MachineName('scripted', name) }, fn)
+  return bindCaller({ ...currentCaller(), machine: new MachineName('scripted', name) }, fn)
 }
 
 describe('placement', () => {

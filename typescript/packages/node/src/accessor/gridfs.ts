@@ -18,13 +18,6 @@ import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import type { GridFSConfig } from '../vfs/gridfs/config.ts'
 
-interface MongoModule {
-  MongoClient: new (
-    uri: string,
-    options: { connectTimeoutMS: number; socketTimeoutMS: number },
-  ) => MongoClient
-}
-
 export class GridFSAccessor extends Accessor {
   readonly config: GridFSConfig
   private clientPromise: Promise<MongoClient> | null = null
@@ -45,7 +38,7 @@ export class GridFSAccessor extends Accessor {
   }
 
   private async _connect(): Promise<MongoClient> {
-    const mod = await loadOptionalPeer(() => import('mongodb') as unknown as Promise<MongoModule>, {
+    const mod = await loadOptionalPeer(() => import('mongodb'), {
       feature: 'GridFSVFS',
       packageName: 'mongodb',
     })

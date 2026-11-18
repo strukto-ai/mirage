@@ -18,7 +18,7 @@ import { memoryLimit } from '../../../config.ts'
 import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { Context } from '../../../../commands/config.ts'
-import { currentCaller, runWithCaller } from '../../../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../../../context/session_context.ts'
 import type { RunResult } from '../../../types.ts'
 import type { RuntimeFiles } from '../../../files.ts'
 import { READ } from '../../../handles/mode.ts'
@@ -297,7 +297,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = this.answer(message, () =>
-            runWithCaller(caller, () =>
+            bindCaller(caller, () =>
               this.operation(message, live, processes, handles, stdio, stop),
             ),
           )

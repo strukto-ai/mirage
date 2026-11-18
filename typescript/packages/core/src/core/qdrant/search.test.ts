@@ -19,7 +19,7 @@ import { expect, it, vi } from 'vitest'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { onMount, vfsOver } from '../../test-utils.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
 
@@ -29,7 +29,7 @@ function accessorOf(config: QdrantConfig, points: QdrantPoint[]) {
   const query = vi.fn((_collection: string, _opts: { limit: number }) =>
     Promise.resolve({ points }),
   )
-  const accessor = new QdrantAccessor(resolveQdrantConfig({ cloudInference: true, ...config }))
+  const accessor = new QdrantAccessor(QdrantConfig.parse({ cloudInference: true, ...config }))
   vi.spyOn(accessor, 'client').mockResolvedValue({ query } as unknown as QdrantClient)
   return { accessor, query }
 }

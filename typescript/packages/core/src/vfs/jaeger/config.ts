@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import type { ConfigOf } from '../secrets.ts'
 import { z } from '../secrets.ts'
 
@@ -36,7 +36,7 @@ export const JaegerConfig = z.object({
     .string()
     .optional()
     .describe('Upper bound of trace listings, an ISO 8601 timestamp. Unset means now.'),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
 })
 
 export type JaegerConfig = ConfigOf<typeof JaegerConfig>

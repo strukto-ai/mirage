@@ -18,6 +18,7 @@ from collections import OrderedDict
 from mirage.cache.file.entry import CacheEntry, Holds
 from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
+from mirage.cache.file.utils import token_or_none
 from mirage.cache.lock import KeyLockMixin
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -105,7 +106,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 entry = CacheEntry(
                     size=len(data),
                     cached_at=self._seconds(),
-                    fingerprint=fingerprint or None,
+                    fingerprint=token_or_none(fingerprint),
                     ttl=ttl,
                 )
                 self._entries[key] = entry

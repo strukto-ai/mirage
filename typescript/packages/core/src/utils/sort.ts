@@ -63,10 +63,24 @@ export function compareComponents(a: string, b: string): number {
  * Python's `json.dumps(value, sort_keys=True)`, so an encoded checkpoint does
  * not depend on the order its maps were filled in.
  */
-export function sortedJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    item !== null && typeof item === 'object' && !Array.isArray(item)
-      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => compareCodePoints(a, b)))
-      : item,
+export function sortedJson(value: unknown, indent?: number): string {
+  const ordered = new WeakMap<object, object>()
+  return JSON.stringify(
+    value,
+    (_key, item: unknown) => {
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) return item
+      const cached = ordered.get(item)
+      if (cached !== undefined) return cached
+      // JSON.stringify visits proxy keys in the supplied order, including integer-like keys.
+      const view = new Proxy(item, {
+        ownKeys: (target) => [
+          ...Object.getOwnPropertyNames(target).sort(compareCodePoints),
+          ...Object.getOwnPropertySymbols(target),
+        ],
+      })
+      ordered.set(item, view)
+      return view
+    },
+    indent,
   )
 }

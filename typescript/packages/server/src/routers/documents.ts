@@ -30,7 +30,7 @@ interface DocumentPath {
   path: string
 }
 
-export function registerDocumentsRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

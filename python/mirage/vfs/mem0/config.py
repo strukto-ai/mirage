@@ -55,6 +55,8 @@ class Mem0Config(TimeoutConfig):
                 "Mem0Config requires exactly one of "
                 f"user_id, agent_id, run_id; got {present or 'none'}"
             )
+        if not getattr(self, present[0]).strip():
+            raise ValueError("Mem0 scope id cannot be empty")
         return self
 
     @property

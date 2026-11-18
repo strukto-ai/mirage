@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
+from mirage.core.slack.types import SlackUser
 from mirage.utils.naming import file_id_name, make_id_name
 
 
-def channel_dirname(ch: dict[str, Any]) -> str:
+def channel_dirname(ch: Mapping[str, Any]) -> str:
     """Compute the VFS dirname for a channel, of the form `name__C123`."""
     return make_id_name(
         ch.get("name", ch.get("id", "unknown")),
@@ -26,7 +28,7 @@ def channel_dirname(ch: dict[str, Any]) -> str:
     )
 
 
-def dm_dirname(dm: dict[str, Any], user_map: dict[str, str]) -> str:
+def dm_dirname(dm: Mapping[str, Any], user_map: dict[str, str]) -> str:
     """Compute the VFS dirname for a DM, of the form `username__D123`.
 
     Args:
@@ -41,7 +43,7 @@ def dm_dirname(dm: dict[str, Any], user_map: dict[str, str]) -> str:
     return make_id_name(display, dm["id"], path_safe=True)
 
 
-def user_filename(u: dict[str, Any]) -> str:
+def user_filename(u: SlackUser) -> str:
     """Compute the VFS filename for a user, of the form `name__U123.json`."""
     name = u.get("name", u.get("id", "unknown"))
     return make_id_name(name, u["id"], path_safe=True, suffix=".json")

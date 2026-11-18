@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  MSGRAPH_CONFIG_SHAPE,
-  optionalText,
-  resolveMsGraphConfig,
-  type MsGraphConfig,
-} from '../core/msgraph/config.ts'
+import { MsGraphConfig, optionalText, resolveMsGraphConfig } from '../core/msgraph/config.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { Accessor } from './base.ts'
 
@@ -30,7 +25,7 @@ export interface SharePointConfig extends MsGraphConfig {
 }
 
 export const SharePointConfig = z.object({
-  ...MSGRAPH_CONFIG_SHAPE,
+  ...MsGraphConfig.shape,
   siteFilter: z.string().optional().meta({
     description:
       "Search term passed to Graph's `/sites?search=` to choose which sites the mount lists.",
@@ -50,6 +45,7 @@ export const SharePointConfig = z.object({
     ),
   keyPrefix: z
     .string()
+    .refine((value) => !value.split('/').includes('..'), "keyPrefix must not contain '..' segments")
     .optional()
     .describe(
       'Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected.',

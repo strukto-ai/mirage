@@ -12,30 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
 import sys
+from unittest.mock import patch
 
-from mirage.machine.ssh import sdk
+import pytest
 
-NAMES = ("connect",)
-
-
-def test_the_extra_resolves_as_a_unit():
-    """Every name comes from the SDK, or every name is None; never a mix."""
-    present = [getattr(sdk, name) is not None for name in NAMES]
-    assert all(present) or not any(present)
+from mirage.machine.ssh import SSHMachine
 
 
-def test_an_absent_extra_reads_as_none():
-    """CI installs every extra, so this is the only run of the except arm."""
-    saved = sys.modules.get("asyncssh")
-    sys.modules["asyncssh"] = None
-    try:
-        module = importlib.reload(sdk)
-        assert all(getattr(module, name) is None for name in NAMES)
-    finally:
-        if saved is None:
-            sys.modules.pop("asyncssh", None)
-        else:
-            sys.modules["asyncssh"] = saved
-        importlib.reload(sdk)
+def test_the_sdk_loads_on_first_use(monkeypatch):
+    monkeypatch.setitem(sys.modules, "asyncssh", None)
+    machine = SSHMachine("box", config={"host": "box"})
+    with pytest.raises(ImportError, match=r"mirage-ai\[ssh\]"):
+        _ = machine._sdk
+
+
+def test_a_broken_dependency_keeps_its_import_error():
+    machine = SSHMachine("box", config={"host": "box"})
+    failure = ModuleNotFoundError(
+        "missing SDK dependency", name="upstream_dep"
+    )
+    with patch("mirage.machine.handle.import_module", side_effect=failure):
+        with pytest.raises(ModuleNotFoundError) as caught:
+            _ = machine._sdk
+    assert caught.value is failure

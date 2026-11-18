@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import { FIELD_NORMALIZERS, secretSchema, secretStr, z } from '../secrets.ts'
 
 export interface BoxConfig {
@@ -43,7 +43,7 @@ export interface BoxConfig {
 
 export const BoxConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     endpoint: z
       .string()
       .optional()

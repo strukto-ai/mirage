@@ -38,6 +38,15 @@ def normalize(raw: str | None) -> str:
     return v if v.endswith("/") else v + "/"
 
 
+def normalize_key_prefix(raw: str | None) -> str | None:
+    """Normalize a configured prefix, leaving a mount at the root unprefixed.
+
+    Args:
+        raw (str | None): the prefix from the mount config.
+    """
+    return normalize(raw) or None
+
+
 def apply(prefix: str, path: str) -> str:
     """Prepend a normalized prefix to a virtual path.
 

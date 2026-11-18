@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -28,13 +28,43 @@ from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
 
 
-def rule_to_dict(rule: CommandRule) -> dict[str, Any]:
+class RuleJSON(TypedDict):
+    reason: str
+    commands: NotRequired[list[str]]
+    paths: NotRequired[list[str]]
+    mount: NotRequired[str]
+
+
+class ScriptJSON(TypedDict):
+    profile: str
+    language: str
+    source: str
+    runtime: str
+    config: NotRequired[dict[str, Any]]
+    env: NotRequired[dict[str, str | dict[str, Any]]]
+
+
+class DecisionJSON(TypedDict):
+    id: str
+    session_id: str
+    command: str
+    argv: list[str]
+    cwd: str
+    paths: list[str]
+    reason: str
+    rule: RuleJSON
+    outcome: str | None
+    scope: str
+    note: str
+
+
+def rule_to_dict(rule: CommandRule) -> RuleJSON:
     """One admission rule as the session record stores it.
 
     Args:
         rule (CommandRule): the rule.
     """
-    data: dict[str, Any] = {
+    data: RuleJSON = {
         "reason": rule.reason,
         "commands": list(rule.commands),
         "paths": list(rule.paths),
@@ -85,7 +115,7 @@ def commands_from_dict(data: Mapping[str, Any]) -> AdmissionRules:
     )
 
 
-def script_to_dict(entry: ProfileScript) -> dict[str, Any]:
+def script_to_dict(entry: ProfileScript) -> ScriptJSON:
     """A session's profile script as the record stores it.
 
     Args:
@@ -157,7 +187,7 @@ def scripts_from_dict(
     }
 
 
-def decision_to_dict(record: Decision) -> dict[str, Any]:
+def decision_to_dict(record: Decision) -> DecisionJSON:
     """A ledger record as the session record stores it.
 
     Args:

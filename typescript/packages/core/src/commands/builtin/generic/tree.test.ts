@@ -17,7 +17,7 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { setMountGate } from '../../../context/session_context.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -247,7 +247,7 @@ describe('treeGeneric across a nested mount', () => {
   // summaries.
   it('draws the mounted entries and none of the covered ones', async () => {
     // A run on the parent mount, so the nested mount is a boundary.
-    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+    const [out] = (await setMountGate('/', MountMode.WRITE, () =>
       treeGeneric([spec('/base')], crossOpts(), backendReaddir, backendStat),
     )) as [Uint8Array, unknown]
     expect(DEC.decode(out)).toBe(
@@ -282,7 +282,7 @@ describe('treeGeneric across a nested mount', () => {
       ...ctx({ p: true, noreport: true }),
       vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { ledger: false }),
     } as unknown as Context
-    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+    const [out] = (await setMountGate('/', MountMode.WRITE, () =>
       treeGeneric([spec('/base')], withRow, backendReaddir, backendStat),
     )) as [Uint8Array, unknown]
     const row =
@@ -294,7 +294,7 @@ describe('treeGeneric across a nested mount', () => {
 
   it('stops at the mount point under -L 1', async () => {
     const withDepth = { ...crossOpts(), flags: { L: '1' } } as unknown as Context
-    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+    const [out] = (await setMountGate('/', MountMode.WRITE, () =>
       treeGeneric([spec('/base')], withDepth, backendReaddir, backendStat),
     )) as [Uint8Array, unknown]
     expect(DEC.decode(out)).toBe(

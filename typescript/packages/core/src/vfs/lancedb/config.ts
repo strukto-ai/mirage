@@ -13,94 +13,87 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
-import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
-import type { ConfigOf } from '../secrets.ts'
+import { defaultRequestTimeout } from '../../core/api/config.ts'
 import { secretStr } from '../secrets.ts'
 
-export const LanceDBConfig = z.object({
-  ...timeoutShape,
-  uri: z
-    .string()
-    .describe(
-      'Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise.',
-    ),
-  apiKey: secretStr().optional().describe('API key for LanceDB Cloud or Enterprise.'),
-  region: z.string().optional().meta({
-    description: 'LanceDB Cloud region of a `db://` database; ignored for other URIs.',
-    default: 'us-east-1',
-  }),
-  hostOverride: z
-    .string()
-    .optional()
-    .describe(
-      'Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs.',
-    ),
-  storageOptions: z
-    .record(z.string(), z.string())
-    .optional()
-    .describe(
-      "Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI.",
-    ),
-  table: z
-    .string()
-    .optional()
-    .describe('Table the mount root shows; unset lists every table as a top-level folder.'),
-  groupBy: z.array(z.string()).optional().meta({
-    description:
-      "Columns that become folder levels, one per column in order; unset puts every row's files directly under the table.",
-    default: [],
-  }),
-  idColumn: z.string().optional().meta({
-    description: "Column whose value names each row's files (`<id>.md`, `<id>.<blobExt>`).",
-    default: 'id',
-  }),
-  titleColumn: z
-    .string()
-    .optional()
-    .describe(
-      "Column whose value heads a row's card as a `# ` title; unset leaves the card without one.",
-    ),
-  blobColumn: z
-    .string()
-    .optional()
-    .describe(
-      'Column of raw or base64 bytes served as `<id>.<blobExt>` and left out of the card; unset adds no blob file.',
-    ),
-  blobExt: z
-    .string()
-    .optional()
-    .meta({ description: 'File extension of the blob file, without the dot.', default: 'bin' }),
-  vectorColumn: z.string().optional().describe('Embedding column left out of cards and listings.'),
-  searchLimit: z
-    .number()
-    .optional()
-    .meta({ description: 'Results `search` returns when `--top-k` is not given.', default: 10 }),
-  maxRows: z.number().optional().meta({
-    description:
-      'Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry.',
-    default: 1000,
-  }),
-})
+export const LanceDBConfig = z
+  .object({
+    timeout: defaultRequestTimeout,
+    uri: z
+      .string()
+      .describe(
+        'Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise.',
+      ),
+    apiKey: secretStr()
+      .nullable()
+      .default(null)
+      .describe('API key for LanceDB Cloud or Enterprise.'),
+    region: z.string().default('us-east-1').meta({
+      description: 'LanceDB Cloud region of a `db://` database; ignored for other URIs.',
+      default: 'us-east-1',
+    }),
+    hostOverride: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe(
+        'Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs.',
+      ),
+    storageOptions: z
+      .record(z.string(), z.string())
+      .nullable()
+      .default(null)
+      .describe(
+        "Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI.",
+      ),
+    table: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('Table the mount root shows; unset lists every table as a top-level folder.'),
+    groupBy: z.array(z.string()).default([]).meta({
+      description:
+        "Columns that become folder levels, one per column in order; unset puts every row's files directly under the table.",
+      default: [],
+    }),
+    idColumn: z.string().default('id').meta({
+      description: "Column whose value names each row's files (`<id>.md`, `<id>.<blobExt>`).",
+      default: 'id',
+    }),
+    titleColumn: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe(
+        "Column whose value heads a row's card as a `# ` title; unset leaves the card without one.",
+      ),
+    blobColumn: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe(
+        'Column of raw or base64 bytes served as `<id>.<blobExt>` and left out of the card; unset adds no blob file.',
+      ),
+    blobExt: z
+      .string()
+      .default('bin')
+      .meta({ description: 'File extension of the blob file, without the dot.', default: 'bin' }),
+    vectorColumn: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('Embedding column left out of cards and listings.'),
+    searchLimit: z
+      .number()
+      .int()
+      .default(10)
+      .meta({ description: 'Results `search` returns when `--top-k` is not given.', default: 10 }),
+    maxRows: z.number().int().default(1000).meta({
+      description:
+        'Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry.',
+      default: 1000,
+    }),
+  })
+  .strict()
 
-export type LanceDBConfig = ConfigOf<typeof LanceDBConfig>
-
-export function resolveLanceDBConfig(config: LanceDBConfig) {
-  return {
-    timeout: config.timeout ?? DEFAULT_TIMEOUT,
-    uri: config.uri,
-    apiKey: config.apiKey ?? null,
-    region: config.region ?? 'us-east-1',
-    hostOverride: config.hostOverride ?? null,
-    storageOptions: config.storageOptions ?? null,
-    table: config.table ?? null,
-    groupBy: config.groupBy ?? [],
-    idColumn: config.idColumn ?? 'id',
-    titleColumn: config.titleColumn ?? null,
-    blobColumn: config.blobColumn ?? null,
-    blobExt: config.blobExt ?? 'bin',
-    vectorColumn: config.vectorColumn ?? null,
-    searchLimit: config.searchLimit ?? 10,
-    maxRows: config.maxRows ?? 1000,
-  }
-}
+export type LanceDBConfig = z.input<typeof LanceDBConfig>

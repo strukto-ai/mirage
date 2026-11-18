@@ -58,6 +58,7 @@ from mirage.types import (
     PathSpec,
     ReaddirFn,
     ReadStreamFn,
+    SetAttrFields,
     StatFn,
 )
 from mirage.utils.glob_walk import ResolveGlobFn, make_resolve_glob
@@ -151,7 +152,7 @@ class CommandFiles:
     dir_copy: Callable[[PathSpec, PathSpec], Awaitable[None]]
     truncate: Callable[..., Awaitable[None]]
     set_attrs: Callable[
-        [PathSpec, Mapping[str, Any]], Awaitable[dict[str, int | str]]
+        [PathSpec, SetAttrFields], Awaitable[dict[str, int | str]]
     ]
     first_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
@@ -965,7 +966,7 @@ def command_files(
         await call("truncate", path, length=length, no_create=no_create)
 
     async def set_attrs(
-        path: PathSpec, fields: Mapping[str, Any]
+        path: PathSpec, fields: SetAttrFields
     ) -> dict[str, int | str]:
         return cast(
             dict[str, int | str], await call("setattr", path, **fields)

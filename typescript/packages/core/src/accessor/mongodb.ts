@@ -13,19 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDriver } from '../core/mongodb/_driver.ts'
-import type { resolveMongoDBConfig } from '../vfs/mongodb/config.ts'
+import { type MongoDBConfig } from '../vfs/mongodb/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
 
 export class MongoDBAccessor extends Accessor {
   readonly driver: MongoDriver
-  readonly config: ReturnType<typeof resolveMongoDBConfig>
+  readonly config: ReturnType<typeof MongoDBConfig.parse>
   /** The database and collection names a listing or an existence check reads. */
   readonly listings: ResponseCache<string, string[]>
 
   constructor(
     driver: MongoDriver,
-    config: ReturnType<typeof resolveMongoDBConfig>,
+    config: ReturnType<typeof MongoDBConfig.parse>,
     options: { listingCacheTtlMs?: number } = {},
   ) {
     super()

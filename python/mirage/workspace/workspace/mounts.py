@@ -25,6 +25,7 @@ from mirage.execution.machine.table import MachineTable
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
+    DEFAULT_READ_SPEC,
     MountMode,
     ReadSpec,
     VFSName,
@@ -323,7 +324,7 @@ def install_mounts(
                 "/",
                 RAMVFS(),
                 default_mode,
-                ReadSpec(),
+                DEFAULT_READ_SPEC,
                 write=WritePolicy.UNCONDITIONAL,
             )
         )

@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { write } from './write.ts'
 
@@ -31,7 +31,7 @@ describe('OneDrive write', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'item' })))
     vi.stubGlobal('fetch', fetchMock)
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       write(accessor, SPEC, new TextEncoder().encode('hi')),
     )
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('PUT')

@@ -6,6 +6,7 @@ from mirage.core.generic.find_eval import (
     emit_start_path,
     evaluate,
     keep,
+    printf_kind,
     tree_has_action,
     tree_has_prune,
     tree_has_time,
@@ -432,3 +433,8 @@ def test_unrespell_raw_round_trip():
     assert unrespell_raw("./sub/x", "/data", ".") == "/data/sub/x"
     assert unrespell_raw(".", "/data", ".") == "/data"
     assert unrespell_raw("/data/x", "/data", "/data") == "/data/x"
+
+
+def test_find_kind_for_special_files_reported_by_a_backend():
+    for kind, letter in [(FileType.BLOCK_DEVICE, "b"), (FileType.SOCKET, "s")]:
+        assert printf_kind(FileStat(name="special", type=kind)) == letter

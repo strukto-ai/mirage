@@ -34,7 +34,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SSHMachine } from './handle.ts'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
-import type { Ssh2Sdk } from './sdk.ts'
+import type { SshSdk } from './sdk.ts'
 import { machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 vi.mock('node:os', async (original) => ({
@@ -105,8 +105,8 @@ class SdkFakeRuntime extends SSHMachine {
   protected override ssh(): Promise<RunResult> {
     return Promise.resolve({ exitCode: 0 })
   }
-  protected override loadSdk(): Promise<Ssh2Sdk> {
-    return Promise.resolve({ Client: FakeClient } as unknown as Ssh2Sdk)
+  protected override loadSdk(): Promise<SshSdk> {
+    return Promise.resolve({ Client: FakeClient } as unknown as SshSdk)
   }
 }
 

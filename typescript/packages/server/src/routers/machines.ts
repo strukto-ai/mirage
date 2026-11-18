@@ -58,7 +58,7 @@ function toResponse(record: Machine, ws: Workspace): MachineResponse {
   }
 }
 
-export function registerMachinesRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

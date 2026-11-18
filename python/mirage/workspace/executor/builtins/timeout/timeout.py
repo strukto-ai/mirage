@@ -40,7 +40,9 @@ from mirage.context import (
     set_current_evaluation,
     set_program_invocation,
 )
-from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.config import (
+    DEFAULT_PROCESS_PERMISSIONS,
+)
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import ProcessState
@@ -684,7 +686,7 @@ def _own_job(
         None
         if record.parent is None
         else processes.target(
-            record.parent, record.session_id, ProcessPermissions()
+            record.parent, record.session_id, DEFAULT_PROCESS_PERMISSIONS
         )
     )
     if job is None or not job.background or syntax is None:

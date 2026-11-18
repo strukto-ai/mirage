@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
-import { record, revisionFor, runWithRecording, startOp } from './context.ts'
+import { currentCaller, bindCaller } from '../context/session_context.ts'
+import { record, revisionFor, recordingScope, startOp } from './context.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
 // The browser-runtime branch under node's test runner: the real
@@ -48,12 +48,12 @@ describe('revision pins on the fallback storage', () => {
     const [holdPinned, releasePinned] = gate()
     const [holdNull, releaseNull] = gate()
     let beneathNull: string | null = null
-    const pinned = runWithCaller({ ...currentCaller(), revisions: { map: pins } }, async () => {
+    const pinned = bindCaller({ ...currentCaller(), revisions: { map: pins } }, async () => {
       await holdPinned
       beneathNull = revisionFor('/s3/report.json')
       releaseNull()
     })
-    const unpinned = runWithCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
+    const unpinned = bindCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
       releasePinned()
       await holdNull
     })
@@ -70,10 +70,10 @@ describe('recording on the fallback storage', () => {
     // `record` returned silently. The frame stack keeps the live
     // line's recorder until its own settle.
     const [hold, release] = gate()
-    const first = runWithRecording(async () => {
+    const first = recordingScope(async () => {
       await hold
     })
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       release()
       await first
       record('read', '/x', 'test', 3, startOp())

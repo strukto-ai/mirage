@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres import client
@@ -42,7 +42,32 @@ NUMERIC_TYPES = frozenset(
 )
 
 
-def classify_column(name: str, data_type: str, key_columns: set[str]) -> str:
+ColumnRole = Literal["dimensions", "time_dimensions", "facts"]
+
+
+class ColumnEntry(TypedDict):
+    name: str
+    expr: str
+    data_type: str
+    description: NotRequired[str]
+    is_enum: NotRequired[bool]
+    sample_values: NotRequired[list[str]]
+
+
+class RelationshipColumn(TypedDict):
+    left_column: str
+    right_column: str
+
+
+class Relationship(TypedDict):
+    left_table: str
+    right_table: str
+    relationship_columns: list[RelationshipColumn]
+
+
+def classify_column(
+    name: str, data_type: str, key_columns: set[str]
+) -> ColumnRole:
     """Assign a column its semantic role.
 
     Mirrors the dimension / time_dimension / fact split of the Snowflake
@@ -64,11 +89,11 @@ def classify_column(name: str, data_type: str, key_columns: set[str]) -> str:
 
 
 def build_column_entry(
-    column: dict[str, Any],
+    column: client.ColumnInfo,
     comment: str | None,
-    enum: dict[str, Any] | None,
-    stats: dict[str, Any] | None,
-) -> dict[str, Any]:
+    enum: client.EnumInfo | None,
+    stats: client.ColumnStats | None,
+) -> ColumnEntry:
     """Render one column in the semantic vocabulary.
 
     Empty fields are omitted rather than emitted as null. The whole point
@@ -76,13 +101,13 @@ def build_column_entry(
     metadata should cost nothing.
 
     Args:
-        column (dict[str, Any]): the entry from fetch_columns.
+        column (client.ColumnInfo): the entry from fetch_columns.
         comment (str | None): the column's COMMENT, if any.
-        enum (dict[str, Any] | None): declared enum type and labels, if the
+        enum (client.EnumInfo | None): declared enum type and labels, if the
             column's type is an enum.
-        stats (dict[str, Any] | None): the pg_stats row, if ANALYZE has run.
+        stats (client.ColumnStats | None): the pg_stats row, if ANALYZE has run.
     """
-    entry: dict[str, Any] = {
+    entry: ColumnEntry = {
         "name": column["name"],
         "expr": column["name"],
         "data_type": enum["type"] if enum else column["type"],
@@ -102,16 +127,16 @@ def build_column_entry(
 
 
 def build_relationships(
-    foreign_keys: list[dict[str, Any]], schema: str, name: str
-) -> list[dict[str, Any]]:
+    foreign_keys: list[client.ForeignKey], schema: str, name: str
+) -> list[Relationship]:
     """Render foreign keys as semantic relationships.
 
     Args:
-        foreign_keys (list[dict[str, Any]]): entries from fetch_foreign_keys.
+        foreign_keys (list[client.ForeignKey]): entries from fetch_foreign_keys.
         schema (str): the owning schema.
         name (str): the owning entity.
     """
-    relationships: list[dict[str, Any]] = []
+    relationships: list[Relationship] = []
     for fk in foreign_keys:
         ref = fk["references"]
         relationships.append(
@@ -160,7 +185,7 @@ async def build_entity_semantic_json(
     for fk in fks:
         key_columns.update(fk["columns"])
 
-    buckets: dict[str, list[dict[str, Any]]] = {
+    buckets: dict[str, list[ColumnEntry]] = {
         "dimensions": [],
         "time_dimensions": [],
         "facts": [],

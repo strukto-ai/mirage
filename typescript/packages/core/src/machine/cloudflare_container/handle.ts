@@ -37,7 +37,7 @@ import { abortable, makeAbortError, settledWithin, sleep } from '../../utils/abo
 import { concat } from '../../utils/bytes.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { requireId } from '../config.ts'
-import { CONTAINER_CONFIG_FIELDS, type ContainerConfig } from './config.ts'
+import { ContainerConfig } from './config.ts'
 import {
   BOTH,
   CHECK_POLL_SECONDS,
@@ -119,7 +119,7 @@ async function drain(
  */
 export class ContainerMachine extends MachineHandle<ContainerConfig> implements PipeTransport {
   static override readonly provider = 'cloudflare_container'
-  static override readonly configFields: ConfigFields = CONTAINER_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = ContainerConfig
   readonly [PIPE_TRANSPORT] = true as const
   // Settles once the container the last connect reached has exited.
   private exited: Promise<void> | null = null

@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.machine.daytona import DaytonaMachine, sdk
+from mirage.machine.daytona import DaytonaMachine
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_answer, on
@@ -98,7 +99,13 @@ def fake_client(monkeypatch):
     FakeClient.state = "started"
     FakeClient.changes = []
     FakeClient.pause_refusal = None
-    monkeypatch.setattr(sdk, "AsyncDaytona", FakeClient)
+    module = SimpleNamespace(
+        AsyncDaytona=FakeClient,
+        DaytonaConfig=SimpleNamespace,
+        DaytonaNotFoundError=FileNotFoundError,
+    )
+    monkeypatch.setitem(sys.modules, "daytona", module)
+    return module
 
 
 @pytest.mark.asyncio
@@ -140,9 +147,9 @@ async def test_pause_leaves_alone_a_sandbox_it_never_reached():
 
 
 @pytest.mark.asyncio
-async def test_a_sandbox_already_gone_counts_as_paused():
+async def test_a_sandbox_already_gone_counts_as_paused(fake_client):
     machine = await _reached()
-    FakeClient.pause_refusal = sdk.DaytonaNotFoundError("gone")
+    FakeClient.pause_refusal = fake_client.DaytonaNotFoundError("gone")
     await machine.pause()
     assert FakeClient.closed == 2
 
@@ -174,12 +181,12 @@ def test_sandbox_id_is_required():
 
 
 @pytest.mark.asyncio
-async def test_api_key_reaches_the_client(monkeypatch):
+async def test_api_key_reaches_the_client(monkeypatch, fake_client):
     class FakeSdkConfig:
         def __init__(self, api_key=None) -> None:
             self.api_key = api_key
 
-    monkeypatch.setattr(sdk, "DaytonaConfig", FakeSdkConfig)
+    monkeypatch.setattr(fake_client, "DaytonaConfig", FakeSdkConfig)
     runtime = DaytonaMachine(
         "box",
         config={
@@ -237,7 +244,7 @@ async def test_close_releases_the_client_never_the_sandbox():
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
-    monkeypatch.setattr(sdk, "AsyncDaytona", None)
+    monkeypatch.setitem(sys.modules, "daytona", None)
     runtime = DaytonaMachine("box", config={"sandbox_id": "sb-live"})
     with pytest.raises(ImportError, match="mirage-ai\\[daytona\\]"):
         await runtime.connect()

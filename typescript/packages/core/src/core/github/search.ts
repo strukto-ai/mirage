@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ensureDefaultBranch, ensureRef } from './repo.ts'
+import { ensureTree } from './tree.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
@@ -118,9 +120,8 @@ export async function narrowPaths(
   })
 }
 
-// The tree is the last listing's, fetched when the mount was built and
-// reseated by every listing since.
-function scopeFiles(accessor: GitHubAccessor, under: readonly PathSpec[]): number {
+async function scopeFiles(accessor: GitHubAccessor, under: readonly PathSpec[]): Promise<number> {
+  await ensureTree(accessor)
   let count = 0
   for (const p of under) count += countScopeFiles(accessor.tree, rawPathOf(p))
   return count
@@ -145,9 +146,9 @@ export async function filesContaining(
 ): Promise<PathSpec[] | null> {
   if (
     !searchSafe(text) ||
-    scopeFiles(accessor, under) <= SCOPE_WARN ||
+    (await scopeFiles(accessor, under)) <= SCOPE_WARN ||
     accessor.truncated ||
-    !accessor.isDefaultBranch
+    (await ensureRef(accessor)) !== (await ensureDefaultBranch(accessor))
   ) {
     return null
   }

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
@@ -116,7 +116,7 @@ describe('object_store write', () => {
         truncate: () => makeTruncate(driver)(accessor, path, 2),
         stream: () => makeWrite(driver)(accessor, path, yieldBytes(ENC.encode('hello'))),
       }
-      const [row, records] = await runWithRecording(calls[operation])
+      const [row, records] = await recordingScope(calls[operation])
       expect(row).toMatchObject({
         name: 'result.txt',
         size: 7,
@@ -358,7 +358,7 @@ describe('object_store write', () => {
 // ── the backend token the put answered reaches the op record ───────────
 
 async function recorded(fn: () => Promise<unknown>): Promise<OpRecord[]> {
-  const [, records] = await runWithRecording(async () => {
+  const [, records] = await recordingScope(async () => {
     await fn()
   })
   return records
@@ -404,7 +404,7 @@ describe('object store write records the put token', () => {
         return Promise.resolve(data === undefined ? null : [data, 'v1'])
       },
     }
-    await runWithCaller(
+    await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([['/mnt/a/cut.txt', 'rev-1']]) } },
       () => makeTruncate(driver)(accessor, spec('/a/cut.txt'), 2),
     )

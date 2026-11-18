@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { DBRef, Long } from 'bson'
 import { applyElision, follow, lastLines, lineCount, readStream, renderDoc } from './stream.ts'
@@ -61,7 +61,7 @@ describe('mongodb document streams', () => {
   })
   const accessor = new MongoDBAccessor(
     driver,
-    resolveMongoDBConfig({ uri: 'mongodb://h', databases: ['app'] }),
+    MongoDBConfig.parse({ uri: 'mongodb://h', databases: ['app'] }),
   )
 
   // The streams went straight to the collection the path names, so a
@@ -103,7 +103,7 @@ describe('mongodb read stand-ins', () => {
       iterInserts: () => arrayIter([{ _id: 7, name: 'gus' }])(),
     })
     return [
-      new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h', maxDocLimit })),
+      new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h', maxDocLimit })),
       asked,
     ]
   }
@@ -155,7 +155,7 @@ describe('mongodb read stand-ins', () => {
         return arrayIter([{ _id: 9, name: 'ida' }])<T>()
       },
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     const added = await follow(accessor, docs('app'), 2)
     if (added === null) throw new Error('expected a follow')
     expect(seen).toEqual([])
@@ -178,7 +178,7 @@ describe('mongodb read stand-ins', () => {
       },
       iterInserts: <T>() => arrayIter([{ _id: 9 }])<T>(),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     const added = await follow(accessor, docs('app'), 0)
     if (added === null) throw new Error('expected a follow')
     expect(await drain(added)).toBe('{"_id": 9}\n')
@@ -192,7 +192,7 @@ describe('mongodb read stand-ins', () => {
       listCollections: () => Promise.resolve(['users']),
       findSnapshot: () => Promise.resolve(null),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     expect(await follow(accessor, docs('app'), 2)).toBeNull()
   })
 
@@ -207,7 +207,7 @@ describe('mongodb read stand-ins', () => {
     })
     const accessor = new MongoDBAccessor(
       driver,
-      resolveMongoDBConfig({ uri: 'mongodb://h', elideFields: { 'app.users': ['_id'] } }),
+      MongoDBConfig.parse({ uri: 'mongodb://h', elideFields: { 'app.users': ['_id'] } }),
     )
     const added = await follow(accessor, docs('app'), 1)
     if (added === null) throw new Error('expected a follow')
@@ -235,7 +235,7 @@ describe('mongodb read stand-ins', () => {
         },
       }),
     })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const accessor = new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h' }))
     const added = await follow(accessor, docs('app'), 0)
     if (added === null) throw new Error('expected a follow')
     const pulling = added.next()

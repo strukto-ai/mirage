@@ -1,5 +1,5 @@
 {
- "baseline": 980,
+ "baseline": 711,
  "modules": {
   "secrets/aws": {
    "typescript_only": {
@@ -18,11 +18,6 @@
     "OnePasswordItem": "The SDK item's shape, as OnePasswordClient is the client's; Python annotates with the SDK's Item.",
     "readOnepassword": "The read past the client, shared by node's source and the Worker's, which each make the client their own way; Python's one runtime does it inside fetch_onepassword.",
     "serviceAccountToken": "The token lookup both TypeScript runtimes share; Python's onepassword_client does it inline."
-   }
-  },
-  "machine/kubernetes/config": {
-   "typescript_only": {
-    "KUBERNETES_CONFIG_FIELDS": "TypeScript has no dataclass to read a config's fields from, so the provider declares them for the shared field check."
    }
   },
   "commands/cli/builtin/git/refs": {
@@ -190,11 +185,6 @@
    },
    "typescript_only": {
     "Pending": "TypeScript stores resolve/reject callbacks and abort-listener cleanup for FIFO admission; Python queues asyncio futures."
-   }
-  },
-  "machine/microsandbox/config": {
-   "typescript_only": {
-    "MICROSANDBOX_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "core/api/client": {
@@ -378,44 +368,14 @@
     "within": "asyncio.wait_for in Python."
    }
   },
-  "machine/daytona/sdk": {
-   "python_only": {
-    "DaytonaNotFoundError": "Python's guarded SDK import names each class it uses; TypeScript loads the @daytonaio/sdk module and reads DaytonaNotFoundError off it."
-   }
-  },
-  "machine/e2b/sdk": {
-   "python_only": {
-    "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields.",
-    "SandboxException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxError off it.",
-    "SandboxNotFoundException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxNotFoundError off it.",
-    "SandboxNotRunningException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxNotRunningError off it."
-   }
-  },
-  "machine/boxd/config": {
-   "typescript_only": {
-    "BOXD_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
-   }
-  },
   "machine/boxd/handle": {
    "typescript_only": {
     "drain": "TypeScript's exec stream hands stdout and stderr over as two async iterables, each drained into its sink; Python's yields both from one iterator, read inline."
    }
   },
   "machine/boxd/sdk": {
-   "python_only": {
-    "APIConnectionError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads APIConnectionError off it.",
-    "AsyncBoxd": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads Boxd off it.",
-    "ConflictError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads ConflictError off it.",
-    "NotFoundError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads NotFoundError off it."
-   },
    "typescript_only": {
-    "BoxdSdk": "TypeScript loads the optional peer at the runtime boundary, typed as the module; Python imports it when the module loads, behind a guard.",
     "loadSdk": "TypeScript loads the optional peer at the runtime boundary, typed as the module; Python imports it when the module loads, behind a guard."
-   }
-  },
-  "machine/ssh/sdk": {
-   "python_only": {
-    "DisconnectError": "asyncssh raises its own error when a connection drops mid-line, which the handle maps to a lost connection; ssh2 reports the same drop as a channel that closed with no exit status, so TypeScript names no error class."
    }
   },
   "machine/mixin": {
@@ -502,14 +462,7 @@
   },
   "cli/tools": {
    "python_only": {
-    "edit_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "glob_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "grep_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "ls_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "read_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "write_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
-    "shell_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
+    "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
    },
    "typescript_only": {
     "Target": "commander builds every tool verb inside one register function, with toolCommand adding the shared -w/-s options and Target typing them; Python's Typer takes one function per verb instead.",
@@ -520,9 +473,6 @@
   "server/routers/tools": {
    "python_only": {
     "tool_route": "FastAPI adds one endpoint per tool through tool_route; Fastify registers the same routes inside registerToolsRoutes."
-   },
-   "typescript_only": {
-    "registerToolsRoutes": "Fastify routes are registered by a function taking its dependencies (registerToolsRoutes, ToolsRoutesDeps), as every TypeScript router is; Python's FastAPI router is a module object."
    }
   },
   "server/mcp/server": {
@@ -542,9 +492,6 @@
    "python_only": {
     "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "shell_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
-   },
-   "typescript_only": {
-    "ExplainedNode": "The shape of one node of the explain/shell answer, typed for the printer; Python's printer reads the same JSON as a dict."
    }
   },
   "server/routers/shell": {
@@ -596,7 +543,6 @@
    "python_only": {
     "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
     "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
-    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "CREATE_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
     "DEFAULT_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
     "MOUNT": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
@@ -619,16 +565,9 @@
   },
   "cli/workspace": {
    "python_only": {
-    "start_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
-    "stop_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "logs_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
-    "list_lines_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
-    "list_jobs_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
-    "list_processes_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
-    "list_machines_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
+    "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    },
    "typescript_only": {
     "LogPage": "TypeScript types the HTTP page passed to its formatter; Python uses a dictionary from the HTTP response.",
@@ -646,21 +585,9 @@
     "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
    }
   },
-  "server/routers/sessions": {
-   "python_only": {
-    "cancel_session_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
-    "kill_session_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
-    "update_session": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
-   }
-  },
   "server/routers/workspaces": {
    "python_only": {
-    "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "start_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "stop_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
-    "workspace_logs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
    },
    "typescript_only": {
     "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
@@ -669,8 +596,6 @@
    }
   },
   "server/schemas": {
-   "typescript_only": {
-   },
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
     "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
@@ -699,10 +624,6 @@
    }
   },
   "cli/ssh": {
-   "python_only": {
-    "codex_exec_cmd": "Typer commands are module functions; commander registers the same command inline in registerCodexExecCommand.",
-    "ssh_proxy_cmd": "Typer commands are module functions; commander registers the same command inline in registerSshProxyCommand."
-   },
    "typescript_only": {
     "registerCodexExecCommand": "commander registers a command through a function; Typer's is the module function codex_exec_cmd.",
     "registerSshProxyCommand": "commander registers a command through a function; Typer's is the module function ssh_proxy_cmd."
@@ -714,8 +635,7 @@
     "ssh_tunnel": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes."
    },
    "typescript_only": {
-    "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments.",
-    "registerSshRoutes": "Fastify registers routes through a function; FastAPI's route is the module function ssh_tunnel."
+    "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments."
    }
   },
   "server/ssh/constants": {
@@ -750,14 +670,8 @@
   },
   "cli/login": {
    "python_only": {
-    "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
-    "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
-    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing.",
-    "context_app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands.",
-    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+    "context_app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands."
    },
    "typescript_only": {
     "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd.",
@@ -768,9 +682,6 @@
   "server/routers/oauth": {
    "python_only": {
     "protected_resource": "FastAPI routes are module functions; Fastify registers the same handler inline in registerOAuthRoutes."
-   },
-   "typescript_only": {
-    "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
    }
   },
   "cache/file/config": {
@@ -828,13 +739,7 @@
    },
    "typescript_only": {
     "DocumentParams": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "registerDocumentsRoutes": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
-   }
-  },
-  "core/box/api": {
-   "typescript_only": {
-    "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
+    "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   },
   "workspace/node/explain": {
@@ -844,15 +749,11 @@
    }
   },
   "context/session_context": {
-   "python_only": {
-    "set_current_evaluation": "Python binds an evaluation with its session and returns the ContextVar token reset_caller restores; TypeScript runWithEvaluation scopes the binding around an async callback."
-   },
    "typescript_only": {
     "callerConflict": "The browser fallback lacks Python's task-isolated ContextVars; it checks live conditional callers before binding operations or stream cleanup.",
     "pendingCloses": "Browser-only deferred cleanup holds a paused stream's closer until conflicting caller frames release; Python's task-local context closes directly.",
     "flushCloses": "The browser fallback drains deferred stream closers when caller frames settle, preserving the active conditional operation's owner; Python needs no queue.",
     "CallerDispatchFn": "TypeScript's DispatchFn lives in the runtime types, which import no workspace module and so cannot name the Caller; the dispatcher and the workspace functions that hand it a caller take this type. Python's DispatchFn carries the caller through its keywords.",
-    "runWithEvaluation": "TypeScript scopes the evaluation's session binding around a callback; Python set_current_evaluation returns a ContextVar token.",
     "callerSignal": "TypeScript hands the current call's AbortSignal to a read or copy of a live pipe, so a reader that gives up (timeout) withdraws its claim on the pipe; Python cancels the awaiting task, which the pipe's shielded pull answers directly.",
     "lineSignal": "TypeScript must pass a line's AbortSignal into fetch to interrupt an outstanding response body read; Python task cancellation interrupts the awaited HTTP read directly."
    }
@@ -875,15 +776,13 @@
   },
   "server/routers/vfs": {
    "python_only": {
-    "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "streamed_read": "FastAPI has module-level route handlers; the matching Fastify handler streams a read inline in registerVfsRoutes.",
     "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
    "typescript_only": {
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
+    "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
    }
   },
   "server/vfs_calls": {
@@ -984,8 +883,8 @@
   },
   "cache/context": {
    "typescript_only": {
-    "activeWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCaller does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
-    "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCaller does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "activeWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as bindCaller does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as bindCaller does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "agree": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
     "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
     "ownersOf": "TypeScript's fallback async-context storage can hold live frames of several overlapping lines at once, so a path is answered by the frames of the longest prefix covering it; Python's ContextVar is always task-isolated, so its one frame is the owner."
@@ -998,7 +897,7 @@
    },
    "typescript_only": {
     "lostPaths": "TypeScript retrieves a line's lost paths by its records array after its recording scope ends; Python reads the current Recorder through active_lost. This function was previously folded with the LostPaths class, now moved to observe/record on both hosts.",
-    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
+    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after recordingScope returns; Python keeps them on the Recorder (active_lost).",
     "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
     "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
    }
@@ -1076,11 +975,6 @@
    },
    "typescript_only": {
     "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
-   }
-  },
-  "runtime/python/local/config": {
-   "typescript_only": {
-    "LOCAL_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "runtime/python/local/runtime": {
@@ -1484,12 +1378,10 @@
     "create_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "delete_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "get_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "list_templates": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
+    "list_templates": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
    },
    "typescript_only": {
     "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
-    "registerTemplatesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper that throws the mapped HttpError."
    }
   },
@@ -1520,12 +1412,10 @@
     "delete_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "get_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "list_policies": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "update_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
    },
    "typescript_only": {
     "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
-    "registerPoliciesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper that throws the mapped HttpError.",
     "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves through validationError."
    }
@@ -1534,12 +1424,7 @@
    "python_only": {
     "NAME": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
     "SOURCE": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "app": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "create_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "delete_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "get_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "list_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "update_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands."
+    "app": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands."
    },
    "typescript_only": {
     "registerPolicyCommands": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
@@ -1632,7 +1517,7 @@
   "workspace/workspace/execute": {
    "python_only": {
     "_run_limited": "Python wraps the line's tree in its clock, egress, memory, timeout and env limits as nested contexts; TypeScript carries them on the line's stop and frame.",
-    "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's runAsShell is a closure inside runLine over the line's options, frame and argv."
+    "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's clearProgramInvocation is a closure inside runLine over the line's options, frame and argv."
    }
   },
   "server/logs": {
@@ -1653,43 +1538,37 @@
     "close_stdin": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
     "get_line": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
     "list_lines": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
-    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
     "write_stdin": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
    },
    "typescript_only": {
     "ListLinesQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
     "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
     "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "WsLineParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "registerLinesRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
+    "WsLineParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature."
    }
   },
   "server/routers/jobs": {
    "python_only": {
     "get_job": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes.",
-    "list_jobs": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes.",
-    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes."
+    "list_jobs": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes."
    },
    "typescript_only": {
     "ListJobsQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
     "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
     "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "WsJobParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "registerJobsRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes."
+    "WsJobParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature."
    }
   },
   "server/routers/processes": {
    "python_only": {
     "get_process": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes.",
-    "list_processes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes.",
-    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
+    "list_processes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
    },
    "typescript_only": {
     "ListProcessesQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
     "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
     "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "WsProcessParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
-    "registerProcessesRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
+    "WsProcessParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature."
    }
   },
   "shell/console/sql": {
@@ -1734,11 +1613,9 @@
   "server/routers/machines": {
    "python_only": {
     "list_machines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes.",
-    "get_machine": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes.",
-    "router": "FastAPI collects a module's routes on an APIRouter the app includes; Fastify registers them on the app in registerMachinesRoutes."
+    "get_machine": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes."
    },
    "typescript_only": {
-    "registerMachinesRoutes": "FastAPI collects a module's routes on an APIRouter the app includes; Fastify registers them on the app in registerMachinesRoutes.",
     "WsIdParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature.",
     "WsMachineParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature."
    }
@@ -1767,11 +1644,6 @@
   "execution/process/constants": {
    "typescript_only": {
     "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
-   }
-  },
-  "machine/cloudflare_container/config": {
-   "typescript_only": {
-    "CONTAINER_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "machine/cloudflare_container/constants": {

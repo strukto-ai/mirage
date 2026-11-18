@@ -20,7 +20,7 @@ import { GitHubEventHook } from './events.ts'
 
 const ROOT = new PathSpec({ virtual: '/gh', directory: '/gh', vfsPath: '' })
 
-function accessor(): GitHubAccessor {
+function accessor(options: { ref?: string } = {}): GitHubAccessor {
   const transport: GitHubTransport = {
     get: () => Promise.resolve({}),
     request: () => Promise.resolve({}),
@@ -29,7 +29,7 @@ function accessor(): GitHubAccessor {
     account: new GitHubAccount({ token: 't' }, transport),
     owner: 'acme',
     repo: 'proj',
-    ref: 'main',
+    ...options,
     defaultBranch: 'main',
   })
 }
@@ -47,7 +47,11 @@ function push(ref = 'refs/heads/main', extra: Record<string, JsonValue> = {}) {
 }
 
 async function pairs(eventName: string, payload: JsonValue): Promise<[string, string][]> {
-  const events = await new GitHubEventHook(accessor()).toEvents(ROOT, eventName, payload)
+  const events = await new GitHubEventHook(accessor({ ref: 'main' })).toEvents(
+    ROOT,
+    eventName,
+    payload,
+  )
   return events.map((event) => [event.kind, event.path.virtual])
 }
 
@@ -59,6 +63,22 @@ describe('GitHubEventHook', () => {
       [FileChangeKind.UPDATE, '/gh/a.md'],
       [FileChangeKind.DELETE, '/gh/old.txt'],
     ])
+  })
+
+  it('follows the default branch in the push when the mount has no ref', async () => {
+    const hook = new GitHubEventHook(accessor())
+    const payload = push('refs/heads/trunk', {
+      repository: { full_name: 'Acme/Proj', default_branch: 'trunk' },
+    })
+    expect(await hook.toEvents(ROOT, 'push', payload)).toHaveLength(3)
+    expect(await hook.toEvents(ROOT, 'push', { ...payload, ref: 'refs/heads/main' })).toEqual([])
+    expect(
+      await hook.toEvents(ROOT, 'push', {
+        ...payload,
+        ref: 'refs/heads/null',
+        repository: { full_name: 'Acme/Proj' },
+      }),
+    ).toEqual([])
   })
 
   // Twin of test_a_push_elsewhere_or_rewritten_is_skipped_or_unknown.

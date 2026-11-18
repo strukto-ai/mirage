@@ -1,4 +1,4 @@
-import { runWithCaller, currentCaller } from '../../context/session_context.ts'
+import { bindCaller, currentCaller } from '../../context/session_context.ts'
 import { readFileSync } from 'node:fs'
 import { ABSENT_WRITE, ANY_WRITE } from '../../cache/types.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -506,7 +506,7 @@ it('compensates cancellation after a confirmed copy before source deletion', asy
     },
   }
   await expect(
-    runWithCaller({ ...currentCaller(), stop: controller }, () =>
+    bindCaller({ ...currentCaller(), stop: controller }, () =>
       requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
     ),
   ).rejects.toMatchObject({ name: 'AbortError' })
@@ -564,7 +564,7 @@ it('keeps the abort result when cancellation arrives during compensation', async
       })
     },
   }
-  const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+  const move = bindCaller({ ...currentCaller(), stop: controller }, () =>
     requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
   )
   const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })
@@ -602,7 +602,7 @@ it('bounds an unknown source delete and reports partial completion on cancellati
     },
   }
   try {
-    const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+    const move = bindCaller({ ...currentCaller(), stop: controller }, () =>
       requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
     )
     const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })
@@ -652,7 +652,7 @@ it.each(['refused', 'committed'])(
         })
       },
     }
-    const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+    const move = bindCaller({ ...currentCaller(), stop: controller }, () =>
       requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
     )
     const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })

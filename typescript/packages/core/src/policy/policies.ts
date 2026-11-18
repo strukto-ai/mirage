@@ -21,7 +21,7 @@ import {
   explaining,
   lineRunning,
   noteDecision,
-  runExplaining,
+  setExplaining,
   runLanding,
   type Caller,
 } from '../context/session_context.ts'
@@ -448,7 +448,7 @@ export async function preVfsGate(
     // Without task isolation the binding would reach other tasks' ops; there
     // the mark rides a deciding method's own files and program instead.
     const noted = await (asyncContextIsolatesTasks
-      ? runExplaining(DryRun.DECIDING, decide)
+      ? setExplaining(DryRun.DECIDING, decide)
       : decide())
     trace.push(noted)
     if (final || noted.error !== '') throw new Explained()
@@ -909,7 +909,7 @@ export class Policies {
         composition.close()
       }
     }
-    return asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, settle) : settle()
+    return asyncContextIsolatesTasks ? setExplaining(DryRun.DECIDING, settle) : settle()
   }
 
   private async fire(

@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from typing import Any
+from functools import cached_property
+from typing import Any, cast
 
 from mirage.io.types import ByteSource
 from mirage.machine.constants import (
@@ -21,11 +22,10 @@ from mirage.machine.constants import (
     encode_output,
     wrap_line,
 )
-from mirage.machine.daytona import sdk
 from mirage.machine.daytona.config import DaytonaConfig
 from mirage.machine.daytona.constants import PAUSED_STATE
+from mirage.machine.daytona.sdk import DaytonaSdk
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,10 @@ class DaytonaMachine(MachineHandle):
     config_cls = DaytonaConfig
     config: DaytonaConfig
 
+    @cached_property
+    def _sdk(self) -> DaytonaSdk:
+        return cast(DaytonaSdk, self._load_sdk("daytona", DaytonaSdk))
+
     _client: Any = None
     _sandbox: Any = None
 
@@ -71,13 +75,13 @@ class DaytonaMachine(MachineHandle):
     def _new_client(self) -> Any:
         api_key = self.config.api_key
         config = (
-            sdk.DaytonaConfig(api_key=api_key) if api_key is not None else None
+            self._sdk.DaytonaConfig(api_key=api_key)
+            if api_key is not None
+            else None
         )
-        return sdk.AsyncDaytona(config)
+        return self._sdk.AsyncDaytona(config)
 
     async def connect(self) -> None:
-        if sdk.AsyncDaytona is None:
-            raise ImportError(sdk_install_hint("daytona"))
         if self._client is None:
             self._client = self._new_client()
         self._sandbox = await self._client.get(self.config.sandbox_id)
@@ -98,7 +102,7 @@ class DaytonaMachine(MachineHandle):
         try:
             sandbox = await client.get(self.config.sandbox_id)
             await sandbox.pause()
-        except sdk.DaytonaNotFoundError:
+        except self._sdk.DaytonaNotFoundError:
             logger.debug(
                 "%s: sandbox already gone, nothing to pause",
                 self.machine,

@@ -29,6 +29,12 @@ class Pager {
 }
 
 describe('cursorItems', () => {
+  it.each([0, -1])('does not fetch for a limit of %i', async (limit) => {
+    const pager = new Pager([])
+    expect(await cursorItems(pager.fetch, limit)).toEqual([])
+    expect(pager.cursors).toEqual([])
+  })
+
   it('collects across pages and threads the cursor', async () => {
     const pager = new Pager([
       { results: [{ n: 1 }, { n: 2 }], has_more: true, next_cursor: 'c1' },

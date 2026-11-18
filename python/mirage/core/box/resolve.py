@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Mapping
 from typing import Any, cast
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import (
+    BoxItem,
     get_file_info,
     get_folder_info,
     list_folder_items,
@@ -40,7 +42,7 @@ def path_parts(path: PathSpec) -> list[str]:
 
 async def resolve_chain(
     accessor: BoxAccessor, parts: list[str]
-) -> list[dict[str, Any]]:
+) -> list[BoxItem]:
     """Walk folder listings to resolve each component of a path.
 
     Box has no path-addressing endpoint, so ids are resolved by listing
@@ -54,7 +56,7 @@ async def resolve_chain(
     """
     tm = accessor.token_manager
     cur_id = accessor.root_folder_id
-    chain: list[dict[str, Any]] = []
+    chain: list[BoxItem] = []
     for name in parts:
         if chain and chain[-1].get("type") != "folder":
             break
@@ -69,7 +71,7 @@ async def resolve_chain(
 
 async def resolve_item(
     accessor: BoxAccessor, parts: list[str]
-) -> dict[str, Any] | None:
+) -> BoxItem | None:
     """Resolve a mount-relative path to its Box item.
 
     Returns None if any component is missing, or a non-final component
@@ -85,7 +87,7 @@ async def resolve_item(
     return chain[-1]
 
 
-def item_of(row: FileStat | None) -> dict[str, Any] | None:
+def item_of(row: FileStat | None) -> Mapping[str, Any] | None:
     """The Box item a listed row names, in the shape a lookup answers.
 
     Args:
@@ -126,7 +128,7 @@ def parent_folder(
 
 
 def mount_relative_key(
-    item: dict[str, Any], root_folder_id: str
+    item: Mapping[str, Any], root_folder_id: str
 ) -> str | None:
     """Mount-relative path of an item, from its ``path_collection``.
 
@@ -136,7 +138,7 @@ def mount_relative_key(
     is not among the ancestors, which is every item outside the mount.
 
     Args:
-        item (dict[str, Any]): A Box item carrying ``path_collection``.
+        item (Mapping[str, Any]): A Box item carrying ``path_collection``.
         root_folder_id (str): Box id of the mount root folder.
     """
     entries = (item.get("path_collection") or {}).get("entries") or []
@@ -154,7 +156,7 @@ def mount_relative_key(
 
 
 def names_this_path(
-    accessor: BoxAccessor, item: dict[str, Any], path: PathSpec
+    accessor: BoxAccessor, item: Mapping[str, Any], path: PathSpec
 ) -> bool:
     """Whether a live ``GET /files/{id}`` or ``GET /folders/{id}`` answer is
     the active item at ``path``.
@@ -172,7 +174,7 @@ def names_this_path(
 
     Args:
         accessor (BoxAccessor): Box accessor.
-        item (dict[str, Any]): ``GET /files/{id}`` answer.
+        item (Mapping[str, Any]): ``GET /files/{id}`` answer.
         path (PathSpec): the path being checked.
     """
     if item.get("type") not in ("file", "folder"):
@@ -190,7 +192,7 @@ def names_this_path(
 
 async def live_item_of(
     accessor: BoxAccessor, path: PathSpec, row: FileStat | None
-) -> dict[str, Any] | None:
+) -> Mapping[str, Any] | None:
     """The item a listed row names, as :func:`live_item` finds it at
     ``path`` now; None for no row.
 
@@ -204,8 +206,8 @@ async def live_item_of(
 
 
 async def live_item(
-    accessor: BoxAccessor, path: PathSpec, lead: dict[str, Any] | None
-) -> dict[str, Any] | None:
+    accessor: BoxAccessor, path: PathSpec, lead: Mapping[str, Any] | None
+) -> Mapping[str, Any] | None:
     """What is at ``path`` now, asked live.
 
     A listed row can be older than the path's item: another client may

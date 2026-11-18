@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.util import (
     first_text,
@@ -20,10 +22,33 @@ from mirage.commands.cli.builtin.ntn.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.normalize import extract_title
+from mirage.core.notion.normalize import plain_text_of
 from mirage.core.notion.pages import get_page, get_page_markdown
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.records import as_object
+from mirage.utils.yaml import dump_yaml
+
+
+def _property_value(prop: dict[str, Any]) -> Any:
+    kind = prop.get("type", "")
+    value = prop.get(kind)
+    if kind in ("title", "rich_text"):
+        return plain_text_of(value)
+    if kind in ("select", "status", "created_by", "last_edited_by"):
+        item = as_object(value)
+        return item.get("name") or item.get("id")
+    if kind in ("multi_select", "people", "files", "relation") and isinstance(
+        value, list
+    ):
+        return [
+            item.get("name") or item.get("id")
+            for item in value
+            if isinstance(item, dict)
+        ]
+    if kind in ("formula", "rollup") and isinstance(value, dict):
+        return _property_value(value)
+    return value
 
 
 async def get(
@@ -34,14 +59,16 @@ async def get(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     page_id = first_text(texts, "page id")
-    # Both calls happen either way: the body comes from the markdown
-    # endpoint and the title heading the frontmatter only exists on the
-    # page object.
+    # The Markdown endpoint omits the properties printed in the frontmatter.
     line = notion_transport(accessor, ctx)
     rendered = await get_page_markdown(line, page_id)
     page = await get_page(line, page_id)
     if fl.as_bool("json"):
         return pretty_json({"markdown": rendered, "page": page}), IOResult()
     body = rendered.get("markdown", "")
-    text = f"---\ntitle: {extract_title(page)}\n---\n\n{body}"
+    fields = {
+        name: _property_value(as_object(prop))
+        for name, prop in sorted(as_object(page.get("properties")).items())
+    }
+    text = f"---\n{dump_yaml(fields, sort_keys=True, multiline=True)}---\n\n{body}"
     return text.encode(), IOResult()

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, Literal, Required, TypedDict, cast
 
 from mirage.cache.context import condition_version, stale
 from mirage.cache.types import WriteCondition
@@ -34,6 +34,36 @@ SEARCH_PAGE = 1000
 # result set that hits the ceiling may be incomplete and must not be used
 # to narrow a scan.
 MAX_SEARCH_MATCHES = 10_000
+
+
+DropboxEntry = TypedDict(
+    "DropboxEntry",
+    {
+        ".tag": Required[Literal["file", "folder", "deleted"]],
+        "name": Required[str],
+        "id": str,
+        "path_lower": str,
+        "path_display": str,
+        "size": int,
+        "client_modified": str,
+        "server_modified": str,
+        "rev": str,
+        "content_hash": str,
+    },
+    total=False,
+)
+
+
+class ListFolderResponse(TypedDict):
+    entries: list[DropboxEntry]
+    cursor: str
+    has_more: bool
+
+
+class SearchResponseV2(TypedDict, total=False):
+    matches: list[dict[str, Any]]
+    cursor: str
+    has_more: bool
 
 
 async def get_metadata(tm: DropboxTokenManager, path: str) -> dict[str, Any]:
@@ -169,13 +199,16 @@ async def search_files(
     }
     if path:
         options["path"] = path
-    resp = await dropbox_rpc(
-        tm,
-        "/files/search_v2",
-        {
-            "query": query,
-            "options": options,
-        },
+    resp = cast(
+        SearchResponseV2,
+        await dropbox_rpc(
+            tm,
+            "/files/search_v2",
+            {
+                "query": query,
+                "options": options,
+            },
+        ),
     )
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
@@ -194,8 +227,11 @@ async def search_files(
             return out, True
         if not resp.get("has_more"):
             return out, False
-        resp = await dropbox_rpc(
-            tm, "/files/search/continue_v2", {"cursor": resp["cursor"]}
+        resp = cast(
+            SearchResponseV2,
+            await dropbox_rpc(
+                tm, "/files/search/continue_v2", {"cursor": resp["cursor"]}
+            ),
         )
 
 
@@ -205,7 +241,7 @@ async def list_folder(
     recursive: bool = False,
     page_size: int = 2000,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DropboxEntry]:
     """List a folder's entries, following every continuation cursor.
 
     Args:
@@ -223,22 +259,28 @@ async def list_folder(
         list[dict]: entry metadata dicts.
     """
     api_path = "" if path in ("/", "") else path
-    out: list[dict[str, Any]] = []
-    resp = await dropbox_rpc(
-        tm,
-        "/files/list_folder",
-        {
-            "path": api_path,
-            "recursive": recursive,
-            "limit": page_size if limit is None else min(page_size, limit),
-        },
+    out: list[DropboxEntry] = []
+    resp = cast(
+        ListFolderResponse,
+        await dropbox_rpc(
+            tm,
+            "/files/list_folder",
+            {
+                "path": api_path,
+                "recursive": recursive,
+                "limit": page_size if limit is None else min(page_size, limit),
+            },
+        ),
     )
     out.extend(resp["entries"])
     while resp.get("has_more"):
         if limit is not None and len(out) >= limit:
             break
-        resp = await dropbox_rpc(
-            tm, "/files/list_folder/continue", {"cursor": resp["cursor"]}
+        resp = cast(
+            ListFolderResponse,
+            await dropbox_rpc(
+                tm, "/files/list_folder/continue", {"cursor": resp["cursor"]}
+            ),
         )
         out.extend(resp["entries"])
     return out
@@ -268,7 +310,7 @@ async def latest_cursor(
 async def continue_folder(
     tm: DropboxTokenManager,
     cursor: str,
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[DropboxEntry], str]:
     """Replay changes since ``cursor``, following every continuation page.
 
     Args:
@@ -279,14 +321,20 @@ async def continue_folder(
         tuple[list[dict], str]: changed entries (including deleted) and
             the next cursor.
     """
-    out: list[dict[str, Any]] = []
-    resp = await dropbox_rpc(
-        tm, "/files/list_folder/continue", {"cursor": cursor}
+    out: list[DropboxEntry] = []
+    resp = cast(
+        ListFolderResponse,
+        await dropbox_rpc(
+            tm, "/files/list_folder/continue", {"cursor": cursor}
+        ),
     )
     out.extend(resp["entries"])
     while resp.get("has_more"):
-        resp = await dropbox_rpc(
-            tm, "/files/list_folder/continue", {"cursor": resp["cursor"]}
+        resp = cast(
+            ListFolderResponse,
+            await dropbox_rpc(
+                tm, "/files/list_folder/continue", {"cursor": resp["cursor"]}
+            ),
         )
         out.extend(resp["entries"])
     return out, resp["cursor"]

@@ -106,8 +106,9 @@ export class DriveLoc {
 }
 
 export function parentPath(path: string): string {
-  const index = path.lastIndexOf('/')
-  return index < 0 ? '' : path.slice(0, index)
+  const stripped = stripSlash(path)
+  const index = stripped.lastIndexOf('/')
+  return index < 0 ? '' : stripped.slice(0, index)
 }
 
 export function baseName(path: string): string {
@@ -129,7 +130,7 @@ export function virtualKey(path: PathSpec): string {
 }
 
 export function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
 }
 
 // Graph returns the folder facet's childCount by default, so `-empty` needs

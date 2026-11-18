@@ -40,7 +40,7 @@ import {
 import { makeVar } from '../../shell/variable.ts'
 import { makeArray } from '../../shell/array.ts'
 import { parseProgram } from '../../shell/parse/parse.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 
 function makeView(): [SessionView, SessionState] {
   const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
@@ -442,7 +442,7 @@ describe('the frame a task reads', () => {
     gone.release()
     setAttr(session, 'r', VarAttr.Nameref)
     const notes: (string | Uint8Array)[] = []
-    await runWithSession(other, () => sessionView(session, notes).set('r', makeArray(['x'])))
+    await setCurrentSession(other, () => sessionView(session, notes).set('r', makeArray(['x'])))
     held.release()
     expect(
       notes.map((note) => (typeof note === 'string' ? note : new TextDecoder().decode(note))),

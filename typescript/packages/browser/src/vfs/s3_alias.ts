@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import { TimeoutConfig } from '@struktoai/mirage-core/core/api/config'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import type { ConfigOf, RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
@@ -81,7 +81,7 @@ export const ALIAS_SHAPE = {
     .describe(
       'Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
     ),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
 }
 
 /**

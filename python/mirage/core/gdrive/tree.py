@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import aiohttp
@@ -21,7 +21,7 @@ import aiohttp
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import readdir, stat_from_item
 from mirage.core.google.client import GoogleApiError
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, DriveFile
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 PARENTS_PER_QUERY = 40
 
 
-def vfs_name(item: dict[str, Any]) -> str:
+def vfs_name(item: Mapping[str, Any]) -> str:
     """The rendered vfs filename for a Drive item.
 
     Args:
@@ -45,7 +45,7 @@ async def iter_tree(
     path: PathSpec,
     folder_id: str,
     drive_id: str | None,
-) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
+) -> AsyncIterator[tuple[str, DriveFile, bool]]:
     """Walk a folder subtree, yielding (mount-relative path, item, is_dir).
 
     The walk goes a level at a time, the level's folders listed together
@@ -88,7 +88,7 @@ async def list_level(
     accessor: GDriveAccessor,
     folders: list[tuple[str, str | None]],
     limit: int | None = None,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, list[DriveFile]]:
     """The children of each folder of one level of a walk, by folder id.
 
     One query asks for the children of up to ``PARENTS_PER_QUERY``
@@ -106,7 +106,7 @@ async def list_level(
         limit (int | None): the most items worth fetching.
     """
     corpora: dict[str | None, list[str]] = {}
-    children: dict[str, list[dict[str, Any]]] = {}
+    children: dict[str, list[DriveFile]] = {}
     for folder_id, drive_id in folders:
         corpora.setdefault(drive_id, []).append(folder_id)
         children[folder_id] = []

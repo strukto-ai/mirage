@@ -32,7 +32,7 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
   }
 })
 
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
@@ -170,7 +170,7 @@ function replyWith(build: (reply: DriveFile) => unknown): void {
 
 async function writeRecorded(): Promise<unknown[][]> {
   const handed = await handedAt(readdir, accessor, spec('/f.txt'))
-  const [, records] = await runWithRecording(() =>
+  const [, records] = await recordingScope(() =>
     write(accessor, spec('/f.txt'), ENC.encode('hello'), handed),
   )
   return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Final
+
 from mirage.cache.types import ConditionSupport
 
 CONDITION_SUPPORT: ConditionSupport = {
@@ -56,7 +58,7 @@ GONE_STATUS = 404
 # A name taken, or a non-recursive delete of a folder that is not empty.
 CONFLICT_STATUS = 409
 
-SHA1 = "sha1"
+SHA1: Final = "sha1"
 ACTIVE = "active"
 ALL_FILES_FOLDER_ID = "0"
 TRASH_FOLDER_ID = "1"

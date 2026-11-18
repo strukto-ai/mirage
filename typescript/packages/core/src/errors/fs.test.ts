@@ -14,6 +14,7 @@
 
 import { ResponseTooLargeError } from '../core/api/errors.ts'
 import { describe, expect, it } from 'vitest'
+import * as fsErrors from './fs.ts'
 import { classify } from './classify.ts'
 import { OPERAND_CONDITIONS } from './constants.ts'
 import {
@@ -280,4 +281,14 @@ describe('strerrorOf', () => {
 
 it('classifies an oversized API response as EFBIG', () => {
   expect(fsStrerror(new ResponseTooLargeError(1024))).toBe('File too large')
+})
+
+describe('non-error rejections', () => {
+  for (const thrown of [null, undefined]) {
+    it(`keeps the original ${String(thrown)} diagnostic`, () => {
+      expect(fsErrors.errorVirtualPath(thrown)).toBe(String(thrown))
+      expect(fsErrors.isMissError(thrown)).toBe(false)
+      expect(fsErrors.isMissingOp(thrown, 'read')).toBe(false)
+    })
+  }
 })

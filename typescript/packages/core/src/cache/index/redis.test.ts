@@ -21,7 +21,7 @@ import { CacheManager } from '../manager.ts'
 import { LookupStatus, type IndexDirectory } from './config.ts'
 import { ENTRY_PREFIX, GENERATION_KEY, REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
-import { runInCommandScope } from './scope.ts'
+import { commandScope } from './scope.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -1603,7 +1603,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       for (const writer of [store, peer]) {
         await store.setDir('/d', LISTED)
         const sent = await reads()
-        await runInCommandScope(async () => {
+        await commandScope(async () => {
           await store.listDir('/d')
           expect((await store.get('/d/a')).entry?.fingerprint).not.toBe('new')
           await NOT_COUNTING[method](writer)
@@ -1622,7 +1622,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       if (kind === 'partial') await store.setPartialDir('/d', LISTED)
       else await store.setDir('/d', LISTED, null, { window: kind === 'window' })
       const sent = await reads()
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         const before = await store.listDir('/d')
         expect(await store.invalidateMissing(['/d/a'])).toBe(false)
         expect(await store.listDir('/d')).toEqual(before)
@@ -1634,7 +1634,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
   it('an unknown observation keeps the listing memo', async () => {
     await store.setDir('/d', LISTED)
     const sent = await reads()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       const before = await store.listDir('/d')
       expect(await store.invalidateMissing(['/e/new'])).toBe(false)
       expect(await store.listDir('/d')).toEqual(before)
@@ -1647,7 +1647,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     async (observer) => {
       await store.setDir('/d', LISTED)
       const writer = observer === 'self' ? store : peer
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
         const childrenKey = (
           store as unknown as { childrenKey: (path: string) => string }
@@ -1665,7 +1665,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       await store.setDir('/d', LISTED)
       const client = await redis()
       const key = (store as unknown as { childrenKey: (path: string) => string }).childrenKey('/d')
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
         if (known) {
           await client.eval("return redis.call('ZADD', KEYS[1], 3, ARGV[1])", {
@@ -1686,7 +1686,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
   it('peer unknown observation keeps an unrelated memo', async () => {
     await store.setDir('/d', LISTED)
     const sent = await reads()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       const before = await store.listDir('/d')
       expect(await peer.invalidateMissing(['/e/new'])).toBe(false)
       expect(await store.listDir('/d')).toEqual(before)
@@ -1697,7 +1697,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
   it('keeps the siblings of a written row batched', async () => {
     await store.setDir('/d', LISTED)
     const sent = await reads()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await store.listDir('/d')
       for (const name of ['a', 'b']) {
         const path = `/d/${name}`
@@ -1717,13 +1717,13 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
 
   it('reads external row changes at the next command', async () => {
     await store.setDir('/d', LISTED)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await store.listDir('/d')
       await store.get('/d/a')
     })
     const c = await redis()
     await c.set(`${prefix}${ENTRY_PREFIX}/d/a`, JSON.stringify(row('a', 'external')))
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await store.listDir('/d')
       expect((await store.get('/d/a')).entry?.fingerprint).toBe('external')
     })
@@ -1756,7 +1756,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     'sees a listing write by %s in the same command',
     async (method) => {
       await store.setDir('/d', LISTED)
-      const [before, after] = await runInCommandScope(async () => {
+      const [before, after] = await commandScope(async () => {
         const first = await store.listDir('/d')
         await COUNTING[method](store)
         return [first, await store.listDir('/d')] as const
@@ -1771,7 +1771,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     async (method) => {
       await store.setDir('/d', LISTED)
       const sent = await reads()
-      const [before, after] = await runInCommandScope(async () => {
+      const [before, after] = await commandScope(async () => {
         const first = await store.listDir('/d')
         await NOT_COUNTING[method](store)
         return [first, await store.listDir('/d')] as const
@@ -1791,7 +1791,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     await store.setDir('/d', LISTED)
     const sent = await reads()
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await store.listDir('/d')
         await other.setDir('/d', [['z', row('z')]])
         await store.listDir('/d')
@@ -1813,7 +1813,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     })
     try {
       await timed.setDir('/d', LISTED)
-      const after = await runInCommandScope(async () => {
+      const after = await commandScope(async () => {
         expect((await timed.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
         clock.advance(60)
         return timed.listDir('/d')
@@ -1826,7 +1826,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
 
   it('sees a write by a peer store on the same keyspace', async () => {
     await store.setDir('/d', LISTED)
-    const after = await runInCommandScope(async () => {
+    const after = await commandScope(async () => {
       await store.listDir('/d')
       await peer.invalidateEntry('/d/a')
       return store.listDir('/d')
@@ -1836,7 +1836,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
 
   it('sees a peer store seed once it is flushed', async () => {
     await store.setDir('/d', LISTED)
-    const after = await runInCommandScope(async () => {
+    const after = await commandScope(async () => {
       await COUNTING.seed(peer)
       await store.listDir('/d')
       await peer.get('/d/c')
@@ -1860,7 +1860,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       }
       return evaluate(script, options)
     })
-    const after = await runInCommandScope(async () => {
+    const after = await commandScope(async () => {
       const writing = store.invalidateEntry('/d/a')
       await entering
       expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
@@ -1876,7 +1876,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     await store.invalidateEntry('/d/b')
     const sent = await reads()
     expect((await store.listDir('/d', '/d/a')).partialEntries).toEqual(['/d/a'])
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       expect((await store.listDir('/d', '/d/b')).partialEntries).toEqual([])
       expect((await store.get('/d/a')).entry?.fingerprint).toBe('a')
       expect((await store.listDir('/d', '/d/a')).partialEntries).toEqual(['/d/a'])
@@ -1893,7 +1893,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     await store.setDir('/d', LISTED)
     await store.invalidate()
     const sent = await reads()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       for (const [folder, status] of [
         ['/missing', LookupStatus.NOT_FOUND],
         ['/d', LookupStatus.EXPIRED],

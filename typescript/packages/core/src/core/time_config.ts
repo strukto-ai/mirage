@@ -15,28 +15,28 @@ const timestamp = z
   })
   .nullable()
 
-export const timeRangeShape = {
-  startTime: timestamp
-    .optional()
-    .describe(
-      "Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.",
-    ),
-  endTime: timestamp
-    .optional()
-    .describe(
-      "End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.",
-    ),
-}
-
-export function orderedTimes(config: {
+export const orderedTimes = z.refine<{
   startTime?: string | null | undefined
   endTime?: string | null | undefined
-}): boolean {
-  return (
+}>(
+  (config) =>
     config.startTime == null ||
     config.endTime == null ||
-    Date.parse(config.startTime) < Date.parse(config.endTime)
-  )
-}
+    Date.parse(config.startTime) < Date.parse(config.endTime),
+  { message: 'start_time must be earlier than end_time' },
+)
 
-export const timeRangeOrderError = { message: 'start_time must be earlier than end_time' }
+export const TimeRangeConfig = z
+  .object({
+    startTime: timestamp
+      .optional()
+      .describe(
+        "Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.",
+      ),
+    endTime: timestamp
+      .optional()
+      .describe(
+        "End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.",
+      ),
+  })
+  .check(orderedTimes)

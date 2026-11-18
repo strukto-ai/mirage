@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, Literal, Required, TypedDict, TypeVar, cast
 
 from mirage.cache.context import condition_version, stale
 from mirage.cache.types import WriteCondition
@@ -109,12 +109,53 @@ MAX_SEARCH_MATCHES = 10_000
 EVENTS_PAGE = 500
 
 
+class BoxItem(TypedDict, total=False):
+    id: Required[str]
+    name: Required[str]
+    type: Required[Literal["file", "folder", "web_link"]]
+    size: int
+    modified_at: str
+    etag: str
+    sha1: str
+    parent: dict[str, str] | None
+
+
+class BoxSearchItem(BoxItem, total=False):
+    path_collection: dict[str, Any]
+
+
+class BoxFileInfo(BoxSearchItem, total=False):
+    item_status: str
+
+
+class BoxEvent(TypedDict, total=False):
+    type: str
+    event_id: str
+    event_type: str
+    created_at: str
+    source: JsonValue
+
+
+class EventsResponse(TypedDict, total=False):
+    chunk_size: int
+    next_stream_position: str | int | None
+    entries: list[BoxEvent]
+
+
+class BoxRealtimeServer(TypedDict, total=False):
+    type: Required[Literal["realtime_server"]]
+    url: Required[str]
+    ttl: str | int
+    max_retries: str | int
+    retry_timeout: int
+
+
 async def list_folder_items(
     tm: BoxTokenManager,
     folder_id: str,
     page_size: int = 1000,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[BoxItem]:
     """List every item in a Box folder, following offset pagination.
 
     Args:
@@ -125,7 +166,7 @@ async def list_folder_items(
             links (bookmarks no listing names) are in hand and do not
             request another page.
     """
-    out: list[dict[str, Any]] = []
+    out: list[BoxItem] = []
     offset = 0
     named = 0
     while True:
@@ -149,7 +190,7 @@ async def list_folder_items(
     return out
 
 
-def _next_position(data: dict[str, Any]) -> str | None:
+def _next_position(data: EventsResponse) -> str | None:
     value = data.get("next_stream_position")
     return None if value is None or value == "" else str(value)
 
@@ -161,13 +202,16 @@ async def events_now(tm: BoxTokenManager, stream_type: str) -> str:
         tm (BoxTokenManager): token manager.
         stream_type (str): ``all``, ``changes`` or ``sync``.
     """
-    data = await box_get(
-        tm,
-        f"{tm.api_base}/events",
-        params={
-            "stream_type": stream_type,
-            "stream_position": "now",
-        },
+    data = cast(
+        EventsResponse,
+        await box_get(
+            tm,
+            f"{tm.api_base}/events",
+            params={
+                "stream_type": stream_type,
+                "stream_position": "now",
+            },
+        ),
     )
     position = _next_position(data)
     if position is None:
@@ -180,7 +224,7 @@ async def events_since(
     stream_position: str,
     stream_type: str,
     limit: int = EVENTS_PAGE,
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[BoxEvent], str]:
     """Every user event after ``stream_position``, and the new position.
 
     Box may answer with fewer events than ``limit`` while more remain,
@@ -194,17 +238,20 @@ async def events_since(
         stream_type (str): ``all``, ``changes`` or ``sync``.
         limit (int): events per request (Box caps it at 500).
     """
-    out: list[dict[str, Any]] = []
+    out: list[BoxEvent] = []
     position = stream_position
     while True:
-        data = await box_get(
-            tm,
-            f"{tm.api_base}/events",
-            params={
-                "stream_type": stream_type,
-                "stream_position": position,
-                "limit": limit,
-            },
+        data = cast(
+            EventsResponse,
+            await box_get(
+                tm,
+                f"{tm.api_base}/events",
+                params={
+                    "stream_type": stream_type,
+                    "stream_position": position,
+                    "limit": limit,
+                },
+            ),
         )
         entries = data.get("entries") or []
         advanced = _next_position(data)
@@ -219,7 +266,7 @@ async def events_since(
         position = advanced
 
 
-async def realtime_server(tm: BoxTokenManager) -> dict[str, Any]:
+async def realtime_server(tm: BoxTokenManager) -> BoxRealtimeServer:
     """The long-poll server for the user's event stream.
 
     ``OPTIONS /events`` hands back a ``realtime_server`` entry; a GET on
@@ -234,25 +281,30 @@ async def realtime_server(tm: BoxTokenManager) -> dict[str, Any]:
     entries = data.get("entries") or []
     if not entries:
         raise RuntimeError("Box OPTIONS /events returned no realtime server")
-    server: dict[str, Any] = entries[0]
+    server: BoxRealtimeServer = entries[0]
     return server
 
 
-async def get_folder_info(
-    tm: BoxTokenManager, folder_id: str
-) -> dict[str, Any]:
-    return await box_get(tm, f"{tm.api_base}/folders/{folder_id}")
+async def get_folder_info(tm: BoxTokenManager, folder_id: str) -> BoxItem:
+    return cast(
+        BoxItem, await box_get(tm, f"{tm.api_base}/folders/{folder_id}")
+    )
 
 
-async def get_file_info(tm: BoxTokenManager, file_id: str) -> dict[str, Any]:
+async def get_file_info(tm: BoxTokenManager, file_id: str) -> BoxFileInfo:
     """One file's live metadata: its sha1, name, ancestry and status.
 
     Args:
         tm (BoxTokenManager): token manager.
         file_id (str): Box file id.
     """
-    return await box_get(
-        tm, f"{tm.api_base}/files/{file_id}", params={"fields": ITEM_FIELDS}
+    return cast(
+        BoxFileInfo,
+        await box_get(
+            tm,
+            f"{tm.api_base}/files/{file_id}",
+            params={"fields": ITEM_FIELDS},
+        ),
     )
 
 
@@ -282,7 +334,7 @@ async def search_content(
     tm: BoxTokenManager,
     query: str,
     ancestor_folder_id: str,
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[BoxSearchItem], bool]:
     """Name+content search scoped to a folder subtree.
 
     Pages Box `/search` with `ancestor_folder_ids` scoping and
@@ -296,11 +348,11 @@ async def search_content(
         ancestor_folder_id (str): folder id scoping the search to a subtree.
 
     Returns:
-        tuple[list[dict[str, Any]], bool]: matched file items and whether the
+        tuple[list[BoxSearchItem], bool]: matched file items and whether the
             result reached the 10,000-match ceiling (a truncated set is not a
             trustworthy superset of a full walk).
     """
-    out: list[dict[str, Any]] = []
+    out: list[BoxSearchItem] = []
     offset = 0
     while True:
         data = await box_get(

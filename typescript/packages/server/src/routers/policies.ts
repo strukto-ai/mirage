@@ -87,7 +87,7 @@ async function stored<T>(registry: WorkspaceRegistry, run: () => Promise<T>): Pr
   }
 }
 
-export function registerPoliciesRoutes(
+export function router(
   app: RouteApp,
   deps: {
     resources: ResourceStore

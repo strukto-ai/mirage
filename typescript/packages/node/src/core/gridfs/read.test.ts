@@ -21,7 +21,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, bucket: vi.fn(), latestFile: vi.fn() }
 })
 
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
@@ -68,7 +68,7 @@ describe('gridfs read token', () => {
     expect(meta?.fingerprint).toBe(FILE_ID)
 
     const spec = new PathSpec({ vfsPath: 'a.txt', virtual: '/mnt/a.txt', directory: '/mnt/' })
-    const [bytes, records] = await runWithRecording(async () => read(accessor(), spec))
+    const [bytes, records] = await recordingScope(async () => read(accessor(), spec))
 
     expect(new TextDecoder().decode(bytes)).toBe('hello')
     expect(records.map((r) => r.fingerprint)).toEqual([FILE_ID])

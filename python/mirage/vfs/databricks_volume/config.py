@@ -23,6 +23,53 @@ from mirage.core.api.config import TimeoutConfig
 TokenProvider = Callable[[], str | SecretStr | Awaitable[str | SecretStr]]
 
 
+def valid_volume_part(value: str) -> str:
+    if not value or "/" in value:
+        raise ValueError("must be a non-empty path segment")
+    return value
+
+
+def normalize_host(value: str) -> str:
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or any(char.isspace() for char in value)
+        or "?" in value
+        or "#" in value
+        or "\\" in value
+    ):
+        raise ValueError("host must be an HTTP(S) origin")
+    port = parsed.port
+    hostname = parsed.hostname
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    else:
+        hostname = hostname.encode("idna").decode("ascii")
+    default_port = 80 if parsed.scheme == "http" else 443
+    authority = (
+        hostname
+        if port is None or port == default_port
+        else f"{hostname}:{port}"
+    )
+    return f"{parsed.scheme}://{authority}"
+
+
+def normalize_root_path(value: str) -> str:
+    stripped = value.strip("/")
+    if not stripped:
+        return "/"
+    if any(part == ".." for part in stripped.split("/")):
+        raise ValueError("root_path must not contain '..' segments")
+    normalized = posixpath.normpath("/" + stripped)
+    return "/" if normalized == "/." else normalized
+
+
 class DatabricksVolumeConfig(TimeoutConfig):
     model_config = ConfigDict(
         frozen=True,
@@ -50,44 +97,11 @@ class DatabricksVolumeConfig(TimeoutConfig):
     """Bearer token as a string, or a function, synchronous or
     asynchronous, that returns one for each request."""
 
-    @field_validator("catalog", "schema_name", "volume")
-    @classmethod
-    def validate_volume_part(cls, value: str) -> str:
-        if not value or "/" in value:
-            raise ValueError("must be a non-empty path segment")
-        return value
+    _valid_volume_part = field_validator("catalog", "schema_name", "volume")(
+        valid_volume_part
+    )
 
-    @field_validator("host")
-    @classmethod
-    def normalize_host(cls, value: str) -> str:
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-            or parsed.path not in {"", "/"}
-            or any(char.isspace() for char in value)
-            or "?" in value
-            or "#" in value
-            or "\\" in value
-        ):
-            raise ValueError("host must be an HTTP(S) origin")
-        port = parsed.port
-        hostname = parsed.hostname
-        if ":" in hostname:
-            hostname = f"[{hostname}]"
-        else:
-            hostname = hostname.encode("idna").decode("ascii")
-        default_port = 80 if parsed.scheme == "http" else 443
-        authority = (
-            hostname
-            if port is None or port == default_port
-            else f"{hostname}:{port}"
-        )
-        return f"{parsed.scheme}://{authority}"
+    _normalize_host = field_validator("host")(normalize_host)
 
     @field_validator("token")
     @classmethod
@@ -102,13 +116,4 @@ class DatabricksVolumeConfig(TimeoutConfig):
                 )
         return value
 
-    @field_validator("root_path")
-    @classmethod
-    def normalize_root_path(cls, value: str) -> str:
-        stripped = value.strip("/")
-        if not stripped:
-            return "/"
-        if any(part == ".." for part in stripped.split("/")):
-            raise ValueError("root_path must not contain '..' segments")
-        normalized = posixpath.normpath("/" + stripped)
-        return "/" if normalized == "/." else normalized
+    _normalize_root_path = field_validator("root_path")(normalize_root_path)

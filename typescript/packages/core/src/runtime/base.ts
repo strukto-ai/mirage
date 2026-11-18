@@ -16,7 +16,7 @@ import type { Context } from '../commands/config.ts'
 import {
   currentCaller,
   isProgramInvocation,
-  runWithCaller,
+  bindCaller,
   voiceName,
 } from '../context/session_context.ts'
 import { isAborting } from '../errors/fs.ts'
@@ -208,7 +208,7 @@ export abstract class Runtime<E = unknown> {
       }
       if (vfs === undefined) delete runCtx.vfs
       else runCtx.vfs = vfs
-      return await runWithCaller(capture.caller, () =>
+      return await bindCaller(capture.caller, () =>
         this.asProgram(kind, [...texts], runCtx, opts.errors, (programCtx) =>
           this.runAs(kind, engine, [...paths], [...texts], programCtx, opts.output, opts.errors),
         ),

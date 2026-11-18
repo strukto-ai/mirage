@@ -17,6 +17,7 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
+from mirage.core.api.errors import PaginationStalledError
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.s3.constants import MAX_PARTS, PART_DOUBLING
 from mirage.core.s3.driver import DRIVER
@@ -739,3 +740,21 @@ async def test_competing_destination_creation_names_the_destination():
     assert raised.value.keys == ["dst"]
     assert not raised.value.gone
     client.delete_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token", "error"),
+    [(None, ValueError), ("same", PaginationStalledError)],
+)
+async def test_truncated_listing_needs_a_fresh_token(token, error):
+    page = {"IsTruncated": True}
+    if token is not None:
+        page["NextContinuationToken"] = token
+    pages = MagicMock()
+    pages.__aiter__.return_value = [page, page]
+    client = Mock()
+    client.get_paginator.return_value.paginate.return_value = pages
+    conn = S3Conn(client, S3Config(bucket="b"))
+    with pytest.raises(error):
+        _ = [child async for child in DRIVER.list_children(conn, "")]

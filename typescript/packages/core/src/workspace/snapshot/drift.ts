@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FingerprintKey } from './keys.ts'
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import {
   CONTENT_CHANGING_OPS,
@@ -257,9 +258,12 @@ export function captureFingerprints(
     const mount = registry.tryMountFor(rec.path)
     if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
     if (!mount.vfs.supportsSnapshot) continue
-    const entry: FingerprintEntrySnapshot = { path: rec.path, mount_prefix: mount.prefix }
-    if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint
-    if (rec.revision !== null) entry.revision = rec.revision
+    const entry: FingerprintEntrySnapshot = {
+      [FingerprintKey.PATH]: rec.path,
+      [FingerprintKey.MOUNT_PREFIX]: mount.prefix,
+    }
+    if (rec.fingerprint !== null) entry[FingerprintKey.FINGERPRINT] = rec.fingerprint
+    if (rec.revision !== null) entry[FingerprintKey.REVISION] = rec.revision
     out.set(rec.path, entry)
   }
   return [...out.values()]

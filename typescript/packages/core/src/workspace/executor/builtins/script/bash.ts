@@ -18,7 +18,7 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import {
   currentCaller,
   isProgramInvocation,
-  runAsShell,
+  clearProgramInvocation,
 } from '../../../../context/session_context.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -245,7 +245,7 @@ export async function handleBash(
   const run = async (signal: AbortSignal | null = null): Promise<IOResult> => {
     const stops = signal === null ? {} : { signal }
     try {
-      return await runAsShell(async () =>
+      return await clearProgramInvocation(async () =>
         finishShell(
           (action, opts) =>
             executeFn(action, { ...opts, ...jobs, ...stops, context: shellContext }),

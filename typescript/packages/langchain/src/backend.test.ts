@@ -122,6 +122,23 @@ describe('LangchainWorkspace.read', () => {
     expect(r.content).toBeUndefined()
   })
 
+  it('reads extensionless UTF-8 and preserves invalid UTF-8 in raw reads', async () => {
+    const ws = mkWs()
+    const backend = new LangchainWorkspace(ws)
+    await ws.vfs.write('/Makefile', 'all: build')
+    expect(await backend.read('/Makefile')).toMatchObject({
+      content: 'all: build',
+      mimeType: 'text/plain',
+    })
+    const bytes = new Uint8Array([0xff, 0xfe])
+    await ws.vfs.write('/invalid.txt', bytes)
+    expect((await backend.read('/invalid.txt')).error).toMatch(/binary/i)
+    expect((await backend.readRaw('/invalid.txt')).data).toMatchObject({
+      content: bytes,
+      mimeType: 'application/octet-stream',
+    })
+  })
+
   it('returns Uint8Array for application/pdf', async () => {
     const ws = mkWs()
     await ws.vfs.write('/x.pdf', new Uint8Array([0x25, 0x50, 0x44, 0x46]))
@@ -223,6 +240,7 @@ describe('LangchainWorkspace.ls', () => {
     await ws.vfs.write('/a.txt', 'a')
     await ws.vfs.mkdir('/d')
     await ws.vfs.write('/d/b.txt', 'b')
+    await ws.vfs.write('/ .hidden\n ', 'c')
     const lw = new LangchainWorkspace(ws)
     const r = await lw.ls('/')
     expect(r.error).toBeUndefined()
@@ -230,10 +248,44 @@ describe('LangchainWorkspace.ls', () => {
     const paths = files.map((i) => i.path).sort()
     expect(paths).toContain('/a.txt')
     expect(paths).toContain('/d')
+    expect(paths).toContain('/ .hidden\n ')
     const dirEntry = files.find((i) => i.path === '/d')
     expect(dirEntry?.is_dir).toBe(true)
     const fileEntry = files.find((i) => i.path === '/a.txt')
     expect(fileEntry?.is_dir).toBe(false)
+  })
+
+  it('follows directory links and lists dangling links', async () => {
+    const ws = mkWs()
+    const backend = new LangchainWorkspace(ws)
+    await backend.write('/data/dir/file', 'hello')
+    await ws.vfs.symlink('/data/dir-link', 'dir')
+    await ws.vfs.symlink('/data/file-link', 'dir/file')
+    await ws.vfs.symlink('/data/dangling', 'missing')
+    expect(await backend.ls('/data')).toEqual({
+      files: [
+        { path: '/data/dangling', is_dir: false },
+        { path: '/data/dir', is_dir: true },
+        { path: '/data/dir-link', is_dir: true },
+        { path: '/data/file-link', is_dir: false },
+      ],
+    })
+    ws.createSession('agent')
+    const agent = new LangchainWorkspace(ws, { sessionId: 'agent' })
+    await agent.execute('cd /data')
+    expect((await agent.ls('.')).files).toContainEqual({ path: './dir-link', is_dir: true })
+  })
+
+  it('rejects an incomplete filename when ls hits its byte limit', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { ls: new Limit({ maxBytes: 3 }) } },
+    )
+    const backend = new LangchainWorkspace(ws)
+    await backend.write('/data/report.txt', 'hello')
+    const listed = await backend.ls('/data')
+    expect(listed.files).toBeUndefined()
+    expect(listed.error).toContain('output truncated at limit')
   })
 
   it('handles paths with single quotes via shellQuote', async () => {
@@ -346,6 +398,20 @@ describe('LangchainWorkspace.grep', () => {
     expect(matches[0]?.path).toBe('/log.txt')
     expect(matches[0]?.line).toBe(2)
     expect(matches[0]?.text).toContain('error here')
+  })
+
+  it('matches literal text beginning with a dash under the requested relative glob', async () => {
+    const lw = new LangchainWorkspace(mkWs())
+    await lw.write('/src/main.ts', '-a.b')
+    await lw.write('/src/app/main.ts', '-a.b\n-axb')
+    const result = await lw.grep('-a.b', '/src', 'app/*.ts')
+    expect(result.matches).toEqual([{ path: '/src/app/main.ts', line: 1, text: '-a.b' }])
+  })
+
+  it('reports a missing search root', async () => {
+    const result = await new LangchainWorkspace(mkWs()).grep('needle', '/missing')
+    expect(result.error).toContain('/missing')
+    expect(result.matches).toBeUndefined()
   })
 
   it('returns empty matches for no hits', async () => {

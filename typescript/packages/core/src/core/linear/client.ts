@@ -113,7 +113,10 @@ export class HttpLinearTransport implements LinearTransport {
       const msg = errorMessage(data.errors) ?? 'Linear API error'
       throw new LinearApiError(msg, data.errors)
     }
-    return data.data ?? {}
+    if (data.data == null || typeof data.data !== 'object' || Array.isArray(data.data)) {
+      throw new LinearApiError('Linear API response has no data object')
+    }
+    return data.data
   }
 }
 
@@ -303,7 +306,7 @@ export async function issueCreate(
   const data = await transport.graphql(ISSUE_CREATE_MUTATION, { input: payload })
   const created = data.issueCreate as { issue?: { id?: string } } | undefined
   const id = created?.issue?.id
-  if (id === undefined) throw new LinearApiError('issueCreate returned no id')
+  if (typeof id !== 'string' || id === '') throw new LinearApiError('issueCreate returned no id')
   return getIssue(transport, id)
 }
 

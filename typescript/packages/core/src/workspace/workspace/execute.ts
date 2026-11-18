@@ -40,7 +40,7 @@ import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
+import { activeRecords, lostPaths, recordingScope } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
@@ -51,11 +51,11 @@ import {
   currentCaller,
   expireCaller,
   getCurrentSessionFor,
-  runWithCaller,
-  runWithDecisionSink,
-  runWithSession,
+  bindCaller,
+  setDecisionSink,
+  setCurrentSession,
   getCurrentEvaluation,
-  runWithEvaluation,
+  setCurrentEvaluation,
   syntaxHead,
   voiceName,
 } from '../../context/session_context.ts'
@@ -411,7 +411,7 @@ async function runLine(
     env.lineTable.start(lineHandle)
     let ended: ExecuteResult
     try {
-      ended = await runAsShell()
+      ended = await clearProgramInvocation()
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         lineHandle.stop(LINE_STOP_SIGNAL)
@@ -425,7 +425,7 @@ async function runLine(
     return ended
   }
   // The line as a process the session starts for it, its `$$`.
-  const runAsShell = async (): Promise<ExecuteResult> => {
+  const clearProgramInvocation = async (): Promise<ExecuteResult> => {
     const abort = new AbortController()
     const combined =
       lineOptions.signal === undefined
@@ -450,7 +450,7 @@ async function runLine(
         ignores: SHELL_IGNORED_SIGNALS,
         pid: targetSession.shellPid,
         run: async () => {
-          result = await runWithSession(
+          result = await setCurrentSession(
             targetSession,
             () =>
               runPreparedLine(
@@ -1025,7 +1025,7 @@ async function runPreparedLine(
           // bound, so an op a policy script makes while the line is judged is
           // inside the line, never a question of its own.
           const held = (): Promise<boolean> =>
-            runWithDecisionSink(
+            setDecisionSink(
               (decision: PolicyDecision) => {
                 nested.latest = decision
               },
@@ -1058,7 +1058,7 @@ async function runPreparedLine(
                 mergeSignals(options.signal, context.frame.abortSignal),
               )
             placed = await abortable(
-              asyncContextIsolatesTasks ? runWithEvaluation(context, decide) : decide(),
+              asyncContextIsolatesTasks ? setCurrentEvaluation(context, decide) : decide(),
               options.signal,
             )
           } catch (err) {
@@ -1172,10 +1172,10 @@ async function runPreparedLine(
             )
           // The root program reaches each command of a line recorded a
           // command at a time through the caller.
-          const answered = await runWithEvaluation(
+          const answered = await setCurrentEvaluation(
             context,
             () =>
-              history === null ? parsed() : runWithCaller({ ...currentCaller(), history }, parsed),
+              history === null ? parsed() : bindCaller({ ...currentCaller(), history }, parsed),
             env.sessions,
           )
           // A path that answered before recording how the line ended (a
@@ -1450,9 +1450,7 @@ async function runOnLineRuntime(
   let result: Awaited<ReturnType<typeof runWholeLine>>
   try {
     result = await abortable(
-      inLine(() =>
-        isLine ? runWithCaller({ ...currentCaller(), recording }, runLine) : runLine(),
-      ),
+      inLine(() => (isLine ? bindCaller({ ...currentCaller(), recording }, runLine) : runLine())),
       killed,
     )
   } catch (error) {
@@ -1527,7 +1525,7 @@ async function runParsedLine(
   // Without task isolation a live call is in reach of every task, so each
   // write stays a call of its own there.
   const inLine = <T>(fn: () => Promise<T>): Promise<T> =>
-    runWithCaller(
+    bindCaller(
       {
         ...currentCaller(),
         refusals: note,
@@ -1758,7 +1756,7 @@ async function runParsedLine(
     }
     try {
       execResult = await inLine(async () =>
-        isLine ? runWithRecording(runBody, env.records, env.registry.clock) : [await runBody(), []],
+        isLine ? recordingScope(runBody, env.records, env.registry.clock) : [await runBody(), []],
       )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedDecision). A question a gate left

@@ -70,7 +70,7 @@ function listFile(): void {
 }
 
 /** `mirage daemon config`: the daemon's settings in config.toml. */
-export function registerConfigCommands(parent: Command): void {
+export function app(parent: Command): Command {
   const config = parent
     .command('config')
     .description('Read and write daemon settings in config.toml.')
@@ -79,56 +79,57 @@ export function registerConfigCommands(parent: Command): void {
     .command('list')
     .option('--resolved', 'show effective values and their origins')
     .description('Print the config.toml [daemon] table.')
-    .action((opts: { resolved?: boolean }) => {
-      if (opts.resolved === true) listResolved()
-      else listFile()
-    })
+    .action(listCmd)
 
-  config
-    .command('get')
-    .argument('<key>')
-    .description('Print one [daemon] key.')
-    .action((key: string) => {
-      let value: string | undefined
-      try {
-        value = getConfig(key)
-      } catch (e) {
-        fail((e as Error).message, 2)
-        return
-      }
-      if (value === undefined) {
-        fail(`${key} is not set`, 1)
-        return
-      }
-      emit({ [key]: value }, () => value)
-    })
+  config.command('get').argument('<key>').description('Print one [daemon] key.').action(getCmd)
 
   config
     .command('set')
     .argument('<key>')
     .argument('<value>')
     .description('Write a [daemon] key (path settings apply on next daemon restart).')
-    .action((key: string, value: string) => {
-      try {
-        setConfig(key, value)
-      } catch (e) {
-        fail((e as Error).message, 2)
-        return
-      }
-      emit({ [key]: value, written: true }, () => `${key} = ${value}`)
-    })
+    .action(setCmd)
 
-  config
-    .command('unset')
-    .argument('<key>')
-    .description('Remove a [daemon] key.')
-    .action((key: string) => {
-      try {
-        unsetConfig(key)
-      } catch (e) {
-        fail((e as Error).message, 2)
-        return
-      }
-      emit({ [key]: null, unset: true }, () => `unset ${key}`)
-    })
+  config.command('unset').argument('<key>').description('Remove a [daemon] key.').action(unsetCmd)
+  return config
+}
+
+function listCmd(opts: { resolved?: boolean }): void {
+  if (opts.resolved === true) listResolved()
+  else listFile()
+}
+
+function getCmd(key: string): void {
+  let value: string | undefined
+  try {
+    value = getConfig(key)
+  } catch (e) {
+    fail((e as Error).message, 2)
+    return
+  }
+  if (value === undefined) {
+    fail(`${key} is not set`, 1)
+    return
+  }
+  emit({ [key]: value }, () => value)
+}
+
+function setCmd(key: string, value: string): void {
+  try {
+    setConfig(key, value)
+  } catch (e) {
+    fail((e as Error).message, 2)
+    return
+  }
+  emit({ [key]: value, written: true }, () => `${key} = ${value}`)
+}
+
+function unsetCmd(key: string): void {
+  try {
+    unsetConfig(key)
+  } catch (e) {
+    fail((e as Error).message, 2)
+    return
+  }
+  emit({ [key]: null, unset: true }, () => `unset ${key}`)
 }

@@ -15,10 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 export const NotionConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   apiKey: secretStr().describe('Notion integration token.'),
   baseUrl: z.string().optional().meta({
     description: 'Notion API root; override to point at a fake or proxy.',

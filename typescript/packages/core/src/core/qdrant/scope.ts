@@ -14,7 +14,7 @@
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { ContentType } from '../../types.ts'
-import type { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import { Codec, JSON_NAME, PATH_SAFE, RAW } from '../hierarchy/codec.ts'
 import { makeDetectScope, type DetectFn, type Scope } from '../hierarchy/scope.ts'
@@ -33,7 +33,7 @@ const TXT = new Codec({ suffix: '.txt' })
  * because its rendering drops the value's parents and the lister resolves it
  * against the payload instead.
  */
-export function scopesFor(config: ReturnType<typeof resolveQdrantConfig>): Scope[] {
+export function scopesFor(config: ReturnType<typeof QdrantConfig.parse>): Scope[] {
   const leaves: Leaf[] = [['row_json', JSON_NAME, ContentType.TEXT]]
   if (config.textField !== null) leaves.push(['row_text', TXT, ContentType.TEXT])
   if (config.blobField !== null) leaves.push(blobLeaf(config.blobExt))

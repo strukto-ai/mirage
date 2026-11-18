@@ -16,11 +16,8 @@ import { S3Accessor } from '../../accessor/s3.ts'
 import { VFSName } from '../../types.ts'
 import { VFSConfigError } from '../errors.ts'
 import type { S3Config as S3CoreConfig, S3HttpAgents } from '../s3/config.ts'
-import {
-  normalizeKeyPrefix,
-  S3_FAMILY_RENAME,
-  S3Config as S3CoreConfigSchema,
-} from '../s3/config.ts'
+import { normalizeKeyPrefix } from '../../utils/key_prefix.ts'
+import { S3_FAMILY_RENAME, S3Config as S3CoreConfigSchema } from '../s3/config.ts'
 import { S3VFS as CoreS3VFS, declaredEndpoint } from '../s3/s3.ts'
 import { s3StorageLocation } from '../s3/storage_id.ts'
 import type { RedactedSchema } from '../secrets.ts'

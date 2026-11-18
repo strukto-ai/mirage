@@ -16,7 +16,7 @@ import {
   currentCaller,
   currentProcessId,
   liveCallers,
-  runWithCaller,
+  bindCaller,
 } from '../context/session_context.ts'
 import { LostPaths, OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS, type Recorder } from './record.ts'
 import type { PathSpec } from '../types.ts'
@@ -56,7 +56,7 @@ export async function commandRecords<T>(
   const mine: OpRecord[] = []
   const held = currentCaller().commandSink
   const command = own ? mine : (held?.[0] ?? null)
-  return runWithCaller({ ...currentCaller(), commandSink: [command, mine] }, () => fn(mine))
+  return bindCaller({ ...currentCaller(), commandSink: [command, mine] }, () => fn(mine))
 }
 
 /**
@@ -127,13 +127,13 @@ export function activeRecords(): readonly OpRecord[] | undefined {
  * which a file call of that workspace made on the line joins; `clock` is
  * the workspace clock its ops are timed and stamped on.
  */
-export async function runWithRecording<T>(
+export async function recordingScope<T>(
   fn: () => Promise<T>,
   ledger: OpRecord[] | null = null,
   clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
   const state: Recorder = { records: [], mountId: null, ledger, clock }
-  const value = await runWithCaller({ ...currentCaller(), recording: state }, fn)
+  const value = await bindCaller({ ...currentCaller(), recording: state }, fn)
   return [value, state.records]
 }
 
@@ -142,16 +142,16 @@ export async function runWithRecording<T>(
  *
  * Derives a state for this async branch and shares only the records array,
  * so two mounts consumed concurrently (`cat /s3/a & cat /db/b`) cannot see
- * or clobber each other's mount. Mirrors python's `push_mount_context`,
+ * or clobber each other's mount. Mirrors python's `set_mount_context`,
  * whose `Recorder` is frozen and re-set per task for the same reason.
  * An undefined `mountId` inherits the enclosing frame's.
  *
  * Inert (runs `fn` unchanged) when no recording context is active.
  */
-export function runWithMountContext<T>(fn: () => Promise<T>, mountId?: string | null): Promise<T> {
+export function setMountContext<T>(fn: () => Promise<T>, mountId?: string | null): Promise<T> {
   const state = currentCaller().recording
   if (state === null) return fn()
-  return runWithCaller(
+  return bindCaller(
     {
       ...currentCaller(),
       recording: {
@@ -184,7 +184,7 @@ export function withMountContext(
     async next(): Promise<IteratorResult<Uint8Array>> {
       if (ended) return done
       try {
-        const step = await runWithMountContext(() => iter.next(), mountId)
+        const step = await setMountContext(() => iter.next(), mountId)
         if (step.done === true) ended = true
         return step
       } catch (err) {

@@ -18,6 +18,7 @@ import { asArray, asObject } from '../../utils/records.ts'
 import type { LangfuseConfig } from '../../vfs/langfuse/config.ts'
 import { apiRequest, buildUrl } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
+import { cursorPages } from '../api/paginate.ts'
 
 export class LangfuseApiError extends ApiError {
   constructor(
@@ -127,15 +128,26 @@ async function collect(
   limit?: number,
 ): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = []
-  let cursor: string | undefined
-  while (limit === undefined || out.length < limit) {
+  if (limit !== undefined && limit <= 0) return out
+  const pages = cursorPages(async (cursor) => {
     const size = limit === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, limit - out.length)
-    const body = await transport.request(path, { ...query, limit: size, cursor })
+    const body = await transport.request(path, {
+      ...query,
+      limit: size,
+      cursor: cursor ?? undefined,
+    })
     const data = getData(body)
-    for (const item of data) out.push(item)
-    const next = asObject(asObject(body).meta).cursor
-    cursor = typeof next === 'string' && next !== '' ? next : undefined
-    if (data.length === 0 || cursor === undefined) break
+    return {
+      results: data,
+      next_cursor: asObject(asObject(body).meta).cursor,
+      has_more: data.length > 0,
+    }
+  })
+  for await (const rows of pages) {
+    for (const row of rows) {
+      out.push(row as Record<string, unknown>)
+      if (limit !== undefined && out.length >= limit) return out
+    }
   }
   return out
 }

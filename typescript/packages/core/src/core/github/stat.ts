@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ensureRef } from './repo.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -81,7 +82,7 @@ export async function stat(
   if (!accessor.truncated) {
     const whole = await refreshTree(accessor)
     if (whole !== null) {
-      const row = whole.tree[rel]
+      const row = Object.hasOwn(whole.tree, rel) ? whole.tree[rel] : undefined
       if (row === undefined) throw enoent(path.virtual)
       return rowOf(row, rel.slice(rel.lastIndexOf('/') + 1))
     }
@@ -96,7 +97,7 @@ export async function stat(
  * when a level does not name it. Mirrors Python's `_walked`.
  */
 async function walked(accessor: GitHubAccessor, rel: string): Promise<FileStat | null> {
-  let sha = accessor.ref
+  let sha = await ensureRef(accessor)
   const names = rel.split('/')
   for (const [depth, name] of names.entries()) {
     const rows = await fetchDirTree(accessor.account.transport, accessor.owner, accessor.repo, sha)
@@ -127,7 +128,12 @@ async function rootVersion(
 ): Promise<string | null> {
   if (!(index instanceof ListingCheckStore)) return null
   try {
-    return await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, accessor.ref)
+    return await fetchHead(
+      accessor.account.transport,
+      accessor.owner,
+      accessor.repo,
+      await ensureRef(accessor),
+    )
   } catch (err) {
     // An answer that refuses the head is no answer about the version, the
     // way pointRow reads a refusal; anything else propagates.

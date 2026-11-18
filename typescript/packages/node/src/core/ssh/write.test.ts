@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
@@ -74,7 +74,7 @@ describe('core/ssh/write', () => {
         ['/data', {}],
       ]),
     })
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await write(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)

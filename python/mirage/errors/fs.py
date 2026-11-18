@@ -92,6 +92,9 @@ def numbered(exc: OSError) -> OSError:
     condition = classify(exc)
     if exc.errno is not None or condition is None:
         return exc
+    if exc.filename is None and not exc.args:
+        kind = CONDITION_CLASS.get(condition, OSError)
+        return kind(posix_errno(condition), posix_phrase(condition))
     path = exc.filename if exc.filename is not None else exc.args[0]
     return fs_error(path, condition)
 

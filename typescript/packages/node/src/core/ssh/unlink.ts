@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { modeType } from '@struktoai/mirage-core/utils/stat_view'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
-import { isDirectoryAttrs, isFailure, isNoSuchFile, sftpCall } from './utils.ts'
+import { isFailure, isNoSuchFile, sftpCall } from './utils.ts'
 
 export async function unlink(accessor: SSHAccessor, p: PathSpec): Promise<void> {
   const sftp = await accessor.sftp()
@@ -34,7 +35,7 @@ export async function unlink(accessor: SSHAccessor, p: PathSpec): Promise<void> 
     if (isFailure(err)) {
       const isDir = await new Promise<boolean>((resolveFn) => {
         sftp.stat(remote, (statErr, attrs) => {
-          resolveFn(statErr ? false : isDirectoryAttrs(attrs))
+          resolveFn(statErr ? false : modeType(attrs.mode) === FileType.DIRECTORY)
         })
       })
       if (isDir) throw eisdir(p)

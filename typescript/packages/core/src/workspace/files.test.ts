@@ -14,7 +14,7 @@
 
 import { materialize, type ByteSource } from '../io/types.ts'
 import { describe, expect, it } from 'vitest'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { render } from '../test-utils.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
@@ -503,7 +503,7 @@ describe('fresh stat', () => {
       } else if (binding === 'bound') {
         result = new Session(ws, 'blind').vfs.stat('/data/secret.txt', undefined, { fresh: true })
       } else {
-        result = runWithSession(blind, () =>
+        result = setCurrentSession(blind, () =>
           ws.vfs.stat('/data/secret.txt', 'seeing', { fresh: true }),
         )
       }
@@ -737,7 +737,7 @@ describe('Files goes through the dispatcher', () => {
     ws.addMount('/m', outer, MountMode.WRITE)
     ws.addMount('/m/inner/deep', inner, MountMode.WRITE)
     const session = ws.createSession('agent', { mounts: { '/m/inner/deep': MountMode.EXEC } })
-    await runWithSession(session, async () => {
+    await setCurrentSession(session, async () => {
       ws.records.length = 0
       expect(await ws.vfs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
       expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
@@ -754,7 +754,7 @@ describe('Files goes through the dispatcher', () => {
     ws.addMount('/m', outer, MountMode.WRITE)
     ws.addMount('/m/inner/deep', inner, MountMode.WRITE)
     const session = ws.createSession('agent', { mounts: { '/m/inner/deep': MountMode.EXEC } })
-    await runWithSession(session, async () => {
+    await setCurrentSession(session, async () => {
       ws.records.length = 0
       await expect(ws.vfs.readdir('/m/inner')).rejects.toThrow(PolicyDenied)
       expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
@@ -1252,7 +1252,7 @@ describe('Files per-call sessionId', () => {
     // confined session cannot read as a wider one by naming it.
     const ws = await splitWs()
     const blind = ws.getSession('blind')
-    const seen = await runWithSession(blind, () => ws.vfs.exists('/data/secret.txt', 'seeing'))
+    const seen = await setCurrentSession(blind, () => ws.vfs.exists('/data/secret.txt', 'seeing'))
     expect(seen).toBe(false)
   })
 

@@ -54,19 +54,10 @@ from mirage.types import (
 from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
-from mirage.utils.stat_view import DIR_SIZE, posix_mode
+from mirage.utils.stat_view import DIR_SIZE, TYPE_CHARS, PrintfKind, posix_mode
 
 _ACCESS_BITS = {"r": 0o400, "w": 0o200, "x": 0o100}
 _PERMISSION_BITS = 0o7777
-
-_TYPE_LETTER = {
-    FileType.DIRECTORY: "d",
-    FileType.SYMLINK: "l",
-    FileType.CHAR_DEVICE: "c",
-    FileType.BLOCK_DEVICE: "b",
-    FileType.FIFO: "p",
-    FileType.SOCKET: "s",
-}
 
 
 def start_basename(path: PathSpec) -> str:
@@ -719,7 +710,7 @@ def unrespell_raw(row: str, virtual: str, raw: str) -> str:
     return row
 
 
-def printf_kind(st: FileStat | None) -> str:
+def printf_kind(st: FileStat | None) -> PrintfKind:
     """The one-letter kind a -printf %y/%Y directive renders for a stat.
 
     Args:
@@ -727,4 +718,4 @@ def printf_kind(st: FileStat | None) -> str:
     """
     if st is None or st.type is None:
         return "f"
-    return _TYPE_LETTER.get(st.type, "f")
+    return TYPE_CHARS.get(st.type, "f")

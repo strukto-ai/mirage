@@ -13,15 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from typing import Any
+from functools import cached_property
+from typing import Any, cast
 
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
-from mirage.machine.boxd import sdk
 from mirage.machine.boxd.config import BoxdConfig
 from mirage.machine.boxd.constants import MACHINE_GONE
+from mirage.machine.boxd.sdk import BoxdSdk
 from mirage.machine.constants import (
     PROCESS,
     is_run,
@@ -32,7 +33,6 @@ from mirage.machine.constants import (
 )
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
 
 
@@ -64,6 +64,10 @@ class BoxdMachine(MachineHandle):
     config_cls = BoxdConfig
     config: BoxdConfig
 
+    @cached_property
+    def _sdk(self) -> BoxdSdk:
+        return cast(BoxdSdk, self._load_sdk("boxd", BoxdSdk))
+
     _client: Any = None
 
     @property
@@ -72,10 +76,8 @@ class BoxdMachine(MachineHandle):
         return self.config.machine_id
 
     async def connect(self) -> None:
-        if sdk.AsyncBoxd is None:
-            raise ImportError(sdk_install_hint("boxd"))
         if self._client is None:
-            self._client = sdk.AsyncBoxd(
+            self._client = self._sdk.AsyncBoxd(
                 api_key=self.config.api_key, region=self.config.region
             )
         try:
@@ -98,7 +100,7 @@ class BoxdMachine(MachineHandle):
         Args:
             exc (BaseException): what an SDK call raised.
         """
-        if not isinstance(exc, sdk.NotFoundError):
+        if not isinstance(exc, self._sdk.NotFoundError):
             return None
         return not_running_hint(
             "machine", self.config.machine_id, "deleted", MACHINE_GONE
@@ -114,7 +116,7 @@ class BoxdMachine(MachineHandle):
         """
         hint = self._gone(exc)
         if hint is None and isinstance(
-            exc, (sdk.APIConnectionError, sdk.ConflictError)
+            exc, (self._sdk.APIConnectionError, self._sdk.ConflictError)
         ):
             hint = str(exc)
         if hint is None:

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { runWithMountGate } from '../../../../context/session_context.ts'
+import { setMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
@@ -48,7 +48,7 @@ function files(removed?: string[]): Files {
 }
 
 async function rmdir(vfs: Files, paths: string[]): Promise<[number, string]> {
-  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+  const result = await setMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(
       {} as Accessor,
       paths.map((p) => PathSpec.fromStrPath(p)),

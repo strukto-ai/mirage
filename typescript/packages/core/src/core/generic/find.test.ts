@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -78,7 +78,7 @@ describe('walkFind', () => {
           return row === undefined ? Promise.reject(enoent(path.virtual)) : Promise.resolve(row)
         },
       }
-      const result = await runWithCaller({ ...currentCaller(), cache: { manager } }, () =>
+      const result = await bindCaller({ ...currentCaller(), cache: { manager } }, () =>
         walk(ROOT, deps),
       )
       expect(result).toEqual(['/', '/entry'])
@@ -102,7 +102,7 @@ describe('walkFind', () => {
         return row === undefined ? Promise.reject(enoent(path.virtual)) : Promise.resolve(row)
       },
     }
-    const result = await runWithCaller({ ...currentCaller(), cache: { manager } }, () =>
+    const result = await bindCaller({ ...currentCaller(), cache: { manager } }, () =>
       walk(ROOT, deps, { minSize: 6, maxSize: 6 }),
     )
     expect(result).toEqual(['/entry'])

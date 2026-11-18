@@ -689,6 +689,9 @@ importers:
       redis:
         specifier: ^5.0.0
         version: 5.12.1(@opentelemetry/api@1.10.0)
+      yaml:
+        specifier: ^2.6.0
+        version: 2.8.3
       zod:
         specifier: ^4.6.6
         version: 4.6.7

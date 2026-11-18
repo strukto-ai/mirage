@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -119,7 +119,7 @@ describe('Session', () => {
     const reviewer = await ws.session('reviewer', { profile: 'reviewer' })
     expect(stdoutStr(await reviewer.shell('pwd', { cwd: '/repo' }))).toBe('/repo\n')
     expect(reviewer.state.cwd).not.toBe('/repo')
-    await runWithSession(ws.getSession(ws.defaultSessionId), async () => {
+    await setCurrentSession(ws.getSession(ws.defaultSessionId), async () => {
       // A session already bound is kept by the dispatcher, so a handle
       // reached from inside the default session's own command reads
       // as that session, never wider.

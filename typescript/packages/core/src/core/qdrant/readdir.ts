@@ -16,7 +16,7 @@ import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
 import { globPrefix, globStemPrefix } from '../../utils/glob_walk.ts'
 import { keptText } from '../../utils/record_search.ts'
-import type { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import type { Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes } from '../vector/read.ts'
@@ -39,7 +39,7 @@ function blobSize(value: unknown): number | null {
   }
 }
 
-function rowFiles(rows: QdrantRow[], config: ReturnType<typeof resolveQdrantConfig>): FileStat[] {
+function rowFiles(rows: QdrantRow[], config: ReturnType<typeof QdrantConfig.parse>): FileStat[] {
   // The scroll already carries every payload, so each file's exact rendered
   // size and text are free here; the mount serves the size from the listing
   // instead of refetching one row per file, and grep checks the text instead
@@ -94,7 +94,7 @@ function rowFiles(rows: QdrantRow[], config: ReturnType<typeof resolveQdrantConf
  * A leaf is named `<pointId>` plus whichever suffix the renderer gave it, and
  * only the id half is a prefix the scroll can test.
  */
-function rowPrefix(pattern: string | null, config: ReturnType<typeof resolveQdrantConfig>): string {
+function rowPrefix(pattern: string | null, config: ReturnType<typeof QdrantConfig.parse>): string {
   const suffixes = ['.json']
   if (config.textField !== null && config.textField !== '') suffixes.push('.txt')
   if (config.blobField !== null && config.blobField !== '') suffixes.push(`.${config.blobExt}`)

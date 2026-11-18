@@ -30,8 +30,8 @@ import type { Context } from '../commands/config.ts'
 import {
   callsAs,
   getCurrentSessionFor,
-  runWithCaller,
-  runWithSession,
+  bindCaller,
+  setCurrentSession,
 } from '../context/session_context.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { yieldBytes } from '../io/stream.ts'
@@ -218,11 +218,11 @@ describe('execution bindings', () => {
       expect(required(other.ctx.session).get('PUBLIC')).toBeNull()
       expect(context.ctx.env?.PUBLIC).toBeUndefined()
       const reads = await Promise.all([
-        runWithCaller(context.caller, async () => {
+        bindCaller(context.caller, async () => {
           await Promise.resolve()
           return required(context.ctx.session).get('PUBLIC')
         }),
-        runWithCaller(other.caller, async () => {
+        bindCaller(other.caller, async () => {
           await Promise.resolve()
           return required(other.ctx.session).get('PUBLIC')
         }),
@@ -300,7 +300,7 @@ it.each([
           : "print(open('/data/link').read(), end='')"
       const results = await Promise.all(
         ['one', 'two'].map((session) =>
-          runWithSession(
+          setCurrentSession(
             ws.getSession(session),
             () => answered(runtime, [], context({ flags: { c: code } })),
             { owner: ws.sessionManager },

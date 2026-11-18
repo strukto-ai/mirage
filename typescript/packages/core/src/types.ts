@@ -628,21 +628,6 @@ export const VFSName = Object.freeze({
 
 export type VFSName = (typeof VFSName)[keyof typeof VFSName]
 
-/**
- * POSIX file type (the `st_mode` kind), the switch behavior branches on.
- *
- * One per entry, always present. Directory and symlink are their own
- * kinds; every regular file is FILE and carries its content shape on
- * `FileStat.content`. Distinct from ContentType, which is only a
- * rendering hint for a FILE. Mirrors `FileType` in `mirage/types.py`.
- *
- * The full POSIX set is enumerated so the model is comprehensive.
- * DIRECTORY, FILE, SYMLINK, CHAR_DEVICE (the /dev mount) and FIFO (a
- * process substitution's /dev/fd/N) are produced today; BLOCK_DEVICE and
- * SOCKET are declared but not yet emitted, and the render/derivation tables
- * (find letter, st_mode bits, ls char) grow a row for one the moment a
- * backend starts producing it.
- */
 /** `ls` sort keys: name is the default, time `-t`, size `-S`, version
  * `-v`, extension `-X`, width `--sort=width`, and none `-U`. */
 export type LsSortBy = 'name' | 'time' | 'size' | 'version' | 'extension' | 'width' | 'none'
@@ -729,6 +714,11 @@ export class LineFacts {
   }
 }
 
+/**
+ * POSIX file type (the st_mode kind) reported by a backend. Every regular
+ * file has type FILE and carries its rendering hint in FileStat.content.
+ * SSH mounts can also report devices, pipes and sockets from remote stat attributes.
+ */
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
   FILE: 'file',

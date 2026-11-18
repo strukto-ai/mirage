@@ -16,7 +16,11 @@ import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_opera
 import { TRUNCATION_NOTICE } from '@struktoai/mirage-core/commands/builtin/utils/limit'
 import type { Workspace } from '@struktoai/mirage-node'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
+import { resolvePath } from '@struktoai/mirage-core/utils/path'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { readerOf, type Files } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import picomatch from 'picomatch'
 import { normalizeReadPagination } from 'deepagents'
@@ -39,53 +43,58 @@ import type {
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
 import { decode, replaceText, withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 
-const TEXT_EXTENSIONS = new Set([
-  'txt',
-  'md',
-  'json',
-  'jsonl',
-  'yaml',
-  'yml',
-  'csv',
-  'tsv',
-  'xml',
-  'html',
-  'htm',
-  'js',
-  'mjs',
-  'cjs',
-  'ts',
-  'tsx',
-  'jsx',
-  'py',
-  'rb',
-  'rs',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'sql',
-  'log',
-  'env',
-  'ini',
-  'toml',
-  'conf',
-  'cfg',
-])
-
-function shellQuote(s: string): string {
-  if (/^[A-Za-z0-9_./-]+$/.test(s)) return s
-  return `'${s.replaceAll(`'`, `'\\''`)}'`
+const BINARY_EXTENSIONS: Readonly<Record<string, string>> = {
+  '.3gpp': 'video/3gpp',
+  '.aac': 'audio/aac',
+  '.aiff': 'audio/aiff',
+  '.avi': 'video/x-msvideo',
+  '.flac': 'audio/flac',
+  '.flv': 'video/x-flv',
+  '.gif': 'image/gif',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.mpeg': 'video/mpeg',
+  '.mpg': 'video/mpeg',
+  '.ogg': 'audio/ogg',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.wav': 'audio/wav',
+  '.webm': 'video/webm',
+  '.webp': 'image/webp',
+  '.wmv': 'video/x-ms-wmv',
 }
 
-function commandError(io: ExecuteResult): string | undefined {
-  if (io.exitCode === 0) return undefined
+function textContent(
+  path: string,
+  bytes: Uint8Array,
+): { content: string | Uint8Array; mimeType: string } {
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  const dot = name.lastIndexOf('.')
+  const suffix = dot > 0 ? name.slice(dot) : ''
+  const media = BINARY_EXTENSIONS[suffix]
+  if (media !== undefined) return { content: bytes, mimeType: media }
+  if (!bytes.includes(0)) {
+    try {
+      const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+      const mime = suffix === '.jsonl' ? 'application/json' : mimeTypeFor(name)
+      const mimeType = mime.startsWith('text/') || mime === 'application/json' ? mime : 'text/plain'
+      return { content, mimeType }
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err
+    }
+  }
+  return { content: bytes, mimeType: 'application/octet-stream' }
+}
+
+function commandError(io: ExecuteResult, successExitCodes = [0]): string | undefined {
+  if (successExitCodes.includes(io.exitCode)) return undefined
   const stderr = withDecision(io.stderrText.trim(), io.decision).trim()
   return stderr || `Command failed with exit code ${String(io.exitCode)}`
 }
@@ -95,26 +104,8 @@ function capped(io: ExecuteResult): boolean {
 }
 
 function relativeTo(root: string, path: string): string {
-  const prefix = `${root.replace(/\/+$/, '')}/`
+  const prefix = `${rstripSlash(root)}/`
   return path.startsWith(prefix) ? path.slice(prefix.length) : (path.split('/').pop() ?? path)
-}
-
-function mimeFor(path: string): string {
-  const dot = path.lastIndexOf('.')
-  const ext = dot < 0 ? '' : path.slice(dot + 1).toLowerCase()
-  if (ext === 'json' || ext === 'jsonl') return 'application/json'
-  if (ext === 'csv') return 'text/csv'
-  if (ext === 'html' || ext === 'htm') return 'text/html'
-  if (ext === 'md') return 'text/markdown'
-  if (TEXT_EXTENSIONS.has(ext)) return 'text/plain'
-  if (ext === 'png') return 'image/png'
-  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
-  if (ext === 'pdf') return 'application/pdf'
-  return 'application/octet-stream'
-}
-
-function isTextMime(mimeType: string): boolean {
-  return mimeType.startsWith('text/') || mimeType === 'application/json'
 }
 
 /**
@@ -161,36 +152,50 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
   }
 
   async ls(path: string): Promise<LsResult> {
-    let entries: string[]
+    const base = rstripSlash(path)
+    const io = await this.exec(
+      `ls -1Ap --zero --quoting-style=literal -- ${singleQuote(base + '/')}`,
+    )
+    const error = commandError(io)
+    if (error !== undefined) return { error }
+    if (capped(io)) return { error: io.stderrText.trim() }
+    const entries = io.stdoutText.split('\0')
+    if (entries.pop()) return { error: 'Incomplete directory listing' }
+
+    const vfs = this.vfs
+    const cwd = this.ws.getSession(this.sessionId ?? this.ws.defaultSessionId).cwd
+    const directory = resolvePath(base || '/', cwd)
+    const links = readerOf(vfs).linkNamesUnder(directory)
+    const files: FileInfo[] = []
     try {
-      entries = await this.vfs.readdir(path)
+      for (const entry of entries) {
+        const name = rstripSlash(entry)
+        const isDir =
+          entry.endsWith('/') ||
+          (links.has(name) && (await vfs.isDir(`${rstripSlash(directory)}/${name}`)))
+        files.push({ path: `${base}/${name}`, is_dir: isDir })
+      }
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
-    }
-    const files: FileInfo[] = []
-    for (const entry of entries) {
-      const isDir = await this.vfs.isDir(entry)
-      files.push({ path: entry, is_dir: isDir })
     }
     return { files }
   }
 
   async read(filePath: string, offset = 0, limit = 500): Promise<ReadResult> {
-    const mimeType = mimeFor(filePath)
     let bytes: Uint8Array
     try {
       bytes = await this.vfs.read(filePath)
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
     }
-    if (!isTextMime(mimeType)) {
+    const { content: text, mimeType } = textContent(filePath, bytes)
+    if (typeof text !== 'string') {
       if (mimeType !== 'application/octet-stream') return { content: bytes, mimeType }
       return {
         error: `Binary file '${filePath}' (${mimeType}, ${String(bytes.length)} bytes). Use shell commands (head, file, wc, od) via execute() to inspect.`,
       }
     }
     const window = normalizeReadPagination(offset, limit)
-    const text = new TextDecoder('utf-8').decode(bytes)
     const lines = text.split('\n')
     const totalLines = lines[lines.length - 1] === '' ? lines.length - 1 : lines.length
     if (window.offset > 0 && window.offset >= totalLines) {
@@ -220,10 +225,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
     }
-    const mimeType = mimeFor(filePath)
-    const content: string | Uint8Array = isTextMime(mimeType)
-      ? new TextDecoder('utf-8').decode(bytes)
-      : bytes
+    const { content, mimeType } = textContent(filePath, bytes)
     const modified = stat.modified ?? new Date().toISOString()
     const data: FileData = {
       content,
@@ -279,14 +281,18 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     glob?: string | null,
     maxCount?: number | null,
   ): Promise<GrepResult> {
-    const parts: string[] = ['grep', '-rnH']
-    if (glob !== undefined && glob !== null && glob.length > 0) {
-      parts.push('--include', shellQuote(glob))
+    const root = path === '' ? '/' : (path ?? '/')
+    const parts: string[] = ['grep', '-FrnH']
+    if (glob !== undefined && glob !== null && glob.length > 0 && !glob.includes('/')) {
+      parts.push('--include', singleQuote(glob))
     }
-    parts.push(shellQuote(pattern))
-    parts.push(shellQuote(path ?? '/'))
+    parts.push('--', singleQuote(pattern), singleQuote(root))
     const io = await this.exec(parts.join(' '))
-    const matches = ioToGrepMatches(io)
+    const error = commandError(io, [0, 1])
+    if (error !== undefined) return { error }
+    const all = ioToGrepMatches(io)
+    const included = glob ? picomatch(glob, { dot: true, basename: !glob.includes('/') }) : null
+    const matches = included ? all.filter((m) => included(relativeTo(root, m.path))) : all
     if (maxCount === undefined || maxCount === null || matches.length <= maxCount) {
       return capped(io) ? { matches, truncated: true } : { matches }
     }
@@ -301,7 +307,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
    */
   async glob(pattern: string, path = '/'): Promise<GlobResult> {
     const matches = picomatch(pattern, { dot: true })
-    const io = await this.exec(`find ${shellQuote(path)} -type f`)
+    const io = await this.exec(`find ${singleQuote(path)} -type f`)
     const error = commandError(io)
     if (error !== undefined) return { error }
     const files = ioToFileInfos(io).filter((info) => matches(relativeTo(path, info.path)))
@@ -310,7 +316,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
 
   /** Remove a file, or a directory with everything under it. */
   async delete(filePath: string): Promise<DeleteResult> {
-    const io = await this.exec(`rm -r -- ${shellQuote(filePath)}`)
+    const io = await this.exec(`rm -r -- ${singleQuote(filePath)}`)
     const error = commandError(io)
     if (error !== undefined) return { error }
     return { path: filePath }

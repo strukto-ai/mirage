@@ -20,7 +20,6 @@ from typing import Any, TypeVar
 
 from mirage.context.session_context import (
     Caller,
-    CallerToken,
     bind_caller,
     current_caller,
     reset_caller,
@@ -441,7 +440,9 @@ class Decisions(DecisionOwner):
         if outer is not None:
             return await run(outer)
         handed = HandOff()
-        token = set_op_call(self, handed, session_id)
+        token = bind_caller(
+            current_caller().changed({"call": (self, handed, session_id)})
+        )
         try:
             return await run(handed)
         except PolicyDenied as exc:
@@ -449,7 +450,7 @@ class Decisions(DecisionOwner):
                 self.release(session_id, handed)
             raise
         finally:
-            reset_op_call(token)
+            reset_caller(token)
             await self.revoke(session_id, handed)
 
     def _claim(
@@ -645,30 +646,6 @@ class Decisions(DecisionOwner):
     async def _flush(self) -> None:
         if self._sessions is not None:
             await self._sessions.flush()
-
-
-def set_op_call(
-    owner: Decisions, handed: HandOff, session_id: str
-) -> CallerToken:
-    """Bind one call, the unit an op-level answer covers: a file
-    tool's, or a line's or a job's, whose session writes are its ops. A
-    grant one of its ops is answered by is claimed on ``handed`` for the
-    call's other ops on that subject.
-
-    Args:
-        owner (Decisions): the ledger the call runs under, the only one
-            that claims on ``handed`` and spends it.
-        handed (HandOff): the call's hand-off, spent when it ends.
-        session_id (str): the session the call runs as.
-    """
-    return bind_caller(
-        current_caller().changed({"call": (owner, handed, session_id)})
-    )
-
-
-def reset_op_call(token: CallerToken) -> None:
-    """Restore the previous call binding."""
-    reset_caller(token)
 
 
 def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:

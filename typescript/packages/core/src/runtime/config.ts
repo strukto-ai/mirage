@@ -84,9 +84,11 @@ export interface ConfigField {
 }
 
 /** The keys a runtime's config takes, camelCase, each with its shape. */
-export type ConfigFields = Readonly<Record<string, ConfigField>>
+export type ConfigFields<Config extends RuntimeConfig = Record<string, unknown>> = Readonly<
+  Record<Extract<keyof Config, string>, ConfigField>
+>
 
-export const HOME_CONFIG_FIELDS: ConfigFields = { home: { type: 'string' } }
+export const HomeConfig = { home: { type: 'string' } } satisfies ConfigFields<HomeConfig>
 
 /**
  * Where a runtime's engine is: the config's `home`, else `envVar`'s value,

@@ -77,7 +77,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BoxVFS } from '../../vfs/box/box.ts'
@@ -474,7 +474,7 @@ describe('box write ops', () => {
   it('a rename onto its own name sends and records nothing', async () => {
     vi.mocked(api.updateFile).mockClear()
     const h = await handed(spec('/data/a.txt'), spec('/data/a.txt'))
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       rename(makeAccessor(), spec('/data/a.txt'), spec('/data/a.txt'), h),
     )
     expect(vi.mocked(api.updateFile)).not.toHaveBeenCalled()
@@ -483,7 +483,7 @@ describe('box write ops', () => {
 
   it('copy copies a file into the dst parent, recorded once', async () => {
     const h = await handed(spec('/data/a.txt'), spec('/data/c.txt'))
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'), h),
     )
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
@@ -492,7 +492,7 @@ describe('box write ops', () => {
 
   it('copy of a whole folder is recorded as a prefix', async () => {
     const h = await handed(spec('/data/sub'), spec('/data/new'))
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       copy(makeAccessor(), spec('/data/sub'), spec('/data/new'), h),
     )
     expect(vi.mocked(api.copyFolder)).toHaveBeenCalledWith(STUB_TM, '300', '100', 'new')
@@ -511,7 +511,7 @@ describe('box write ops', () => {
     H.order = []
     try {
       const h = await handed(spec('/data/a.txt'), spec('/data/b.txt'))
-      const [, records] = await runWithRecording(() =>
+      const [, records] = await recordingScope(() =>
         copy(makeAccessor(), spec('/data/a.txt'), spec('/data/b.txt'), h),
       )
       expect(H.order).toEqual(['copyFile', 'record'])
@@ -545,7 +545,7 @@ describe('box write ops', () => {
     H.order = []
     try {
       const h = await handed(spec('/data/sub'), spec('/data/dst'))
-      await runWithRecording(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'), h))
+      await recordingScope(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'), h))
       expect(H.order).toEqual(['copyFolder', 'record', 'copyFolder', 'record'])
     } finally {
       vi.mocked(api.copyFolder).mockReset()
@@ -589,7 +589,7 @@ describe.each([
     vi.mocked(api.uploadNewFile).mockResolvedValue(reply as never)
     vi.mocked(api.uploadFileVersion).mockResolvedValue(reply as never)
     const h = await handed(spec(virtual))
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       write(makeAccessor(), spec(virtual), new TextEncoder().encode('hello'), h),
     )
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])

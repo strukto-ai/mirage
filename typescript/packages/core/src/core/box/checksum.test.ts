@@ -21,7 +21,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import * as api from './api.ts'
 import type { BoxTokenManager } from './client.ts'
@@ -70,7 +70,7 @@ describe('Box checksum', () => {
   ])('records the token a read would, listed %s', async (sha1, token) => {
     vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1: 'AB'.repeat(20) } as never)
     const row = listed(sha1)
-    const [, records] = await runWithRecording(() => checksum(accessor, SCOPE, 'sha1', row))
+    const [, records] = await recordingScope(() => checksum(accessor, SCOPE, 'sha1', row))
     expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([['read', '/a.txt', token]])
   })
 })

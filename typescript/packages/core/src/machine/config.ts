@@ -42,11 +42,11 @@ export interface MachineConfig extends RuntimeConfig {
   captures?: readonly string[]
 }
 
-export const BASE_CONFIG_FIELDS: ConfigFields = {
+export const MachineConfig = {
   env: { type: 'map' },
   mountType: { type: 'string', options: MOUNT_TYPES },
   captures: { type: 'list' },
-}
+} satisfies ConfigFields<MachineConfig>
 
 /** Fail loud on a `mountType` other than ssh, fuse or both; unset serves nothing. */
 export function checkMountType(runtime: string, mountType: unknown): MountType | null {

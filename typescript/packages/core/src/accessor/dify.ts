@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { stallTimeout } from '../core/api/client.ts'
-import type { resolveDifyConfig } from '../vfs/dify/config.ts'
+import type { DifyConfig } from '../vfs/dify/config.ts'
 import { Accessor } from './base.ts'
 
 export interface DifyRequestOptions {
@@ -23,10 +23,10 @@ export interface DifyRequestOptions {
 }
 
 export class DifyAccessor extends Accessor {
-  readonly config: ReturnType<typeof resolveDifyConfig>
+  readonly config: ReturnType<typeof DifyConfig.parse>
   private readonly limiter: ConcurrencyLimiter
 
-  constructor(config: ReturnType<typeof resolveDifyConfig>) {
+  constructor(config: ReturnType<typeof DifyConfig.parse>) {
     super()
     this.config = config
     this.limiter = new ConcurrencyLimiter(config.maxConcurrency)

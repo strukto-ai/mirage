@@ -39,7 +39,7 @@ vi.mock('./_schema_json.ts', () => ({
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
+import { PostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import * as _schema from './_schema_json.ts'
@@ -51,9 +51,9 @@ const STUB_DRIVER: PgDriver = {
 }
 
 function makeAccessor(
-  cfgOverrides: Parameters<typeof resolvePostgresConfig>[0] = { dsn: 'postgres://h/db' },
+  cfgOverrides: Parameters<typeof PostgresConfig.parse>[0] = { dsn: 'postgres://h/db' },
 ): PostgresAccessor {
-  const cfg = resolvePostgresConfig(cfgOverrides)
+  const cfg = PostgresConfig.parse(cfgOverrides)
   return new PostgresAccessor(STUB_DRIVER, cfg)
 }
 

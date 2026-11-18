@@ -482,12 +482,54 @@ async def test_aedit_keeps_a_leading_bom(backend, workspace):
 @pytest.mark.asyncio
 async def test_als(backend):
     await backend.awrite("/dir/a.txt", "a")
-    await backend.awrite("/dir/b.txt", "b")
+    await backend.awrite("/dir/sub/b.txt", "b")
+    await backend.awrite("/dir/ .hidden\n ", "c")
     result = await backend.als("/dir")
     assert result.entries is not None
     entries = result.entries
-    paths = [e["path"] for e in entries]
-    assert len(paths) == 2
+    assert {e["path"]: e["is_dir"] for e in entries} == {
+        "/dir/a.txt": False,
+        "/dir/sub": True,
+        "/dir/ .hidden\n ": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_als_follows_directory_links(backend, workspace):
+    await backend.awrite("/data/dir/file", "hello")
+    await workspace.vfs.symlink("/data/dir-link", "dir")
+    await workspace.vfs.symlink("/data/file-link", "dir/file")
+    await workspace.vfs.symlink("/data/dangling", "missing")
+    listed = await backend.als("/data")
+    assert listed.error is None
+    assert {row["path"]: row["is_dir"] for row in listed.entries or []} == {
+        "/data/dir": True,
+        "/data/dir-link": True,
+        "/data/file-link": False,
+        "/data/dangling": False,
+    }
+    workspace.create_session("agent")
+    agent = LangchainWorkspace(workspace, session_id="agent")
+    await agent.aexecute("cd /data")
+    relative = await agent.als(".")
+    assert {"path": "./dir-link", "is_dir": True} in (relative.entries or [])
+
+
+@pytest.mark.asyncio
+async def test_als_rejects_a_partial_name():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"ls": Limit(max_bytes=3)},
+    )
+    try:
+        backend = LangchainWorkspace(ws)
+        await backend.awrite("/data/report.txt", "hello")
+        listed = await backend.als("/data")
+        assert listed.entries is None
+        assert "output truncated at limit" in (listed.error or "")
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -496,6 +538,14 @@ async def test_als_reports_command_errors(backend):
 
     assert result.entries is None
     assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_agrep_treats_leading_dash_and_regex_syntax_as_text(backend):
+    await backend.awrite("/log.txt", "-a.b\n-axb\n")
+    result = await backend.agrep("-a.b", path="/log.txt")
+    assert result.error is None
+    assert [m["text"] for m in result.matches] == ["-a.b"]
 
 
 @pytest.mark.asyncio

@@ -97,6 +97,15 @@ async def test_a_push_to_the_mounted_ref_names_each_path_once():
             [(FileChangeKind.UNKNOWN, "/gh")],
         ),
         ("push", _push(), None, None),
+        (
+            "push",
+            {
+                **_push("refs/heads/None"),
+                "repository": {"full_name": "acme/proj"},
+            },
+            None,
+            [],
+        ),
     ],
 )
 async def test_a_push_elsewhere_or_rewritten_is_skipped_or_unknown(

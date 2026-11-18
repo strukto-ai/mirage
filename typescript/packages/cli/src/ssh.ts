@@ -26,26 +26,7 @@ export function registerSshProxyCommand(program: Command): void {
     .command('ssh-proxy')
     .argument('<workspace>', 'The workspace to log in to')
     .description("Carry SSH to a workspace over the server's HTTPS port, on stdio.")
-    .action(async (workspace: string) => {
-      const client = makeClient()
-      try {
-        await client.ensureRunning({ allowSpawn: true })
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error))
-      }
-      const base = client.settings.url
-      const token = await client.token()
-      const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/ssh`
-      const headers: Record<string, string> =
-        token === '' ? {} : { Authorization: `Bearer ${token}` }
-      const { TunnelRefused, relaySsh } = await import('@struktoai/mirage-server/ssh/relay')
-      try {
-        await relaySsh(url, headers)
-      } catch (error) {
-        if (error instanceof TunnelRefused) fail(`ssh-proxy: ${error.message}`)
-        throw error
-      }
-    })
+    .action(sshProxyCmd)
 }
 
 /**
@@ -60,20 +41,42 @@ export function registerCodexExecCommand(program: Command): void {
     .argument('<workspace>', 'The workspace to serve')
     .option('--listen <address>', 'HOST:PORT to accept codex exec-server forward on', '127.0.0.1:0')
     .description('Serve a workspace to `codex exec-server forward` on a local port.')
-    .action(async (workspace: string, opts: { listen: string }) => {
-      const at = opts.listen.lastIndexOf(':')
-      const host = opts.listen.slice(0, at)
-      const port = opts.listen.slice(at + 1)
-      if (at <= 0 || !/^\d+$/.test(port)) fail('codex-exec: --listen takes HOST:PORT')
-      const client = makeClient()
-      try {
-        await client.ensureRunning({ allowSpawn: true })
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error))
-      }
-      const base = client.settings.url
-      const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/codex-exec`
-      const { relayCodex } = await import('@struktoai/mirage-server/ssh/relay')
-      await relayCodex(host.replace(/^\[|\]$/g, ''), Number(port), url, () => client.token())
-    })
+    .action(codexExecCmd)
+}
+
+async function sshProxyCmd(workspace: string): Promise<void> {
+  const client = makeClient()
+  try {
+    await client.ensureRunning({ allowSpawn: true })
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+  const base = client.settings.url
+  const token = await client.token()
+  const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/ssh`
+  const headers: Record<string, string> = token === '' ? {} : { Authorization: `Bearer ${token}` }
+  const { TunnelRefused, relaySsh } = await import('@struktoai/mirage-server/ssh/relay')
+  try {
+    await relaySsh(url, headers)
+  } catch (error) {
+    if (error instanceof TunnelRefused) fail(`ssh-proxy: ${error.message}`)
+    throw error
+  }
+}
+
+async function codexExecCmd(workspace: string, opts: { listen: string }): Promise<void> {
+  const at = opts.listen.lastIndexOf(':')
+  const host = opts.listen.slice(0, at)
+  const port = opts.listen.slice(at + 1)
+  if (at <= 0 || !/^\d+$/.test(port)) fail('codex-exec: --listen takes HOST:PORT')
+  const client = makeClient()
+  try {
+    await client.ensureRunning({ allowSpawn: true })
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+  const base = client.settings.url
+  const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/codex-exec`
+  const { relayCodex } = await import('@struktoai/mirage-server/ssh/relay')
+  await relayCodex(host.replace(/^\[|\]$/g, ''), Number(port), url, () => client.token())
 }

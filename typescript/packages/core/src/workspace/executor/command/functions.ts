@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../context/session_context.ts'
-import { runAsShell, sessionVoice } from '../../../context/session_context.ts'
+import { clearProgramInvocation, sessionVoice } from '../../../context/session_context.ts'
 import { share } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -170,7 +170,7 @@ export async function runShellFunction(
   try {
     // The body is shell code: the builtins it runs are the shell's,
     // whatever `xargs` or `env` marked the line that called it.
-    return await runAsShell(async (): Promise<RedirectResult> => {
+    return await clearProgramInvocation(async (): Promise<RedirectResult> => {
       let stdout: ByteSource | null
       let io: IOResult
       let lastExec: ExecutionNode

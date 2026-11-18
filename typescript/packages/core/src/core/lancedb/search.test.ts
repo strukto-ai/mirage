@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
+import { LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
 import { filesContaining } from './search.ts'
@@ -25,7 +25,7 @@ import { TREE } from './tree.ts'
 it('spells a group value in the canonical path the way the listing does', async () => {
   // A path the listing never shows is one `cat` cannot open: the group
   // segment renders the way readdir renders it, escape lead and all.
-  const config = resolveLanceDBConfig({
+  const config = LanceDBConfig.parse({
     uri: '/tmp/db',
     groupBy: ['label'],
     idColumn: 'id',
@@ -85,7 +85,7 @@ function animals(texts: string[] | null): { accessor: LanceDBAccessor; clauses: 
       )
     },
   } as unknown as LanceDriver
-  const config = resolveLanceDBConfig({
+  const config = LanceDBConfig.parse({
     uri: '/tmp/db',
     groupBy: ['label', 'kind'],
     idColumn: 'id',
@@ -137,7 +137,7 @@ it('leaves a text a column name or the blob extension holds to the scan', async 
   const accessor = (blob: string | null) =>
     new LanceDBAccessor(
       driver,
-      resolveLanceDBConfig({
+      LanceDBConfig.parse({
         uri: '/tmp/db',
         table: 't',
         idColumn: 'id',
@@ -167,7 +167,7 @@ it('searches a title drawn from the blob column', async () => {
     },
     rowsWhere: () => Promise.resolve([{ id: 1 }]),
   } as unknown as LanceDriver
-  const config = resolveLanceDBConfig({
+  const config = LanceDBConfig.parse({
     uri: '/tmp/db',
     table: 't',
     idColumn: 'id',
@@ -200,7 +200,7 @@ it('reads every card when more rows hold the text than a listing shows', async (
   const capped = (maxRows: number) =>
     new LanceDBAccessor(
       driver,
-      resolveLanceDBConfig({ uri: '/tmp/db', table: 't', idColumn: 'id', maxRows }),
+      LanceDBConfig.parse({ uri: '/tmp/db', table: 't', idColumn: 'id', maxRows }),
     )
   expect(await filesContaining(capped(4), 'plain', [scope()], false, false)).toBeNull()
   const found = await filesContaining(capped(5), 'plain', [scope()], false, false)

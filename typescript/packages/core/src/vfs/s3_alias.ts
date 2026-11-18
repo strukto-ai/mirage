@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../core/api/config.ts'
+import { TimeoutConfig } from '../core/api/config.ts'
 import type { ConfigOf, RedactedSchema } from './secrets.ts'
 import { FIELD_NORMALIZERS, redactedConfigDump, secretStr, z } from './secrets.ts'
 import type { ConfigState } from './types.ts'
@@ -80,7 +80,7 @@ export const ALIAS_SHAPE = {
     .describe(
       'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
     ),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   proxy: secretStr()
     .optional()
     .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),

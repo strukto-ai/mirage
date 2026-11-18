@@ -30,3 +30,9 @@ def test_defaults():
     assert cfg.default_page_size == 100
     assert cfg.default_search_limit == 10
     assert cfg.scope_filter == {"run_id": "r"}
+
+
+@pytest.mark.parametrize("scope", ["", "  "])
+def test_empty_scope_id_is_refused(scope):
+    with pytest.raises(ValidationError, match="scope id cannot be empty"):
+        Mem0Config(api_key=SecretStr("key"), user_id=scope)

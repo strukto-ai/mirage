@@ -5,7 +5,7 @@ import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
-import { runInCommandScope } from './scope.ts'
+import { commandScope } from './scope.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -121,7 +121,7 @@ for (const backend of ['ram', 'redis']) {
         if (kind === 'partial') await store.setPartialDir('/dir', [['a', entry()]])
         else await store.setDir('/dir', [['a', entry()]], null, { window: true })
         const ticket = await store.refillToken()
-        const before = await runInCommandScope(async () => {
+        const before = await commandScope(async () => {
           const kept = await store.listDir('/dir')
           expect(await store.invalidateMissing(['/dir/new'])).toBe(false)
           expect(await store.listDir('/dir')).toEqual(kept)

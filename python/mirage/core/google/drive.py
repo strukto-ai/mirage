@@ -16,7 +16,7 @@ import hashlib
 import json
 from collections.abc import AsyncGenerator
 from enum import Enum
-from typing import Any
+from typing import Any, Required, TypedDict, cast
 
 from mirage.core.google.client import (
     TokenManager,
@@ -34,6 +34,43 @@ from mirage.core.google.client import (
 from mirage.core.google.constants import SIMPLE_UPLOAD_MAX
 from mirage.io.spool import ByteSpool, size_of
 from mirage.utils.ranges import ByteWindow
+
+
+class DriveFile(TypedDict, total=False):
+    id: Required[str]
+    name: str
+    mimeType: str
+    driveId: str
+    size: str
+    quotaBytesUsed: str
+    createdTime: str
+    modifiedTime: str
+    md5Checksum: str
+    sha1Checksum: str
+    sha256Checksum: str
+    headRevisionId: str
+    trashed: bool
+    owners: list[dict[str, Any]]
+    capabilities: dict[str, bool]
+    parents: list[str]
+
+
+class ListResponse(TypedDict, total=False):
+    files: list[DriveFile]
+    nextPageToken: str
+    incompleteSearch: bool
+
+
+class SharedDrive(TypedDict):
+    id: str
+    name: str
+
+
+class DriveChange(TypedDict, total=False):
+    changeType: str
+    fileId: str
+    removed: bool
+    file: DriveFile
 
 
 class GoogleFileSuffix(str, Enum):
@@ -86,7 +123,7 @@ async def list_files(
     modified_before: str | None = None,
     name: str | None = None,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DriveFile]:
     """List files via Drive API.
 
     Args:
@@ -133,7 +170,7 @@ async def list_children(
     drive_id: str | None = None,
     page_size: int = 1000,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DriveFile]:
     """The untrashed children of several folders of one corpus, from one
     query (``'a' in parents or 'b' in parents``), in the order a listing
     of each folder returns them.
@@ -164,7 +201,7 @@ async def _query_files(
     drive_id: str | None,
     page_size: int,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> list[DriveFile]:
     """The files a query names, newest first, a page at a time.
 
     Args:
@@ -175,7 +212,7 @@ async def _query_files(
         page_size (int): results per page.
         limit (int | None): stop once this many files are in hand.
     """
-    files: list[dict[str, Any]] = []
+    files: list[DriveFile] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -192,7 +229,9 @@ async def _query_files(
         if page_token:
             params["pageToken"] = page_token
         url = f"{drive_base(token_manager)}/files"
-        data = await google_get(token_manager, url, params=params)
+        data = cast(
+            ListResponse, await google_get(token_manager, url, params=params)
+        )
         files.extend(data.get("files", []))
         if limit is not None and len(files) >= limit:
             break
@@ -205,7 +244,7 @@ async def _query_files(
 async def list_shared_drives(
     token_manager: TokenManager,
     page_size: int = 100,
-) -> list[dict[str, Any]]:
+) -> list[SharedDrive]:
     """List shared drives visible to the authenticated user.
 
     Args:
@@ -215,7 +254,7 @@ async def list_shared_drives(
     Returns:
         list[dict]: shared drive metadata dicts.
     """
-    drives: list[dict[str, Any]] = []
+    drives: list[SharedDrive] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -240,7 +279,7 @@ async def list_all_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[DriveFile], bool]:
     """List all files (no folder filter) via Drive API.
 
     Searches every corpus the account can reach, so a document that lives
@@ -277,7 +316,7 @@ async def list_all_files(
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts) if parts else None
-    files: list[dict[str, Any]] = []
+    files: list[DriveFile] = []
     complete = True
     page_token: str | None = None
     while True:
@@ -297,7 +336,9 @@ async def list_all_files(
         if page_token:
             params["pageToken"] = page_token
         url = f"{drive_base(token_manager)}/files"
-        data = await google_get(token_manager, url, params=params)
+        data = cast(
+            ListResponse, await google_get(token_manager, url, params=params)
+        )
         files.extend(data.get("files", []))
         if data.get("incompleteSearch"):
             complete = False
@@ -357,7 +398,9 @@ async def search_files(
         if page_token:
             params["pageToken"] = page_token
         url = f"{drive_base(token_manager)}/files"
-        data = await google_get(token_manager, url, params=params)
+        data = cast(
+            ListResponse, await google_get(token_manager, url, params=params)
+        )
         ids.extend(f["id"] for f in data.get("files", []))
         if data.get("incompleteSearch"):
             complete = False
@@ -518,7 +561,7 @@ async def start_page_token(token_manager: TokenManager) -> str:
 
 async def list_changes(
     token_manager: TokenManager, page_token: str
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[DriveChange], str]:
     """Every change since ``page_token`` across the account's drives,
     and the token the next read starts from.
 
@@ -527,7 +570,7 @@ async def list_changes(
         page_token (str): Where the last read ended.
     """
     url = f"{drive_base(token_manager)}/changes"
-    found: list[dict[str, Any]] = []
+    found: list[DriveChange] = []
     token = page_token
     while True:
         data = await google_get(
@@ -543,7 +586,9 @@ async def list_changes(
         )
         rows = data.get("changes")
         if isinstance(rows, list):
-            found.extend(r for r in rows if isinstance(r, dict))
+            found.extend(
+                cast(DriveChange, r) for r in rows if isinstance(r, dict)
+            )
         if data.get("newStartPageToken"):
             return found, str(data["newStartPageToken"])
         token = str(data["nextPageToken"])

@@ -71,7 +71,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.sources import resolve_config_secrets
 from mirage.secrets.types import ResolvedSource
-from mirage.types import JsonValue, PathSpec
+from mirage.types import JsonObject, JsonValue, PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def script_context(
     | VfsContext
     | WorkspaceContext
     | NetworkContext,
-) -> dict[str, JsonValue]:
+) -> JsonObject:
     """A policy context as a program reads it: every field a coded
     policy reads, under the same name, as plain data.
 

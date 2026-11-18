@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import { Boundary } from '../boundary.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -61,7 +61,7 @@ describe('MountModePolicy', () => {
     const ws = new Workspace({ '/extra': [new RAMVFS(), MountMode.WRITE] })
     const owner = ws.namespace.tryMountFor('/extra/lk')
     const sess = ws.createSession('agent', { mounts: { '/extra/': 'read' } })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(admit(owner, path('/extra/lk'))).rejects.toThrow(/read-only/)
     })
     await admit(owner, path('/extra/lk'))
@@ -72,7 +72,7 @@ describe('MountModePolicy', () => {
     // root to read refuses the table write there, with no mount at /.
     const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     const sess = ws.createSession('agent', { mounts: { '/': 'read' } })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(admit(null, path('/toplink'))).rejects.toMatchObject({ code: 'EROFS' })
     })
   })

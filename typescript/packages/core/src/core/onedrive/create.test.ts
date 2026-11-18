@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { create } from './create.ts'
 
@@ -31,7 +31,7 @@ describe('OneDrive create', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'item' })))
     vi.stubGlobal('fetch', fetchMock)
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const [, records] = await runWithRecording(() => create(accessor, SPEC))
+    const [, records] = await recordingScope(() => create(accessor, SPEC))
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('PUT')
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       'https://graph.microsoft.com/v1.0/me/drive/root:/m/k.txt:/content',

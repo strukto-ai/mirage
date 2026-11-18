@@ -19,7 +19,7 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
 import { posixNormpath } from '../utils/path.ts'
-import { S_IFDIR, S_IFLNK, S_IFMT } from '../utils/stat_view.ts'
+import { fileMode, S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { OPEN, PIPE_PACKET_SIZE, POSIX_RENAME, STATUS } from './constants.ts'
@@ -99,11 +99,7 @@ export function toAttrs(a: MountAttrs): Attributes {
 
 /** The `ls -l` line an SFTP v3 client prints for an entry. */
 export function longname(name: string, a: Attributes): string {
-  let permissions = (a.mode & S_IFMT) === S_IFDIR ? 'd' : (a.mode & S_IFMT) === S_IFLNK ? 'l' : '-'
-  for (let shift = 6; shift >= 0; shift -= 3) {
-    const triplet = (a.mode >> shift) & 0o7
-    permissions += (triplet & 4 ? 'r' : '-') + (triplet & 2 ? 'w' : '-') + (triplet & 1 ? 'x' : '-')
-  }
+  const permissions = fileMode(a.mode)
   const when = new Date(a.mtime * 1000)
   const day = String(when.getDate()).padStart(2)
   const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`

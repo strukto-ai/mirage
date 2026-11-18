@@ -14,13 +14,50 @@
 
 import json
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Literal, TypedDict, cast
 
 import asyncpg
 
 from mirage.utils.json_canonical import canonicalize_row, canonicalize_value
 
 __all__ = ["canonicalize_row", "canonicalize_value"]
+
+
+class ColumnInfo(TypedDict):
+    name: str
+    type: str
+    nullable: bool
+
+
+class ColumnReference(TypedDict):
+    schema: str
+    table: str
+    columns: list[str]
+
+
+class ForeignKey(TypedDict):
+    columns: list[str]
+    references: ColumnReference
+
+
+Relationship = TypedDict(
+    "Relationship",
+    {
+        "from": ColumnReference,
+        "to": ColumnReference,
+        "kind": Literal["many_to_one"],
+    },
+)
+
+
+class EnumInfo(TypedDict):
+    type: str
+    labels: list[str]
+
+
+class ColumnStats(TypedDict):
+    n_distinct: float
+    most_common_vals: list[str]
 
 
 def quote_ident(ident: str) -> str:
@@ -303,7 +340,7 @@ async def fetch_bounded_query(
 
 async def fetch_columns(
     conn: asyncpg.Connection, schema: str, name: str
-) -> list[dict[str, Any]]:
+) -> list[ColumnInfo]:
     rows = await conn.fetch(
         "SELECT column_name, data_type, is_nullable "
         "FROM information_schema.columns "
@@ -356,7 +393,7 @@ async def fetch_column_comments(
 
 async def fetch_enum_columns(
     conn: asyncpg.Connection, schema: str, name: str
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, EnumInfo]:
     rows = await conn.fetch(
         "SELECT a.attname, t.typname, "
         "       array_agg(e.enumlabel ORDER BY e.enumsortorder)::text[] "
@@ -383,7 +420,7 @@ async def fetch_enum_columns(
 
 async def fetch_column_stats(
     conn: asyncpg.Connection, schema: str, name: str
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, ColumnStats]:
     # pg_stats is populated by ANALYZE, so it is empty for a freshly written
     # relation until autovacuum gets to it. Callers treat it as best-effort;
     # mirage never runs ANALYZE itself (a write and a cost on the user's DB).
@@ -455,7 +492,7 @@ async def fetch_row_key(
 
 async def fetch_foreign_keys(
     conn: asyncpg.Connection, schema: str, name: str
-) -> list[dict[str, Any]]:
+) -> list[ForeignKey]:
     rows = await conn.fetch(
         "SELECT con.conname AS constraint_name, "
         "       a.attname AS from_column, "
@@ -480,7 +517,7 @@ async def fetch_foreign_keys(
         schema,
         name,
     )
-    grouped: dict[str, dict[str, Any]] = {}
+    grouped: dict[str, ForeignKey] = {}
     for r in rows:
         cn = r["constraint_name"]
         if cn not in grouped:
@@ -528,7 +565,7 @@ async def fetch_indexes(
 
 async def fetch_all_relationships(
     conn: asyncpg.Connection, schemas: list[str]
-) -> list[dict[str, Any]]:
+) -> list[Relationship]:
     if not schemas:
         return []
     rows = await conn.fetch(
@@ -556,7 +593,7 @@ async def fetch_all_relationships(
         "ORDER BY n.nspname, c.relname, con.conname, k.ord",
         schemas,
     )
-    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str], Relationship] = {}
     for r in rows:
         key = (r["from_schema"], r["from_table"], r["constraint_name"])
         if key not in grouped:

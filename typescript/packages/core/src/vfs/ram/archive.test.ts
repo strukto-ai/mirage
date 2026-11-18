@@ -29,7 +29,7 @@ import {
   PathSpec,
   MountMode,
 } from '../../types.ts'
-import { runWithMountGate } from '../../context/session_context.ts'
+import { setMountGate } from '../../context/session_context.ts'
 import { CycleError } from '../../utils/path.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -137,7 +137,7 @@ async function runCmd(
   const result =
     links === null
       ? await onMount(vfs, run, mountPrefix || '/')
-      : await runWithMountGate('/', MountMode.WRITE, async () => run(filesOver(vfs, links)))
+      : await setMountGate('/', MountMode.WRITE, async () => run(filesOver(vfs, links)))
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
   }

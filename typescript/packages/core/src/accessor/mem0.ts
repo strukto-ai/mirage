@@ -1,7 +1,7 @@
 import { stallTimeout } from '../core/api/client.ts'
 import { ApiError } from '../core/api/errors.ts'
 import { md5Hex } from '../utils/hash.ts'
-import { resolveMem0Config, type Mem0Config } from '../vfs/mem0/config.ts'
+import { Mem0Config } from '../vfs/mem0/config.ts'
 import { Accessor } from './base.ts'
 
 const ENCODER = new TextEncoder()
@@ -15,11 +15,17 @@ export class Mem0Error extends ApiError {
 }
 
 export class Mem0Accessor extends Accessor {
-  readonly config: ReturnType<typeof resolveMem0Config>
+  readonly config: ReturnType<typeof Mem0Config.parse>
+  readonly scopeFilter: Record<string, string>
 
   constructor(config: Mem0Config) {
     super()
-    this.config = resolveMem0Config(config)
+    this.config = Mem0Config.parse(config)
+    const { userId, agentId, runId } = this.config
+    if (userId !== null) this.scopeFilter = { user_id: userId }
+    else if (agentId !== null) this.scopeFilter = { agent_id: agentId }
+    else if (runId !== null) this.scopeFilter = { run_id: runId }
+    else throw new Error('validated Mem0Config has no scope')
   }
 
   async request(

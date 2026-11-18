@@ -17,12 +17,13 @@ import { posix } from 'node:path'
 import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { WalkBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
 import { classify } from '@struktoai/mirage-core/errors/classify'
+import { shellJoin } from '@struktoai/mirage-core/shell/join'
 import { JobOutput } from '@struktoai/mirage-core/shell/console/terminal'
-import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
-import { S_IFDIR, S_IFLNK, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
+import { modeType } from '@struktoai/mirage-core/utils/stat_view'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { eexist, enoent, strerrorOf } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
@@ -182,14 +183,7 @@ export function argvLine(argv: readonly string[]): string {
   ) {
     return script
   }
-  return argv.map(shellWord).join(' ')
-}
-
-/** One word as a POSIX shell reads it back, the way Python's shlex quotes. */
-function shellWord(word: string): string {
-  if (word === '') return "''"
-  if (/^[\w@%+=:,./-]+$/.test(word)) return word
-  return `'${word.replaceAll("'", `'"'"'`)}'`
+  return shellJoin(argv)
 }
 
 /**
@@ -210,10 +204,6 @@ function notAFile(path: string): CodexRPCError {
   return new CodexRPCError(RPC_INVALID_REQUEST, `path \`${path}\` is not a file`)
 }
 
-const isDir = (mode: number): boolean => (mode & S_IFMT) === S_IFDIR
-const isFile = (mode: number): boolean => (mode & S_IFMT) === S_IFREG
-const isLink = (mode: number): boolean => (mode & S_IFMT) === S_IFLNK
-
 async function lookup(core: MountCore, path: string): Promise<MountAttrs | null> {
   try {
     return await core.getattr(path)
@@ -231,11 +221,11 @@ function followed(core: MountCore, path: string): Promise<MountAttrs> {
 /** `fs/getMetadata`: what the path points at, and whether it is a link. */
 async function metadata(core: MountCore, path: string): Promise<Message> {
   const own = await core.getattr(path)
-  const link = isLink(own.mode)
+  const link = modeType(own.mode) === FileType.SYMLINK
   const st = link ? await followed(core, path) : own
   return {
-    isDirectory: isDir(st.mode),
-    isFile: isFile(st.mode),
+    isDirectory: modeType(st.mode) === FileType.DIRECTORY,
+    isFile: modeType(st.mode) === FileType.FILE,
     isSymlink: link,
     size: st.size,
     createdAtMs: st.ctime.getTime(),
@@ -244,7 +234,7 @@ async function metadata(core: MountCore, path: string): Promise<Message> {
 }
 
 async function openFile(core: MountCore, path: string): Promise<number> {
-  if (isDir((await followed(core, path)).mode)) throw notAFile(path)
+  if (modeType((await followed(core, path)).mode) === FileType.DIRECTORY) throw notAFile(path)
   return core.open(path)
 }
 
@@ -296,8 +286,8 @@ async function directory(core: MountCore, path: string): Promise<JsonValue[]> {
   const names = await children(core, path)
   return (await core.listing(path, names, true)).map(([name, st]) => ({
     fileName: name,
-    isDirectory: isDir(st.mode),
-    isFile: isFile(st.mode),
+    isDirectory: modeType(st.mode) === FileType.DIRECTORY,
+    isFile: modeType(st.mode) === FileType.FILE,
   }))
 }
 
@@ -307,11 +297,11 @@ async function directory(core: MountCore, path: string): Promise<JsonValue[]> {
  */
 async function walkKind(core: MountCore, path: string, follow: boolean): Promise<string | null> {
   const { mode } = await core.getattr(path)
-  if (isLink(mode)) {
-    if (!follow || !isDir((await followed(core, path)).mode)) return null
+  if (modeType(mode) === FileType.SYMLINK) {
+    if (!follow || modeType((await followed(core, path)).mode) !== FileType.DIRECTORY) return null
     return 'directory'
   }
-  return isDir(mode) ? 'directory' : 'file'
+  return modeType(mode) === FileType.DIRECTORY ? 'directory' : 'file'
 }
 
 /**
@@ -332,7 +322,7 @@ async function walk(core: MountCore, root: string, options: Message): Promise<Me
   const entries: JsonValue[] = []
   const errors: JsonValue[] = []
   const result = (truncated: boolean): Message => ({ entries, errors, truncated })
-  if (!isDir((await followed(core, root)).mode)) return result(false)
+  if (modeType((await followed(core, root)).mode) !== FileType.DIRECTORY) return result(false)
   const budget = new WalkBudget(
     PathSpec.fromStrPath(core.resolve(root)),
     mountView(core.files, true) ?? null,
@@ -825,7 +815,7 @@ class CodexChannel {
   private async createDirectory(params: Message): Promise<JsonValue> {
     const path = toPath(arg(params, 'path', 'string'))
     if (arg(params, 'recursive', 'boolean', false))
-      await this.line(`mkdir -p -- ${shellWord(path)}`)
+      await this.line(shellJoin(['mkdir', '-p', '--', path]))
     else await makeDirectory(this.core, path)
     return {}
   }
@@ -839,8 +829,8 @@ class CodexChannel {
       if (force) return {}
       throw rpcError(enoent(path))
     }
-    if (!isDir(st.mode)) await this.core.unlink(path)
-    else if (recursive) await this.line(`rm -r -- ${shellWord(path)}`)
+    if (modeType(st.mode) !== FileType.DIRECTORY) await this.core.unlink(path)
+    else if (recursive) await this.line(shellJoin(['rm', '-r', '--', path]))
     else await this.core.rmdir(path)
     return {}
   }
@@ -848,15 +838,15 @@ class CodexChannel {
   private async copy(params: Message): Promise<JsonValue> {
     const source = toPath(arg(params, 'sourcePath', 'string'))
     const destination = toPath(arg(params, 'destinationPath', 'string'))
-    const tree = isDir((await followed(this.core, source)).mode)
+    const tree = modeType((await followed(this.core, source)).mode) === FileType.DIRECTORY
     if (tree && !arg(params, 'recursive', 'boolean', false)) {
       throw new CodexRPCError(
         RPC_INVALID_REQUEST,
         'fs/copy requires recursive: true when sourcePath is a directory',
       )
     }
-    const flag = tree ? '-R ' : ''
-    await this.line(`cp ${flag}-- ${shellWord(source)} ${shellWord(destination)}`)
+    const flags = tree ? ['-R'] : []
+    await this.line(shellJoin(['cp', ...flags, '--', source, destination]))
     return {}
   }
 

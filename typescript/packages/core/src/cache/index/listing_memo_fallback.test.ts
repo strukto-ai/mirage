@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ListResult } from './config.ts'
 import { SystemClock } from '../../utils/clock.ts'
 import { ListingMemo } from './listing_memo.ts'
-import { runInCommandScope } from './scope.ts'
+import { commandScope } from './scope.ts'
 
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()
@@ -51,19 +51,19 @@ describe('ListingMemo on the fallback storage', () => {
     const folder = counted()
     const live = gate()
     const entered = gate()
-    const other = runInCommandScope(async () => {
+    const other = commandScope(async () => {
       entered.open()
       await live.opened
     })
     await entered.opened
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       await memo.read('/d', folder.fetch)
     })
     live.open()
     await other
     expect(folder.reads()).toBe(2)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await memo.read('/d', folder.fetch)
       await memo.read('/d', folder.fetch)
     })
@@ -84,10 +84,10 @@ describe('ListingMemo on the fallback storage', () => {
       return [{ entries: ['/d/a', '/d/b'] }, Date.now() / 1000 + 60]
     }
     const live = gate()
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       const read = memo.read('/d', fetch)
       await reading.opened
-      const other = runInCommandScope(() => live.opened)
+      const other = commandScope(() => live.opened)
       release.open()
       await read
       live.open()

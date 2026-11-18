@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+
 import pytest
 
 from mirage.utils.ranges import (
@@ -166,3 +168,12 @@ def test_the_huggingface_backwards_content_range_is_unsatisfiable():
     """Past the end huggingface echoes a range whose end precedes its
     start and OpenDAL refuses to parse it, so no status ever surfaces."""
     assert is_unsatisfiable_range(RuntimeError(HF_INVALID_CONTENT_RANGE))
+
+
+def test_response_status_for_range_reads():
+    class ReadError(Exception):
+        def __init__(self, status):
+            self.response = SimpleNamespace(status=status)
+
+    assert is_unsatisfiable_range(ReadError(416))
+    assert not is_unsatisfiable_range(ReadError(403))

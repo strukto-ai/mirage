@@ -1,7 +1,7 @@
 from pydantic import field_validator
 
 from mirage.accessor.base import SessionAccessor
-from mirage.core.msgraph.config import MsGraphConfig
+from mirage.core.msgraph.config import MsGraphConfig, optional_text
 from mirage.utils import key_prefix as kp
 
 
@@ -20,6 +20,11 @@ class SharePointConfig(MsGraphConfig):
     """Folder path inside the scoped library that the mount uses as its
     root; takes effect only with `site` and `drive` set. `..` segments are
     rejected."""
+
+    @field_validator("site_filter", "site", "drive")
+    @classmethod
+    def _v_scope(cls, value: str | None) -> str | None:
+        return optional_text(value)
 
     @field_validator("key_prefix")
     @classmethod

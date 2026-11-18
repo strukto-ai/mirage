@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import type { Action, Policy, VfsContext, VfsResultContext } from '../policy/index.ts'
 import { SessionProfile } from '../policy/profile.ts'
 import { type FileStat, MountMode, type PathSpec } from '../types.ts'
@@ -231,7 +231,7 @@ describe('the path axis end to end', () => {
     })
     expect(await ws.readdir('/data')).toEqual([])
     expect(await ws.vfs.readdir('/data')).toEqual([])
-    await runWithSession(host, async () => {
+    await setCurrentSession(host, async () => {
       expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
     })
   })
@@ -254,7 +254,7 @@ describe('the path axis end to end', () => {
     const files = new Session(ws, host.sessionId).vfs
     await files.mkdir('/data/vault')
     await files.write('/data/vault/secret', 'top\n')
-    await runWithSession(
+    await setCurrentSession(
       wide,
       async () => {
         await expect(ws.vfs.read('/data/vault/secret')).rejects.toMatchObject({
@@ -264,7 +264,7 @@ describe('the path axis end to end', () => {
       },
       { owner: other.sessionManager },
     )
-    await runWithSession(wide, async () => {
+    await setCurrentSession(wide, async () => {
       expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
     })
   })
@@ -695,7 +695,7 @@ describe('ws.vfs against hides', () => {
         paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } },
       }),
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/repo/only')).rejects.toMatchObject({
         code: 'ENOTEMPTY',
       })
@@ -722,7 +722,7 @@ describe('ws.vfs against hides', () => {
     const sess = ws.createSession('rev', {
       profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
         code: 'ENOTEMPTY',
       })
@@ -751,7 +751,7 @@ describe('ws.vfs against hides', () => {
     const sess = ws.createSession('rev', {
       profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
         code: 'ENOTEMPTY',
       })
@@ -775,7 +775,7 @@ describe('ws.vfs against hides', () => {
         profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
       })
       a.failing = failing
-      await runWithSession(sess, async () => {
+      await setCurrentSession(sess, async () => {
         await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
           code: 'ENOTEMPTY',
         })
@@ -801,7 +801,7 @@ describe('ws.vfs against hides', () => {
     const sess = ws.createSession('rev', {
       profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
-    await runWithSession(sess, () => ws.dispatch('rmdir', '/a/d'))
+    await setCurrentSession(sess, () => ws.dispatch('rmdir', '/a/d'))
     const gone = await ws.shell('test -e /a/d')
     expect(gone.exitCode).toBe(1)
   })
@@ -820,7 +820,7 @@ describe('ws.vfs against hides', () => {
     const sess = ws.createSession('rev', {
       profile: SessionProfile({ paths: { hide: ['/a/d/sec', '/a/d/lnk'] } }),
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await ws.dispatch('rmdir', '/a/d')
     })
     // No session, no hides: the tree must be gone, link included.
@@ -844,7 +844,7 @@ describe('ws.vfs against hides', () => {
     const sess = ws.createSession('rev', {
       profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
-    await runWithSession(sess, async () => {
+    await setCurrentSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
         code: 'ENOTEMPTY',
       })

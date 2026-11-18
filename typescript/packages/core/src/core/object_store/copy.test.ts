@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { makeCopy } from './copy.ts'
 import { makeExists } from './exists.ts'
 import {
@@ -65,7 +65,7 @@ describe('object_store copy', () => {
 })
 
 async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
-  const [, records] = await runWithRecording(async () => {
+  const [, records] = await recordingScope(async () => {
     await fn()
   })
   return records.map((r) => [r.op, r.path])
@@ -124,7 +124,7 @@ async function recordedFailure(
   fn: () => Promise<void>,
 ): Promise<{ code: string; records: [string, string][] }> {
   let code = 'no-throw'
-  const [, records] = await runWithRecording(async () => {
+  const [, records] = await recordingScope(async () => {
     code = await codeOf(fn())
   })
   return { code, records: records.map((r) => [r.op, r.path]) }

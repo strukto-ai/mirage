@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import datetime
 from enum import Enum
-from typing import Any, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 from urllib.parse import urlencode
 
 import aiohttp
@@ -41,6 +41,13 @@ from mirage.core.github.constants import (
 )
 from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
+
+
+class GitHubTreeItem(TypedDict):
+    path: str
+    type: Literal["commit", "blob", "tree"]
+    sha: str
+    size: NotRequired[int]
 
 
 class _NoBody(Enum):
@@ -90,7 +97,7 @@ async def _mint(account: GitHubAccount) -> MintedToken:
         body["permissions"] = dict(app.permissions)
     data = await api_request(
         "POST",
-        (account.config.base_url or API_BASE)
+        account.api_base
         + f"/app/installations/{app.installation_id}/access_tokens",
         error_of=_error_of,
         headers=github_headers(app_jwt(app)),
@@ -148,10 +155,16 @@ class GitHubApiError(ApiError):
         self.body = body
         self.url = url
         self.headers = headers or {}
-        try:
-            self.data: JsonValue = json.loads(body) if body else None
-        except ValueError:
-            self.data = body
+        self.data = _decoded_body(body)
+
+
+def _decoded_body(body: str) -> JsonValue:
+    if not body:
+        return None
+    try:
+        return cast(JsonValue, json.loads(body))
+    except ValueError:
+        return body
 
 
 class GitHubConnectionError(Exception):
@@ -179,7 +192,7 @@ async def github_get(
 ) -> dict[str, Any]:
     data: dict[str, Any] = await api_request(
         "GET",
-        (account.config.base_url or API_BASE) + path.format(**kwargs),
+        account.api_base + path.format(**kwargs),
         error_of=_error_of,
         headers=github_headers(await github_token(account)),
         params=params,
@@ -251,7 +264,7 @@ async def github_raw_response(
     url = (
         graphql_url(base_url)
         if path == GRAPHQL_PATH
-        else (base_url or API_BASE) + path
+        else account.api_base + path
     )
     # A caller's own Authorization wins, as gh adds its token only to a
     # request without one, so no token is minted for it.
@@ -279,27 +292,36 @@ async def github_raw_response(
             read="bytes_response",
             session=account.pool,
         )
-    except aiohttp.ClientConnectorDNSError as exc:
-        raise GitHubConnectionError(
+    except aiohttp.ClientConnectionError as exc:
+        raise _connection_error(exc, method, url, params) from exc
+    return raw
+
+
+def _connection_error(
+    exc: aiohttp.ClientConnectionError,
+    method: str,
+    url: str,
+    params: dict[str, str] | None,
+) -> GitHubConnectionError:
+    if isinstance(exc, aiohttp.ClientConnectorDNSError):
+        return GitHubConnectionError(
             f"error connecting to {exc.host}\n"
             "check your internet connection or https://githubstatus.com"
-        ) from exc
-    except aiohttp.ClientConnectorError as exc:
-        if not isinstance(exc.os_error, ConnectionRefusedError):
-            raise GitHubConnectionError(str(exc)) from exc
+        )
+    if isinstance(exc, aiohttp.ClientConnectorError) and isinstance(
+        exc.os_error, ConnectionRefusedError
+    ):
         target = (
             f"{url}{'&' if '?' in url else '?'}{urlencode(params)}"
             if params
             else url
         )
         host = f"[{exc.host}]" if ":" in exc.host else exc.host
-        raise GitHubConnectionError(
+        return GitHubConnectionError(
             f'{method.capitalize()} "{target}": dial tcp {host}:{exc.port}: '
             "connect: connection refused"
-        ) from exc
-    except aiohttp.ClientConnectionError as exc:
-        raise GitHubConnectionError(str(exc)) from exc
-    return raw
+        )
+    return GitHubConnectionError(str(exc))
 
 
 async def github_request_response(
@@ -378,10 +400,7 @@ def _api_message(text: str, reason: str | None) -> str:
     Returns:
         str: the message to report.
     """
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        return reason or text
+    payload = _decoded_body(text)
     if isinstance(payload, dict):
         message = payload.get("message")
         if isinstance(message, str):
@@ -418,11 +437,10 @@ async def stream_blob(
         repo (str): the repository.
         sha (str): the blob's sha.
     """
-    config = account.config
     token = await github_token(account)
     async with aclosing(
         api_stream(
-            (config.base_url or API_BASE) + blob_path(owner, repo, sha),
+            account.api_base + blob_path(owner, repo, sha),
             error_of=_error_of,
             headers={**github_headers(token), "Accept": RAW_MEDIA_TYPE},
             session=account.pool,

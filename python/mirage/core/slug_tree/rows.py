@@ -16,10 +16,23 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from mirage.core.slug_tree.types import DirRows
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, JsonValue
 from mirage.utils.path import gnu_basename, parent
 
 V = TypeVar("V")
+
+
+def scalar_string(value: JsonValue) -> str | None:
+    """Read a scalar path-tree field as text.
+
+    Args:
+        value (JsonValue): the field from the service.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    return None
 
 
 def normalize_slug(value: str, noun: str) -> str:

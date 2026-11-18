@@ -84,6 +84,19 @@ def test_every_host_reaching_method_is_overridden():
     )
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (stat.S_IFBLK, asyncssh.FILEXFER_TYPE_BLOCK_DEVICE),
+        (stat.S_IFCHR, asyncssh.FILEXFER_TYPE_CHAR_DEVICE),
+        (stat.S_IFIFO, asyncssh.FILEXFER_TYPE_FIFO),
+        (stat.S_IFSOCK, asyncssh.FILEXFER_TYPE_SOCKET),
+    ],
+)
+def test_special_file_types_include_permissions(mode, expected):
+    assert filetype(mode | 0o755) == expected
+
+
 def test_attrs_carry_type_mode_size_and_split_times():
     st = MountAttrs(
         mode=stat.S_IFREG | 0o640,

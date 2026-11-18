@@ -16,7 +16,6 @@ import asyncio
 import json
 import threading
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import ClientSession, web
@@ -33,17 +32,21 @@ def test_delete_refuses_an_unknown_mode():
 @pytest.mark.parametrize("stage", ["setup", "start"])
 def test_serve_propagates_startup_failure_and_closes_loop(monkeypatch, stage):
     loop = asyncio.new_event_loop()
-    before = set(threading.enumerate())
+    worker: threading.Thread
+
+    async def fail_startup(_self):
+        nonlocal worker
+        worker = threading.current_thread()
+        raise OSError("injected startup")
+
     monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
     target = web.AppRunner if stage == "setup" else web.TCPSite
-    monkeypatch.setattr(
-        target, stage, AsyncMock(side_effect=OSError("injected startup"))
-    )
+    monkeypatch.setattr(target, stage, fail_startup)
     with pytest.raises(OSError, match="injected startup"):
         with serve():
             pytest.fail("failed startup must not yield")
     assert loop.is_closed()
-    assert set(threading.enumerate()) == before
+    assert not worker.is_alive()
 
 
 @pytest.mark.asyncio

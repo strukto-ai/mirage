@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PgDriver } from '../core/postgres/_driver.ts'
-import type { resolvePostgresConfig } from '../vfs/postgres/config.ts'
+import { type PostgresConfig } from '../vfs/postgres/config.ts'
 import { Accessor } from './base.ts'
 
 /**
@@ -65,9 +65,9 @@ export function readAsText(defaults: {
 
 export class PostgresAccessor extends Accessor {
   readonly driver: PgDriver
-  readonly config: ReturnType<typeof resolvePostgresConfig>
+  readonly config: ReturnType<typeof PostgresConfig.parse>
 
-  constructor(driver: PgDriver, config: ReturnType<typeof resolvePostgresConfig>) {
+  constructor(driver: PgDriver, config: ReturnType<typeof PostgresConfig.parse>) {
     super()
     this.driver = driver
     this.config = config

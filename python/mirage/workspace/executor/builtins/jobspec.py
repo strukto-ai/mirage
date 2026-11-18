@@ -18,7 +18,10 @@ from collections.abc import Awaitable, Mapping
 from typing import TypeVar
 
 from mirage.execution.job import JobHandle
-from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.config import (
+    DEFAULT_PROCESS_PERMISSIONS,
+    ProcessPermissions,
+)
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process
@@ -73,7 +76,11 @@ def grants_of(session: SessionState | None) -> ProcessPermissions:
     Args:
         session (SessionState | None): the shell session, if any.
     """
-    return session.processes if session is not None else ProcessPermissions()
+    return (
+        session.processes
+        if session is not None
+        else DEFAULT_PROCESS_PERMISSIONS
+    )
 
 
 async def scanning_while(processes: ProcessTable, waiting: Awaitable[T]) -> T:

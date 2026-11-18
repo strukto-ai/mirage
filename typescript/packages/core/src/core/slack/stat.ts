@@ -20,6 +20,6 @@ import { detectScope } from './scope.ts'
 // A chat.jsonl, a files directory or a blob is what its day's listing names,
 // which no day outside the mount's scope has; only a day itself exists beyond
 // what is listed.
-const day: StatHook<SlackAccessor> = dayStat(guardDay)
+const day: StatHook<SlackAccessor> = dayStat<SlackAccessor>(guardDay)
 
 export const stat = makeStat<SlackAccessor>(detectScope, { overrides: { day } })

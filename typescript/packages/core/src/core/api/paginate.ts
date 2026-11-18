@@ -57,6 +57,7 @@ export async function cursorItems(
   maxResults?: number,
   shape: PageShape = HAS_MORE_PAGES,
 ): Promise<unknown[]> {
+  if (maxResults !== undefined && maxResults <= 0) return []
   const collected: unknown[] = []
   for await (const page of cursorPages(fetchPage, shape)) {
     for (const item of page) collected.push(item)

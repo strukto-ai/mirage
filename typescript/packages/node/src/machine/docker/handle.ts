@@ -15,7 +15,7 @@
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { DOCKER_CONFIG_FIELDS, type DockerConfig } from './config.ts'
+import { DockerConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import { CONTAINER_GONE, DOCKER_HINT, ON_PAUSE, PAUSED_STATE, RUNNING_STATE } from './constants.ts'
 import { reportedState } from '../program.ts'
@@ -36,7 +36,7 @@ import { ProgramMachine } from '../transport.ts'
  * connect unpauses it.
  */
 export class DockerMachine extends ProgramMachine<DockerConfig> {
-  static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = DockerConfig
   static override readonly provider = 'docker'
   protected override readonly pauses = true
   protected readonly program = 'docker'

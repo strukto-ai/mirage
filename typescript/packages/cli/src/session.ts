@@ -120,7 +120,7 @@ const ACTIONS = [
 ] as const
 
 /** `mirage workspace session …`, taking the workspace and session as `-w` and `-s`. */
-export function registerSessionCommands(parent: Command): void {
+export function app(parent: Command): Command {
   const sess = parent.command('session').description('Manage workspace sessions.')
 
   sess
@@ -130,24 +130,13 @@ export function registerSessionCommands(parent: Command): void {
     .option('-s, --session <id>', 'Explicit session id')
     .option('-m, --mount <prefix>', MOUNT_HELP, collect, [] as string[])
     .option('-p, --profile <name>', CREATE_PROFILE_HELP)
-    .action(async (opts: Omit<CreateOptions, 'id'> & Partial<Flags>) => {
-      await createSession(resolveWorkspace(opts.workspace), { ...opts, id: opts.session })
-    })
+    .action(createCmd)
 
   sess
     .command('list')
     .description("List the workspace's sessions.")
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
-    .action(async (opts: { workspace?: string }) => {
-      const wsId = resolveWorkspace(opts.workspace)
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleList(
-          await c.request('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`),
-        ),
-      )
-    })
+    .action(listCmd)
 
   for (const [name, description, method, suffix] of ACTIONS) {
     sess
@@ -166,7 +155,23 @@ export function registerSessionCommands(parent: Command): void {
       .description("Replace the session's profile; its cwd, env and history stay.")
       .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
       .requiredOption('-s, --session <id>', 'Session id'),
-  ).action(async (opts: UpdateOptions & Flags) => {
-    await updateSession(resolveWorkspace(opts.workspace), opts.session, opts)
-  })
+  ).action(updateCmd)
+  return sess
+}
+
+async function createCmd(opts: Omit<CreateOptions, 'id'> & Partial<Flags>): Promise<void> {
+  await createSession(resolveWorkspace(opts.workspace), { ...opts, id: opts.session })
+}
+
+async function listCmd(opts: { workspace?: string }): Promise<void> {
+  const wsId = resolveWorkspace(opts.workspace)
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  emit(
+    await handleList(await c.request('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`)),
+  )
+}
+
+async function updateCmd(opts: UpdateOptions & Flags): Promise<void> {
+  await updateSession(resolveWorkspace(opts.workspace), opts.session, opts)
 }

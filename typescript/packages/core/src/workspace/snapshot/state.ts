@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CLIKey, ScriptKey } from './keys.ts'
 import { z } from 'zod'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
@@ -323,27 +324,27 @@ function cliConfigDump(install: CLIInstall): Record<string, unknown> | null {
 /** One installed CLI as snapshot state. */
 function cliSnapshot(name: string, install: CLIInstall): CLISnapshot {
   const entry: CLISnapshot = {
-    name,
-    spec: install.cli.spec.name,
-    config: cliConfigDump(install),
+    [CLIKey.NAME]: name,
+    [CLIKey.SPEC]: install.cli.spec.name,
+    [CLIKey.CONFIG]: cliConfigDump(install),
   }
   // A script install has no name to resolve (the spec is synthesized
   // from a yaml `script:`), so its embedded program rides along and
   // load rebuilds the spec from it.
   const script = install.cli.script
   if (script !== null) {
-    entry.script = {
-      source: script.source,
-      language: script.language,
-      module: script.module,
+    entry[CLIKey.SCRIPT] = {
+      [ScriptKey.SOURCE]: script.source,
+      [ScriptKey.LANGUAGE]: script.language,
+      [ScriptKey.MODULE]: script.module,
     }
-    entry.machine = install.cli.machine
-    entry.runtime = install.cli.runtime
+    entry[CLIKey.MACHINE] = install.cli.machine
+    entry[CLIKey.RUNTIME] = install.cli.runtime
   }
   // An MCP install's tool list rides along, so load rebuilds it with no request.
   const source = install.cli.mcp
   if (source !== null) {
-    entry.mcp = {
+    entry[CLIKey.MCP] = {
       [MCPKey.TITLE]: source.title,
       [MCPKey.TOOLS]: source.tools.map((tool) => ({
         [MCPKey.NAME]: tool.name,

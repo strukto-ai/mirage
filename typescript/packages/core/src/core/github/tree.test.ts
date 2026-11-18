@@ -43,6 +43,25 @@ function transport(): GitHubTransport {
 }
 
 describe('github tree fetch', () => {
+  it.each([{}, { tree: null }, { tree: {} }])(
+    'refuses a missing recursive listing',
+    async (value) => {
+      const service = { ...transport(), get: () => Promise.resolve(value) }
+      await expect(fetchTree(service, 'acme', 'proj', 'main')).rejects.toThrow('carries no tree')
+    },
+  )
+
+  it('preserves a blob named __proto__ when indexing its directory', async () => {
+    const service = {
+      ...transport(),
+      get: () =>
+        Promise.resolve({ tree: [{ path: '__proto__', type: 'blob', sha: 'abc', size: 2 }] }),
+    }
+    const { tree } = await fetchTree(service, 'acme', 'proj', 'main')
+    expect(Object.keys(tree)).toEqual(['__proto__'])
+    expect(treeRows(tree).get('')).toHaveLength(1)
+  })
+
   it('excludes submodule gitlinks from the recursive tree', async () => {
     const { tree, truncated } = await fetchTree(transport(), 'acme', 'proj', 'main')
     expect(truncated).toBe(false)

@@ -1,11 +1,11 @@
-from typing import Any
+from mirage.core.chroma.client import ChromaChunk
 
 
-def render_page(chunks: list[dict[str, Any]]) -> bytes:
+def render_page(chunks: list[ChromaChunk]) -> bytes:
     """Render a page's chunks as the file body.
 
     Args:
-        chunks (list[dict]): the page's chunks, in chunk-index order.
+        chunks (list[ChromaChunk]): the page's chunks, in chunk-index order.
     """
     # Single renderer for a page: read() and the size the directory scan
     # records must produce the same bytes for the same chunks, so the

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, ParamSpec, TypeVar
 
@@ -105,7 +105,7 @@ def drive_target_name(basename: str, mime_type: str) -> str:
     return basename
 
 
-def node_from_item(item: dict[str, Any], drive_id: str | None) -> DriveNode:
+def node_from_item(item: Mapping[str, Any], drive_id: str | None) -> DriveNode:
     return DriveNode(
         id=item["id"],
         name=item["name"],

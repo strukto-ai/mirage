@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
+import { PostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import { linesContaining } from './search.ts'
 
@@ -86,7 +86,7 @@ function makeAccessor(
     }) as PgDriver['query'],
     close: () => Promise.resolve(),
   }
-  const cfg = resolvePostgresConfig({ dsn: 'postgres://localhost/db', ...config })
+  const cfg = PostgresConfig.parse({ dsn: 'postgres://localhost/db', ...config })
   return { accessor: new PostgresAccessor(driver, cfg), calls }
 }
 

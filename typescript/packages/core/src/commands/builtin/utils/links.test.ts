@@ -31,7 +31,7 @@ import { readers } from '../../../test-utils.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { Context } from '../../config.ts'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { setMountGate } from '../../../context/session_context.ts'
 import {
   LinkResolver,
   crossesMounts,
@@ -306,7 +306,7 @@ describe('mountsOf', () => {
     expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([true, ''])
     expect(across?.descendants('/data')).toEqual([])
     expect(across?.answers('/data/x', 'read_tree')).toBe(false)
-    await runWithMountGate('/data/', MountMode.WRITE, () => {
+    await setMountGate('/data/', MountMode.WRITE, () => {
       const bound = mountsOf(ctx)
       expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([false, '/data'])
       expect(bound?.descendants('/data')).toEqual(['/data/inner'])
@@ -321,7 +321,7 @@ describe('mountsOf', () => {
     const vfs = files(['/data/', '/other/'])
     const on = ctxOf(vfs.servedBy(['/data/', MountMode.WRITE]))
     const across = ctxOf(vfs.servedBy(null))
-    await runWithMountGate('/other/', MountMode.WRITE, () => {
+    await setMountGate('/other/', MountMode.WRITE, () => {
       expect([crossesMounts(on), mountRoot(on)]).toEqual([false, '/data'])
       expect([crossesMounts(across), mountRoot(across)]).toEqual([true, ''])
       return Promise.resolve()

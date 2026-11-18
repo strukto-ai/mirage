@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
@@ -40,7 +40,7 @@ describe('hf_hub stream record path', () => {
       await Promise.resolve()
       yield new TextEncoder().encode('hello')
     })
-    const [text, records] = await runWithRecording(async () => {
+    const [text, records] = await recordingScope(async () => {
       let out = ''
       for await (const chunk of streamed()) out += new TextDecoder().decode(chunk)
       return out
@@ -70,7 +70,7 @@ describe('hf_hub stream stamp', () => {
     // Only the first chunk is pulled: stamped as soon as the response
     // arrived, so a reader that stops after one chunk (head -c 1) still
     // leaves a token behind.
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await streamed()[Symbol.asyncIterator]().next()
     })
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
@@ -78,7 +78,7 @@ describe('hf_hub stream stamp', () => {
 
   it('stamps nothing when the bytes are another version', async () => {
     vi.spyOn(client, 'hubStream').mockImplementation(answering('"another-version"', 'newr'))
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       for await (const chunk of streamed()) void chunk
     })
     expect(records.map((r) => r.fingerprint)).toEqual([null])

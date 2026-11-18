@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { connect } from '@lancedb/lancedb'
-import { resolveLanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
+import { LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { LanceDBStore } from './store.ts'
@@ -42,7 +42,7 @@ describe('lancedb store distinct', () => {
     await db.createTable('crowded', rows)
     db.close()
     store = new LanceDBStore(
-      resolveLanceDBConfig({
+      LanceDBConfig.parse({
         uri: root,
         table: 'crowded',
         groupBy: ['label'],
@@ -87,7 +87,7 @@ describe('lancedb store card search', () => {
     ])
     await db.createTable('tagged', [{ id: 1, name: 'x', tags: ['orange'] }])
     db.close()
-    store = new LanceDBStore(resolveLanceDBConfig({ uri: root, idColumn: 'id' }))
+    store = new LanceDBStore(LanceDBConfig.parse({ uri: root, idColumn: 'id' }))
   })
 
   afterAll(async () => {

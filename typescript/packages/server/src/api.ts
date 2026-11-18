@@ -18,25 +18,25 @@ import type { AuthConfig } from './auth/config.ts'
 import { registerMcpRoutes, type McpEndpoint } from './mcp/http.ts'
 import type { WorkspaceRegistry } from './registry.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
-import { registerAsksRoutes } from './routers/asks.ts'
-import { registerJobsRoutes } from './routers/jobs.ts'
-import { registerLinesRoutes } from './routers/lines.ts'
-import { registerMachinesRoutes } from './routers/machines.ts'
-import { registerProcessesRoutes } from './routers/processes.ts'
-import { registerDocumentsRoutes } from './routers/documents.ts'
-import { registerHealthRoutes } from './routers/health.ts'
-import { registerOAuthRoutes } from './routers/oauth.ts'
-import { registerPoliciesRoutes } from './routers/policies.ts'
-import { registerSessionsRoutes } from './routers/sessions.ts'
-import { registerShellRoutes } from './routers/shell.ts'
-import { registerTemplatesRoutes } from './routers/templates.ts'
+import { router as registerAsksRoutes } from './routers/asks.ts'
+import { router as registerJobsRoutes } from './routers/jobs.ts'
+import { router as registerLinesRoutes } from './routers/lines.ts'
+import { router as registerMachinesRoutes } from './routers/machines.ts'
+import { router as registerProcessesRoutes } from './routers/processes.ts'
+import { router as registerDocumentsRoutes } from './routers/documents.ts'
+import { router as registerHealthRoutes } from './routers/health.ts'
+import { router as registerOauthRoutes } from './routers/oauth.ts'
+import { router as registerPoliciesRoutes } from './routers/policies.ts'
+import { router as registerSessionsRoutes } from './routers/sessions.ts'
+import { router as registerShellRoutes } from './routers/shell.ts'
+import { router as registerTemplatesRoutes } from './routers/templates.ts'
 import { registerEntryRoutes, ROUTES as ENTRY_ROUTES } from './routers/entries.ts'
-import { registerToolsRoutes } from './routers/tools.ts'
-import { registerVfsRoutes } from './routers/vfs.ts'
-import { isStopped, registerWorkspacesRoutes } from './routers/workspaces.ts'
+import { router as registerToolsRoutes } from './routers/tools.ts'
+import { router as registerVfsRoutes } from './routers/vfs.ts'
+import { router as registerWorkspacesRoutes } from './routers/workspaces.ts'
 import type { RouteApp, ServerHost } from './routes.ts'
 
-export { isStopped }
+export { isStopped } from './routers/workspaces.ts'
 
 export interface ApiDeps {
   registry: WorkspaceRegistry
@@ -60,7 +60,7 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
   const { registry, host } = deps
   const jobs = registry.jobs
   registerHealthRoutes(app, { registry, startedAt: deps.startedAt, exit: deps.exit })
-  registerOAuthRoutes(app, { auth: deps.auth })
+  registerOauthRoutes(app, { auth: deps.auth })
   registerWorkspacesRoutes(app, {
     registry,
     host,

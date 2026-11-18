@@ -15,6 +15,7 @@
 // Path filtering follows huggingface_hub 1.16.4 (Apache-2.0; see
 // licenses/third_party/huggingface_hub.txt).
 
+import { asObject, pickString, stringOf } from '../../utils/records.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { fnmatchcase } from '../../utils/fnmatch.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
@@ -44,24 +45,20 @@ const NEXT_LINK = /<([^>]{1,4096})>\s*;\s*rel="next"/
 // read every file as deleted.
 const MISSING_SUBTREE = 'EntryNotFound'
 
-function str(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback
-}
-
 /** Turn one tree row into a TreeEntry. */
 export function parseEntry(item: Record<string, unknown>): TreeEntry {
-  const lfs = (item.lfs ?? {}) as Record<string, unknown>
-  const commit = (item.lastCommit ?? {}) as Record<string, unknown>
+  const lfs = asObject(item.lfs)
+  const commit = asObject(item.lastCommit)
   const size = item.size
   return {
-    path: str(item.path),
-    type: str(item.type, 'file'),
-    oid: str(item.oid),
+    path: stringOf(item, 'path'),
+    type: pickString(item, 'type') ?? 'file',
+    oid: stringOf(item, 'oid'),
     size: typeof size === 'number' ? size : undefined,
-    lastModified: str(commit.date),
-    lastCommit: str(commit.id),
-    lfsOid: str(lfs.oid),
-    xetHash: str(item.xetHash),
+    lastModified: stringOf(commit, 'date'),
+    lastCommit: stringOf(commit, 'id'),
+    lfsOid: stringOf(lfs, 'oid'),
+    xetHash: stringOf(item, 'xetHash'),
   }
 }
 

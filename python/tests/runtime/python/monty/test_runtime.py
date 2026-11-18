@@ -267,17 +267,17 @@ async def test_monty_runs_off_loop_and_cancellation_halts():
 
 
 def test_monty_missing_extra_raises(monkeypatch):
-    import mirage.runtime.python.monty.runtime as monty_module
+    import mirage.runtime.python.monty.loader as monty_module
 
-    monkeypatch.setattr(monty_module, "pydantic_monty", None)
+    monkeypatch.setattr(monty_module, "_pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         MontyRuntime()
 
 
 def test_workspace_explicit_monty_fails_loud(monkeypatch):
-    import mirage.runtime.python.monty.runtime as monty_module
+    import mirage.runtime.python.monty.loader as monty_module
 
-    monkeypatch.setattr(monty_module, "pydantic_monty", None)
+    monkeypatch.setattr(monty_module, "_pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         Workspace(
             {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]

@@ -16,7 +16,7 @@ import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { Mount } from '../../workspace/mount/spec.ts'
 import { CLI } from '../../commands/cli/types.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { IOResult } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
@@ -388,7 +388,7 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
 
 it('rejects stale releases after the same session reuses an input', async () => {
   const dev = new DevVFS()
-  await runWithSession(new SessionState({ sessionId: 'owner' }), () => {
+  await setCurrentSession(new SessionState({ sessionId: 'owner' }), () => {
     const [path, oldAllocation] = dev.allocateInput(new DevicePipe(true))
     dev.releaseInput(path, oldAllocation)
     const [newPath, newAllocation] = dev.allocateInput(new DevicePipe(true))
@@ -418,7 +418,7 @@ it.each([false, true])(
     )
     const owner = ws.createSession('owner')
     ws.createSession('peer')
-    await runWithSession(owner, () => {
+    await setCurrentSession(owner, () => {
       dev.allocateInput(new DevicePipe(true))
       return Promise.resolve()
     })

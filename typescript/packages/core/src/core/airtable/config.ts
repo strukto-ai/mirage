@@ -15,12 +15,12 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 /** Credentials and bounds for one Airtable account. */
 export const AirtableConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     token: secretStr().describe(
       'Personal access token (or OAuth access token), sent as `Authorization: Bearer`.',
     ),

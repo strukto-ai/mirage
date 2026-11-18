@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MISSING_PACKAGE_HINT } from './constants.ts'
+import { isMissingPeer } from '../../../utils/optional_peer.ts'
 import { MontyUnavailableError } from './errors.ts'
 
 // Structural views of @pydantic/monty so its types never leak into our
@@ -103,6 +104,7 @@ export async function loadMontyModule(): Promise<MontyModuleLike> {
   try {
     return (await import('@pydantic/monty')) as unknown as MontyModuleLike
   } catch (err) {
+    if (!isMissingPeer(err, '@pydantic/monty')) throw err
     throw new MontyUnavailableError(MISSING_PACKAGE_HINT, { cause: err })
   }
 }
