@@ -621,7 +621,7 @@ SOFTWARE.
 ------------------------------------------------------------------------
 
 The WebAssembly modules shipped in this package (dist/generated/mirage_rs.wasm,
-mirage_shell.wasm, mirage_gh.wasm and mirage_pdf.wasm, built from rust/ in
+mirage_shell.wasm, mirage_gh.wasm, mirage_pdf.wasm and mirage_ast_grep.wasm, built from rust/ in
 https://github.com/strukto-ai/mirage) are compiled from the Rust crates below,
 each listed under the license it came with:
 
@@ -6059,7 +6059,35 @@ bzip2/libbzip2 version 1.1.0 of 6 September 2010
 
 ------------------------------------------------------------------------
 
-The bundled ast-grep WebAssembly module includes the following crates.
+Mirage is licensed under Apache-2.0. The bundled WebAssembly module uses
+ast-grep under the MIT license, reproduced below. Its Rust dependencies
+are listed under their respective licenses.
+
+------------------------------------------------------------------------
+
+ast-grep 0.51.3 (https://github.com/ast-grep/ast-grep)
+
+MIT License
+
+Copyright (c) 2022 Herrington Darkholme
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ------------------------------------------------------------------------
 
@@ -8254,32 +8282,6 @@ Except as contained in this notice, the name of a copyright holder shall
 not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
-
-------------------------------------------------------------------------
-
-ast-grep 0.51.3 (https://github.com/ast-grep/ast-grep)
-
-MIT License
-
-Copyright (c) 2022 Herrington Darkholme
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 ------------------------------------------------------------------------
 

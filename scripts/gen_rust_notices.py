@@ -10,7 +10,6 @@ RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
 # cargo about cannot see because it is not a dependency.
 ADAPTED = [
-    ROOT / "licenses/third_party/ast-grep.txt",
     ROOT / "licenses/third_party/cobra.txt",
     ROOT / "licenses/third_party/gh.txt",
     ROOT / "licenses/third_party/go-gh.txt",
@@ -31,7 +30,8 @@ ADAPTED = [
 ]
 CORE_LEAD = (
     "The WebAssembly modules shipped in this package (dist/generated/"
-    "mirage_rs.wasm,\nmirage_shell.wasm, mirage_gh.wasm and mirage_pdf.wasm, "
+    "mirage_rs.wasm,\nmirage_shell.wasm, mirage_gh.wasm, mirage_pdf.wasm and "
+    "mirage_ast_grep.wasm, "
     "built from rust/ in\nhttps://github.com/strukto-ai/mirage) are compiled "
     "from the Rust crates below,\neach listed under the license it came with:"
 )
@@ -76,7 +76,12 @@ def crate_sections(manifest: str) -> list[str]:
 def notices(manifest: str, ast_grep: list[str]) -> str:
     sections = crate_sections(manifest)
     sections.append(
-        "The bundled ast-grep WebAssembly module includes the following crates."
+        "Mirage is licensed under Apache-2.0. The bundled WebAssembly module "
+        "uses\nast-grep under the MIT license, reproduced below. Its Rust "
+        "dependencies\nare listed under their respective licenses."
+    )
+    sections.append(
+        (ROOT / "licenses/third_party/ast-grep.txt").read_text().strip()
     )
     sections.extend(ast_grep)
     sections.extend(path.read_text().strip() for path in ADAPTED)
