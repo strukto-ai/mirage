@@ -419,6 +419,23 @@ def test_a_subcommand_names_an_option_its_parent_declares():
     assert _normalized(written) == written
 
 
+def test_a_subcommand_option_is_checked_by_its_own_values():
+    spec = CommandSpec(
+        name="prog",
+        arguments=(Argument("--level", choices=("a", "b")),),
+        subcommands=(
+            CommandSpec(
+                name="run",
+                arguments=(Argument("--level", action="store_true"),),
+            ),
+        ),
+    )
+    grammars = {**BUILTIN_GRAMMARS, "prog": Grammar(spec, tree=True)}
+    written = {"prog": {"run": {"--level": {"values": {"a": "deny"}}}}}
+    with pytest.raises(PolicyError, match="--level takes no value"):
+        normalize_tree(command_tree(written), grammars)
+
+
 def test_a_command_with_no_grammar_keeps_its_operands_and_can_wait():
     assert _normalized({"kubectl": {"operands": {"get": "deny"}}}) == {
         "kubectl": {"operands": {"get": "deny"}}

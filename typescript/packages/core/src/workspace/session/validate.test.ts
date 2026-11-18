@@ -406,6 +406,23 @@ describe('normalizeTree', () => {
     expect(normalized(written)).toEqual(written)
   })
 
+  it("checks a subcommand's option by its own values", () => {
+    const spec = new CommandSpec({
+      name: 'prog',
+      arguments: [new Argument(['--level'], { choices: ['a', 'b'] })],
+      subcommands: [
+        new CommandSpec({
+          name: 'run',
+          arguments: [new Argument(['--level'], { action: 'store_true' })],
+        }),
+      ],
+    })
+    const withProg = new Map(BUILTIN_GRAMMARS)
+    withProg.set('prog', { spec, tree: true, passthrough: false })
+    const written = { prog: { run: { '--level': { values: { a: 'deny' } } } } }
+    expect(() => normalizeTree(commandTree(written), withProg)).toThrow('--level takes no value')
+  })
+
   it('keeps operands on a command with no grammar, and can wait for one', () => {
     expect(normalized({ kubectl: { operands: { get: 'deny' } } })).toEqual({
       kubectl: { operands: { get: 'deny' } },
