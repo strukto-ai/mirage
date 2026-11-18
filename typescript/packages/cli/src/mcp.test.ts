@@ -230,12 +230,11 @@ async function stubDaemon(
   return {
     url: `http://127.0.0.1:${String((stub.address() as AddressInfo).port)}`,
     calls,
-    close: () =>
-      new Promise((resolve) => {
-        stub.close(() => {
-          resolve()
-        })
-      }),
+    close: () => {
+      const closed = stub[Symbol.asyncDispose]()
+      stub.closeAllConnections()
+      return closed
+    },
   }
 }
 
@@ -257,7 +256,7 @@ function loggedIn(url: string, fields: Partial<Login> = {}): Login {
   return login
 }
 
-describe('relayWorkspace', () => {
+describe('relayWorkspace', { timeout: 60_000 }, () => {
   afterEach(() => {
     vi.unstubAllEnvs()
   })

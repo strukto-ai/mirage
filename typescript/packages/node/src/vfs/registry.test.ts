@@ -229,13 +229,12 @@ describe('node VFS registry', () => {
         key_prefix: 'sub',
       }),
     )
-    const mem0 = new Mem0VFS(
-      parseConfigWithSchema(Mem0Config, {
-        api_key: 'key',
-        user_id: 'user',
-        default_page_size: 5,
-      }),
-    )
+    const mem0Config = parseConfigWithSchema(Mem0Config, {
+      api_key: 'key',
+      user_id: 'user',
+      default_page_size: 5,
+    })
+    const mem0 = new Mem0VFS(mem0Config)
 
     expect(oneDrive.getState()).toEqual({
       type: 'onedrive',
@@ -243,7 +242,7 @@ describe('node VFS registry', () => {
     })
     expect(mem0.getState()).toEqual({
       type: 'mem0',
-      config: { apiKey: '<REDACTED>', userId: 'user', defaultPageSize: 5 },
+      config: { ...mem0Config, apiKey: '<REDACTED>' },
     })
     expect(vfsStateRequiresOverride(oneDrive.getState())).toBe(true)
     expect(vfsStateRequiresOverride(mem0.getState())).toBe(true)

@@ -54,10 +54,12 @@ export class GitHubEventHook {
 
   private map(root: PathSpec, eventName: string, payload: JsonValue): readonly FileEvent[] {
     if (eventName !== 'push') return []
-    const { owner, repo, ref } = this.accessor
+    const { owner, repo } = this.accessor
     const repository = field(payload, 'repository')
     const name = textField(repository, 'full_name') ?? ''
     if (name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) return []
+    const ref = this.accessor.ref ?? textField(repository, 'default_branch')
+    if (!ref) return []
     const pushed = textField(payload, 'ref')
     if (pushed !== `refs/heads/${ref}` && pushed !== `refs/tags/${ref}`) return []
     const commits = field(payload, 'commits')

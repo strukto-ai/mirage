@@ -17,6 +17,7 @@ import { TRUNCATION_NOTICE } from '@struktoai/mirage-core/commands/builtin/utils
 import type { Workspace } from '@struktoai/mirage-node'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -102,7 +103,7 @@ function capped(io: ExecuteResult): boolean {
 }
 
 function relativeTo(root: string, path: string): string {
-  const prefix = `${root.replace(/\/+$/, '')}/`
+  const prefix = `${rstripSlash(root)}/`
   return path.startsWith(prefix) ? path.slice(prefix.length) : (path.split('/').pop() ?? path)
 }
 
@@ -150,7 +151,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
   }
 
   async ls(path: string): Promise<LsResult> {
-    const base = path.replace(/\/+$/, '')
+    const base = rstripSlash(path)
     const io = await this.exec(
       `ls -1Ap --zero --quoting-style=literal -- ${singleQuote(base + '/')}`,
     )
