@@ -550,9 +550,9 @@ impl Comparison {
                             ComparisonPhase::Version
                         } else if mods.month {
                             ComparisonPhase::MonthLeft
-                        } else if mods.numeric && !mods.human {
+                        } else if mods.human || mods.numeric {
                             ComparisonPhase::ParseLeft
-                        } else if !mods.human && !mods.general_numeric {
+                        } else if !mods.general_numeric {
                             ComparisonPhase::Lexical
                         } else {
                             ComparisonPhase::Compare
@@ -667,8 +667,26 @@ impl Comparison {
                     let side = usize::from(matches!(self.phase, ComparisonPhase::ParseRight));
                     let (start, end) = self.ranges[side];
                     let field = &(if side == 0 { a } else { b })[start..end];
-                    if !self.numbers[side].step(field, bytes) {
+                    let human = compare.keys[self.key].mods.human;
+                    let ready = if human {
+                        self.numbers[side].step_human(field, bytes)
+                    } else {
+                        self.numbers[side].step(field, bytes)
+                    };
+                    if !ready {
                         return None;
+                    }
+                    if side == 1 && human {
+                        let order = self.numbers[0]
+                            .human_order()
+                            .cmp(&self.numbers[1].human_order());
+                        if order != Ordering::Equal {
+                            return Some(if compare.keys[self.key].mods.reverse {
+                                order.reverse()
+                            } else {
+                                order
+                            });
+                        }
                     }
                     self.phase = if side == 0 {
                         ComparisonPhase::ParseRight

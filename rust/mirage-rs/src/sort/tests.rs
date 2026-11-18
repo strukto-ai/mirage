@@ -139,6 +139,57 @@ fn random_comparisons_hash_sliced_transformed_keys_and_keep_tie_fallbacks() {
 }
 
 #[test]
+fn human_keys_resume_without_changing_malformed_runs_or_unit_order() {
+    let blanks = " ".repeat(1800);
+    let zeroes = "0".repeat(1800);
+    let points = ".".repeat(1800);
+    let digits = "9".repeat(1800);
+    let records = [
+        format!("{blanks}1K"),
+        format!("{blanks}-0{points}1K"),
+        format!("{blanks}0{points}1K"),
+        format!("{zeroes}2K"),
+        format!("{zeroes}-2K"),
+        format!("{digits}K"),
+        format!("{digits}M"),
+        format!("-{digits}M"),
+        format!("1.{zeroes}1K"),
+        format!("1.{zeroes}2K"),
+        format!("{blanks}-0.000K"),
+        format!("{blanks}1m"),
+        format!("{blanks}1Q"),
+    ];
+    for stable in [false, true] {
+        for reverse in [false, true] {
+            let mut key = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+            key["mods"]["human"] = json!(true);
+            key["mods"]["reverse"] = json!(reverse);
+            let compare: super::Compare = serde_json::from_value(json!({
+                "keys": [key], "field_sep": null,
+                "reverse": reverse, "stable": stable, "unique": false,
+            }))
+            .unwrap();
+            for a in &records {
+                for b in &records {
+                    let (a, b) = (a.as_bytes(), b.as_bytes());
+                    let mut comparison = super::Comparison::default();
+                    let mut calls = 0;
+                    let actual = loop {
+                        calls += 1;
+                        assert!(calls < 200, "comparison failed to advance");
+                        if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1) {
+                            break order;
+                        }
+                    };
+                    assert!(calls > 1);
+                    assert_eq!(actual, compare.records(a, b));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn numeric_comparisons_resume_without_changing_key_order() {
     let tail = "0".repeat(1600);
     let prefix = "x".repeat(1600);
