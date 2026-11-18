@@ -14,6 +14,7 @@
 
 import time
 
+from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
 from mirage.workspace.session import SessionManager
 from mirage.workspace.store import WorkspaceStateStore
 
@@ -61,6 +62,95 @@ class WorkspaceMeta:
     @property
     def default_session_id(self) -> str:
         return self._default_session_id
+
+    async def recall(self, name: str) -> str | None:
+        """The machine Mirage started for ``name``, from the record's
+        ``machines``; None when none.
+
+        Args:
+            name (str): the machine's name under ``machines:``.
+        """
+        record = await self._store.load_meta(self._workspace_id)
+        machines = record.get("machines") if record is not None else None
+        instance = machines.get(name) if isinstance(machines, dict) else None
+        return instance if isinstance(instance, str) else None
+
+    async def remember(self, name: str, instance: str) -> None:
+        """Keep ``instance`` under the record's ``machines`` as the
+        machine started for ``name``.
+
+        Args:
+            name (str): the machine's name under ``machines:``.
+            instance (str): its provider's id.
+        """
+        await self._write_machine(name, instance)
+
+    async def forget(self, name: str) -> None:
+        """Drop the machine kept for ``name`` from the record's
+        ``machines``.
+
+        Args:
+            name (str): the machine's name under ``machines:``.
+        """
+        await self._write_machine(name, None)
+
+    async def remembered(self) -> dict[str, str]:
+        """Every machine the record's ``machines`` keeps, by name."""
+        record = await self._store.load_meta(self._workspace_id)
+        machines = record.get("machines") if record is not None else None
+        if not isinstance(machines, dict):
+            return {}
+        return {
+            name: instance
+            for name, instance in machines.items()
+            if isinstance(name, str) and isinstance(instance, str)
+        }
+
+    async def _write_machine(self, name: str, instance: str | None) -> None:
+        """Set or drop one machine under ``machines``, merged into the
+        record as it is now and compare-and-set, so machines started at
+        once each land. Writes the record, as ``ensure`` would, when there
+        is none yet.
+
+        Args:
+            name (str): the machine's name under ``machines:``.
+            instance (str | None): its provider's id; None drops it.
+        """
+        for _ in range(CAS_MAX_RETRIES):
+            existing = await self._store.load_meta(self._workspace_id)
+            stored = (
+                existing
+                if existing is not None
+                else {
+                    "workspace_id": self._workspace_id,
+                    "default_session_id": self._default_session_id,
+                    "created_at": time.time(),
+                }
+            )
+            kept = stored.get("machines")
+            machines = {
+                key: value
+                for key, value in (
+                    kept if isinstance(kept, dict) else {}
+                ).items()
+                if key != name
+            }
+            if instance is not None:
+                machines[name] = instance
+            expected = generation_of(existing)
+            fields = {
+                **stored,
+                "machines": machines,
+                "generation": expected + 1,
+            }
+            if await self._store.cas_set_meta(
+                self._workspace_id, fields, expected
+            ):
+                return
+        raise RuntimeError(
+            f"workspace {self._workspace_id!r} meta kept "
+            "conflicting with another writer"
+        )
 
     async def adopt_default(self, session_id: str) -> None:
         """Snapshot restore: adopt the snapshot's default session identity

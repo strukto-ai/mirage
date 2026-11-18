@@ -39,6 +39,7 @@ import {
   MOUNT_WAIT_SECONDS,
   PIPE_SERVER_HINT,
   SSHFS_HINT,
+  SSHFS_LINE,
   SSHFS_LOG_NAME,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
@@ -322,6 +323,8 @@ export class MachineMounts {
    * @param run runs one setup command in the machine.
    * @param openPipe starts a command in the machine with its stdin and
    *   stdout held open.
+   * @param working whether Mirage has work on the machine now; omitted
+   *   counts it as always working.
    */
   constructor(
     private readonly provider: string,
@@ -329,6 +332,7 @@ export class MachineMounts {
     private readonly mountType: MountType,
     private readonly run: (line: string, signal?: AbortSignal) => Promise<RunAnswer>,
     private readonly openPipe: (command: string) => Promise<MachinePipe>,
+    private readonly working: () => boolean = () => true,
   ) {}
 
   get fileEffectsDispatched(): boolean {
@@ -694,7 +698,7 @@ export class MachineMounts {
     if (fresh.length > 0) {
       const make = pipeServer
       if (make === null) throw new Error(PIPE_SERVER_HINT)
-      if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
+      if ((await this.run(SSHFS_LINE, signal)).exitCode !== 0) {
         throw new Error(`${this.provider}: ${SSHFS_HINT}`)
       }
       const folder = await this.folder(served, signal)
@@ -862,15 +866,17 @@ export class MachineMounts {
   /**
    * Kill the sshfs of a prefix whose server ended, unless a line dropped it
    * already: a program blocked on the mount then gets an error rather than
-   * hanging. The next line unmounts it and serves the prefix again, as for
-   * any server that ended; a kill that lands late, even after a restart,
+   * hanging. With no work on the machine no program of Mirage's is blocked,
+   * and the server most likely ended as the machine paused itself, so the
+   * sshfs is left for the next line. The next line unmounts it and serves
+   * the prefix again, as for any server that ended; a kill that lands late, even after a restart,
    * reaches only this serve's sshfs, never the one serving the prefix again. A kill the machine does
    * not answer is let go after `UNMOUNT_WAIT_SECONDS`, or when the mounts
    * close.
    */
   private ended(prefix: string, entry: Served): void {
     entry.ended = true
-    if (this.served.get(prefix) !== entry) return
+    if (this.served.get(prefix) !== entry || !this.working()) return
     const kill = new AbortController()
     const signal = mergeSignals(kill.signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000))
     this.kills.add(kill)

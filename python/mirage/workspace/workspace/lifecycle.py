@@ -15,6 +15,7 @@
 import asyncio
 import builtins
 import io
+import logging
 import os
 import shutil
 from collections.abc import Awaitable, Callable, Sequence
@@ -28,6 +29,7 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.execution.job import JobTable
 from mirage.execution.process.table import ProcessTable
 from mirage.io.async_line_iterator import release_inputs
+from mirage.machine.types import MachineMemory
 from mirage.observe.store import ObserverStore
 from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
@@ -38,6 +40,8 @@ from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.events import EventManager
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
+
+logger = logging.getLogger(__name__)
 
 # An attribute a ``with`` block replaced: the module, the name and what
 # the name held before.
@@ -71,6 +75,9 @@ class CloseDeps:
         blocked_loop (asyncio.AbstractEventLoop | None): the loop a sync
             ``with`` block is exiting inside, which runs nothing until
             the close returns.
+        machine_memory (MachineMemory | None): where the workspace keeps
+            the machines Mirage started; a delete keeps there the ones it
+            could not remove.
     """
 
     sessions: SessionManager
@@ -88,6 +95,7 @@ class CloseDeps:
     workspace_id: str
     planes: Sequence[NamespaceStore | ObserverStore]
     blocked_loop: asyncio.AbstractEventLoop | None = None
+    machine_memory: MachineMemory | None = None
 
 
 def patch_process(
@@ -148,6 +156,29 @@ def unpatch_process(patched: list[Patched]) -> None:
     """
     for module, name, fn in patched:
         setattr(module, name, fn)
+
+
+async def _keep_machines(
+    memory: MachineMemory | None, left: dict[str, str]
+) -> None:
+    """Keep, past a delete, each machine Mirage started that is still
+    there: one whose removal failed, or whose entry the config no longer
+    names. A later build of the workspace that names it again removes it
+    as that one is deleted.
+
+    Args:
+        memory (MachineMemory | None): where the workspace keeps them.
+        left (dict[str, str]): the machines still kept, by name.
+    """
+    for name, instance in left.items():
+        logger.warning(
+            "machine %s: %s was not removed with its workspace, and is "
+            "kept so a later delete removes it",
+            name,
+            instance,
+        )
+        if memory is not None:
+            await memory.remember(name, instance)
 
 
 async def _drop_state(deps: CloseDeps) -> None:
@@ -245,7 +276,16 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
             await run_blocking(deps.kernel_mounts.close)
         except Exception as exc:
             failures.append(exc)
+        # The machines' close removed the ones Mirage started and forgot
+        # each; what the workspace still keeps outlives the drop.
+        left: dict[str, str] = {}
+        if deps.machine_memory is not None:
+            try:
+                left = await deps.machine_memory.remembered()
+            except Exception as exc:
+                failures.append(exc)
         await settle(_drop_state(deps))
+        await settle(_keep_machines(deps.machine_memory, left))
     if deps.owns_state_store:
         await settle(deps.state_store.close())
     try:

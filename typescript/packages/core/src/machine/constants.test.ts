@@ -18,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -33,6 +34,7 @@ import {
   PROCESS,
   NOT_RUNNING_STATUS,
   RUN_PROGRAM_AT,
+  SSHFS_LINE,
   SSHFS_OPTIONS,
   TOOLS_PATH,
   decodeOutput,
@@ -381,5 +383,77 @@ describe('SSHFS_OPTIONS', () => {
         'direct_io',
       ]),
     )
+  })
+})
+
+// Stand-ins for the tools SSHFS_LINE calls, on a PATH of their own: sudo runs
+// what it is given when SUDO_OK is set, apt-get installs sshfs only once its
+// lists were updated, and every call is logged.
+const FAKE_TOOLS: Record<string, string> = {
+  id: '#!/bin/sh\necho "${FAKE_UID:-1000}"\n',
+  sudo: '#!/bin/sh\n[ -n "$SUDO_OK" ] || exit 1\n[ "$1" = -n ] && shift\n[ "$1" = true ] && exit 0\nexec "$@"\n',
+  env: '#!/bin/sh\nwhile case "$1" in *=*) true;; *) false;; esac; do export "$1"; shift; done\nexec "$@"\n',
+  'apt-get':
+    '#!/bin/sh\necho "apt-get $*" >> "$LOG"\n' +
+    'case " $* " in *" update "*) : > "$TOOLS/lists"; exit 0;; esac\n' +
+    '[ -f "$TOOLS/lists" ] || exit 100\n' +
+    'printf \'#!/bin/sh\\n\' > "$TOOLS/sshfs"\n' +
+    '/bin/chmod +x "$TOOLS/sshfs"\n',
+}
+
+describe('SSHFS_LINE', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const tools = (names: string[], files: string[] = []): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-sshfs-'))
+    dirs.push(dir)
+    for (const name of names) {
+      writeFileSync(join(dir, name), FAKE_TOOLS[name] ?? '')
+      chmodSync(join(dir, name), 0o755)
+    }
+    for (const name of files) {
+      writeFileSync(join(dir, name), '#!/bin/sh\n')
+      chmodSync(join(dir, name), 0o755)
+    }
+    writeFileSync(join(dir, 'log'), '')
+    return dir
+  }
+
+  const line = (dir: string, env: Record<string, string> = {}): [number | null, string[]] => {
+    const done = spawnSync('/bin/sh', ['-c', SSHFS_LINE], {
+      env: { PATH: dir, TOOLS: dir, LOG: join(dir, 'log'), ...env },
+    })
+    const log = readFileSync(join(dir, 'log'), 'utf8')
+    return [done.status, log.split('\n').filter((row) => row !== '')]
+  }
+
+  it('leaves a machine that has sshfs alone', () => {
+    expect(line(tools(['id', 'apt-get'], ['sshfs']))).toEqual([0, []])
+  })
+  it('installs through sudo from fresh lists', () => {
+    expect(line(tools(['id', 'sudo', 'env', 'apt-get']), { SUDO_OK: '1' })).toEqual([
+      0,
+      [
+        'apt-get -y -qq install --no-install-recommends sshfs',
+        'apt-get -y -qq update',
+        'apt-get -y -qq install --no-install-recommends sshfs',
+      ],
+    ])
+  })
+  it('installs as root without sudo', () => {
+    const dir = tools(['id', 'env', 'apt-get'], ['lists'])
+    expect(line(dir, { FAKE_UID: '0' })).toEqual([
+      0,
+      ['apt-get -y -qq install --no-install-recommends sshfs'],
+    ])
+  })
+  it.each([
+    ['no sudo', ['id', 'sudo', 'env', 'apt-get'], {}],
+    ['no package manager', ['id', 'sudo', 'env'], { SUDO_OK: '1' }],
+  ])('fails when it cannot install: %s', (_, names, env) => {
+    expect(line(tools(names), env)).toEqual([1, []])
   })
 })

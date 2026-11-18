@@ -720,7 +720,9 @@ export class Workspace {
       machines: this.machineTable,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.closers.push(() => this.machineTable.close(this.machinesPaused))
+    this.machineTable.bindMemory(this.meta)
+    // A delete removes the machines Mirage started; a close or pause pauses them.
+    this.closers.push(() => this.machineTable.close(this.machinesPaused, this.stateDropped))
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld, this.namespace)
     this.registry.bindClocks()
@@ -2999,6 +3001,7 @@ export class Workspace {
         dropState,
         workspaceId: this.workspaceId,
         planes: this.planes,
+        machineMemory: this.meta,
       })
     } finally {
       // Teardown has run either way, and `closing` is memoized, so it will

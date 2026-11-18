@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { MachineMemory } from '../../machine/types.ts'
+import { isRecord } from '../../utils/records.ts'
+import { CAS_MAX_RETRIES, generationOf } from '../record/types.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 
@@ -22,7 +25,7 @@ import type { WorkspaceStateStore } from '../store/base.ts'
  * A minted default session id is provisional: attaching to a workspace
  * whose record already names one adopts the stored pointer instead.
  */
-export class WorkspaceMeta {
+export class WorkspaceMeta implements MachineMemory {
   private readonly wsId: string
   private readonly store: WorkspaceStateStore
   private readonly sessions: SessionManager
@@ -74,6 +77,60 @@ export class WorkspaceMeta {
       }
     }
     this.written = true
+  }
+
+  /** The machine Mirage started for `name`, from the record's `machines`; null when none. */
+  async recall(name: string): Promise<string | null> {
+    const machines = (await this.store.loadMeta(this.wsId))?.machines
+    const instance = isRecord(machines) ? machines[name] : undefined
+    return typeof instance === 'string' ? instance : null
+  }
+
+  /** Keep `instance` under the record's `machines` as the machine started for `name`. */
+  remember(name: string, instance: string): Promise<void> {
+    return this.writeMachine(name, instance)
+  }
+
+  /** Drop the machine kept for `name` from the record's `machines`. */
+  forget(name: string): Promise<void> {
+    return this.writeMachine(name, null)
+  }
+
+  /** Every machine the record's `machines` keeps, by name. */
+  async remembered(): Promise<Record<string, string>> {
+    const machines = (await this.store.loadMeta(this.wsId))?.machines
+    if (!isRecord(machines)) return {}
+    return Object.fromEntries(
+      Object.entries(machines).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    )
+  }
+
+  /**
+   * Set or drop one machine under `machines`, merged into the record as it
+   * is now and compare-and-set, so machines started at once each land.
+   * Writes the record, as `ensure` would, when there is none yet.
+   */
+  private async writeMachine(name: string, instance: string | null): Promise<void> {
+    for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
+      const existing = await this.store.loadMeta(this.wsId)
+      const stored = existing ?? {
+        workspace_id: this.wsId,
+        default_session_id: this.sessions.defaultId,
+        created_at: Date.now() / 1000,
+      }
+      const kept = isRecord(stored.machines) ? stored.machines : {}
+      const machines = Object.fromEntries(
+        [...Object.entries(kept).filter(([key]) => key !== name)].concat(
+          instance === null ? [] : [[name, instance]],
+        ),
+      )
+      const expected = generationOf(existing)
+      const fields = { ...stored, machines, generation: expected + 1 }
+      if (await this.store.casSetMeta(this.wsId, fields, expected)) return
+    }
+    throw new Error(`workspace ${this.wsId} meta kept conflicting with another writer`)
   }
 
   /**

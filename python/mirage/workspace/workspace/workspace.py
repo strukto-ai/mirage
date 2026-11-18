@@ -695,6 +695,7 @@ class Workspace:
             host_resources,
             host=self.process_table.machine,
         )
+        self.machine_table.bind_memory(self._meta)
         self._wire_machines()
         self._program_machine = program_machine(entries, handles)
         bind_machine_mounts(
@@ -2158,7 +2159,11 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                partial(self.machine_table.close, pause=pause),
+                # A delete removes the machines Mirage started; a close or
+                # pause pauses them.
+                partial(
+                    self.machine_table.close, pause=pause, destroy=drop_state
+                ),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,
@@ -2170,6 +2175,7 @@ class Workspace:
             workspace_id=self.workspace_id,
             planes=self._planes,
             blocked_loop=blocked_loop,
+            machine_memory=self._meta,
         )
 
     # ── snapshot / load / copy ─────────────────────────────────────────────

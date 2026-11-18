@@ -28,8 +28,28 @@ CLOSED_INPUT = ("broken pipe", "file already closed")
 # memory.
 ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
 
+# The template a sandbox Mirage starts comes from when the config names
+# none: E2B's own.
+DEFAULT_TEMPLATE = "base"
+
+# How long a sandbox Mirage started stays up while Mirage has work there
+# before E2B pauses it itself, pushed out again every
+# ``BUSY_REFRESH_SECONDS`` while the work lasts: a host that went away
+# mid-run leaves it running this long at most.
+BUSY_TIMEOUT_SECONDS = 10 * 60
+BUSY_REFRESH_SECONDS = 5 * 60
+
+# How long a sandbox Mirage started stays up once Mirage's work there ends,
+# before E2B pauses it itself, when the config sets no ``idle_timeout``.
+IDLE_TIMEOUT_SECONDS = 10
+
+# How much sooner than its idle timeout a sandbox may have paused already:
+# the time the timeout took to reach E2B.
+IDLE_MARGIN_SECONDS = 1
+
 # Why a sandbox the SDK says is gone cannot take a line, by how it said so,
-# with the fix: the sandbox is the user's, and Mirage never makes one.
+# with the fix: the sandbox is the user's. One Mirage started is started
+# anew.
 _SANDBOX_FIX = "create a new sandbox and set the machine's sandbox_id to it"
 SANDBOX_GONE = {
     "deleted": (

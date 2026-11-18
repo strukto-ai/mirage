@@ -15,6 +15,7 @@
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import { releaseInputs } from '../../io/async_line_iterator.ts'
 import type { JobTable } from '../../execution/job/index.ts'
+import type { MachineMemory } from '../../machine/types.ts'
 import { ABORT_JOIN_MS } from '../../utils/abort.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -37,6 +38,26 @@ export interface CloseDeps {
   workspaceId: string
   /** The stores the workspace's state lives in, however they were wired. */
   planes: { clear(): Promise<void> }[]
+  /** Where the workspace keeps the machines Mirage started; a delete keeps there the ones it could not remove. */
+  machineMemory: MachineMemory | null
+}
+
+/**
+ * Keep, past a delete, each machine Mirage started that is still there:
+ * one whose removal failed, or whose entry the config no longer names. A
+ * later build of the workspace that names it again removes it as that one
+ * is deleted.
+ */
+async function keepMachines(
+  memory: MachineMemory | null,
+  left: Record<string, string>,
+): Promise<void> {
+  for (const [name, instance] of Object.entries(left)) {
+    console.warn(
+      `machine ${name}: ${instance} was not removed with its workspace, and is kept so a later delete removes it`,
+    )
+    await memory?.remember(name, instance)
+  }
 }
 
 /**
@@ -106,7 +127,14 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // Nothing writes the state any more, so it can go before its store
   // closes. A failed drop must not skip the rest of teardown; it is raised
   // with the other failures once everything is released.
-  if (deps.dropState) await settle([() => dropState(deps)])
+  if (deps.dropState) {
+    // The machines' close removed the ones Mirage started and forgot each;
+    // what the workspace still keeps outlives the drop.
+    const left: Record<string, string> = {}
+    await settle([async () => Object.assign(left, (await deps.machineMemory?.remembered()) ?? {})])
+    await settle([() => dropState(deps)])
+    await settle([() => keepMachines(deps.machineMemory, left)])
+  }
   if (deps.ownsStateStore) await settle([() => deps.stateStore.close()])
   await settle([() => deps.cache.clear()])
   await settle([() => deps.cache.close()])

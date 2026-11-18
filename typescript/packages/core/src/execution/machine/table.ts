@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineHandle } from '../../machine/handle.ts'
+import type { MachineMemory } from '../../machine/types.ts'
 import { buildMachine } from '../../machine/registry.ts'
 import { MAX_PROCESSES } from '../process/constants.ts'
 import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
@@ -515,18 +516,33 @@ export class MachineTable {
   }
 
   /**
+   * Give every handle where the workspace keeps the machines Mirage
+   * started for it (`MachineHandle.bindMemory`).
+   *
+   * @param memory the workspace's memory of the machines it started.
+   */
+  bindMemory(memory: MachineMemory): void {
+    for (const handle of this.byName.values()) handle.bindMemory(memory)
+  }
+
+  /**
    * Close every handle: unmount what each was served, and let go of it for
    * another workspace. With `pause`, each handle it names that this table
    * held is then paused, every held handle staying held until then so no
    * other workspace takes it first; a handle whose close failed is still
-   * paused.
+   * paused. A machine Mirage started is paused either way, and with
+   * `destroy` (the workspace is being deleted) it is removed instead.
    *
    * @param pause the machines to pause after closing, by name; null closes only.
+   * @param destroy remove the machines Mirage started rather than pause them.
    */
-  async close(pause: ReadonlySet<string> | null = null): Promise<void> {
+  async close(pause: ReadonlySet<string> | null = null, destroy = false): Promise<void> {
     const held = [...this.byName].filter(([, handle]) => HOLDERS.get(handle) === this)
+    const started = held.filter(([, handle]) => handle.startedByMirage).map(([name]) => name)
     let results: PromiseSettledResult<void>[]
-    if (pause !== null) results = await this.closeThenPause(held, pause)
+    if (destroy) results = await this.closeThenDestroy(held)
+    else if (pause !== null || started.length > 0)
+      results = await this.closeThenPause(held, new Set([...(pause ?? []), ...started]))
     else {
       for (const [, handle] of held) HOLDERS.delete(handle)
       results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
@@ -535,6 +551,25 @@ export class MachineTable {
     if (failures.length === 1) throw failures[0] as Error
     if (failures.length > 1) throw new AggregateError(failures, 'machine close failed')
   }
+
+  /**
+   * Close every handle, then remove each held one's machine that Mirage
+   * started (`MachineHandle.destroy`), once the signals still queued for
+   * its machines have run; the handles stay held until then.
+   */
+  private async closeThenDestroy(
+    held: [string, MachineHandle][],
+  ): Promise<PromiseSettledResult<void>[]> {
+    await Promise.allSettled(this.signaling.values())
+    try {
+      const results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
+      results.push(...(await Promise.allSettled(held.map(async ([, h]) => h.destroy()))))
+      return results
+    } finally {
+      for (const [, handle] of held) HOLDERS.delete(handle)
+    }
+  }
+
   /**
    * Close every handle and pause the held ones `pause` names, once the
    * signals still queued for its machines have run, so none reaches a

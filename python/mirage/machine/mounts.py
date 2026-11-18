@@ -35,6 +35,7 @@ from mirage.machine.constants import (
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
     SSHFS_HINT,
+    SSHFS_LINE,
     SSHFS_LOG_NAME,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
@@ -316,6 +317,8 @@ class MachineMounts:
             command in the machine, its answer kept whole.
         open_pipe (Callable[[str], Awaitable[MachinePipe]]): starts a
             command in the machine with its stdin and stdout held open.
+        working (Callable[[], bool] | None): whether Mirage has work on
+            the machine now; None counts it as always working.
     """
 
     def __init__(
@@ -325,8 +328,10 @@ class MachineMounts:
         mount_type: MountType,
         run: Callable[[str], Awaitable[RunAnswer]],
         open_pipe: Callable[[str], Awaitable[MachinePipe]],
+        working: Callable[[], bool] | None = None,
     ) -> None:
         self._provider = provider
+        self._working = working
         self._machine = machine
         self._mount_type = mount_type
         self._run = run
@@ -804,7 +809,7 @@ class MachineMounts:
                 )
         if new:
             server = pipe_server()
-            if (await self._run("command -v sshfs")).exit_code != 0:
+            if (await self._run(SSHFS_LINE)).exit_code != 0:
                 raise RuntimeError(f"{self._provider}: {SSHFS_HINT}")
             folder = await self._folder(served)
             try:
@@ -980,8 +985,11 @@ class MachineMounts:
     def _ended(self, prefix: str, task: asyncio.Task[None]) -> None:
         """Kill the sshfs of a prefix whose server ended, unless a line
         dropped it already: a program blocked on the mount then gets an
-        error rather than hanging. The next line unmounts it and serves the
-        prefix again, as for any server that ended; a kill that lands late,
+        error rather than hanging. With no work on the machine no program
+        of Mirage's is blocked, and the server most likely ended as the
+        machine paused itself, so the sshfs is left for the next line. The
+        next line unmounts it and serves the prefix again, as for any
+        server that ended; a kill that lands late,
         even after a restart, reaches only this serve's sshfs, never the one
         serving the prefix again. A kill the machine does not answer is let go after
         ``UNMOUNT_WAIT_SECONDS``, or when the mounts close.
@@ -992,6 +1000,8 @@ class MachineMounts:
         """
         served = self._served.get(prefix)
         if served is None or served[1] is not task:
+            return
+        if self._working is not None and not self._working():
             return
         kill = asyncio.create_task(self._kill(prefix, served[3]))
         self._kills.add(kill)

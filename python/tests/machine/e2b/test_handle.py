@@ -45,7 +45,13 @@ from mirage.machine.constants import (
     wrap_line,
 )
 from mirage.machine.e2b import E2BConfig, E2BMachine, sdk
-from mirage.machine.e2b.constants import PTY_MARK, PTY_RAW
+from mirage.machine.e2b import handle as e2b_handle
+from mirage.machine.e2b.constants import (
+    BUSY_TIMEOUT_SECONDS,
+    IDLE_TIMEOUT_SECONDS,
+    PTY_MARK,
+    PTY_RAW,
+)
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import PathSpec
@@ -220,10 +226,39 @@ class FakeMachine:
     last = None
     paused = []
     pause_refusal = None
+    created = []
+    killed = []
+    timeouts = []
+    timeout_refusal = None
+    kill_refusal = None
 
     def __init__(self):
         self.commands = FakeCommands()
         self.pty = FakePty()
+        self.sandbox_id = "sb-live"
+
+    @classmethod
+    async def create(cls, template, **opts):
+        cls.created.append((template, opts))
+        await asyncio.sleep(0)
+        cls.last = cls()
+        cls.last.sandbox_id = f"sb-new-{len(cls.created)}"
+        return cls.last
+
+    @classmethod
+    async def kill(cls, sandbox_id, **params):
+        cls.killed.append((sandbox_id, params))
+        await asyncio.sleep(0)
+        if cls.kill_refusal is not None:
+            raise cls.kill_refusal
+        return True
+
+    @classmethod
+    async def set_timeout(cls, sandbox_id, timeout, **params):
+        cls.timeouts.append((sandbox_id, timeout))
+        await asyncio.sleep(0)
+        if cls.timeout_refusal is not None:
+            raise cls.timeout_refusal
 
     @classmethod
     async def connect(cls, sandbox_id, **params):
@@ -250,6 +285,11 @@ def fake_sdk(monkeypatch):
     FakeMachine.last = None
     FakeMachine.paused = []
     FakeMachine.pause_refusal = None
+    FakeMachine.created = []
+    FakeMachine.killed = []
+    FakeMachine.timeouts = []
+    FakeMachine.timeout_refusal = None
+    FakeMachine.kill_refusal = None
     monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
 
 
@@ -262,9 +302,269 @@ async def test_connect_attaches_by_id_with_api_key():
     assert FakeMachine.connected == [("sb-live", {"api_key": "k-123"})]
 
 
-def test_sandbox_id_is_required():
-    with pytest.raises(TypeError, match="sandbox_id"):
-        E2BMachine("box", config={})
+class MapMemory:
+    """A workspace's memory of the machines Mirage started, in a dict."""
+
+    def __init__(self, kept=None):
+        self.kept = dict(kept or {})
+
+    async def recall(self, name):
+        return self.kept.get(name)
+
+    async def remember(self, name, instance):
+        self.kept[name] = instance
+
+    async def forget(self, name):
+        self.kept.pop(name, None)
+
+    async def remembered(self):
+        return dict(self.kept)
+
+
+def _startable(memory, **config):
+    machine = E2BMachine("box", config={"api_key": "k", **config})
+    machine.bind_memory(memory)
+    return machine
+
+
+_STARTED = {
+    "timeout": BUSY_TIMEOUT_SECONDS,
+    "lifecycle": {"on_timeout": "pause", "auto_resume": False},
+    "metadata": {"mirage_machine": "box"},
+    "api_key": "k",
+}
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_is_started_from_its_template_and_remembered():
+    memory = MapMemory()
+    machine = _startable(memory, template="tpl")
+    assert (machine.instance, machine.started_by_mirage) == ("box", False)
+    await machine.connect()
+    assert FakeMachine.created == [("tpl", _STARTED)]
+    assert (machine.instance, machine.started_by_mirage) == ("sb-new-1", True)
+    assert memory.kept == {"box": "sb-new-1"}
+
+
+@pytest.mark.asyncio
+async def test_a_config_naming_no_template_starts_from_e2b_base():
+    await _startable(MapMemory()).connect()
+    assert [template for template, _ in FakeMachine.created] == ["base"]
+
+
+@pytest.mark.asyncio
+async def test_the_remembered_sandbox_is_connected_again_and_resumed():
+    machine = _startable(MapMemory({"box": "sb-old"}))
+    await machine.connect()
+    assert FakeMachine.connected == [
+        ("sb-old", {"timeout": BUSY_TIMEOUT_SECONDS, "api_key": "k"})
+    ]
+    assert (FakeMachine.created, machine.instance) == ([], "sb-old")
+    assert machine.started_by_mirage
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_sandbox_that_is_gone_is_started_anew():
+    memory = MapMemory({"box": "sb-old"})
+    FakeMachine.refusal = SandboxNotFoundException("gone")
+    await _startable(memory).connect()
+    assert len(FakeMachine.created) == 1
+    assert memory.kept == {"box": "sb-new-1"}
+
+
+@pytest.mark.asyncio
+async def test_the_started_sandbox_is_killed_and_forgotten_on_delete():
+    memory = MapMemory()
+    machine = _startable(memory)
+    await machine.connect()
+    await machine.destroy()
+    assert FakeMachine.killed == [("sb-new-1", {"api_key": "k"})]
+    assert (memory.kept, machine.started_by_mirage) == ({}, False)
+
+
+@pytest.mark.asyncio
+async def test_the_remembered_sandbox_is_killed_without_connecting():
+    memory = MapMemory({"box": "sb-old"})
+    await _startable(memory).destroy()
+    assert FakeMachine.killed == [("sb-old", {"api_key": "k"})]
+    assert memory.kept == {}
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_the_config_names_is_never_killed():
+    machine = _startable(MapMemory(), sandbox_id="sb-live")
+    await machine.connect()
+    await machine.destroy()
+    assert (FakeMachine.killed, FakeMachine.created) == ([], [])
+    assert not machine.started_by_mirage
+
+
+@pytest.mark.asyncio
+async def test_the_started_sandbox_is_paused():
+    machine = _startable(MapMemory())
+    await machine.connect()
+    await machine.close()
+    await machine.pause()
+    assert FakeMachine.paused == [("sb-new-1", {"api_key": "k"})]
+
+
+async def _settled():
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_work_on_a_started_sandbox_sets_its_busy_then_idle_timeout():
+    machine = _startable(MapMemory())
+    await machine.connect()
+    async with machine._at_work():
+        await _settled()
+        assert FakeMachine.timeouts == [("sb-new-1", BUSY_TIMEOUT_SECONDS)]
+    await _settled()
+    assert FakeMachine.timeouts == [
+        ("sb-new-1", BUSY_TIMEOUT_SECONDS),
+        ("sb-new-1", IDLE_TIMEOUT_SECONDS),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nested_and_concurrent_work_sets_the_timeouts_once():
+    machine = _startable(MapMemory())
+    await machine.connect()
+
+    async def piece():
+        async with machine._at_work():
+            await asyncio.sleep(0.01)
+
+    async with machine._at_work():
+        await asyncio.gather(piece(), piece())
+    await _settled()
+    assert [t for _, t in FakeMachine.timeouts] == [
+        BUSY_TIMEOUT_SECONDS,
+        IDLE_TIMEOUT_SECONDS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_idle_timeout_comes_from_the_config():
+    machine = _startable(MapMemory(), idle_timeout=30)
+    await machine.connect()
+    async with machine._at_work():
+        pass
+    await _settled()
+    assert FakeMachine.timeouts[-1] == ("sb-new-1", 30)
+
+
+@pytest.mark.asyncio
+async def test_timeouts_asked_while_one_is_sent_collapse_to_the_newest():
+    machine = _startable(MapMemory())
+    await machine.connect()
+    machine._push(600)
+    machine._push(20)
+    machine._push(30)
+    await _settled()
+    sent = [seconds for _, seconds in FakeMachine.timeouts]
+    assert 20 not in sent
+    assert sent[-1] == 30
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_the_config_names_keeps_its_own_timeout():
+    machine = _startable(MapMemory(), sandbox_id="sb-live")
+    await machine.connect()
+    async with machine._at_work():
+        pass
+    await _settled()
+    assert FakeMachine.timeouts == []
+
+
+@pytest.mark.asyncio
+async def test_long_work_pushes_the_busy_timeout_out_again(monkeypatch):
+    monkeypatch.setattr(e2b_handle, "BUSY_REFRESH_SECONDS", 0.001)
+    machine = _startable(MapMemory())
+    await machine.connect()
+
+    def busy():
+        return [
+            t for _, t in FakeMachine.timeouts if t == BUSY_TIMEOUT_SECONDS
+        ]
+
+    async with machine._at_work():
+        for _ in range(1000):
+            if len(busy()) >= 3:
+                break
+            await asyncio.sleep(0.001)
+    sent = len(busy())
+    await asyncio.sleep(0.02)
+    assert sent >= 3
+    assert len(busy()) <= sent + 1
+    assert FakeMachine.timeouts[-1] == ("sb-new-1", IDLE_TIMEOUT_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_work_after_the_idle_timeout_connects_again(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(e2b_handle, "monotonic", lambda: clock[0])
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    await _settled()
+    clock[0] += IDLE_TIMEOUT_SECONDS
+    before = len(FakeMachine.timeouts)
+    async with machine._at_work():
+        await machine.ensure_connected()
+    await _settled()
+    assert FakeMachine.connected == [
+        ("sb-new-1", {"timeout": BUSY_TIMEOUT_SECONDS, "api_key": "k"})
+    ]
+    assert FakeMachine.timeouts[before:] == [
+        ("sb-new-1", IDLE_TIMEOUT_SECONDS)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_connect_after_the_idle_timeout_resumes_with_no_work(
+    monkeypatch,
+):
+    clock = [1000.0]
+    monkeypatch.setattr(e2b_handle, "monotonic", lambda: clock[0])
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    clock[0] += IDLE_TIMEOUT_SECONDS
+    await machine.ensure_connected()
+    await machine.ensure_connected()
+    assert [sid for sid, _ in FakeMachine.connected] == ["sb-new-1"]
+
+
+@pytest.mark.asyncio
+async def test_work_within_the_idle_timeout_keeps_the_connection(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(e2b_handle, "monotonic", lambda: clock[0])
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    clock[0] += IDLE_TIMEOUT_SECONDS / 2
+    async with machine._at_work():
+        await machine.ensure_connected()
+    assert FakeMachine.connected == []
+
+
+@pytest.mark.parametrize(
+    "idle", [0, -1, "10", True, float("inf"), float("nan")]
+)
+def test_an_idle_timeout_that_is_no_positive_number_is_rejected(idle):
+    with pytest.raises((TypeError, ValueError), match="idle_timeout"):
+        E2BMachine("box", config={"idle_timeout": idle})
+
+
+@pytest.mark.parametrize("template", ["", " ", 0])
+def test_a_blank_or_non_string_template_is_rejected(template):
+    with pytest.raises((TypeError, ValueError), match="template"):
+        E2BMachine("box", config={"template": template})
 
 
 @pytest.mark.asyncio
@@ -521,7 +821,7 @@ async def test_missing_sdk_fails_with_install_hint(monkeypatch):
         await runtime.connect()
 
 
-@pytest.mark.parametrize("value", [None, "", " \t\n", 0, 1, False, [], {}])
+@pytest.mark.parametrize("value", ["", " \t\n", 0, 1, False, [], {}])
 def test_invalid_sandbox_id_is_rejected_before_connecting(value):
     with pytest.raises(ValueError, match="nonblank sandbox_id"):
         E2BConfig(sandbox_id=value)
@@ -1044,3 +1344,114 @@ async def test_any_other_pause_failure_is_raised():
     FakeMachine.pause_refusal = RuntimeError("node busy")
     with pytest.raises(RuntimeError, match="node busy"):
         await machine.pause()
+
+
+@pytest.mark.asyncio
+async def test_a_started_sandbox_the_workspace_cannot_keep_is_killed():
+    memory = MapMemory()
+
+    async def refuse(name, instance):
+        raise RuntimeError("store down")
+
+    memory.remember = refuse
+    machine = _startable(memory)
+    with pytest.raises(RuntimeError, match="store down"):
+        await machine.connect()
+    assert FakeMachine.killed == [("sb-new-1", {"api_key": "k"})]
+    assert (machine.instance, machine.started_by_mirage) == ("box", False)
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_started_inside_work_is_timed_from_that_work_on():
+    machine = _startable(MapMemory())
+    async with machine._at_work():
+        await machine.ensure_connected()
+    await _settled()
+    async with machine._at_work():
+        pass
+    await _settled()
+    assert [seconds for _, seconds in FakeMachine.timeouts] == [
+        IDLE_TIMEOUT_SECONDS,
+        BUSY_TIMEOUT_SECONDS,
+        IDLE_TIMEOUT_SECONDS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_build_times_the_remembered_sandbox_its_first_program_reaches():
+    machine = _startable(MapMemory({"box": "sb-old"}))
+    async with machine._at_work():
+        await machine.ensure_connected()
+    await _settled()
+    assert FakeMachine.timeouts == [("sb-old", IDLE_TIMEOUT_SECONDS)]
+
+
+@pytest.mark.asyncio
+async def test_work_out_of_idle_waits_for_its_busy_timeout():
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    await _settled()
+    sent = len(FakeMachine.timeouts)
+    async with machine._at_work():
+        assert FakeMachine.timeouts[sent:] == [
+            ("sb-new-1", BUSY_TIMEOUT_SECONDS)
+        ]
+        await machine.ensure_connected()
+    assert FakeMachine.connected == []
+
+
+@pytest.mark.asyncio
+async def test_every_piece_of_work_out_of_idle_waits_for_the_busy_timeout():
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    await _settled()
+    sent = len(FakeMachine.timeouts)
+    seen = []
+
+    async def piece():
+        async with machine._at_work():
+            seen.append(len(FakeMachine.timeouts) - sent)
+
+    await asyncio.gather(piece(), piece())
+    assert seen == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_work_out_of_idle_connects_again_when_its_busy_timeout_misses():
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    await _settled()
+    FakeMachine.timeout_refusal = SandboxNotFoundException("paused")
+    async with machine._at_work():
+        await machine.ensure_connected()
+    assert FakeMachine.connected == [
+        ("sb-new-1", {"timeout": BUSY_TIMEOUT_SECONDS, "api_key": "k"})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_neither_kept_nor_killed_is_saved_at_the_next_connect():
+    memory = MapMemory()
+
+    async def refuse(name, instance):
+        raise RuntimeError("store down")
+
+    remember = memory.remember
+    memory.remember = refuse
+    FakeMachine.kill_refusal = RuntimeError("kill refused")
+    machine = _startable(memory)
+    with pytest.raises(RuntimeError, match="store down"):
+        await machine.connect()
+    assert (machine.instance, machine.started_by_mirage) == ("sb-new-1", True)
+    memory.remember = remember
+    FakeMachine.kill_refusal = None
+    await machine.connect()
+    assert (len(FakeMachine.created), memory.kept) == (1, {"box": "sb-new-1"})
+    await machine.destroy()
+    assert [sid for sid, _ in FakeMachine.killed] == ["sb-new-1", "sb-new-1"]

@@ -35,7 +35,18 @@ import {
   stopSignal,
   wrapLine,
 } from '../constants.ts'
-import { CLOSED_INPUT, ON_PAUSE, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
+import {
+  CLOSED_INPUT,
+  DEFAULT_TEMPLATE,
+  ON_PAUSE,
+  PTY_MARK,
+  PTY_RAW,
+  BUSY_REFRESH_SECONDS,
+  BUSY_TIMEOUT_SECONDS,
+  IDLE_MARGIN_SECONDS,
+  IDLE_TIMEOUT_SECONDS,
+  SANDBOX_GONE,
+} from './constants.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type { E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -126,11 +137,18 @@ class PtyWriter implements PipeWriter {
 }
 
 /**
- * A running E2B sandbox, reached through its SDK.
+ * An E2B sandbox, reached through its SDK.
  *
- * You create the machine yourself (`e2b sandbox spawn` or the SDK);
- * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
- * back to E2B_API_KEY. E2B's exec reports stdout and stderr
+ * Yours, by `sandboxId` (`e2b sandbox spawn` or the SDK), or, without one,
+ * a sandbox Mirage starts from `template` at the first run that needs it
+ * and keeps in the workspace's memory: a later build connects to it again
+ * (resuming it when paused), and one that is gone is started anew. Mirage
+ * pauses a sandbox it started as the workspace closes and kills it as the
+ * workspace is deleted. While Mirage has work there (a program's run or one
+ * of its own lines) the sandbox's E2B timeout is `BUSY_TIMEOUT_SECONDS`,
+ * pushed out every `BUSY_REFRESH_SECONDS`; once the work ends it is
+ * `idleTimeout`, after which E2B pauses the sandbox itself, and the next
+ * work resumes it. `apiKey` falls back to E2B_API_KEY. E2B's exec reports stdout and stderr
  * separately, stdout as it arrives when streamed, each base64-encoded in
  * the machine since the exec decodes output as text (`encodeOutput`: the
  * sandbox needs dd and base64). Piped bytes use native
@@ -139,9 +157,9 @@ class PtyWriter implements PipeWriter {
  * command runs until mirage's limits stop it. A `mountType` serves the
  * workspace over a PTY, since E2B's exec decodes output as text.
  *
- * The sandbox is yours: Mirage never kills it, and pauses it only when the
- * workspace pauses and its config says `onPause: 'pause'` or the call names
- * it. Once the SDK
+ * A sandbox you brought is yours: Mirage never kills it, and pauses it only
+ * when the workspace pauses and its config says `onPause: 'pause'` or the
+ * call names it. Once the SDK
  * says it is gone, connecting fails with how to replace it, and a line it
  * cut short loses its connection (129) with the same advice; the next line
  * connects again.
@@ -153,16 +171,42 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   protected override readonly pauses = true
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
+  // The sandbox the config names, which is the user's; null when Mirage starts one.
+  private readonly brought: string | null
+  // The sandbox this handle reaches: the config's, or the one Mirage started; null before that.
+  private sandboxId: string | null
+  // When Mirage's last work here ended, in ms since the epoch; null while it has work or had none.
+  private idleAt: number | null = null
+  // Pushes the busy timeout out again while Mirage's work here lasts.
+  private refresher: ReturnType<typeof setInterval> | null = null
+  // The timeout, in seconds, still to send E2B, and the sending under way.
+  private wanted: number | null = null
+  private pushing: Promise<void> | null = null
+  // Whether the last timeout sent failed to arrive.
+  private missed = false
+  // Whether the sandbox Mirage started here is one the workspace failed to
+  // remember and that could not be killed either: the next connect saves it.
+  private unsaved = false
+  // Whether work that came out of idle found its busy timeout missed: the
+  // sandbox may have paused first, so the next connect reaches it anew.
+  private asleep = false
 
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
-    requireId('e2b', 'sandboxId', this.config.sandboxId)
+    // Null is unset, as Python's None is: a YAML `sandbox_id: null` names no sandbox.
+    this.brought = this.config.sandboxId ?? null
+    if (this.brought !== null) requireId('e2b', 'sandboxId', this.brought)
+    if ((this.config.template ?? null) !== null) requireId('e2b', 'template', this.config.template)
+    const idle = this.config.idleTimeout ?? null
+    if (idle !== null && !(typeof idle === 'number' && Number.isFinite(idle) && idle > 0))
+      throw new Error(`e2b: idleTimeout must be a number of seconds above 0, got ${String(idle)}`)
+    this.sandboxId = this.brought
     checkOnPause('e2b', this.config.onPause, ON_PAUSE)
   }
 
-  /** The sandbox's id at E2B. */
+  /** The sandbox's id at E2B; its name before Mirage starts one. */
   override get instance(): string {
-    return this.config.sandboxId
+    return this.sandboxId ?? this.name
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -182,15 +226,199 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     return this.config.apiKey !== undefined ? { apiKey: this.config.apiKey } : {}
   }
 
+  /**
+   * Connect to the config's sandbox, or to the one Mirage started for this
+   * workspace (resuming it when paused), or start one: from `template`, set
+   * to pause itself on its timeout and stay paused until a connect resumes
+   * it (a call that reaches it paused, such as the SDK's own health check,
+   * leaves it paused), and remembered. A connect comes with work, so a
+   * started one's timeout is `BUSY_TIMEOUT_SECONDS`. A started one that is
+   * gone is forgotten and started anew; the config's fails with how to
+   * replace it.
+   */
   async connect(): Promise<void> {
     const sdk = await this.ensureSdk()
+    if (this.brought === null && this.sandboxId === null) {
+      this.sandboxId = (await this.memory?.recall(this.name)) ?? null
+      this.startedHere = this.sandboxId !== null
+    }
+    if (this.sandboxId !== null) {
+      try {
+        this.sandbox = await sdk.Sandbox.connect(this.sandboxId, {
+          ...this.apiParams(),
+          ...(this.startedHere ? { timeoutMs: BUSY_TIMEOUT_SECONDS * 1000 } : {}),
+        })
+        if (this.unsaved) {
+          await this.memory?.remember(this.name, this.sandboxId)
+          this.unsaved = false
+        }
+        this.reached = true
+        return
+      } catch (error) {
+        const hint = this.gone(sdk, error)
+        if (hint === null) throw error
+        if (!this.startedHere) throw new Error(hint, { cause: error })
+        await this.memory?.forget(this.name)
+        this.sandboxId = null
+      }
+    }
+    this.sandbox = await sdk.Sandbox.create(this.config.template ?? DEFAULT_TEMPLATE, {
+      ...this.apiParams(),
+      timeoutMs: BUSY_TIMEOUT_SECONDS * 1000,
+      lifecycle: { onTimeout: 'pause', autoResume: false },
+      metadata: { mirage_machine: this.name },
+    })
+    this.sandboxId = this.sandbox.sandboxId
+    this.startedHere = true
     try {
-      this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
+      await this.memory?.remember(this.name, this.sandboxId)
     } catch (error) {
-      const hint = this.gone(sdk, error)
-      throw hint === null ? error : new Error(hint, { cause: error })
+      await this.dropUnkept(sdk)
+      throw error
     }
     this.reached = true
+  }
+
+  /**
+   * Kill a sandbox just started that the workspace could not keep: no later
+   * build would reach it, so it would outlive the workspace unseen. The next
+   * connect starts another. One the kill misses stays this handle's, so the
+   * next connect reaches it and saves it, and a delete removes it.
+   */
+  private async dropUnkept(sdk: E2bSdk): Promise<void> {
+    const id = this.sandboxId
+    this.sandbox = null
+    if (id === null) return
+    try {
+      await sdk.Sandbox.kill(id, this.apiParams())
+    } catch (error) {
+      this.unsaved = true
+      logger.debug?.(
+        `${this.machine.toString()}: unkept sandbox ${id} not killed: ${String(error)}`,
+      )
+      return
+    }
+    this.sandboxId = null
+    this.startedHere = false
+  }
+
+  /**
+   * Keep a sandbox Mirage manages up while Mirage has work there: its E2B
+   * timeout goes to `BUSY_TIMEOUT_SECONDS`, pushed out again every
+   * `BUSY_REFRESH_SECONDS`. One whose idle timeout has passed has paused,
+   * and gets its timeout as the work's connect resumes it (`stale`). Work
+   * that comes while the idle timeout runs waits for the busy one to land,
+   * or the sandbox could pause under it; when it misses, the sandbox may
+   * have paused first, and the work's connect reaches it anew.
+   */
+  protected override async becameBusy(): Promise<void> {
+    if (this.brought !== null) return
+    if (!this.lapsed()) {
+      const waking = this.idleAt !== null
+      this.idleAt = null
+      this.push(BUSY_TIMEOUT_SECONDS)
+      if (waking && this.pushing !== null) {
+        await this.pushing
+        if (this.missed) this.asleep = true
+      }
+    }
+    if (this.refresher === null) {
+      this.refresher = setInterval(() => {
+        this.push(BUSY_TIMEOUT_SECONDS)
+      }, BUSY_REFRESH_SECONDS * 1000)
+      ;(this.refresher as { unref?: () => void }).unref?.()
+    }
+  }
+
+  /** Let a sandbox Mirage manages pause itself `idleTimeout` after its work ends. */
+  protected override becameIdle(): void {
+    if (this.brought !== null) return
+    this.idleAt = Date.now()
+    this.stopRefresher()
+    this.push(this.idleSeconds())
+  }
+
+  /**
+   * A sandbox Mirage manages whose idle timeout has passed has paused: the
+   * next connect resumes it and reads its mounts anew.
+   */
+  protected override stale(): boolean {
+    if (this.brought !== null || (!this.asleep && !this.lapsed())) return false
+    this.asleep = false
+    this.idleAt = null
+    return true
+  }
+
+  /** Whether the idle timeout has passed since Mirage's last work ended. */
+  private lapsed(): boolean {
+    return (
+      this.idleAt !== null &&
+      Date.now() - this.idleAt >= (this.idleSeconds() - IDLE_MARGIN_SECONDS) * 1000
+    )
+  }
+
+  /** Seconds the sandbox stays up once Mirage's work there ends. */
+  private idleSeconds(): number {
+    return this.config.idleTimeout ?? IDLE_TIMEOUT_SECONDS
+  }
+
+  private stopRefresher(): void {
+    if (this.refresher === null) return
+    clearInterval(this.refresher)
+    this.refresher = null
+  }
+
+  /**
+   * Set a started sandbox's E2B timeout to `seconds` from now, without
+   * holding the work up. The timeouts go out one at a time, the newest
+   * asked replacing any not yet sent; a sandbox not started yet gets its
+   * timeout as it starts, and one that fails to arrive leaves the sandbox
+   * on the timeout it had (`missed`).
+   */
+  private push(seconds: number): void {
+    if (this.sandboxId === null || !this.startedHere) return
+    this.wanted = seconds
+    this.pushing ??= this.sendTimeouts()
+  }
+
+  private async sendTimeouts(): Promise<void> {
+    // Yield first: `push` sets `pushing` to this before its end clears it.
+    await Promise.resolve()
+    try {
+      while (this.wanted !== null) {
+        const seconds = this.wanted
+        this.wanted = null
+        const id = this.sandboxId
+        if (id === null || !this.startedHere) continue
+        try {
+          const sdk = await this.ensureSdk()
+          await sdk.Sandbox.setTimeout(id, seconds * 1000, this.apiParams())
+          this.missed = false
+        } catch (error) {
+          this.missed = true
+          logger.debug?.(`${this.machine.toString()}: timeout not set: ${String(error)}`)
+        }
+      }
+    } finally {
+      this.pushing = null
+    }
+  }
+
+  /**
+   * Kill the sandbox Mirage started for this workspace, as the workspace is
+   * deleted, and forget it; one the config names stays. Reaches the one the
+   * workspace remembers when this build never connected.
+   */
+  override async destroy(): Promise<void> {
+    if (this.brought !== null) return
+    this.stopRefresher()
+    const id = this.sandboxId ?? (await this.memory?.recall(this.name)) ?? null
+    if (id === null) return
+    const sdk = await this.ensureSdk()
+    await sdk.Sandbox.kill(id, this.apiParams())
+    await this.memory?.forget(this.name)
+    this.sandboxId = null
+    this.startedHere = false
   }
 
   /** Whether the config says `onPause: 'pause'`. */
@@ -203,9 +431,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
    * it. A sandbox already gone has nothing to pause.
    */
   protected override async pauseMachine(): Promise<void> {
+    this.stopRefresher()
+    const id = this.sandboxId
+    if (id === null) return
     const sdk = await this.ensureSdk()
     try {
-      await sdk.Sandbox.pause(this.config.sandboxId, this.apiParams())
+      await sdk.Sandbox.pause(id, this.apiParams())
     } catch (error) {
       if (!(error instanceof sdk.SandboxNotFoundError)) throw error
       logger.debug?.(`${this.machine.toString()}: sandbox already gone, nothing to pause`)
@@ -220,9 +451,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
         : error instanceof sdk.SandboxNotRunningError
           ? 'ended'
           : null
-    return state === null
-      ? null
-      : notRunningHint('sandbox', this.config.sandboxId, state, SANDBOX_GONE)
+    return state === null ? null : notRunningHint('sandbox', this.instance, state, SANDBOX_GONE)
   }
 
   /**

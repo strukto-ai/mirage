@@ -31,6 +31,8 @@ import {
 import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
 import { Workspace } from './workspace.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
+import type { MachineMemory } from '../../machine/types.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { toStateDict } from '../snapshot/state.ts'
 import { Mount } from '../mount/spec.ts'
@@ -927,6 +929,114 @@ class Insomniac extends Napper {
     return Promise.reject(new Error('pause refused'))
   }
 }
+
+/** A machine Mirage started, as an E2B machine with no sandbox id reports once it connected. */
+class Started extends Unasked {
+  memoryGiven: MachineMemory | null = null
+
+  override get startedByMirage(): boolean {
+    return true
+  }
+
+  override bindMemory(memory: MachineMemory): void {
+    super.bindMemory(memory)
+    this.memoryGiven = memory
+  }
+
+  override destroy(): Promise<void> {
+    this.log.push('destroy')
+    return Promise.resolve()
+  }
+}
+
+/** A machine Mirage started whose removal fails, as E2B refusing a kill. */
+class Unkillable extends Started {
+  override destroy(): Promise<void> {
+    this.log.push('destroy')
+    return Promise.reject(new Error('kill refused'))
+  }
+}
+
+describe('machines Mirage started', () => {
+  const build = (box: MachineHandle, store = new RAMWorkspaceStateStore()) =>
+    new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { box }, workspaceId: 'w', store },
+    )
+
+  it('pauses one on a plain close', async () => {
+    const box = new Started('box')
+    await build(box).close()
+    expect(box.log).toEqual(['close', 'pause'])
+  })
+
+  it('pauses one even when the pause names none', async () => {
+    const box = new Started('box')
+    await build(box).pause({ machines: [] })
+    expect(box.log).toEqual(['close', 'pause'])
+  })
+
+  it('removes one, never pausing it, when the workspace is deleted', async () => {
+    const box = new Started('box')
+    await build(box).delete()
+    expect(box.log).toEqual(['close', 'destroy'])
+  })
+
+  it('keeps one whose removal failed in the record past the delete', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const box = new Unkillable('box')
+    const ws = build(box, store)
+    await box.memoryGiven?.remember('box', 'sb-1')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await expect(ws.delete()).rejects.toThrow('kill refused')
+      expect((await store.loadMeta('w'))?.machines).toEqual({ box: 'sb-1' })
+      expect(String(warn.mock.calls[0]?.[0])).toContain('sb-1')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('keeps one the config no longer names in the record past the delete', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const box = new Started('box')
+    const ws = build(box, store)
+    await box.memoryGiven?.remember('gone', 'sb-9')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await ws.delete()
+      expect((await store.loadMeta('w'))?.machines).toEqual({ gone: 'sb-9' })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('leaves no record once the delete removed every machine', async () => {
+    const store = new RAMWorkspaceStateStore()
+    await build(new Started('box'), store).delete()
+    expect(await store.loadMeta('w')).toBeNull()
+  })
+
+  it('keeps what it started in the workspace record for the next build', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const first = new Started('box')
+    const ws = build(first, store)
+    const memory = first.memoryGiven
+    if (memory === null) throw new Error('no memory bound')
+    await memory.remember('box', 'sb-1')
+    await memory.remember('other', 'sb-2')
+    await ws.close()
+    const second = new Started('box')
+    const again = build(second, store)
+    const recalled = second.memoryGiven
+    if (recalled === null) throw new Error('no memory bound')
+    expect([await recalled.recall('box'), await recalled.recall('other')]).toEqual(['sb-1', 'sb-2'])
+    await recalled.forget('box')
+    expect([await recalled.recall('box'), await recalled.recall('other')]).toEqual([null, 'sb-2'])
+    expect((await store.loadMeta('w'))?.default_session_id).toBeTypeOf('string')
+    await again.close()
+  })
+})
 
 describe('pause', () => {
   it('raises a machine’s failed pause', async () => {

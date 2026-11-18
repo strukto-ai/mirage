@@ -25,6 +25,7 @@ from mirage.machine.constants import (
     NOT_RUNNING_STATUS,
     PROCESS,
     RUN_PROGRAM_AT,
+    SSHFS_LINE,
     SSHFS_OPTIONS,
     TOOLS_PATH,
     decode_output,
@@ -380,3 +381,87 @@ def test_sshfs_keeps_names_and_attributes_a_second_and_never_contents():
         "dir_cache=no",
         "direct_io",
     } <= set(SSHFS_OPTIONS.split(","))
+
+
+# Stand-ins for the tools SSHFS_LINE calls, on a PATH of their own: sudo
+# runs what it is given when SUDO_OK is set, apt-get installs sshfs only once
+# its lists were updated, and every call is logged.
+_FAKE_TOOLS = {
+    "id": '#!/bin/sh\necho "${FAKE_UID:-1000}"\n',
+    "sudo": (
+        '#!/bin/sh\n[ -n "$SUDO_OK" ] || exit 1\n[ "$1" = -n ] && shift\n'
+        '[ "$1" = true ] && exit 0\nexec "$@"\n'
+    ),
+    "env": (
+        '#!/bin/sh\nwhile case "$1" in *=*) true;; *) false;; esac; do '
+        'export "$1"; shift; done\nexec "$@"\n'
+    ),
+    "apt-get": (
+        '#!/bin/sh\necho "apt-get $*" >> "$LOG"\n'
+        'case " $* " in *" update "*) : > "$TOOLS/lists"; exit 0;; esac\n'
+        '[ -f "$TOOLS/lists" ] || exit 100\n'
+        "printf '#!/bin/sh\\n' > \"$TOOLS/sshfs\"\n"
+        '/bin/chmod +x "$TOOLS/sshfs"\n'
+    ),
+}
+
+
+def _sshfs_line(tmp_path, tools, **env):
+    for name in tools:
+        path = tmp_path / name
+        path.write_text(_FAKE_TOOLS[name])
+        path.chmod(0o755)
+    log = tmp_path / "log"
+    log.touch()
+    done = subprocess.run(
+        ["/bin/sh", "-c", SSHFS_LINE],
+        env={
+            "PATH": str(tmp_path),
+            "TOOLS": str(tmp_path),
+            "LOG": str(log),
+            **env,
+        },
+        check=False,
+    )
+    return done.returncode, log.read_text().splitlines()
+
+
+def test_sshfs_line_leaves_a_machine_that_has_sshfs_alone(tmp_path):
+    sshfs = tmp_path / "sshfs"
+    sshfs.write_text("#!/bin/sh\n")
+    sshfs.chmod(0o755)
+    assert _sshfs_line(tmp_path, ["id", "apt-get"]) == (0, [])
+
+
+def test_sshfs_line_installs_through_sudo_from_fresh_lists(tmp_path):
+    code, calls = _sshfs_line(
+        tmp_path, ["id", "sudo", "env", "apt-get"], SUDO_OK="1"
+    )
+    assert code == 0
+    assert calls == [
+        "apt-get -y -qq install --no-install-recommends sshfs",
+        "apt-get -y -qq update",
+        "apt-get -y -qq install --no-install-recommends sshfs",
+    ]
+
+
+def test_sshfs_line_installs_as_root_without_sudo(tmp_path):
+    (tmp_path / "lists").touch()
+    code, calls = _sshfs_line(tmp_path, ["id", "env", "apt-get"], FAKE_UID="0")
+    assert (code, calls) == (
+        0,
+        ["apt-get -y -qq install --no-install-recommends sshfs"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("tools", "env"),
+    [
+        (["id", "sudo", "env", "apt-get"], {}),
+        (["id", "sudo", "env"], {"SUDO_OK": "1"}),
+    ],
+    ids=["no sudo", "no package manager"],
+)
+def test_sshfs_line_fails_when_it_cannot_install(tmp_path, tools, env):
+    code, calls = _sshfs_line(tmp_path, tools, **env)
+    assert (code, calls) == (1, [])
