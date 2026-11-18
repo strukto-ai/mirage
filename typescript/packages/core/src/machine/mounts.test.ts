@@ -42,6 +42,7 @@ import {
   RUN_PROGRAM_AT,
   SSHFS_HINT,
   SSHFS_LINE,
+  SSHFS_LINKS_OPTION,
   SSHFS_OPTIONS,
   UNMOUNT_WAIT_SECONDS,
 } from './constants.ts'
@@ -52,6 +53,7 @@ import {
   runningLine,
   servedPrefixes,
   sourceName,
+  sshfsLine,
   topPrefixes,
   type PipeServer,
 } from './mounts.ts'
@@ -71,6 +73,13 @@ function answer(stdout = '', exitCode = 0, stderr = ''): RunAnswer {
 // sh -c's own reading of a single-quoted word, enough for these commands.
 function words(command: string): string[] {
   return [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+}
+
+// The source and mountpoint an sshfs pipe command names.
+function sshfsMount(command: string): [string, string] {
+  const all = words(command)
+  const at = all.indexOf('exec')
+  return [all[at + 5] ?? '', all[at + 6] ?? '']
 }
 
 // The argv a sandbox runs, as the line the fakes answer.
@@ -240,8 +249,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
 
   openPipe(command: string): Promise<MachinePipe> {
     this.pipes.push(command)
-    const source = words(command)[5] ?? ''
-    const prefix = words(command)[6] ?? ''
+    const [source, prefix] = sshfsMount(command)
     if (this.sshfsMounts) {
       this.table.set(prefix, [source, 'fuse.sshfs'])
       this.running.add(source)
@@ -269,7 +277,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
   }
 
   served(): string[] {
-    return this.pipes.map((p) => words(p)[6] ?? '')
+    return this.pipes.map((p) => sshfsMount(p)[1])
   }
 
   /** End `prefix`'s server: its sshfs then unmounts itself. */
@@ -500,6 +508,49 @@ function lost(prefix: string): string {
 }
 
 describe('MachineMounts', () => {
+  it.each([
+    ['1', `${SSHFS_OPTIONS},${SSHFS_LINKS_OPTION}`],
+    ['', SSHFS_OPTIONS],
+  ])('passes sshfs every link target when it knows how (%j)', async (namesIt, options) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-sshfs-'))
+    try {
+      writeFileSync(
+        join(dir, 'sshfs'),
+        '#!/bin/sh\n' +
+          'if [ "$1" = -h ]; then\n' +
+          '  echo "usage: sshfs [user@]host:[dir] mountpoint [options]"\n' +
+          `  [ -n "$NAMES_IT" ] && echo "    -o ${SSHFS_LINKS_OPTION} allow all symlink targets"\n` +
+          '  exit 0\n' +
+          'fi\n' +
+          'printf \'%s\\n\' "$@"\n' +
+          'cat\n',
+        { mode: 0o755 },
+      )
+      const child = spawn(
+        '/bin/sh',
+        ['-c', sshfsLine('mirage-w:/my notes', '/my notes', join(dir, 'sshfs.log'))],
+        { env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, NAMES_IT: namesIt } },
+      )
+      const out: Buffer[] = []
+      child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
+      const code = new Promise<number | null>((resolve) => child.on('close', resolve))
+      child.stdin.end('sftp stream')
+      expect([await code, Buffer.concat(out).toString().split('\n').filter(Boolean)]).toEqual([
+        0,
+        [
+          '-f',
+          '-o',
+          `${options},uid=${String(process.getuid?.())},gid=${String(process.getgid?.())}`,
+          'mirage-w:/my notes',
+          '/my notes',
+          'sftp stream',
+        ],
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('serves every prefix the session sees over ssh', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox)
@@ -507,11 +558,12 @@ describe('MachineMounts', () => {
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
     const name = sourceName(ws.workspaceId, 'box')
-    const pipes = sandbox.pipes.map((p) => p.split(' 2>')[0] ?? '')
+    const head = (line: string) => line.slice(0, line.lastIndexOf(' 2>'))
+    const pipes = sandbox.pipes.map(head)
     const instance = /-([0-9a-f]{8})-1:\/data'/.exec(pipes[0] ?? '')?.[1] ?? ''
     expect(pipes).toEqual([
-      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-${instance}-1:/data' '/data'`,
-      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-${instance}-2:/my notes' '/my notes'`,
+      head(sshfsLine(`${name}-${instance}-1:/data`, '/data', '')),
+      head(sshfsLine(`${name}-${instance}-2:/my notes`, '/my notes', '')),
     ])
     await agent.shell('python3 again.py')
     expect(sandbox.pipes).toHaveLength(2)
@@ -526,7 +578,7 @@ describe('MachineMounts', () => {
       { mode: MountMode.WRITE, ...on(sandbox) },
     )
     expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
+    expect(sandbox.served()).toEqual(['/data'])
     const fromTmp = await ws.shell('cd /tmp && python3 job.py')
     expect([fromTmp.exitCode, DEC.decode(fromTmp.stdout)]).toEqual([0, 'ran\n'])
     await ws.close()
@@ -539,7 +591,7 @@ describe('MachineMounts', () => {
       { mode: MountMode.WRITE, ...on(sandbox) },
     )
     expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data', '/tmp'])
+    expect(sandbox.served()).toEqual(['/data', '/tmp'])
     await ws.close()
   })
 
@@ -549,10 +601,7 @@ describe('MachineMounts', () => {
     await ws.vfsMd('/VFS.md')
     const result = await ws.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
-    expect(sandbox.pipes.map((p) => (p.split(' 2>')[0] ?? '').split(' ').at(-1))).toEqual([
-      "'/data'",
-      "notes'",
-    ])
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
     await ws.close()
   })
 

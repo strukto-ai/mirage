@@ -993,7 +993,9 @@ class MountingE2BMachine(E2BMachine):
         return RunAnswer(0, stdout.encode())
 
     async def open_pipe(self, command):
-        source, prefix = shlex.split(command)[5:7]
+        words = shlex.split(command)
+        at = words.index("exec")
+        source, prefix = words[at + 5 : at + 7]
         self.table[prefix] = (source, "fuse.sshfs")
         self.pipes.append(prefix)
         requests = asyncio.StreamReader()

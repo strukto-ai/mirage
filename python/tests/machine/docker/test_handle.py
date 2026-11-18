@@ -232,7 +232,9 @@ class MountingDockerMachine(FakeDockerMachine):
         return await super()._exec_program(args, stdin, output, errors)
 
     async def open_pipe(self, command):
-        source, prefix = shlex.split(command)[5:7]
+        words = shlex.split(command)
+        at = words.index("exec")
+        source, prefix = words[at + 5 : at + 7]
         self.table[prefix] = (source, "fuse.sshfs")
         requests = asyncio.StreamReader()
 

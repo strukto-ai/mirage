@@ -767,8 +767,8 @@ impl Run<'_, '_> {
             Kind::Dir if !config.to_stdout && !parts.is_empty() => {
                 match host.ensure(&mut self.made, &path).await {
                     Ok(()) => {
-                        if config.preserve {
-                            self.chmod(&path, member.mode, &shown).await;
+                        if let Some(mode) = restored(config, member.mode, 0o755) {
+                            self.chmod(&path, mode, &shown).await;
                         }
                         if config.verbose {
                             host.print(&[&escaped(trimmed(&member.name))[..], b"/\n"].concat());
@@ -839,8 +839,8 @@ impl Run<'_, '_> {
                 if file.failed.is_none() {
                     file.close(host).await;
                 }
-                if config.preserve && file.failed.is_none() {
-                    self.chmod(&path, member.mode, &shown).await;
+                if let (None, Some(mode)) = (&file.failed, restored(config, member.mode, 0o644)) {
+                    self.chmod(&path, mode, &shown).await;
                 }
                 match &file.failed {
                     Some(text) => {
@@ -869,6 +869,18 @@ impl Run<'_, '_> {
 /// xz refuse an input without their magic (bzip2 an empty one aside), and
 /// standard input cannot be read again through a compressor its magic
 /// names but the line did not.
+/// The mode an extracted entry takes: its member's with -p, else its
+/// member's permission bits under the host's umask, as an ordinary user's tar
+/// sets them. None where that is `fresh`, the mode the host makes the entry
+/// with, or the host named no umask.
+fn restored(config: &Config, mode: u32, fresh: u32) -> Option<u32> {
+    if config.preserve {
+        return Some(mode);
+    }
+    let mode = mode & 0o777 & !config.umask?;
+    (mode != fresh).then_some(mode)
+}
+
 fn codec(config: &Config, first: &[u8]) -> Result<Option<Codec>, Vec<u8>> {
     let refused = |line: &str, status: i32| {
         format!("{line}\ntar: Child returned status {status}\n{FATAL}\n").into_bytes()

@@ -995,6 +995,39 @@ it('ends a run on its exit line while the exec stays open', async () => {
   }
 }, 5000)
 
+// A box whose program has exited, its exit line out, while the exec still
+// hands on what it wrote: 200 chunks of 4 KiB.
+class ExitsFirstBox extends RecordingMachine {
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors(new Uint8Array([...mark, ...ENC.encode('0\n')]))
+    for (let i = 0; i < 200; i++) await output(new Uint8Array(4096).fill(120))
+    return { exitCode: 0 }
+  }
+}
+
+// A reader slow to take the output (here one that waits past the drain time
+// before it reads) still gets all of it: the run is let go only once its
+// output stops moving, not a set time after its exit line.
+it('hands a slow reader all a run wrote after its exit line', async () => {
+  const box = new ExitsFirstBox({ captures: ['train'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell(`train | { sleep ${String(RUN_DRAIN_SECONDS * 2)}; cat; } | wc -c`)
+    expect([io.exitCode, DEC.decode(await materialize(io.stdout))]).toEqual([0, '819200\n'])
+  } finally {
+    await ws.close()
+  }
+}, 10000)
+
 // A box whose program, once stopped, exits 0 by its own trap while the exec
 // takes longer than the drain to answer the stop.
 class SlowStopBox extends RecordingMachine {

@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from time import monotonic
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -225,6 +226,40 @@ class ExitLineFilter:
         )
         self._held = held[len(held) - keep :]
         return bytes(out + held[: len(held) - keep])
+
+
+class OutputWatch:
+    """When a run's output last moved. A chunk still being handed to its
+    sink counts as moving until the sink takes it, so a reader slow to take
+    what the program wrote keeps the run while that output is on its way.
+    """
+
+    def __init__(self) -> None:
+        self._busy = 0
+        self._moved = monotonic()
+
+    def watched(self, sink: OutputFn) -> OutputFn:
+        """``sink``, with each chunk handed to it counted as moving.
+
+        Args:
+            sink (OutputFn): where the stream goes.
+        """
+
+        async def write(data: bytes) -> None:
+            self._busy += 1
+            self._moved = monotonic()
+            try:
+                await sink(data)
+            finally:
+                self._busy -= 1
+                self._moved = monotonic()
+
+        return write
+
+    def quiet(self) -> float:
+        """Seconds since the output last moved; 0 while a chunk is still
+        being handed on."""
+        return 0.0 if self._busy else monotonic() - self._moved
 
 
 class MachineHandle:
@@ -487,6 +522,7 @@ class MachineHandle:
             out_exit = ExitLineFilter(out_pid.write, exited, mark)
             filters += [out_exit, out_pid]
             sink = out_exit.write
+        watch = OutputWatch()
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
@@ -494,12 +530,12 @@ class MachineHandle:
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
-                sink,
-                exit_line.write,
+                watch.watched(sink),
+                watch.watched(exit_line.write),
             )
         )
         try:
-            done = await self._outcome(execution, ended)
+            done = await self._outcome(execution, ended, watch)
             for line_filter in filters:
                 await line_filter.finish()
         except asyncio.CancelledError:
@@ -536,22 +572,30 @@ class MachineHandle:
         return RunResult(exit_code=done.exit_code or 1)
 
     async def _outcome(
-        self, execution: asyncio.Future[RunResult], ended: asyncio.Future[int]
+        self,
+        execution: asyncio.Future[RunResult],
+        ended: asyncio.Future[int],
+        watch: OutputWatch,
     ) -> RunResult:
         """How a run ended: its exec's answer, or, when its exit line
         says its program has exited while the exec stays open because
         something the program left running holds its output, the status
-        the line gave. That exec is let go after a moment for the output
-        still arriving, and what the program left running stays.
+        the line gave. That exec is let go once its output has been quiet
+        for ``RUN_DRAIN_SECONDS``, so output a slow reader is still taking
+        all arrives, and what the program left running stays.
 
         Args:
             execution (asyncio.Future[RunResult]): the exec.
             ended (asyncio.Future[int]): the status the exit line gave.
+            watch (OutputWatch): when the run's output last moved.
         """
         either: set[asyncio.Future[Any]] = {execution, ended}
         await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
-        if not execution.done():
-            await asyncio.wait({execution}, timeout=RUN_DRAIN_SECONDS)
+        while not execution.done():
+            quiet = watch.quiet()
+            if quiet >= RUN_DRAIN_SECONDS:
+                break
+            await asyncio.wait({execution}, timeout=RUN_DRAIN_SECONDS - quiet)
         if execution.done():
             return execution.result()
         execution.cancel()
