@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { findChild } from '../../commands/cli/walk.ts'
+import { argumentDest, compileSpec } from '../../commands/spec/compile.ts'
 import { SPECS } from '../../commands/spec/index.ts'
+import type { CommandSpec } from '../../commands/spec/types.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import {
@@ -24,7 +27,14 @@ import {
   undeclaredOptions,
 } from '../../policy/match/grammar.ts'
 import { expandPattern, splitPattern } from '../../policy/match/pattern.ts'
-import type { AdmissionRules, CommandRule, Grammar } from '../../policy/types.ts'
+import type {
+  AdmissionRules,
+  CommandNode,
+  CommandRule,
+  Grammar,
+  OptionRule,
+} from '../../policy/types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 /** Opt in by assigning a sink per level, as Python's module logger logs. */
 export const logger: { warn?: (message: string) => void; info?: (message: string) => void } = {}
@@ -32,6 +42,16 @@ export const logger: { warn?: (message: string) => void; info?: (message: string
 export const BUILTIN_GRAMMARS: ReadonlyMap<string, Grammar> = new Map(
   Object.entries(SPECS).map(([name, spec]) => [name, { spec, tree: false, passthrough: false }]),
 )
+
+const RESERVED_WORDS: ReadonlySet<string> = new Set([
+  'decision',
+  'reason',
+  'paths',
+  'operands',
+  'values',
+])
+const VALUELESS_ACTIONS: ReadonlySet<string> = new Set(['store_true', 'count'])
+const GLOB_CHARS = /[*?[]/
 
 /** Written patterns with each `{a,b}` group expanded, in order. */
 export function expanded(patterns: readonly string[]): string[] {
@@ -324,4 +344,195 @@ export function envFilled(
     }
   }
   return out
+}
+
+function* atOrBelow(spec: CommandSpec): Generator<CommandSpec> {
+  yield spec
+  for (const child of spec.subcommands) yield* atOrBelow(child)
+}
+
+function cluster(key: string, spec: CommandSpec): boolean {
+  if (key.startsWith('--') || key.length < 3) return false
+  const shorts = new Set<string>()
+  for (const below of atOrBelow(spec))
+    for (const spelling of compileSpec(below).dest.keys()) shorts.add(spelling)
+  for (const letter of key.slice(1)) if (!shorts.has(`-${letter}`)) return false
+  return true
+}
+
+function optionName(key: string, spec: CommandSpec, at: string): string {
+  const own = compileSpec(spec).dest.get(key)
+  if (own !== undefined) return own
+  const found = new Set<string>()
+  for (const below of atOrBelow(spec)) {
+    const dest = compileSpec(below).dest.get(key)
+    if (dest !== undefined) found.add(dest)
+  }
+  const meanings = [...found].sort(compareCodePoints)
+  const [only] = meanings
+  if (meanings.length === 1 && only !== undefined) return only
+  if (meanings.length > 1)
+    throw new PolicyError(
+      `${at}: ${key} names different options below (${meanings.join(', ')}); ` +
+        'write the long name you mean, or put the entry under its subcommand',
+    )
+  if (cluster(key, spec)) {
+    const letters: string[] = []
+    for (const letter of key.slice(1)) letters.push(`-${letter}`)
+    const keys = letters.join(' and ')
+    throw new PolicyError(`${at}: ${key} is a cluster of options; write ${keys} as separate keys`)
+  }
+  throw new PolicyError(`${at}: no option ${key} at or below this command`)
+}
+
+function checkValues(name: string, words: Iterable<string>, spec: CommandSpec, at: string): void {
+  const declared = [...atOrBelow(spec)].flatMap((below) =>
+    below.arguments.filter(
+      (argument) => argument.names[0]?.startsWith('-') === true && argumentDest(argument) === name,
+    ),
+  )
+  if (declared.every((argument) => VALUELESS_ACTIONS.has(argument.action) || argument.nargs === 0))
+    throw new PolicyError(`${at}: ${name} takes no value`)
+  const choices = new Set(declared.flatMap((argument) => argument.choices))
+  if (choices.size === 0 || declared.some((argument) => argument.choices.length === 0)) return
+  for (const word of words) {
+    if (!GLOB_CHARS.test(word) && !choices.has(word))
+      throw new PolicyError(
+        `${at}: ${name} takes none of '${word}'; its values are ${[...choices].sort(compareCodePoints).join(', ')}`,
+      )
+  }
+}
+
+function options(
+  entries: ReadonlyMap<string, OptionRule>,
+  spec: CommandSpec,
+  at: string,
+  passthrough: boolean,
+): Map<string, OptionRule> {
+  const out = new Map<string, OptionRule>()
+  const written = new Map<string, string>()
+  for (const [key, rule] of entries) {
+    const here = `${at}.${key}`
+    if (passthrough)
+      throw new PolicyError(
+        `${here}: this command's script reads its own words, so it has no option to name`,
+      )
+    const name = optionName(key, spec, here)
+    const first = written.get(name)
+    if (first !== undefined) throw new PolicyError(`${at}: ${first} and ${key} are the same option`)
+    written.set(name, key)
+    if (rule.values.size > 0) checkValues(name, rule.values.keys(), spec, here)
+    out.set(name, {
+      decision: rule.decision,
+      values: new Map(
+        [...rule.values].map(([word, value]) => [
+          word,
+          {
+            decision: value.decision,
+            options: options(value.options, spec, `${here}.values.${word}`, false),
+          },
+        ]),
+      ),
+      options: options(rule.options, spec, here, false),
+    })
+  }
+  return out
+}
+
+function noGrammar(tree: CommandNode, at: string): CommandNode {
+  if (tree.options.size > 0 || tree.otherOptions.length > 0)
+    throw new PolicyError(`${at}: this command has no grammar here to read an option by`)
+  const [first] = tree.subcommands.keys()
+  if (first !== undefined)
+    throw new PolicyError(`${at}: ${first} is no subcommand here; an operand goes under operands`)
+  return {
+    ...tree,
+    operands: new Map(
+      [...tree.operands].map(([word, child]) => [word, noGrammar(child, `${at}.operands.${word}`)]),
+    ),
+  }
+}
+
+function reserved(spec: CommandSpec): string | null {
+  for (const child of spec.subcommands)
+    for (const word of [child.name, ...child.aliases]) if (RESERVED_WORDS.has(word)) return word
+  return null
+}
+
+function plain(tree: CommandNode): boolean {
+  const bare =
+    tree.subcommands.size === 0 &&
+    tree.options.size === 0 &&
+    tree.otherOptions.length === 0 &&
+    tree.operands.size === 0
+  return bare && tree.decision.every((leaf) => leaf.reason === '' && leaf.paths.length === 0)
+}
+
+function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boolean): CommandNode {
+  const word = reserved(spec)
+  if (word !== null && !plain(tree))
+    throw new PolicyError(
+      `${at}: this command has a subcommand named ${word}, which a commands block reserves; ` +
+        'write it a plain allow, ask or deny',
+    )
+  const subcommands = new Map<string, CommandNode>()
+  const written = new Map<string, string>()
+  for (const [key, child] of tree.subcommands) {
+    const found = findChild(spec, key)
+    if (found === null && spec.subcommands.length === 0)
+      throw new PolicyError(`${at}: ${key} is no subcommand here; an operand goes under operands`)
+    if (found === null) throw new PolicyError(`${at}: no subcommand ${key}`)
+    const first = written.get(found.name)
+    if (first !== undefined)
+      throw new PolicyError(`${at}: ${first} and ${key} are the same subcommand`)
+    written.set(found.name, key)
+    subcommands.set(found.name, node(child, found, `${at}.${found.name}`, passthrough))
+  }
+  if (tree.operands.size > 0 && spec.subcommands.length > 0)
+    throw new PolicyError(`${at}: this command takes a subcommand, so its operands go under one`)
+  if (tree.otherOptions.length > 0 && passthrough)
+    throw new PolicyError(
+      `${at}.-*: this command's script reads its own words, so it has no option to name`,
+    )
+  return {
+    decision: tree.decision,
+    subcommands,
+    options: options(tree.options, spec, at, passthrough),
+    otherOptions: tree.otherOptions,
+    operands: new Map(
+      [...tree.operands].map(([word, child]) => [
+        word,
+        node(child, spec, `${at}.operands.${word}`, passthrough),
+      ]),
+    ),
+  }
+}
+
+/**
+ * A command tree with every name checked against its command's grammar
+ * and held by its canonical name, the one the line reader reports: a
+ * subcommand by its spec name, an option by its first long name or its
+ * short name when it has none. Refused: a name the grammar lacks; two
+ * keys for one option or one subcommand; a cluster of short options; a
+ * short option meaning different options in the subcommands below;
+ * operands on a command that takes a subcommand; a value under an option
+ * that takes none, or outside its choices; and options or subcommands on
+ * a command with no grammar, since the line reader gives it only
+ * operands. `defer` keeps a command with no grammar as written, for a
+ * check made before every CLI is registered.
+ */
+export function normalizeTree(
+  tree: CommandNode,
+  grammars: ReadonlyMap<string, Grammar>,
+  where = 'commands',
+  defer = false,
+): CommandNode {
+  const commands = new Map<string, CommandNode>()
+  for (const [name, child] of tree.subcommands) {
+    const grammar = grammars.get(name)
+    const at = `${where}.${name}`
+    if (grammar === undefined) commands.set(name, defer ? child : noGrammar(child, at))
+    else commands.set(name, node(child, grammar.spec, at, grammar.passthrough))
+  }
+  return { ...tree, subcommands: commands }
 }

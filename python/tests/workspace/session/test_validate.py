@@ -22,6 +22,7 @@ from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.errors import PolicyError
+from mirage.policy.profile import command_tree, tree_doc
 from mirage.policy.types import (
     AdmissionRules,
     AllowFlags,
@@ -31,10 +32,12 @@ from mirage.policy.types import (
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.validate import (
+    BUILTIN_GRAMMARS,
     check_cli_patterns,
     check_rules,
     closed_commands,
     env_filled,
+    normalize_tree,
     pattern_warnings,
     unread_patterns,
 )
@@ -453,3 +456,67 @@ def test_create_session_reads_the_verbs_of_a_tree_a_mount_serves(caplog):
         ws.create_session("bad", permissions=deny("tool poke"))
     ws.create_session("good", permissions=deny("tool peek --all"))
     assert "tool has no grammar" not in caplog.text
+
+
+def _grammars() -> dict[str, Grammar]:
+    grammars = dict(BUILTIN_GRAMMARS)
+    for name in ("gh", "git"):
+        cli = cli_spec_for(name)
+        grammars[name] = Grammar(cli.spec, tree=True)
+    return grammars
+
+
+def _normalized(doc, **kwargs):
+    return tree_doc(normalize_tree(command_tree(doc), _grammars(), **kwargs))
+
+
+def test_a_tree_holds_each_name_by_its_canonical_spelling():
+    written = {
+        "rm": {"-r": "ask", "-f": "deny", "-i": "allow"},
+        "gh": {"pr": {"ls": "deny", "merge": {"-R": "ask"}}},
+        "git": {"-C": "deny", "checkout": {"operands": {"main": "deny"}}},
+        "head": {"-n": {"values": {"-5": "deny"}}},
+    }
+    assert _normalized(written) == {
+        "rm": {"--recursive": "ask", "--force": "deny", "-i": "allow"},
+        "gh": {"pr": {"list": "deny", "merge": {"--repo": "ask"}}},
+        "git": {"-C": "deny", "checkout": {"operands": {"main": "deny"}}},
+        "head": {"--lines": {"values": {"-5": "deny"}}},
+    }
+
+
+@pytest.mark.parametrize(
+    "doc, says",
+    [
+        ({"gh": {"pr": {"mrge": "deny"}}}, "no subcommand mrge"),
+        ({"gh": {"pr": {"merge": {"--amdin": "deny"}}}}, "no option --amdin"),
+        (
+            {"gh": {"pr": {"merge": {"admin": "deny"}}}},
+            "admin is no subcommand here; an operand goes under operands",
+        ),
+        ({"gh": {"operands": {"x": "deny"}}}, "takes a subcommand"),
+        ({"kubectl": {"--namespace": "deny"}}, "no grammar here"),
+        ({"kubectl": {"get": "deny"}}, "get is no subcommand here"),
+        ({"rm": {"-r": "ask", "--recursive": "deny"}}, "same option"),
+        ({"gh": {"pr": {"ls": "deny", "list": "allow"}}}, "same subcommand"),
+        ({"rm": {"-rf": "deny"}}, "cluster of options; write -r and -f"),
+        ({"git": {"-f": "deny"}}, "-f names different options below"),
+        ({"rm": {"--force": {"values": {"x": "deny"}}}}, "takes no value"),
+        (
+            {"git": {"status": {"-u": {"values": {"some": "deny"}}}}},
+            "takes none of 'some'",
+        ),
+    ],
+)
+def test_a_name_its_grammar_lacks_or_reads_two_ways_is_refused(doc, says):
+    with pytest.raises(PolicyError, match=re.escape(says)):
+        normalize_tree(command_tree(doc), _grammars())
+
+
+def test_a_command_with_no_grammar_keeps_its_operands_and_can_wait():
+    assert _normalized({"kubectl": {"operands": {"get": "deny"}}}) == {
+        "kubectl": {"operands": {"get": "deny"}}
+    }
+    assert _normalized({"kubectl": {"--namespace": "deny"}}, defer=True) == {
+        "kubectl": {"--namespace": "deny"}
+    }

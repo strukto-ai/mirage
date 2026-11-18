@@ -16,7 +16,7 @@ import { cliSpecFor } from '../../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { SessionProfile } from '../../policy/profile.ts'
+import { commandTree, SessionProfile, treeDoc } from '../../policy/profile.ts'
 import {
   type AdmissionRules,
   AllowFlags,
@@ -27,11 +27,13 @@ import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import {
+  BUILTIN_GRAMMARS,
   checkCliPatterns,
   checkRules,
   closedCommands,
   envFilled,
   logger,
+  normalizeTree,
   patternWarnings,
   unreadPatterns,
 } from './validate.ts'
@@ -407,5 +409,61 @@ describe('createSession reads the verbs of a tree a mount serves', () => {
       delete logger.warn
     }
     expect(said.some((m) => m.includes('tool has no grammar'))).toBe(false)
+  })
+})
+
+const grammars = (): Map<string, Grammar> => {
+  const out = new Map(BUILTIN_GRAMMARS)
+  for (const name of ['gh', 'git'])
+    out.set(name, { spec: cliSpecFor(name).spec, tree: true, passthrough: false })
+  return out
+}
+
+const normalized = (doc: unknown, defer = false): Record<string, unknown> =>
+  treeDoc(normalizeTree(commandTree(doc), grammars(), 'commands', defer))
+
+describe('normalizeTree', () => {
+  it('holds each name by its canonical spelling', () => {
+    const written = {
+      rm: { '-r': 'ask', '-f': 'deny', '-i': 'allow' },
+      gh: { pr: { ls: 'deny', merge: { '-R': 'ask' } } },
+      git: { '-C': 'deny', checkout: { operands: { main: 'deny' } } },
+      head: { '-n': { values: { '-5': 'deny' } } },
+    }
+    expect(normalized(written)).toEqual({
+      rm: { '--recursive': 'ask', '--force': 'deny', '-i': 'allow' },
+      gh: { pr: { list: 'deny', merge: { '--repo': 'ask' } } },
+      git: { '-C': 'deny', checkout: { operands: { main: 'deny' } } },
+      head: { '--lines': { values: { '-5': 'deny' } } },
+    })
+  })
+
+  it.each([
+    [{ gh: { pr: { mrge: 'deny' } } }, 'no subcommand mrge'],
+    [{ gh: { pr: { merge: { '--amdin': 'deny' } } } }, 'no option --amdin'],
+    [
+      { gh: { pr: { merge: { admin: 'deny' } } } },
+      'admin is no subcommand here; an operand goes under operands',
+    ],
+    [{ gh: { operands: { x: 'deny' } } }, 'takes a subcommand'],
+    [{ kubectl: { '--namespace': 'deny' } }, 'no grammar here'],
+    [{ kubectl: { get: 'deny' } }, 'get is no subcommand here'],
+    [{ rm: { '-r': 'ask', '--recursive': 'deny' } }, 'same option'],
+    [{ gh: { pr: { ls: 'deny', list: 'allow' } } }, 'same subcommand'],
+    [{ rm: { '-rf': 'deny' } }, 'cluster of options; write -r and -f'],
+    [{ git: { '-f': 'deny' } }, '-f names different options below'],
+    [{ rm: { '--force': { values: { x: 'deny' } } } }, 'takes no value'],
+    [{ git: { status: { '-u': { values: { some: 'deny' } } } } }, "takes none of 'some'"],
+  ])('refuses a name its grammar lacks or reads two ways %#', (doc, says) => {
+    expect(() => normalizeTree(commandTree(doc), grammars())).toThrow(says)
+  })
+
+  it('keeps operands on a command with no grammar, and can wait for one', () => {
+    expect(normalized({ kubectl: { operands: { get: 'deny' } } })).toEqual({
+      kubectl: { operands: { get: 'deny' } },
+    })
+    expect(normalized({ kubectl: { '--namespace': 'deny' } }, true)).toEqual({
+      kubectl: { '--namespace': 'deny' },
+    })
   })
 })
