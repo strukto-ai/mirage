@@ -26,7 +26,7 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import command_tree, tree_doc
-from mirage.policy.types import Grammar
+from mirage.policy.types import Grammar, Outcome
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -307,6 +307,31 @@ async def test_a_default_rule_no_grammar_can_read_refuses_its_command():
 
 
 UNREAD = {"default": {"commands": {"tool": {"go": "deny"}}}}
+
+
+@pytest.mark.asyncio
+async def test_a_default_rule_no_grammar_can_read_says_why_to_run_and_explain():
+    why = (
+        "commands.tool: go is no subcommand here; an operand goes under "
+        "operands"
+    )
+    ws = Workspace({"/a/": RAMVFS()}, profiles=UNREAD)
+    try:
+        ws.mount("/a").register_commands(
+            [command("tool", vfs=None, spec=CommandSpec())(_answer)]
+        )
+        ran = await ws.shell("cd /a && tool go")
+        assert ran.exit_code == 126
+        assert ran.decision is not None
+        assert ran.decision.reason == why
+        said = await ws.explain("cd /a && tool go")
+        assert (said.outcome, said.exit_code, said.reason) == (
+            Outcome.DENY,
+            126,
+            why,
+        )
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

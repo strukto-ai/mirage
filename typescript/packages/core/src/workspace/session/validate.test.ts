@@ -313,6 +313,24 @@ describe('a workspace checks command trees against its grammars', () => {
     }
   })
 
+  it('a default rule no grammar can read says why to run and explain', async () => {
+    const why = 'commands.tool: go is no subcommand here; an operand goes under operands'
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.mount('/a').registerCommands(answering())
+      const ran = await ws.shell('cd /a && tool go')
+      expect(ran.exitCode).toBe(126)
+      expect(ran.decision?.reason).toBe(why)
+      const said = await ws.explain('cd /a && tool go')
+      expect([said.outcome, said.exitCode, said.reason]).toEqual(['deny', 126, why])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a default rule no grammar can read holds after a snapshot', async () => {
     const ws = new Workspace(
       { '/a': new RAMVFS() },
