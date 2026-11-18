@@ -18,22 +18,21 @@ import dataclasses
 from mirage import Decision, MountMode, Outcome, Scope, Workspace
 from mirage.vfs.ram import RAMVFS
 
-# One profile, one rule. `allow` is what the session may run at all;
-# `ask` puts one of those commands to a person before it runs.
+# One profile, one rule. The root `*` refuses every command the tree
+# does not name; `rm` is named, and puts each delete to a person before
+# it runs.
 ROLE = {
     "commands": {
-        "allow": [
-            "ls",
-            "rm",
-            "printf",
-            "xargs",
-            "sleep",
-            "wait",
-            "eval",
-            "shopt",
-            "alias",
-        ],
-        "ask": [{"reason": "deletes are reviewed", "commands": ["rm"]}],
+        "*": "deny",
+        "rm": {"decision": "ask", "reason": "deletes are reviewed"},
+        "ls": "allow",
+        "printf": "allow",
+        "xargs": "allow",
+        "sleep": "allow",
+        "wait": "allow",
+        "eval": "allow",
+        "shopt": "allow",
+        "alias": "allow",
     },
 }
 

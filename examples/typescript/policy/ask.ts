@@ -23,13 +23,22 @@ import {
 } from "@struktoai/mirage-node";
 import type { AskHandler, Decision } from "@struktoai/mirage-node";
 
-// One profile, one rule. `allow` is what the session may run at all;
-// `ask` puts one of those commands to a person before it runs.
+// One profile, one rule. The root `*` refuses every command the tree
+// does not name; `rm` is named, and puts each delete to a person before
+// it runs.
 const ROLE = SessionProfile(
   {
     commands: {
-      allow: ["ls", "rm", "printf", "xargs", "sleep", "wait", "eval", "shopt", "alias"],
-      ask: [{ reason: "deletes are reviewed", commands: ["rm"] }],
+      "*": "deny",
+      rm: { decision: "ask", reason: "deletes are reviewed" },
+      ls: "allow",
+      printf: "allow",
+      xargs: "allow",
+      sleep: "allow",
+      wait: "allow",
+      eval: "allow",
+      shopt: "allow",
+      alias: "allow",
     },
   },
   "profile `agent`",

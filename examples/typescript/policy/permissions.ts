@@ -18,54 +18,54 @@ import { MountMode, RAMVFS, Workspace, SessionProfile } from '@struktoai/mirage-
 // oncall works from, and the credentials nobody reads by hand.
 //
 // Three roles read the same three mounts and see three different
-// filesystems. Every refusal below comes from one of two orderings, and
-// the point of the example is that they are different orderings:
+// filesystems. A role's command tree is read in three steps, and every
+// refusal below comes from one of them:
 //
-//   the command axis   a rule naming no path is read by verb alone,
-//                      deny before ask, and a word the allow list
-//                      leaves out is refused.
-//   the path axis      a rule carrying paths is read by anchor depth,
-//                      the number of literal components before its
-//                      first wildcard. /runbook/frozen/* is 2 and
-//                      /runbook/* is 1, so the deeper one wins wherever
-//                      both reach, whichever verb it carries.
+//   the name     the tree maps command names to decisions. The root `*`
+//                is every command it does not name, so a root deny
+//                leaves a role only the commands the tree names.
+//   the paths    a decision that lists paths speaks only for those
+//                paths. A list holds several decisions for one command,
+//                and the strictest that covers a path wins: deny, then
+//                ask, then allow.
+//   the mount    a mount section's tree is judged beside the role's own
+//                for a line that works inside the mount, and the
+//                stricter answer wins, so it only tightens.
 //
-// Hiding is neither: it is not a refusal at all. A hidden path answers
-// ENOENT, so the role never learns the name; a denied path stays in the
-// listing and fails when read. /vault is denied for the oncall and
-// hidden for the auditor, which is the same three files seen two ways.
+// Hiding is none of these: it is not a refusal at all. A hidden path
+// answers ENOENT, so the role never learns the name; a denied path stays
+// in the listing and fails when read. /vault is denied for the oncall
+// and hidden for the auditor, which is the same three files seen two
+// ways.
 //
-// The third role, the commander, states no allow list, which is how a
-// role says "every tool". That is the opposite of a deny list and worth
-// seeing beside one: the list is not a filter over some default set, it
-// IS the set, so omitting it allows everything and an empty one
-// allows nothing. Its rules still run.
+// The third role, the commander, states no root deny, which is how a
+// role says "every tool": a command the tree does not decide is allowed.
+// Its one decision still runs.
+
+const VAULT = {
+  decision: 'deny',
+  reason: 'credentials are never read by hand',
+  paths: ['/vault/*'],
+}
+const NOD = {
+  decision: 'ask',
+  reason: 'a runbook edit needs a nod',
+  paths: ['/runbook/*'],
+}
 
 const PROFILES = {
   oncall: {
     commands: {
-      // The allow list names the tools this role may run. A word
-      // missing from it is refused: `sort: Permission denied`.
-      allow: ['ls', 'cat', 'grep', 'rm', 'cp'],
-      ask: [
-        {
-          reason: 'a runbook edit needs a nod',
-          // Anchor depth 1: /runbook, then a wildcard.
-          command: 'rm', paths: ['/runbook/*'],
-        }, {
-          reason: 'a runbook edit needs a nod',
-          // Anchor depth 1: /runbook, then a wildcard.
-          command: 'cp', paths: ['/runbook/*'],
-        },
-      ],
-      deny: [
-        {
-          reason: 'credentials are never read by hand',
-          // A rule with paths and no command reaches the dispatcher too,
-          // so FUSE and the cache cannot go around it.
-          paths: ['/vault/*'],
-        },
-      ],
+      // Every command the tree does not name is refused:
+      // `sort: Permission denied`.
+      '*': 'deny',
+      ls: 'allow',
+      // A named command answers for itself, so each one that could read
+      // a credential carries the deny.
+      cat: ['allow', VAULT],
+      grep: ['allow', VAULT],
+      rm: ['allow', NOD],
+      cp: ['allow', NOD, VAULT],
     },
     mounts: {
       '/repo': {
@@ -78,36 +78,34 @@ const PROFILES = {
         paths: { hide: ['*.env'] },
       },
       '/runbook': {
+        // This tree is asked about a line that works inside /runbook,
+        // beside the role's own. For a frozen file the role's tree asks
+        // and this one denies, and the stricter answer wins.
         commands: {
-          deny: [
-            {
-              reason: 'the rollback plan is frozen',
-              // Anchor depth 2, so it outranks the ask at 1 that also
-              // covers these files. Writing it in the mount section is
-              // not what makes it win; the extra component is.
-              command: 'rm', paths: ['/runbook/frozen/*'],
-            },
-          ],
+          rm: {
+            decision: 'deny',
+            reason: 'the rollback plan is frozen',
+            paths: ['/runbook/frozen/*'],
+          },
         },
       },
     },
   },
   auditor: {
     // No rm, no cp: this role cannot be talked into a write, because
-    // there is no rule to argue with.
-    commands: { allow: ['ls', 'cat', 'grep'] },
+    // its tree names neither.
+    commands: { '*': 'deny', ls: 'allow', cat: 'allow', grep: 'allow' },
     // Hidden, where the oncall has it denied. Same mount, same files,
     // two different answers to `ls /vault`.
     paths: { hide: ['/vault'] },
   },
   commander: {
     commands: {
-      // No allow list, which allows every command mirage ships, this
-      // role's own `sort` and `wc` included. `allow: ['*']` says the
-      // same thing out loud; `allow: []` says the opposite and allows
-      // nothing. What it does not say is "unrestricted": the deny below
-      // still runs, and so would an ask.
-      deny: [{ reason: 'credentials are never read by hand', paths: ['/vault/*'] }],
+      // No root deny, so every command mirage ships runs, this role's
+      // own `sort` and `wc` included. What that does not say is
+      // "unrestricted": the root `*` here decides for /vault alone, and
+      // denies any command that names a path there.
+      '*': VAULT,
     },
     // No mount section either, so every mount stays at the mode the
     // workspace declared. A role narrows by naming; naming nothing
@@ -126,25 +124,25 @@ const SEED = [
 ]
 
 const LINES: [string, string, string][] = [
-  ['oncall', 'cat /repo/service.py', 'the allow list names cat'],
-  ['oncall', 'sort /repo/service.py', 'unlisted, so the allow list refuses it'],
+  ['oncall', 'cat /repo/service.py', 'the tree names cat, and allows it'],
+  ['oncall', 'sort /repo/service.py', 'not named, so the root `*` refuses it'],
   ['oncall', 'ls /repo', 'the hide takes .env out of the listing'],
   ['oncall', 'cat /repo/.env', 'and answers absence, not refusal'],
   ['oncall', 'cat /runbook/local.env', 'the same pattern, anchored to /repo, reaches no further'],
   ['oncall', 'ls /vault', 'a deny leaves the name where it is'],
-  ['oncall', 'cat /vault/aws.token', 'and refuses the read: paths, depth 1'],
-  ['oncall', 'rm /runbook/steps.md', 'ask at depth 1'],
-  ['oncall', 'rm /runbook/frozen/rollback.md', 'deny at depth 2 outranks it'],
+  ['oncall', 'cat /vault/aws.token', 'and refuses the read: cat decides for /vault'],
+  ['oncall', 'rm /runbook/steps.md', 'rm asks under /runbook'],
+  ['oncall', 'rm /runbook/frozen/rollback.md', "the mount's tree denies, and the stricter wins"],
   [
     'oncall',
     'cp /vault/aws.token /runbook/steps.md',
-    "every operand is judged: the source's deny wins",
+    "every path is judged: the source's deny wins",
   ],
   ['oncall', 'rm /repo/service.py', 'the mount section narrowed the mode'],
   ['auditor', 'ls /vault', 'hidden here, so the mount is not there at all'],
   ['auditor', 'cat /repo/.env', "the hide was the other role's, not the workspace's"],
-  ['auditor', 'rm /runbook/steps.md', 'no rm in this allow list'],
-  ['commander', 'sort /repo/service.py', 'no allow list, so every tool runs'],
+  ['auditor', 'rm /runbook/steps.md', 'this tree does not name rm'],
+  ['commander', 'sort /repo/service.py', 'no root deny, so every tool runs'],
   ['commander', 'wc -l /runbook/steps.md', 'including the ones no other role names'],
   ['commander', 'cat /vault/aws.token', 'and it is still not unrestricted: the deny runs'],
   [

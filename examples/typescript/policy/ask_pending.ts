@@ -22,15 +22,19 @@ import {
   SessionProfile,
 } from "@struktoai/mirage-node";
 
-// Two rules that ask: one about a path, one about a whole command.
+// Two places that ask: `cat` on one path, and `rm` whatever it names.
+// A list holds several decisions for one place, and the strictest that
+// applies wins, so `cat` runs everywhere but asks for the secret.
 const ROLE = SessionProfile(
   {
     commands: {
-      allow: ["ls", "cat", "rm"],
-      ask: [
-        { reason: "secrets are reviewed", command: 'cat', paths: ["/data/secret.txt"] },
-        { reason: "deletes are reviewed", commands: ["rm"] },
+      "*": "deny",
+      ls: "allow",
+      cat: [
+        "allow",
+        { decision: "ask", reason: "secrets are reviewed", paths: ["/data/secret.txt"] },
       ],
+      rm: { decision: "ask", reason: "deletes are reviewed" },
     },
   },
   "profile `agent`",
@@ -58,7 +62,7 @@ async function main(): Promise<void> {
     await run(ws, "rm /data/a.txt");
     // The host reads the queue, one record per question and oldest
     // first, and answers each by id. ONCE passes one retry of that line;
-    // SESSION passes every line the rule covers from now on.
+    // SESSION passes every line that entry asks about from now on.
     for (const waiting of ws.decisions.pending("agent")) {
       const scope = waiting.command === "cat" ? Scope.ONCE : Scope.SESSION;
       const words = waiting.argv.join(" ");

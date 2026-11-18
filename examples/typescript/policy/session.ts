@@ -32,10 +32,12 @@ import type {
 // Two roles read one world and see two filesystems. The reviewer's
 // profile hides /repo/secrets and its session caps /repo at read, so the
 // directory does not exist for it on either entry point and a write is a
-// read-only file system on either entry point. The editor may write, and a
-// deny rule keeps it out of the secrets by name, so the same file is
-// "does not exist" for one role and "permission denied" for the other,
-// through the shell and through vfs.read alike. The workspace names no
+// read-only file system on either entry point. The editor may write, and
+// its command tree denies every command on the secrets, so the same `cat`
+// is "does not exist" for one role and "permission denied" for the other.
+// A command tree judges commands, and vfs.read is not one, so the editor's
+// file API still reads the key. Hiding is what closes a path on every
+// entry point. The workspace names no
 // default profile, so its own entry points (`ws.vfs`, bare `ws.shell`) are
 // the host's view. A second `ws.session(id)` adopts the session as is;
 // naming a profile for a session that already exists is refused.
@@ -44,9 +46,13 @@ const PROFILES = {
   reviewer: { paths: { hide: ["/repo/secrets"] } },
   editor: {
     commands: {
-      deny: [
-        { reason: "keys are never read by hand", paths: ["/repo/secrets/*"] },
-      ],
+      // The root `*` is every command the tree does not name, and this
+      // decision speaks only for the paths it lists.
+      "*": {
+        decision: "deny",
+        reason: "keys are never read by hand",
+        paths: ["/repo/secrets/*"],
+      },
     },
   },
 };
@@ -184,7 +190,7 @@ async function main(): Promise<void> {
     "editor",
     editor,
     "cat /repo/secrets/key.pem",
-    "the editor's rule denies the file by name",
+    "the editor's tree denies every command there",
   );
   await read(
     "reviewer",
@@ -196,7 +202,7 @@ async function main(): Promise<void> {
     "editor",
     editor,
     "/repo/secrets/key.pem",
-    "the dispatcher, the same rule, the same answer",
+    "a file call is no command, so the tree is not asked",
   );
   await read(
     "host",
@@ -215,7 +221,7 @@ async function main(): Promise<void> {
     "host",
     host,
     "/repo/secrets/key.pem",
-    "and the editor's own rule, from the same call site",
+    "and as the editor, whose tree judges commands only",
     "editor",
   );
 
