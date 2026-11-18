@@ -17,6 +17,7 @@ import posixpath
 import shlex
 
 from mirage.accessor.machine import MachineAccessor
+from mirage.core.posix.constants import TREE_FORMAT
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
@@ -112,6 +113,7 @@ class FakeFiles:
                 return failed(b"")
             return ok(f"{real}\n".encode())
         if words[:4] == ["env", "LC_ALL=C", "find", "-L"]:
+            assert words[-2:] == ["-printf", TREE_FORMAT], words
             path = self._real(words[4])
             depth = int(words[6]) if words[5] == "-maxdepth" else None
             if any(path.startswith(f + "/") for f in self.files):

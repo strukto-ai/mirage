@@ -141,6 +141,25 @@ async def test_precision_pads_an_id_and_cuts_a_name():
     assert await _render("[%.2U] [%.5u]", _fs(uid=1000)) == "[UN] [01000]"
 
 
+@pytest.mark.asyncio
+async def test_precision_and_width_count_bytes():
+    assert await _render_named("[%.2n] [%.3n] [%-8n]", "équipe") == (
+        "[é] [éq] [équipe ]"
+    )
+    out, _ = await stat(
+        [PathSpec.from_str_path("équipe")],
+        stat_fn=partial(_const_stat, _fs()),
+        c="[%.1n]",
+    )
+    assert await materialize(out) == b"[\xc3]\n"
+
+
+@pytest.mark.asyncio
+async def test_a_field_past_int_max_prints_nothing():
+    assert await _render("a%.2147483648ub", _fs()) == "ab"
+    assert await _render("[%4294967296n] [%.2147483648U]", _fs()) == "[] []"
+
+
 # Pinned against GNU coreutils 9.7 on debian:stable-slim under LC_ALL=C.
 # Single quotes are the rule; a name whose only awkward character is an
 # apostrophe reads better in double quotes and GNU renders that one case

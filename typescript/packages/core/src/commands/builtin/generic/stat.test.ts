@@ -173,6 +173,20 @@ describe('stat -c directive formatting', () => {
     expect(await render('[%.2U] [%.5u]', fs({ uid: 1000 }))).toBe('[UN] [01000]')
   })
 
+  it('counts bytes for a precision and a width', async () => {
+    expect(await renderNamed('[%.2n] [%.3n] [%-8n]', 'équipe')).toBe('[é] [éq] [équipe ]\n')
+    const result = await statGeneric([PathSpec.fromStrPath('équipe')], ctx('[%.1n]'), () =>
+      Promise.resolve(fs()),
+    )
+    if (result === null) throw new Error('statGeneric returned null')
+    expect([...(await materialize(result[0]))]).toEqual([0x5b, 0xc3, 0x5d, 0x0a])
+  })
+
+  it('prints nothing for a field past INT_MAX', async () => {
+    expect(await render('a%.2147483648ub', fs())).toBe('ab')
+    expect(await render('[%4294967296n] [%.2147483648U]', fs())).toBe('[] []')
+  })
+
   it.each(GNU_QUOTED)('shell-quotes %N safely: %j', async (name, quoted) => {
     expect(await renderNamed('%N', name)).toBe(quoted + '\n')
   })

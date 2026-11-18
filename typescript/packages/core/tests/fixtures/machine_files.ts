@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MachineAccessor } from '../../src/accessor/machine.ts'
+import { TREE_FORMAT } from '../../src/core/posix/constants.ts'
 import { PathSpec } from '../../src/types.ts'
 import type { RunAnswer } from '../../src/runtime/types.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
@@ -122,6 +123,8 @@ export class FakeFiles {
       return this.dirs.has(dirname(real)) ? ok(`${real}\n`) : failed('')
     }
     if (w.slice(0, 4).join(' ') === 'env LC_ALL=C find -L') {
+      if (w.at(-2) !== '-printf' || w.at(-1) !== TREE_FORMAT)
+        throw new Error(`unexpected find format: ${w.join(' ')}`)
       const path = this.real(w[4] ?? '')
       const depth = w[5] === '-maxdepth' ? Number(w[6]) : null
       if ([...this.files.keys()].some((f) => path.startsWith(`${f}/`)))

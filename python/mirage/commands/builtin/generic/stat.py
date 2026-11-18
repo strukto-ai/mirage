@@ -35,7 +35,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import byte_char, encode_text
+from mirage.shell.bytes import byte_char, decode_text, encode_text
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -84,6 +84,9 @@ _KNOWN = frozenset("aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%") | {
 # The placeholders for a value that is not known, which a 0 flag pads
 # with spaces rather than zeros.
 _PLACEHOLDERS = frozenset({"-", "?"})
+# The widest field printf takes, INT_MAX: past it a directive prints
+# nothing, as GNU stat does.
+_FIELD_MAX = 2147483647
 
 _FORMAT_FLAGS = frozenset("'-+ #0I")
 
@@ -273,7 +276,8 @@ def _quote_name(name: str) -> str:
 def _apply_flags(
     value: str, flags: str, width: str, precision: str | None, text: bool
 ) -> str:
-    """Apply GNU printf flags/width/precision to a rendered directive.
+    """Apply GNU printf flags/width/precision to a rendered directive,
+    counting bytes as printf does.
 
     Args:
         value (str): the raw directive value.
@@ -283,17 +287,30 @@ def _apply_flags(
         text (bool): the directive prints a string, which a precision
             cuts short.
     """
+    raw = encode_text(value)
     if precision is not None and text:
-        value = value[: int(precision)] if precision else ""
-    if width and len(value) < int(width):
-        w = int(width)
+        raw = raw[: int(precision or "0")]
+    pad = int(width or "0") - len(raw)
+    if pad > 0:
         if "-" in flags:
-            value = value.ljust(w)
+            raw += b" " * pad
         elif "0" in flags and value not in _PLACEHOLDERS:
-            value = value.rjust(w, "0")
+            raw = b"0" * pad + raw
         else:
-            value = value.rjust(w)
-    return value
+            raw = b" " * pad + raw
+    return decode_text(raw)
+
+
+def _past_field_max(digits: str | None) -> bool:
+    """Whether a width or precision is past :data:`_FIELD_MAX`.
+
+    Args:
+        digits (str | None): the width or precision as written.
+    """
+    significant = (digits or "").lstrip("0")
+    return len(significant) > len(str(_FIELD_MAX)) or (
+        bool(significant) and int(significant) > _FIELD_MAX
+    )
 
 
 def _directive_value(
@@ -405,6 +422,8 @@ def _render_directive(
     """
     if d.spec not in _KNOWN:
         return "?"
+    if _past_field_max(d.width) or _past_field_max(d.precision):
+        return ""
     if d.spec == "N":
         # GNU formats the name and a symlink's target as two separate
         # fields, so a width pads each one rather than the joined line.

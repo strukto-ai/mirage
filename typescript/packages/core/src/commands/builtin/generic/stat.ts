@@ -61,7 +61,7 @@ import {
 } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError, wordRefusalError } from '../../spec/usage.ts'
-import { byteChar, encodeText } from '../../../shell/bytes.ts'
+import { byteChar, decodeText, encodeText } from '../../../shell/bytes.ts'
 import { linksOf, mountsOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 
@@ -102,6 +102,9 @@ const KNOWN = new Set([...Array.from('aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%'), 'Hd',
 // The placeholders for a value that is not known, which a 0 flag pads with
 // spaces rather than zeros.
 const PLACEHOLDERS = new Set(['-', '?'])
+// The widest field printf takes, INT_MAX: past it a directive prints nothing,
+// as GNU stat does.
+const FIELD_MAX = 2147483647
 
 // The conversions %H and %L split into a device's major and minor; in
 // file-system mode they are no prefix at all.
@@ -222,8 +225,9 @@ function quoteName(name: string): string {
   return singleQuoted(name)
 }
 
-// Apply GNU printf flags, width and precision to a rendered directive; a
-// precision cuts short only a directive that prints a string (`text`).
+// Apply GNU printf flags, width and precision to a rendered directive,
+// counting bytes as printf does; a precision cuts short only a directive that
+// prints a string (`text`).
 function applyFlags(
   value: string,
   flags: string,
@@ -231,16 +235,22 @@ function applyFlags(
   precision: string | undefined,
   text: boolean,
 ): string {
-  if (precision !== undefined && text) {
-    value = precision === '' ? '' : value.slice(0, Number(precision))
-  }
-  if (width !== '' && value.length < Number(width)) {
-    const w = Number(width)
-    if (flags.includes('-')) value = value.padEnd(w)
-    else if (flags.includes('0') && !PLACEHOLDERS.has(value)) value = value.padStart(w, '0')
-    else value = value.padStart(w)
-  }
-  return value
+  let raw = encodeText(value)
+  if (precision !== undefined && text) raw = raw.subarray(0, Number(precision || '0'))
+  const pad = Number(width || '0') - raw.length
+  if (pad <= 0) return decodeText(raw)
+  const fill = flags.includes('0') && !flags.includes('-') && !PLACEHOLDERS.has(value) ? '0' : ' '
+  const padding = fill.repeat(pad)
+  return flags.includes('-') ? decodeText(raw) + padding : padding + decodeText(raw)
+}
+
+// Whether a width or precision is past FIELD_MAX.
+function pastFieldMax(digits: string | undefined): boolean {
+  const significant = (digits ?? '').replace(/^0+/, '')
+  return (
+    significant.length > String(FIELD_MAX).length ||
+    (significant !== '' && Number(significant) > FIELD_MAX)
+  )
 }
 
 function directiveValue(
@@ -322,6 +332,7 @@ function renderDirective(
   identity: Identity | null,
 ): string {
   if (!KNOWN.has(d.spec)) return '?'
+  if (pastFieldMax(d.width) || pastFieldMax(d.precision)) return ''
   if (d.spec === 'N') {
     // GNU formats the name and a symlink's target as two separate fields,
     // so a width pads each one rather than the joined line.
