@@ -32,28 +32,28 @@ import { CLI, CLIHandler, DefaultCommandRoot } from '../../types.ts'
 import { AstGrepConfig } from './config.ts'
 import { processor } from './engine.ts'
 
-const LANGUAGES: Record<string, string> = {
-  js: 'JavaScript',
-  jsx: 'JavaScript',
-  javascript: 'JavaScript',
-  py: 'Python',
-  python: 'Python',
-  ts: 'TypeScript',
-  typescript: 'TypeScript',
-  tsx: 'Tsx',
-}
-const EXTENSIONS: Record<string, string> = {
-  js: 'JavaScript',
-  jsx: 'JavaScript',
-  mjs: 'JavaScript',
-  cjs: 'JavaScript',
-  py: 'Python',
-  pyi: 'Python',
-  ts: 'TypeScript',
-  mts: 'TypeScript',
-  cts: 'TypeScript',
-  tsx: 'Tsx',
-}
+const LANGUAGES = new Map([
+  ['js', 'JavaScript'],
+  ['jsx', 'JavaScript'],
+  ['javascript', 'JavaScript'],
+  ['py', 'Python'],
+  ['python', 'Python'],
+  ['ts', 'TypeScript'],
+  ['typescript', 'TypeScript'],
+  ['tsx', 'Tsx'],
+])
+const EXTENSIONS = new Map([
+  ['js', 'JavaScript'],
+  ['jsx', 'JavaScript'],
+  ['mjs', 'JavaScript'],
+  ['cjs', 'JavaScript'],
+  ['py', 'Python'],
+  ['pyi', 'Python'],
+  ['ts', 'TypeScript'],
+  ['mts', 'TypeScript'],
+  ['cts', 'TypeScript'],
+  ['tsx', 'Tsx'],
+])
 const GLOBS = new Argument('--globs', {
   action: 'append',
   help: 'Include or exclude matching paths',
@@ -186,15 +186,14 @@ async function loadRules(
   ctx: Context,
   process: ReturnType<typeof processor>,
   maxMemory: number,
-): Promise<string> {
+): Promise<[string, PathSpec]> {
   const rule = fl.asPath('rule'),
     inline = fl.asStr('inline_rules')
   let config = fl.asPath('config')
   if ([rule, inline, config].filter((value) => value !== undefined).length > 1)
     throw new UsageError('ast-grep scan: select one rule source')
-  if (inline !== undefined) return inline
-  const decoder = new TextDecoder('utf-8', { fatal: true })
-  if (rule !== undefined) return decoder.decode(await read(vfs, rule, maxMemory))
+  if (inline !== undefined) return [inline, cwd]
+  if (rule !== undefined) return [decodeRule(await read(vfs, rule, maxMemory)), rule.parent]
   if (config === undefined) {
     let folder = cwd
     while (!(await vfs.exists(folder.join('sgconfig.yml')))) {
@@ -227,10 +226,19 @@ async function loadRules(
       size += data.length + 5
       if (size > maxMemory) throw new MemoryExhausted()
       checkMemory(size)
-      documents.push(decoder.decode(data))
+      documents.push(decodeRule(data))
     }
   }
-  return documents.join('\n---\n')
+  return [documents.join('\n---\n'), config.parent]
+}
+
+function decodeRule(data: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch (error) {
+    if (error instanceof TypeError) throw new UsageError('ast-grep scan: rule is not valid UTF-8')
+    throw error
+  }
 }
 
 async function execute(
@@ -250,18 +258,19 @@ async function execute(
   let command = currentCaller().command ?? 'ast-grep'
   if (!command.endsWith(' ' + verb)) command += ' ' + verb
   const mounts = mountView(vfs, true, command) ?? null
-  let language = selected ? LANGUAGES[selected.toLowerCase()] : undefined
+  let language = selected ? LANGUAGES.get(selected.toLowerCase()) : undefined
   if (selected && !language) throw new UsageError(`ast-grep: unsupported language: ${selected}`)
   let rules: string | null = null,
     pattern: string | null = null,
     rewrite: string | null = null,
     kind: string | null = null
   let filesOnly = false
+  let ruleBase = ctx.cwd
   const update = (verb === 'run' || verb === 'scan') && fl.asBool('update_all')
   if (update && !ctx.argv?.some((arg) => arg === '-U' || arg === '--update-all'))
     throw new UsageError('ast-grep: use -U or --update-all as a separate option')
   if (verb === 'scan') {
-    rules = await loadRules(fl, vfs, ctx.cwd, mounts, ctx, process, maxMemory)
+    ;[rules, ruleBase] = await loadRules(fl, vfs, ctx.cwd, mounts, ctx, process, maxMemory)
     const meta = await process(
       { verb: 'rules' },
       new TextEncoder().encode(rules),
@@ -317,8 +326,13 @@ async function execute(
     chunks.push(data)
   }
   async function visit(data: Uint8Array, path: PathSpec | null, shown: string, lang: string) {
+    const prefix = ruleBase.virtual.replace(/\/$/, '') + '/'
+    const rulePath =
+      verb === 'scan' && path?.virtual.startsWith(prefix)
+        ? path.virtual.slice(prefix.length)
+        : shown
     const result = await process(
-      { ...options, language: lang, path: shown },
+      { ...options, language: lang, path: shown, rule_path: rulePath },
       data,
       (memoryRoom() ?? Number.MAX_SAFE_INTEGER) - size,
     )
@@ -351,7 +365,7 @@ async function execute(
         globs,
         maxMemory,
       )) {
-        const lang = EXTENSIONS[/\.([^./]+)$/.exec(path.virtual)?.[1] ?? '']
+        const lang = EXTENSIONS.get(/\.([^./]+)$/.exec(path.virtual)?.[1] ?? '')
         if (lang && (!language || lang === language))
           await visit(await read(vfs, path, maxMemory), path, display, lang)
       }

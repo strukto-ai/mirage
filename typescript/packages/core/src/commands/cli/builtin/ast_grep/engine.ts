@@ -50,7 +50,7 @@ export function processor(maxMemory: number) {
     const available = room - header.length * 3 - data.length
     const maximum = Math.floor(Math.min(maxMemory, available) / PAGE)
     if (maximum < INITIAL) throw new MemoryExhausted()
-    if (guest === undefined || guest.maximum > maximum) {
+    if (guest?.maximum !== maximum) {
       const compiled = await module()
       const memory = new WebAssembly.Memory({ initial: INITIAL, maximum })
       guest = {

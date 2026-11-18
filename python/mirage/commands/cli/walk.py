@@ -986,7 +986,12 @@ def walk(
                 and token == "-h"
                 and node.add_help
                 and style
-                in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
+                in (
+                    UsageStyle.ARGPARSE,
+                    UsageStyle.CLAP,
+                    UsageStyle.COBRA,
+                    UsageStyle.POPPLER,
+                )
                 and "-h" not in cs.dest
             ):
                 return WalkResult(

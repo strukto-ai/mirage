@@ -2,8 +2,8 @@
 use std::{cell::RefCell, fmt::Write};
 
 use ast_grep_config::{
-    GlobalRules, LabelStyle, Rule, RuleCollection, RuleConfig, SerializableRuleConfig, Severity,
-    from_multiple, parse_selector,
+    CombinedScan, GlobalRules, LabelStyle, Rule, RuleCollection, RuleConfig,
+    SerializableRuleConfig, Severity, from_multiple, parse_selector,
 };
 use ast_grep_core::source::Edit;
 use ast_grep_core::{AstGrep, Pattern, tree_sitter::StrDoc};
@@ -30,6 +30,7 @@ struct Request {
     verb: String,
     language: SupportLang,
     path: String,
+    rule_path: Option<String>,
     pattern: Option<String>,
     rewrite: Option<String>,
     rules: Option<String>,
@@ -335,13 +336,12 @@ fn execute(req: Request, source: &str) -> Result<Value> {
                     for (line, text) in lines.iter().enumerate().take(end + 1).skip(first) {
                         writeln!(output, "{}:{}:{text}", req.path, line + 1)?;
                     }
-                    next = end + 1;
+                    next = next.max(end + 1);
                 }
             }
         }
         "scan" => {
             let rules = scan_rules(req.rules.as_deref().ok_or("a rule is required")?)?;
-            let mut edits = Vec::new();
             let file = SimpleFile::new(req.path.as_str(), source);
             let config = Config {
                 display_style: match req.style.as_deref() {
@@ -351,10 +351,19 @@ fn execute(req: Request, source: &str) -> Result<Value> {
                 },
                 ..Config::default()
             };
-            for rule in rules.get_rule_from_lang(std::path::Path::new(&req.path), req.language) {
-                for found in root.find_all(&rule.matcher) {
+            let path = std::path::Path::new(req.rule_path.as_deref().unwrap_or(&req.path));
+            let scan = CombinedScan::new(rules.get_rule_from_lang(path, req.language));
+            let mut findings = scan.scan(&doc, false);
+            let mut edits = Vec::new();
+            findings
+                .matches
+                .sort_unstable_by(|(a, _), (b, _)| a.id.cmp(&b.id));
+            for (rule, matches) in findings.matches {
+                for found in matches {
                     count += 1;
-                    if matches!(rule.severity, Severity::Error) {
+                    if matches!(rule.severity, Severity::Error)
+                        && (!req.update || rule.fixer.is_empty())
+                    {
                         errors += 1;
                     }
                     let severity = match rule.severity {

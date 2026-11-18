@@ -816,6 +816,7 @@ export function walk(
         node.addHelp &&
         token === '-h' &&
         (style === UsageStyle.ARGPARSE ||
+          style === UsageStyle.CLAP ||
           style === UsageStyle.COBRA ||
           style === UsageStyle.POPPLER) &&
         !cs.dest.has('-h')

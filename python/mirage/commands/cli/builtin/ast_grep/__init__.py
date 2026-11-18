@@ -14,6 +14,7 @@
 
 import asyncio
 import posixpath
+import re
 from collections.abc import AsyncIterator
 from typing import cast
 
@@ -107,33 +108,21 @@ async def _files(
         prior: tuple[tuple[str, IgnoreRules], ...],
         repo: bool,
     ) -> tuple[tuple[tuple[str, IgnoreRules], ...], bool]:
+        names: list[str] = []
         if await vfs.exists(folder.join(".git")):
             repo = True
-            exclude = folder.join(".git/info/exclude")
-            if await vfs.is_file(exclude):
-                prior += (
-                    (
-                        folder.virtual,
-                        IgnoreRules(
-                            (await _read(vfs, exclude, max_memory))
-                            .decode()
-                            .splitlines()
-                        ),
-                    ),
-                )
-        for name in (".gitignore", ".ignore") if repo else (".ignore",):
+            names.append(".git/info/exclude")
+        if repo:
+            names.append(".gitignore")
+        names.append(".ignore")
+        for name in names:
             path = folder.join(name)
             if await vfs.is_file(path):
-                prior += (
-                    (
-                        folder.virtual,
-                        IgnoreRules(
-                            (await _read(vfs, path, max_memory))
-                            .decode()
-                            .splitlines()
-                        ),
-                    ),
+                data = await _read(vfs, path, max_memory)
+                lines = re.split(
+                    r"\r?\n", data.decode("utf-8-sig", errors="replace")
                 )
+                prior += ((folder.virtual, IgnoreRules(lines)),)
         return prior, repo
 
     for folder in reversed(ancestors):
@@ -213,7 +202,7 @@ async def _rules(
     mounts: MountView | None,
     ctx: Context,
     max_memory: int,
-) -> str:
+) -> tuple[str, PathSpec]:
     rule, inline, config = (
         fl.as_path("rule"),
         fl.as_str("inline_rules"),
@@ -222,9 +211,9 @@ async def _rules(
     if sum(value is not None for value in (rule, inline, config)) > 1:
         raise UsageError("ast-grep scan: select one rule source")
     if inline is not None:
-        return inline
+        return inline, cwd
     if rule is not None:
-        return (await _read(vfs, rule, max_memory)).decode()
+        return _decode_rule(await _read(vfs, rule, max_memory)), rule.parent
     if config is None:
         folder = cwd
         while not await vfs.exists(folder.join("sgconfig.yml")):
@@ -261,7 +250,14 @@ async def _rules(
                 if documents:
                     documents.extend(b"\n---\n")
                 documents.extend(data)
-    return documents.decode()
+    return _decode_rule(documents), config.parent
+
+
+def _decode_rule(data: bytes | bytearray) -> str:
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise UsageError("ast-grep scan: rule is not valid UTF-8") from exc
 
 
 async def execute(
@@ -286,6 +282,7 @@ async def execute(
     if selected and language is None:
         raise UsageError(f"ast-grep: unsupported language: {selected}")
     pattern = rewrite = kind = rules = None
+    rule_base = ctx.cwd
     files_only = False
     update = verb in ("run", "scan") and fl.as_bool("update_all")
     if update and not any(arg in ("-U", "--update-all") for arg in ctx.argv):
@@ -310,7 +307,9 @@ async def execute(
                 "ast-grep: --files-with-matches conflicts with --rewrite"
             )
     if verb == "scan":
-        rules = await _rules(fl, vfs, ctx.cwd, mounts, ctx, max_memory)
+        rules, rule_base = await _rules(
+            fl, vfs, ctx.cwd, mounts, ctx, max_memory
+        )
         room = memory_room()
         meta = await asyncio.to_thread(
             process,
@@ -353,9 +352,22 @@ async def execute(
     ) -> None:
         nonlocal matched, errors, applied
         room = memory_room()
+        prefix = rule_base.virtual.rstrip("/") + "/"
+        rule_path = (
+            path.virtual[len(prefix) :]
+            if verb == "scan"
+            and path is not None
+            and path.virtual.startswith(prefix)
+            else shown
+        )
         result = await asyncio.to_thread(
             process,
-            {**options, "language": lang, "path": shown},
+            {
+                **options,
+                "language": lang,
+                "path": shown,
+                "rule_path": rule_path,
+            },
             data,
             (room if room is not None else 2**53 - 1) - len(out),
             max_memory,
