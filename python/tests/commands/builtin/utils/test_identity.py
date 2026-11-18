@@ -154,6 +154,24 @@ async def test_a_name_the_database_lacks_prints_as_unknown_in_id_fields():
 
 
 @pytest.mark.asyncio
+async def test_a_field_past_the_memory_budget_is_refused():
+    ws = _ws(max_memory="1MB")
+    io = await ws.shell("stat -c '%.9999999u' /data/f.txt")
+    err = await materialize(io.stderr) if io.stderr else b""
+    assert (io.exit_code, err) == (1, b"stat: memory exhausted\n")
+
+
+@pytest.mark.asyncio
+async def test_a_precision_cuts_a_multibyte_name_by_bytes():
+    ws = _ws(profiles={"équipe": SessionProfile()}, profile="équipe")
+    io = await ws.shell("stat -c '[%.2U] [%.3G] [%.1U] [%.1G]' /data/f.txt")
+    assert (
+        await materialize(io.stdout)
+        == b"[\xc3\xa9] [\xc3\xa9q] [\xc3] [\xc3]\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_profile_name_past_utf8_keeps_its_bytes_for_the_home():
     name = "team\udcff"
     ws = _ws(profiles={name: SessionProfile()}, profile=name)

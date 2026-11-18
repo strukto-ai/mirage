@@ -158,6 +158,7 @@ async def test_precision_and_width_count_bytes():
 async def test_a_field_past_int_max_prints_nothing():
     assert await _render("a%.2147483648ub", _fs()) == "ab"
     assert await _render("[%4294967296n] [%.2147483648U]", _fs()) == "[] []"
+    assert await _render("a%." + "0" * 5000 + "5ub", _fs(uid=0)) == "a00000b"
 
 
 # Pinned against GNU coreutils 9.7 on debian:stable-slim under LC_ALL=C.

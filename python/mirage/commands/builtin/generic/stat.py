@@ -34,6 +34,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_char, decode_text, encode_text
@@ -290,9 +291,10 @@ def _apply_flags(
     """
     raw = encode_text(value)
     if precision is not None and text:
-        raw = raw[: int(precision or "0")]
-    pad = int(width or "0") - len(raw)
+        raw = raw[: _field_number(precision)]
+    pad = _field_number(width) - len(raw)
     if pad > 0:
+        check_memory(len(raw) + pad)
         if "-" in flags:
             raw += b" " * pad
         elif "0" in flags and value not in _PLACEHOLDERS:
@@ -310,8 +312,19 @@ def _past_field_max(digits: str | None) -> bool:
     """
     significant = (digits or "").lstrip("0")
     return len(significant) > len(str(_FIELD_MAX)) or (
-        bool(significant) and int(significant) > _FIELD_MAX
+        _field_number(significant) > _FIELD_MAX
     )
+
+
+def _field_number(digits: str | None) -> int:
+    """A width or precision as a number, leading zeros and all; empty is
+    0, as printf reads a bare ``.``.
+
+    Args:
+        digits (str | None): the width or precision as written, no
+            longer than :data:`_FIELD_MAX` once its zeros are gone.
+    """
+    return int((digits or "").lstrip("0") or "0")
 
 
 def _directive_value(
@@ -442,7 +455,8 @@ def _render_directive(
         and d.precision is not None
         and value.isdigit()
     ):
-        digits = int(d.precision or "0")
+        digits = _field_number(d.precision)
+        check_memory(digits)
         value = "" if value == "0" and not digits else value.zfill(digits)
         flags = flags.replace("0", "")
     return _apply_flags(

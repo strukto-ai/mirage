@@ -17,6 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { atOffsets, operandStat } from '../utils/operands.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { IOResult } from '../../../io/types.ts'
 import {
   CapacityState,
@@ -236,9 +237,10 @@ function applyFlags(
   text: boolean,
 ): string {
   let raw = encodeText(value)
-  if (precision !== undefined && text) raw = raw.subarray(0, Number(precision || '0'))
-  const pad = Number(width || '0') - raw.length
+  if (precision !== undefined && text) raw = raw.subarray(0, fieldNumber(precision))
+  const pad = fieldNumber(width) - raw.length
   if (pad <= 0) return decodeText(raw)
+  checkMemory(raw.length + pad)
   const fill = flags.includes('0') && !flags.includes('-') && !PLACEHOLDERS.has(value) ? '0' : ' '
   const padding = fill.repeat(pad)
   return flags.includes('-') ? decodeText(raw) + padding : padding + decodeText(raw)
@@ -247,10 +249,13 @@ function applyFlags(
 // Whether a width or precision is past FIELD_MAX.
 function pastFieldMax(digits: string | undefined): boolean {
   const significant = (digits ?? '').replace(/^0+/, '')
-  return (
-    significant.length > String(FIELD_MAX).length ||
-    (significant !== '' && Number(significant) > FIELD_MAX)
-  )
+  return significant.length > String(FIELD_MAX).length || fieldNumber(significant) > FIELD_MAX
+}
+
+// A width or precision as a number, leading zeros and all; empty is 0, as
+// printf reads a bare `.`.
+function fieldNumber(digits: string | undefined): number {
+  return Number((digits ?? '').replace(/^0+/, '') || '0')
 }
 
 function directiveValue(
@@ -345,7 +350,8 @@ function renderDirective(
   if (d.flags.includes('#') && d.spec === 'a' && !value.startsWith('0')) value = '0' + value
   let flags = d.flags
   if (ID_DIRECTIVES.has(d.spec) && d.precision !== undefined && /^[0-9]+$/.test(value)) {
-    const digits = Number(d.precision || '0')
+    const digits = fieldNumber(d.precision)
+    checkMemory(digits)
     value = value === '0' && digits === 0 ? '' : value.padStart(digits, '0')
     flags = flags.replaceAll('0', '')
   }

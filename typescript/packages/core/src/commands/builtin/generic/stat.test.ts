@@ -185,6 +185,7 @@ describe('stat -c directive formatting', () => {
   it('prints nothing for a field past INT_MAX', async () => {
     expect(await render('a%.2147483648ub', fs())).toBe('ab')
     expect(await render('[%4294967296n] [%.2147483648U]', fs())).toBe('[] []')
+    expect(await render(`a%.${'0'.repeat(5000)}5ub`, fs({ uid: 0 }))).toBe('a00000b')
   })
 
   it.each(GNU_QUOTED)('shell-quotes %N safely: %j', async (name, quoted) => {

@@ -152,6 +152,21 @@ describe('identity in a workspace', () => {
     await ws.close()
   })
 
+  it('refuses a field past the memory budget', async () => {
+    const ws = makeWs({ maxMemory: '1MB' })
+    const io = await ws.shell("stat -c '%.9999999u' /data/f.txt")
+    expect([io.exitCode, io.stderrText]).toEqual([1, 'stat: memory exhausted\n'])
+    await ws.close()
+  })
+
+  it('cuts a multibyte name by bytes for a precision', async () => {
+    const ws = makeWs({ profiles: { équipe: SessionProfile({}) }, profile: 'équipe' })
+    const io = await ws.shell("stat -c '[%.2U] [%.3G] [%.1U] [%.1G]' /data/f.txt")
+    const enc = (text: string): number[] => [...new TextEncoder().encode(text)]
+    expect([...io.stdout]).toEqual([...enc('[é] [éq] ['), 0xc3, ...enc('] ['), 0xc3, ...enc(']\n')])
+    await ws.close()
+  })
+
   it('keeps the bytes of a profile name past UTF-8 for the home', async () => {
     const name = 'team\udcff'
     const ws = makeWs({ profiles: { [name]: SessionProfile({}) }, profile: name })
