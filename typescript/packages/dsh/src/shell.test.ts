@@ -371,8 +371,10 @@ describe('sandbox policy', () => {
           scoped: SessionProfile(
             {
               commands: {
-                allow: ['cat', 'ls', 'echo'],
-                deny: [{ reason: 'no notes', paths: ['/data/notes/*'] }],
+                '*': 'deny',
+                cat: ['allow', { decision: 'deny', reason: 'no notes', paths: ['/data/notes/*'] }],
+                ls: 'allow',
+                echo: 'allow',
               },
             },
             'profile scoped',
@@ -393,14 +395,14 @@ describe('sandbox policy', () => {
     )
     expect(denied.exitCode).not.toBe(0)
     expect(denied.stderr.text).toContain('no notes')
-    // A word the profile never allowed is refused here too.
+    // A word the profile's tree closes is refused here too.
     const missing = await runOn(
       shell,
       shell.resolve({ command: 'sort /data/notes/a.txt', sandboxPolicy: READ_ONLY }),
     )
     expect(missing.stderr.text).toContain('sort: Permission denied')
-    // The twin carries the source's allow list.
-    expect(ws.getSession('agent::read-only').commands?.allow).toEqual(['cat', 'ls', 'echo'])
+    // The twin carries the source's command trees.
+    expect(ws.getSession('agent::read-only').commands).toEqual(ws.getSession('agent').commands)
   })
 
   it('keeps a bound session out of the read-only twin it narrowed into', async () => {

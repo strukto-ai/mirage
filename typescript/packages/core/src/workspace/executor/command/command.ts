@@ -967,7 +967,7 @@ export async function handleCommand(
   }
 
   // A wrapper execs the program it names, past every function and CLI; the
-  // session's allow list judges the name it typed.
+  // session's command trees judge the name it typed.
   const typed = cmdName
   const wrapped = runsAs(cmdName, registry) !== cmdName ? EXEC_WRAPPERS.get(cmdName) : undefined
   if (wrapped !== undefined) {

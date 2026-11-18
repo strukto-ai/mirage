@@ -669,8 +669,7 @@
    }
   },
   "server/schemas": {
-   "typescript_only": {
-   },
+   "typescript_only": {},
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
     "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
@@ -1285,7 +1284,9 @@
   "rs/policy": {
    "typescript_only": {
     "byValue": "The compiled-matcher map behind admissionMatcher and visibilityMatcher, keyed by configuration; Python's functools.lru_cache holds the same entries.",
-    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value."
+    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value.",
+    "RuleRow": "Names one row of the stream's rule table, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "tables": "The rule table kept per session's trees behind ruleTable; Python's functools.lru_cache on rule_table holds the same entries."
    }
   },
   "workspace/session/resolve": {
@@ -1293,9 +1294,7 @@
     "PathsReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "PlanReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "ProfileReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
-    "ReasonReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
-    "RuleReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
-    "RulesReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings."
+    "ReasonReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings."
    }
   },
   "policy/builtin/output_cap": {
@@ -1836,26 +1835,21 @@
   "commands/cli/walk": {
    "typescript_only": {
     "GRAMMARS": "TypeScript keeps each leaf's parse grammar in a WeakMap keyed by the leaf, as compileSpec keeps its tables; Python keeps it on the leaf itself, since a frozen dataclass key would hash every field on every parse."
-    }
-   },
+   }
+  },
   "policy/profile": {
    "typescript_only": {
     "stringList": "Validates vars.hide entries through the document stream; Python's pydantic model types the field as a tuple of strings."
    }
   },
-  "policy/match/grammar": {
-   "typescript_only": {
-    "READS": "The pattern reads kept per grammar behind patternReads; Python's functools.lru_cache holds the same entries."
-   }
-  },
-  "policy/match/pattern": {
-   "typescript_only": {
-    "EXPANSIONS": "The group expansions kept per pattern behind expandPattern; Python's functools.lru_cache on _expansion holds the same entries."
-   }
-  },
   "policy/match/rule": {
    "typescript_only": {
-    "READS_WIRE": "The wire form kept per pattern-read list behind lineWords; Python's functools.lru_cache on _reads_wire holds the same entries."
+    "Walked": "Names the walk the stream's naming_rules answers, which TypeScript reads typed; Python reads the same JSON as mappings."
+   }
+  },
+  "workspace/session/serialize": {
+   "typescript_only": {
+    "TreeJSON": "Names one command tree of a session record, which TypeScript writes typed; Python writes the same JSON as a dict."
    }
   }
  }

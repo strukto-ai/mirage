@@ -42,6 +42,7 @@ import {
   resolveProducer,
   type Route,
 } from '../../policy/index.ts'
+import { closedByDefault } from '../../policy/match/reads.ts'
 import { agreed } from '../../policy/policies.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
@@ -1313,12 +1314,12 @@ function refused(command: string, verdict: Refused): RedirectResult {
 }
 
 /**
- * An allow list's refusal of what only the machine can resolve (a path, a
- * line run under the box): the list names only what the gate can read. Null
- * under any other profile.
+ * A closed profile's refusal of what only the machine can resolve (a path,
+ * a line run under the box): a tree that denies by default names only what
+ * the gate can read. Null under any other profile.
  */
 function unreadable(name: string, session: SessionState): Refused | null {
-  if ((session.commands?.allow ?? null) === null) return null
+  if (!closedByDefault(session.commands)) return null
   const deny: Deny = { kind: 'deny', reason: UNREADABLE_LINES }
   const [stderr, exitCode] = renderDeny(name, deny)
   return { stderr, exitCode, decision: decisionOf(deny) }
@@ -1329,8 +1330,8 @@ function unreadable(name: string, session: SessionState): Refused | null {
  * them run (`nohup python3` on a machine). What the words run is followed as
  * the line's pass follows it (`programLines`): each program is admitted as
  * `env` and `timeout` have theirs admitted, at the place the pass judged it,
- * and a line the gate cannot read (`nohup /opt/bin/env`) is refused under an
- * allow list. The machine runs the program itself, so a function of its name
+ * and a line the gate cannot read (`nohup /opt/bin/env`) is refused under a
+ * closed tree. The machine runs the program itself, so a function of its name
  * does not stand in for it. A program spelled by its `/usr/bin` path is
  * admitted under its name too, as the plain path admits it. Returns the first refusal, else every route a
  * policy answered for them.

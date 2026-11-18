@@ -1097,7 +1097,6 @@ class MountingE2BMachine extends FakedE2BMachine {
 
 const RESTRICTIONS: SessionProfile[] = [
   { paths: { hide: ['/data/secret'] } },
-  { commands: { deny: [{ paths: ['/data/secret'], reason: 'sealed' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
 

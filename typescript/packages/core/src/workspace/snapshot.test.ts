@@ -61,6 +61,7 @@ import type { CLISnapshot, MountSnapshot } from './snapshot/types.ts'
 import { RAMWorkspaceStateStore } from './store/ram.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 let tempDir: string
 
@@ -449,7 +450,9 @@ describe('Workspace.copy', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        profiles: { ro: { commands: { deny: [{ reason: 'read-only', commands: ['rm'] }] } } },
+        profiles: {
+          ro: SessionProfile({ commands: { rm: { decision: 'deny', reason: 'read-only' } } }),
+        },
         profile: 'ro',
       },
     )
@@ -475,7 +478,7 @@ describe('Workspace.copy', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: { commands: { deny: [{ reason: 'denied by policy', commands: ['rm'] }] } },
+          default: SessionProfile({ commands: { rm: 'deny' } }),
           ro: { paths: { hide: ['/data/secrets'] } },
         },
         commandLimits: { cat: new Limit({ maxBytes: 2 }) },
@@ -1019,7 +1022,9 @@ describe('applyStateDict and the deployment', () => {
     const state = await toStateDict(source)
     await source.close()
     const loaded = await Workspace.fromState(state, {
-      profiles: { default: { commands: { deny: [{ reason: 'no rm', commands: ['rm'] }] } } },
+      profiles: {
+        default: SessionProfile({ commands: { rm: { decision: 'deny', reason: 'no rm' } } }),
+      },
     })
     try {
       for (const sessionId of [loaded.defaultSessionId, 'agent']) {
@@ -1046,7 +1051,9 @@ describe('applyStateDict and the deployment', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: { commands: { deny: [{ reason: 'no removals', commands: ['rm'] }] } },
+          default: SessionProfile({
+            commands: { rm: { decision: 'deny', reason: 'no removals' } },
+          }),
         },
       },
     )
@@ -1106,7 +1113,9 @@ describe('applyStateDict and the deployment', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        profiles: { default: { commands: { ask: [{ reason: 'ask', commands: ['rm'] }] } } },
+        profiles: {
+          default: SessionProfile({ commands: { rm: { decision: 'ask', reason: 'ask' } } }),
+        },
       },
     )
     expect((await source.shell('rm /data/f.txt')).exitCode).toBe(126)

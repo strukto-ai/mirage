@@ -125,9 +125,12 @@ async function run(
   const scoped = hide !== undefined || deny !== undefined
   try {
     if (scoped) {
-      const rules = deny === undefined ? [] : [{ reason: 'sealed', paths: deny }]
+      const sealed = { decision: 'deny', reason: 'sealed', paths: deny }
       ws.createSession('agent', {
-        profile: SessionProfile({ paths: { hide: hide ?? [] }, commands: { deny: rules } }),
+        profile: SessionProfile({
+          paths: { hide: hide ?? [] },
+          ...(deny === undefined ? {} : { commands: { '*': sealed } }),
+        }),
       })
     }
     const out = await ws.shell(line, scoped ? { sessionId: 'agent' } : {})

@@ -16,8 +16,8 @@ import { Accessor } from './base.ts'
 
 /**
  * Accessor over the workspace's command lookup for the /usr/bin view.
- * Both answers are the calling session's, so a program its allow list
- * hides has no file either: `programs` is every program name the session
+ * Both answers are the calling session's, so a program its command
+ * trees close has no file either: `programs` is every program name the session
  * can run, sorted, and `note` is the line one program's file says about
  * it, null when the name runs as no program, which is what gives it a
  * file.

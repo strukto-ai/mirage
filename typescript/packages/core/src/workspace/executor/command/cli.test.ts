@@ -1303,7 +1303,7 @@ describe('a command tree a mount serves', () => {
       ws.createSession('hidden', { profile: { paths: { hide: ['/n/x'] } } })
       ws.createSession('ruled', {
         profile: SessionProfile({
-          commands: { deny: [{ reason: 'no tagging', commands: ['notes add'] }] },
+          commands: { notes: { add: { decision: 'deny', reason: 'no tagging' } } },
         }),
       })
       for (const [line, sessionId, code] of [

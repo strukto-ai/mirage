@@ -22,7 +22,9 @@ import { IOResult, materialize } from '../../io/types.ts'
 import type { Action } from '../../policy/index.ts'
 import { PolicyDenied } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
-import type { AdmissionRules, CommandContext, CommandRule } from '../../policy/types.ts'
+import type { CommandContext } from '../../policy/types.ts'
+import { ruleTable } from '../../rs/policy.ts'
+import { trees } from '../../test-utils.ts'
 import { parse } from '../../shell/parse/parse.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -45,40 +47,21 @@ function gateCtx(tokens: string[]): CommandContext {
 
 const DOC = SessionProfile({
   commands: {
-    allow: [
-      'cat',
-      'rm',
-      'ls',
-      'ln',
-      'echo',
-      'head',
-      'grep',
-      'rg',
-      'cd',
-      'xargs',
-      'sh',
-      'mkdir',
-      'eval',
-      'source',
-    ],
-    deny: [
-      { reason: 'sealed', command: 'cat', paths: ['/data/secret*'] },
-      {
-        reason: 'private',
-        command: 'ls',
-        paths: ['/data/private'],
-      },
-      {
-        reason: 'private',
-        command: 'grep',
-        paths: ['/data/private'],
-      },
-      {
-        reason: 'private',
-        command: 'rg',
-        paths: ['/data/private'],
-      },
-    ],
+    '*': 'deny',
+    cat: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+    rm: 'allow',
+    ls: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    ln: 'allow',
+    echo: 'allow',
+    head: 'allow',
+    grep: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    rg: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    cd: 'allow',
+    xargs: 'allow',
+    sh: 'allow',
+    mkdir: 'allow',
+    eval: 'allow',
+    source: 'allow',
   },
 })
 
@@ -113,7 +96,7 @@ describe('admission', () => {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: { deny: [{ reason: 'elsewhere', paths: ['/secret'] }] },
+            commands: { '*': { decision: 'deny', reason: 'elsewhere', paths: ['/secret'] } },
           }),
         },
       },
@@ -261,7 +244,7 @@ describe('admission', () => {
     ])
     expect(await line("sh -c 'rm /data/x'; sh -c 'sort'")).toEqual([
       126,
-      'sort: Permission denied\npolicy denied: sort is not allowed\n',
+      'sort: Permission denied\npolicy denied: denied by policy\n',
     ])
   })
 
@@ -326,7 +309,7 @@ describe('admission', () => {
     // names the program no operand is a path.
     const w = ws(
       SessionProfile({
-        commands: { deny: [{ reason: 'sealed', paths: ['/data/secret*'] }] },
+        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] } },
       }),
     )
     await w.shell('cd /data')
@@ -448,9 +431,14 @@ describe('admission', () => {
     expect(io.decision?.reason).toBe('sealed')
   })
   it('the admitted gate judges what the line did not name', () => {
-    const deny: CommandRule = { reason: 'sealed', paths: ['/data/sealed'] }
-    const ask: CommandRule = { reason: 'nod', commands: ['grep'], paths: ['/data/asked/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
+    const rules = trees({
+      grep: [
+        { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] },
+        { decision: 'ask', reason: 'nod', paths: ['/data/asked/*'] },
+      ],
+    })
+    const ask = ruleTable(rules).find((r) => r.reason === 'nod')
+    if (ask === undefined) throw new Error('no ask leaf')
     const gate = new Admitted({
       rules,
       ctx: gateCtx(['grep', '-r', 'x', '/data']),
@@ -498,11 +486,7 @@ describe('admission', () => {
   it('the admitted gate scopes each start point on its own', () => {
     // A walk keeps its native op where no rule could reach: the gate of
     // `find /data /other` sets aside only the walk of /data.
-    const rules: AdmissionRules = {
-      allow: null,
-      ask: [],
-      deny: [{ reason: 'sealed', paths: ['/data/sealed'] }],
-    }
+    const rules = trees({ '*': { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] } })
     const gate = new Admitted({
       rules,
       ctx: gateCtx(['find', '/data', '/other']),
@@ -773,7 +757,7 @@ describe('what the handler a command resolves to declares', () => {
         { '/reader': new RAMVFS(), '/write': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          profiles: { default: SessionProfile({ commands: { [decision]: ['remote send'] } }) },
+          profiles: { default: SessionProfile({ commands: { remote: { send: decision } } }) },
         },
       )
       open.push(w)
@@ -866,9 +850,9 @@ async function tested(profile: SessionProfile, name: string, prefix: string, exp
 // rule reads a file operand however it is spelled, and an allow list answers
 // each name for itself.
 describe("the shell's own tests", () => {
-  const DENY: SessionProfile = {
-    commands: { deny: [{ reason: 'secret', paths: ['/data/secret.txt'] }] },
-  }
+  const DENY: SessionProfile = SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'secret', paths: ['/data/secret.txt'] } },
+  })
 
   it.each(['test', '[', '[['])('%s reads a file operand as a path rule does', async (name) => {
     expect(await tested(DENY, name, 'cd /data && ', '-e secret.txt')).toEqual([
@@ -917,14 +901,16 @@ describe("the shell's own tests", () => {
     ])
   })
 
-  it.each(['test', '[', '[['])('%s is answered by its own name in an allow list', async (name) => {
-    const without = { commands: { allow: ['echo', 'cd'] } }
+  it.each(['test', '[', '[['])('%s is answered by its own name in a closed tree', async (name) => {
+    const without = SessionProfile({ commands: { '*': 'deny', echo: 'allow', cd: 'allow' } })
     expect(await tested(without, name, 'cd /data && ', '-e a.txt')).toEqual([
       0,
       '126\n',
       `${name}: Permission denied\n`,
     ])
-    const listed = { commands: { allow: ['echo', 'cd', name] } }
+    const listed = SessionProfile({
+      commands: { '*': 'deny', echo: 'allow', cd: 'allow', [name]: 'allow' },
+    })
     expect(await tested(listed, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
   })
 })

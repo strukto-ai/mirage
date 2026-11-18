@@ -18,7 +18,8 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
-import type { CommandRule, ExecuteResultContext } from '../../../policy/types.ts'
+import type { ExecuteResultContext } from '../../../policy/types.ts'
+import { trees } from '../../../test-utils.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import type { RuntimeOptions } from '../../../runtime/config.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
@@ -407,9 +408,10 @@ describe('external command routing regressions', () => {
   })
 })
 
-/** The production rule law fed one deny rule as every session's profile. */
-function profileRule(rule: CommandRule): PermissionsPolicy {
-  return new PermissionsPolicy({ commandsOf: () => ({ allow: null, deny: [rule], ask: [] }) })
+/** The production rule law fed one command tree as every session's profile. */
+function profileRule(block: Record<string, unknown>): PermissionsPolicy {
+  const rules = trees(block)
+  return new PermissionsPolicy({ commandsOf: () => rules })
 }
 
 describe.each(['process', 'shell'] as const)('external %s path admission', (kind) => {
@@ -422,11 +424,14 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
         machines: [probe],
         mode: MountMode.EXEC,
         policies: [
-          profileRule({
-            reason: 'protected',
-            commands: ['cat', 'grep', 'tar'],
-            paths: ['/work/secret.txt'],
-          }),
+          profileRule(
+            Object.fromEntries(
+              ['cat', 'grep', 'tar'].map((name) => [
+                name,
+                { decision: 'deny', reason: 'protected', paths: ['/work/secret.txt'] },
+              ]),
+            ),
+          ),
         ],
       },
     )
@@ -526,11 +531,14 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
     const [ws, probe] = textWorkspace(
       ['grep', 'python3'],
       [
-        profileRule({
-          reason: 'protected',
-          commands: ['grep', 'python3'],
-          paths: ['/work/secret.txt'],
-        }),
+        profileRule(
+          Object.fromEntries(
+            ['grep', 'python3'].map((name) => [
+              name,
+              { decision: 'deny', reason: 'protected', paths: ['/work/secret.txt'] },
+            ]),
+          ),
+        ),
       ],
     )
     try {
@@ -568,7 +576,9 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
       {
         machines: [probe],
         mode: MountMode.EXEC,
-        policies: [profileRule({ reason: 'protected', paths: ['/work/*'] })],
+        policies: [
+          profileRule({ '*': { decision: 'deny', reason: 'protected', paths: ['/work/*'] } }),
+        ],
       },
     )
     await ws.shell('cd /work')

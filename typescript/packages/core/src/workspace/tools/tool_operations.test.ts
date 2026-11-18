@@ -18,7 +18,6 @@ import type { Policy } from '../../policy/base.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import type { VfsContext } from '../../policy/types.ts'
-import { Outcome } from '../../policy/types.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Files } from '../files.ts'
@@ -389,10 +388,14 @@ describe('the tool list', () => {
   it.each([
     [null, MountMode.WRITE, TOOL_NAMES],
     [null, MountMode.READ, ['shell', 'read', 'ls', 'grep', 'glob']],
-    [{ commands: { allow: ['cat'] } }, MountMode.WRITE, ['shell', 'read', 'write', 'edit', 'glob']],
-    [{ commands: { allow: [] } }, MountMode.WRITE, ['read', 'write', 'edit', 'glob']],
     [
-      { commands: { deny: [{ reason: 'no', commands: ['grep'] }] } },
+      { commands: { '*': 'deny', cat: 'allow' } },
+      MountMode.WRITE,
+      ['shell', 'read', 'write', 'edit', 'glob'],
+    ],
+    [{ commands: { '*': 'deny' } }, MountMode.WRITE, ['read', 'write', 'edit', 'glob']],
+    [
+      { commands: { grep: { decision: 'deny', reason: 'no' } } },
       MountMode.WRITE,
       ['shell', 'read', 'write', 'edit', 'ls', 'glob'],
     ],
@@ -412,7 +415,7 @@ describe('the tool list', () => {
       { '/': new RAMVFS(), '/data': new RAMVFS() },
       { mode: MountMode.WRITE },
     )
-    const noLs = { commands: { deny: [{ reason: 'no', commands: ['ls'] }] } }
+    const noLs = { commands: { ls: { decision: 'deny', reason: 'no' } } }
     own.createSession('scoped', { profile: SessionProfile({ mounts: { '/data': noLs } }) })
     own.createSession('rooted', { profile: SessionProfile({ mounts: { '/': noLs } }) })
     expect(new Session(own, 'scoped').tools.names()).toContain('ls')
@@ -425,35 +428,5 @@ describe('the tool list', () => {
     await expect(
       new Session(own, 'ro').tools.call('write', { path: '/x', content: 'y' }),
     ).rejects.toThrow(/unknown tool: write/)
-  })
-})
-
-describe('a path ask outside a line', () => {
-  it('waits on the host, runs one call on a nod and asks again', async () => {
-    const own = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    own.createSession('agent', {
-      profile: {
-        commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] },
-      },
-    })
-    const tools = new Session(own, 'agent').tools
-    const asked = await tools.write('/data/out/a.txt', 'hi')
-    expect(asked.isError).toBe(true)
-    const [record] = own.decisions.pending('agent')
-    expect([record?.command, record?.paths]).toEqual(['', ['/data/out/a.txt']])
-    expect(asked.content[0]?.text).toBe(
-      `Error: /data/out/a.txt: Permission denied\nrequires approval: outbox needs a nod (ask ${record?.id ?? ''})\n`,
-    )
-    // Asking again quotes the same question.
-    await tools.write('/data/out/a.txt', 'hi')
-    expect(own.decisions.pending('agent').map((r) => r.id)).toEqual([record?.id])
-    await own.decisions.answer(record?.id ?? '', Outcome.ALLOW)
-    expect((await tools.write('/data/out/a.txt', 'hi')).isError).toBeUndefined()
-    // The nod was for one call on that path, and it is spent.
-    expect((await tools.write('/data/out/a.txt', 'again')).isError).toBe(true)
-    // A line holds no question for its ops: the redirect is the line's to
-    // ask about, at command admission.
-    const io = await own.shell('echo hi > /data/out/b.txt', { sessionId: 'agent' })
-    expect(io.exitCode).not.toBe(0)
   })
 })

@@ -242,7 +242,6 @@ class MountingDockerMachine extends FakeDockerMachine {
 
 const RESTRICTIONS: SessionProfile[] = [
   { paths: { hide: ['/data/secret'] } },
-  { commands: { deny: [{ paths: ['/data/secret'], reason: 'sealed' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
 

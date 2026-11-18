@@ -12,26 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getAdmission, lineRunning, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
-import { opRuling, posixLevel } from '../match/rule.ts'
-import { SESSION_SCOPED, type SessionScopedMixin } from '../mixin.ts'
-import {
-  Outcome,
-  type Action,
-  type CommandContext,
-  type PolicyMethod,
-  type SessionCommandsQuery,
-  type VfsContext,
-} from '../types.ts'
+import { Outcome, type Action, type CommandContext, type SessionCommandsQuery } from '../types.ts'
 
 /**
- * The profile's `commands` rules, enforced.
+ * The profile's command trees, enforced.
  *
  * Seeded by the workspace after `MountRootPolicy` (POSIX messages still
  * win) and before user policies, so a document rule speaks before a
- * coded one when both match. It reads the session's compiled rules
+ * coded one when both match. It reads the session's compiled trees
  * through the narrow `SessionCommandsQuery` by the session id the entry point
  * put in the context, never through ambient state: an explicit fact
  * survives the async hop that drops a store. Verdicts render through
@@ -39,18 +29,11 @@ import {
  * document deny from a coded one.
  *
  * `preCommand` renders one `decide` call, which is where the law lives:
- * the allow list first (a line it does not cover is refused whole,
- * though its head was visible), then the winning rule, refused whole or
- * per operand by whether it names paths, or taken to the approval ledger
- * when it asks. `preVfs` reads the rules that are pure paths, deny and ask
- * alike (`opRuling`), so FUSE, programmatic ops and the warm cache cannot
- * bypass a path the profile protects. A path rule that asks is a question only where no
- * line is running (a file tool, the host's facade), which the entry point puts
- * to the approval ledger keyed by rule and path; inside a line it
- * refuses, since the line was admitted without it.
+ * the leaf that decided refuses the line, or takes it to the approval
+ * ledger when it asks. A tree judges lines only; what every entry point
+ * must keep from a path is a hide.
  */
-export class PermissionsPolicy implements Policy, SessionScopedMixin {
-  readonly [SESSION_SCOPED] = true as const
+export class PermissionsPolicy implements Policy {
   private readonly sessions: SessionCommandsQuery
 
   constructor(sessions: SessionCommandsQuery) {
@@ -61,45 +44,12 @@ export class PermissionsPolicy implements Policy, SessionScopedMixin {
     const decision = decide(ctx, this.sessions.commandsOf(ctx.sessionId ?? ''))
     if (decision.outcome === Outcome.ALLOW) return null
     const rule = decision.rule
-    const matched = decision.matched === null ? {} : { matched: decision.matched }
-    if (rule === null) {
-      const program = (
-        ctx.program !== undefined && ctx.program.length > 0 ? ctx.program : [ctx.command]
-      ).join(' ')
-      return { kind: 'deny', reason: `${program} is not allowed`, ...matched }
-    }
+    if (rule === null) throw new Error('a tree refused a line with no leaf')
     if (decision.outcome === Outcome.ASK) {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
     const path = decision.matchedPath === null ? {} : { path: decision.matchedPath }
+    const matched = decision.matched === null ? {} : { matched: decision.matched }
     return { kind: 'deny', reason: rule.reason, ...path, rule, ...matched }
-  }
-
-  preVfs(ctx: VfsContext): Action | null {
-    if (redirectTargetJudged(ctx.path.virtual)) return null
-    // The grants belong to the line, not the session: a once grant is
-    // spent as the command is admitted, so by the time its own walk
-    // reaches the dispatcher the session holds nothing and only the
-    // command's gate still remembers the nod: the one its op carries (none,
-    // when its command was admitted without one), or the bound one for an op
-    // that says nothing about its command.
-    const gate = ctx.gate === undefined ? getAdmission() : ctx.gate
-    const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
-    if (ruled === null) return null
-    const [rule, asks] = ruled
-    if (asks && gate === null && !lineRunning()) return { kind: 'ask', reason: rule.reason, rule }
-    return { kind: 'deny', reason: rule.reason, rule }
-  }
-
-  /**
-   * Whether this session's rules speak at `method`: always at command
-   * admission, and at the dispatcher only through a pure path rule, the one kind
-   * an op can meet (`opRuling`).
-   */
-  wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean> {
-    if (method !== 'preVfs') return Promise.resolve(true)
-    const rules = this.sessions.commandsOf(sessionId)
-    if (rules === null) return Promise.resolve(false)
-    return Promise.resolve([...rules.deny, ...rules.ask].some(posixLevel))
   }
 }

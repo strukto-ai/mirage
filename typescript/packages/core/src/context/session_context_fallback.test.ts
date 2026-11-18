@@ -959,7 +959,7 @@ it('walks a nested mount under the command’s own gate while another session’
   )
   const sealed = ws.createSession('sealed', {
     profile: SessionProfile({
-      commands: { deny: [{ reason: 'sealed', command: 'pause', paths: ['/data/sub/box'] }] },
+      commands: { pause: { decision: 'deny', reason: 'sealed', paths: ['/data/sub/box'] } },
     }),
   })
   const free = ws.createSession('free')
@@ -1121,7 +1121,7 @@ describe('a line beside another session’s paused line on the fallback storage'
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, onAsk: allowOnce })
     const asker = ws.createSession('asker', {
       profile: SessionProfile({
-        commands: { ask: [{ reason: 'review', paths: ['/data/review/*'] }] },
+        commands: { '*': { decision: 'ask', reason: 'review', paths: ['/data/review/*'] } },
       }),
     })
     const other = ws.createSession('other')
@@ -1201,13 +1201,9 @@ describe('a line beside another session’s paused line on the fallback storage'
   })
 })
 
-it('judges a named facade’s op by its own rules when a wider session binds meanwhile', async () => {
+it('judges a named facade’s op by its own hides when a wider session binds meanwhile', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-  ws.createSession('sealed', {
-    profile: SessionProfile({
-      commands: { deny: [{ reason: 'sealed', paths: ['/data/secret'] }] },
-    }),
-  })
+  ws.createSession('sealed', { profile: SessionProfile({ paths: { hide: ['/data/secret'] } }) })
   const free = ws.createSession('free')
   const ns = (ws as unknown as { namespace: { ensureLoaded: () => Promise<void> } }).namespace
   const loaded = ns.ensureLoaded.bind(ns)

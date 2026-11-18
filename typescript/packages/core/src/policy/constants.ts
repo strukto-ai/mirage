@@ -15,21 +15,11 @@
 import type { ScriptMethod } from './types.ts'
 
 /**
- * The reason a bare command pattern under `commands.deny` carries, and
- * the one a bare pattern under `commands.ask` carries.
+ * The reason a deny leaf written without one carries, and the one an ask
+ * leaf written without one carries.
  */
 export const DEFAULT_DENY_REASON = 'denied by policy'
 export const DEFAULT_ASK_REASON = 'no standing approval'
-
-/**
- * Ops that act on a whole subtree at once, so a pure path rule refuses
- * them on the directory that holds its scope or on any ancestor: moving
- * or removing `/x` takes `/x/locked/*` along. `rmdir` removes the scope's
- * own directory; `rm_r` removes a tree in one call. They are pinned to what
- * the functions declare by constants.test.ts: policy sits below vfs (the Pyodide
- * worker loads it), so it cannot read the declarations itself.
- */
-export const SUBTREE_OPS: ReadonlySet<string> = new Set(['rename', 'rmdir', 'rm_r'])
 
 /**
  * Ops that read an entry's metadata and nothing of its content, which a
@@ -38,7 +28,9 @@ export const SUBTREE_OPS: ReadonlySet<string> = new Set(['rename', 'rmdir', 'rm_
  * of it is what fails, as GNU reports an unreadable file. The command
  * tier's guard leaves its `stat` slot unwrapped for the same reason; a
  * hidden path is the hide arm's, and stays ENOENT. `exists` is the command
- * tier's probe; `stat` is pinned like SUBTREE_OPS's VFS ops.
+ * tier's probe; `stat` is pinned to what the functions declare by
+ * constants.test.ts: policy sits below vfs (the Pyodide worker loads it),
+ * so it cannot read the declarations itself.
  */
 export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])
 

@@ -44,50 +44,52 @@ import { explainLine, type Judgment } from './explain.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-const ALLOW = [
-  'ls',
-  'cat',
-  'git',
-  'rm',
-  'mkdir',
-  'cd',
-  'echo',
-  'sleep',
-  'wait',
-  'eval',
-  'command',
-  'xargs',
-  'touch',
-  'printf',
-  'mapfile',
-  'alias',
-  'shopt',
-]
+const COMMANDS: Record<string, unknown> = {
+  '*': 'deny',
+  ls: 'allow',
+  cat: [
+    'allow',
+    {
+      decision: 'ask',
+      reason: 'secrets need sign-off',
+      paths: ['/data/secret.txt', '/data/secret file', '/data/secrét'],
+    },
+  ],
+  git: { '*': 'allow', operands: { push: { decision: 'ask', reason: 'pushes need sign-off' } } },
+  rm: [
+    'allow',
+    { decision: 'deny', reason: 'production data is protected', paths: ['/data/prod/*'] },
+  ],
+  ...Object.fromEntries(
+    [
+      'mkdir',
+      'cd',
+      'echo',
+      'sleep',
+      'wait',
+      'eval',
+      'command',
+      'xargs',
+      'touch',
+      'printf',
+      'mapfile',
+      'alias',
+      'shopt',
+    ].map((name) => [name, 'allow']),
+  ),
+}
 
-const PROFILE = SessionProfile({
-  commands: {
-    allow: ALLOW,
-    deny: [{ reason: 'production data is protected', command: 'rm', paths: ['/data/prod/*'] }],
-    ask: [
-      { reason: 'pushes need sign-off', commands: ['git push'] },
-      {
-        reason: 'secrets need sign-off',
-        command: 'cat',
-        paths: ['/data/secret.txt', '/data/secret file', '/data/secrét'],
-      },
-    ],
-  },
-})
+const PROFILE = SessionProfile({ commands: COMMANDS })
 
 // The same world under a rule that speaks on the command name alone, so
 // a spelling whose operands only the runtime can read is still asked
 // about.
 const ASK_CAT = SessionProfile({
-  commands: { allow: ALLOW, ask: [{ reason: 'reads need sign-off', commands: ['cat'] }] },
+  commands: { ...COMMANDS, cat: { decision: 'ask', reason: 'reads need sign-off' } },
 })
 
 const DENY_CAT = SessionProfile({
-  commands: { allow: ALLOW, deny: [{ reason: 'reads are refused', commands: ['cat'] }] },
+  commands: { ...COMMANDS, cat: { decision: 'deny', reason: 'reads are refused' } },
 })
 
 const open: Workspace[] = []
@@ -265,24 +267,24 @@ describe('explain', () => {
     expect(asked?.reason).toBe('pushes need sign-off')
   })
 
-  it('reports a word the allow list leaves out as a deny at 126', async () => {
-    // The allow list is the profile's policy: a word it leaves out is a
-    // DENY with no rule, refused in bash's words like any other.
+  it('reports a word the tree names nothing for as a deny at 126', async () => {
+    // The root's own decision speaks for a word the tree names nothing
+    // for: a DENY refused in bash's words like any other.
     const w = await ws()
     const [missing] = await judged(w, 'gerp x', 's')
     expect(missing?.outcome).toBe(Outcome.DENY)
-    expect(missing?.rule).toBeNull()
-    expect(missing?.source).toBe('commands.allow')
+    expect(missing?.rule?.at).toBe('/*')
+    expect(missing?.source).toBe('top')
     expect(missing?.exitCode).toBe(126)
     expect(missing?.stderr).toBe('gerp: Permission denied\n')
   })
 
   it.each(['timeout 5 sort /data/a.txt', 'eval sort /data/a.txt'])(
-    'refuses a word the allow list leaves out where it runs: %s',
+    'refuses a word the tree closes where it runs: %s',
     async (line) => {
       // A builtin that runs a word hands it to the gate, which refuses it
       // there, and the dry run says what the run says.
-      const profile = SessionProfile({ commands: { allow: ['timeout', 'eval'] } })
+      const profile = SessionProfile({ commands: { '*': 'deny', timeout: 'allow', eval: 'allow' } })
       const w = new Workspace(
         { '/data': new RAMVFS() },
         { mode: MountMode.WRITE, profiles: { r: profile } },
@@ -295,7 +297,7 @@ describe('explain', () => {
       const said = 'sort: Permission denied\n'
       expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([126, said])
       expect([missing?.exitCode, missing?.stderr]).toEqual([126, said])
-      expect([missing?.command, missing?.source]).toEqual(['sort', 'commands.allow'])
+      expect([missing?.command, missing?.source]).toEqual(['sort', 'top'])
     },
   )
 
@@ -326,7 +328,7 @@ describe('explain', () => {
   })
 
   it('refuses the whole line only for a verdict', async () => {
-    // A word the allow list leaves out fails where it stands and the rest
+    // A word the closed root refuses fails where it stands and the rest
     // of the line runs; a rule's refusal holds the whole line, whatever
     // failed before it.
     const w = await ws()
@@ -338,7 +340,7 @@ describe('explain', () => {
       gerp !== undefined && 'command' in gerp
         ? [gerp.outcome, gerp.exitCode, gerp.stderr, gerp.source]
         : null,
-    ).toEqual([Outcome.DENY, 126, 'gerp: Permission denied\n', 'commands.allow'])
+    ).toEqual([Outcome.DENY, 126, 'gerp: Permission denied\n', 'top'])
     const line = 'gerp x; rm /data/prod/x.txt'
     said = await w.explain(line, 's')
     ran = await w.shell(line, { sessionId: 's' })
@@ -382,8 +384,8 @@ describe('explain', () => {
     ])
   })
 
-  it('leaves a line alone when the allow list leaves a word out', async () => {
-    // The allow list refuses a word where it stands, not the line. A typo
+  it('leaves a line alone when the closed root refuses a word', async () => {
+    // The closed root refuses a word where it stands, not the line. A typo
     // must not cost an agent the work the line already did.
     const w = await ws()
     const ran = await w.shell('rm /data/a.txt && gerp x', { sessionId: 's' })
@@ -424,7 +426,9 @@ describe('explain', () => {
     await w.vfs.write('/data/a.txt', 'a\n')
     await w.vfs.write('/data/secret.txt', 's\n')
     w.createSession('s', {
-      profile: { commands: { ask: [{ reason: 'nod', paths: ['/data/secret.txt'] }] } },
+      profile: SessionProfile({
+        commands: { '*': { decision: 'ask', reason: 'nod', paths: ['/data/secret.txt'] } },
+      }),
     })
     const line = `echo before; ${test}; echo rc=$?`
     const held = await w.shell(line, { sessionId: 's' })
@@ -445,7 +449,9 @@ describe('explain', () => {
     open.push(w)
     await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
     w.createSession('s', {
-      profile: { commands: { ask: [{ reason: 'nod', paths: ['/data/secret.txt'] }] } },
+      profile: SessionProfile({
+        commands: { '*': { decision: 'ask', reason: 'nod', paths: ['/data/secret.txt'] } },
+      }),
     })
     const line = 'find /data -name a.txt -exec cat /data/secret.txt \\;'
     const said = await w.explain(line, 's')
@@ -526,10 +532,14 @@ describe('explain', () => {
   })
 })
 
+const SEALED_PROD = { decision: 'deny', reason: 'sealed until review', paths: ['/data/prod/*'] }
+
 const SEALED = SessionProfile({
   commands: {
-    allow: ['ls', 'cat', 'rm', 'mkdir', 'echo'],
-    deny: [{ reason: 'sealed until review', paths: ['/data/prod/*'] }],
+    '*': 'deny',
+    ...Object.fromEntries(
+      ['ls', 'cat', 'rm', 'mkdir', 'echo'].map((name) => [name, ['allow', SEALED_PROD]]),
+    ),
   },
 })
 
@@ -884,7 +894,11 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        profiles: { r: SessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
+        profiles: {
+          r: SessionProfile({
+            commands: { '*': 'deny', bash: 'allow', source: 'allow', rm: 'allow' },
+          }),
+        },
         machines: [new LineBox()],
       },
     )
@@ -979,7 +993,7 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        profiles: { r: SessionProfile({ commands: { deny: ['hostname'] } }) },
+        profiles: { r: SessionProfile({ commands: { hostname: 'deny' } }) },
         machines: [box],
       },
     )
@@ -1005,19 +1019,10 @@ describe('prejudge', () => {
         profiles: {
           r: SessionProfile({
             commands: {
-              allow: ['cat', 'cd', 'grep'],
-              deny: [
-                {
-                  reason: 'sealed',
-                  command: 'cat',
-                  paths: ['/data/secret*'],
-                },
-                {
-                  reason: 'sealed',
-                  command: 'grep',
-                  paths: ['/data/secret*'],
-                },
-              ],
+              '*': 'deny',
+              cat: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+              cd: 'allow',
+              grep: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
             },
           }),
         },
@@ -1055,19 +1060,12 @@ describe('prejudge', () => {
         profiles: {
           r: SessionProfile({
             commands: {
-              allow: ['cat', 'cd', 'false', 'grep', 'true'],
-              deny: [
-                {
-                  reason: 'sealed',
-                  command: 'cat',
-                  paths: ['/data/secret*'],
-                },
-                {
-                  reason: 'sealed',
-                  command: 'grep',
-                  paths: ['/data/secret*'],
-                },
-              ],
+              '*': 'deny',
+              cat: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+              cd: 'allow',
+              false: 'allow',
+              grep: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+              true: 'allow',
             },
           }),
         },
@@ -1153,8 +1151,8 @@ describe('prejudge', () => {
         profiles: {
           r: SessionProfile({
             commands: {
-              allow: ['grep'],
-              ask: [{ reason: 'nod', command: 'grep', paths: ['/data'] }],
+              '*': 'deny',
+              grep: ['allow', { decision: 'ask', reason: 'nod', paths: ['/data'] }],
             },
           }),
         },
@@ -1221,7 +1219,7 @@ describe('prejudge', () => {
     // path a word names outright stays read though it is the lost cwd;
     // a grep pattern spelling that cwd names no path.
     const sealed = SessionProfile({
-      commands: { deny: [{ reason: 'sealed', command: 'grep', paths: ['/data/prod'] }] },
+      commands: { grep: { decision: 'deny', reason: 'sealed', paths: ['/data/prod'] } },
     })
     const w = new Workspace(
       { '/data': new RAMVFS() },
@@ -1878,7 +1876,9 @@ describe('a /usr/bin path', () => {
       {
         mode: MountMode.EXEC,
         machines: { m: { provider: 'in_process', runtime: 'monty' } },
-        profiles: { default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } } },
+        profiles: {
+          default: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
+        },
       },
     )
     open.push(w)
@@ -1934,7 +1934,7 @@ describe('a /usr/bin path on a line the box runs whole', () => {
       },
     )
     open.push(w)
-    w.createSession('s', { profile: SessionProfile({ commands: { allow: ['echo'] } }) })
+    w.createSession('s', { profile: SessionProfile({ commands: { '*': 'deny', echo: 'allow' } }) })
     await w.shell('grep() { echo hi; }', { sessionId: 's' })
     const io = await w.shell('/usr/bin/grep x /data', { sessionId: 's' })
     expect([io.exitCode, DEC.decode(io.stderr)]).toEqual([126, 'grep: Permission denied\n'])
@@ -1947,7 +1947,7 @@ describe('a /usr/bin path on a line the box runs whole', () => {
     open.push(w)
     w.createSession('s', {
       profile: SessionProfile({
-        commands: { deny: [{ reason: 'no', commands: ['echo forbidden'] }] },
+        commands: { echo: { operands: { forbidden: { decision: 'deny', reason: 'no' } } } },
       }),
     })
     const bare = await w.shell('cat /data/f | xargs echo', { sessionId: 's' })
@@ -1967,7 +1967,7 @@ it('leaves a relative path after a cd the pass lost to the gate', async () => {
   )
   open.push(w)
   w.createSession('s', {
-    profile: SessionProfile({ commands: { deny: [{ reason: 'no', commands: ['python3'] }] } }),
+    profile: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
   })
   await w.shell("printf 'echo harmless\\n' > /data/python3; cd /usr/bin", { sessionId: 's' })
   const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })

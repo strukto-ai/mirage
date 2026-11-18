@@ -434,7 +434,7 @@ describe('patchNodeFs — descriptors', () => {
   })
 
   describe.each([false, true])('retained descriptor (detached=%s)', (detached) => {
-    it.each(['hide', 'deny', 'pre', 'post'] as const)(
+    it.each(['hide', 'pre', 'post'] as const)(
       'rechecks %s without consuming bytes or rereading the backend',
       async (restriction) => {
         const path = '/data/retained.txt'
@@ -461,13 +461,8 @@ describe('patchNodeFs — descriptors', () => {
           expect(first.buffer.toString()).toBe('ab')
           if (detached) await fs.promises.unlink(path)
           const fetched = read.mock.calls.length
-          if (restriction === 'hide' || restriction === 'deny') {
-            await ws.setSessionProfile(
-              ws.defaultSessionId,
-              restriction === 'hide'
-                ? { paths: { hide: [path] } }
-                : { commands: { deny: [{ reason: 'sealed', paths: [path] }] } },
-            )
+          if (restriction === 'hide') {
+            await ws.setSessionProfile(ws.defaultSessionId, { paths: { hide: [path] } })
           }
           refuse = true
           const denied = Buffer.alloc(2, 90)
@@ -654,24 +649,18 @@ describe('patchNodeFs — ledger', () => {
 })
 
 describe('patchNodeFs — refusals', () => {
-  // A hide, a read-only mount and a path rule: both entry points ask the
-  // dispatcher, so the one refusal comes back through either.
+  // A hide and a read-only mount: both entry points ask the dispatcher,
+  // so the one refusal comes back through either.
   it.each([
     ['/data/secret.txt', 'read', 'ENOENT'],
     ['/ro/new.txt', 'write', 'EROFS'],
-    ['/data/sealed/f.txt', 'read', 'EACCES'],
   ] as const)('%s refuses %s as ws.vfs does', async (path, op, code) => {
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/ro': [new RAMVFS(), MountMode.READ] },
       { mode: MountMode.WRITE },
     )
     await ws.vfs.write('/data/secret.txt', 's')
-    await ws.vfs.mkdir('/data/sealed')
-    await ws.vfs.write('/data/sealed/f.txt', 'f')
-    await ws.setSessionProfile(ws.defaultSessionId, {
-      paths: { hide: ['/data/secret.txt'] },
-      commands: { deny: [{ reason: 'sealed', paths: ['/data/sealed/*'] }] },
-    })
+    await ws.setSessionProfile(ws.defaultSessionId, { paths: { hide: ['/data/secret.txt'] } })
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
     const direct = op === 'read' ? ws.vfs.read(path) : ws.vfs.write(path, 'x')

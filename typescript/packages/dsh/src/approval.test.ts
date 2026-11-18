@@ -29,7 +29,7 @@ async function runOn(shell: ShellExecutor, spec: ShellExecSpec): Promise<ShellRu
   return (await shell.execute(spec)).result()
 }
 
-const ASK_RM = { commands: { ask: [{ reason: 'deletes are reviewed', commands: ['rm'] }] } }
+const ASK_RM = { commands: { rm: { decision: 'ask', reason: 'deletes are reviewed' } } }
 
 interface AskedRequest {
   toolName: string
@@ -270,7 +270,7 @@ describe('an asked line with no approval channel', () => {
 describe('the sandbox facts a refused run reports', () => {
   it('marks a whole-line policy deny as denied', async () => {
     const { shell } = await world({
-      commands: { deny: [{ reason: 'no removes', commands: ['rm'] }] },
+      commands: { rm: { decision: 'deny', reason: 'no removes' } },
     })
     const run = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(126)
@@ -282,7 +282,7 @@ describe('the sandbox facts a refused run reports', () => {
     // read-only call. A role's rules are not, so the flag has to be set
     // for a call carrying the widest mode there is.
     const { shell } = await world({
-      commands: { deny: [{ reason: 'no removes', commands: ['rm'] }] },
+      commands: { rm: { decision: 'deny', reason: 'no removes' } },
     })
     const run = await runOn(
       shell,
@@ -384,7 +384,7 @@ describe('an ask that outlives the run that raised it', () => {
 describe('a refusal the line redirected away from stderr', () => {
   it('is still reported as denied when 2>&1 puts it on stdout', async () => {
     const { shell } = await world({
-      commands: { deny: [{ reason: 'no removes', commands: ['rm'] }] },
+      commands: { rm: { decision: 'deny', reason: 'no removes' } },
     })
     const run = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt 2>&1' }))
     expect(run.exitCode).toBe(126)

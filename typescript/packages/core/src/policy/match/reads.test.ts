@@ -14,72 +14,62 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { AdmissionRules } from '../types.ts'
-import { hasRules, readsArgs, scopesPaths } from './reads.ts'
+import { trees } from '../../test-utils.ts'
+import { closed, closedByDefault, hasRules, readsArgs, scopesPaths } from './reads.ts'
 
 // Mirrors python/tests/policy/match/test_reads.py.
 
-const EMPTY: AdmissionRules = { allow: null, ask: [], deny: [] }
-
 describe('reads', () => {
-  it('hasRules is a profile stating anything', () => {
+  it('hasRules is a profile stating a tree', () => {
     expect(hasRules(null)).toBe(false)
-    expect(hasRules(EMPTY)).toBe(false)
-    expect(hasRules({ ...EMPTY, allow: [] })).toBe(true)
-    expect(hasRules({ ...EMPTY, ask: [{ reason: 'r' }] })).toBe(true)
-    expect(hasRules({ ...EMPTY, deny: [{ reason: 'r' }] })).toBe(true)
+    expect(hasRules({ trees: [] })).toBe(false)
+    expect(hasRules(trees({ rm: 'deny' }))).toBe(true)
   })
 
-  it('readsArgs only for a rule that reads past the name', () => {
-    const rules: AdmissionRules = {
-      allow: ['cat', 'git status', '*'],
-      deny: [
-        { reason: 'no rm', commands: ['rm'] },
-        { reason: 'sealed', commands: ['cat'], paths: ['/secret*'] },
-        { reason: 'no force', commands: ['git push -f'] },
-        { reason: 'repo', commands: ['ls'], mount: '/repo' },
-      ],
-      ask: [{ reason: 'frozen', paths: ['/locked/*'] }],
-    }
-    // A token after the name, a path or a mount reads the arguments.
+  it('readsArgs only where a node reads past the name', () => {
+    const rules = trees(
+      {
+        '*': 'allow',
+        rm: 'deny',
+        cat: { decision: 'deny', paths: ['/secret*'] },
+        git: { push: { '--force': 'deny' } },
+      },
+      { '/repo': { ls: 'deny' } },
+    )
     expect(readsArgs(rules, 'git')).toBe(true)
     expect(readsArgs(rules, 'cat')).toBe(true)
     expect(readsArgs(rules, 'ls')).toBe(true)
-    // The command-less frozen rule reads every command's paths.
-    expect(readsArgs(rules, 'echo')).toBe(true)
-    // With no such rule for it, a command's arguments are unread: the
-    // wildcard allow and the bare `rm` deny decide on the name alone.
-    expect(
-      readsArgs(
-        { ...EMPTY, allow: ['*', 'rm'], deny: [{ reason: 'no rm', commands: ['rm'] }] },
-        'rm',
-      ),
-    ).toBe(false)
+    expect(readsArgs(rules, 'rm')).toBe(false)
+    expect(readsArgs(rules, 'echo')).toBe(false)
     expect(readsArgs(null, 'rm')).toBe(false)
   })
 
-  it('scopesPaths is a path rule that applies to this command', () => {
-    const named: AdmissionRules = {
-      ...EMPTY,
-      deny: [
-        { reason: 'no rm', commands: ['rm'] },
-        { reason: 'sealed', commands: ['cat'], paths: ['/secret*'] },
-        { reason: 'repo', commands: ['ls'], mount: '/repo' },
-      ],
-    }
-    // A glob operand of cat or ls must be expanded before the gate reads
-    // it: a rule names the command and reads its paths (or its mount).
-    expect(scopesPaths(named, 'cat')).toBe(true)
-    expect(scopesPaths(named, 'ls')).toBe(true)
-    // The bare rm deny and an allow list read the name alone.
-    expect(scopesPaths({ ...named, allow: ['rm', '*'] }, 'rm')).toBe(false)
-    expect(scopesPaths(named, 'echo')).toBe(false)
+  it("a leaf with paths on the root reads every command's args", () => {
+    const rules = trees({ '*': { decision: 'ask', paths: ['/locked/*'] } })
+    expect(readsArgs(rules, 'echo')).toBe(true)
+    expect(scopesPaths(rules, 'echo')).toBe(true)
+  })
+
+  it('scopesPaths is a leaf with paths that applies to the command', () => {
+    const rules = trees(
+      { rm: 'deny', cat: { decision: 'deny', paths: ['/secret*'] } },
+      { '/repo': { ls: 'deny' } },
+    )
+    expect(scopesPaths(rules, 'cat')).toBe(true)
+    expect(scopesPaths(rules, 'ls')).toBe(true)
+    expect(scopesPaths(rules, 'rm')).toBe(false)
+    expect(scopesPaths(rules, 'echo')).toBe(false)
     expect(scopesPaths(null, 'cat')).toBe(false)
-    // A pure path rule applies to every command, so every command's globs
-    // expand: a pattern that only later matches under the scope would
-    // otherwise reach the command unjudged.
-    const frozen = { reason: 'frozen', paths: ['/locked/*'] }
-    expect(scopesPaths({ ...named, ask: [frozen] }, 'rm')).toBe(true)
-    expect(scopesPaths({ ...EMPTY, ask: [frozen] }, 'echo')).toBe(true)
+  })
+
+  it('closed is a top-level root that denies and names nothing', () => {
+    expect(closed(trees({ '*': 'deny' }))).toBe(true)
+    expect(closedByDefault(trees({ '*': 'deny' }))).toBe(true)
+    const listed = trees({ '*': 'deny', ls: 'allow' })
+    expect(closed(listed)).toBe(false)
+    expect(closedByDefault(listed)).toBe(true)
+    expect(closedByDefault(trees({ '*': { decision: 'deny', paths: ['/x'] } }))).toBe(false)
+    expect(closedByDefault(trees(null, { '/a': { '*': 'deny' } }))).toBe(false)
+    expect(closed(null)).toBe(false)
   })
 })

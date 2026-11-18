@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-node'
+import { SessionProfile, Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type ClientChannel, type ServerChannel } from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
@@ -96,7 +96,11 @@ async function vaultWorkspace(): Promise<Workspace> {
     {
       mode: MountMode.WRITE,
       profiles: {
-        guarded: { commands: { deny: [{ reason: 'the vault is sealed', paths: ['/vault/*'] }] } },
+        guarded: SessionProfile({
+          commands: {
+            '*': { decision: 'deny', reason: 'the vault is sealed', paths: ['/vault/*'] },
+          },
+        }),
       },
     },
   )

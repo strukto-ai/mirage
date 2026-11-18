@@ -38,6 +38,8 @@ import type { WorkspaceOptions } from '../workspace/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parserAliases } from './command_dispatch.ts'
 import { buildRuntime } from '../../runtime/table.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import { trees } from '../../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -217,7 +219,7 @@ async function withBox(
   const box = new Box()
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
   try {
-    ws.createSession('s', { profile })
+    ws.createSession('s', { profile: SessionProfile(profile) })
     await run(ws, box)
   } finally {
     await ws.close()
@@ -238,9 +240,16 @@ describe('a wrapper Mirage runs', () => {
     ['nohup time tool -c x', 'time tool -c x'],
     ['nohup nice time -p tool -c x', 'time -p tool -c x'],
     ['nohup time env tool -c x', 'time env tool -c x'],
-  ])('runs no program the allow list leaves out: %s', async (line, bare) => {
+  ])('runs no program the tree closes: %s', async (line, bare) => {
     await withBox(
-      { commands: { allow: [...WRAPPERS, 'wait', 'time', 'env'] } },
+      {
+        commands: {
+          '*': 'deny',
+          ...Object.fromEntries(
+            [...WRAPPERS, 'wait', 'time', 'env'].map((name) => [name, 'allow']),
+          ),
+        },
+      },
       async (ws, box) => {
         const alone = await ws.shell(bare, { sessionId: 's' })
         const io = await ws.shell(line, { sessionId: 's' })
@@ -252,22 +261,28 @@ describe('a wrapper Mirage runs', () => {
   })
 
   it('admits every wrapper it runs', async () => {
-    await withBox({ commands: { allow: ['nohup', 'python3'] } }, async (ws, box) => {
-      const io = await ws.shell('nohup nice python3 -c x', { sessionId: 's' })
-      expect(io.exitCode).toBe(126)
-      expect(text(io.stderr).startsWith('nice: ')).toBe(true)
-      expect(box.ran).toEqual([])
-    })
+    await withBox(
+      { commands: { '*': 'deny', nohup: 'allow', python3: 'allow' } },
+      async (ws, box) => {
+        const io = await ws.shell('nohup nice python3 -c x', { sessionId: 's' })
+        expect(io.exitCode).toBe(126)
+        expect(text(io.stderr).startsWith('nice: ')).toBe(true)
+        expect(box.ran).toEqual([])
+      },
+    )
   })
 
   it.each(['nohup tool -c x', 'nohup -- tool -c x', 'nice --ad 5 tool -c x'])(
     'hands a machine its words before a listed program: %s',
     async (line) => {
-      await withBox({ commands: { allow: ['nohup', 'nice', 'tool'] } }, async (ws, box) => {
-        const io = await ws.shell(line, { sessionId: 's' })
-        expect(io.exitCode).toBe(0)
-        expect(box.ran).toEqual([line.split(' ')])
-      })
+      await withBox(
+        { commands: { '*': 'deny', nohup: 'allow', nice: 'allow', tool: 'allow' } },
+        async (ws, box) => {
+          const io = await ws.shell(line, { sessionId: 's' })
+          expect(io.exitCode).toBe(0)
+          expect(box.ran).toEqual([line.split(' ')])
+        },
+      )
     },
   )
 
@@ -281,7 +296,9 @@ describe('a wrapper Mirage runs', () => {
   })
 
   it("reads its program's operands", async () => {
-    const profile = { commands: { deny: [{ reason: 'secret', paths: ['/data/secret.py'] }] } }
+    const profile = {
+      commands: { '*': { decision: 'deny', reason: 'secret', paths: ['/data/secret.py'] } },
+    }
     await withBox(profile, async (ws, box) => {
       const bare = await ws.shell('cd /data && python3 secret.py', { sessionId: 's' })
       const io = await ws.shell('cd /data && nohup python3 secret.py', { sessionId: 's' })
@@ -295,28 +312,25 @@ describe('a wrapper Mirage runs', () => {
   // The pass asks about the program where it stands under the wrapper, and
   // the gate finds that answer there rather than asking again.
   it('asks about its program once', async () => {
-    await withBox(
-      { commands: { ask: [{ reason: 'nod', commands: ['tool'] }] } },
-      async (ws, box) => {
-        const line = 'nohup tool -c x'
-        const held = await ws.shell(line, { sessionId: 's' })
-        expect(held.exitCode).toBe(126)
-        const pending = ws.decisions.pending()
-        expect(pending).toHaveLength(1)
-        await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
-        const ran = await ws.shell(line, { sessionId: 's' })
-        expect(ran.exitCode).toBe(0)
-        expect(box.ran).toEqual([['nohup', 'tool', '-c', 'x']])
-        expect(ws.decisions.pending()).toEqual([])
-      },
-    )
+    await withBox({ commands: { tool: { decision: 'ask', reason: 'nod' } } }, async (ws, box) => {
+      const line = 'nohup tool -c x'
+      const held = await ws.shell(line, { sessionId: 's' })
+      expect(held.exitCode).toBe(126)
+      const pending = ws.decisions.pending()
+      expect(pending).toHaveLength(1)
+      await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
+      const ran = await ws.shell(line, { sessionId: 's' })
+      expect(ran.exitCode).toBe(0)
+      expect(box.ran).toEqual([['nohup', 'tool', '-c', 'x']])
+      expect(ws.decisions.pending()).toEqual([])
+    })
   })
 
   // The box resolves a path on its own disk, which the gate cannot read, so an
   // allow list, which names only what it can read, refuses it.
   it.each([
-    [{ commands: { allow: ['nohup'] } }, true],
-    [{ commands: { deny: [{ reason: 'r', commands: ['rm'] }] } }, false],
+    [{ commands: { '*': 'deny', nohup: 'allow' } }, true],
+    [{ commands: { rm: { decision: 'deny', reason: 'r' } } }, false],
     [{}, false],
   ])('runs a path only without an allow list: %j', async (profile, refused) => {
     await withBox(profile, async (ws, box) => {
@@ -336,13 +350,16 @@ describe('a wrapper Mirage runs', () => {
     ['', "nohup time env -S 'tool -c x'", "time env -S 'tool -c x'"],
     ['pip() { echo harmless; }', 'nohup time pip --version', 'time pip --version'],
   ])('runs its program as it runs bare: %s %s', async (setup, line, bare) => {
-    await withBox({ commands: { allow: ['nohup', 'time', 'env', 'echo'] } }, async (ws, box) => {
-      if (setup !== '') await ws.shell(setup, { sessionId: 's' })
-      const alone = await ws.shell(bare, { sessionId: 's' })
-      const io = await ws.shell(line, { sessionId: 's' })
-      expect([io.exitCode, text(io.stdout)]).toEqual([alone.exitCode, text(alone.stdout)])
-      expect(box.ran).toEqual([])
-    })
+    await withBox(
+      { commands: { '*': 'deny', nohup: 'allow', time: 'allow', env: 'allow', echo: 'allow' } },
+      async (ws, box) => {
+        if (setup !== '') await ws.shell(setup, { sessionId: 's' })
+        const alone = await ws.shell(bare, { sessionId: 's' })
+        const io = await ws.shell(line, { sessionId: 's' })
+        expect([io.exitCode, text(io.stdout)]).toEqual([alone.exitCode, text(alone.stdout)])
+        expect(box.ran).toEqual([])
+      },
+    )
   })
 })
 
@@ -522,7 +539,7 @@ const SPELLED = [
 ]
 
 const NO_PYTHON_PROFILES = {
-  default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } },
+  default: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
 }
 
 /** Every command of an explained tree, nested scopes included, with its exit and machine. */
@@ -616,7 +633,9 @@ describe('a wrapper over a path-spelled program', () => {
   // refuses.
   it('leaves a path the view does not list to the machine', async () => {
     const ws = spelledWs({
-      profiles: { default: { commands: { deny: [{ reason: 'no', commands: ['nosuch'] }] } } },
+      profiles: {
+        default: SessionProfile({ commands: { nosuch: { decision: 'deny', reason: 'no' } } }),
+      },
     })
     try {
       const bare = await ws.shell('/usr/bin/nosuch -c 1')
@@ -634,7 +653,9 @@ describe('a program spelled by its path under an ask rule', () => {
     'is asked once: %s',
     async (line) => {
       const ws = spelledWs({
-        profiles: { default: { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } } },
+        profiles: {
+          default: SessionProfile({ commands: { python3: { decision: 'ask', reason: 'nod' } } }),
+        },
       })
       try {
         const held = await ws.shell(line)
@@ -760,8 +781,8 @@ class PythonOnMonty implements Policy {
 
 describe('a path no file of Mirage answers', () => {
   it.each([
-    [{ commands: { allow: ['echo'] } }, true],
-    [{ commands: { deny: [{ reason: 'r', commands: ['rm'] }] } }, false],
+    [{ commands: { '*': 'deny', echo: 'allow' } }, true],
+    [{ commands: { rm: { decision: 'deny', reason: 'r' } } }, false],
     [{}, false],
   ])('goes to the external runtime: %j', async (profile, isRefused) => {
     await withBox(profile, async (ws, box) => {
@@ -842,11 +863,7 @@ describe('a function named like a builtin that runs other words', () => {
     const ws = makeWs()
     ws.createSession('s')
     await ws.shell(`echo x > /data/f; ${fn}() { :; }`, { sessionId: 's' })
-    ws.getSession('s').commands = {
-      allow: null,
-      ask: [],
-      deny: [{ reason: 'no rm', commands: ['rm'] }],
-    }
+    ws.getSession('s').commands = trees({ rm: { decision: 'deny', reason: 'no rm' } })
     expect((await ws.shell(line, { sessionId: 's' })).exitCode).toBe(0)
     expect((await ws.shell('command timeout 1 rm /data/f', { sessionId: 's' })).exitCode).toBe(126)
   })

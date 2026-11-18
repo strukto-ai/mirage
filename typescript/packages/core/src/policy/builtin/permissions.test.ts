@@ -14,18 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { PathSpec } from '../../types.ts'
+import { line, trees } from '../../test-utils.ts'
 import { Policies } from '../policies.ts'
-import type { CommandContext, AdmissionRules, CommandRule, VfsContext } from '../types.ts'
+import { type AdmissionRules, type Ask, type CommandContext, type Deny, Outcome } from '../types.ts'
 import { PermissionsPolicy } from './permissions.ts'
-import { CALLS } from '../../workspace/dispatcher/constants.ts'
-import type { VfsCall } from '../../vfs/types.ts'
 
-function callOf(name: string): VfsCall {
-  const call = CALLS.get(name)
-  if (call === undefined) throw new Error(`no call ${name}`)
-  return call
-}
+// Mirrors python/tests/policy/builtin/test_permissions.py.
 
 // A SessionCommandsQuery: one compiled document per session id.
 class Sessions {
@@ -36,314 +30,72 @@ class Sessions {
   }
 }
 
-function path(virtual: string, raw = ''): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    vfsPath: virtual,
-    resolved: true,
-    rawPath: raw,
+const FULL = trees(
+  {
+    rm: { decision: 'deny', reason: 'no repo deletes', paths: ['/repo/*'] },
+    cp: { decision: 'ask', reason: 'sign-off' },
+  },
+  { '/repo': { cp: { decision: 'deny', reason: 'read-only' } } },
+)
+const REVIEWER = trees({ '*': 'deny', ls: 'allow', cat: 'allow' })
+
+function policy(): PermissionsPolicy {
+  return new PermissionsPolicy(new Sessions({ s: FULL, rev: REVIEWER }))
+}
+
+function judge(
+  p: PermissionsPolicy,
+  words: string[],
+  options: { session?: string; cwd?: string; tool?: boolean } = {},
+): Deny | Ask | null {
+  const ctx: CommandContext = line(words, {
+    sessionId: options.session ?? 's',
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.tool === undefined ? {} : { tool: options.tool }),
   })
+  return p.preCommand(ctx) as Deny | Ask | null
 }
-
-function ctx(
-  command: string,
-  args: string[] = [],
-  extra: Partial<Omit<CommandContext, 'command'>> = {},
-): CommandContext {
-  return {
-    command,
-    paths: [],
-    argv: args,
-    cwd: '/',
-    sessionId: 's',
-    tokens: [command, ...args],
-    program: [command],
-    ...extra,
-  }
-}
-
-// One profile, compiled: its own rules plus the ones its `mounts./repo`
-// section carries, which the compiler stamped with that root.
-const MOUNT_DENY: CommandRule = {
-  reason: 'history is read-only here',
-  commands: ['git push'],
-  mount: '/repo',
-}
-const ASK_PUSH: CommandRule = { reason: 'sign-off', commands: ['git push'] }
-const FULL: AdmissionRules = {
-  allow: ['ls', 'cat', 'rm', 'git', 'python3'],
-  deny: [
-    MOUNT_DENY,
-    { reason: 'no deletes in the repo', commands: ['rm'], paths: ['/repo/*'] },
-    { reason: 'frozen', paths: ['/repo/locked/*'] },
-  ],
-  ask: [ASK_PUSH],
-}
-const REVIEWER: AdmissionRules = {
-  allow: ['ls', 'cat', 'git log', 'git status'],
-  ask: [],
-  deny: [],
-}
-
-const policy = () => new PermissionsPolicy(new Sessions({ s: FULL, rev: REVIEWER }))
 
 describe('PermissionsPolicy', () => {
-  it('no rules means no opinion', () => {
-    const p = new PermissionsPolicy(new Sessions({}))
-    expect(p.preCommand(ctx('rm', ['-rf', '/']))).toBeNull()
-    expect(
-      p.preVfs({ call: callOf('unlink'), path: path('/x'), write: true, prefix: '/' }),
-    ).toBeNull()
+  it('no tree means no opinion', () => {
+    expect(judge(new PermissionsPolicy(new Sessions({})), ['rm', '-rf', '/'])).toBeNull()
   })
 
-  it('the allow list refuses a visible head it does not cover', () => {
+  it('a closed root refuses every command it names no allow for', () => {
     const p = policy()
-    expect(p.preCommand(ctx('ls', ['-la'], { sessionId: 'rev' }))).toBeNull()
-    expect(
-      p.preCommand(ctx('git', ['log', '-1'], { sessionId: 'rev', program: ['git', 'log'] })),
-    ).toBeNull()
-    // `git` is visible in the reviewer session (some git lines are
-    // allowed) but `git push` matches nothing there: a whole-command
-    // refusal naming the program, not "command not found".
-    expect(
-      p.preCommand(ctx('git', ['push'], { sessionId: 'rev', program: ['git', 'push'] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'git push is not allowed',
-      matched: { command: ['git'], flags: [] },
-    })
-    // A word that is not a tool is never refused by an allow list.
-    expect(p.preCommand(ctx('cd', ['/x'], { sessionId: 'rev', tool: false }))).toBeNull()
-    expect(p.preCommand(ctx('python3', ['-c', '1']))).toBeNull()
+    expect(judge(p, ['ls', '-la'], { session: 'rev' })).toBeNull()
+    const deny = judge(p, ['rm', '/x'], { session: 'rev' })
+    expect(deny?.kind).toBe('deny')
+    expect(deny?.kind === 'deny' ? deny.rule?.at : null).toBe('/*')
+    expect(deny?.reason).toBe('denied by policy')
+    expect(judge(p, ['cd', '/x'], { session: 'rev', tool: false })).toBeNull()
   })
 
-  it('a deny rule speaks by scope and by where it was written', () => {
+  it('a leaf speaks by its paths and by where it was written', () => {
     const p = policy()
-    // Whole-command rule: reason only, the command plane renders `git: policy
-    // denied: ...` at 126. A mount section's rule applies when the line
-    // works inside that mount (here by cwd).
-    expect(
-      p.preCommand(ctx('git', ['push'], { cwd: '/repo/sub', program: ['git', 'push'] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'history is read-only here',
-      rule: MOUNT_DENY,
-      matched: { command: ['git', 'push'], flags: [] },
-    })
-    // Off the mount, the same line falls through to the ask rule: the
-    // deny rules ran first and had no opinion.
-    expect(
-      p.preCommand(ctx('git', ['push'], { cwd: '/scratch', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'ask', reason: 'sign-off', rule: ASK_PUSH, rules: [ASK_PUSH] })
-    // Operand-scoped rule: the operand as typed, in the GNU voice.
-    expect(p.preCommand(ctx('rm', ['x'], { paths: [path('/repo/x', 'x')], cwd: '/repo' }))).toEqual(
-      {
-        kind: 'deny',
-        reason: 'no deletes in the repo',
-        path: 'x',
-        rule: FULL.deny[1],
-        matched: { command: ['rm'], flags: [] },
-      },
-    )
-    expect(p.preCommand(ctx('rm', ['/scratch/x'], { paths: [path('/scratch/x')] }))).toBeNull()
-    // A pure path rule refuses any command that names the path.
-    expect(
-      p.preCommand(ctx('cat', ['/repo/locked/a'], { paths: [path('/repo/locked/a')] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'frozen',
-      path: '/repo/locked/a',
-      rule: FULL.deny[2],
-    })
-  })
-
-  it('the deeper anchor wins and deny breaks a tie', () => {
-    // The path axis: two rules matching one operand are ordered by how
-    // many literal components each anchors, deepest first, and only a
-    // tie is broken by the verb.
-    const deep: CommandRule = { reason: 'sealed', commands: ['rm'], paths: ['/repo/sealed/*'] }
-    const shallow: CommandRule = { reason: 'needs a nod', commands: ['rm'], paths: ['/repo/*'] }
-    const p = new PermissionsPolicy(
-      new Sessions({ s: { allow: null, ask: [shallow], deny: [deep] } }),
-    )
-    expect(
-      p.preCommand(ctx('rm', ['/repo/sealed/y'], { paths: [path('/repo/sealed/y')] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'sealed',
-      path: '/repo/sealed/y',
-      rule: deep,
-      matched: { command: ['rm'], flags: [] },
-    })
-    // Outside the deeper rule's anchor the shallow one is what is left.
-    expect(p.preCommand(ctx('rm', ['/repo/x'], { paths: [path('/repo/x')] }))).toEqual({
-      kind: 'ask',
-      reason: 'needs a nod',
-      rule: shallow,
-      rules: [shallow],
-    })
-    // The other way round: an ask anchored deeper than a deny wins, so a
-    // profile can carve an exception out of a broad refusal.
-    const flipped = new PermissionsPolicy(
-      new Sessions({
-        s: {
-          allow: null,
-          ask: [{ reason: 'nod here', commands: ['rm'], paths: ['/repo/sealed/*'] }],
-          deny: [{ reason: 'no deletes', commands: ['rm'], paths: ['/repo/*'] }],
-        },
-      }),
-    )
-    expect(
-      flipped.preCommand(ctx('rm', ['/repo/sealed/y'], { paths: [path('/repo/sealed/y')] })),
-    ).toMatchObject({ kind: 'ask', reason: 'nod here' })
-  })
-
-  it('an unrelated entry does not lend a rule its depth', () => {
-    // The rule is scored by the entry that covered this operand, not by
-    // its deepest entry. Scoring the deepest would let
-    // `/else/very/deep/*` -- which says nothing about /repo -- carry the
-    // ask past a deny anchored right at /repo/private, and an approval
-    // would then reopen exactly what the deny sealed.
-    const ask: CommandRule = {
-      reason: 'review',
-      commands: ['cat'],
-      paths: ['/repo/*', '/else/very/deep/*'],
+    const deny = judge(p, ['cp', 'a', 'b'], { cwd: '/repo/sub' })
+    expect(deny?.kind).toBe('deny')
+    expect(deny?.reason).toBe('read-only')
+    expect(deny?.kind === 'deny' ? deny.rule?.mount : null).toBe('/repo')
+    const ask = judge(p, ['cp', 'a', 'b'], { cwd: '/scratch' })
+    expect(ask?.kind).toBe('ask')
+    expect(ask?.reason).toBe('sign-off')
+    if (ask?.kind === 'ask') expect(ask.rules).toEqual([ask.rule])
+    const refused = judge(p, ['rm', '/repo/x'])
+    expect(refused?.kind).toBe('deny')
+    if (refused?.kind === 'deny') {
+      expect(refused.path).toBe('/repo/x')
+      expect(refused.rule?.decision).toBe(Outcome.DENY)
     }
-    const deny: CommandRule = { reason: 'private', commands: ['cat'], paths: ['/repo/private/*'] }
-    const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
-    expect(
-      p.preCommand(ctx('cat', ['/repo/private/x'], { paths: [path('/repo/private/x')] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'private',
-      path: '/repo/private/x',
-      rule: deny,
-      matched: { command: ['cat'], flags: [] },
-    })
-    // The unrelated entry still speaks where it does anchor.
-    expect(
-      p.preCommand(ctx('cat', ['/else/very/deep/x'], { paths: [path('/else/very/deep/x')] })),
-    ).toMatchObject({ kind: 'ask', reason: 'review' })
-  })
-
-  it('a pathless rule is read by verb wherever it is written', () => {
-    // The command axis, and the one thing it deliberately cannot say.
-    // A rule naming no path scores nothing on the path axis even when a
-    // mount section holds it, so "denied generally, asked inside one
-    // mount" is inexpressible for a pathless rule: the deny wins. That
-    // is correct for what such a rule covers in practice, an account CLI
-    // that reaches a service and touches no mount at all.
-    const deny: CommandRule = { reason: 'no branches', commands: ['git branch'] }
-    const ask: CommandRule = {
-      reason: 'branches need a nod',
-      commands: ['git branch'],
-      mount: '/repo',
-    }
-    const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
-    expect(
-      p.preCommand(ctx('git', ['branch'], { cwd: '/repo', program: ['git', 'branch'] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'no branches',
-      rule: deny,
-      matched: { command: ['git', 'branch'], flags: [] },
-    })
-    // Give the mount rule a path and it is on the other axis, where
-    // being deeper is what lets it carve out the exception.
-    const scopedRule: CommandRule = {
-      reason: 'branches need a nod',
-      commands: ['git branch'],
-      paths: ['/repo/wip/*'],
-      mount: '/repo',
-    }
-    const carved = new PermissionsPolicy(
-      new Sessions({ s: { allow: null, ask: [scopedRule], deny: [deny] } }),
-    )
-    expect(
-      carved.preCommand(
-        ctx('git', ['branch', '/repo/wip/x'], {
-          paths: [path('/repo/wip/x')],
-          cwd: '/repo',
-          program: ['git', 'branch'],
-        }),
-      ),
-    ).toMatchObject({ kind: 'ask', reason: 'branches need a nod' })
-  })
-
-  it('an ask rule speaks after every deny', () => {
-    const p = policy()
-    // A line an ask rule covers, refused by nothing: the Ask names the
-    // rule so the entry point can key a session grant on it.
-    expect(
-      p.preCommand(
-        ctx('git', ['push', 'origin', 'main'], { cwd: '/scratch', program: ['git', 'push'] }),
-      ),
-    ).toEqual({ kind: 'ask', reason: 'sign-off', rule: ASK_PUSH, rules: [ASK_PUSH] })
-    // Deny runs first: on the mount the same line is refused, and a
-    // grant could never re-open it because no Ask is raised.
-    expect(p.preCommand(ctx('git', ['push'], { cwd: '/repo', program: ['git', 'push'] }))).toEqual({
-      kind: 'deny',
-      reason: 'history is read-only here',
-      rule: MOUNT_DENY,
-      matched: { command: ['git', 'push'], flags: [] },
-    })
-    // An ask rule with paths asks only when the line names the path.
-    const shared: AdmissionRules = {
-      allow: null,
-      ask: [{ reason: 'shared', commands: ['rm'], paths: ['/repo/shared/*'] }],
-      deny: [],
-    }
-    const perms = new PermissionsPolicy(new Sessions({ s: shared }))
-    expect(
-      perms.preCommand(ctx('rm', ['/repo/shared/a'], { paths: [path('/repo/shared/a')] })),
-    ).toEqual({ kind: 'ask', reason: 'shared', rule: shared.ask[0], rules: [shared.ask[0]] })
-    expect(perms.preCommand(ctx('rm', ['/repo/b'], { paths: [path('/repo/b')] }))).toBeNull()
-  })
-
-  it('preVfs holds the pure path rules', () => {
-    const p = policy()
-    const locked: VfsContext = {
-      call: callOf('write'),
-      path: path('/repo/locked/a'),
-      write: true,
-      prefix: '/repo/',
-      sessionId: 's',
-    }
-    expect(p.preVfs(locked)).toEqual({ kind: 'deny', reason: 'frozen', rule: FULL.deny[2] })
-    // Command-scoped rules do not reach the dispatcher: an op does not
-    // know which command issued it.
-    expect(
-      p.preVfs({
-        call: callOf('unlink'),
-        path: path('/repo/x'),
-        write: true,
-        prefix: '/repo/',
-        sessionId: 's',
-      }),
-    ).toBeNull()
+    expect(judge(p, ['rm', '/scratch/x'])).toBeNull()
   })
 
   it('seeded in a Policies chain after the builtins', async () => {
     const policies = new Policies([policy()])
-    expect(
-      await policies.preCommand(ctx('git', ['push'], { cwd: '/repo', program: ['git', 'push'] })),
-    ).toEqual({
-      kind: 'deny',
-      reason: 'history is read-only here',
-      policy: 'PermissionsPolicy',
-      rule: MOUNT_DENY,
-      matched: { command: ['git', 'push'], flags: [] },
-    })
-    expect(policies.wants('preVfs')).toBe(true)
-  })
-
-  it('speaks at the dispatcher only through a pure path rule', async () => {
-    const p = policy()
-    expect(await p.wantsFor('preVfs', 's')).toBe(true)
-    expect(await p.wantsFor('preVfs', 'rev')).toBe(false)
-    expect(await p.wantsFor('preVfs', 'nobody')).toBe(false)
-    expect(await p.wantsFor('preCommand', 'rev')).toBe(true)
-    expect(await new Policies([p]).wantsFor('preVfs', 'rev')).toBe(false)
+    const deny = await policies.preCommand(line(['cp', 'a', 'b'], { cwd: '/repo', sessionId: 's' }))
+    expect(deny?.kind).toBe('deny')
+    expect(deny?.reason).toBe('read-only')
+    expect(deny?.policy).toBe('PermissionsPolicy')
+    expect(policies.wants('preVfs')).toBe(false)
   })
 })

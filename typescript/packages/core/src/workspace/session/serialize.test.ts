@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { CommandRule, AdmissionRules, Decision, ProfileScript } from '../../policy/types.ts'
+import type { CommandRule, Decision, ProfileScript } from '../../policy/types.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import {
   commandsFromDict,
@@ -27,49 +27,70 @@ import {
   scriptToDict,
 } from './serialize.ts'
 import { ScriptSource } from '../../runtime/types.ts'
+import { trees } from '../../test-utils.ts'
+import { OLDER_FORMAT } from './constants.ts'
 
 describe('session record codecs', () => {
-  it('a rule round-trips and writes mount only when set', () => {
-    const bare: CommandRule = { reason: 'no', commands: ['rm'] }
-    const data = ruleToDict(bare)
-    expect(data).toEqual({ reason: 'no', commands: ['rm'], paths: [] })
-    expect(ruleFromDict(data)).toEqual({ reason: 'no', commands: ['rm'], paths: [], mount: '' })
-    const scoped: CommandRule = {
+  it('a rule round-trips and writes its optional fields only when set', () => {
+    const leaf: CommandRule = {
       reason: 'ro',
-      commands: ['git push'],
+      decision: Outcome.DENY,
+      at: '/git/push/*',
       paths: ['/repo/*'],
       mount: '/repo',
     }
-    expect(ruleToDict(scoped).mount).toBe('/repo')
-    expect(ruleFromDict(ruleToDict(scoped))).toEqual(scoped)
-    // A record written before a field existed reads with the default.
-    expect(ruleFromDict({ reason: 'x' })).toEqual({
-      reason: 'x',
-      commands: [],
+    const data = ruleToDict(leaf)
+    expect(data).toEqual({
+      reason: 'ro',
+      decision: 'deny',
+      paths: ['/repo/*'],
+      at: '/git/push/*',
+      mount: '/repo',
+    })
+    expect(ruleFromDict(data)).toEqual({ ...leaf, commands: [] })
+    const coded: CommandRule = { reason: 'no', commands: ['rm'] }
+    expect(ruleToDict(coded)).toEqual({ reason: 'no', paths: [], commands: ['rm'] })
+    expect(ruleFromDict(ruleToDict(coded))).toEqual({
+      reason: 'no',
+      decision: Outcome.ASK,
+      at: '',
       paths: [],
       mount: '',
+      commands: ['rm'],
     })
   })
 
-  it('a command tier round-trips and keeps an absent allow list', () => {
-    const spec: AdmissionRules = {
-      allow: ['ls', 'git log'],
-      ask: [{ reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }],
-      deny: [{ reason: 'no', commands: ['rm'], paths: [], mount: '' }],
-    }
-    expect(commandsFromDict(commandsToDict(spec))).toEqual(spec)
-    const unlisted: AdmissionRules = {
-      allow: null,
-      ask: [],
-      deny: [{ reason: 'x', commands: [], paths: [], mount: '' }],
-    }
-    const data = commandsToDict(unlisted)
-    expect(data.allow).toBeNull()
-    expect(commandsFromDict(data)).toEqual(unlisted)
+  it('command trees round-trip with their mounts', () => {
+    const spec = trees(
+      { '*': 'deny', ls: 'allow', rm: { '-r': 'ask' } },
+      { '/repo': { git: { push: 'deny' } } },
+      { cp: 'deny' },
+    )
+    const data = commandsToDict(spec)
+    expect(data).toEqual([
+      { mount: '', commands: { '*': 'deny', ls: 'allow', rm: { '--recursive': 'ask' } } },
+      { mount: '/repo', commands: { git: { push: 'deny' } } },
+      { mount: '', commands: { cp: 'deny' }, inline: true },
+    ])
+    expect(commandsFromDict(data)).toEqual(spec)
+    expect(commandsFromDict(undefined)).toBeNull()
+  })
+
+  it('flat rules read back as the closed tree', () => {
+    const flat = { allow: ['ls'], ask: [], deny: [] }
+    expect(commandsFromDict(undefined, flat)).toEqual(OLDER_FORMAT)
+    expect(commandsFromDict(commandsToDict(trees({})), flat)).toEqual(trees({}))
   })
 
   it('a decision round-trips', () => {
-    const rule: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
+    const rule: CommandRule = {
+      reason: 'sign-off',
+      decision: Outcome.ASK,
+      at: '',
+      commands: ['git push'],
+      paths: [],
+      mount: '',
+    }
     const record: Decision = {
       id: 'd1',
       sessionId: 'agent',

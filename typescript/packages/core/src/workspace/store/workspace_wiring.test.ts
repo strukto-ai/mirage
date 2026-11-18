@@ -19,6 +19,7 @@ import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
+import { trees } from '../../test-utils.ts'
 
 const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -149,13 +150,18 @@ describe('Workspace on a WorkspaceStateStore', () => {
       const provisional = attached.defaultSessionId
       const requested = target === 'default' ? provisional : 'named'
       const expected = target === 'default' ? writer.defaultSessionId : 'named'
-      const session = await attached.setSessionProfile(requested, { commands: { allow: ['cat'] } })
+      const session = await attached.setSessionProfile(
+        requested,
+        SessionProfile({ commands: { '*': 'deny', cat: 'allow' } }),
+      )
       expect(session.sessionId).toBe(expected)
       expect(attached.defaultSessionId).toBe(writer.defaultSessionId)
       expect(attached.defaultSessionId).not.toBe(provisional)
-      expect(session.commands?.allow).toEqual(['cat'])
+      expect(session.commands).toEqual(trees({ '*': 'deny', cat: 'allow' }))
       const persisted = await store.sessions('shared').load()
-      expect(persisted.get(expected)?.commands).toMatchObject({ allow: ['cat'] })
+      expect(persisted.get(expected)?.command_trees).toEqual([
+        { mount: '', commands: { '*': 'deny', cat: 'allow' } },
+      ])
     },
   )
 
@@ -173,7 +179,10 @@ describe('Workspace on a WorkspaceStateStore', () => {
     })
     const session = ws.getSession(ws.defaultSessionId)
     const commands = session.commands
-    const changing = ws.setSessionProfile(ws.defaultSessionId, { commands: { allow: ['cat'] } })
+    const changing = ws.setSessionProfile(
+      ws.defaultSessionId,
+      SessionProfile({ commands: { '*': 'deny', cat: 'allow' } }),
+    )
     const refused = expect(changing).rejects.toThrow('Workspace is closed')
     try {
       await entered.promise

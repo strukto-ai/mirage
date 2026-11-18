@@ -32,18 +32,10 @@ import {
   commandLimitsToJSON,
   parseCommandLimits,
 } from './builtin/output_cap.ts'
-import {
-  CTX_ENV,
-  DEFAULT_ASK_REASON,
-  DEFAULT_DENY_REASON,
-  METHODS,
-  PROGRAM_RUNTIME,
-} from './constants.ts'
+import { CTX_ENV, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import {
   type AdmissionRules,
-  AllowFlags,
   type CommandNode,
-  type CommandRule,
   type HideReason,
   type OptionRule,
   type ProfileScript,
@@ -83,38 +75,6 @@ export interface VarsBlock {
 }
 
 /**
- * `commands:` at the top level of a profile. `allow` lists the command
- * patterns the profile allows; a line no pattern covers is refused,
- * `<cmd>: Permission denied` at 126, like any other rule's Deny. Shell
- * builtins are subjects like everything else: a list stating only `cat`
- * refuses `echo` and `cd`. The agent's own functions are the one exemption, safe because
- * every line of a body passes the gate itself. `ask` rules are admitted
- * only with a host approval; `deny` rules refuse with a reason. A bare
- * string in either is one command pattern with the default reason.
- * `allow` null or absent (unstated) allows everything; an entry is a
- * pattern, or `{command, flags}`, which runs the command only with options
- * from the set.
- */
-export interface CommandsBlock {
-  readonly allow?: readonly (string | AllowFlags)[] | null
-  readonly ask?: readonly CommandRule[]
-  readonly deny?: readonly CommandRule[]
-}
-
-/**
- * `commands:` of one mount section: `ask` and `deny` only. A mount rule
- * applies to a line that works inside the mount (its cwd or one of its
- * paths lies under the root); its `paths` are absolute, like every other
- * path in the document, and must name something under that root. There
- * is no `allow` here: what a session can see is a property of the
- * session, and an operand cannot make a command "not found".
- */
-export interface MountCommandsBlock {
-  readonly ask?: readonly CommandRule[]
-  readonly deny?: readonly CommandRule[]
-}
-
-/**
  * One mount's entry in a profile: what this profile may do there. Every field
  * is optional, and an omitted mount is not a refusal: the mount is
  * reachable at the mode it declares in the workspace's `mounts:`, which
@@ -122,16 +82,15 @@ export interface MountCommandsBlock {
  * not touch a mount hides it, so the mount reads as nonexistent rather
  * than as a permission error naming something the profile cannot see.
  *
- * `commands` here carries ask and deny only: an allow list installs a
- * command for the whole session, and visibility is answered before any
- * operand exists, so it cannot be per mount. Rules written here apply to
- * a line that works inside this mount, by cwd or by operand, which is
- * what a path-scoped rule cannot express (`cd /repo && git commit` names
- * no path).
+ * `commands` here is a command tree of its own. It applies to a line
+ * that works inside this mount, by cwd or by a path it names, which a
+ * path-scoped leaf cannot express (`cd /repo && git commit` names no
+ * path). It is judged beside the top-level tree and the strictest
+ * result wins, so it only tightens.
  */
 export interface ProfileMount {
   readonly mode?: MountMode | null
-  readonly commands?: MountCommandsBlock | null
+  readonly commands?: CommandNode | null
   readonly paths?: PathsBlock | null
 }
 
@@ -170,7 +129,7 @@ export interface SessionProfile {
   readonly mounts?: ReadonlyMap<string, ProfileMount> | null
   readonly paths?: PathsBlock | null
   readonly vars?: VarsBlock | null
-  readonly commands?: CommandsBlock | null
+  readonly commands?: CommandNode | null
   /**
    * The profile's policy: for each method it answers at (`preExecute`,
    * `preCommand`, `preVfs`, `preNetwork` and their `post` twins;
@@ -320,21 +279,6 @@ function underMount(entries: readonly string[], root: string, where: string): vo
   validateDocument('under', entries, where, { root })
 }
 
-/**
- * Coerce a `deny` or `ask` list to its rules. A bare string is one
- * command pattern over the whole line, with the arm's default reason. A
- * mapping carries `reason` (defaulting) and exactly one of: `commands`, a
- * whole-line rule on each pattern; `command` with `paths`, one pattern on
- * those paths; `paths` alone, a path rule on every command. A list of
- * commands beside a list of paths is refused, because it does not say
- * which command the paths belong to, and a rule naming neither is refused
- * rather than read as "every command".
- */
-function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
-  const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
-  return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
-}
-
 interface ValueDoc {
   decision: RuleLeaf[]
   options: Record<string, OptionDoc>
@@ -466,27 +410,6 @@ export function treeDoc(tree: CommandNode): Record<string, unknown> {
   return Object.fromEntries(doc)
 }
 
-/**
- * Coerce `commands.allow` to its entries: a pattern string, or a
- * `{command, flags}` entry that runs the command only with options from
- * the set.
- */
-function parseAllow(raw: unknown, where: string): readonly (string | AllowFlags)[] | null {
-  if (raw === undefined || raw === null) return null
-  const written = Array.isArray(raw)
-    ? raw.map((entry: unknown) =>
-        entry instanceof AllowFlags ? { command: entry.command, flags: [...entry.flags] } : entry,
-      )
-    : raw
-  const entries = validateDocument('allow', written, `${where}.allow`) as (
-    | string
-    | { command: string; flags: string[] }
-  )[]
-  return entries.map((entry) =>
-    typeof entry === 'string' ? entry : new AllowFlags(entry.command, entry.flags),
-  )
-}
-
 /** Validate a `paths:` block. Every entry is absolute or a name pattern. */
 export function PathsBlock(raw: unknown, where = 'paths'): PathsBlock {
   return validateDocument('paths', raw, where) as PathsBlock
@@ -498,23 +421,22 @@ export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
-export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
-  const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, ['allow', 'ask', 'deny'], where)
-  const ask = rules(obj.ask, where, 'ask')
-  const deny = rules(obj.deny, where, 'deny')
-  // This block is the profile's own, never a mount section's, so a rule's
-  // paths are virtual paths: absolute, or name patterns.
-  for (const rule of ask) absolutePaths(rule.paths ?? [], `${where}.ask rule paths`)
-  for (const rule of deny) absolutePaths(rule.paths ?? [], `${where}.deny rule paths`)
-  return { allow: parseAllow(obj.allow, where), ask, deny }
+function optionPaths(rule: OptionRule): string[] {
+  const out = rule.decision.flatMap((leaf) => [...leaf.paths])
+  for (const value of rule.values.values()) {
+    for (const leaf of value.decision) out.push(...leaf.paths)
+    for (const inner of value.options.values()) out.push(...optionPaths(inner))
+  }
+  for (const inner of rule.options.values()) out.push(...optionPaths(inner))
+  return out
 }
 
-/** Validate a mount section's `commands:` block (`ask` and `deny` only). */
-export function MountCommandsBlock(raw: unknown, where = 'commands'): MountCommandsBlock {
-  const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, ['ask', 'deny'], where)
-  return { ask: rules(obj.ask, where, 'ask'), deny: rules(obj.deny, where, 'deny') }
+function leafPaths(node: CommandNode): string[] {
+  const out = [...node.decision, ...node.otherOptions].flatMap((leaf) => [...leaf.paths])
+  for (const rule of node.options.values()) out.push(...optionPaths(rule))
+  for (const child of [...node.subcommands.values(), ...node.operands.values()])
+    out.push(...leafPaths(child))
+  return out
 }
 
 /** Validate one `mounts.<prefix>` section of a profile. */
@@ -522,7 +444,7 @@ export function ProfileMount(raw: unknown, root: string, where: string): Profile
   // A bare mode string is sugar for the section that carries only a mode.
   const obj = typeof raw === 'string' ? { mode: raw } : asObject(raw, where)
   rejectUnknownKeys(obj, ['mode', 'commands', 'paths'], where)
-  const out: { mode?: MountMode | null; commands?: MountCommandsBlock; paths?: PathsBlock } = {}
+  const out: { mode?: MountMode | null; commands?: CommandNode; paths?: PathsBlock } = {}
   if (obj.mode !== undefined && obj.mode !== null) {
     if (typeof obj.mode !== 'string') throw new Error(`${where}.mode must be a mode name or alias`)
     out.mode = parseMountMode(obj.mode)
@@ -538,11 +460,10 @@ export function ProfileMount(raw: unknown, root: string, where: string): Profile
     out.paths = paths
   }
   if (obj.commands !== undefined && obj.commands !== null) {
-    const commands = MountCommandsBlock(obj.commands, `${where}.commands`)
-    for (const rule of commands.ask ?? [])
-      underMount(rule.paths ?? [], root, `${where}.commands.ask`)
-    for (const rule of commands.deny ?? [])
-      underMount(rule.paths ?? [], root, `${where}.commands.deny`)
+    const commands = commandTree(obj.commands, `${where}.commands`)
+    const paths = leafPaths(commands)
+    absolutePaths(paths, `${where}.commands paths`)
+    underMount(paths, root, `${where}.commands paths`)
     out.commands = commands
   }
   return out
@@ -733,7 +654,7 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     mounts?: ReadonlyMap<string, ProfileMount> | null
     paths?: PathsBlock | null
     vars?: VarsBlock | null
-    commands?: CommandsBlock | null
+    commands?: CommandNode | null
     policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: Partial<ProcessPermissions>
@@ -780,8 +701,11 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
   if (obj.paths !== undefined && obj.paths !== null)
     out.paths = PathsBlock(obj.paths, `${where}.paths`)
   if (obj.vars !== undefined && obj.vars !== null) out.vars = VarsBlock(obj.vars, `${where}.vars`)
-  if (obj.commands !== undefined && obj.commands !== null)
-    out.commands = CommandsBlock(obj.commands, `${where}.commands`)
+  if (obj.commands !== undefined && obj.commands !== null) {
+    const commands = commandTree(obj.commands, `${where}.commands`)
+    absolutePaths(leafPaths(commands), 'commands paths')
+    out.commands = commands
+  }
   return out
 }
 
@@ -836,7 +760,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
     )
   }
   if (profile.paths != null) doc.paths = pathsDoc(profile.paths)
-  if (profile.commands != null) doc.commands = commandsDoc(profile.commands)
+  if (profile.commands != null) doc.commands = treeDoc(profile.commands)
   return doc
 }
 
@@ -875,7 +799,7 @@ function mountDoc(entry: ProfileMount): Record<string, unknown> {
   const doc: Record<string, unknown> = {}
   if (entry.mode != null) doc.mode = entry.mode
   if (entry.paths != null) doc.paths = pathsDoc(entry.paths)
-  if (entry.commands != null) doc.commands = commandsDoc(entry.commands)
+  if (entry.commands != null) doc.commands = treeDoc(entry.commands)
   return doc
 }
 
@@ -893,31 +817,4 @@ function pathsDoc(block: PathsBlock): Record<string, unknown> {
     show: Object.fromEntries(show),
     reasons: (block.reasons ?? []).map((g) => ({ patterns: [...g.patterns], reason: g.reason })),
   }
-}
-
-function commandsDoc(block: CommandsBlock | MountCommandsBlock): Record<string, unknown> {
-  const doc: Record<string, unknown> = {
-    ask: (block.ask ?? []).flatMap(ruleDocs),
-    deny: (block.deny ?? []).flatMap(ruleDocs),
-  }
-  if ('allow' in block && block.allow != null)
-    doc.allow = block.allow.map((entry) =>
-      typeof entry === 'string' ? entry : { command: entry.command, flags: [...entry.flags] },
-    )
-  return doc
-}
-
-/**
- * A rule as document entries. One naming commands and paths is written
- * one command per entry, each on the rule's paths, which admits exactly
- * what the one rule did.
- */
-function ruleDocs(rule: CommandRule): Record<string, unknown>[] {
-  const commands = rule.commands ?? []
-  const paths = rule.paths ?? []
-  if (commands.length > 0 && paths.length > 0) {
-    return commands.map((command) => ({ reason: rule.reason, command, paths: [...paths] }))
-  }
-  if (paths.length > 0) return [{ reason: rule.reason, paths: [...paths] }]
-  return [{ reason: rule.reason, commands: [...commands] }]
 }

@@ -18,6 +18,7 @@ import { MountMode } from '../../../../types.ts'
 import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { buildRuntime } from '../../../../runtime/table.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
 
 // Direct port of tests/workspace/executor/builtins/test_exec_path.py: a
 // slash-carrying head word runs the file, bash's loader rule.
@@ -128,12 +129,11 @@ describe('direct path execution', () => {
     expect(stderrStr(b)).toBe('+ echo b\n')
   })
 
-  it('a path guard sees the executed file', async () => {
-    // The executed file lives in argv[0], not the operands, so the
-    // admission context must carry it or a path-pattern guard never
-    // fires on direct execution. Seeding runs through an unguarded
-    // workspace sharing the VFS, since a command-less guard also
-    // seals the op layer.
+  it('a hide sees the executed file', async () => {
+    // The executed file lives in argv[0], not the operands, so a hide
+    // must reach it there or direct execution would run a hidden script.
+    // The script is seeded through a workspace without the hide, sharing
+    // the same VFS.
     const prod = new RAMVFS()
     const seed = new Workspace({ '/data/': prod }, { mode: MountMode.WRITE })
     await seed.shell('mkdir -p /data/prod')
@@ -145,21 +145,16 @@ describe('direct path execution', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: {
-            commands: {
-              deny: [{ reason: 'production scripts are sealed', paths: ['/data/prod/*'] }],
-            },
-          },
+          default: SessionProfile({ paths: { hide: ['/data/prod/run.sh'] } }),
         },
       },
     )
-    const refused = await ws.shell('/data/prod/run.sh')
-    expect(refused.exitCode).toBe(1)
-    expect(refused.decision?.reason).toContain('production scripts are sealed')
-    expect(stdoutStr(refused)).toBe('')
-    const relative = await ws.shell('cd /data/prod && ./run.sh')
-    expect(relative.exitCode).toBe(1)
-    expect(relative.decision?.reason).toContain('production scripts are sealed')
+    for (const line of ['/data/prod/run.sh', 'cd /data/prod && ./run.sh']) {
+      const result = await ws.shell(line)
+      expect(result.exitCode).toBe(127)
+      expect(stderrStr(result)).toContain('No such file or directory')
+      expect(stdoutStr(result)).toBe('')
+    }
     const outside = await ws.shell('/data/ok.sh')
     expect(outside.exitCode).toBe(0)
     expect(stdoutStr(outside)).toBe('fine\n')
@@ -170,7 +165,9 @@ it('virtual programs need only their own permission, including through links', a
   const ws = makeWs()
   try {
     await ws.shell('ln -s /usr/bin/echo /work/say')
-    ws.createSession('narrow', { profile: { commands: { allow: ['echo'] } } })
+    ws.createSession('narrow', {
+      profile: SessionProfile({ commands: { '*': 'deny', echo: 'allow' } }),
+    })
     for (const path of ['/usr/bin/echo', '/usr/bin/../bin/echo', '/work/say']) {
       const io = await ws.shell(`${path} 'two words'`, { sessionId: 'narrow' })
       expect(io.exitCode).toBe(0)
@@ -187,9 +184,9 @@ it('virtual programs still check the target command policy', async () => {
   const ws = makeWs()
   try {
     ws.createSession('narrow', {
-      profile: {
-        commands: { allow: ['echo'], deny: [{ reason: 'blocked', commands: ['echo blocked'] }] },
-      },
+      profile: SessionProfile({
+        commands: { '*': 'deny', echo: { '*': 'allow', operands: { blocked: 'deny' } } },
+      }),
     })
     const io = await ws.shell('/usr/bin/echo blocked', { sessionId: 'narrow' })
     expect(io.exitCode).toBe(126)

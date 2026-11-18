@@ -258,7 +258,9 @@ describe('vfsMd', () => {
       { '/': [new RAMVFS(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { deny: ['rm', 'grep', 'tree'] } }) },
+        profiles: {
+          default: SessionProfile({ commands: { rm: 'deny', grep: 'deny', tree: 'deny' } }),
+        },
       },
     )
     const markdown = await ws.vfsMd()
@@ -313,7 +315,7 @@ describe('vfsMd', () => {
       { '/docs': [gdocs(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { deny: ['rg'] } }) },
+        profiles: { default: SessionProfile({ commands: { rg: 'deny' } }) },
       },
     )
     const markdown = await ws.vfsMd()
@@ -328,7 +330,7 @@ describe('vfsMd', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: SessionProfile({ commands: { deny: [{ command: 'rm', paths: ['/data/*'] }] } }),
+          default: SessionProfile({ commands: { rm: { decision: 'deny', paths: ['/data/*'] } } }),
         },
       },
     )
@@ -343,7 +345,7 @@ describe('vfsMd', () => {
       { '/': [new RAMVFS(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { allow: ['cat'] } }) },
+        profiles: { default: SessionProfile({ commands: { '*': 'deny', cat: 'allow' } }) },
       },
     )
     expect(row(await ws.vfsMd(), SUPPORTED, '/')).toBe(
@@ -351,12 +353,16 @@ describe('vfsMd', () => {
     )
   })
 
-  it('counts a longer form the allow list names', async () => {
+  it('counts a command an option only tightens', async () => {
     const ws = new Workspace(
       { '/docs': [gdocs(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { allow: ['cat', 'rm -f'] } }) },
+        profiles: {
+          default: SessionProfile({
+            commands: { '*': 'deny', cat: 'allow', rm: { '*': 'allow', '-r': 'deny' } },
+          }),
+        },
       },
     )
     const markdown = await ws.vfsMd()
@@ -366,32 +372,19 @@ describe('vfsMd', () => {
     )
   })
 
-  it('keeps the denied words inside a longer form', async () => {
+  it('names no option the tree denies', async () => {
     const ws = new Workspace(
       { '/docs': [gdocs(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: { allow: ['cat', 'grep * needle'], deny: ['grep -r'] },
+            commands: { '*': 'deny', cat: 'allow', grep: { '*': 'allow', '-r': 'deny' } },
           }),
         },
       },
     )
     expect(await ws.vfsMd()).not.toContain('`grep -r`')
-  })
-
-  it('counts no help request as a write', async () => {
-    const ws = new Workspace(
-      { '/docs': [gdocs(), MountMode.WRITE] },
-      {
-        mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { allow: ['cat', 'rm --help'] } }) },
-      },
-    )
-    const markdown = await ws.vfsMd()
-    expect(markdown).toContain('| `/docs` | `gdocs`, read |')
-    expect(row(markdown, SUPPORTED, '/docs')).not.toContain('`rm`')
   })
 
   it('names no search whose whole-word form is denied', async () => {
@@ -400,7 +393,9 @@ describe('vfsMd', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: SessionProfile({ commands: { deny: ['grep -r -w', 'rg -w'] } }),
+          default: SessionProfile({
+            commands: { grep: { '-r': { '-w': 'deny' } }, rg: { '-w': 'deny' } },
+          }),
         },
       },
     )
@@ -430,7 +425,9 @@ describe('vfsMd', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: SessionProfile({ commands: { allow: ['cat', 'notes show'] } }),
+          default: SessionProfile({
+            commands: { '*': 'deny', cat: 'allow', notes: { show: 'allow' } },
+          }),
         },
       },
     )
@@ -445,7 +442,9 @@ describe('vfsMd', () => {
       { '/docs': [gdocs(), MountMode.WRITE] },
       {
         mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ commands: { allow: ['cat', 'unlink'] } }) },
+        profiles: {
+          default: SessionProfile({ commands: { '*': 'deny', cat: 'allow', unlink: 'allow' } }),
+        },
       },
     )
     const markdown = await ws.vfsMd()
@@ -509,15 +508,17 @@ describe('vfsMd', () => {
   })
 
   it('judges tee -a by its own ops', async () => {
-    const ws = await seeded(['write'], new RAMVFS(), { commands: { allow: ['cat', 'tee -a'] } })
+    const ws = await seeded(['write'], new RAMVFS(), {
+      commands: { '*': 'deny', cat: 'allow', tee: 'allow' },
+    })
     const markdown = await ws.vfsMd()
     expect(row(markdown, SUPPORTED, '/m')).toContain('`tee -a`')
-    expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`\. /)
+    expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`, `tee`\. /)
   })
 
   it('counts rm -r on a file where only unlink works', async () => {
     const ws = await seeded(['write', 'append', 'rmdir', 'rm_r'], new RAMVFS(), {
-      commands: { allow: ['cat', 'rm -r'] },
+      commands: { '*': 'deny', cat: 'allow', rm: 'allow' },
     })
     expect(row(await ws.vfsMd(), '', '/m')).toBe('write')
     expect((await ws.shell('rm -r /m/f')).exitCode).toBe(0)
@@ -528,7 +529,7 @@ describe('skillMd', () => {
   it('lists the CLIs the profile allows', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
-      { profiles: { default: SessionProfile({ commands: { deny: ['hidden'] } }) } },
+      { profiles: { default: SessionProfile({ commands: { hidden: 'deny' } }) } },
     )
     for (const name of ['shown', 'hidden'])
       ws.registerCli(
@@ -549,7 +550,11 @@ describe('skillMd', () => {
   it('keeps the path to an allowed leaf', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
-      { profiles: { default: SessionProfile({ commands: { allow: ['gws drive list'] } }) } },
+      {
+        profiles: {
+          default: SessionProfile({ commands: { '*': 'deny', gws: { drive: { list: 'allow' } } } }),
+        },
+      },
     )
     ws.registerCli('gws', gws())
     const skill = await ws.skillMd()
@@ -562,7 +567,11 @@ describe('skillMd', () => {
   it('keeps the options of a group above an allowed leaf', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
-      { profiles: { default: SessionProfile({ commands: { allow: ['tool run'] } }) } },
+      {
+        profiles: {
+          default: SessionProfile({ commands: { '*': 'deny', tool: { run: 'allow' } } }),
+        },
+      },
     )
     ws.registerCli('tool', TOOL)
     const skill = await ws.skillMd()
@@ -576,7 +585,7 @@ describe('skillMd', () => {
       { '/': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
-          default: SessionProfile({ paths: { hide: ['/vault'] }, commands: { allow: ['*'] } }),
+          default: SessionProfile({ paths: { hide: ['/vault'] }, commands: { '*': 'allow' } }),
         },
       },
     )
@@ -584,12 +593,12 @@ describe('skillMd', () => {
     expect(await ws.skillMd()).toMatch(/No CLIs are registered\.\n$/)
   })
 
-  it('keeps a leaf its allow list names with arguments', async () => {
+  it('keeps a leaf its tree allows', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
-          default: SessionProfile({ commands: { allow: ['gws drive list --id'] } }),
+          default: SessionProfile({ commands: { '*': 'deny', gws: { drive: { list: 'allow' } } } }),
         },
       },
     )
@@ -640,7 +649,11 @@ describe('skillMd', () => {
   it('stops below the top where the profile allows only a group', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
-      { profiles: { default: SessionProfile({ commands: { allow: ['gws drive'] } }) } },
+      {
+        profiles: {
+          default: SessionProfile({ commands: { '*': 'deny', gws: { drive: 'allow' } } }),
+        },
+      },
     )
     ws.registerCli('gws', gws())
     const skill = await ws.skillMd()
@@ -655,7 +668,7 @@ describe('skillMd', () => {
       {
         profiles: {
           default: SessionProfile({
-            commands: { allow: ['gws drive'], deny: ['gws drive delete'] },
+            commands: { '*': 'deny', gws: { drive: { '*': 'allow', delete: 'deny' } } },
           }),
         },
       },

@@ -112,14 +112,21 @@ describe('CLI dispatch e2e', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          crew: {
+          crew: SessionProfile({
             commands: {
-              allow: ['h1', 'h2', 'type'],
-              ask: [{ reason: 'outbound needs a nod', commands: ['h1 message send'] }],
-              deny: [{ reason: 'beta is read-only', commands: ['h2 message send'] }],
+              '*': 'deny',
+              h1: {
+                '*': 'allow',
+                message: { send: { decision: 'ask', reason: 'outbound needs a nod' } },
+              },
+              h2: {
+                '*': 'allow',
+                message: { send: { decision: 'deny', reason: 'beta is read-only' } },
+              },
+              type: 'allow',
             },
-          },
-          solo: { commands: { allow: ['h1', 'type'] } },
+          }),
+          solo: SessionProfile({ commands: { '*': 'deny', h1: 'allow', type: 'allow' } }),
         },
       },
     )
@@ -402,7 +409,7 @@ describe('policy cli fact', () => {
     }
   })
 
-  it('an account CLI under hides runs where the allow list names it', async () => {
+  it('an account CLI under hides runs where the tree names it', async () => {
     const hidden = { hide: ['/data/secret.txt'] }
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -410,28 +417,25 @@ describe('policy cli fact', () => {
         mode: MountMode.WRITE,
         profiles: {
           hides: { paths: hidden },
-          wildcard: { paths: hidden, commands: { allow: ['*'] } },
-          other: { paths: hidden, commands: { allow: ['*', 'sl message send --to y'] } },
-          named: { paths: hidden, commands: { allow: ['*', 'sl'] } },
+          wildcard: SessionProfile({ paths: hidden, commands: { '*': 'allow' } }),
+          named: SessionProfile({ paths: hidden, commands: { '*': 'allow', sl: 'allow' } }),
         },
       },
     )
     ws.registerCli('sl', makeTree(), { token: 'tok' })
     ws.registerCli('peek', PEEK)
     await ws.shell('echo top > /data/secret.txt')
-    for (const name of ['hides', 'wildcard', 'other', 'named']) {
+    for (const name of ['hides', 'wildcard', 'named']) {
       ws.createSession(name, { profile: name })
     }
     try {
-      for (const name of ['hides', 'wildcard', 'other']) {
+      for (const name of ['hides', 'wildcard']) {
         const refused = await ws.shell('sl message send -t x hi', { sessionId: name })
         expect([refused.exitCode, refused.stderrText]).toEqual([126, 'sl: Permission denied\n'])
         expect(refused.decision?.reason).toBe('sl message send is not allowed')
         const agent = await ws.session(name)
         const said = await agent.explain.shell('sl message send -t x hi')
-        expect(said.node.children).toMatchObject([
-          { outcome: Outcome.DENY, source: 'commands.allow' },
-        ])
+        expect(said.node.children).toMatchObject([{ outcome: Outcome.DENY, source: 'commands' }])
       }
       const named = await ws.shell('sl message send -t x hi', { sessionId: 'named' })
       expect([named.exitCode, dec.decode(named.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
@@ -452,18 +456,8 @@ describe('policy cli fact', () => {
         profiles: {
           sealed: SessionProfile({
             commands: {
-              deny: [
-                {
-                  reason: 'sealed',
-                  command: 'peek',
-                  paths: ['/data/secret.txt'],
-                },
-                {
-                  reason: 'sealed',
-                  command: 'later',
-                  paths: ['/data/secret.txt'],
-                },
-              ],
+              peek: { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] },
+              later: { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] },
             },
           }),
         },
@@ -693,10 +687,10 @@ describe('a session hides reach what a CLI prints', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          hides: {
+          hides: SessionProfile({
             paths: { hide: ['/data/secret.txt'] },
-            commands: { allow: ['*', 'listing'] },
-          },
+            commands: { '*': 'allow', listing: 'allow' },
+          }),
         },
       },
     )
@@ -724,12 +718,12 @@ describe('a session hides reach what a CLI prints', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          hides: {
+          hides: SessionProfile({
             paths: { hide: ['/data/secret.txt'] },
-            commands: { allow: ['*', 'shelf'] },
-          },
+            commands: { '*': 'allow', shelf: 'allow' },
+          }),
           sealed: SessionProfile({
-            commands: { deny: [{ reason: 'sealed', command: 'shelf', paths: ['/data'] }] },
+            commands: { shelf: { decision: 'deny', reason: 'sealed', paths: ['/data'] } },
           }),
         },
       },

@@ -149,7 +149,12 @@ export async function answerOf(
   return { exitCode: done.exitCode, stdout: concat(out), stderr: concat(err) }
 }
 
-/** Map restrictions to owning mounts, not ancestors whose trees contain another mount. */
+/**
+ * Map file restrictions to their owning mounts, not ancestors whose trees
+ * contain another mount. A file restriction is a hide, a show entry with a
+ * mode, or a mount mode below exec. Command trees judge lines, not file
+ * ops, so they restrict no mount.
+ */
 export function restrictedMountsFor(session: SessionState, prefixes: readonly string[]): string[] {
   const hidden = session.visibility.paths
   const entries = [...(hidden?.paths ?? []), ...(hidden?.patterns ?? [])]
@@ -158,10 +163,6 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
       .filter((e) => e.mode !== null && e.mode !== 'exec')
       .map((e) => e.path),
   )
-  for (const rule of [...(session.commands?.ask ?? []), ...(session.commands?.deny ?? [])]) {
-    for (const item of rule.paths?.length ? rule.paths : rule.mount ? [rule.mount] : [])
-      entries.push(item)
-  }
   for (const [prefix, mode] of session.mountModes ?? []) if (mode !== 'exec') entries.push(prefix)
   const mounts = new Map(prefixes.map((p) => [p.replace(/\/+$/, '') || '/', p]))
   if (!mounts.has('/')) mounts.set('/', '/')

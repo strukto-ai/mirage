@@ -33,7 +33,6 @@ const DEC = new TextDecoder()
 
 const RESTRICTIONS: SessionProfile[] = [
   { paths: { hide: ['/data/secret'] } },
-  { commands: { deny: [{ paths: ['/data/secret'], reason: 'x' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
 interface Capture {

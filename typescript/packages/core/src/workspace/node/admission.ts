@@ -37,11 +37,10 @@ import {
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
-import { allowPatterns } from '../../policy/match/grammar.ts'
-import { splitPattern } from '../../policy/match/pattern.ts'
 import { ioReach, ioRefusal, namingRules } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
-import { CommandWord, type EntryGate } from '../../policy/types.ts'
+import { type CommandNode, CommandWord, type EntryGate } from '../../policy/types.ts'
+import type { Encoded } from '../../rs/policy.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
@@ -136,7 +135,7 @@ export class Admitted implements EntryGate {
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
   readonly route: Route | null
-  private namedRules: readonly number[] | null = null
+  private namedRules: Encoded | null | undefined = undefined
 
   constructor(init: {
     rules: AdmissionRules | null
@@ -168,10 +167,10 @@ export class Admitted implements EntryGate {
     return this.rules !== null && ioReach(this.rules, this.named(), virtual)
   }
 
-  // The rules that name the command (`namingRules`), asked on the first
-  // entry it reaches and kept for the rest of its run.
-  named(): readonly number[] {
-    this.namedRules ??= namingRules(this.rules, this.ctx)
+  // The command's walk through the trees (`namingRules`), asked on the
+  // first entry it reaches and kept for the rest of its run.
+  named(): Encoded | null {
+    if (this.namedRules === undefined) this.namedRules = namingRules(this.rules, this.ctx)
     return this.namedRules
   }
 
@@ -229,9 +228,9 @@ function seenWords(
  * The command plane's admission of one command: the policy chain, then
  * the approval ledger. The one gate every command class passes through,
  * in the tree (`runArgv`, once the words are expanded) and for a line a
- * runtime takes whole (`admitLine`, per parsed command). A word the
- * session's allow list leaves out is the profile's Deny, like any other
- * rule's; a path the session cannot see is
+ * runtime takes whole (`admitLine`, per parsed command). A word a
+ * closed tree names nothing for is the profile's Deny, like any other
+ * leaf's; a path the session cannot see is
  * dropped before any method, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
  * is answered by the entry point from the session's grants or the host.
@@ -280,7 +279,7 @@ export function redirectPaths(
  * reaches the host, which is what makes it safe for `explain`;
  * `admit` adds exactly those and renders.
  *
- * `intrinsic` keeps shell-provided operations subject to tool allow lists
+ * `intrinsic` keeps shell-provided operations subject to a tree's root
  * even when a function shadows their policy name. `unread` holds the
  * virtual paths a reader of the line's text cannot vouch for: what a word
  * only the runtime expands names, or a relative word after a `cd` it
@@ -293,13 +292,14 @@ export function redirectPaths(
  * empty outside a line.
  */
 /**
- * Whether the allow list refuses a CLI that reaches a service. Such a CLI
+ * Whether the profile leaves out a CLI that reaches a service. Such a CLI
  * (an account or script CLI) reaches its service by id, past every hide, so
- * under a profile that hides paths it runs only where an entry starting
- * with its own name matches the line. `*` does not count. An entry that
- * names the command closes it to the entries naming it, which the allow
- * list itself holds the line to, so what is left here is whether any entry
- * names it at all. Mirrors the Python `unlisted_service`.
+ * under a profile that hides paths it runs only where the profile's
+ * top-level tree names it at its root with an allow somewhere in that
+ * node. `*` does not count, and neither does inline permissions' tree,
+ * which only tightens. What the node says of the line is the tree's to
+ * judge, so what is left here is whether the profile names the command at
+ * all. Mirrors the Python `unlisted_service`.
  */
 export function unlistedService(
   ctx: CommandContext,
@@ -316,7 +316,19 @@ export function unlistedService(
     return false
   }
   const rules = session.commands
-  return rules === null || !allowPatterns(rules).some((p) => splitPattern(p)[0] === ctx.command)
+  return !rules?.trees.some((scoped) => {
+    const node =
+      scoped.mount || scoped.inline ? undefined : scoped.tree.subcommands.get(ctx.command)
+    return node !== undefined && yieldsAllow(node)
+  })
+}
+
+function yieldsAllow(node: CommandNode): boolean {
+  return (
+    node.decision.some((leaf) => leaf.decision === Outcome.ALLOW) ||
+    [...node.subcommands.values()].some(yieldsAllow) ||
+    [...node.operands.values()].some(yieldsAllow)
+  )
 }
 
 /**
@@ -506,7 +518,6 @@ export async function gate(
     tokens: [...reading.tokens],
     program: [...reading.program],
     read: reading.read,
-    grammar: reading.grammar,
     tool,
     walks: facts.walks,
     write,
@@ -615,9 +626,9 @@ export async function admit(
 
 /**
  * Admit a `[ ]` test, or one `[[ ]]` leaf, as the command it is: the shell
- * evaluates it itself, so no command gate saw its words, and a rule, an allow
- * list or a policy answers it by its own name as it answers `test` on the
- * same words. `name` is `[` or `[[`; `words` what it tests, expanded,
+ * evaluates it itself, so no command gate saw its words, and a tree or a
+ * policy answers it by its own name as it answers `test` on the same
+ * words. `name` is `[` or `[[`; `words` what it tests, expanded,
  * operators included; `signal` the run's abort signal; `claimant` the test
  * and its line, null outside a line. Throws `CondRefused` where the gate
  * refused it. Mirrors Python's admit_test.

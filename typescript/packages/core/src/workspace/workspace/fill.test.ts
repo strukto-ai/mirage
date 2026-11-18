@@ -88,7 +88,7 @@ class DenyLine implements Policy {
 // rules judge a line before it runs, so they keep a refused line's
 // secrets unfetched.
 function ruled(verb: 'deny' | 'ask', name: string, reason: string): SessionProfile {
-  return SessionProfile({ commands: { [verb]: [{ reason, commands: [name] }] } })
+  return SessionProfile({ commands: { [name]: { decision: verb, reason } } })
 }
 
 function makeWs(
@@ -1676,7 +1676,7 @@ describe('fillEnv through execute', () => {
         CLI_ROOT: { from: 'fake-cli-refused', ref: 'root' },
         CLI_ALPHA: { from: 'fake-cli-refused', ref: 'alpha' },
       },
-      SessionProfile({ paths: { hide: ['/secret'] }, commands: { allow: ['*'] } }),
+      SessionProfile({ paths: { hide: ['/secret'] }, commands: { '*': 'allow' } }),
     )
     try {
       const base = envCliSpec()
@@ -1693,14 +1693,16 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it('a glob the allow list may admit keeps its fetch', async () => {
-    // The allow list reads a glob unexpanded, and the run may expand it to
-    // the word a pattern names, so the command keeps its fetch.
+  it('a glob a tree may admit keeps its fetch', async () => {
+    // A tree reads a glob unexpanded, and the run may expand it to the
+    // operand a tree names, so the command keeps its fetch.
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
     registerSecrets('fake-cli-glob', FakeConfig, fetch)
     const ws = makeWs(
       { CLI_ROOT: { from: 'fake-cli-glob', ref: 'root' } },
-      SessionProfile({ commands: { allow: ['probe /open.txt'] } }),
+      SessionProfile({
+        commands: { '*': 'deny', probe: { operands: { '/open.txt': 'allow' } } },
+      }),
     )
     try {
       await ws.vfs.write('/open.txt', new Uint8Array())
@@ -1724,7 +1726,7 @@ describe('fillEnv through execute', () => {
         mode: MountMode.EXEC,
         machines: [new NiceBox()],
         env: { TOKEN: { from: 'fake-nice-box', ref: 'r' } },
-        profiles: { p: SessionProfile({ commands: { allow: ['nice'] } }) },
+        profiles: { p: SessionProfile({ commands: { '*': 'deny', nice: 'allow' } }) },
         profile: 'p',
       },
     )

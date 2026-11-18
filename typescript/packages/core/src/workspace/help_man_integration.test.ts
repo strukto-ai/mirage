@@ -20,6 +20,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 function makeWs(): Workspace {
   const r = new RAMVFS()
@@ -189,7 +190,9 @@ describe('--help and man through the executor', () => {
     // documents the whole tree.
     const ws = cliWs()
     ws.createSession('narrow', {
-      profile: { commands: { allow: ['man', 'linear issue', 'which'], ask: [], deny: [] } },
+      profile: SessionProfile({
+        commands: { '*': 'deny', man: 'allow', linear: { issue: 'allow' }, which: 'allow' },
+      }),
     })
     const page = stdoutStr(await ws.shell('man linear', { sessionId: 'narrow' }))
     expect(page).toContain('issue')

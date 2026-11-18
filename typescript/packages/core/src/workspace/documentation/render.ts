@@ -14,20 +14,18 @@
 
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
-import { standardRequest } from '../../commands/spec/standard.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { CommandSpecInit, UsageStyle } from '../../commands/spec/types.ts'
 import { effectivePathMode } from '../../context/session_context.ts'
 import { decide } from '../../policy/match/decide.ts'
-import { allowPatterns } from '../../policy/match/grammar.ts'
-import { patternReaches, splitPattern } from '../../policy/match/pattern.ts'
-import { Outcome } from '../../policy/types.ts'
+import { type CommandRead, Outcome } from '../../policy/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isGlob, pathVisible } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { readLine } from '../executor/command/reading.ts'
 import { unlistedService } from '../node/admission.ts'
 import type { SessionState } from '../session/session.ts'
 import { ASKS, CHANGES, INTRO, READS, REFUSED, WALKS } from './constants.ts'
@@ -71,79 +69,72 @@ function* listed(
 /**
  * Whether the session's profile lets a line of `words` run in `cwd`: the
  * documents name nothing the profile refuses. Empty `words` is a
- * redirection, which no rule names. `inside` names a file under `cwd`, so
- * that a rule written for paths there speaks; a CLI names none. `registry`
- * holds the CLIs, so that a CLI reaching a service is refused as execution
- * refuses it under a profile that hides paths; null for a file command.
+ * redirection, which no rule names. `registry` holds the mounts and CLIs,
+ * whose grammars read the line as execution reads it, and which refuse a
+ * CLI reaching a service as execution refuses it under a profile that
+ * hides paths. `inside` names a file under `cwd`, so that a rule written
+ * for paths there speaks; a CLI names none. `node` says `words` are a
+ * command tree's name and a subcommand path from its spec, judged as that
+ * node: the options a node requires are no part of the question, so no
+ * line is read.
  */
 function allowed(
   session: SessionState,
+  registry: MountRegistry,
   cwd: string,
   words: readonly string[],
   inside = false,
-  registry: MountRegistry | null = null,
+  node = false,
 ): boolean {
   const [command, ...argv] = words
   if (command === undefined) return true
   const paths = inside ? [PathSpec.fromStrPath(`${cwd.replace(/\/+$/, '')}/<file>`)] : []
   const facts = lineFacts(command, words, cwd)
+  let tokens: readonly string[]
+  let program: readonly string[]
+  let read: CommandRead | null
+  if (node) {
+    tokens = program = [...words]
+    read = { path: [...words], flags: [], operands: [] }
+  } else {
+    const reading = readLine(registry, command, argv, argv, cwd)
+    tokens = reading.tokens
+    program = reading.program
+    read = reading.read
+  }
   const ctx = {
     command,
     paths,
     argv,
     cwd,
+    tokens,
+    program,
+    read,
     subtree: facts.subtree,
     moveTarget: facts.moveTarget,
   }
-  if (registry !== null && unlistedService(ctx, registry, session)) return false
+  if (unlistedService(ctx, registry, session)) return false
   return decide(ctx, session.commands).outcome !== Outcome.DENY
 }
 
 /**
- * The lines that stand for `words` under the session's profile: the words as
- * they stand, and followed by what each longer pattern in its allow list adds
- * (`rm -f` where the list holds only that), unless `spec` answers that line
- * with `--help` or `--version`. A null `spec` counts every form.
- */
-function forms(
-  session: SessionState,
-  words: readonly string[],
-  spec: CommandSpec | null,
-): (readonly string[])[] {
-  const found: (readonly string[])[] = [words]
-  const [command] = words
-  const rules = session.commands
-  if (command !== undefined && rules !== null && rules.allow !== null) {
-    for (const pattern of allowPatterns(rules)) {
-      const form = [...words, ...splitPattern(pattern).slice(words.length)]
-      if (
-        form.length > words.length &&
-        patternReaches(pattern, words) &&
-        standardRequest(command, spec, form.slice(1)) === null
-      )
-        found.push(form)
-    }
-  }
-  return found
-}
-
-/**
  * Whether the profile lets some line of `words` do its work on a file under
- * `path`. A form starting with one of the `claimed` longer commands, which
- * are answered on their own, does not count here.
+ * `path`. A line starting with one of the `claimed` longer commands, which
+ * are answered on their own, does not count here. `node` says `words` name
+ * a command tree's node (`allowed`).
  */
 function runnable(
   session: SessionState,
-  mount: MountEntry,
+  registry: MountRegistry,
   path: string,
   words: readonly string[],
   claimed: readonly (readonly string[])[] = [],
+  node = false,
 ): boolean {
-  const [command] = words
-  const spec = command === undefined ? null : mount.specFor(command)
-  return forms(session, words, spec)
-    .filter((form) => !claimed.some((k) => k.every((w, i) => form[i] === w)))
-    .some((form) => allowed(session, path, form, true))
+  return (
+    !claimed.some((k) => k.every((w, i) => words[i] === w)) &&
+    allowed(session, registry, path, words, true, node)
+  )
 }
 
 /**
@@ -152,7 +143,12 @@ function runnable(
  * (`tee -a` appends where `tee` writes); one running on more ops (`rm -r`)
  * does this change's work on a file too.
  */
-function admitted(session: SessionState, mount: MountEntry, path: string, change: Change): boolean {
+function admitted(
+  session: SessionState,
+  registry: MountRegistry,
+  path: string,
+  change: Change,
+): boolean {
   const size = change.command.length
   const claimed = CHANGES.filter(
     (other) =>
@@ -162,7 +158,7 @@ function admitted(session: SessionState, mount: MountEntry, path: string, change
         other.needs.some((more) => ops.every((op) => more.includes(op))),
       ),
   ).map((other) => other.command)
-  return runnable(session, mount, path, change.command, claimed)
+  return runnable(session, registry, path, change.command, claimed)
 }
 
 /**
@@ -172,13 +168,14 @@ function admitted(session: SessionState, mount: MountEntry, path: string, change
  */
 function uses(
   session: SessionState,
+  registry: MountRegistry,
   mount: MountEntry,
   path: string,
   name: string,
 ): [boolean, boolean] {
   const tree = mount.cliFor(name)
   if (tree === null) {
-    const ok = runnable(session, mount, path, [name])
+    const ok = runnable(session, registry, path, [name])
     const writes = mount.mayWrite(name)
     return [ok && !writes, ok && writes]
   }
@@ -188,18 +185,23 @@ function uses(
       ([verbs, handler]) =>
         [
           handler.write,
-          runnable(session, mount, path, [name, ...verbs.split(' ').filter(Boolean)]),
+          runnable(session, registry, path, [name, ...verbs.split(' ').filter(Boolean)], [], true),
         ] as const,
     )
   return [leaves.some(([write, ok]) => ok && !write), leaves.some(([write, ok]) => ok && write)]
 }
 
 /** The mount's own commands that the profile lets change files at `path`. */
-function writers(session: SessionState, mount: MountEntry, path: string): string[] {
+function writers(
+  session: SessionState,
+  registry: MountRegistry,
+  mount: MountEntry,
+  path: string,
+): string[] {
   return Object.keys(mount.commands())
     .filter((n) => !SHARED.has(n))
     .sort(compareCodePoints)
-    .filter((n) => uses(session, mount, path, n)[1])
+    .filter((n) => uses(session, registry, mount, path, n)[1])
 }
 
 function works(mount: MountEntry, change: Change): boolean {
@@ -252,14 +254,15 @@ function table(
  */
 function granted(
   session: SessionState,
+  registry: MountRegistry,
   mount: MountEntry,
   path: string,
   mode: MountMode,
 ): MountMode {
   if (
     mode === MountMode.WRITE &&
-    writers(session, mount, path).length === 0 &&
-    !CHANGES.some((c) => admitted(session, mount, path, c) && works(mount, c))
+    writers(session, registry, mount, path).length === 0 &&
+    !CHANGES.some((c) => admitted(session, registry, path, c) && works(mount, c))
   )
     return MountMode.READ
   return mode
@@ -282,13 +285,14 @@ function description(mount: MountEntry, mode: MountMode): string {
 /** What one path supports, as VFS.md states it. */
 function supported(
   session: SessionState,
+  registry: MountRegistry,
   mount: MountEntry,
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => runnable(session, mount, path, words)
+  const runs = (words: readonly string[]): boolean => runnable(session, registry, path, words)
   const reads = READS.filter((c) => runs([c])).map(code)
-  const changes = CHANGES.filter((c) => admitted(session, mount, path, c))
+  const changes = CHANGES.filter((c) => admitted(session, registry, path, c))
   const working = changes
     .filter((c) => mode !== MountMode.READ && works(mount, c))
     .map((c) => c.label)
@@ -320,7 +324,7 @@ function supported(
   if (asks.length > 0)
     parts.push(`${listing(asks)} ${agree(asks, 'ask')} ${name} instead of reading a file.`)
   const offered = (name: string): boolean => {
-    const [reads, writes] = uses(session, mount, path, name)
+    const [reads, writes] = uses(session, registry, mount, path, name)
     return reads || (writes && mode !== MountMode.READ)
   }
   const own = Object.keys(mount.commands())
@@ -335,16 +339,17 @@ function supported(
 /** Where one path differs from a local filesystem. */
 function limitations(
   session: SessionState,
+  registry: MountRegistry,
   mount: MountEntry,
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => runnable(session, mount, path, words)
+  const runs = (words: readonly string[]): boolean => runnable(session, registry, path, words)
   const parts: string[] = []
   if (mode === MountMode.READ) {
     parts.push('Read only: no command changes files.')
   } else {
-    const changes = CHANGES.filter((c) => admitted(session, mount, path, c))
+    const changes = CHANGES.filter((c) => admitted(session, registry, path, c))
     const missing = changes.filter((c) => !works(mount, c)).map((c) => c.label)
     if (missing.length > 0 && missing.length === changes.length)
       parts.push('No Unix command changes files.')
@@ -387,10 +392,10 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
   const limits: [string, string][] = []
   const vis = session.visibility
   for (const [mount, prefix, mode] of listed(registry, session)) {
-    const shown = granted(session, mount, prefix, mode)
+    const shown = granted(session, registry, mount, prefix, mode)
     paths.push([code(prefix), description(mount, shown)])
-    commands.push([code(prefix), supported(session, mount, prefix, shown)])
-    limits.push([code(prefix), limitations(session, mount, prefix, shown)])
+    commands.push([code(prefix), supported(session, registry, mount, prefix, shown)])
+    limits.push([code(prefix), limitations(session, registry, mount, prefix, shown)])
     // Backend prose is not a permission document. Under a restricted view
     // it can advertise hidden paths or verbs, so describe only structured
     // facts rather than interpolate unrestricted guidance.
@@ -416,14 +421,15 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       if (registry.tryMountFor(entry.path) === mount) {
         const effective = granted(
           session,
+          registry,
           mount,
           entry.path,
           effectivePathMode(entry.path, mount.prefix, mount.mode, session),
         )
         const at = code(entry.path)
         paths.push([at, description(mount, effective)])
-        commands.push([at, supported(session, mount, entry.path, effective)])
-        limits.push([at, limitations(session, mount, entry.path, effective)])
+        commands.push([at, supported(session, registry, mount, entry.path, effective)])
+        limits.push([at, limitations(session, registry, mount, entry.path, effective)])
       }
     }
   }
@@ -456,8 +462,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
  * descendant it allows, so a group's own options stay documented; a page lists
  * only the children leading to an allowed one. A node the profile allows
  * answers `--help` for what is under it, so it stops there, but for a child
- * built with no `--help`, which keeps its page. A leaf counts a longer form
- * its allow list names (`gws gmail read --id`).
+ * built with no `--help`, which keeps its page.
  */
 export function cliPages(
   head: string,
@@ -474,18 +479,13 @@ export function cliPages(
   const pages: string[] = []
   const words = [head, ...path]
   const kept = children.filter(([, found]) => found.length > 0).map(([child]) => child)
-  if (
-    kept.length > 0 ||
-    (children.length === 0 ? forms(session, words, null) : [words]).some((form) =>
-      allowed(session, session.cwd, form, false, registry),
-    )
-  ) {
+  const helps = allowed(session, registry, session.cwd, words, false, true)
+  if (kept.length > 0 || helps) {
     const name = words.join(' ')
     const init: CommandSpecInit = node
     const text = nodeHelp(name, new CommandSpec({ ...init, subcommands: kept }), style).trimEnd()
     pages.push(`## \`${name}\`\n\n${fenced(text, 'text')}`)
   }
-  const helps = allowed(session, session.cwd, words, false, registry)
   for (const [child, found] of children)
     pages.push(...(helps && child.addHelp ? found.slice(1) : found))
   return pages

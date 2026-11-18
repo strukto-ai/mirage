@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
-import type { AdmissionRules, CommandRule } from '../policy/types.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from '../policy/constants.ts'
+import {
+  type AdmissionRules,
+  type CommandNode,
+  type CommandRule,
+  type OptionRule,
+  Outcome,
+  type RuleLeaf,
+} from '../policy/types.ts'
 import type { MountMode, ProcessScope, Visibility } from '../types.ts'
 import type { LinkStep } from '../utils/path.ts'
 import { fromUnits, units } from './document.ts'
@@ -26,7 +34,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 function open(config: Readonly<Wire>): MovableStream {
-  return new MovableStream('policy', { ...config, dialect: 'ecmascript' })
+  return new MovableStream('policy', config)
 }
 
 /**
@@ -76,30 +84,90 @@ export class PolicyMatcher {
   }
 }
 
-/** One rule in the stream's wire shape. Mirrors Python's rule_wire. */
-export function ruleWire(rule: CommandRule): Wire {
+function leavesWire(leaves: readonly RuleLeaf[]): util.JSONType[] {
+  return leaves.map((leaf) => ({
+    decision: leaf.decision,
+    reason: units(leaf.reason),
+    paths: leaf.paths.map(units),
+  }))
+}
+
+function optionWire(rule: OptionRule): Wire {
   return {
-    reason: units(rule.reason),
-    commands: (rule.commands ?? []).map(units),
-    paths: (rule.paths ?? []).map(units),
-    mount: rule.mount === undefined ? null : units(rule.mount),
+    decision: leavesWire(rule.decision),
+    values: [...rule.values].map(([word, value]) => [
+      units(word),
+      {
+        decision: leavesWire(value.decision),
+        options: [...value.options].map(([name, option]) => [units(name), optionWire(option)]),
+      },
+    ]),
+    options: [...rule.options].map(([name, option]) => [units(name), optionWire(option)]),
   }
 }
 
-/** A rule set in the stream's wire shape. Mirrors Python's rules_wire. */
-export function rulesWire(rules: Partial<AdmissionRules>): Wire {
+/**
+ * A command tree in the stream's wire shape: each map a list of pairs,
+ * text as code points. Mirrors Python's tree_wire.
+ */
+export function treeWire(node: CommandNode): Wire {
   return {
-    allow:
-      rules.allow == null
-        ? null
-        : rules.allow.map((entry) =>
-            typeof entry === 'string'
-              ? units(entry)
-              : { command: units(entry.command), flags: entry.flags.map(units) },
-          ),
-    deny: (rules.deny ?? []).map(ruleWire),
-    ask: (rules.ask ?? []).map(ruleWire),
+    decision: leavesWire(node.decision),
+    subcommands: [...node.subcommands].map(([name, child]) => [units(name), treeWire(child)]),
+    options: [...node.options].map(([name, option]) => [units(name), optionWire(option)]),
+    other_options: leavesWire(node.otherOptions),
+    operands: [...node.operands].map(([word, child]) => [units(word), treeWire(child)]),
   }
+}
+
+/** A session's command trees in the stream's wire shape. Mirrors Python's rules_wire. */
+export function rulesWire(rules: AdmissionRules): Wire {
+  return {
+    trees: rules.trees.map((scoped) => ({
+      mount: scoped.mount === '' ? null : units(scoped.mount),
+      root: treeWire(scoped.tree),
+    })),
+  }
+}
+
+interface RuleRow {
+  readonly decision: Outcome
+  readonly reason: number[]
+  readonly at: number[]
+  readonly paths: number[][]
+  readonly mount: number[] | null
+}
+
+const tables = new WeakMap<AdmissionRules, readonly CommandRule[]>()
+
+/**
+ * Every leaf of a session's trees as the rule a ruling names, in the
+ * order the stream numbers them; an empty reason reads as the default one
+ * for the leaf's decision. Mirrors Python's rule_table.
+ */
+export function ruleTable(rules: AdmissionRules): readonly CommandRule[] {
+  const held = tables.get(rules)
+  if (held !== undefined) return held
+  const rows = admissionMatcher(rules).ask('rules') as readonly RuleRow[]
+  const table = Object.freeze(
+    rows.map((row): CommandRule => {
+      const reason = fromUnits(row.reason)
+      return {
+        reason:
+          reason !== ''
+            ? reason
+            : row.decision === Outcome.ASK
+              ? DEFAULT_ASK_REASON
+              : DEFAULT_DENY_REASON,
+        decision: row.decision,
+        at: fromUnits(row.at),
+        paths: row.paths.map(fromUnits),
+        mount: row.mount === null ? '' : fromUnits(row.mount),
+      }
+    }),
+  )
+  tables.set(rules, table)
+  return table
 }
 
 /** A session's visibility in the stream's wire shape. Mirrors Python's visibility_wire. */
@@ -191,9 +259,10 @@ function cached(text: string, config: () => Wire): PolicyMatcher {
  * admission_matcher.
  */
 export function admissionMatcher(rules: AdmissionRules | null): PolicyMatcher {
-  return cached(JSON.stringify({ rules }), () =>
-    rules === null ? {} : { rules: rulesWire(rules) },
+  const key = JSON.stringify({ rules }, (_key, value: unknown) =>
+    value instanceof Map ? [...(value as Map<unknown, unknown>)] : value,
   )
+  return cached(key, () => (rules === null ? {} : { rules: rulesWire(rules) }))
 }
 
 /** The compiled matcher for a visibility, shared by every caller asking the same. Mirrors Python's visibility_matcher. */

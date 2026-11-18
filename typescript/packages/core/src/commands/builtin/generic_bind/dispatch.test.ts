@@ -28,6 +28,7 @@ import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
 
 it('reads the output inside the running command', async () => {
   // A fresh mount trusts only the listings the running command made, so a
@@ -197,9 +198,12 @@ it('refuses the stand-ins through a link to a sealed file', async () => {
   const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
   try {
     expect((await ws.shell('ln -s /m/f /m/l')).exitCode).toBe(0)
-    await ws.setSessionProfile(ws.defaultSessionId, {
-      commands: { deny: [{ paths: ['/m/f'], reason: 'sealed' }] },
-    })
+    await ws.setSessionProfile(
+      ws.defaultSessionId,
+      SessionProfile({
+        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/m/f'] } },
+      }),
+    )
     for (const line of ['head -n 2 /m/l', 'tail -n 1 /m/l', 'wc -l /m/l']) {
       const refused = await ws.shell(line)
       expect(refused.exitCode).toBe(1)

@@ -29,6 +29,7 @@ import {
   type RedisIndexConfig,
 } from '@struktoai/mirage-core/cache/index/config'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
+import { commandTree } from '@struktoai/mirage-core/policy/profile'
 import { DaytonaMachine } from './machine/daytona/handle.ts'
 import { SandlockRuntime } from './runtime/sandlock/runtime.ts'
 import { SSHMachine } from './machine/ssh/handle.ts'
@@ -122,6 +123,12 @@ describe('loadWorkspaceConfig', () => {
     expect(() => loadWorkspaceConfig({})).toThrow(/mounts/)
   })
 })
+
+const PROTECTED = {
+  decision: 'deny',
+  reason: 'production data is protected',
+  paths: ['/repo/prod/*'],
+}
 
 describe('configToWorkspaceArgs', () => {
   it('keeps a machine built from its entry through a copy', async () => {
@@ -998,21 +1005,7 @@ describe('configToWorkspaceArgs', () => {
           cwd: '/scratch',
           env: { PAGER: 'cat' },
           mounts: { '/repo': 'r', '/scratch': 'rwx' },
-          commands: {
-            deny: [
-              {
-                reason: 'production data is protected',
-                command: 'rm',
-                paths: ['/repo/prod/*'],
-              },
-              {
-                reason: 'production data is protected',
-                command: 'mv',
-                paths: ['/repo/prod/*'],
-              },
-              'python3',
-            ],
-          },
+          commands: { rm: PROTECTED, mv: PROTECTED, python3: 'deny' },
           paths: { hide: ['/scratch/finance'] },
         },
         reviewer: {
@@ -1031,15 +1024,7 @@ describe('configToWorkspaceArgs', () => {
         ['/repo', { mode: MountMode.READ }],
         ['/scratch', { mode: MountMode.EXEC }],
       ]),
-      commands: {
-        allow: null,
-        ask: [],
-        deny: [
-          { reason: 'production data is protected', commands: ['rm'], paths: ['/repo/prod/*'] },
-          { reason: 'production data is protected', commands: ['mv'], paths: ['/repo/prod/*'] },
-          { reason: 'denied by policy', commands: ['python3'] },
-        ],
-      },
+      commands: commandTree({ rm: PROTECTED, mv: PROTECTED, python3: 'deny' }),
       paths: { hide: ['/scratch/finance'] },
     })
     expect(args.options.profiles?.reviewer).toEqual({
@@ -1052,18 +1037,18 @@ describe('configToWorkspaceArgs', () => {
     expect(args.mounts['/scratch']?.options.mode).toBe(MountMode.EXEC)
   })
 
-  it('a deny rule with an unknown key fails at load', () => {
-    // A typo like `path:` would otherwise widen the rule into an
-    // unconditional denial (mirrors Python's extra="forbid"), and like
-    // Python it must fail at load, not when the args are built.
+  it('a leaf with an unknown key fails at load', () => {
+    // A typo like `path:` would otherwise widen the leaf into an
+    // unconditional denial, and like Python it must fail at load, not
+    // when the args are built.
     expect(() =>
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
         profiles: {
-          default: { commands: { deny: [{ reason: 'x', path: ['/data/prod/*'] }] } },
+          default: { commands: { rm: { decision: 'deny', reason: 'x', path: ['/data/prod/*'] } } },
         },
       }),
-    ).toThrow(/deny\[0\]: unknown field `path`/)
+    ).toThrow(/unknown field `path`/)
   })
 
   it('unshipped and misspelled fields fail at load', () => {
@@ -1073,14 +1058,7 @@ describe('configToWorkspaceArgs', () => {
         profiles: { a: { hidden_paths: { paths: ['/x'] } } },
       }),
     ).toThrow(/unknown field `hidden_paths`/)
-    // A mount section has no allow list, and a mount block has no
-    // permissions of its own any more.
-    expect(() =>
-      loadWorkspaceConfig({
-        mounts: { '/data': { vfs: 'ram' } },
-        profiles: { a: { mounts: { '/data': { commands: { allow: ['ls'] } } } } },
-      }),
-    ).toThrow(/unknown field `allow`/)
+    // A mount block has no permissions of its own any more.
     expect(() =>
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram', permissions: { paths: { hide: ['x'] } } } },
@@ -1791,7 +1769,7 @@ describe('CLI to daemon round trip', () => {
 // loads in one language and not the other fails a test until both
 // loaders agree. The accepted half is one file per subject: every config
 // block that is not a permission verb, then a verb each.
-const ACCEPTED_FIXTURES = ['blocks', 'allow', 'ask', 'deny'] as const
+const ACCEPTED_FIXTURES = ['blocks', 'commands'] as const
 
 /** The machines a config built, by name. */
 function machinesOf(args: { options: { machines?: unknown } }): Record<string, unknown> {

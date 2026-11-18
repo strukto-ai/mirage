@@ -760,7 +760,7 @@ describe('typeIndicator', () => {
 describe('a directory a rule refuses to list', () => {
   const SEALED_DOC = SessionProfile({
     commands: {
-      deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
+      '*': { decision: 'deny', reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] },
     },
   })
   const SEALED_SEED =

@@ -35,6 +35,7 @@ import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import type { MountView } from '../../../view/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
 
 const DEC = new TextDecoder()
 
@@ -452,10 +453,10 @@ it('du keeps a listed name a profile hides and denies missing', async () => {
   try {
     await ws.shell("printf x > /d/s; printf '/d/s\\0' > /d/l")
     ws.createSession('agent', {
-      profile: {
+      profile: SessionProfile({
         paths: { hide: ['/d/s'] },
-        commands: { deny: [{ reason: 'no', paths: ['/d/s'] }] },
-      },
+        commands: { '*': { decision: 'deny', reason: 'no', paths: ['/d/s'] } },
+      }),
     })
     const io = await ws.shell('du --files0-from=/d/l', { sessionId: 'agent' })
     expect(io.exitCode).toBe(1)

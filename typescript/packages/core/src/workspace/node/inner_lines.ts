@@ -328,7 +328,7 @@ function shellInner(args: readonly Word[]): InnerLine[] {
  * `time`, `find -exec`). A whole-line runtime is a real shell, so
  * anything else that
  * can run a command (an interpreter's `-c`, `make`, `git` hooks) is the
- * runtime's own world: the allow list is the closed form there.
+ * runtime's own world: a closed tree is the closed form there.
  */
 export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
   if (head.includes('/')) return [UNREADABLE]

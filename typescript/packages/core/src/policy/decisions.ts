@@ -136,6 +136,8 @@ function sameList(a: readonly string[] = [], b: readonly string[] = []): boolean
 export function sameRule(a: CommandRule, b: CommandRule): boolean {
   return (
     a.reason === b.reason &&
+    (a.decision ?? Outcome.ASK) === (b.decision ?? Outcome.ASK) &&
+    (a.at ?? '') === (b.at ?? '') &&
     a.mount === b.mount &&
     sameList(a.commands, b.commands) &&
     sameList(a.paths, b.paths)

@@ -619,12 +619,11 @@ async function sealedWs(mounted = false): Promise<Workspace> {
   ws.createSession('g', {
     profile: SessionProfile({
       commands: {
-        deny: [
-          {
-            reason: 'sealed',
-            paths: ['/data/t/secret.txt', '/data/t/sealed', '/data/t/sealed/*'],
-          },
-        ],
+        '*': {
+          decision: 'deny',
+          reason: 'sealed',
+          paths: ['/data/t/secret.txt', '/data/t/sealed', '/data/t/sealed/*'],
+        },
       },
     }),
   })

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { METHODS } from '../../policy/constants.ts'
+import { commandTree, treeDoc } from '../../policy/profile.ts'
 import {
   type AdmissionRules,
-  AllowFlags,
   type CommandRule,
   type Decision,
-  type Outcome,
+  Outcome,
   type ProfileScript,
   type ProfileScripts,
   type Scope,
@@ -28,60 +28,79 @@ import type { Language } from '../../runtime/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import type { SecretRef } from '../../secrets/config.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
+import { OLDER_FORMAT } from './constants.ts'
 
 export interface RuleJSON {
   reason: string
-  commands?: string[]
+  decision?: string
   paths?: string[]
+  at?: string
   mount?: string
+  commands?: string[]
 }
 
+/** The rule an approval is keyed on, as the session record stores it. */
 export function ruleToDict(rule: CommandRule): RuleJSON {
-  const out: RuleJSON = {
-    reason: rule.reason,
-    commands: [...(rule.commands ?? [])],
-    paths: [...(rule.paths ?? [])],
-  }
+  const out: RuleJSON = { reason: rule.reason }
+  const decision = rule.decision ?? Outcome.ASK
+  if (decision !== Outcome.ASK) out.decision = decision
+  out.paths = [...(rule.paths ?? [])]
+  if (rule.at !== undefined && rule.at !== '') out.at = rule.at
   if (rule.mount !== undefined && rule.mount !== '') out.mount = rule.mount
+  if ((rule.commands ?? []).length > 0) out.commands = [...(rule.commands ?? [])]
   return out
 }
 
+/** The rule an approval is keyed on, read back from a session record. */
 export function ruleFromDict(data: RuleJSON): CommandRule {
   return {
     reason: data.reason,
-    commands: data.commands ?? [],
+    decision: (data.decision ?? Outcome.ASK) as Outcome,
+    at: data.at ?? '',
     paths: data.paths ?? [],
     mount: data.mount ?? '',
+    commands: data.commands ?? [],
   }
 }
 
-/** One allow entry as the record stores it. Mirrors Python's `allow_to_dict`. */
-export function allowToDict(
-  entry: string | AllowFlags,
-): string | { command: string; flags: readonly string[] } {
-  return typeof entry === 'string' ? entry : { command: entry.command, flags: [...entry.flags] }
+/** One command tree of a session record, with the mount it belongs to. */
+export interface TreeJSON {
+  mount: string
+  commands: Record<string, unknown>
+  inline?: boolean
 }
 
-/** One allow entry read back from a record. Mirrors Python's `allow_from_dict`. */
-export function allowFromDict(
-  data: string | { command: string; flags: readonly string[] },
-): string | AllowFlags {
-  return typeof data === 'string' ? data : new AllowFlags(data.command, data.flags)
+/**
+ * A session's command trees as the record stores them, each with the
+ * mount it belongs to, under the `command_trees` field.
+ */
+export function commandsToDict(rules: AdmissionRules): TreeJSON[] {
+  return rules.trees.map((scoped) => ({
+    mount: scoped.mount,
+    commands: treeDoc(scoped.tree),
+    ...(scoped.inline ? { inline: true } : {}),
+  }))
 }
 
-export function commandsToDict(spec: AdmissionRules) {
+/**
+ * A session's command trees read back from a record. A record written
+ * before command trees holds flat `commands` lists and no
+ * `command_trees`. Such a session comes back closed, every line denied,
+ * so a restart never leaves it less restricted than it was; recreating
+ * the session gives it its profile's trees. `flat` is the record's flat
+ * `commands`, undefined for a record without them.
+ */
+export function commandsFromDict(
+  data: readonly TreeJSON[] | undefined,
+  flat?: unknown,
+): AdmissionRules | null {
+  if (data === undefined) return flat === undefined ? null : OLDER_FORMAT
   return {
-    allow: spec.allow === null ? null : spec.allow.map(allowToDict),
-    ask: spec.ask.map(ruleToDict),
-    deny: spec.deny.map(ruleToDict),
-  }
-}
-
-export function commandsFromDict(data: ReturnType<typeof commandsToDict>): AdmissionRules {
-  return {
-    allow: data.allow == null ? null : data.allow.map(allowFromDict),
-    ask: data.ask.map(ruleFromDict),
-    deny: data.deny.map(ruleFromDict),
+    trees: data.map((entry) => ({
+      tree: commandTree(entry.commands),
+      mount: entry.mount,
+      inline: entry.inline ?? false,
+    })),
   }
 }
 

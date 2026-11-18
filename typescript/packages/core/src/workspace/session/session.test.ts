@@ -18,7 +18,8 @@ import { varsFromEntries, varsFromEnv, varsFromFields, varsToFields } from './se
 import { describe, expect, it } from 'vitest'
 import { SessionState } from './session.ts'
 import { MountMode } from '../../types.ts'
-import type { AdmissionRules, Decision } from '../../policy/types.ts'
+import type { Decision } from '../../policy/types.ts'
+import { trees } from '../../test-utils.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import { makeArray } from '../../shell/array.ts'
 
@@ -456,41 +457,33 @@ describe('a stored session keeps its attributes', () => {
   })
 })
 
-describe('the command tier round-trips through the record', () => {
+describe('the command trees round-trip through the record', () => {
   it('writes the Python spelling and reads it back', () => {
-    const own: AdmissionRules = {
-      allow: ['ls', 'git log'],
-      ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
-      deny: [{ reason: 'no', commands: ['rm'] }],
-    }
+    const own = trees({ rm: 'deny' }, { '/repo': { git: { push: 'ask' } } })
     const s = new SessionState({ sessionId: 's1', commands: own })
     const d = s.toDict()
-    expect(d.commands).toEqual({
-      allow: ['ls', 'git log'],
-      ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
-      deny: [{ reason: 'no', commands: ['rm'], paths: [] }],
-    })
+    expect(d.command_trees).toEqual([
+      { mount: '', commands: { rm: 'deny' } },
+      { mount: '/repo', commands: { git: { push: 'ask' } } },
+    ])
+    expect('commands' in d).toBe(false)
     const back = SessionState.fromDict(d as Parameters<typeof SessionState.fromDict>[0])
-    expect(back.commands).toEqual({
-      allow: ['ls', 'git log'],
-      ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
-      deny: [{ reason: 'no', commands: ['rm'], paths: [], mount: '' }],
-    })
-    // Null means unstated and is not written; a tier without an allow
-    // list writes allow as null, distinct from an empty list.
-    expect('commands' in new SessionState({ sessionId: 's2' }).toDict()).toBe(false)
-    const bare = new SessionState({
-      sessionId: 's3',
-      commands: { allow: null, ask: [], deny: [{ reason: 'x' }] },
-    })
-    expect((bare.toDict().commands as { allow: unknown }).allow).toBeNull()
-    expect(bare.fork().commands).toBe(bare.commands)
+    expect(back.commands).toEqual(own)
+    expect('command_trees' in new SessionState({ sessionId: 's2' }).toDict()).toBe(false)
+    expect(s.fork().commands).toBe(s.commands)
   })
 })
 
 describe('ledger records round-trip through the record', () => {
   it('writes the Python spelling and reads it back', () => {
-    const rule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
+    const rule = {
+      reason: 'sign-off',
+      decision: Outcome.ASK,
+      at: '',
+      commands: ['git push'],
+      paths: [],
+      mount: '',
+    }
     const base = {
       sessionId: 's1',
       command: 'git',

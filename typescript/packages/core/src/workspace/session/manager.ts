@@ -228,6 +228,25 @@ export class SessionManager extends SessionOwner {
   }
 
   /**
+   * Hold every live session's command trees, and the default profile's, as
+   * `restate` gives them back: how a CLI registered after the trees were
+   * compiled has their names read by its grammar. Every answer is made
+   * before any is stored, so a refusal leaves every session as it was.
+   */
+  restateCommands(restate: (rules: AdmissionRules | null) => AdmissionRules | null): void {
+    const restated = [...this.sessions.values()].map(
+      (session) => [session, restate(session.commands)] as const,
+    )
+    const held = this.defaultProfileInternal
+    const fallback =
+      held === null
+        ? null
+        : { ...held, policies: { ...held.policies, commands: restate(held.policies.commands) } }
+    for (const [session, rules] of restated) session.commands = rules
+    this.defaultProfileInternal = fallback
+  }
+
+  /**
    * The admission rules one session runs under (SessionCommandsQuery).
    * The default profile's rules for an id this manager does not know, the
    * empty id of an unbound entry point included, so an entry point that names no

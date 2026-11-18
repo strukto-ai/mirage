@@ -745,7 +745,7 @@ export class Policies {
   /**
    * Register a policy after the existing ones. Code only: a
    * declarative rule belongs in the permissions document
-   * (`commands.deny`), which the workspace compiles.
+   * (a `commands` tree), which the workspace compiles.
    */
   add(entry: Policy): void {
     this.policies.push(entry)

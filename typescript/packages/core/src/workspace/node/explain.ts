@@ -155,8 +155,9 @@ const SUBSTITUTIONS: ReadonlySet<string> = new Set([
  * What the gate decides about one command of a line, as the pass reads
  * it: the per-command record `explain` and the admission pass share,
  * which `explainedLine` turns into the public tree. `outcome` is the
- * document's answer and `rule` says who gave it; a line the allow list
- * does not cover arrives as `DENY` with no rule, at 126. Mirrors the
+ * document's answer and `rule` says who gave it; a line a closed tree
+ * names nothing for arrives as `DENY` with the root's own leaf as its
+ * rule, at 126. Mirrors the
  * Python Judgment.
  */
 export interface Judgment {
@@ -166,7 +167,7 @@ export interface Judgment {
   readonly argv: readonly string[]
   /** What the profile's rules say. */
   readonly outcome: Outcome
-  /** The rule that spoke, null when the allow list did or nothing did. */
+  /** The leaf that spoke, null when a coded condition did or nothing did. */
   readonly rule: CommandRule | null
   /** The rule's reason, empty when there is no rule. */
   readonly reason: string
@@ -346,7 +347,7 @@ async function explained(
       document === null ? Outcome.ALLOW : document.kind === 'deny' ? Outcome.DENY : Outcome.ASK,
     rule,
     reason: rule?.reason ?? '',
-    source: rule !== null ? sourceOf(rule) : document !== null ? 'commands.allow' : '',
+    source: rule !== null ? sourceOf(rule) : document !== null ? 'commands' : '',
     matchedPath: document?.kind === 'deny' ? (document.path ?? null) : null,
     paths: ctx.paths.map((p) => p.virtual),
     exitCode: 0,
@@ -900,17 +901,6 @@ function* walkedLine(
 }
 
 /**
- * Whether an explanation refuses the line's intent, rather than just
- * failing one command.
- *
- * Explicit deny rules and command-scoped policy refusals hold the line.
- * Operand-scoped filesystem refusals wait for the per-command gate,
- * where earlier commands have established the live cwd and namespace.
- * Rule-less DENY results also wait: an unavailable head word, an
- * uncovered command, or words only the runtime can expand fail where
- * they occur rather than against the whole line.
- */
-/**
  * Whether the compound-line pass puts a command through the gate.
  *
  * A verdict is, so the line is refused whole. So is a command that would
@@ -926,12 +916,28 @@ function isJudged(expl: Judgment): boolean {
 }
 
 /**
- * Whether the allow list refuses a command on its own words, which nothing
- * that runs before it on the line can change. Mirrors the Python
- * `_uncovered`.
+ * Whether a tree's root decided the command by its own decision, which
+ * speaks for every command the tree names nothing for. A root leaf with
+ * paths states a rule about those paths, and holds the line. Mirrors the
+ * Python `_by_default`.
+ */
+function byDefault(expl: Judgment): boolean {
+  const rule = expl.rule
+  return rule !== null && (rule.paths ?? []).length === 0 && (rule.at ?? '').split('/')[1] === '*'
+}
+
+/**
+ * Whether the profile refuses a command no tree names (by a root's own
+ * decision, or a CLI that reaches a service, `unlistedService`), on its
+ * own words, which nothing that runs before it on the line can change.
+ * Mirrors the Python `_uncovered`.
  */
 function uncovered(expl: Judgment): boolean {
-  return expl.outcome === Outcome.DENY && expl.source === 'commands.allow' && refuses(expl)
+  return (
+    expl.outcome === Outcome.DENY &&
+    (expl.source === 'commands' || byDefault(expl)) &&
+    refuses(expl)
+  )
 }
 
 /**
@@ -955,8 +961,21 @@ function asksFor(one: Judged): boolean {
   return one.stated || refuses(one.judgment)
 }
 
+/**
+ * Whether an explanation refuses the line's intent, rather than just
+ * failing one command.
+ *
+ * A deny a tree states for a command it names, and command-scoped policy
+ * refusals, hold the line. Operand-scoped filesystem refusals wait for
+ * the per-command gate, where earlier commands have established the live
+ * cwd and namespace. Rule-less DENY results also wait, and so does a tree
+ * root's own decision (`byDefault`): an unavailable head word, a command
+ * no tree names (a function the line defines first, say), or words only
+ * the runtime can expand fail where they occur rather than against the
+ * whole line.
+ */
 function isVerdict(expl: Judgment): boolean {
-  if (expl.exitCode === 0) return false
+  if (expl.exitCode === 0 || byDefault(expl)) return false
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
   // Filesystem refusals use the live cwd and fail only their command.
   const denied = expl.answers.find((a): a is Deny => a.kind === 'deny')
@@ -1027,8 +1046,8 @@ export async function lineJudgments(
  *
  * Two things deliberately do not stop the line, and both are the same
  * rule: only a refusal that names a rule is a verdict about the intent.
- * A word the allow list leaves out is refused where it stands, not with
- * the line, so a typo cannot cost an agent the work the line already did; a
+ * A word a closed tree names nothing for is refused where it stands, not
+ * with the line, so a typo cannot cost an agent the work the line already did; a
  * word only the runtime can expand is judged where it is expanded, by
  * the per-command gate, which sees the real path.
  *
@@ -1038,7 +1057,7 @@ export async function lineJudgments(
  * `cd` whose argument is a variable) is invisible here. The rule is
  * still enforced, by the gate, but the earlier commands have run by
  * then. For a deny that costs allowed side effects and nothing more,
- * since the commands that ran were on the allow list. For an ask it
+ * since the commands that ran were ones the trees allow. For an ask it
  * costs the replay: the question is recorded after part of the line
  * already happened, so approving it re-runs a line whose first half is
  * done. Closing that would mean asking whenever a word cannot be read,
@@ -1335,7 +1354,7 @@ function soleLiteralCommand(
 /**
  * Whether one walked command is refused on its text, resolving an
  * unanswered ask through the ledger the gate reads. `line` says the
- * command is the whole line, which runs nothing at all once the allow list
+ * command is the whole line, which runs nothing at all once a tree's root
  * refuses it.
  */
 async function commandRefused(
@@ -1365,7 +1384,7 @@ async function commandRefused(
   )) {
     explained.push(one)
   }
-  // The allow list refusing the line's one command on words no glob can
+  // The profile refusing the line's one command on words no glob can
   // change means nothing runs. A line it hands on, or a line handed on to
   // it, is not enough: what runs it may not ask the gate.
   const globbed = [...item.words, ...item.redirects].some((word) => word.glob === true)
@@ -1643,7 +1662,7 @@ function refusal(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | null {
  * A command's outcome, reason and source as its explanation states them:
  * the refusal it meets (`ASK` for a question waiting on the host, `DENY`
  * for any other, a policy that failed included), else the ask an approval
- * lets through, else `DENY` for a word the allow list refuses. The reason
+ * lets through, else `DENY` for a command no tree names. The reason
  * and source are the deciding answer's, which a coded policy may give over
  * the document's own. Mirrors the Python `_verdict_of`.
  */
@@ -1652,7 +1671,7 @@ function verdictOf(judgment: Judgment): [Outcome, string, string] {
   const source =
     decider?.rule !== undefined
       ? sourceOf(decider.rule)
-      : judgment.source === 'commands.allow'
+      : judgment.source === 'commands'
         ? judgment.source
         : ''
   const refused = judgment.decision

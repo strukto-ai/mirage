@@ -14,153 +14,110 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { PathSpec } from '../../types.ts'
-import {
-  CommandWord,
-  Outcome,
-  type CommandContext,
-  type CommandRule,
-  type AdmissionRules,
-} from '../types.ts'
-import { WordKind } from '../../commands/spec/types.ts'
+import { line, trees } from '../../test-utils.ts'
+import { Outcome } from '../types.ts'
 import { decide, sourceOf } from './decide.ts'
 
-function path(virtual: string): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    vfsPath: virtual,
-    resolved: true,
-    rawPath: virtual,
-  })
-}
-
-function ctx(command: string, ...paths: string[]): CommandContext {
-  const specs = paths.map(path)
-  return {
-    command,
-    paths: specs,
-    words: [
-      new CommandWord(command, WordKind.NAME),
-      ...specs.map((p) => new CommandWord(p.virtual, WordKind.OPERAND, null, p)),
-    ],
-    argv: paths,
-    cwd: '/',
-    tokens: [command, ...paths],
-  }
-}
+// Mirrors python/tests/policy/match/test_decide.py.
 
 describe('decide', () => {
-  it('answers with silence and with the allow list before any rule', () => {
-    expect(decide(ctx('ls'), null).outcome).toBe(Outcome.ALLOW)
-    expect(decide(ctx('ls'), { allow: null, ask: [], deny: [] }).outcome).toBe(Outcome.ALLOW)
-    const listed: AdmissionRules = { allow: ['cat'], ask: [], deny: [] }
-    expect(decide(ctx('cat', '/x'), listed).outcome).toBe(Outcome.ALLOW)
-    const refused = decide(ctx('rm', '/x'), listed)
-    // The allow list refuses as DENY like any rule; the empty `rule` is
-    // the only thing separating it from one, and is what leaves the
-    // refusal with no operator reason to print.
+  it('allows every line under no tree', () => {
+    expect(decide(line(['ls']), null).outcome).toBe(Outcome.ALLOW)
+    expect(decide(line(['ls']), { trees: [] }).outcome).toBe(Outcome.ALLOW)
+  })
+
+  it('a closed root denies what it names no allow for', () => {
+    const rules = trees({ '*': 'deny', cat: 'allow' })
+    expect(decide(line(['cat', '/x']), rules).outcome).toBe(Outcome.ALLOW)
+    const refused = decide(line(['rm', '/x']), rules)
     expect(refused.outcome).toBe(Outcome.DENY)
-    expect(refused.rule).toBeNull()
-    expect(refused.source).toBe('commands.allow')
+    expect(refused.rule?.at).toBe('/*')
+    expect(refused.source).toBe('top')
   })
 
-  it('answers unrestricted and refused allow lists before inspecting mv arguments', () => {
-    const malformed = { ...ctx('mv', '/repo'), argv: ['--not-a-mv-option'] }
-    expect(decide(malformed, null).outcome).toBe(Outcome.ALLOW)
-    expect(decide(malformed, { allow: null, deny: [], ask: [] }).outcome).toBe(Outcome.ALLOW)
-    const refused = decide(malformed, { allow: [], deny: [], ask: [] })
-    expect(refused.outcome).toBe(Outcome.DENY)
-    expect(refused.source).toBe('commands.allow')
+  it('an option tightens its command', () => {
+    const rules = trees({ rm: { '-r': { decision: 'deny', reason: 'no trees' } } })
+    expect(decide(line(['rm', '/x']), rules).outcome).toBe(Outcome.ALLOW)
+    for (const words of [
+      ['rm', '-r', '/x'],
+      ['rm', '-rf', '/x'],
+      ['rm', '-R', '/x'],
+    ]) {
+      const ruling = decide(line(words), rules)
+      expect(ruling.outcome).toBe(Outcome.DENY)
+      expect(ruling.rule?.reason).toBe('no trees')
+      expect(ruling.rule?.at).toBe('/rm/--recursive/*')
+    }
   })
 
-  it('takes the deeper entry and breaks a tie with deny', () => {
-    const broad: CommandRule = { reason: 'broad', commands: ['cat'], paths: ['/a/*'] }
-    const deep: CommandRule = { reason: 'deep', commands: ['cat'], paths: ['/a/b/c/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [deep], deny: [broad] }
-    expect(decide(ctx('cat', '/a/b/c/x'), rules).rule).toBe(deep)
-    expect(decide(ctx('cat', '/a/other'), rules).rule).toBe(broad)
-    const tied: CommandRule = { reason: 'tied', commands: ['cat'], paths: ['/a/*'] }
-    expect(decide(ctx('cat', '/a/x'), { allow: null, ask: [tied], deny: [broad] }).rule).toBe(broad)
+  it("one operand's ask never answers for another operand's deny", () => {
+    const rules = trees({
+      cp: [
+        { decision: 'deny', reason: 'sealed', paths: ['/p/*'] },
+        { decision: 'ask', reason: 'nod', paths: ['/review/*'] },
+      ],
+    })
+    const ruling = decide(line(['cp', '/p/secret', '/review/out']), rules)
+    expect(ruling.outcome).toBe(Outcome.DENY)
+    expect(ruling.matchedPath).toBe('/p/secret')
+    expect(ruling.asks).toEqual([])
+    const asked = decide(line(['cp', '/review/x', '/elsewhere']), rules)
+    expect(asked.outcome).toBe(Outcome.ASK)
+    expect(asked.rule?.reason).toBe('nod')
   })
 
-  it("never lets one operand's ask answer for another operand's deny", () => {
-    // The whole reason a line is judged subject by subject: reading one
-    // best match for the line let the destination's deeper ask carry the
-    // source out of a deny written for it.
-    const deny: CommandRule = { reason: 'protected', commands: ['cp'], paths: ['/protected/*'] }
-    const ask: CommandRule = { reason: 'review nod', commands: ['cp'], paths: ['/review/deep/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
-    const decision = decide(ctx('cp', '/protected/secret', '/review/deep/out'), rules)
-    expect(decision.outcome).toBe(Outcome.DENY)
-    expect(decision.rule).toBe(deny)
-    expect(decision.matchedPath).toBe('/protected/secret')
-    // Each operand on its own still reads as it always did.
-    expect(decide(ctx('cp', '/protected/secret', '/elsewhere/out'), rules).rule).toBe(deny)
-    expect(decide(ctx('cp', '/review/deep/x', '/elsewhere/out'), rules).rule).toBe(ask)
+  it('the strictest leaf covering a path decides it', () => {
+    const rules = trees({
+      cat: [
+        { decision: 'deny', paths: ['/a/*'] },
+        { decision: 'ask', paths: ['/a/open/*'] },
+      ],
+    })
+    expect(decide(line(['cat', '/a/open/x']), rules).outcome).toBe(Outcome.DENY)
+    expect(decide(line(['cat', '/b']), rules).outcome).toBe(Outcome.ALLOW)
   })
 
-  it('still reopens the operand a carve-out was written for', () => {
-    // The per-subject law must not undo the deeper-wins law: one operand
-    // covered by both rules is still the deeper one's.
-    const deny: CommandRule = { reason: 'sealed', commands: ['cat'], paths: ['/a/*'] }
-    const ask: CommandRule = { reason: 'nod', commands: ['cat'], paths: ['/a/open/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
-    expect(decide(ctx('cat', '/a/open/x'), rules).rule).toBe(ask)
-    // A second operand the carve-out says nothing about brings the deny
-    // back, because the line has to survive every path it names.
-    expect(decide(ctx('cat', '/a/open/x', '/a/sealed'), rules).rule).toBe(deny)
-  })
-
-  it('reaches every subject with a pathless rule, at depth zero', () => {
-    // It is off the path axis, so an entry naming a place outranks it,
-    // but it still speaks about an operand no entry covers.
-    const pathless: CommandRule = { reason: 'no rm', commands: ['rm'] }
-    const ask: CommandRule = { reason: 'wip nod', commands: ['rm'], paths: ['/wip/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [ask], deny: [pathless] }
-    expect(decide(ctx('rm', '/wip/x'), rules).rule).toBe(ask)
-    expect(decide(ctx('rm', '/wip/x', '/elsewhere'), rules).rule).toBe(pathless)
-    // A line naming no path at all is one subject, itself.
-    const whole = decide(ctx('rm'), rules)
-    expect(whole.rule).toBe(pathless)
+  it('a leaf with paths says nothing for a line naming none', () => {
+    const rules = trees({ rm: { decision: 'deny', paths: ['/wip/*'] } })
+    expect(decide(line(['rm', '/wip/x']), rules).outcome).toBe(Outcome.DENY)
+    const whole = decide(line(['rm']), rules)
+    expect(whole.outcome).toBe(Outcome.ALLOW)
     expect(whole.matchedPath).toBeNull()
   })
 
-  it('reports the rule and where it was written', () => {
-    const top: CommandRule = { reason: 'top', commands: ['rm'], paths: ['/a/*'] }
-    const inside: CommandRule = {
-      reason: 'mount',
-      commands: ['rm'],
-      paths: ['/a/b/*'],
-      mount: '/a',
-    }
-    const decision = decide(ctx('rm', '/a/b/x'), { allow: null, ask: [], deny: [top, inside] })
-    expect(decision.rule).toBe(inside)
-    expect(decision.source).toBe('mounts./a')
-    expect(sourceOf(top)).toBe('top')
+  it('a mount tree reports where it was written', () => {
+    const rules = trees(null, { '/a': { rm: { decision: 'deny', paths: ['b/*'] } } })
+    const ruling = decide(line(['rm', '/a/b/x']), rules)
+    expect(ruling.outcome).toBe(Outcome.DENY)
+    expect(ruling.rule?.paths).toEqual(['/a/b/*'])
+    expect(ruling.source).toBe('mounts./a')
+    expect(decide(line(['rm', '/c/x']), rules).outcome).toBe(Outcome.ALLOW)
   })
 
-  it("reports every subject's ask, not just the winner", () => {
-    const source: CommandRule = { reason: 'source nod', commands: ['cp'], paths: ['/a/*'] }
-    const dest: CommandRule = { reason: 'dest nod', commands: ['cp'], paths: ['/deep/b/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [source, dest], deny: [] }
-    const decision = decide(ctx('cp', '/a/x', '/deep/b/y'), rules)
-    // The deeper anchor is still the decision, which is what the agent is
-    // told; both are what the entry point has to collect.
-    expect(decision.outcome).toBe(Outcome.ASK)
-    expect(decision.rule).toBe(dest)
-    expect(decision.asks).toEqual([source, dest])
-    // One rule covering two operands is one question, not two.
-    const both: CommandRule = { reason: 'either', commands: ['cp'], paths: ['/a/*'] }
-    const one = decide(ctx('cp', '/a/x', '/a/y'), { allow: null, ask: [both], deny: [] })
-    expect(one.asks).toEqual([both])
-    // A deny anywhere refuses the line, so there is nothing to ask about.
-    const stopped = decide(ctx('cp', '/a/x', '/deep/b/y'), {
-      allow: null,
-      ask: [dest],
-      deny: [{ reason: 'no', commands: ['cp'], paths: ['/a/*'] }],
+  it("every subject's ask is reported, not just the winner", () => {
+    const rules = trees({
+      cp: [
+        { decision: 'ask', reason: 'source', paths: ['/a/*'] },
+        { decision: 'ask', reason: 'dest', paths: ['/b/*'] },
+      ],
     })
-    expect(stopped.outcome).toBe(Outcome.DENY)
-    expect(stopped.asks).toEqual([])
+    const ruling = decide(line(['cp', '/a/x', '/b/y']), rules)
+    expect(ruling.outcome).toBe(Outcome.ASK)
+    expect(new Set(ruling.asks.map((a) => a.reason))).toEqual(new Set(['source', 'dest']))
+    const one = decide(line(['cp', '/a/x', '/a/y']), rules)
+    expect(one.asks.map((a) => a.reason)).toEqual(['source'])
+  })
+
+  it('the top tree and the inline tree are judged apart', () => {
+    const rules = trees({ rm: 'allow' }, {}, { rm: 'deny' })
+    expect(decide(line(['rm', '/x']), rules).outcome).toBe(Outcome.DENY)
+  })
+
+  it('sourceOf names the section', () => {
+    const rules = trees({ rm: 'deny' }, { '/a': { cp: 'deny' } })
+    const top = decide(line(['rm']), rules).rule
+    const inside = decide(line(['cp', '/a/x']), rules).rule
+    expect(top !== null && sourceOf(top)).toBe('top')
+    expect(inside !== null && sourceOf(inside)).toBe('mounts./a')
   })
 })

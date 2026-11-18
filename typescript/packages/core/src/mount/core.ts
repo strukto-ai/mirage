@@ -131,11 +131,11 @@ export class MountCore {
     this.session = options.session ?? null
     const skipped = this.session === null ? [] : skippedAtDispatch(this.session.commands)
     if (this.session !== null && skipped.length > 0) {
-      // This entry point sees ops, never a line, so the profile's command-level
-      // rules have nothing here to judge.
+      // This entry point sees ops, never a line, so the profile's command
+      // trees have nothing here to judge.
       console.warn(
         `session ${this.session.sessionId}: an entry point that sees only ops (a kernel mount, ` +
-          `SFTP, codex-exec's file calls) cannot apply ${skipped.join('; ')}; path rules, ` +
+          `SFTP, codex-exec's file calls) cannot apply ${skipped.join('; ')}; ` +
           'hides and modes still hold',
       )
     }

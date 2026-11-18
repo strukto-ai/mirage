@@ -61,6 +61,7 @@ import {
 } from '../../types.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -3836,7 +3837,9 @@ it.each([
   const ws = new Workspace({ '/d': vfs, '/other': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     ws.createSession('agent', {
-      profile: { commands: { deny: [{ paths: [sealed], reason: 'sealed' }] } },
+      profile: SessionProfile({
+        commands: { '*': { decision: 'deny', reason: 'sealed', paths: [sealed] } },
+      }),
     })
     await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
     await ws.shell('rm -r /d/t', { sessionId: 'agent' })

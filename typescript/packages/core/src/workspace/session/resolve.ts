@@ -20,14 +20,14 @@ import {
   type ProfileMount,
   type SessionProfile,
 } from '../../policy/profile.ts'
-import {
-  type AdmissionRules,
-  AllowFlags,
-  type CommandRule,
-  type HideReason,
-  type ProfileScript,
-  type ProfileScripts,
-  type ScriptMethod,
+import type {
+  AdmissionRules,
+  Grammar,
+  HideReason,
+  ProfileScript,
+  ProfileScripts,
+  ScopedTree,
+  ScriptMethod,
 } from '../../policy/types.ts'
 import {
   layerProcesses,
@@ -36,13 +36,13 @@ import {
 } from '../../execution/process/config.ts'
 import { fromUnits, units } from '../../rs/document.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
-import { admissionMatcher, rulesWire, visibilityFrom, type Wire } from '../../rs/policy.ts'
+import { admissionMatcher, visibilityFrom, type Wire } from '../../rs/policy.ts'
 import type { MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
-import { checkRules } from './validate.ts'
+import { normalizeTree } from './validate.ts'
 
 /**
  * The profile a session is created from. A name is looked up as written; a
@@ -63,17 +63,6 @@ export function resolveProfile(
   return found
 }
 
-interface RuleReply {
-  readonly reason: number[]
-  readonly commands: number[][]
-  readonly paths: number[][]
-  readonly mount: number[] | null
-}
-interface RulesReply {
-  readonly allow: (number[] | { command: number[]; flags: number[][] })[] | null
-  readonly deny: readonly RuleReply[]
-  readonly ask: readonly RuleReply[]
-}
 interface ReasonReply {
   readonly patterns: number[][]
   readonly reason: number[]
@@ -84,25 +73,22 @@ interface PathsReply {
   readonly reasons: readonly ReasonReply[]
 }
 interface ProfileReply {
-  readonly commands: RulesReply | null
   readonly paths: PathsReply | null
   readonly vars: number[][] | null
   readonly mounts:
     | readonly {
         readonly prefix: number[]
         readonly mode: MountMode | null
-        readonly commands: RulesReply | null
         readonly paths: PathsReply | null
       }[]
     | null
 }
 interface PlanReply {
-  readonly commands: RulesReply | null
   readonly visibility: Parameters<typeof visibilityFrom>[0]
   readonly mount_modes: readonly [number[], MountMode][]
   readonly hide_reasons: readonly ReasonReply[]
 }
-type ProfileFields = Pick<SessionProfile, 'commands' | 'paths' | 'vars' | 'mounts'>
+type ProfileFields = Pick<SessionProfile, 'paths' | 'vars' | 'mounts'>
 
 function pathsWire(block: PathsBlock | null | undefined): Wire | null {
   if (block == null) return null
@@ -117,9 +103,7 @@ function pathsWire(block: PathsBlock | null | undefined): Wire | null {
 }
 
 function profileWire(profile: SessionProfile): Wire {
-  const block = profile.commands
   return {
-    commands: block == null ? null : rulesWire(block),
     paths: pathsWire(profile.paths),
     vars: profile.vars == null ? null : profile.vars.hide.map(units),
     mounts:
@@ -128,34 +112,8 @@ function profileWire(profile: SessionProfile): Wire {
         : [...profile.mounts].map(([prefix, entry]) => ({
             prefix: units(prefix),
             mode: entry.mode ?? null,
-            commands: entry.commands == null ? null : rulesWire(entry.commands),
             paths: pathsWire(entry.paths),
           })),
-  }
-}
-
-function ruleFrom(value: RuleReply): CommandRule {
-  return {
-    reason: fromUnits(value.reason),
-    ...(value.commands.length === 0 ? {} : { commands: value.commands.map(fromUnits) }),
-    ...(value.paths.length === 0 ? {} : { paths: value.paths.map(fromUnits) }),
-    ...(value.mount === null ? {} : { mount: fromUnits(value.mount) }),
-  }
-}
-
-function rulesFrom(value: RulesReply | null): AdmissionRules | null {
-  if (value === null) return null
-  return {
-    allow:
-      value.allow === null
-        ? null
-        : value.allow.map((entry) =>
-            Array.isArray(entry)
-              ? fromUnits(entry)
-              : new AllowFlags(fromUnits(entry.command), entry.flags.map(fromUnits)),
-          ),
-    deny: value.deny.map(ruleFrom),
-    ask: value.ask.map(ruleFrom),
   }
 }
 
@@ -174,9 +132,8 @@ function pathsFrom(value: PathsReply | null): PathsBlock | null {
   }
 }
 
-function profileFields(value: ProfileReply): ProfileFields {
+function profileFields(value: ProfileReply, base: SessionProfile | null): ProfileFields {
   return {
-    commands: rulesFrom(value.commands),
     paths: pathsFrom(value.paths),
     vars: value.vars === null ? null : { hide: value.vars.map(fromUnits) },
     mounts:
@@ -184,13 +141,14 @@ function profileFields(value: ProfileReply): ProfileFields {
         ? null
         : new Map(
             value.mounts.map((mount): [string, ProfileMount] => {
-              const rules = rulesFrom(mount.commands)
+              const prefix = fromUnits(mount.prefix)
+              const commands = base?.mounts?.get(prefix)?.commands ?? null
               const paths = pathsFrom(mount.paths)
               return [
-                fromUnits(mount.prefix),
+                prefix,
                 {
                   ...(mount.mode === null ? {} : { mode: mount.mode }),
-                  ...(rules === null ? {} : { commands: { ask: rules.ask, deny: rules.deny } }),
+                  ...(commands === null ? {} : { commands }),
                   ...(paths === null ? {} : { paths }),
                 },
               ]
@@ -213,7 +171,7 @@ function restrictMatching(
     if (error instanceof StreamRefusal) throw new PolicyError(error.message)
     throw error
   }
-  return value === null ? null : profileFields(value)
+  return value === null ? null : profileFields(value, base)
 }
 
 function compilePlan(profile: SessionProfile): PlanReply {
@@ -224,14 +182,18 @@ function compilePlan(profile: SessionProfile): PlanReply {
  * A profile with the inline document of one `createSession` added.
  *
  * The one rule about combining two documents: an inline document may
- * add ask and deny rules and hides, never an allow list and never a
- * script, and that holds even when there is no profile to add to. Modes
- * take the weaker of the two, `cwd` and `env` are the inline document's
- * when it states them (they are session presets, not permissions).
- * Either side null returns the other unchanged; the profile's policy
- * survives the merge, since the inline document can only add rules
- * beside it. An inline `processes` narrows the profile's over the
- * workspace's (`workspaceProcesses`).
+ * add command trees and hides, never a show entry and never a script,
+ * and that holds even when there is no profile to add to. Modes take the
+ * weaker of the two, `cwd` and `env` are the inline document's when it
+ * states them (they are session presets, not permissions). Either side
+ * null returns the other unchanged; the profile's policy survives the
+ * merge, since the inline document can only add rules beside it. An
+ * inline `processes` narrows the profile's over the workspace's
+ * (`workspaceProcesses`).
+ *
+ * The result carries the base's command trees only. A tree cannot absorb
+ * another without changing what it means, so the inline document's trees
+ * are judged beside the base's (`commandRules` reads both documents).
  */
 export function withInline(
   base: SessionProfile | null,
@@ -246,7 +208,7 @@ export function withInline(
     throw new PolicyError('network belongs on the profile, not inline permissions')
   if (inline.policy !== undefined && inline.policy !== null) {
     throw new PolicyError(
-      'inline permissions may add ask and deny rules, not a policy; state one on the profile',
+      'inline permissions may add command rules and hides, not a policy; state one on the profile',
     )
   }
   const processes =
@@ -256,6 +218,7 @@ export function withInline(
   if (base === null) return inline.processes == null ? inline : { ...inline, processes }
   return {
     ...restriction,
+    ...(base.commands != null ? { commands: base.commands } : {}),
     commandLimits: base.commandLimits ?? null,
     processes,
     network: base.network ?? null,
@@ -291,13 +254,55 @@ export function compileScripts(effective: SessionProfile, name: string): Profile
 }
 
 /**
+ * A session's command trees: each document's top-level tree and each of
+ * its mounts' trees, every name checked against its command's grammar
+ * and held by its canonical name. null when no document states a tree.
+ * `defer` keeps a command with no grammar as written, for a check made
+ * before every CLI is registered. Throws `PolicyError` when a name does
+ * not fit its command's grammar. Mirrors Python's `command_rules`.
+ */
+export function commandRules(
+  base: SessionProfile | null,
+  inline: SessionProfile | null,
+  grammars: ReadonlyMap<string, Grammar>,
+  defer = false,
+): AdmissionRules | null {
+  const trees: ScopedTree[] = []
+  for (const [doc, stated] of [
+    [base, false],
+    [inline, true],
+  ] as const) {
+    if (doc === null) continue
+    if (doc.commands != null)
+      trees.push({
+        tree: normalizeTree(doc.commands, grammars, 'commands', defer),
+        mount: '',
+        inline: stated,
+      })
+    for (const [prefix, entry] of doc.mounts ?? []) {
+      if (entry.commands == null) continue
+      const where = `mounts[${prefix}].commands`
+      trees.push({
+        tree: normalizeTree(entry.commands, grammars, where, defer),
+        mount: prefix,
+        inline: stated,
+      })
+    }
+  }
+  return trees.length > 0 ? { trees } : null
+}
+
+/**
  * The session fields a profile compiles to; its `processes` over the
- * workspace's (`workspaceProcesses`), field by field.
+ * workspace's (`workspaceProcesses`), field by field. `commands` are the
+ * session's command trees, read off the profile and the inline document
+ * (`commandRules`).
  */
 export function compileProfile(
   effective: SessionProfile | null,
   name = '',
   workspaceProcesses: ProcessesBlock | null = null,
+  commands: AdmissionRules | null = null,
 ): CompiledProfile {
   const profile = name === '' ? null : name
   const processes = Object.freeze(layerProcesses([effective?.processes, workspaceProcesses]))
@@ -318,8 +323,6 @@ export function compileProfile(
     }
   }
   const plan = compilePlan(effective)
-  const commands = rulesFrom(plan.commands)
-  checkRules(commands)
   return {
     setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
     visibility: visibilityFrom(plan.visibility, processes.list),
