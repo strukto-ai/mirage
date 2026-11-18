@@ -838,6 +838,17 @@
    ]
   },
   {
+   "id": "a_rule_on_a_subcommand_names_an_option_its_parent_reads",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
+   "steps": [
+    {"op": "exec", "command": "cd /data && git init -q .", "expect": {"value": {"exit_code": 0}}},
+    {"op": "session", "id": "plain", "profile": {"cwd": "/data", "commands": {"*": "allow", "git": {"status": {"-C": {"decision": "deny", "reason": "no -C on status"}}}}}},
+    {"op": "exec", "session": "plain", "command": "git -C /data status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "no -C on status", "matched": {"command": ["git", "status"], "flags": ["-C"], "keys": []}}}},
+    {"op": "exec", "session": "plain", "command": "git status --short", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "plain", "command": "git -C /data branch", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}}
+   ]
+  },
+  {
    "id": "a_cli_tree_reads_options_beside_subcommands",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"gh": {"cli": "gh", "machine": "in_process", "config": {"token": "t"}}, "git": {"cli": "git", "machine": "in_process"}}},
    "steps": [
