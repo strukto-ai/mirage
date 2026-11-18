@@ -256,6 +256,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   protected reached = false
   // Where the workspace keeps the machines Mirage started for it; null for a handle no workspace bound.
   protected memory: MachineMemory | null = null
+  // Whether Mirage started the machine this handle reaches (or recalled one
+  // it started) rather than the user bringing it: set by a provider that starts machines.
+  protected startedHere = false
   private pausable = false
   private mounts: MachineMounts | null = null
   // The libfaketime the machine holds, asked once the first program runs
@@ -315,7 +318,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * it is deleted. False until a connect starts or recalls one.
    */
   get startedByMirage(): boolean {
-    return false
+    return this.startedHere
   }
 
   /**
@@ -775,8 +778,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    */
   private async busyWith<T>(work: () => Promise<T>): Promise<T> {
     this.working += 1
-    if (this.working === 1) this.becameBusy()
     try {
+      if (this.working === 1) await this.becameBusy()
       return await work()
     } finally {
       this.working -= 1
@@ -787,10 +790,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * Told as Mirage starts work on the machine while it had none: a
    * program's run, before it connects, or one of Mirage's own lines. A
-   * provider whose machine pauses itself when idle keeps it up from here.
+   * provider whose machine pauses itself when idle keeps it up from here;
+   * the work waits for it.
    */
-  protected becameBusy(): void {
-    return
+  protected becameBusy(): Promise<void> {
+    return Promise.resolve()
   }
 
   /** Told as the last of Mirage's work on the machine ends. */

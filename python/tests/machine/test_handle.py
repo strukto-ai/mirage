@@ -235,7 +235,7 @@ class WorkingMachine(RecordingMachine):
         self.events.append("connect")
         await super().connect()
 
-    def _became_busy(self) -> None:
+    async def _became_busy(self) -> None:
         self.events.append("busy")
 
     def _became_idle(self) -> None:

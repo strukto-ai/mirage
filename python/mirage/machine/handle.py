@@ -288,6 +288,10 @@ class MachineHandle:
         # Where the workspace keeps the machines Mirage started for it;
         # None for a handle no workspace bound.
         self._memory: MachineMemory | None = None
+        # Whether Mirage started the machine this handle reaches (or
+        # recalled one it started) rather than the user bringing it: set by
+        # a provider that starts machines.
+        self._started_here = False
         self._mounts: MachineMounts | None = None
         # The libfaketime the machine holds, asked once the first program
         # runs there under a system_time: None for none. Its first runs
@@ -348,7 +352,7 @@ class MachineHandle:
         than the user bringing it: its workspace pauses it as it closes and
         removes it as it is deleted. False until a connect starts or
         recalls one."""
-        return False
+        return self._started_here
 
     async def destroy(self) -> None:
         """Remove the machine Mirage started for this handle, as its
@@ -836,20 +840,20 @@ class MachineHandle:
         (``_became_busy``), and the last to end that it is idle
         (``_became_idle``)."""
         self._working += 1
-        if self._working == 1:
-            self._became_busy()
         try:
+            if self._working == 1:
+                await self._became_busy()
             yield
         finally:
             self._working -= 1
             if self._working == 0:
                 self._became_idle()
 
-    def _became_busy(self) -> None:
+    async def _became_busy(self) -> None:
         """Told as Mirage starts work on the machine while it had none: a
         program's run, before it connects, or one of Mirage's own lines.
         A provider whose machine pauses itself when idle keeps it up from
-        here."""
+        here; the work waits for it."""
         return
 
     def _became_idle(self) -> None:

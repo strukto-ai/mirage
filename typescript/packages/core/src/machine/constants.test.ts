@@ -18,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -425,7 +426,7 @@ describe('SSHFS_LINE', () => {
     const done = spawnSync('/bin/sh', ['-c', SSHFS_LINE], {
       env: { PATH: dir, TOOLS: dir, LOG: join(dir, 'log'), ...env },
     })
-    const log = spawnSync('/bin/cat', [join(dir, 'log')]).stdout.toString()
+    const log = readFileSync(join(dir, 'log'), 'utf8')
     return [done.status, log.split('\n').filter((row) => row !== '')]
   }
 

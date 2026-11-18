@@ -3001,6 +3001,7 @@ export class Workspace {
         dropState,
         workspaceId: this.workspaceId,
         planes: this.planes,
+        machineMemory: this.meta,
       })
     } finally {
       // Teardown has run either way, and `closing` is memoized, so it will

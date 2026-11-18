@@ -119,7 +119,7 @@ SSHFS_LINE = (
     "elif command -v apk; then $s apk add --no-cache sshfs; "
     "elif command -v dnf; then $s dnf install -y -q fuse-sshfs; "
     "elif command -v yum; then $s yum install -y -q fuse-sshfs; fi; "
-    "} >/dev/null 2>&1; command -v sshfs >/dev/null 2>&1"
+    "} >/dev/null 2>&1; command -v sshfs >/dev/null 2>&1 || exit 1"
 )
 SSHFS_HINT = (
     "serving the workspace into a machine needs sshfs there, and it could "

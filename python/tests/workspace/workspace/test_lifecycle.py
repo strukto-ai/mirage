@@ -1740,6 +1740,15 @@ class _Started(_Unasked):
         self.log.append("destroy")
 
 
+class _Unkillable(_Started):
+    """A machine Mirage started whose removal fails, as E2B refusing a
+    kill."""
+
+    async def destroy(self) -> None:
+        self.log.append("destroy")
+        raise RuntimeError("kill refused")
+
+
 def _built(box: MachineHandle, store=None) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
@@ -1769,6 +1778,35 @@ async def test_a_machine_mirage_started_is_removed_on_delete_never_paused():
     box = _Started("box")
     await _built(box).delete()
     assert box.log == ["close", "destroy"]
+
+
+@pytest.mark.asyncio
+async def test_a_machine_whose_removal_failed_is_kept_past_the_delete(caplog):
+    store = RAMWorkspaceStateStore()
+    box = _Unkillable("box")
+    ws = _built(box, store)
+    await box.memory_given.remember("box", "sb-1")
+    with pytest.raises(RuntimeError, match="kill refused"):
+        await ws.delete()
+    assert (await store.load_meta("w"))["machines"] == {"box": "sb-1"}
+    assert "sb-1" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_machine_the_config_no_longer_names_is_kept_past_the_delete():
+    store = RAMWorkspaceStateStore()
+    box = _Started("box")
+    ws = _built(box, store)
+    await box.memory_given.remember("gone", "sb-9")
+    await ws.delete()
+    assert (await store.load_meta("w"))["machines"] == {"gone": "sb-9"}
+
+
+@pytest.mark.asyncio
+async def test_a_delete_that_removed_every_machine_leaves_no_record():
+    store = RAMWorkspaceStateStore()
+    await _built(_Started("box"), store).delete()
+    assert await store.load_meta("w") is None
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,8 @@ export interface MachineMemory {
   remember(name: string, instance: string): Promise<void>
   /** Drop the machine kept for `name`, once it is gone. */
   forget(name: string): Promise<void>
+  /** Every machine kept, its provider's id by the machine's name. */
+  remembered(): Promise<Record<string, string>>
 }
 
 /** A command a machine runs with its stdin and stdout held open. */

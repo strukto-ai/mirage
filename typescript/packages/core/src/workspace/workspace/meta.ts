@@ -79,10 +79,6 @@ export class WorkspaceMeta implements MachineMemory {
     this.written = true
   }
 
-  /**
-   * Snapshot restore: adopt the snapshot's default session identity and
-   * point the discovery record at it.
-   */
   /** The machine Mirage started for `name`, from the record's `machines`; null when none. */
   async recall(name: string): Promise<string | null> {
     const machines = (await this.store.loadMeta(this.wsId))?.machines
@@ -98,6 +94,15 @@ export class WorkspaceMeta implements MachineMemory {
   /** Drop the machine kept for `name` from the record's `machines`. */
   forget(name: string): Promise<void> {
     return this.writeMachine(name, null)
+  }
+
+  /** Every machine the record's `machines` keeps, by name. */
+  async remembered(): Promise<Record<string, string>> {
+    const machines = (await this.store.loadMeta(this.wsId))?.machines
+    if (!isRecord(machines)) return {}
+    return Object.fromEntries(
+      Object.entries(machines).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    )
   }
 
   /**
@@ -126,6 +131,10 @@ export class WorkspaceMeta implements MachineMemory {
     throw new Error(`workspace ${this.wsId} meta kept conflicting with another writer`)
   }
 
+  /**
+   * Snapshot restore: adopt the snapshot's default session identity and
+   * point the discovery record at it.
+   */
   async adoptDefault(sessionId: string): Promise<void> {
     this.sessions.adoptDefault(sessionId)
     await this.store.replaceMeta(this.wsId, {

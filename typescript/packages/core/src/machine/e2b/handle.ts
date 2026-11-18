@@ -175,8 +175,6 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   private readonly brought: string | null
   // The sandbox this handle reaches: the config's, or the one Mirage started; null before that.
   private sandboxId: string | null
-  // Whether Mirage started `sandboxId` (or recalled one it started) rather than the config naming it.
-  private startedHere = false
   // When Mirage's last work here ended, in ms since the epoch; null while it has work or had none.
   private idleAt: number | null = null
   // Pushes the busy timeout out again while Mirage's work here lasts.
@@ -184,6 +182,11 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   // The timeout, in seconds, still to send E2B, and the sending under way.
   private wanted: number | null = null
   private pushing: Promise<void> | null = null
+  // Whether the last timeout sent failed to arrive.
+  private missed = false
+  // Whether work that came out of idle found its busy timeout missed: the
+  // sandbox may have paused first, so the next connect reaches it anew.
+  private asleep = false
 
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
@@ -201,11 +204,6 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   /** The sandbox's id at E2B; its name before Mirage starts one. */
   override get instance(): string {
     return this.sandboxId ?? this.name
-  }
-
-  /** Whether Mirage started the sandbox, rather than the config naming yours. */
-  override get startedByMirage(): boolean {
-    return this.startedHere
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -265,21 +263,52 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     })
     this.sandboxId = this.sandbox.sandboxId
     this.startedHere = true
-    await this.memory?.remember(this.name, this.sandboxId)
+    try {
+      await this.memory?.remember(this.name, this.sandboxId)
+    } catch (error) {
+      await this.dropUnkept(sdk)
+      throw error
+    }
     this.reached = true
+  }
+
+  /**
+   * Kill a sandbox just started that the workspace could not keep: no later
+   * build would reach it, so it would outlive the workspace unseen. The next
+   * connect starts another.
+   */
+  private async dropUnkept(sdk: E2bSdk): Promise<void> {
+    const id = this.sandboxId
+    this.sandbox = null
+    this.sandboxId = null
+    this.startedHere = false
+    if (id === null) return
+    try {
+      await sdk.Sandbox.kill(id, this.apiParams())
+    } catch (error) {
+      logger.debug?.(`${this.machine.toString()}: unkept sandbox ${id} not killed: ${String(error)}`)
+    }
   }
 
   /**
    * Keep a sandbox Mirage manages up while Mirage has work there: its E2B
    * timeout goes to `BUSY_TIMEOUT_SECONDS`, pushed out again every
    * `BUSY_REFRESH_SECONDS`. One whose idle timeout has passed has paused,
-   * and gets its timeout as the work's connect resumes it (`stale`).
+   * and gets its timeout as the work's connect resumes it (`stale`). Work
+   * that comes while the idle timeout runs waits for the busy one to land,
+   * or the sandbox could pause under it; when it misses, the sandbox may
+   * have paused first, and the work's connect reaches it anew.
    */
-  protected override becameBusy(): void {
+  protected override async becameBusy(): Promise<void> {
     if (this.brought !== null) return
     if (!this.lapsed()) {
+      const waking = this.idleAt !== null
       this.idleAt = null
       this.push(BUSY_TIMEOUT_SECONDS)
+      if (waking && this.pushing !== null) {
+        await this.pushing
+        if (this.missed) this.asleep = true
+      }
     }
     if (this.refresher === null) {
       this.refresher = setInterval(() => {
@@ -302,7 +331,8 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
    * next connect resumes it and reads its mounts anew.
    */
   protected override stale(): boolean {
-    if (this.brought !== null || !this.lapsed()) return false
+    if (this.brought !== null || (!this.asleep && !this.lapsed())) return false
+    this.asleep = false
     this.idleAt = null
     return true
   }
@@ -331,14 +361,17 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
    * holding the work up. The timeouts go out one at a time, the newest
    * asked replacing any not yet sent; a sandbox not started yet gets its
    * timeout as it starts, and one that fails to arrive leaves the sandbox
-   * on the timeout it had.
+   * on the timeout it had (`missed`).
    */
   private push(seconds: number): void {
+    if (this.sandboxId === null || !this.startedHere) return
     this.wanted = seconds
     this.pushing ??= this.sendTimeouts()
   }
 
   private async sendTimeouts(): Promise<void> {
+    // Yield first: `push` sets `pushing` to this before its end clears it.
+    await Promise.resolve()
     try {
       while (this.wanted !== null) {
         const seconds = this.wanted
@@ -348,7 +381,9 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
         try {
           const sdk = await this.ensureSdk()
           await sdk.Sandbox.setTimeout(id, seconds * 1000, this.apiParams())
+          this.missed = false
         } catch (error) {
+          this.missed = true
           logger.debug?.(`${this.machine.toString()}: timeout not set: ${String(error)}`)
         }
       }

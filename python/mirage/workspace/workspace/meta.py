@@ -94,6 +94,18 @@ class WorkspaceMeta:
         """
         await self._write_machine(name, None)
 
+    async def remembered(self) -> dict[str, str]:
+        """Every machine the record's ``machines`` keeps, by name."""
+        record = await self._store.load_meta(self._workspace_id)
+        machines = record.get("machines") if record is not None else None
+        if not isinstance(machines, dict):
+            return {}
+        return {
+            name: instance
+            for name, instance in machines.items()
+            if isinstance(name, str) and isinstance(instance, str)
+        }
+
     async def _write_machine(self, name: str, instance: str | None) -> None:
         """Set or drop one machine under ``machines``, merged into the
         record as it is now and compare-and-set, so machines started at

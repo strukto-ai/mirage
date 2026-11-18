@@ -204,8 +204,9 @@ class WorkingBox extends RecordingMachine {
     return super.connect()
   }
 
-  protected override becameBusy(): void {
+  protected override becameBusy(): Promise<void> {
     this.events.push('busy')
+    return Promise.resolve()
   }
 
   protected override becameIdle(): void {

@@ -949,6 +949,14 @@ class Started extends Unasked {
   }
 }
 
+/** A machine Mirage started whose removal fails, as E2B refusing a kill. */
+class Unkillable extends Started {
+  override destroy(): Promise<void> {
+    this.log.push('destroy')
+    return Promise.reject(new Error('kill refused'))
+  }
+}
+
 describe('machines Mirage started', () => {
   const build = (box: MachineHandle, store = new RAMWorkspaceStateStore()) =>
     new Workspace(
@@ -972,6 +980,41 @@ describe('machines Mirage started', () => {
     const box = new Started('box')
     await build(box).delete()
     expect(box.log).toEqual(['close', 'destroy'])
+  })
+
+  it('keeps one whose removal failed in the record past the delete', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const box = new Unkillable('box')
+    const ws = build(box, store)
+    await box.memoryGiven?.remember('box', 'sb-1')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await expect(ws.delete()).rejects.toThrow('kill refused')
+      expect((await store.loadMeta('w'))?.machines).toEqual({ box: 'sb-1' })
+      expect(String(warn.mock.calls[0]?.[0])).toContain('sb-1')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('keeps one the config no longer names in the record past the delete', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const box = new Started('box')
+    const ws = build(box, store)
+    await box.memoryGiven?.remember('gone', 'sb-9')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await ws.delete()
+      expect((await store.loadMeta('w'))?.machines).toEqual({ gone: 'sb-9' })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('leaves no record once the delete removed every machine', async () => {
+    const store = new RAMWorkspaceStateStore()
+    await build(new Started('box'), store).delete()
+    expect(await store.loadMeta('w')).toBeNull()
   })
 
   it('keeps what it started in the workspace record for the next build', async () => {

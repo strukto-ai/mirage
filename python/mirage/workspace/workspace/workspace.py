@@ -2175,6 +2175,7 @@ class Workspace:
             workspace_id=self.workspace_id,
             planes=self._planes,
             blocked_loop=blocked_loop,
+            machine_memory=self._meta,
         )
 
     # ── snapshot / load / copy ─────────────────────────────────────────────

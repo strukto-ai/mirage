@@ -47,6 +47,10 @@ class MachineMemory(Protocol):
         """Drop the machine kept for ``name``, once it is gone."""
         ...
 
+    async def remembered(self) -> dict[str, str]:
+        """Every machine kept, its provider's id by the machine's name."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class RunStatus:

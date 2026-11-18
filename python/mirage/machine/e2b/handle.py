@@ -183,9 +183,6 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         # The sandbox this handle reaches: the config's, or the one Mirage
         # started; None before that.
         self._sandbox_id: str | None = self.config.sandbox_id
-        # Whether Mirage started ``_sandbox_id`` (or recalled one it
-        # started) rather than the config naming it.
-        self._started_here = False
         # When Mirage's last work here ended, monotonic; None while it has
         # work or had none.
         self._idle_at: float | None = None
@@ -195,17 +192,17 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         # way.
         self._wanted: float | None = None
         self._pushing: asyncio.Task[None] | None = None
+        # Whether the last timeout sent failed to arrive.
+        self._missed = False
+        # Whether work that came out of idle found its busy timeout missed:
+        # the sandbox may have paused first, so the next connect reaches it
+        # anew.
+        self._asleep = False
 
     @property
     def instance(self) -> str:
         """The sandbox's id at E2B; its name before Mirage starts one."""
         return self._sandbox_id if self._sandbox_id is not None else self.name
-
-    @property
-    def started_by_mirage(self) -> bool:
-        """Whether Mirage started the sandbox, rather than the config
-        naming yours."""
-        return self._started_here
 
     def _api_params(self) -> dict[str, Any]:
         api_key = self.config.api_key
@@ -255,20 +252,52 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         self._sandbox_id = self._sandbox.sandbox_id
         self._started_here = True
         if self._memory is not None:
-            await self._memory.remember(self.name, self._sandbox_id)
+            try:
+                await self._memory.remember(self.name, self._sandbox_id)
+            except Exception:
+                await self._drop_unkept()
+                raise
         self._reached = True
 
-    def _became_busy(self) -> None:
+    async def _drop_unkept(self) -> None:
+        """Kill a sandbox just started that the workspace could not keep:
+        no later build would reach it, so it would outlive the workspace
+        unseen. The next connect starts another."""
+        sandbox_id = self._sandbox_id
+        self._sandbox = None
+        self._sandbox_id = None
+        self._started_here = False
+        if sandbox_id is None:
+            return
+        try:
+            await sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
+        except Exception:
+            logger.debug(
+                "%s: unkept sandbox %s not killed",
+                self.machine,
+                sandbox_id,
+                exc_info=True,
+            )
+
+    async def _became_busy(self) -> None:
         """Keep a sandbox Mirage manages up while Mirage has work there:
         its E2B timeout goes to ``BUSY_TIMEOUT_SECONDS``, pushed out again
         every ``BUSY_REFRESH_SECONDS``. One whose idle timeout has passed
         has paused, and gets its timeout as the work's connect resumes it
-        (``_stale``)."""
+        (``_stale``). Work that comes while the idle timeout runs waits for
+        the busy one to land, or the sandbox could pause under it; when it
+        misses, the sandbox may have paused first, and the work's connect
+        reaches it anew."""
         if self.config.sandbox_id is not None:
             return
         if not self._lapsed():
+            waking = self._idle_at is not None
             self._idle_at = None
             self._push(BUSY_TIMEOUT_SECONDS)
+            if waking and self._pushing is not None:
+                await asyncio.shield(self._pushing)
+                if self._missed:
+                    self._asleep = True
         if self._refresher is None:
             self._refresher = asyncio.get_running_loop().create_task(
                 self._refresh()
@@ -286,8 +315,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     def _stale(self) -> bool:
         """A sandbox Mirage manages whose idle timeout has passed has
         paused: the next connect resumes it and reads its mounts anew."""
-        if self.config.sandbox_id is not None or not self._lapsed():
+        if self.config.sandbox_id is not None or (
+            not self._asleep and not self._lapsed()
+        ):
             return False
+        self._asleep = False
         self._idle_at = None
         return True
 
@@ -323,11 +355,13 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         without holding the work up. The timeouts go out one at a time,
         the newest asked replacing any not yet sent; a sandbox not started
         yet gets its timeout as it starts, and one that fails to arrive
-        leaves the sandbox on the timeout it had.
+        leaves the sandbox on the timeout it had (``_missed``).
 
         Args:
             seconds (float): the timeout from now.
         """
+        if self._sandbox_id is None or not self._started_here:
+            return
         self._wanted = seconds
         if self._pushing is None:
             self._pushing = asyncio.get_running_loop().create_task(
@@ -345,7 +379,9 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     await sdk.AsyncSandbox.set_timeout(
                         sandbox_id, seconds, **self._api_params()
                     )
+                    self._missed = False
                 except Exception:
+                    self._missed = True
                     logger.debug(
                         "%s: timeout not set", self.machine, exc_info=True
                     )
