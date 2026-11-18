@@ -41,7 +41,7 @@ export class PipeConsole extends JobConsole {
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
     if (channel === Channel.STDERR && !this.pipeStderr && this.errors !== undefined) {
-      await this.errors.emit(channel, data)
+      if (!this.finished && !this.store.closed) await this.errors.emit(channel, data)
     } else if (channel !== Channel.STDOUT && !this.pipeStderr) {
       if (channel === Channel.STDERR) {
         this.held += data.byteLength

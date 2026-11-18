@@ -52,7 +52,8 @@ class PipeConsole(JobConsole):
         if channel == Channel.STDOUT or self._pipe_stderr:
             await self._pipe.write(data)
         elif channel == Channel.STDERR and self._errors is not None:
-            await self._errors.emit(channel, data)
+            if not self.finished and not self.store.closed:
+                await self._errors.emit(channel, data)
         else:
             if channel == Channel.STDERR:
                 self._held += len(data)
