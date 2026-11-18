@@ -1488,6 +1488,7 @@
     "entry_router": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper."
    },
    "typescript_only": {
+    "DeleteQuery": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
     "ListQuery": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
     "RefParams": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
     "answered": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",

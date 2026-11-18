@@ -41,6 +41,13 @@ export const STATUS = {
   OP_UNSUPPORTED: 8,
 } as const
 
+// The extension a machine's sshfs renames with when the server names it,
+// replacing what the new name held as rename(2) does: SFTP v3's own rename
+// refuses an existing target, so without it `mv` over a file, git and every
+// save through a temporary file fail there. ssh2's VERSION names no extension,
+// so a machine's pipe adds it. Mirrors Python's `POSIX_RENAME`.
+export const POSIX_RENAME = 'posix-rename@openssh.com'
+
 // The size ssh2's SFTP class cuts each answer to on a sandbox's pipe.
 export const PIPE_PACKET_SIZE = 64 * 1024
 

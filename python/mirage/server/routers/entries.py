@@ -14,6 +14,7 @@
 
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -21,7 +22,6 @@ from fastapi import APIRouter, Depends, Request, Response
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import NAME, NOUN
 from mirage.resources.errors import ResourceError
-from mirage.resources.refs import uses_of
 from mirage.resources.types import Entry, EntryInput, EntryKind, Fields
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.resources.fields import types_of
@@ -46,16 +46,13 @@ TYPES_ROUTE = "types"
 ID_PREFIX = re.compile(r"(ws|sec|pol|key|tpl|team|usr)_")
 
 
-def present(
-    kind: EntryKind, entry: Entry, used_by: int | None = None
-) -> dict[str, Any]:
+def present(kind: EntryKind, entry: Entry) -> dict[str, Any]:
     """An entry as a route answers it. The daemon keeps no id, creator
     or times, so the id is the name and the rest are null.
 
     Args:
         kind (EntryKind): the entry's kind.
         entry (Entry): the entry.
-        used_by (int | None): how many templates name it, for a list.
     """
     out: dict[str, Any] = {
         "id": entry.name,
@@ -66,9 +63,21 @@ def present(
         "config": entry.fields,
     }
     out.update(created_by=None, created_at=None, updated_at=None)
-    if used_by is not None:
-        out["used_by"] = used_by
     return out
+
+
+def in_use(name: str, ids: Sequence[str]) -> HttpError:
+    """The refusal a delete answers while kept workspace configs name the
+    entry: each fills its pointers in again when it starts.
+
+    Args:
+        name (str): the entry.
+        ids (Sequence[str]): the workspaces whose configs name it.
+    """
+    return HttpError(
+        ErrorCode.CONFLICT,
+        f"{name} is used by workspaces {', '.join(ids)}",
+    )
 
 
 def required_string(body: dict[str, JsonValue], key: str) -> str:
@@ -181,13 +190,12 @@ def entry_router(kind: EntryKind) -> APIRouter:
         store: ResourceStore = request.app.state.resources
         try:
             entries = await store.list_entries(kind)
-            used = uses_of(await store.list_templates())
         except ResourceError as e:
             raise store_refusal(e) from e
         text = (q or "").strip().lower()
         return {
             "items": [
-                present(kind, e, len(used.get(e.name, [])))
+                present(kind, e)
                 for e in entries
                 if (not type or e.type == type)
                 and (not text or text in e.name.lower())
@@ -264,10 +272,18 @@ def entry_router(kind: EntryKind) -> APIRouter:
         return present(kind, saved)
 
     @router.delete("/{ref}", status_code=204, response_model=None)
-    async def delete_entry(ref: str, request: Request) -> Response:
+    async def delete_entry(
+        ref: str, request: Request, force: bool = False
+    ) -> Response:
         store: ResourceStore = request.app.state.resources
         try:
             current = await entry_named(store, kind, ref)
+            if not force:
+                ids = await request.app.state.registry.ids_naming(
+                    current.name, request.state.account
+                )
+                if ids:
+                    raise in_use(current.name, ids)
             await store.delete_entry(kind, current.name)
         except ResourceError as e:
             raise store_refusal(e) from e

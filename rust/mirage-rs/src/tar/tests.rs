@@ -568,3 +568,47 @@ fn a_delete_of_no_names_changes_nothing() {
     assert_eq!(changed(&mut host, "delete", json!([]), json!([])).0, 0);
     assert_eq!(names_in(&mut host), "a.txt\n");
 }
+
+#[test]
+fn a_read_only_directory_takes_its_mode_after_what_goes_in_it() {
+    let mut host = Host::with(&[("ro/f.txt", "in\n")], "");
+    let mut dir = json!({"name": "ro/", "kind": "dir"});
+    dir["mode"] = json!(0o555);
+    packed(&mut host, json!([dir, file("ro/f.txt", 2, None)]));
+    let tar = host.files["a.tar"].clone();
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "umask": 0o022}));
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(host.files["/out/ro/f.txt"], b"in\n");
+    assert_eq!(host.modes.get("/out/ro"), Some(&0o555));
+}
+
+#[test]
+fn a_later_member_of_a_name_sets_back_the_mode_an_earlier_one_gave() {
+    let mut host = two();
+    let mut first = file("a.txt", 2, None);
+    first["mode"] = json!(0o755);
+    let mut second = file("a.txt", 2, None);
+    second["mode"] = json!(0o644);
+    packed(&mut host, json!([first, second]));
+    let tar = host.files["a.tar"].clone();
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "umask": 0o022}));
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(host.modes.get("/out/a.txt"), Some(&0o644));
+}
+
+#[test]
+fn a_child_directory_takes_its_mode_before_its_parent() {
+    let mut host = Host::default();
+    let mut child = json!({"name": "p/c/", "kind": "dir"});
+    child["mode"] = json!(0o700);
+    let mut parent = json!({"name": "p/", "kind": "dir"});
+    parent["mode"] = json!(0o600);
+    packed(&mut host, json!([child, parent]));
+    let tar = host.files["a.tar"].clone();
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "umask": 0o022}));
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(
+        (host.modes.get("/out/p"), host.modes.get("/out/p/c")),
+        (Some(&0o600), Some(&0o700))
+    );
+}

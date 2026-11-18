@@ -18,7 +18,7 @@ import { strerrorOf } from '../errors/fs.ts'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { OPEN, STATUS } from './constants.ts'
+import { OPEN, POSIX_RENAME, STATUS } from './constants.ts'
 import type { MountCore } from './core.ts'
 import { PipeServer, longname, toAttrs, workspacePath } from './sftp.ts'
 
@@ -28,7 +28,9 @@ const FXP_OPEN = 3
 const FXP_CLOSE = 4
 const FXP_WRITE = 6
 const FXP_STAT = 17
+const FXP_RENAME = 18
 const FXP_SYMLINK = 20
+const FXP_EXTENDED = 200
 const FXP_VERSION = 2
 const FXP_STATUS = 101
 const FXP_HANDLE = 102
@@ -232,6 +234,49 @@ describe('PipeServer', () => {
       if (target === 'real') {
         expect(new TextDecoder().decode(await ws.vfs.read('/notes/link'))).toBe('target')
       }
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('names posix-rename in its VERSION and renames over a name with it', async () => {
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/notes/new', 'new\n')
+    await ws.vfs.write('/notes/old', 'old')
+    await ws.session('agent')
+    const end = client()
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    const paths = Buffer.concat([
+      sftpString(Buffer.from('/notes/new')),
+      sftpString(Buffer.from('/notes/old')),
+    ])
+    try {
+      end.send(packet(FXP_INIT, uint32(3)))
+      const [kind, body] = await end.answer()
+      expect([kind, body.readUInt32BE(0), body.subarray(4).toString('latin1')]).toEqual([
+        FXP_VERSION,
+        3,
+        sftpString(Buffer.from(POSIX_RENAME)).toString('latin1') +
+          sftpString(Buffer.from('1')).toString('latin1'),
+      ])
+      end.send(packet(FXP_RENAME, Buffer.concat([uint32(1), paths])))
+      const [refused, status] = await end.answer()
+      expect([refused, status.readUInt32BE(4)]).toEqual([FXP_STATUS, STATUS.FAILURE])
+      end.send(
+        packet(
+          FXP_EXTENDED,
+          Buffer.concat([uint32(2), sftpString(Buffer.from(POSIX_RENAME)), paths]),
+        ),
+      )
+      const [renamed, done] = await end.answer()
+      expect([renamed, done.readUInt32BE(0), done.readUInt32BE(4)]).toEqual([
+        FXP_STATUS,
+        2,
+        STATUS.OK,
+      ])
+      expect((await ws.shell('cat /notes/old; ls /notes')).stdoutText).toBe('new\nold\n')
     } finally {
       end.close()
       await served

@@ -152,6 +152,25 @@ SEEDED = "cd /data && printf '1\\n' > a; printf '2\\n' > b; "
             (0, b"a\n", b""),
             id="exclude_vcs",
         ),
+        pytest.param(
+            "chmod 755 a; chmod 666 b; mkdir d; tar -cf o."
+            "tar a b d; mkdir o; cd o; tar -xf ../o.tar; stat -c '%a %n"
+            "' a b d; cd ..; mkdir m; cd m; umask 077; tar -xf ../o.tar"
+            "; stat -c '%a %n' a b d; cd ..; mkdir p; cd p; tar -xpf .."
+            "/o.tar; stat -c '%a %n' a b d",
+            (
+                0,
+                b"755 a\n644 b\n755 d\n700 a\n600 b\n700 d\n755 a\n666 b\n755 d\n",
+                b"",
+            ),
+            id="extract_gives_the_member_mode_under_the_umask",
+        ),
+        pytest.param(
+            "chmod 755 a; tar -cf d.tar a; chmod 644 a; tar -rf d.tar a; rm a; "
+            "tar -xf d.tar; stat -c %a a",
+            (0, b"644\n", b""),
+            id="a_later_member_sets_back_an_earlier_mode",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -159,6 +178,31 @@ async def test_tar_options_behave_as_pinned(
     line: str, expected: tuple[int, bytes, bytes]
 ) -> None:
     assert await _shell(SEEDED + line, {}) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_piped_extract_lands_every_member():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    try:
+        made = await ws.shell(
+            "cd /data && for d in $(seq 12); do mkdir -p src/d$d; for f in "
+            "$(seq 100); do echo $d.$f > src/d$d/f$f; done; done; chmod +x "
+            "src/d1/f1; mkdir out"
+        )
+        assert made.exit_code == 0
+        r = await ws.shell("tar -cf - -C /data src | tar -xf - -C /data/out")
+        assert (r.exit_code, await r.materialize_stderr()) == (0, b"")
+        landed = [
+            len(await ws.vfs.readdir(f"/data/out/src/d{d}"))
+            for d in range(1, 13)
+        ]
+        assert landed == [100] * 12
+        mode = await ws.shell("stat -c %a /data/out/src/d1/f1")
+        assert await mode.stdout_str() == "755\n"
+    finally:
+        await ws.close()
 
 
 async def _mounted(line: str) -> tuple[int, bytes, bytes]:

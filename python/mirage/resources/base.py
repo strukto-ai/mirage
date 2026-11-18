@@ -74,9 +74,6 @@ class ResourceStore(ABC):
         Args:
             kind (EntryKind): the entry's kind.
             name (str): its name.
-
-        Raises:
-            ResourceError: ``conflict`` while a saved template names it.
         """
 
     @abstractmethod

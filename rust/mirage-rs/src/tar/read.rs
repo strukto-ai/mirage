@@ -4,7 +4,7 @@
 //! next header; a member whose data runs out ends it. Meta headers (GNU long
 //! names, pax records) shape the member after them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -40,6 +40,11 @@ pub(super) const MAX_META: u64 = 1 << 20;
 const MAX_ZEROS: u64 = 1 << 30;
 #[cfg(test)]
 const MAX_ZEROS: u64 = 1 << 20;
+
+/// The mode the host makes a file it is asked to write with, and a directory
+/// it is asked to make; an extracted entry wanting it needs no chmod.
+const FRESH_FILE: u32 = 0o644;
+const FRESH_DIR: u32 = 0o755;
 
 /// A compressor's failure as its stream reports it.
 #[derive(Deserialize)]
@@ -661,9 +666,34 @@ struct Run<'c, 'h> {
     failed: bool,
     rows: Rows,
     made: HashSet<Vec<u8>>,
+    /// Each directory member's path, mode and shown name, its mode given
+    /// once the run ends (`settle`).
+    dirs: Vec<(Vec<u8>, u32, Vec<u8>)>,
+    /// The files this run gave a mode other than `FRESH_FILE`, which a later
+    /// member of the same name wanting `FRESH_FILE` must set back.
+    moded: HashSet<Vec<u8>>,
 }
 
 impl Run<'_, '_> {
+    /// Give each directory member its mode once everything under it has
+    /// landed, the last member of a path deciding and children before their
+    /// parents, as tar does: a directory made read-only early would refuse
+    /// what goes in it, and a parent closed first the change of its child.
+    async fn settle(&mut self) {
+        let mut last = HashMap::new();
+        for (path, mode, shown) in std::mem::take(&mut self.dirs) {
+            last.insert(path, (mode, shown));
+        }
+        let mut dirs: Vec<_> = last.into_iter().collect();
+        let depth = |path: &[u8]| path.iter().filter(|&&b| b == b'/').count();
+        dirs.sort_by(|(a, _), (b, _)| depth(b).cmp(&depth(a)).then_with(|| a.cmp(b)));
+        for (path, (mode, shown)) in dirs {
+            if self.config.preserve || mode != FRESH_DIR {
+                self.chmod(&path, mode, &shown).await;
+            }
+        }
+    }
+
     fn say(&mut self, line: impl Into<Vec<u8>>) {
         self.notices.push(line.into());
     }
@@ -767,8 +797,8 @@ impl Run<'_, '_> {
             Kind::Dir if !config.to_stdout && !parts.is_empty() => {
                 match host.ensure(&mut self.made, &path).await {
                     Ok(()) => {
-                        if config.preserve {
-                            self.chmod(&path, member.mode, &shown).await;
+                        if let Some(mode) = wanted(config, member.mode) {
+                            self.dirs.push((path.clone(), mode, shown.clone()));
                         }
                         if config.verbose {
                             host.print(&[&escaped(trimmed(&member.name))[..], b"/\n"].concat());
@@ -839,8 +869,15 @@ impl Run<'_, '_> {
                 if file.failed.is_none() {
                     file.close(host).await;
                 }
-                if config.preserve && file.failed.is_none() {
-                    self.chmod(&path, member.mode, &shown).await;
+                if let (None, Some(mode)) = (&file.failed, wanted(config, member.mode)) {
+                    if config.preserve || mode != FRESH_FILE || self.moded.contains(&path) {
+                        self.chmod(&path, mode, &shown).await;
+                    }
+                    if mode == FRESH_FILE {
+                        self.moded.remove(&path);
+                    } else {
+                        self.moded.insert(path.clone());
+                    }
                 }
                 match &file.failed {
                     Some(text) => {
@@ -863,6 +900,16 @@ impl Run<'_, '_> {
             _ => input.skip(member.size).await,
         }
     }
+}
+
+/// The mode a member's entry takes: its member's with -p, else its
+/// permission bits under the host's umask, as an ordinary user's tar sets
+/// them. None when the host named no umask.
+fn wanted(config: &Config, mode: u32) -> Option<u32> {
+    if config.preserve {
+        return Some(mode);
+    }
+    Some(mode & 0o777 & !config.umask?)
 }
 
 /// The codec the archive is read through, or the run's refusal: bzip2 and
@@ -930,6 +977,8 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             ..Rows::default()
         },
         made: HashSet::new(),
+        dirs: Vec::new(),
+        moded: HashSet::new(),
     };
     let (mut skipping, mut selected, mut cut) = (false, false, false);
     let (mut long_name, mut long_link) = (None, None);
@@ -1040,6 +1089,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             break;
         }
     }
+    run.settle().await;
     if input.taken == 0
         && input.failure.as_ref().is_none_or(Failure::warned)
         && input.raw.error.is_none()

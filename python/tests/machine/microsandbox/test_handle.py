@@ -25,6 +25,7 @@ from mirage.commands.config import Context
 from mirage.machine.constants import (
     EXEC_PRELUDE,
     run_argv,
+    run_done_mark,
     run_exit_mark,
 )
 from mirage.machine.microsandbox import MicrosandboxMachine
@@ -44,7 +45,10 @@ def test_a_program_in_a_session_of_its_own_runs_as_given():
         capture_output=True,
         check=False,
     )
-    assert (done.returncode, done.stdout) == (4, b"a b||")
+    assert (done.returncode, done.stdout) == (
+        4,
+        b"a b||" + run_done_mark("n1") + b"4\n",
+    )
     assert done.stderr.endswith(run_exit_mark("n1") + b"4\n")
 
 

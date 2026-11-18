@@ -23,6 +23,13 @@ enum NumberPhase {
     Done,
 }
 
+#[derive(Default)]
+struct HumanScan {
+    at: Option<usize>,
+    nonzero: bool,
+    order: Option<i32>,
+}
+
 /// Offsets into a borrowed key, retained while the caller yields.
 #[derive(Default)]
 pub(super) struct NumberScan {
@@ -31,6 +38,7 @@ pub(super) struct NumberScan {
     negative: bool,
     integer: (usize, usize),
     fraction: (usize, usize),
+    human: HumanScan,
 }
 
 impl NumberScan {
@@ -50,8 +58,6 @@ impl NumberScan {
                 *bytes -= last.map_or(part.len(), |at| part.len() - at);
                 self.fraction.1 = last.map_or(from, |at| from + at + 1);
                 if last.is_some() || from == start {
-                    self.negative &=
-                        self.integer.0 != self.integer.1 || self.fraction.0 != self.fraction.1;
                     self.phase = NumberPhase::Done;
                 }
                 continue;
@@ -100,10 +106,50 @@ impl NumberScan {
 
     pub(super) fn number<'a>(&self, field: &'a [u8]) -> Number<'a> {
         Number {
-            negative: self.negative,
+            negative: self.negative
+                && (self.integer.0 != self.integer.1 || self.fraction.0 != self.fraction.1),
             integer: &field[self.integer.0..self.integer.1],
             fraction: &field[self.fraction.0..self.fraction.1],
         }
+    }
+
+    pub(super) fn step_human(&mut self, field: &[u8], bytes: &mut usize) -> bool {
+        if !self.step(field, bytes) {
+            return false;
+        }
+        if self.human.order.is_some() {
+            return true;
+        }
+        let at = *self.human.at.get_or_insert_with(|| {
+            self.human.nonzero =
+                self.integer.0 != self.integer.1 || self.fraction.0 != self.fraction.1;
+            self.at
+        });
+        let end = field.len().min(at.saturating_add(*bytes));
+        let part = &field[at..end];
+        let stop = part
+            .iter()
+            .position(|&byte| !byte.is_ascii_digit() && byte != b'.');
+        let count = stop.unwrap_or(part.len());
+        self.human.nonzero |= part[..count]
+            .iter()
+            .any(|&byte| (b'1'..=b'9').contains(&byte));
+        *bytes -= count;
+        self.human.at = Some(at + count);
+        if stop.is_none() && end < field.len() {
+            return false;
+        }
+        let order = if self.human.nonzero {
+            human_unit(field.get(at + count))
+        } else {
+            0
+        };
+        self.human.order = Some(if self.negative { -order } else { order });
+        true
+    }
+
+    pub(super) fn human_order(&self) -> i32 {
+        self.human.order.unwrap()
     }
 }
 
@@ -193,7 +239,16 @@ pub(crate) fn human_order(field: &[u8]) -> (i32, Number<'_>) {
     let nonzero = field[at..end]
         .iter()
         .any(|&byte| (b'1'..=b'9').contains(&byte));
-    let order = match field.get(end) {
+    let order = if nonzero {
+        human_unit(field.get(end))
+    } else {
+        0
+    };
+    (if minus { -order } else { order }, leading_number(field))
+}
+
+fn human_unit(byte: Option<&u8>) -> i32 {
+    match byte {
         Some(b'K' | b'k') => 1,
         Some(b'M') => 2,
         Some(b'G') => 3,
@@ -205,9 +260,7 @@ pub(crate) fn human_order(field: &[u8]) -> (i32, Number<'_>) {
         Some(b'R') => 9,
         Some(b'Q') => 10,
         _ => 0,
-    };
-    let order = if nonzero { order } else { 0 };
-    (if minus { -order } else { order }, leading_number(field))
+    }
 }
 
 /// `-g`: what strtod reads at the front of the field. A field with no
