@@ -19,6 +19,7 @@ import { type OpenStream, openStreamSync } from '../../rs/stream.ts'
 import { byteView } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { PrintfPart } from './types.ts'
+import { idText } from './utils/formatting.ts'
 import { groupId, groupLabel, ownerId, ownerLabel, type Identity } from './utils/identity.ts'
 
 export interface PrintfStatFacts {
@@ -65,9 +66,9 @@ function facts(
     target: kind === 'l' ? (st?.targetKind ?? 'N') : kind,
     mode: st?.mode ?? null,
     owner: byteView(ownerLabel(st?.uid ?? null, identity)),
-    uid: byteView(String(ownerId(st?.uid ?? null, identity))),
+    uid: byteView(idText(ownerId(st?.uid ?? null, identity))),
     group: byteView(groupLabel(st?.gid ?? null, identity)),
-    gid: byteView(String(groupId(st?.gid ?? null, identity))),
+    gid: byteView(idText(groupId(st?.gid ?? null, identity))),
     timestamp: st?.mtimeEpoch ?? 0,
   }
 }

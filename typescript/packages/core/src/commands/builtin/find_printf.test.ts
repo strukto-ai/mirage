@@ -71,6 +71,10 @@ describe('renderPrintf', () => {
       '501 staff\n',
     )
     expect(await expand('%u %U %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('root 0 root\n')
+    const named = { ...stat, uid: 'alice', gid: 'staff' }
+    expect(await expand('%U %G %u %g\n', '/data/a.txt', '/data', named, warnings)).toBe(
+      '? ? alice staff\n',
+    )
     expect(printfNeedsStat('%u %g\n')).toBe(true)
     expect(warnings).toEqual([])
   })

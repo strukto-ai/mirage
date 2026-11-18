@@ -526,6 +526,16 @@ def format_ls_long(
     return out
 
 
+def id_text(number: int | str) -> str:
+    """An owner or group id as a numeric field prints it: the number, or
+    ``?`` for a name the user database cannot resolve to one.
+
+    Args:
+        number (int | str): what ``owner_id`` or ``group_id`` answered.
+    """
+    return str(number) if isinstance(number, int) else UNKNOWN_STAT_FIELD
+
+
 def _id_cell(
     s: FileStat, name: str | None, number: int | str
 ) -> tuple[str, bool]:
@@ -541,7 +551,7 @@ def _id_cell(
     if s.extra.get(STAT_FAILED_KEY):
         return UNKNOWN_STAT_FIELD, False
     if name is None:
-        return str(number), isinstance(number, int)
+        return id_text(number), isinstance(number, int)
     return name, False
 
 

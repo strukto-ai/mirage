@@ -49,7 +49,7 @@ import {
   sizeUnknown,
 } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
+import { fullIsoTime, idText, lsModeString } from '../utils/formatting.ts'
 import {
   UNKNOWN_ID_NAME,
   groupId,
@@ -266,9 +266,9 @@ function directiveValue(
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)
   if (spec === 'f') return posixMode(s).toString(16)
-  if (spec === 'u') return String(ownerId(s.uid, identity))
+  if (spec === 'u') return idText(ownerId(s.uid, identity))
   if (spec === 'U') return ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME
-  if (spec === 'g') return String(groupId(s.gid, identity))
+  if (spec === 'g') return idText(groupId(s.gid, identity))
   if (spec === 'G') return groupName(s.gid, identity) ?? UNKNOWN_ID_NAME
   if (spec === 'x') return statTime(s.atime ?? s.modified)
   if (spec === 'X') return epoch(s.atime ?? s.modified)
@@ -539,8 +539,8 @@ function statTime(value: string | null): string {
  * and times are UTC. */
 function renderStat(s: FileStat, name: string, identity: Identity | null): string {
   const size = directiveValue('s', s, name, identity)
-  const uid = String(ownerId(s.uid, identity)).padStart(5)
-  const gid = String(groupId(s.gid, identity)).padStart(5)
+  const uid = idText(ownerId(s.uid, identity)).padStart(5)
+  const gid = idText(groupId(s.gid, identity)).padStart(5)
   const owner = (ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
   const group = (groupName(s.gid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
   const links = isCharDevice(s)

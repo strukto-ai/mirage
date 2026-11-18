@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.types import PrintfLiteral, PrintfPart, PrintfTime
+from mirage.commands.builtin.utils.formatting import id_text
 from mirage.commands.builtin.utils.identity import (
     Identity,
     group_id,
@@ -66,9 +67,9 @@ def _facts(
         else kind,
         "mode": st.mode if st is not None else None,
         "owner": byte_view(owner_label(uid, identity)),
-        "uid": byte_view(str(owner_id(uid, identity))),
+        "uid": byte_view(id_text(owner_id(uid, identity))),
         "group": byte_view(group_label(gid, identity)),
-        "gid": byte_view(str(group_id(gid, identity))),
+        "gid": byte_view(id_text(group_id(gid, identity))),
         "timestamp": iso_timestamp(st.modified) or 0.0
         if st is not None and st.modified is not None
         else 0.0,

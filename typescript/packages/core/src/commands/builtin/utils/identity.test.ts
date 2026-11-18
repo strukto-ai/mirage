@@ -142,6 +142,16 @@ describe('identity in a workspace', () => {
     await ws.close()
   })
 
+  it('prints a name the database lacks as unknown in id fields', async () => {
+    const ws = makeWs()
+    await ws.vfs.setattr('/data/f.txt', { uid: 'alice', gid: 'staff' })
+    expect((await run(ws, "stat -c '%u %g %U %G' /data/f.txt"))[1]).toBe('? ? alice staff\n')
+    expect((await run(ws, 'ls -n /data/f.txt; ls -l /data/f.txt'))[1]).toBe(
+      '-rw-r--r-- 1 ? ? 5 - /data/f.txt\n-rw-r--r-- 1 alice staff 5 - /data/f.txt\n',
+    )
+    await ws.close()
+  })
+
   it('keeps the bytes of a profile name past UTF-8 for the home', async () => {
     const name = 'team\udcff'
     const ws = makeWs({ profiles: { [name]: SessionProfile({}) }, profile: name })

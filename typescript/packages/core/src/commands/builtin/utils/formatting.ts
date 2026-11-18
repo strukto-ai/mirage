@@ -386,13 +386,21 @@ export function formatLsLong(
 }
 
 /**
+ * An owner or group id as a numeric field prints it: the number, or `?` for a
+ * name the user database cannot resolve to one.
+ */
+export function idText(id: number | string): string {
+  return typeof id === 'number' ? String(id) : UNKNOWN_STAT_FIELD
+}
+
+/**
  * An owner or group cell of a long listing and whether it is a number,
  * which GNU aligns right where it aligns a name left. `name` is the one the
  * user database holds, null for `-n` or an id it holds no name for.
  */
 function idCell(s: FileStat, name: string | null, id: number | string): [string, boolean] {
   if (s.extra[STAT_FAILED_KEY] === true) return [UNKNOWN_STAT_FIELD, false]
-  if (name === null) return [String(id), typeof id === 'number']
+  if (name === null) return [idText(id), typeof id === 'number']
   return [name, false]
 }
 

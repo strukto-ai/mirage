@@ -6,6 +6,7 @@ from typing import cast
 
 from mirage.commands.builtin.utils.formatting import (
     full_iso_time,
+    id_text,
     ls_mode_string,
 )
 from mirage.commands.builtin.utils.identity import (
@@ -331,11 +332,11 @@ def _directive_value(
     if spec == "f":
         return format(posix_mode(s), "x")
     if spec == "u":
-        return str(owner_id(s.uid, identity))
+        return id_text(owner_id(s.uid, identity))
     if spec == "U":
         return owner_name(s.uid, identity) or UNKNOWN_ID_NAME
     if spec == "g":
-        return str(group_id(s.gid, identity))
+        return id_text(group_id(s.gid, identity))
     if spec == "G":
         return group_name(s.gid, identity) or UNKNOWN_ID_NAME
     if spec == "x":
@@ -695,8 +696,8 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
         identity (Identity | None): session owner and group defaults.
     """
     size = _directive_value("s", s, name, identity)
-    uid = str(owner_id(s.uid, identity))
-    gid = str(group_id(s.gid, identity))
+    uid = id_text(owner_id(s.uid, identity))
+    gid = id_text(group_id(s.gid, identity))
     owner = owner_name(s.uid, identity) or UNKNOWN_ID_NAME
     group = group_name(s.gid, identity) or UNKNOWN_ID_NAME
     links = "Links: ?"

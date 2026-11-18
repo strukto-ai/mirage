@@ -116,6 +116,16 @@ def test_expand_owner_directives():
         == "501 staff\n"
     )
     assert (
+        _expand(
+            "%U %G %u %g\n",
+            "/data/a.txt",
+            search,
+            replace(_stat(), uid="alice", gid="staff"),
+            warnings,
+        )
+        == "? ? alice staff\n"
+    )
+    assert (
         _expand("%u %U %g\n", "/data/a.txt", search, _stat(), warnings)
         == "root 0 root\n"
     )

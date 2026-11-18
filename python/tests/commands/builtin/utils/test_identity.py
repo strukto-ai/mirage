@@ -141,6 +141,19 @@ async def test_a_named_session_reports_its_own_profile():
 
 
 @pytest.mark.asyncio
+async def test_a_name_the_database_lacks_prints_as_unknown_in_id_fields():
+    ws = _ws()
+    await ws.vfs.setattr("/data/f.txt", uid="alice", gid="staff")
+    _, stat_out = await _run(ws, "stat -c '%u %g %U %G' /data/f.txt")
+    assert stat_out == "? ? alice staff\n"
+    _, ls_out = await _run(ws, "ls -n /data/f.txt; ls -l /data/f.txt")
+    assert ls_out == (
+        "-rw-r--r-- 1 ? ? 5 - /data/f.txt\n"
+        "-rw-r--r-- 1 alice staff 5 - /data/f.txt\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_profile_name_past_utf8_keeps_its_bytes_for_the_home():
     name = "team\udcff"
     ws = _ws(profiles={name: SessionProfile()}, profile=name)
