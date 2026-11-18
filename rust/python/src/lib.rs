@@ -225,6 +225,13 @@ impl NFSServer {
     }
 }
 
+#[pyfunction]
+fn render_mail<'py>(py: Python<'py>, raw: &[u8], config: &[u8]) -> Option<Bound<'py, PyBytes>> {
+    let data =
+        py.detach(|| streams::mime::render_mail(raw, config, streams::mime::MailHost::Python))?;
+    Some(PyBytes::new(py, &data))
+}
+
 #[pymodule]
 #[pyo3(name = "_rs")]
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -236,6 +243,7 @@ fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<shell::ShellNode>()?;
     m.add_class::<shell::ShellHeredoc>()?;
     m.add_class::<shell::ShellNode>()?;
+    m.add_function(wrap_pyfunction!(render_mail, m)?)?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
     Ok(())
 }

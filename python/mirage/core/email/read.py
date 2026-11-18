@@ -16,7 +16,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.core.email.client import (
     fetch_attachment,
     fetch_headers,
-    fetch_message,
+    fetch_message_file,
 )
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
@@ -35,10 +35,9 @@ async def _read_message(
 ) -> bytes:
     if entry is None:
         raise enoent(path.virtual)
-    msg = await fetch_message(
+    return await fetch_message_file(
         accessor, match.slots["folder"], str(entry.extra["uid"])
     )
-    return message_json_bytes(msg)
 
 
 async def _read_attachment(

@@ -885,9 +885,11 @@ dependencies = [
 name = "mirage-rs"
 version = "0.0.9-alpha.2"
 dependencies = [
+ "base64",
  "blake2",
  "byteorder",
  "bzip2",
+ "chrono",
  "encoding_rs",
  "fancy-regex",
  "flate2",

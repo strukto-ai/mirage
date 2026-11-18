@@ -16,6 +16,9 @@ import base64
 import binascii
 import codecs
 import ipaddress
+import quopri
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -174,6 +177,27 @@ def _decode_charset(data: bytes, charset: str | None) -> str:
     return _text(data)
 
 
+def _decode_canonical_base64(data: bytes) -> bytes | None:
+    clean = data.translate(None, b" \t\r\n")
+    if len(clean) % 4 or re.fullmatch(rb"[A-Za-z0-9+/]*={0,2}", clean) is None:
+        return None
+    return base64.b64decode(clean)
+
+
+def _decode_canonical_quoted_printable(data: bytes) -> bytes | None:
+    if data.endswith((b" ", b"\t", b"\x0c")):
+        return None
+    crlf = data.count(b"\r\n")
+    if crlf != data.count(b"\r") or (crlf and crlf != data.count(b"\n")):
+        return None
+    newline = b"\r\n" if crlf else b"\n"
+    if any(space + newline in data for space in (b" ", b"\t", b"\x0c")):
+        return None
+    if re.search(rb"=(?!(?:[a-fA-F0-9]{2}|\r?\n))", data):
+        return None
+    return quopri.decodestring(data)
+
+
 class Stream:
     """A cursor over raw message bytes.
 
@@ -255,29 +279,22 @@ class Stream:
         return None
 
     def mime_part(self, boundary: bytes) -> tuple[int, bytes]:
-        last = NEWLINE
-        before = 0
         start = self.pos
-        end = self.pos
         self.checkpoint()
-        while (byte := self.next()) is not None:
-            if byte == NEWLINE:
-                end = self.pos - (2 if last == RETURN else 1)
-            elif (
-                byte == DASH
-                and boundary
-                and last == DASH
-                and self.try_skip(boundary)
-            ):
-                if before != NEWLINE:
-                    end = self.pos - len(boundary) - 2
-                return end, self.data[start:end]
-            before = last
-            last = byte
         if not boundary:
+            self.pos = len(self.data)
             return self.pos, self.data[start:]
-        self.restore()
-        return ENCODING_PROBLEM, self.data[start:]
+        marker = b"--" + boundary
+        at = self.data.find(marker, start)
+        if at < 0:
+            return ENCODING_PROBLEM, self.data[start:]
+        self.pos = at + len(marker)
+        end = at
+        if at > start and self.data[at - 1] == NEWLINE:
+            end -= 1
+            if end > start and self.data[end - 1] == RETURN:
+                end -= 1
+        return end, self.data[start:end]
 
     def seek_part_end(self, boundary: bytes | None) -> tuple[int, bool]:
         last = NEWLINE
@@ -315,7 +332,21 @@ class Stream:
         self.restore()
         return False
 
+    def _decode_transfer(
+        self, boundary: bytes, decode: Callable[[bytes], bytes | None]
+    ) -> tuple[int, bytes] | None:
+        end, source = self.mime_part(boundary)
+        if end != ENCODING_PROBLEM:
+            data = decode(source)
+            if data is not None:
+                return end, data
+        self.restore()
+        return None
+
     def decode_base64(self, boundary: bytes) -> tuple[int, bytes]:
+        fast = self._decode_transfer(boundary, _decode_canonical_base64)
+        if fast is not None:
+            return fast
         data = bytearray()
         group: list[int] = []
         last = NEWLINE
@@ -361,6 +392,11 @@ class Stream:
         return self.pos, bytes(data)
 
     def decode_quoted_printable(self, boundary: bytes) -> tuple[int, bytes]:
+        fast = self._decode_transfer(
+            boundary, _decode_canonical_quoted_printable
+        )
+        if fast is not None:
+            return fast
         data = bytearray()
         state = 0
         high = 0
@@ -1633,6 +1669,10 @@ def _part_document(part: dict[str, Any]) -> dict[str, Any]:
     if isinstance(body, dict) and "Message" in body:
         inner: MimeMessage = body["Message"]
         body = {"Message": inner.as_document()}
+    elif "Binary" in body:
+        body = {"Binary": list(body["Binary"])}
+    elif "InlineBinary" in body:
+        body = {"InlineBinary": list(body["InlineBinary"])}
     return {
         "headers": part["headers"],
         "is_encoding_problem": part["is_encoding_problem"],
@@ -1716,6 +1756,22 @@ def _mime_kind(
     if c_type == "message" and subtype in ("rfc822", "global"):
         return False, False, False, Kind.MESSAGE
     return False, False, False, Kind.OTHER
+
+
+def attachment_json_candidate(raw: bytes) -> bool:
+    """Whether the source can amortize the shared JSON renderer.
+
+    Args:
+        raw (bytes): the fetched RFC 5322 message.
+    """
+    if len(raw) < 64 * 1024:
+        return False
+    prefix = raw[: 32 * 1024]
+    separator = prefix.find(b"\r\n\r\n")
+    bare = prefix.find(b"\n\n")
+    if bare >= 0 and (separator < 0 or bare < separator):
+        separator = bare
+    return separator >= 0 and b"multipart/mixed" in prefix[:separator].lower()
 
 
 def parse_mime(raw: bytes, depth: int = MAX_NESTED) -> MimeMessage | None:
@@ -1882,7 +1938,7 @@ def _part_body(
         if nested is not None:
             nested.raw = data
             return {"Message": nested}
-        return {"Binary": list(data), "__problem": True}
+        return {"Binary": data, "__problem": True}
     disposition = content_type_of(headers, "content_disposition")
     is_inline = (
         inline
@@ -1930,7 +1986,7 @@ def _part_body(
             message.attachments.append(index)
         return {"Html": text} if is_html else {"Text": text}
     message.attachments.append(index)
-    return {"InlineBinary" if is_inline else "Binary": list(data)}
+    return {"InlineBinary" if is_inline else "Binary": data}
 
 
 def _close_parts(

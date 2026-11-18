@@ -14,7 +14,9 @@
 
 import type { ImapFlow, MailboxLockObject } from 'imapflow'
 import type { EmailAccessor } from '../../accessor/email.ts'
+import { renderMail } from '../../rs/stream.ts'
 import { parseRfc822, parseWithPayloads } from './_parse.ts'
+import { messageJsonBytes } from './render.ts'
 
 function internalDateOf(value: Date | string | undefined): string {
   if (value === undefined) return ''
@@ -327,7 +329,7 @@ export async function fetchRawMessage(
   }
 }
 
-export async function fetchMessage(accessor: EmailAccessor, folder: string, uid: string) {
+async function fetchMessageSource(accessor: EmailAccessor, folder: string, uid: string) {
   checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
@@ -341,17 +343,31 @@ export async function fetchMessage(accessor: EmailAccessor, folder: string, uid:
       throw new Error(`email: uid ${uid} not found in ${folder}`)
     }
     const source = msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
-    const parsed = await parseRfc822(source)
     return {
-      ...parsed,
-      uid,
+      source,
       flags: msg.flags !== undefined ? [...msg.flags] : [],
       internalDate: internalDateOf(msg.internalDate),
-      rawSize: source.byteLength,
     }
   } finally {
     lock.release()
   }
+}
+
+async function parseMessage(raw: Uint8Array, uid: string, flags: string[], internalDate: string) {
+  return { ...(await parseRfc822(raw)), uid, flags, internalDate, rawSize: raw.byteLength }
+}
+
+export async function fetchMessage(accessor: EmailAccessor, folder: string, uid: string) {
+  const { source, flags, internalDate } = await fetchMessageSource(accessor, folder, uid)
+  return parseMessage(source, uid, flags, internalDate)
+}
+
+export async function fetchMessageFile(accessor: EmailAccessor, folder: string, uid: string) {
+  const { source, flags, internalDate } = await fetchMessageSource(accessor, folder, uid)
+  return (
+    (await renderMail(source, { view: 'file', uid, flags })) ??
+    messageJsonBytes(await parseMessage(source, uid, flags, internalDate))
+  )
 }
 
 /**
@@ -555,6 +571,8 @@ export async function fetchAttachment(
     const msg = await imap.fetchOne(uid, { source: true }, { uid: true })
     if (msg === false) return null
     const source = msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
+    const decoded = await renderMail(source, { view: 'attachment', filename })
+    if (decoded !== null) return decoded
     const attachments = await parseWithPayloads(source)
     for (const att of attachments) {
       if (att.filename === filename) return att.payload

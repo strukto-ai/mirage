@@ -18,7 +18,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchAttachment, fetchHeaders, fetchMessage } from './client.ts'
+import { fetchAttachment, fetchHeaders, fetchMessageFile } from './client.ts'
 import { messageJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
 
@@ -29,8 +29,7 @@ async function readMessage(
   entry: FileStat | null,
 ): Promise<Uint8Array> {
   if (entry === null) throw enoent(path)
-  const msg = await fetchMessage(accessor, match.slots.folder ?? '', String(entry.extra.uid))
-  return messageJsonBytes(msg)
+  return fetchMessageFile(accessor, match.slots.folder ?? '', String(entry.extra.uid))
 }
 
 async function readAttachment(

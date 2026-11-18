@@ -43,7 +43,9 @@ function parseAddressList(
 // header untouched); mailparser's parsed.date would re-format it.
 export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
   const parser = await getParser()
-  const parsed = await parser(Buffer.from(raw), { skipHtmlToText: false })
+  const parsed = await parser(Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength), {
+    skipHtmlToText: false,
+  })
   const text = headersOnly ? '' : (parsed.text ?? '')
   const html = headersOnly ? '' : typeof parsed.html === 'string' ? parsed.html : ''
   const attachments = headersOnly
@@ -80,7 +82,7 @@ export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
 
 export async function parseWithPayloads(raw: Uint8Array) {
   const parser = await getParser()
-  const parsed = await parser(Buffer.from(raw))
+  const parsed = await parser(Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength))
   return parsed.attachments.map((a) => ({
     filename: a.filename ?? 'unnamed',
     content_type: a.contentType,

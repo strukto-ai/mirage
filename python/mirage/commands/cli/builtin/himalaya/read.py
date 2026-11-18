@@ -31,12 +31,14 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import store_flags
 from mirage.core.email.mime import (
     MimeMessage,
+    attachment_json_candidate,
     content_type_of,
     header_value,
     parse_mime,
 )
 from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.stream import render_mail
 from mirage.types import PathSpec
 
 DAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
@@ -193,9 +195,14 @@ async def read(
         if fl.as_bool("json"):
             return notice(fl, raw.decode("utf-8", "replace")), IOResult()
         return raw, IOResult()
+    as_json = fl.as_bool("json")
+    if as_json and attachment_json_candidate(raw):
+        answer = render_mail(raw, {"view": "command_json"})
+        if answer is not None:
+            return answer, IOResult()
     message = parse_mime(raw)
     if message is None:
         raise ValueError(PARSE_FAILURE)
-    if fl.as_bool("json"):
+    if as_json:
         return compact_json_bytes(message.as_document()), IOResult()
     return message_view(message).encode(), IOResult()

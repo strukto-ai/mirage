@@ -65,8 +65,8 @@ export function partMime(headers: MimeHeader[]): string | null {
 export function partPayload(body: MimeBody): Uint8Array {
   if ('Text' in body) return ENC.encode(body.Text)
   if ('Html' in body) return ENC.encode(body.Html)
-  if ('Binary' in body) return Uint8Array.from(body.Binary)
-  if ('InlineBinary' in body) return Uint8Array.from(body.InlineBinary)
+  if ('Binary' in body) return body.Binary
+  if ('InlineBinary' in body) return body.InlineBinary
   return 'Message' in body ? body.Message.raw : new Uint8Array(0)
 }
 

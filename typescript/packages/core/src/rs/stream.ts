@@ -23,6 +23,10 @@ import { StreamRefusal } from './errors.ts'
 interface Exports {
   readonly memory: WebAssembly.Memory
   mirage_rs_args(len: number): number
+  mirage_rs_mail_limit(): number
+  mirage_rs_mail(configLen: number): number
+  mirage_rs_mail_output(): number
+  mirage_rs_mail_release(): void
   mirage_rs_open(kindLen: number, configLen: number): number
   mirage_rs_input_capacity(): number
   mirage_rs_input(handle: number): number
@@ -180,6 +184,32 @@ export class StreamModule {
     this.ready().catch((err: unknown) => {
       logger.debug?.(`mirage-rs: no instance made ahead: ${String(err)}`)
     })
+  }
+
+  async renderMail(
+    raw: Uint8Array,
+    config: Readonly<Record<string, util.JSONType>>,
+  ): Promise<Uint8Array | null> {
+    await this.ready()
+    const exports = this.exports
+    if (exports === undefined || raw.byteLength > exports.mirage_rs_mail_limit()) return null
+    const header = encoder.encode(JSON.stringify(config))
+    try {
+      const ptr = exports.mirage_rs_args(header.byteLength + raw.byteLength)
+      const view = new Uint8Array(exports.memory.buffer, ptr, header.byteLength + raw.byteLength)
+      view.set(header)
+      view.set(raw, header.byteLength)
+      const length = exports.mirage_rs_mail(header.byteLength)
+      try {
+        return length < 0 ? null : bytesAt(exports, exports.mirage_rs_mail_output(), length)
+      } finally {
+        exports.mirage_rs_mail_release()
+        this.retireIfIdle(exports)
+      }
+    } catch (err) {
+      if (err instanceof WebAssembly.RuntimeError) this.retire(exports, true)
+      throw err
+    }
   }
 
   async open(kind: string, config: Readonly<Record<string, util.JSONType>>): Promise<OpenStream> {
@@ -713,4 +743,12 @@ export async function closeStream(stream: OpenStream): Promise<void> {
   } finally {
     stream.close()
   }
+}
+
+/** Render a message if its syntax qualifies for the shared MIME engine. */
+export function renderMail(
+  raw: Uint8Array,
+  config: Readonly<Record<string, util.JSONType>>,
+): Promise<Uint8Array | null> {
+  return MAIN.renderMail(raw, config)
 }

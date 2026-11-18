@@ -19,6 +19,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { storeFlags } from '../../../../core/email/client.ts'
 import {
+  attachmentJsonCandidate,
   contentTypeOf,
   headerValue,
   parseMime,
@@ -29,6 +30,7 @@ import {
   type MimeValue,
 } from '../../../../core/email/mime.ts'
 import { compactJsonBytes } from '../../../../core/render/json.ts'
+import { renderMail } from '../../../../rs/stream.ts'
 import { MONTHS } from '../../../builtin/utils/constants.ts'
 import { PARSE_FAILURE, partMime, partName, partPayload } from './attachment.ts'
 import { SEEN_FLAG } from './deliver.ts'
@@ -201,8 +203,13 @@ export async function read(
     if (fl.asBool('json')) return [notice(fl, new TextDecoder().decode(raw)), new IOResult()]
     return [raw, new IOResult()]
   }
+  const asJson = fl.asBool('json')
+  if (asJson && attachmentJsonCandidate(raw)) {
+    const answer = await renderMail(raw, { view: 'command_json' })
+    if (answer !== null) return [answer, new IOResult()]
+  }
   const message = parseMime(raw)
   if (message === null) throw new Error(PARSE_FAILURE)
-  if (fl.asBool('json')) return [compactJsonBytes(message.asDocument()), new IOResult()]
+  if (asJson) return [compactJsonBytes(message.asDocument()), new IOResult()]
   return [ENC.encode(messageView(message)), new IOResult()]
 }

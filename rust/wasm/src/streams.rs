@@ -27,6 +27,7 @@ pub(crate) struct State {
     pub(crate) args: Vec<u8>,
     open_error: Vec<u8>,
     open_status: i32,
+    mail: Option<Vec<u8>>,
 }
 
 impl Slot {
@@ -364,4 +365,32 @@ pub extern "C" fn mirage_rs_close(handle: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_open_count() -> usize {
     STATE.with_borrow(|state| state.slots.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_mail_limit() -> usize {
+    mirage_rs::mime::MAX_SOURCE
+}
+
+/// Render the message from the args buffer, after its config. A negative
+/// length leaves the message to the host's MIME engine.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_mail(config_len: usize) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        let args = std::mem::take(&mut state.args);
+        state.mail = args.split_at_checked(config_len).and_then(|(config, raw)| {
+            mirage_rs::mime::render_mail(raw, config, mirage_rs::mime::MailHost::Node)
+        });
+        state.mail.as_ref().map_or(-1, |data| data.len() as i32)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_mail_output() -> *const u8 {
+    STATE.with_borrow(|state| state.mail.as_ref().map_or(std::ptr::null(), Vec::as_ptr))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_mail_release() {
+    STATE.with_borrow_mut(|state| state.mail = None);
 }

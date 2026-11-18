@@ -25,6 +25,7 @@ from contextlib import aclosing
 from typing import NamedTuple, Protocol
 
 from mirage._rs import Stream, StreamError
+from mirage._rs import render_mail as render_native_mail
 from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool
@@ -398,3 +399,13 @@ async def close_stream(stream: OpenStream) -> None:
 
         stream._closing = owned_task(retire())
     await settle(stream._closing)
+
+
+def render_mail(raw: bytes, config: Mapping[str, JsonValue]) -> bytes | None:
+    """Render an eligible message via the shared MIME engine.
+
+    Args:
+        raw (bytes): RFC 5322 source.
+        config (Mapping[str, JsonValue]): the output view and its metadata.
+    """
+    return render_native_mail(raw, json.dumps(dict(config)).encode())

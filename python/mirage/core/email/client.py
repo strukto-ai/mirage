@@ -21,6 +21,9 @@ from typing import Any, Literal, cast
 from mirage.accessor.email import EmailAccessor
 from mirage.accessor.imap import IMAPClient, IMAPResponse
 from mirage.core.email._parse import parse_rfc822, parse_with_payloads
+from mirage.core.email.render import message_json_bytes
+from mirage.rs.stream import render_mail
+from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -236,11 +239,11 @@ async def fetch_raw_message(
     return _extract_body(response)
 
 
-async def fetch_message(
+async def _fetch_message_source(
     accessor: EmailAccessor,
     folder: str,
     uid: str,
-) -> dict[str, Any]:
+) -> tuple[bytes, list[str], str]:
     _check_uid(uid)
     async with lock_mailbox(accessor, folder) as imap:
         # BODY.PEEK[] instead of RFC822: reading a rendered file must not
@@ -256,12 +259,42 @@ async def fetch_message(
         ),
         [],
     )
-    msg_dict = parse_rfc822(raw_bytes)
+    return raw_bytes, flags, _internal_date_of(response)
+
+
+def _parse_message(
+    raw: bytes, uid: str, flags: list[str], internal_date: str
+) -> dict[str, Any]:
+    msg_dict = parse_rfc822(raw)
     msg_dict["uid"] = uid
     msg_dict["flags"] = flags
-    msg_dict["internal_date"] = _internal_date_of(response)
-    msg_dict["raw_size"] = len(raw_bytes)
+    msg_dict["internal_date"] = internal_date
+    msg_dict["raw_size"] = len(raw)
     return msg_dict
+
+
+async def fetch_message(
+    accessor: EmailAccessor, folder: str, uid: str
+) -> dict[str, Any]:
+    raw, flags, internal_date = await _fetch_message_source(
+        accessor, folder, uid
+    )
+    return _parse_message(raw, uid, flags, internal_date)
+
+
+async def fetch_message_file(
+    accessor: EmailAccessor, folder: str, uid: str
+) -> bytes:
+    raw, flags, internal_date = await _fetch_message_source(
+        accessor, folder, uid
+    )
+    json_flags: list[JsonValue] = list(flags)
+    rendered = render_mail(
+        raw, {"view": "file", "uid": uid, "flags": json_flags}
+    )
+    if rendered is not None:
+        return rendered
+    return message_json_bytes(_parse_message(raw, uid, flags, internal_date))
 
 
 async def fetch_headers(
@@ -315,6 +348,11 @@ async def fetch_attachment(
     async with lock_mailbox(accessor, folder) as imap:
         response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
+    decoded = render_mail(
+        raw_bytes, {"view": "attachment", "filename": filename}
+    )
+    if decoded is not None:
+        return decoded
     attachments = parse_with_payloads(raw_bytes)
     for att in attachments:
         if att["filename"] == filename:

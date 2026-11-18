@@ -16,6 +16,8 @@ gh = []
 pdf = ["dep:pdf_oxide"]
 
 [dependencies]
+base64 = "0.23.1"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 blake2 = { version = "0.11", default-features = false }
 byteorder = "1.5"
 bzip2 = "0.6.1"

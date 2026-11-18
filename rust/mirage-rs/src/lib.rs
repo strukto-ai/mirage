@@ -43,6 +43,7 @@ mod json_validate;
 mod lance_query;
 mod look;
 mod ls;
+pub mod mime;
 mod network;
 pub mod nfs;
 mod nl;

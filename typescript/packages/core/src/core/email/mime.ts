@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'buffer'
 import type { JsonValue } from '../../types.ts'
 
 const ANONYMOUS_BOUNDARY = new Uint8Array(0)
@@ -146,8 +147,8 @@ export interface MimeHeader {
 export type MimeBody =
   | { Text: string }
   | { Html: string }
-  | { Binary: number[] }
-  | { InlineBinary: number[] }
+  | { Binary: Uint8Array }
+  | { InlineBinary: Uint8Array }
   | { Message: MimeMessage }
   | { Multipart: number[] }
 
@@ -248,6 +249,66 @@ function base64Decode(body: Uint8Array): Uint8Array {
   if (group.length === 3) out.push(...partialBase64(group, 2))
   return concat(out)
 }
+
+function decodeCanonicalBase64(data: Uint8Array): Uint8Array | null {
+  const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+  const ascii = bytes.toString('latin1')
+  if (/[^a-z0-9+/= \t\r\n]/i.test(ascii) || /=[ \t\r\n]*[^= \t\r\n]/.test(ascii)) return null
+  const clean = ascii.replace(/[ \t\r\n]/g, '')
+  if (clean.length % 4 !== 0 || clean.endsWith('===')) return null
+  return Buffer.from(clean, 'base64')
+}
+
+const decodeCanonicalQuotedPrintable = (() => {
+  const hex = new Int8Array(256).fill(-1)
+  for (const value of HEX_DIGITS) hex[value] = hexValue(0x30, value)
+  return (input: Uint8Array): Uint8Array | null => {
+    const last = input[input.length - 1]
+    if (last === 0x20 || last === 0x09 || last === 0x0c) return null
+    const out = new Uint8Array(input.length)
+    let size = 0
+    let newline = 0
+    for (let i = 0; i < input.length; i += 1) {
+      const byte = input[i] ?? 0
+      if (byte === 0x3d) {
+        const hi = hex[input[i + 1] ?? 0] ?? -1
+        const lo = hex[input[i + 2] ?? 0] ?? -1
+        if (hi >= 0 && lo >= 0) {
+          out[size++] = (hi << 4) | lo
+          i += 2
+          continue
+        }
+        const kind =
+          input[i + 1] === NEWLINE ? 1 : input[i + 1] === RETURN && input[i + 2] === NEWLINE ? 2 : 0
+        if (kind === 0 || (newline !== 0 && newline !== kind)) return null
+        newline = kind
+        i += kind
+        continue
+      }
+      if (byte === NEWLINE || byte === RETURN) {
+        const kind = byte === NEWLINE ? 1 : 2
+        const previous = input[i - 1]
+        if (
+          (kind === 2 && input[i + 1] !== NEWLINE) ||
+          (newline !== 0 && newline !== kind) ||
+          previous === 0x20 ||
+          previous === 0x09 ||
+          previous === 0x0c
+        )
+          return null
+        newline = kind
+        if (kind === 2) {
+          out[size++] = RETURN
+          i += 1
+        }
+        out[size++] = NEWLINE
+      } else {
+        out[size++] = byte
+      }
+    }
+    return out.subarray(0, size)
+  }
+})()
 
 function isAlpha(byte: number): boolean {
   return (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a)
@@ -354,24 +415,23 @@ export class Stream {
   }
 
   mimePart(boundary: Uint8Array): [number, Uint8Array] {
-    let last = NEWLINE
-    let before = 0
     const start = this.pos
-    let end = this.pos
     this.checkpoint()
-    for (let byte = this.next(); byte !== null; byte = this.next()) {
-      if (byte === NEWLINE) {
-        end = this.pos - (last === RETURN ? 2 : 1)
-      } else if (byte === DASH && boundary.length > 0 && last === DASH && this.trySkip(boundary)) {
-        if (before !== NEWLINE) end = this.pos - boundary.length - 2
-        return [end, this.slice(start, end)]
-      }
-      before = last
-      last = byte
+    if (boundary.length === 0) {
+      this.pos = this.data.length
+      return [this.pos, this.slice(start, this.pos)]
     }
-    if (boundary.length === 0) return [this.pos, this.slice(start, this.data.length)]
-    this.restore()
-    return [ENCODING_PROBLEM, this.slice(start, this.data.length)]
+    const bytes = Buffer.from(this.data.buffer, this.data.byteOffset, this.data.byteLength)
+    const prefix = Buffer.from([DASH, DASH])
+    const at = bytes.indexOf(Buffer.concat([prefix, boundary]), start)
+    if (at === -1) return [ENCODING_PROBLEM, this.slice(start, this.data.length)]
+    this.pos = at + prefix.length + boundary.length
+    let end = at
+    if (end > start && this.data[end - 1] === NEWLINE) {
+      end -= 1
+      if (end > start && this.data[end - 1] === RETURN) end -= 1
+    }
+    return [end, this.slice(start, end)]
   }
 
   seekPartEnd(boundary: Uint8Array | null): [number, boolean] {
@@ -416,7 +476,22 @@ export class Stream {
     return false
   }
 
+  private decodeTransfer(
+    boundary: Uint8Array,
+    decode: (source: Uint8Array) => Uint8Array | null,
+  ): [number, Uint8Array] | null {
+    const [end, source] = this.mimePart(boundary)
+    if (end !== ENCODING_PROBLEM) {
+      const data = decode(source)
+      if (data !== null) return [end, data]
+    }
+    this.restore()
+    return null
+  }
+
   decodeBase64(boundary: Uint8Array): [number, Uint8Array] {
+    const fast = this.decodeTransfer(boundary, decodeCanonicalBase64)
+    if (fast !== null) return fast
     const data: number[] = []
     let group: number[] = []
     let last = NEWLINE
@@ -465,6 +540,8 @@ export class Stream {
   }
 
   decodeQuotedPrintable(boundary: Uint8Array): [number, Uint8Array] {
+    const fast = this.decodeTransfer(boundary, decodeCanonicalQuotedPrintable)
+    if (fast !== null) return fast
     const data: number[] = []
     let state = 0
     let high = 0
@@ -1761,7 +1838,13 @@ export class MimeMessage {
 function partDocument(part: MimePart): JsonValue {
   const body = part.body
   const rendered: JsonValue =
-    'Message' in body ? { Message: body.Message.asDocument() } : (body as unknown as JsonValue)
+    'Message' in body
+      ? { Message: body.Message.asDocument() }
+      : 'Binary' in body
+        ? { Binary: Array.from(body.Binary) }
+        : 'InlineBinary' in body
+          ? { InlineBinary: Array.from(body.InlineBinary) }
+          : body
   return {
     headers: part.headers as unknown as JsonValue,
     is_encoding_problem: part.is_encoding_problem,
@@ -1849,6 +1932,14 @@ function mimeKind(
     return { multipart: false, inline: false, isText: false, kind: Kind.MESSAGE }
   }
   return { multipart: false, inline: false, isText: false, kind: Kind.OTHER }
+}
+
+/** Whether the source can amortize the shared JSON renderer. Mirrors Python's attachment_json_candidate. */
+export function attachmentJsonCandidate(raw: Uint8Array): boolean {
+  if (raw.byteLength < 64 * 1024) return false
+  const prefix = text(raw.subarray(0, 32 * 1024))
+  const separator = prefix.search(/\r\n\r\n|\n\n/)
+  return separator >= 0 && prefix.slice(0, separator).toLowerCase().includes('multipart/mixed')
 }
 
 /**
@@ -2004,7 +2095,7 @@ function partBody(
       nested.raw = data
       return { body: { Message: nested }, problem: false }
     }
-    return { body: { Binary: [...data] }, problem: true }
+    return { body: { Binary: data }, problem: true }
   }
   const disposition = contentTypeOf(headers, 'content_disposition')
   let isInline =
@@ -2041,7 +2132,7 @@ function partBody(
   }
   message.attachments.push(index)
   return {
-    body: isInline ? { InlineBinary: [...data] } : { Binary: [...data] },
+    body: isInline ? { InlineBinary: data } : { Binary: data },
     problem: false,
   }
 }
