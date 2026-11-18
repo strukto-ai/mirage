@@ -12,6 +12,188 @@ fn config(mode: &str, keys: &str, extra: &str) -> String {
 const WHOLE: &str = r#"[{"start_field":1,"start_char":1,"start_skip":false,"end_field":null,"end_char":null,"end_skip":false,"mods":{"numeric":false,"general_numeric":false,"human":false,"version":false,"month":false,"fold":false,"reverse":false,"dictionary":false,"ignore_nonprinting":false,"random":false}}]"#;
 
 #[test]
+fn transformed_keys_and_months_resume_across_filtered_blocks_and_fields() {
+    let blanks = " ".repeat(1800);
+    let prefix = "a-\u{1}".repeat(1800);
+    let records = [
+        format!("{blanks}Jan|{prefix}Ab"),
+        format!("{blanks}FEB|{prefix}aC"),
+        format!("{blanks}jan|{prefix}ab"),
+        format!("{blanks}|{}z", "!".repeat(9000)),
+    ];
+    for mode in ["fold", "dictionary", "ignore_nonprinting", "month"] {
+        for separator in [None, Some(b'|')] {
+            for (start_field, end_field, start_skip, end_char, end_skip) in [
+                (1, None, false, None, false),
+                (1, Some(1), true, Some(3), true),
+                (2, Some(2), false, None, false),
+                (3, Some(1), false, Some(0), false),
+            ] {
+                let mut key = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+                key["start_field"] = json!(start_field);
+                key["end_field"] = json!(end_field);
+                key["start_skip"] = json!(start_skip);
+                key["end_char"] = json!(end_char);
+                key["end_skip"] = json!(end_skip);
+                key["mods"][mode] = json!(true);
+                for reverse in [false, true] {
+                    key["mods"]["reverse"] = json!(reverse);
+                    let compare: super::Compare = serde_json::from_value(json!({
+                        "keys": [key], "field_sep": separator,
+                        "reverse": !reverse, "stable": true, "unique": false,
+                    }))
+                    .unwrap();
+                    for a in &records {
+                        for b in &records {
+                            let (a, b) = (a.as_bytes(), b.as_bytes());
+                            for budget in [1, 4096] {
+                                let mut comparison = super::Comparison::default();
+                                let mut calls = 0;
+                                let actual = loop {
+                                    calls += 1;
+                                    assert!(calls < 500, "comparison failed to advance");
+                                    if let Some(order) =
+                                        comparison.step(&compare, a, b, &mut 0, budget)
+                                    {
+                                        break order;
+                                    }
+                                };
+                                assert_eq!(actual, compare.records(a, b), "{mode}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn random_comparisons_hash_sliced_transformed_keys_and_keep_tie_fallbacks() {
+    use blake2::Blake2b;
+    use blake2::digest::Digest;
+    use blake2::digest::consts::U16;
+
+    let prefix = "a-\u{1}".repeat(1800);
+    let records = [
+        format!("{prefix}Ab"),
+        format!("{prefix}aC"),
+        format!("{}aB", prefix.to_ascii_uppercase()),
+        "!".repeat(9000),
+    ];
+    for filter in [None, Some("dictionary"), Some("ignore_nonprinting")] {
+        for salt in [vec![], vec![17, 29, 43, 71], vec![7; 4097]] {
+            let mut key = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+            key["mods"]["random"] = json!(true);
+            key["mods"]["fold"] = json!(true);
+            if let Some(filter) = filter {
+                key["mods"][filter] = json!(true);
+            }
+            for stable in [false, true] {
+                key["mods"]["reverse"] = json!(!stable);
+                let compare: super::Compare = serde_json::from_value(json!({
+                    "keys": [key], "field_sep": null,
+                    "reverse": !stable, "stable": stable, "unique": false, "salt": salt,
+                }))
+                .unwrap();
+                let mods = &compare.keys[0].mods;
+                let transform = |source: &[u8]| {
+                    source
+                        .iter()
+                        .copied()
+                        .filter(|&byte| super::modifiers::kept(byte, mods))
+                        .map(|byte| byte.to_ascii_uppercase())
+                        .collect::<Vec<_>>()
+                };
+                for a in &records {
+                    for b in &records {
+                        let (a, b) = (a.as_bytes(), b.as_bytes());
+                        let (left, right) = (transform(a), transform(b));
+                        let hashed = |key: &[u8]| {
+                            let mut input = salt.clone();
+                            input.extend_from_slice(key);
+                            let digest: [u8; 16] = Blake2b::<U16>::digest(input).into();
+                            digest
+                        };
+                        let key_order = hashed(&left)
+                            .cmp(&hashed(&right))
+                            .then_with(|| left.cmp(&right));
+                        let expected = if stable {
+                            key_order
+                        } else {
+                            key_order.then_with(|| a.cmp(b)).reverse()
+                        };
+                        let mut comparison = super::Comparison::default();
+                        let mut calls = 0;
+                        let actual = loop {
+                            calls += 1;
+                            assert!(calls < 500, "comparison failed to advance");
+                            if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1) {
+                                break order;
+                            }
+                        };
+                        assert!(calls > 1);
+                        assert_eq!(actual, expected);
+                        assert_eq!(compare.records(a, b), expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn human_keys_resume_without_changing_malformed_runs_or_unit_order() {
+    let blanks = " ".repeat(1800);
+    let zeroes = "0".repeat(1800);
+    let points = ".".repeat(1800);
+    let digits = "9".repeat(1800);
+    let records = [
+        format!("{blanks}1K"),
+        format!("{blanks}-0{points}1K"),
+        format!("{blanks}0{points}1K"),
+        format!("{zeroes}2K"),
+        format!("{zeroes}-2K"),
+        format!("{digits}K"),
+        format!("{digits}M"),
+        format!("-{digits}M"),
+        format!("1.{zeroes}1K"),
+        format!("1.{zeroes}2K"),
+        format!("{blanks}-0.000K"),
+        format!("{blanks}1m"),
+        format!("{blanks}1Q"),
+    ];
+    for stable in [false, true] {
+        for reverse in [false, true] {
+            let mut key = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+            key["mods"]["human"] = json!(true);
+            key["mods"]["reverse"] = json!(reverse);
+            let compare: super::Compare = serde_json::from_value(json!({
+                "keys": [key], "field_sep": null,
+                "reverse": reverse, "stable": stable, "unique": false,
+            }))
+            .unwrap();
+            for a in &records {
+                for b in &records {
+                    let (a, b) = (a.as_bytes(), b.as_bytes());
+                    let mut comparison = super::Comparison::default();
+                    let mut calls = 0;
+                    let actual = loop {
+                        calls += 1;
+                        assert!(calls < 200, "comparison failed to advance");
+                        if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1) {
+                            break order;
+                        }
+                    };
+                    assert!(calls > 1);
+                    assert_eq!(actual, compare.records(a, b));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn numeric_comparisons_resume_without_changing_key_order() {
     let tail = "0".repeat(1600);
     let prefix = "x".repeat(1600);

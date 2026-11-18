@@ -3,6 +3,7 @@ mod key;
 mod modifiers;
 pub(crate) mod number;
 pub(crate) mod options;
+mod random;
 mod version;
 
 use std::cmp::Ordering;
