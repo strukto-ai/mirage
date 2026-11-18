@@ -24,8 +24,11 @@ import { systemNow } from '../../../utils/clock.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import {
   ALL_MODE_BITS,
+  BLOCK_UNIT,
+  blockCount,
   contentSize,
   fileMode,
+  linkCount,
   posixMode,
   sizeUnknown,
 } from '../../../utils/stat_view.ts'
@@ -51,8 +54,12 @@ import {
 import { gnuStrftime } from './strftime.ts'
 
 // What a stat field a VFS cannot know renders as, in `stat -c` and in
-// the inode and block columns of `find -ls`.
+// the inode column of `find -ls`.
 export const UNKNOWN_STAT_FIELD = '?'
+
+// The unit `ls -s` and its `total` line count in when no --block-size
+// names another, GNU's default output block size.
+export const LS_BLOCK = 1024
 
 // FileStat.extra key marking an `ls` row whose stat failed: the listing
 // named the entry, so GNU keeps its row, and every fact only a stat
@@ -74,9 +81,9 @@ export interface BlockSize {
 
 /** Which columns an `ls` row carries and how its time is spelled: -g
  * drops the owner, -o the group, -n prints both as ids, --author adds the
- * owner after the group; -i leads with the inode column, -s with
- * the block column after it, and -Z puts the context column before the
- * size, each `?` since a VFS has no inode, allocation or context;
+ * owner after the group; -i leads with the inode column and -Z puts the
+ * context column before the size, each `?` since a VFS has no inode or
+ * context; -s leads with the blocks each entry takes, after the inode;
  * timeKind picks the timestamp; timeStyle is `locale` (the six-month
  * rule), `full-iso`, `long-iso`, `iso` or `+FORMAT`. */
 export interface LsColumns {
@@ -278,11 +285,60 @@ export function timeOf(s: FileStat, kind: LsTimeKind): string | null {
   return s.modified ?? null
 }
 
-// What -i, -s and -Z put in front of a short row, in that order: `?` for
-// each, since a VFS has no inode, allocation or security context.
-export function lsPrefix(columns: LsColumns): string {
-  const count = Number(columns.inode) + Number(columns.blocks) + Number(columns.context)
-  return `${UNKNOWN_STAT_FIELD} `.repeat(count)
+/**
+ * A count of 512-byte blocks as `ls -s` and its `total` line print it: in
+ * 1K units unless --block-size names another, rounded up, or scaled under
+ * -h; `?` when unknown.
+ */
+export function blockText(blocks: number | null, block: BlockSize | null, human: boolean): string {
+  if (blocks === null) return UNKNOWN_STAT_FIELD
+  const n = blocks * BLOCK_UNIT
+  if (block === null && !human) return String(Math.ceil(n / LS_BLOCK))
+  return scaledSize(n, block, human)
+}
+
+/**
+ * The `total` line over a listed directory's rows: the blocks they take, a
+ * row whose stat failed counting none; `?` when a row's blocks are unknown.
+ */
+export function lsTotal(stats: readonly FileStat[], columns: LsColumns, human: boolean): string {
+  let blocks: number | null = 0
+  for (const s of stats) {
+    if (s.extra[STAT_FAILED_KEY] === true) continue
+    const count = blockCount(s)
+    blocks = blocks === null || count === null ? null : blocks + count
+  }
+  return `total ${blockText(blocks, columns.blockSize, human)}`
+}
+
+/** The -s column of each row, right-aligned to the widest, `?` for a row
+ * whose stat failed. */
+function blockCells(stats: readonly FileStat[], columns: LsColumns, human: boolean): string[] {
+  const cells = stats.map((s) =>
+    s.extra[STAT_FAILED_KEY] === true
+      ? UNKNOWN_STAT_FIELD
+      : blockText(blockCount(s), columns.blockSize, human),
+  )
+  const width = cells.reduce((m, cell) => Math.max(m, cell.length), 1)
+  return cells.map((cell) => cell.padStart(width))
+}
+
+/**
+ * What -i, -s and (on a short row) -Z put in front of each row, in that
+ * order: `?` for the inode and the security context, which a VFS has none
+ * of, and the blocks the row takes. `context` says whether -Z leads the
+ * row, as on a short one.
+ */
+export function lsPrefixes(
+  stats: readonly FileStat[],
+  columns: LsColumns,
+  human: boolean,
+  context: boolean,
+): string[] {
+  const blocks = columns.blocks ? blockCells(stats, columns, human) : stats.map(() => '')
+  const inode = columns.inode ? `${UNKNOWN_STAT_FIELD} ` : ''
+  const tail = context && columns.context ? `${UNKNOWN_STAT_FIELD} ` : ''
+  return blocks.map((cell) => inode + (columns.blocks ? `${cell} ` : '') + tail)
 }
 
 // The name column: GNU appends `-> target` for a symlink row.
@@ -361,15 +417,18 @@ export function formatLsLong(
   )
   const ownerWidth = owners.reduce((m, [owner]) => Math.max(m, owner.length), 1)
   const groupWidth = groups.reduce((m, [group]) => Math.max(m, group.length), 1)
+  const links = stats.map((s) =>
+    s.extra[STAT_FAILED_KEY] === true ? UNKNOWN_STAT_FIELD : String(linkCount(s)),
+  )
+  const linksWidth = links.reduce((m, text) => Math.max(m, text.length), 1)
+  const leads = lsPrefixes(stats, columns, human, false)
   return stats.map((s, i) => {
     const [rawSize, time] = cells[i] ?? [UNKNOWN_NAME, UNKNOWN_NAME]
     const failed = s.extra[STAT_FAILED_KEY] === true
     const fields = failed
-      ? [
-          (s.type === FileType.DIRECTORY ? 'd' : UNKNOWN_STAT_FIELD) + UNKNOWN_STAT_FIELD.repeat(9),
-          UNKNOWN_STAT_FIELD,
-        ]
-      : [lsModeString(s), '1']
+      ? [(s.type === FileType.DIRECTORY ? 'd' : UNKNOWN_STAT_FIELD) + UNKNOWN_STAT_FIELD.repeat(9)]
+      : [lsModeString(s)]
+    fields.push((links[i] ?? UNKNOWN_STAT_FIELD).padStart(linksWidth))
     const owner = owners[i] ?? [UNKNOWN_STAT_FIELD, false]
     if (columns.owner) fields.push(padId(owner, ownerWidth))
     if (columns.group) fields.push(padId(groups[i] ?? [UNKNOWN_STAT_FIELD, false], groupWidth))
@@ -380,8 +439,7 @@ export function formatLsLong(
       failed ? time.padStart(timeWidth) : time,
       opts.names?.[i] ?? lsName(s),
     )
-    const lead = `${UNKNOWN_STAT_FIELD} `.repeat(Number(columns.inode) + Number(columns.blocks))
-    return lead + fields.join(' ')
+    return (leads[i] ?? '') + fields.join(' ')
   })
 }
 
@@ -414,10 +472,10 @@ function padId([text, number]: [string, boolean], width: number): string {
  * `ls -l`: it leads with the inode and the allocated 1K blocks, then
  * fixes every column's width (inode 9, blocks 6, links 3, owner and
  * group 8 left-aligned, size 8) instead of fitting them to the listing,
- * so a consumer can count fields. The inode and block columns carry
- * `?`, the answer `stat %i` and `%b` already give: a VFS has no inode
- * and no block allocation, and a number invented for either would read
- * as a fact. The remaining columns are the `ls -l` ones, from the same
+ * so a consumer can count fields. The inode column carries `?`, the
+ * answer `stat %i` already gives: a VFS has no inode, and a number
+ * invented for one would read as a fact. The blocks are `%k`'s, the links
+ * `%n`'s. The remaining columns are the `ls -l` ones, from the same
  * helpers, so the two listings cannot disagree about a row; only the
  * name is spelled differently, escaped (`escapeFindName`) so the row
  * stays one line of fixed fields. `s` is the row named as find printed
@@ -458,9 +516,10 @@ export function formatFindLs(s: FileStat, identity: Identity | null): string {
   const [size, time] = lsSizeAndTime(s, false, true)
   const who = ownerLabel(s.uid, identity)
   const grp = groupLabel(s.gid, identity)
+  const blocks = blockText(blockCount(s), null, false)
   return (
-    `${UNKNOWN_STAT_FIELD.padStart(9)} ${UNKNOWN_STAT_FIELD.padStart(6)} ` +
-    `${lsModeString(s)} ${'1'.padStart(3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
+    `${UNKNOWN_STAT_FIELD.padStart(9)} ${blocks.padStart(6)} ` +
+    `${lsModeString(s)} ${String(linkCount(s)).padStart(3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
     `${size.padStart(8)} ${time} ${findLsName(s)}`
   )
 }

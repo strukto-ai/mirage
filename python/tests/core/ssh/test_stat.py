@@ -21,7 +21,7 @@ from mirage.types import FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from tests.fixtures.ssh_run import RunAccessor
 
-TOP = b"d 755 4096 1700000000.5 1700000001.0 1000 1000 \0"
+TOP = b"d 755 4096 1700000000.5 1700000001.0 1000 1000 3 8 \0"
 
 
 def _scope(vfs_path: str = "") -> PathSpec:
@@ -34,9 +34,9 @@ def _scope(vfs_path: str = "") -> PathSpec:
 @pytest.mark.asyncio
 async def test_tree_renders_each_entry_as_stat_does():
     out = TOP + (
-        b"f 644 5 1700000000.9 1700000002.0 1000 1000 a.txt\0"
-        b"d 700 4096 1700000003.0 1700000003.0 1000 1000 sub\0"
-        b"f 4600 0 1700000004.2 1700000004.0 1000 1000 sub/b b.md\0"
+        b"f 644 5 1700000000.9 1700000002.0 1000 1000 1 8 a.txt\0"
+        b"d 700 4096 1700000003.0 1700000003.0 1000 1000 2 8 sub\0"
+        b"f 4600 0 1700000004.2 1700000004.0 1000 1000 1 0 sub/b b.md\0"
     )
     accessor = RunAccessor("data", (0, out, b""))
     rows = await tree(accessor, _scope("in"))
@@ -71,9 +71,9 @@ async def test_an_empty_directory_has_no_rows():
     [
         (1, TOP, b""),
         (0, TOP, b"find: 'x': Permission denied\n"),
-        (0, TOP + b"l 777 7 1.0 1.0 0 0 gone\0", b""),
-        (0, TOP + b"p 644 0 1.0 1.0 0 0 fifo\0", b""),
-        (0, b"f 644 5 1.0 1.0 0 0 \0", b""),
+        (0, TOP + b"l 777 7 1.0 1.0 0 0 1 0 gone\0", b""),
+        (0, TOP + b"p 644 0 1.0 1.0 0 0 1 0 fifo\0", b""),
+        (0, b"f 644 5 1.0 1.0 0 0 1 0 \0", b""),
         (0, TOP + b"f 644 5 1.0\0", b""),
         (0, TOP[:-1], b""),
         (1, b"This service allows sftp connections only.\n", b""),

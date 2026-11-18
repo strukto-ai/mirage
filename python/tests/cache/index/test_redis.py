@@ -85,7 +85,7 @@ ENTRY_WIRE = (
     '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z",'
     '"fingerprint":"/a.txt","revision":null,"type":"file","content":null,'
     '"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,'
-    '"birthtime":null,"dev":null,"extra":{}}'
+    '"birthtime":null,"dev":null,"nlink":null,"blocks":null,"extra":{}}'
 )
 
 

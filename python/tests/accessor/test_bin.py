@@ -19,7 +19,9 @@ def test_accessor_holds_the_lookups_it_was_given():
     accessor = BinAccessor(
         lambda: ["ls"],
         lambda n: "ls is built into mirage." if n == "ls" else None,
+        "2026-11-18T10:00:00Z",
     )
     assert accessor.programs() == ["ls"]
     assert accessor.note("ls") == "ls is built into mirage."
     assert accessor.note("cd") is None
+    assert accessor.made == "2026-11-18T10:00:00Z"

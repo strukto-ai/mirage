@@ -18,7 +18,7 @@ import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
-import { checkDestParents, checkMkdirTarget } from './dest.ts'
+import { checkDestParents, checkMkdirTarget, touchParent } from './dest.ts'
 
 export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
   const p = norm(path.mountPath)
@@ -29,7 +29,10 @@ export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = fal
     const now = nowIso()
     for (const part of parts) {
       current += `/${part}`
-      accessor.store.dirs.add(current)
+      if (!accessor.store.dirs.has(current)) {
+        accessor.store.dirs.add(current)
+        touchParent(accessor.store, current, now)
+      }
       if (!accessor.store.modified.has(current)) {
         accessor.store.modified.set(current, now)
       }
@@ -37,7 +40,9 @@ export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = fal
     return Promise.resolve()
   }
   checkDestParents(accessor, path, p)
+  const now = nowIso()
   accessor.store.dirs.add(p)
-  accessor.store.modified.set(p, nowIso())
+  accessor.store.modified.set(p, now)
+  touchParent(accessor.store, p, now)
   return Promise.resolve()
 }

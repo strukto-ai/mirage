@@ -31,6 +31,7 @@ from mirage.core.sql.rename import rename as _rename
 from mirage.core.sql.rm import rm_r as _rm_r
 from mirage.core.sql.rmdir import rmdir as _rmdir
 from mirage.core.sql.search import files_containing as _files_containing
+from mirage.core.sql.set_attrs import set_attrs as _set_attrs
 from mirage.core.sql.snapshot import restore, snapshot
 from mirage.core.sql.stat import stat as _stat
 from mirage.core.sql.stream import read_stream as _read_stream
@@ -243,6 +244,26 @@ class SqlVFS(BaseVFS):
             if not no_create or await self.exists(path):
                 held.grow_to(length)
             await _truncate(self.accessor, path, length, no_create)
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        return await _set_attrs(
+            self.accessor,
+            path,
+            mode=mode,
+            uid=uid,
+            gid=gid,
+            atime=atime,
+            mtime=mtime,
+        )
 
     async def capacity(self) -> CapacityResult:
         """The database's quota when capped, counted afresh so a writer

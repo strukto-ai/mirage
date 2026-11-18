@@ -18,6 +18,7 @@ from mirage.core.ram.dest import (
     check_dest_parents,
     check_rename,
     lookup_error,
+    touch_parent,
 )
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
@@ -102,3 +103,5 @@ async def rename(
         _move_subtree(store, s, d)
     else:
         raise lookup_error(store, src_spec, s)
+    touch_parent(store, s, now)
+    touch_parent(store, d, now)

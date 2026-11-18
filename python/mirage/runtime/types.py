@@ -192,6 +192,10 @@ class VFSStat:
         uid (int | None): the owner's numeric id, None when unknown or
             stored as a name.
         gid (int | None): the group's numeric id, read the same way.
+        nlink (int | None): the link count, None when the backend counts
+            none.
+        blocks (int | None): the 512-byte blocks the entry takes, None
+            when nothing says.
         source (FileStat | None): original row for checking retained metadata
             without losing unknown size or backend-specific fields.
         name (str | None): the path the row's file has once the links
@@ -208,6 +212,8 @@ class VFSStat:
     atime_ns: int | None = None
     uid: int | None = None
     gid: int | None = None
+    nlink: int | None = None
+    blocks: int | None = None
     source: FileStat | None = field(default=None, repr=False, compare=False)
     name: str | None = field(default=None, compare=False)
 

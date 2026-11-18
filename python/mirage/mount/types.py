@@ -33,7 +33,8 @@ class MountAttrs:
     Args:
         mode (int): type bits plus permissions.
         size (int): byte length the client should see.
-        nlink (int): link count; 2 for a directory, 1 otherwise.
+        nlink (int): link count: the backend's, else 2 for a directory
+            and 1 otherwise.
         uid (int): owning user id.
         gid (int): owning group id.
         rdev (int): device number, for a device node.

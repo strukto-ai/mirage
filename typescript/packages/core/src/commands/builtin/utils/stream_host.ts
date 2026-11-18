@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { clockReply, statEpoch } from '../../../utils/dates.ts'
+import {
+  clockReply,
+  epochOfLocal,
+  epochToIso,
+  localSeconds,
+  nowIso,
+  statEpoch,
+} from '../../../utils/dates.ts'
+import { zoneFromEnv } from '../../../utils/timezone.ts'
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
@@ -28,7 +36,14 @@ import { openStream, serveRequests, type OpenStream, type Served } from '../../.
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { STDIN_PATHS } from '../../../shell/constants.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
+import {
+  FileType,
+  LINK_TARGET_KEY,
+  PathSpec,
+  type FileStat,
+  type JsonValue,
+  type SetAttrFields,
+} from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { Context } from '../../config.ts'
@@ -216,10 +231,18 @@ export class StreamHost {
       case 'rmdir':
         return this.pathOp(request.op, typeof request.path === 'string' ? request.path : '')
       case 'chmod':
-        return this.chmod(
-          typeof request.path === 'string' ? request.path : '',
-          typeof request.mode === 'number' ? request.mode : 0,
-        )
+        return this.setAttrs(typeof request.path === 'string' ? request.path : '', {
+          mode: typeof request.mode === 'number' ? request.mode : 0,
+        })
+      case 'utime': {
+        const seconds = typeof request.mtime === 'number' ? request.mtime : 0
+        const at =
+          request.local === true ? epochOfLocal(seconds, zoneFromEnv(this.ctx.env)) : seconds
+        return this.setAttrs(typeof request.path === 'string' ? request.path : '', {
+          mtime: epochToIso(at),
+          atime: nowIso(),
+        })
+      }
       case 'readlink':
         return this.readlink(typeof request.path === 'string' ? request.path : '')
       case 'copy':
@@ -267,6 +290,11 @@ export class StreamHost {
         return this.run(request)
       case 'clock':
         return { reply: {}, data: clockReply() }
+      case 'walls': {
+        const zone = zoneFromEnv(this.ctx.env)
+        const times = Array.isArray(request.times) ? request.times : []
+        return { reply: { walls: times.map((at) => localSeconds(Number(at), zone)) } }
+      }
     }
     throw new Error(`unknown stream request: ${JSON.stringify(request.op)}`)
   }
@@ -506,13 +534,16 @@ export class StreamHost {
     return { reply: {} }
   }
 
-  /** Give a path a mode, through the workspace's attribute overlay. */
-  private async chmod(name: string, mode: number): Promise<Served> {
+  /** Give a path a mode or a time, as its mount or the workspace's
+   * attribute overlay keeps them; a local time is read in the session's
+   * zone. */
+  private async setAttrs(name: string, fields: SetAttrFields): Promise<Served> {
     if (this.ctx.vfs === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     try {
-      await this.ctx.vfs.setattr(PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd), {
-        mode,
-      })
+      await this.ctx.vfs.setattr(
+        PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd),
+        fields,
+      )
     } catch (error) {
       if (!isWalkError(error)) throw error
       return { reply: failure(error) }
@@ -536,9 +567,17 @@ export class StreamHost {
     return {
       reply: {
         kind: row.type === FileType.DIRECTORY ? 'dir' : 'file',
-        mtime: statEpoch(row.modified),
+        ...this.stamp(row.modified),
       },
     }
+  }
+
+  // A stat's time in UTC and on the session's wall clock, the time a DOS
+  // stamp is weighed against. Mirrors Python's `_stamp`.
+  private stamp(modified: string | null): Record<string, JsonValue> {
+    const mtime = statEpoch(modified)
+    if (mtime === null) return { mtime: null }
+    return { mtime, wall: localSeconds(mtime, zoneFromEnv(this.ctx.env)) }
   }
 
   /**
@@ -569,7 +608,7 @@ export class StreamHost {
       const target = link?.extra[LINK_TARGET_KEY]
       if (link !== null && link !== undefined && typeof target === 'string') {
         await dispatch('readlink', path)
-        return { reply: { target: byteView(target), mtime: statEpoch(link.modified) } }
+        return { reply: { target: byteView(target), ...this.stamp(link.modified) } }
       }
       const [found] = await dispatch('stat', path)
       if (found === null || found === undefined) throw enoent(path)

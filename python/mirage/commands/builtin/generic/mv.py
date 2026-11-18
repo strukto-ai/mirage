@@ -20,6 +20,7 @@ from functools import partial
 from typing import Callable
 
 from mirage.commands.builtin.generic.cp import (
+    Keeper,
     TransferLinks,
     TransferPolicy,
     backup_displaces,
@@ -85,6 +86,10 @@ _logger = logging.getLogger(__name__)
 
 # Bound on the --exchange staging-name probe.
 _HOLDING_ATTEMPTS = 100
+
+# What a move across mounts carries over from each source, as a rename
+# keeps it: GNU mv copies and keeps the mode, owner and times.
+MOVE_KEEPS = frozenset({"mode", "ownership", "timestamps"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,9 +798,16 @@ async def mv_generic(
                     )
                     continue
             # Across mounts GNU copies and then removes, and -v says so
-            # entry by entry instead of `renamed` (coreutils 9.7).
+            # entry by entry instead of `renamed` (coreutils 9.7). The
+            # copy keeps each entry's mode, owner and times, as a rename
+            # would.
             verbose = lines if flags.verbose else None
             entries = await walk(move.readdir, stat, src)
+            keeper = (
+                Keeper(MOVE_KEEPS, stat, dispatch)
+                if dispatch is not None
+                else None
+            )
             copied_all = await copy_entries(
                 "mv",
                 move,
@@ -807,7 +819,10 @@ async def mv_generic(
                 lines=verbose,
                 copies=copies,
                 root_backup=backup,
+                keeper=keeper,
             )
+            if keeper is not None:
+                await keeper.finish()
             if not copied_all:
                 # GNU keeps the whole source tree when any copy failed;
                 # the destination keeps the entries that landed.

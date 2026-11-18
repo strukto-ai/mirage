@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { access, constants, copyFile } from 'node:fs/promises'
+import { access, chmod, constants, copyFile, stat } from 'node:fs/promises'
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { DEFAULT_FILE_MODE } from '@struktoai/mirage-core/utils/mode'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
@@ -27,7 +28,14 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   const timer = startOp()
   try {
     try {
+      // copyFile gives the copy its source's mode; a copy keeps the mode the
+      // file it lands on had, and a new one a new file's, as cp's open does.
+      const held = await stat(d).then(
+        (st) => st.mode & 0o7777,
+        () => DEFAULT_FILE_MODE,
+      )
       await copyFile(s, d)
+      await chmod(d, held)
     } catch (err) {
       // copyFile reports ENOENT and EACCES for either operand, so the operand
       // to blame is only knowable after the failure: probe whether the source

@@ -55,7 +55,7 @@ describe('glob expansion sees namespace state', () => {
 
   it('du rows match GNU', async () => {
     const ws = await makeWs()
-    expect((await out(ws, 'du /base/*')).trimEnd().split('\n')).toEqual([
+    expect((await out(ws, 'du -b /base/*')).trimEnd().split('\n')).toEqual([
       '3\t/base/f1',
       '7\t/base/inner',
       '12\t/base/link',
@@ -134,7 +134,7 @@ describe('glob expansion sees namespace state', () => {
   // parent mount, which cannot serve the child mount's keys.
   it('installs a boundary glob that matches one name', async () => {
     const ws = await makeWs()
-    expect((await out(ws, 'du /base/i*')).trimEnd()).toBe('7\t/base/inner')
+    expect((await out(ws, 'du -b /base/i*')).trimEnd()).toBe('7\t/base/inner')
     expect((await out(ws, 'ls -d /base/i*')).trim()).toBe('/base/inner')
   })
 

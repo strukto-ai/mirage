@@ -17,7 +17,7 @@ import { memoryRoom } from '../../io/memory.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { SQL, TREE_ENTRY_BYTES, childrenOf } from './constants.ts'
-import { inodeOf, inodeStat, isDir, type Inode } from './inode.ts'
+import { inodeOf, inodeStat, isDir, subdirCounts, type Inode } from './inode.ts'
 import { notListable, target, walk } from './path.ts'
 
 function under(p: string): string {
@@ -36,7 +36,29 @@ export async function readdir(accessor: SqlAccessor, path: PathSpec): Promise<Fi
     if (child !== null) entries.push([String(row.name), child])
   }
   entries.sort(([a], [b]) => compareCodePoints(a, b))
-  return entries.map(([name, child]) => inodeStat(under(w.p) + name, child))
+  const counts = await subdirCounts(
+    accessor,
+    entries.map(([, child]) => child),
+  )
+  return entries.map(([name, child]) =>
+    inodeStat(under(w.p) + name, child, counts.get(child.ino) ?? 0),
+  )
+}
+
+/** A whole subtree's rows by relative path, each folder's link count read
+ * off the folders the rows hold under it. `prefix` is the subtree's mount
+ * path, ending in a slash. */
+function treeStats(prefix: string, entries: [string, Inode][]): Map<string, FileStat> {
+  const subdirs = new Map<string, number>()
+  for (const [rel, child] of entries) {
+    if (!isDir(child)) continue
+    const up = rel.slice(0, Math.max(rel.lastIndexOf('/'), 0))
+    subdirs.set(up, (subdirs.get(up) ?? 0) + 1)
+  }
+  entries.sort(([a], [b]) => compareCodePoints(a, b))
+  return new Map(
+    entries.map(([rel, child]) => [rel, inodeStat(prefix + rel, child, subdirs.get(rel) ?? 0)]),
+  )
 }
 
 /**
@@ -59,17 +81,12 @@ export async function tree(
   )
   if (Number.isFinite(ceiling)) return boundedTree(accessor, node, under(w.p), ceiling)
   const rows = await accessor.query(SQL.subtree, [node.ino])
-  rows.sort((a, b) => compareCodePoints(String(a.rel), String(b.rel)))
-  const found = new Map<string, FileStat>()
-  const prefix = under(w.p)
+  const entries: [string, Inode][] = []
   for (const row of rows) {
     const child = inodeOf(row)
-    if (child !== null) {
-      const rel = String(row.rel)
-      found.set(rel, inodeStat(prefix + rel, child))
-    }
+    if (child !== null) entries.push([String(row.rel), child])
   }
-  return found
+  return treeStats(under(w.p), entries)
 }
 
 async function boundedTree(
@@ -79,7 +96,7 @@ async function boundedTree(
   limit: number,
 ): Promise<Map<string, FileStat> | null> {
   const pending: [number, string][] = [[root.ino, '']]
-  const entries: [string, FileStat][] = []
+  const entries: [string, Inode][] = []
   const encoder = new TextEncoder()
   let used = 0
   for (let start = 0; start < pending.length;) {
@@ -99,9 +116,9 @@ async function boundedTree(
       const rel = parent ? parent + '/' + name : name
       used += TREE_ENTRY_BYTES + encoder.encode(rel).byteLength
       if (room !== null && used > room) return null
-      entries.push([rel, inodeStat(prefix + rel, child)])
+      entries.push([rel, child])
       if (isDir(child)) pending.push([child.ino, rel])
     }
   }
-  return new Map(entries.sort(([a], [b]) => compareCodePoints(a, b)))
+  return treeStats(prefix, entries)
 }

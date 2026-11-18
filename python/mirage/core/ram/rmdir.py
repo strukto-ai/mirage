@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.dest import lookup_error
+from mirage.core.ram.dest import lookup_error, touch_parent
 from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -37,3 +37,5 @@ async def rmdir(
     if children:
         raise enotempty(path_spec)
     store.dirs.discard(p)
+    store.modified.pop(p, None)
+    touch_parent(store, p)

@@ -141,6 +141,18 @@ pub(crate) enum Request {
         path: Vec<u8>,
         mode: u32,
     },
+    /// Read each time, in seconds since the epoch, on the session's wall
+    /// clock, counted as an epoch is.
+    Walls {
+        times: Vec<i64>,
+    },
+    /// Set a file's modification time, in seconds since the epoch, or in
+    /// the session's local time when `local`; its access time becomes now.
+    Utime {
+        path: Vec<u8>,
+        mtime: i64,
+        local: bool,
+    },
     Write {
         path: Vec<u8>,
         mode: WriteMode,
@@ -361,6 +373,16 @@ impl Request {
                 put("path", latin1(path));
                 put("mode", (*mode).into());
             }
+            Request::Walls { times } => {
+                put("op", "walls".into());
+                put("times", times.clone().into());
+            }
+            Request::Utime { path, mtime, local } => {
+                put("op", "utime".into());
+                put("path", latin1(path));
+                put("mtime", (*mtime).into());
+                put("local", (*local).into());
+            }
             Request::Write {
                 path,
                 mode,
@@ -534,6 +556,11 @@ pub(crate) struct Reply {
     pub(crate) mode: Option<u32>,
     /// The modification time a stat found, where the host keeps one.
     pub(crate) mtime: Option<i64>,
+    /// That time as the session's wall clock reads it, counted in seconds
+    /// as an epoch is: what a DOS stamp records.
+    pub(crate) wall: Option<i64>,
+    /// What a walls request read each time as, in its order.
+    pub(crate) walls: Vec<i64>,
     /// What a link a readlink found holds; none for a name that is no
     /// link.
     pub(crate) target: Option<String>,

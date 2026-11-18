@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "unzip_gives_each_entry_its_mode_and_time",
+      "seq": 110000204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/ziptime/q && printf y > /data/ziptime/q/b && chmod 750 /data/ziptime/q/b && touch -d '2025-08-13 10:00:00' /data/ziptime/q/b /data/ziptime/q && (cd /data/ziptime && zip -qr /data/ziptime.zip q) && mkdir /data/ziptime/x && (cd /data/ziptime/x && unzip -q /data/ziptime.zip) && stat -c '%a %y %n' /data/ziptime/x/q /data/ziptime/x/q/b",
+      "expect": {
+        "exit": 0,
+        "stdout": "755 2025-08-13 10:00:00.000000000 +0000 /data/ziptime/x/q\n750 2025-08-13 10:00:00.000000000 +0000 /data/ziptime/x/q/b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q"
+      ],
+      "note": "zip records each entry's mode and time, and Info-ZIP's unzip restores both, a directory's included."
+    },
+    {
+      "id": "unzip_lists_and_lands_a_time_in_any_zone",
+      "seq": 110000207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/zt/q && printf y > /data/zt/q/b && touch -d '2025-08-13T10:00:00Z' /data/zt/q/b /data/zt/q && cd /data/zt && TZ=Asia/Tokyo zip -qr /data2/zt.zip q && unzip -l /data2/zt.zip | sed -n 4,5p; TZ=Asia/Tokyo unzip -Z /data2/zt.zip | sed -n 3,4p | cut -c 30-; mkdir -p /data/zt/x && cd /data/zt/x && TZ=America/New_York unzip -q /data2/zt.zip && stat -c '%y %n' q q/b",
+      "expect": {
+        "exit": 0,
+        "stdout": "        0  2025-08-13 10:00   q/\n        1  2025-08-13 10:00   q/b\nbx stor 25-Aug-13 19:00 q/\ntx stor 25-Aug-13 19:00 q/b\n2025-08-13 10:00:00.000000000 +0000 q\n2025-08-13 10:00:00.000000000 +0000 q/b\n",
+        "stderr": ""
+      },
+      "note": "zip records each entry's time in UTC beside the DOS time it reads on the session's clock, written across mounts in the session's zone; a listing reads the UTC time in its own zone and unzip lands it in any zone, as Info-ZIP does."
+    }
+  ]
+}

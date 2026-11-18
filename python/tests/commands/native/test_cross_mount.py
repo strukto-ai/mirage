@@ -254,7 +254,7 @@ def test_cross_vfs_md5_fans_out(cross):
 def test_cross_vfs_du_fans_out(cross):
     cross.create_file(1, "a.txt", b"hello\n")
     cross.create_file(2, "b.txt", b"world!!\n")
-    out = cross.run("du -c /m1/a.txt /m2/b.txt")
+    out = cross.run("du -b -c /m1/a.txt /m2/b.txt")
     assert "6\t/m1/a.txt" in out
     assert "8\t/m2/b.txt" in out
     assert "14\ttotal" in out

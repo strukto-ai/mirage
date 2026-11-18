@@ -1087,3 +1087,42 @@ async def test_cp_p_keeps_the_mode_and_times(tmp_path, backend):
         assert source.startswith("640 ")
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "disk"])
+@pytest.mark.parametrize(
+    "line, out",
+    [
+        ("chmod 750 f; cp f g; stat -c '%a' g", "750\n"),
+        ("chmod 4777 f; cp f g; stat -c '%a' g", "755\n"),
+        ("chmod 750 f; umask 077; cp f g; stat -c '%a' g", "700\n"),
+        (
+            "printf x > g; chmod 600 g; chmod 755 f; cp f g; stat -c '%a' g",
+            "600\n",
+        ),
+        (
+            "mkdir -m 700 s; mkdir -m 750 s/t; cp -r s u; stat -c '%a' u u/t",
+            "700\n750\n",
+        ),
+        (
+            "mkdir -m 777 s u; mkdir -m 700 u/s; cp -r s u; stat -c '%a' u/s",
+            "700\n",
+        ),
+        (
+            "chmod 750 f; cp --attributes-only f h; stat -c '%a %s' h",
+            "750 0\n",
+        ),
+    ],
+)
+async def test_cp_makes_a_new_copy_with_the_source_mode_under_the_umask(
+    tmp_path, backend, line, out
+):
+    vfs = RAMVFS() if backend == "ram" else DiskVFS(root=str(tmp_path))
+    ws = Workspace({"/d": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(_CP_SETUP + line)
+        assert (await result.materialize_stdout()).decode() == out
+        assert result.exit_code == 0
+    finally:
+        await ws.close()

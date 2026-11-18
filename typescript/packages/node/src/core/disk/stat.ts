@@ -14,7 +14,7 @@
 
 import type { BigIntStats } from 'node:fs'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { stat as fsStat } from 'node:fs/promises'
+import { readdir as fsReaddir, stat as fsStat } from 'node:fs/promises'
 import path from 'node:path'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -23,12 +23,39 @@ import { diskError } from './errors.ts'
 import { stamp, wallNs } from './listing_version.ts'
 import { resolveInside } from './utils.ts'
 
+// Linux counts a folder's links as itself, its "." and each subfolder's
+// "..", and its blocks as ext4 allocates them. Other hosts count otherwise
+// (APFS counts every entry and gives a folder no blocks), so there the
+// folder's links are counted as Linux would and its blocks left to the ext4
+// default.
+const LINUX = process.platform === 'linux'
+
+/** A folder's link count as Linux has it: 2, and 1 per subfolder; null for
+ * one that went before it was counted. */
+async function folderLinks(full: string): Promise<number | null> {
+  try {
+    const entries = await fsReaddir(full, { withFileTypes: true })
+    return 2 + entries.filter((entry) => entry.isDirectory()).length
+  } catch (err) {
+    console.debug(`${full}: links not counted: ${String(err)}`)
+    return null
+  }
+}
+
 /**
  * What `stat` answers for a host entry, from its host stat. `nowNs` is the
  * wall clock read before the stat; `versioned` is whether the mount stores
- * folder versions. Mirrors Python's `stat_of`.
+ * folder versions; `full` is where the entry is on the host, whose
+ * subfolders give a folder its link count off Linux. Mirrors Python's
+ * `stat_of`.
  */
-export function statOf(name: string, st: BigIntStats, nowNs: bigint, versioned: boolean): FileStat {
+export async function statOf(
+  name: string,
+  st: BigIntStats,
+  nowNs: bigint,
+  versioned: boolean,
+  full: string,
+): Promise<FileStat> {
   const modified = st.mtime.toISOString()
   const mode = Number(st.mode & 0o7777n)
   const birthtime = st.birthtimeMs > 0n ? st.birthtime.toISOString() : null
@@ -50,6 +77,8 @@ export function statOf(name: string, st: BigIntStats, nowNs: bigint, versioned: 
       atime: st.atime.toISOString(),
       ctime: st.ctime.toISOString(),
       birthtime,
+      nlink: LINUX ? Number(st.nlink) : await folderLinks(full),
+      blocks: LINUX ? Number(st.blocks) : null,
     })
   }
   return new FileStat({
@@ -63,6 +92,8 @@ export function statOf(name: string, st: BigIntStats, nowNs: bigint, versioned: 
     atime: st.atime.toISOString(),
     ctime: st.ctime.toISOString(),
     birthtime,
+    nlink: Number(st.nlink),
+    blocks: Number(st.blocks),
   })
 }
 
@@ -75,5 +106,5 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
   } catch (err) {
     throw diskError(err, p)
   }
-  return statOf(path.basename(full), st, nowNs, accessor.folderVersions)
+  return statOf(path.basename(full), st, nowNs, accessor.folderVersions, full)
 }

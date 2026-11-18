@@ -24,6 +24,7 @@ def _accessor() -> BinAccessor:
     return BinAccessor(
         lambda: ["cat", "ls"],
         lambda n: f"{n} is built into mirage." if n in ("cat", "ls") else None,
+        "2026-11-18T10:00:00Z",
     )
 
 

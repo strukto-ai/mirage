@@ -241,7 +241,13 @@ def test_stat_maps_filestat_fields():
     st = fs.stat("/data/f.txt")
     assert (
         st
-        == VFSStat(size=5, is_dir=False, mode=FILE_MODE, mtime_ns=st.mtime_ns)
+        == VFSStat(
+            size=5,
+            is_dir=False,
+            mode=FILE_MODE,
+            mtime_ns=st.mtime_ns,
+            blocks=8,
+        )
         and st.mtime_ns > 0
     )
     assert fs.stat("/data/sub").is_dir is True

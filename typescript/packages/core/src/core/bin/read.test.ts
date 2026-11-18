@@ -22,6 +22,7 @@ function accessor(names: string[]): BinAccessor {
   return new BinAccessor(
     () => names,
     (name) => (names.includes(name) ? `${name} is built into mirage.` : null),
+    '2026-11-18T10:00:00Z',
   )
 }
 

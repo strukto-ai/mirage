@@ -20,7 +20,7 @@ import { norm } from '../../utils/path.ts'
 
 import { einval } from '../../errors/fs.ts'
 import { activePipe } from '../dev/device.ts'
-import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkWriteTarget, touchParent } from './dest.ts'
 
 /**
  * Set one key's length, padding with NULs or cutting it short. A live pipe
@@ -42,12 +42,15 @@ export async function truncate(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   if (noCreate && !accessor.store.files.has(p)) return
+  const made = !accessor.store.files.has(p)
   checkCapacity(accessor, path, p, length)
   const existing = accessor.store.files.get(p) ?? new Uint8Array()
   const out = new Uint8Array(length)
   out.set(existing.subarray(0, Math.min(existing.byteLength, length)))
   accessor.store.files.set(p, out)
-  accessor.store.modified.set(p, nowIso())
+  const now = nowIso()
+  accessor.store.modified.set(p, now)
+  if (made) touchParent(accessor.store, p, now)
   record('truncate', path.virtual, VFSName.RAM, 0, timer)
   return Promise.resolve()
 }

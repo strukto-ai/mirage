@@ -1161,4 +1161,23 @@ describe('the preserve, link, parent and attribute options', () => {
       await ws.close()
     }
   })
+
+  it.each([
+    ["chmod 750 f; cp f g; stat -c '%a' g", '750\n'],
+    ["chmod 4777 f; cp f g; stat -c '%a' g", '755\n'],
+    ["chmod 750 f; umask 077; cp f g; stat -c '%a' g", '700\n'],
+    ["printf x > g; chmod 600 g; chmod 755 f; cp f g; stat -c '%a' g", '600\n'],
+    ["mkdir -m 700 s; mkdir -m 750 s/t; cp -r s u; stat -c '%a' u u/t", '700\n750\n'],
+    ["mkdir -m 777 s u; mkdir -m 700 u/s; cp -r s u; stat -c '%a' u/s", '700\n'],
+    ["chmod 750 f; cp --attributes-only f h; stat -c '%a %s' h", '750 0\n'],
+  ])('makes a new copy with the source mode under the umask: %s', async (line, out) => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const result = await ws.shell(SETUP + line)
+      expect(stdoutStr(result)).toBe(out)
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
 })

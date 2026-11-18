@@ -101,7 +101,7 @@ async def test_partial_walks_keep_output_and_command_ownership(
             (
                 "du -s /d",
                 1,
-                b"2\t/d\n",
+                b"24\t/d\n",
                 b"du: cannot read directory '/d/c': Permission denied\n",
             ),
             (
@@ -175,7 +175,8 @@ async def test_du_stops_at_the_mounts_walk_limit(unreadable_tree):
                 "narrow the path\n"
             ).encode()
         )
-        assert summary.stdout == f"{limit}\t/d/large\n".encode()
+        # Each one-byte file a block, and the directory its own.
+        assert summary.stdout == f"{4 * limit + 4}\t/d/large\n".encode()
     finally:
         await ws.close()
 
@@ -192,11 +193,11 @@ async def test_du_lifted_accounts_for_every_entry(unreadable_tree):
         summary = await ws.shell("du -s /d/large")
         assert summary.exit_code == 0
         assert not summary.stderr
-        assert summary.stdout == b"10001\t/d/large\n"
+        assert summary.stdout == b"40008\t/d/large\n"
         detailed = await ws.shell("du -a /d/large")
         assert detailed.exit_code == 0
         assert not detailed.stderr
         assert len(detailed.stdout.splitlines()) == 10002
-        assert detailed.stdout.endswith(b"10001\t/d/large\n")
+        assert detailed.stdout.endswith(b"40008\t/d/large\n")
     finally:
         await ws.close()

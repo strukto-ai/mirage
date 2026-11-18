@@ -52,6 +52,7 @@ import {
 import { rstripSlash } from '../../../utils/slash.ts'
 import { descendantPath } from '../utils/paths.ts'
 import {
+  Keeper,
   type TransferLinks,
   linkStat,
   renameLink,
@@ -88,6 +89,10 @@ const ENC = new TextEncoder()
 
 // Bound on the --exchange staging-name probe.
 const HOLDING_ATTEMPTS = 100
+
+// What a move across mounts carries over from each source, as a rename keeps
+// it: GNU mv copies and keeps the mode, owner and times.
+export const MOVE_KEEPS: ReadonlySet<string> = new Set(['mode', 'ownership', 'timestamps'])
 
 export interface MvFlags {
   noClobber: boolean
@@ -650,14 +655,18 @@ export async function mvGeneric(
         }
       }
       // Across mounts GNU copies and then removes, and -v says so entry by
-      // entry instead of `renamed` (coreutils 9.7).
+      // entry instead of `renamed` (coreutils 9.7). The copy keeps each
+      // entry's mode, owner and times, as a rename would.
       const verbose = flags.verbose ? lines : undefined
       const entries = await walk(move.readdir, stat, src)
+      const keeper = dispatch !== undefined ? new Keeper(MOVE_KEEPS, stat, dispatch) : null
       const copiedAll = await copyEntries('mv', move, stat, src, target, entries, errors, {
         copies,
         lines: verbose,
         rootBackup: made.backup,
+        keeper,
       })
+      await keeper?.finish()
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue

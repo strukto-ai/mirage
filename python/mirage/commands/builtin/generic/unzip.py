@@ -20,7 +20,14 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, LineFacts, PathSpec, ReadStreamFn
+from mirage.types import (
+    JsonValue,
+    LineFacts,
+    PathSpec,
+    ReadStreamFn,
+    SetAttrFields,
+)
+from mirage.utils.timezone import zone_from_env
 
 # Info-ZIP answers an option it does not know with its usage block and
 # exit 10; -1, -2, -s, -m and -h are zipinfo's letters and mean nothing to
@@ -181,8 +188,20 @@ async def unzip_generic(
     if dest is not None:
         typed = dest.raw_path if isinstance(dest, PathSpec) else dest
         config["dest"] = byte_view(typed)
+
+    async def set_attrs(path: PathSpec, fields: SetAttrFields) -> None:
+        if dispatch is not None:
+            await dispatch("setattr", path, **fields)
+
     host = StreamHost(
-        [archive], stream, ctx.stdin, dispatch, ctx.cwd, dash=False
+        [archive],
+        stream,
+        ctx.stdin,
+        dispatch,
+        ctx.cwd,
+        dash=False,
+        set_attrs=set_attrs,
+        zone=zone_from_env(ctx.env),
     )
     io = IOResult()
     return hosted_stream("unzip", config, host, io), io

@@ -112,8 +112,17 @@ def _spec(virtual: str) -> PathSpec:
 async def _du(
     mount: _Mount, paths: list[str], links: Any = None, **flags: Any
 ) -> tuple[str, int, str]:
+    """Run du on ``mount``, in bytes (-b), the sizes its rows hold, unless
+    the flags say otherwise.
+
+    Args:
+        mount (_Mount): the mount the dispatcher answers for.
+        paths (list[str]): the operands.
+        links (Any): its links.
+        **flags (Any): the flags.
+    """
     ctx = Context(
-        flags={**flags},
+        flags={"bytes": True, **flags},
         vfs=Files(mount, readers([mount.row], links), ledger=False),
     )
     token = set_mount_gate("/", MountMode.WRITE)
@@ -317,4 +326,4 @@ async def test_du_x_counts_a_file_listed_past_the_mounts_below():
     mounts = {"/ram/": vfs} | {f"/ram/d/m{i}/": RAMVFS() for i in (1, 2, 3)}
     with Workspace(mounts) as ws:
         out = await ws.shell("du -x -a /ram/d")
-        assert await out.stdout_str() == "2\t/ram/d/z\n2\t/ram/d\n"
+        assert await out.stdout_str() == "4\t/ram/d/z\n8\t/ram/d\n"

@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "stat_links_and_blocks_are_what_ext4_counts",
+      "seq": 110000201,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/nlinks/a/b /data/nlinks/c && printf hello > /data/nlinks/f && head -c 5000 /dev/zero > /data/nlinks/big && : > /data/nlinks/e && ln -s f /data/nlinks/l && ls -l /data/nlinks | awk 'NR==1{print; next} {print $1, $2, $NF}'; stat -c '%h %b %n' /data/nlinks /data/nlinks/a /data/nlinks/a/b /data/nlinks/f /data/nlinks/big /data/nlinks/e /data/nlinks/l; find /data/nlinks -links 3 | sort; find /data/nlinks -printf '%n %b %k %p\\n' | sort -k4; ls -s /data/nlinks",
+      "expect": {
+        "exit": 0,
+        "stdout": "total 20\ndrwxr-xr-x 3 a\n-rw-r--r-- 1 big\ndrwxr-xr-x 2 c\n-rw-r--r-- 1 e\n-rw-r--r-- 1 f\nlrwxrwxrwx 1 f\n4 8 /data/nlinks\n3 8 /data/nlinks/a\n2 8 /data/nlinks/a/b\n1 8 /data/nlinks/f\n1 16 /data/nlinks/big\n1 0 /data/nlinks/e\n1 0 /data/nlinks/l\n/data/nlinks/a\n4 8 4 /data/nlinks\n3 8 4 /data/nlinks/a\n2 8 4 /data/nlinks/a/b\n1 16 8 /data/nlinks/big\n2 8 4 /data/nlinks/c\n1 0 0 /data/nlinks/e\n1 8 4 /data/nlinks/f\n1 0 0 /data/nlinks/l\ntotal 20\n4 a\n8 big\n4 c\n0 e\n4 f\n0 l\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ],
+      "note": "A folder links itself, its . and each subfolder's ..; an entry takes whole 4 KiB blocks for its bytes, none when empty or a symlink short enough to sit in its inode. ls -l, ls -s, stat %h %b, find -links and find -printf %n %b %k all read the same counts (debian:stable-slim on ext4)."
+    },
+    {
+      "id": "stat_a_folder_time_moves_with_its_entries",
+      "seq": 110000202,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/nlinks/m && touch -d 2000-01-01 /data/nlinks/m && touch /data/nlinks/m/new && find /data/nlinks/m -maxdepth 0 -newermt 2001-01-01; touch -d 2000-01-01 /data/nlinks/m && rm /data/nlinks/m/new && find /data/nlinks/m -maxdepth 0 -newermt 2001-01-01; touch -d 2000-01-01 /data/nlinks/m && mkdir /data/nlinks/m/s && stat -c %h /data/nlinks/m && find /data/nlinks/m -maxdepth 0 -newermt 2001-01-01",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/nlinks/m\n/data/nlinks/m\n3\n/data/nlinks/m\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ],
+      "note": "Making, removing or making a folder in a directory moves the directory's mtime, as on a disk."
+    }
+  ]
+}

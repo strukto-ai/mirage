@@ -22,6 +22,7 @@ from mirage.core.bin.refuse import refuse
 from mirage.core.bin.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
+from mirage.utils.dates import now_iso
 from mirage.vfs.base import BaseVFS
 
 
@@ -50,7 +51,7 @@ class BinViewVFS(BaseVFS):
         note: Callable[[str], str | None],
     ) -> None:
         super().__init__()
-        self.accessor = BinAccessor(programs, note)
+        self.accessor = BinAccessor(programs, note, now_iso())
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)

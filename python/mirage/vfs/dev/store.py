@@ -23,6 +23,7 @@ from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, einval, enoent, fs_error
 from mirage.errors.types import FsCondition
+from mirage.utils.dates import now_iso
 from mirage.utils.ranges import slice_window
 from mirage.vfs.dev.types import DevFileState, PipeRow
 from mirage.vfs.ram.store import RAMStore
@@ -314,9 +315,11 @@ class DevStore(RAMStore):
         self.dirs = _DevDirs(self.files)
         self.modified = {}
         self.attrs = {}
+        self.made = now_iso()
 
     def for_session(self, owner: str) -> "DevStore":
         store = DevStore(self.files.for_session(owner))
         store.modified = self.modified
         store.attrs = self.attrs
+        store.made = self.made
         return store

@@ -24,6 +24,8 @@ import { groupId, groupLabel, ownerId, ownerLabel, type Identity } from './utils
 
 export interface PrintfStatFacts {
   size: number
+  links: number
+  blocks: number
   kind: PrintfKind
   mtimeEpoch: number
   // The permission bits a backend or the namespace overlay reported,
@@ -62,6 +64,8 @@ function facts(
     path: byteView(row),
     base: byteView(base),
     size: st?.size ?? 0,
+    links: st?.links ?? 0,
+    blocks: st?.blocks ?? 0,
     kind,
     target: kind === 'l' ? (st?.targetKind ?? 'N') : kind,
     mode: st?.mode ?? null,

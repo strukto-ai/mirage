@@ -14,7 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_pipe
-from mirage.core.ram.dest import lookup_error
+from mirage.core.ram.dest import lookup_error, touch_parent
 from mirage.errors.fs import eisdir, fs_error
 from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
@@ -44,3 +44,4 @@ async def unlink(accessor: RAMAccessor, path_spec: PathSpec) -> None:
     del store.files[p]
     store.modified.pop(p, None)
     store.attrs.pop(p, None)
+    touch_parent(store, p)

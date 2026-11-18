@@ -221,28 +221,64 @@ def namespace_listing(
     return merge_readdir(vis, [], prefixes, links, parent)
 
 
+def namespace_folders(
+    vis: Visibility | None,
+    prefixes: Iterable[str],
+    links: NamespaceLinks | None,
+    path: str,
+) -> set[str]:
+    """The folders the namespace adds to a directory: each mount below
+    it and each folder above a deeper link, a link of its own being no
+    folder. Each is one more link to the directory, as a mount point is
+    on Linux.
+
+    Args:
+        vis (Visibility | None): the session's visibility.
+        prefixes (Iterable[str]): the mount prefixes to derive from.
+        links (NamespaceLinks | None): the namespace symlink table.
+        path (str): the directory, as a virtual path.
+    """
+    own = set(links.symlink_targets()) if links is not None else set()
+    base = norm_dir(path)
+    return set(child_mount_names(vis, prefixes, path)) | {
+        segment
+        for segment in _link_names(vis, links, path)
+        if base + segment not in own
+    }
+
+
 def namespace_stat(
     vis: Visibility | None,
     prefixes: Iterable[str],
     links: NamespaceLinks | None,
     path: str,
+    when: str | None = None,
 ) -> FileStat | None:
     """A directory stat for a path that exists only as namespace structure.
 
     The listing and the stat must agree: a directory ``readdir`` can
     serve (because a mount or a link sits below it) must stat as a
-    directory, or ``os.walk`` and ``Path.is_dir`` break on it.
+    directory, or ``os.walk`` and ``Path.is_dir`` break on it. Its link
+    count is 2 and one per folder it holds: each mount below it and each
+    folder above a deeper link, a link of its own being no folder.
 
     Args:
         vis (Visibility | None): the session's visibility.
         prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
         path (str): the path that was statted, as a virtual path.
+        when (str | None): its time, when the namespace was made.
     """
     if namespace_listing(vis, prefixes, links, path) is None:
         return None
     name = _strip_entry(path) or "/"
-    return FileStat(name=name, type=FileType.DIRECTORY)
+    folders = namespace_folders(vis, prefixes, links, path)
+    return FileStat(
+        name=name,
+        type=FileType.DIRECTORY,
+        modified=when,
+        nlink=2 + len(folders),
+    )
 
 
 def paths_scoped(paths: Sequence[PathSpec], prefix: str = "") -> bool:

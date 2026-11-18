@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.dest import check_dest_parents
+from mirage.core.ram.dest import check_dest_parents, touch_parent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -25,6 +25,10 @@ async def create(accessor: RAMAccessor, path: PathSpec) -> None:
     timer = start_op()
     p = norm(path.mount_path)
     check_dest_parents(store, path, p)
+    made = p not in store.files
+    now = now_iso()
     store.files[p] = b""
-    store.modified[p] = now_iso()
+    store.modified[p] = now
+    if made:
+        touch_parent(store, p, now)
     record("create", path.virtual, "ram", 0, timer)

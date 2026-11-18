@@ -256,6 +256,8 @@ class FileStat:
     ctime: str | None = None
     birthtime: str | None = None
     dev: int | None = None
+    nlink: int | None = None
+    blocks: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

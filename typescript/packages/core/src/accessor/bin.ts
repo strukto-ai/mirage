@@ -20,15 +20,17 @@ import { Accessor } from './base.ts'
  * trees close has no file either: `programs` is every program name the session
  * can run, sorted, and `note` is the line one program's file says about
  * it, null when the name runs as no program, which is what gives it a
- * file.
+ * file. `made` is when the view was made, the time of each file in it.
  */
 export class BinAccessor extends Accessor {
   readonly programs: () => string[]
   readonly note: (name: string) => string | null
+  readonly made: string
 
-  constructor(programs: () => string[], note: (name: string) => string | null) {
+  constructor(programs: () => string[], note: (name: string) => string | null, made: string) {
     super()
     this.programs = programs
     this.note = note
+    this.made = made
   }
 }

@@ -27,11 +27,13 @@ from mirage.utils.stat_view import (
     FIFO_MODE,
     FILE_MODE,
     LINK_MODE,
+    block_count,
     content_size,
     id_number,
     is_dir,
     is_fifo,
     is_link,
+    link_count,
     mtime_ns,
     posix_mode,
     size_unknown,
@@ -228,3 +230,24 @@ def test_id_number_reads_leading_zeros_up_to_the_largest_id():
     assert id_number("4294967295") == 4294967295
     assert id_number("4294967296") is None
     assert id_number("99999999999") is None
+
+
+@pytest.mark.parametrize(
+    ("st", "links", "blocks"),
+    [
+        (FileStat(name="f", size=5, type=FileType.FILE), 1, 8),
+        (FileStat(name="f", size=4097, type=FileType.FILE), 1, 16),
+        (FileStat(name="e", size=0, type=FileType.FILE), 1, 0),
+        (FileStat(name="u", size=None, type=FileType.FILE), 1, None),
+        (FileStat(name="d", type=FileType.DIRECTORY, nlink=4), 4, 8),
+        (FileStat(name="l", size=59, type=FileType.SYMLINK), 1, 0),
+        (FileStat(name="l", size=60, type=FileType.SYMLINK), 1, 8),
+        (FileStat(name="z", type=FileType.CHAR_DEVICE), 1, 0),
+        (FileStat(name="p", type=FileType.FIFO), 1, 0),
+        (FileStat(name="b", size=5, type=FileType.FILE, blocks=24), 1, 24),
+    ],
+)
+def test_links_and_blocks_are_the_backends_else_what_ext4_counts(
+    st, links, blocks
+):
+    assert (link_count(st), block_count(st)) == (links, blocks)

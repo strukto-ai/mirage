@@ -49,6 +49,7 @@ from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
     DIR_MODE,
     atime_ns,
+    block_count,
     content_size,
     device_rdev,
     is_dir,
@@ -95,6 +96,8 @@ def stat_row(fs: FileStat) -> VFSStat:
         atime_ns=atime_ns(fs),
         uid=fs.uid if isinstance(fs.uid, int) else None,
         gid=fs.gid if isinstance(fs.gid, int) else None,
+        nlink=fs.nlink,
+        blocks=block_count(fs),
         source=fs,
     )
 

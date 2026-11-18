@@ -32,6 +32,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.utils.timezone import zone_from_env
 from mirage.workspace.files import Files
 
 
@@ -42,6 +43,7 @@ async def run_zip(
     vfs: Files | None,
     cwd: str = "/",
     stdin: ByteSource | None = None,
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Run a zip whose archive and operands span mounts.
 
@@ -59,6 +61,8 @@ async def run_zip(
             scan merges into each walk.
         cwd (str): The directory a name ``-@`` reads resolves against.
         stdin (ByteSource | None): What ``-@``, ``-c`` and ``-z`` read.
+        env (dict[str, str] | None): The session's environment, whose
+            ``TZ`` a member's DOS time is written in.
     """
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
@@ -88,4 +92,5 @@ async def run_zip(
         links=links,
         mounts=mount_view(vfs),
         stdin=stdin,
+        zone=zone_from_env(env),
     )

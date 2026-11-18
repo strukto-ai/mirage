@@ -20,6 +20,16 @@ import { type FsError } from '../../errors/types.ts'
 import { memoryRoom } from '../../io/memory.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { nowIso } from '../../utils/dates.ts'
+import type { RAMStore } from '../../vfs/ram/store.ts'
+
+/** Move the time of the folder holding the key `p` to `now` (the clock's
+ * when absent), as a folder's moves when an entry in it is made, removed or
+ * renamed. Mirrors Python's `touch_parent`. */
+export function touchParent(store: RAMStore, p: string, now: string = nowIso()): void {
+  const parent = p.slice(0, p.lastIndexOf('/')) || '/'
+  if (parent === '/' || store.dirs.has(parent)) store.modified.set(parent, now)
+}
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
 // rename(2) resolves the destination: a component that does not exist is

@@ -24,12 +24,13 @@ MISSING = b"find: '/tmp/d': No such file or directory\n"
 @pytest.mark.asyncio
 async def test_a_directory_on_two_machines_lists_each_name_once():
     a = ScriptedMachine(
-        "a", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 out.csv\0")
+        "a", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 1 0 out.csv\0")
     )
     b = ScriptedMachine(
         "b",
         lambda line, data: ok(
-            DIR + b"f 644 2 0 0 0 0 out.csv\0f 644 9 0 0 0 0 model.bin\0"
+            DIR
+            + b"f 644 2 0 0 0 0 1 0 out.csv\0f 644 9 0 0 0 0 1 0 model.bin\0"
         ),
     )
     names = [
@@ -37,7 +38,7 @@ async def test_a_directory_on_two_machines_lists_each_name_once():
     ]
     assert names == ["model.bin", "out.csv"]
     assert a.lines[0].endswith(
-        "-maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %P\\0'"
+        "-maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'"
     )
 
 
@@ -45,7 +46,7 @@ async def test_a_directory_on_two_machines_lists_each_name_once():
 async def test_a_directory_only_one_machine_has_lists_there():
     a = ScriptedMachine("a", lambda line, data: failed(MISSING))
     b = ScriptedMachine(
-        "b", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 x\0")
+        "b", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 1 0 x\0")
     )
     names = [
         s.name for s in await readdir(bound(a, b), ["a", "b"], spec("/d"))
@@ -58,7 +59,7 @@ async def test_no_machine_holding_it_is_enoent_and_a_file_is_enotdir():
     a = ScriptedMachine("a", lambda line, data: failed(MISSING))
     with pytest.raises(FileNotFoundError):
         await readdir(bound(a), ["a"], spec("/d"))
-    f = ScriptedMachine("f", lambda line, data: ok(b"f 644 1 0 0 0 0 \0"))
+    f = ScriptedMachine("f", lambda line, data: ok(b"f 644 1 0 0 0 0 1 0 \0"))
     with pytest.raises(NotADirectoryError):
         await readdir(bound(a, f), ["a", "f"], spec("/d"))
 
@@ -68,7 +69,7 @@ async def test_a_machine_that_cannot_list_fails_the_listing():
     denied = b"find: '/tmp/d': Permission denied\n"
     a = ScriptedMachine("a", lambda line, data: failed(denied))
     b = ScriptedMachine(
-        "b", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 x\0")
+        "b", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 1 0 x\0")
     )
     with pytest.raises(PermissionError):
         await readdir(bound(a, b), ["a", "b"], spec("/d"))

@@ -32,7 +32,7 @@
       "command": "du /data/due",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/due/e\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
+        "stdout": "4\t/data/due/e\n4\t/data/due/g/h\n8\t/data/due/g\n20\t/data/due\n",
         "stderr": ""
       },
       "note": "Every directory gets a row, an empty one included (0 bytes under -ab, as GNU does), children before their parent and siblings sorted, whether the walk lists each directory or the mount's read_tree lists the subtree."
@@ -51,12 +51,12 @@
       "command": "du -a /data/due",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/due/e\n3\t/data/due/f\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
+        "stdout": "4\t/data/due/e\n4\t/data/due/f\n4\t/data/due/g/h\n8\t/data/due/g\n20\t/data/due\n",
         "stderr": ""
       }
     },
     {
-      "id": "du_empty_operand_is_zero",
+      "id": "du_empty_operand_is_one_block",
       "seq": 1301086,
       "targets": [
         "disk",
@@ -69,7 +69,7 @@
       "command": "mkdir /data/cre && du /data/cre; du -s /data/cre; rmdir /data/cre",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/cre\n0\t/data/cre\n",
+        "stdout": "4\t/data/cre\n4\t/data/cre\n",
         "stderr": ""
       }
     },
@@ -87,7 +87,7 @@
       "command": "du --max-depth=1 /data/due",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/due/e\n0\t/data/due/g\n3\t/data/due\n",
+        "stdout": "4\t/data/due/e\n8\t/data/due/g\n20\t/data/due\n",
         "stderr": ""
       }
     },
@@ -105,7 +105,7 @@
       "command": "du / 2>/dev/null | grep '/due'",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/due/e\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
+        "stdout": "4\t/data/due/e\n4\t/data/due/g/h\n8\t/data/due/g\n20\t/data/due\n",
         "stderr": ""
       },
       "note": "A walk from / folds every mount's rows into one tree; an empty directory prints like an empty file there, so the merge asks the dispatcher which each lone 0 row is. Its stderr is dropped: a remote /data past its walk_limit stops the walk with a note there."

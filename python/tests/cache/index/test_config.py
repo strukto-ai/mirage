@@ -32,7 +32,7 @@ WIRE = (
     '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z",'
     '"fingerprint":"v1","revision":null,"type":"file","content":"text",'
     '"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,'
-    '"birthtime":null,"dev":null,"extra":{}}'
+    '"birthtime":null,"dev":null,"nlink":null,"blocks":null,"extra":{}}'
 )
 
 

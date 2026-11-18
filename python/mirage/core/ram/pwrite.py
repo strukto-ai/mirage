@@ -18,6 +18,7 @@ from mirage.core.ram.dest import (
     check_capacity,
     check_dest_parents,
     check_write_target,
+    touch_parent,
 )
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -55,11 +56,15 @@ async def pwrite(
     check_write_target(store, path_spec, p)
     device = active_device(accessor, p)
     refuse_tty(device, path_spec.virtual)
+    made = device is None and p not in store.files
     if device is None:
         with store.lock:
             if data:
                 end = max(store.files.size(p), offset + len(data))
                 check_capacity(store, path_spec, p, end)
             store.files.splice(p, offset, data)
-    store.modified[p] = now_iso()
+    now = now_iso()
+    store.modified[p] = now
+    if made:
+        touch_parent(store, p, now)
     record("pwrite", path_spec.virtual, "ram", len(data), timer)

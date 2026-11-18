@@ -154,14 +154,36 @@ async def run_relay(
         )
     if cmd_name == Cmd.TAR:
         return await run_tar(
-            scopes, text_args, flag_kwargs, dispatch, vfs, cwd, stdin
+            scopes,
+            text_args,
+            flag_kwargs,
+            dispatch,
+            vfs,
+            cwd,
+            stdin,
+            session_view.snapshot() if session_view is not None else None,
         )
     if cmd_name == Cmd.TEE:
         return await run_tee(scopes, flag_kwargs, dispatch, stdin, storage_key)
     if cmd_name == Cmd.UNZIP:
-        return await run_unzip(scopes, text_args, flag_kwargs, dispatch, cwd)
+        return await run_unzip(
+            scopes,
+            text_args,
+            flag_kwargs,
+            dispatch,
+            cwd,
+            session_view.snapshot() if session_view is not None else None,
+        )
     if cmd_name == Cmd.ZIP:
-        return await run_zip(scopes, flag_kwargs, dispatch, vfs, cwd, stdin)
+        return await run_zip(
+            scopes,
+            flag_kwargs,
+            dispatch,
+            vfs,
+            cwd,
+            stdin,
+            session_view.snapshot() if session_view is not None else None,
+        )
     if cmd_name in DISPATCH_BUILDERS:
         return await run_dispatch(
             DISPATCH_BUILDERS[cmd_name],

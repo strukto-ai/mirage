@@ -36,6 +36,8 @@ class TreeRow:
         atime_ms (int): the access time, in epoch milliseconds.
         uid (int): the owner's uid.
         gid (int): the group's gid.
+        nlink (int): the link count.
+        blocks (int): the 512-byte blocks it takes.
         rel (str): the path under the listed scope, empty for the scope.
     """
 
@@ -48,4 +50,6 @@ class TreeRow:
     atime_ms: int
     uid: int
     gid: int
+    nlink: int
+    blocks: int
     rel: str

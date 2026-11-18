@@ -941,7 +941,7 @@
       "command": "du /data/symx/flink",
       "expect": {
         "exit": 0,
-        "stdout": "19\t/data/symx/flink\n",
+        "stdout": "0\t/data/symx/flink\n",
         "stderr": ""
       }
     },
@@ -976,7 +976,7 @@
       "command": "du -a /data/symx",
       "expect": {
         "exit": 0,
-        "stdout": "15\t/data/symx/dangle\n14\t/data/symx/dlink\n19\t/data/symx/flink\n6\t/data/symx/real.txt\n6\t/data/symx/sub/keep.txt\n6\t/data/symx/sub\n60\t/data/symx\n",
+        "stdout": "0\t/data/symx/dangle\n0\t/data/symx/dlink\n0\t/data/symx/flink\n4\t/data/symx/real.txt\n4\t/data/symx/sub/keep.txt\n8\t/data/symx/sub\n16\t/data/symx\n",
         "stderr": ""
       }
     },

@@ -72,7 +72,7 @@ describe.each(['disk', 'ssh'])('partial traversal on %s', (kind) => {
         ['find /d -type f', 1, '/d/a/f\n/d/b/f\n', diagnostic],
         ['find /d -maxdepth 1', 0, '/d\n/d/a\n/d/b\n/d/c\n', ''],
         ['find /d -empty', 1, '', diagnostic],
-        ['du -s /d', 1, '2\t/d\n', "du: cannot read directory '/d/c': Permission denied\n"],
+        ['du -s /d', 1, '24\t/d\n', "du: cannot read directory '/d/c': Permission denied\n"],
         [
           'echo before; find /d -type f | head -3; echo after=$?',
           0,
@@ -132,7 +132,8 @@ it.each(['disk', 'ssh'])(
       expect([summary.exitCode, DEC.decode(summary.stderr), DEC.decode(summary.stdout)]).toEqual([
         1,
         `du: /d/large: stopped after ${limit} files (walk_limit); narrow the path\n`,
-        `${limit}\t/d/large\n`,
+        // Each one-byte file a block, and the directory its own.
+        `${String(4 * Number(limit) + 4)}\t/d/large\n`,
       ])
     } finally {
       await close()
@@ -149,12 +150,12 @@ it.each(['disk', 'ssh'])(
     try {
       const summary = await ws.shell('du -s /d/large')
       expect([summary.exitCode, DEC.decode(summary.stderr)]).toEqual([0, ''])
-      expect(DEC.decode(summary.stdout)).toBe('10001\t/d/large\n')
+      expect(DEC.decode(summary.stdout)).toBe('40008\t/d/large\n')
       const detailed = await ws.shell('du -a /d/large')
       expect([detailed.exitCode, DEC.decode(detailed.stderr)]).toEqual([0, ''])
       const rows = DEC.decode(detailed.stdout).trimEnd().split('\n')
       expect(rows).toHaveLength(10002)
-      expect(rows.at(-1)).toBe('10001\t/d/large')
+      expect(rows.at(-1)).toBe('40008\t/d/large')
     } finally {
       await close()
     }

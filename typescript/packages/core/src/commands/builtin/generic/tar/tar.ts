@@ -77,6 +77,7 @@ export interface TarFlags {
   autoCompress: boolean
   absolute: boolean
   preserve: boolean
+  touch: boolean
   numeric: boolean
   mtime: string | null
   filesFrom: PathSpec[]
@@ -190,6 +191,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
     autoCompress: fl.asBool('auto_compress'),
     absolute: fl.asBool('absolute_names'),
     preserve: fl.asBool('preserve_permissions'),
+    touch: fl.asBool('touch'),
     numeric: fl.asBool('numeric_owner'),
     mtime: fl.asStr('mtime') ?? null,
     filesFrom: fl.asPaths('files_from'),
@@ -535,6 +537,7 @@ export async function tarGeneric(
       unanchored: flags.unanchored,
       preserve: flags.preserve,
       umask: ctx.vfs === undefined ? null : sessionUmask(ctx.session?.access()),
+      touch: flags.touch,
       to_stdout: flags.toStdout,
       base: byteView(rstripSlash(extractDest(directories.at(-1) ?? null, ctx.cwd.virtual))),
       refusal: refusal.map((line) => byteView(line)),

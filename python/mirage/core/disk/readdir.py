@@ -45,7 +45,7 @@ def _row_of(
     except FileNotFoundError as exc:
         logger.debug("%s left during the scan: %s", entry.path, exc)
         return None
-    return stat_of(entry.name, st, now_ns, versioned)
+    return stat_of(entry.name, st, now_ns, versioned, entry.path)
 
 
 def _scan(p: Path, versioned: bool) -> DirListing:

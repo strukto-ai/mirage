@@ -180,17 +180,47 @@ export function namespaceListing(
  *
  * The listing and the stat must agree: a directory `readdir` can serve
  * (because a mount or a link sits below it) must stat as a directory,
- * or `os.walk` and `Path.is_dir` break on it.
+ * or `os.walk` and `Path.is_dir` break on it. Its link count is 2 and one
+ * per folder it holds: each mount below it and each folder above a deeper
+ * link, a link of its own being no folder. `when` is its time, when the
+ * namespace was made.
  */
+/**
+ * The folders the namespace adds to a directory: each mount below it and each
+ * folder above a deeper link, a link of its own being no folder. Each is one
+ * more link to the directory, as a mount point is on Linux. Mirrors Python's
+ * namespace_folders.
+ */
+export function namespaceFolders(
+  vis: Visibility | null,
+  prefixes: readonly string[],
+  links: NamespaceLinks | null,
+  path: string,
+): Set<string> {
+  const own = links?.symlinkTargets() ?? new Map<string, string>()
+  const base = normDir(path)
+  return new Set([
+    ...childMountNames(vis, prefixes, path),
+    ...linkNames(vis, links, path).filter((segment) => !own.has(base + segment)),
+  ])
+}
+
 export function namespaceStat(
   vis: Visibility | null,
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   path: string,
+  when: string | null = null,
 ): FileStat | null {
   if (namespaceListing(vis, prefixes, links, path) === null) return null
   const name = stripEntry(path)
-  return new FileStat({ name: name === '' ? '/' : name, type: FileType.DIRECTORY })
+  const folders = namespaceFolders(vis, prefixes, links, path)
+  return new FileStat({
+    name: name === '' ? '/' : name,
+    type: FileType.DIRECTORY,
+    modified: when,
+    nlink: 2 + folders.size,
+  })
 }
 
 /**

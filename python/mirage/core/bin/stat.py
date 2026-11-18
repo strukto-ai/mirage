@@ -33,8 +33,19 @@ async def stat(accessor: BinAccessor, path: PathSpec) -> FileStat:
     """
     key = path.mount_path.strip("/")
     if key == "":
-        return FileStat(name="bin", type=FileType.DIRECTORY, mode=PROGRAM_MODE)
+        return FileStat(
+            name="bin",
+            type=FileType.DIRECTORY,
+            mode=PROGRAM_MODE,
+            modified=accessor.made,
+            nlink=2,
+        )
     data = await read(accessor, path)
     return FileStat(
-        name=key, size=len(data), type=FileType.FILE, mode=PROGRAM_MODE
+        name=key,
+        size=len(data),
+        type=FileType.FILE,
+        mode=PROGRAM_MODE,
+        modified=accessor.made,
+        nlink=1,
     )

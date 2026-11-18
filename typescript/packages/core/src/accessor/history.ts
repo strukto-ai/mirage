@@ -20,14 +20,17 @@ import { Accessor } from './base.ts'
  *
  * `session` names the reader when a session's own view was taken, null
  * for the shared view, which finds the reader from the bound session.
+ * `made` is when the view was made, its time before any command.
  */
 export class HistoryAccessor extends Accessor {
   readonly observer: Observer
   readonly session: string | null
+  readonly made: string
 
-  constructor(observer: Observer, session: string | null = null) {
+  constructor(observer: Observer, made: string, session: string | null = null) {
     super()
     this.observer = observer
+    this.made = made
     this.session = session
   }
 }

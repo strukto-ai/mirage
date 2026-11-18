@@ -31,7 +31,7 @@
       "command": "ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n-rw-r--r-- 1 root root 6 Jan  2  2026 f.txt\n",
+        "stdout": "total 4\n-rw-r--r-- 1 root root 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },

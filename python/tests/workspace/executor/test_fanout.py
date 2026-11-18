@@ -92,8 +92,8 @@ async def test_a_hidden_mount_does_not_bound_the_walk(line):
     "line,expected",
     [
         ("find /base -type f", b"/base/inner/g\n/base/top\n"),
-        ("du -s /base", b"5\t/base\n"),
-        ("du -s /base/inner /other", b"3\t/base/inner\n1\t/other\n"),
+        ("du -s /base", b"16\t/base\n"),
+        ("du -s /base/inner /other", b"8\t/base/inner\n8\t/other\n"),
     ],
 )
 async def test_a_nested_mount_is_walked_through_the_ops(line, expected):

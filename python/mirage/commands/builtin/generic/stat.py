@@ -60,10 +60,13 @@ from mirage.utils.quote import (
 )
 from mirage.utils.stat_view import (
     ALL_MODE_BITS,
+    BLKSIZE,
     BLOCK_UNIT,
+    block_count,
     content_size,
     device_rdev,
     is_char_device,
+    link_count,
     posix_mode,
     size_unknown,
 )
@@ -389,6 +392,13 @@ def _directive_value(
         return _epoch(s.birthtime)
     if spec == "B":
         return str(BLOCK_UNIT)
+    if spec == "b":
+        blocks = block_count(s)
+        return "?" if blocks is None else str(blocks)
+    if spec == "o":
+        return str(BLKSIZE)
+    if spec == "h":
+        return str(link_count(s))
     if spec == "d":
         return "?" if s.dev is None else str(s.dev)
     if spec == "D":
@@ -718,8 +728,9 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
     """GNU coreutils 9.7's default layout, with unknown fields marked.
 
     A VFS has rendered bytes, modes, logical owners and its mount's
-    device, but no inode, allocation blocks, IO block size or link
-    count: those print '?'. An absent size or time prints '-'. Each
+    device, and the blocks, IO block size and link count ``%b``, ``%o``
+    and ``%h`` print, but no inode: that prints '?'. An absent size or
+    time prints '-'. Each
     time is the one its directive prints (``%x %y %z %w``),
     the name is unquoted as GNU's default prints it, and times are UTC.
 
@@ -733,17 +744,20 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
     gid = id_text(group_id(s.gid, identity))
     owner = owner_name(s.uid, identity) or UNKNOWN_ID_NAME
     group = group_name(s.gid, identity) or UNKNOWN_ID_NAME
-    links = "Links: ?"
+    count = _directive_value("h", s, name, identity)
+    links = f"Links: {count}"
     if is_char_device(s):
         major = _directive_value("Hr", s, name, identity)
         minor = _directive_value("Lr", s, name, identity)
-        links = f"Links: {'?':<5} Device type: {major},{minor}"
+        links = f"Links: {count:<5} Device type: {major},{minor}"
+    blocks = _directive_value("b", s, name, identity)
+    io_block = _directive_value("o", s, name, identity)
     shown = " -> ".join(_name_parts(s, name, False))
     device = "?" if s.dev is None else "{},{}".format(*_device_halves(s.dev))
     return (
         f"  File: {shown}\n"
-        f"  Size: {size:<10}\tBlocks: {'?':<10} "
-        f"IO Block: {'?':<6} {_type_label(s)}\n"
+        f"  Size: {size:<10}\tBlocks: {blocks:<10} "
+        f"IO Block: {io_block:<6} {_type_label(s)}\n"
         f"Device: {device}\tInode: {'?':<10}  {links}\n"
         f"Access: ({_effective_mode(s):04o}/{ls_mode_string(s)})  "
         f"Uid: ({uid:>5}/{owner:>8})   Gid: ({gid:>5}/{group:>8})\n"

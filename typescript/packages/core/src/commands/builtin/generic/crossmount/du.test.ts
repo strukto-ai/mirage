@@ -82,10 +82,10 @@ function workspace(fn: CommandFn, outer = new RAMVFS()): Workspace {
 }
 
 it.each([
-  ['du /a', '5\t/a/d\n1000\t/a/n\n1005\t/a\n'],
-  ['du -s /a', '1005\t/a\n'],
-  ['du -c -d 0 /a /b', '1005\t/a\n2\t/b\n1007\ttotal\n'],
-  ['du -a /a/n /b', '1000\t/a/n/big\n1000\t/a/n\n2\t/b/h\n2\t/b\n'],
+  ['du -b /a', '5\t/a/d\n1000\t/a/n\n1005\t/a\n'],
+  ['du -b -s /a', '1005\t/a\n'],
+  ['du -b -c -d 0 /a /b', '1005\t/a\n2\t/b\n1007\ttotal\n'],
+  ['du -b -a /a/n /b', '1000\t/a/n/big\n1000\t/a/n\n2\t/b/h\n2\t/b\n'],
 ])('lets each mount measure its own part: %s', async (line, expected) => {
   const ws = workspace(measured)
   try {
@@ -97,7 +97,7 @@ it.each([
   }
 })
 
-it.each(['du -c /a', 'du -c /a/n /b'])(
+it.each(['du -b -c /a', 'du -b -c /a/n /b'])(
   'keeps the one walk for a du without a measurement: %s',
   async (line) => {
     const ws = workspace(unmeasured)
@@ -121,7 +121,7 @@ it.each([
   for (const cmd of command({ name: 'du', vfs: 'ram', spec, fn: partlyMeasured }))
     ws.registry.mountFor('/a/x').register(cmd)
   try {
-    const result = await ws.shell('du -s /a')
+    const result = await ws.shell('du -b -s /a')
     expect(DEC.decode(result.stdout)).toBe(expected)
     expect(result.exitCode).toBe(1)
   } finally {
@@ -135,7 +135,7 @@ it.each([
 ])('measures no mount under an excluded path: %s', async (_, fn) => {
   const ws = workspace(fn)
   try {
-    const result = await ws.shell('du --exclude=n /a')
+    const result = await ws.shell('du -b --exclude=n /a')
     expect(DEC.decode(result.stdout)).toBe('5\t/a/d\n5\t/a\n')
     expect(result.exitCode).toBe(0)
   } finally {
@@ -146,7 +146,7 @@ it.each([
 it('keeps the patterns read from stdin in the one walk', async () => {
   const ws = workspace(unmeasured)
   try {
-    const rows = DEC.decode((await ws.shell("printf 'f\\n' | du -c -X - /a")).stdout)
+    const rows = DEC.decode((await ws.shell("printf 'f\\n' | du -b -c -X - /a")).stdout)
     expect(rows).not.toContain('777')
     expect(rows).toContain('0\t/a/d\n')
     expect(rows.endsWith('3\t/a\n3\ttotal\n')).toBe(true)
@@ -158,7 +158,7 @@ it('keeps the patterns read from stdin in the one walk', async () => {
 it('reads TIME_STYLE on a line across mounts', async () => {
   const ws = workspace(measured)
   try {
-    const result = await ws.shell('export TIME_STYLE=+%Y; du --time -s /a/d /b')
+    const result = await ws.shell('export TIME_STYLE=+%Y; du -b --time -s /a/d /b')
     const rows = DEC.decode(result.stdout).trimEnd().split('\n')
     expect(rows.map((row) => row.split('\t').filter((_, i) => i !== 1))).toEqual([
       ['5', '/a/d'],

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.ram.dest import touch_parent
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -22,6 +23,8 @@ async def rm_r(accessor: RAMAccessor, path_spec: PathSpec) -> None:
     store = accessor.store
     p = norm(path)
     prefix = p.rstrip("/") + "/"
+    if p in store.files or p in store.dirs:
+        touch_parent(store, p)
     for key in list(store.files):
         if key == p or key.startswith(prefix):
             del store.files[key]

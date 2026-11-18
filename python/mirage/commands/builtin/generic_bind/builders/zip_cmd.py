@@ -31,6 +31,7 @@ from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.timezone import zone_from_env
 
 
 async def zip_cmd(
@@ -53,6 +54,7 @@ async def zip_cmd(
         links=links_of(ctx),
         mounts=mount_view(ctx.vfs),
         stdin=ctx.stdin,
+        zone=zone_from_env(ctx.env),
     )
 
 

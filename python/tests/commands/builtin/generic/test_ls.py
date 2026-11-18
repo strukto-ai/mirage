@@ -1,6 +1,7 @@
 import asyncio
 import errno
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from functools import partial
 from operator import attrgetter
 
@@ -682,7 +683,7 @@ async def test_access_time_sorts_and_shows_under_u():
         ),
     )
     assert output.decode().splitlines() == [
-        "total ?",
+        "total 8",
         "-rw-r--r-- 1 1 2025-02-01 00:00 new.txt",
         "-rw-r--r-- 1 1 2025-06-01 00:00 old.txt",
     ]
@@ -1103,16 +1104,26 @@ async def test_ignored_names_and_dot_entries_are_left_out():
 
 
 @pytest.mark.asyncio
-async def test_s_leads_each_row_with_an_unknown_block_count_and_a_total():
+async def test_s_leads_each_row_with_its_blocks_and_a_total():
     tree = _listing("a", "b")
-    assert await _ls_lines(tree, {"size": True}) == "total ?\n? a\n? b\n"
+    tree["/q/a"] = replace(tree["/q/a"], size=5)
+    tree["/q/b"] = replace(tree["/q/b"], size=5000)
+    assert await _ls_lines(tree, {"size": True}) == "total 12\n4 a\n8 b\n"
     assert await _ls_lines(tree, {"size": True, "inode": True}) == (
-        "total ?\n? ? a\n? ? b\n"
+        "total 12\n? 4 a\n? 8 b\n"
+    )
+    assert await _ls_lines(tree, {"size": True, "human_readable": True}) == (
+        "total 12K\n4.0K a\n8.0K b\n"
+    )
+    assert await _ls_lines(tree, {"size": True, "block_size": "512"}) == (
+        "total 24\n 8 a\n16 b\n"
     )
     long = await _ls_lines(
         tree, {"size": True, "args_l": True, "g": True, "o": True}
     )
-    assert long.splitlines()[1].startswith("? -rw")
+    assert long.splitlines()[1].startswith("4 -rw-r--r-- 1    5 ")
+    tree["/q/b"] = replace(tree["/q/b"], size=None)
+    assert await _ls_lines(tree, {"size": True}) == "total ?\n4 a\n? b\n"
 
 
 @pytest.mark.asyncio

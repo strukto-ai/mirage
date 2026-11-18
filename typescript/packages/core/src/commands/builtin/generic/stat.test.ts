@@ -240,14 +240,23 @@ describe('stat -c directive formatting', () => {
       '20015998343868 123456789abc 6298 591751100 591751100',
     )
     expect((await defaultLines(onMount))[2]).toBe(
-      'Device: 6298,591751100\tInode: ?           Links: ?',
+      'Device: 6298,591751100\tInode: ?           Links: 1',
     )
   })
 
   it('renders "?" for unbacked and unknown directives', async () => {
-    for (const spec of ['%i', '%d', '%D', '%h', '%b', '%o', '%m', '%C', '%q']) {
+    for (const spec of ['%i', '%d', '%D', '%m', '%C', '%q']) {
       expect(await render(spec, fs())).toBe('?')
     }
+  })
+
+  it('counts links and blocks as ext4 allocates them', async () => {
+    expect(await render('%h %b %B %o', fs({ size: 6 }))).toBe('1 8 512 4096')
+    expect(await render('%h %b', fs({ size: 0 }))).toBe('1 0')
+    expect(await render('%h %b', fs({ size: 6, nlink: 3, blocks: 24 }))).toBe('3 24')
+    expect(await render('%h %b', fs({ type: FileType.SYMLINK, size: 1 }))).toBe('1 0')
+    expect(await render('%b', fs({ type: FileType.SYMLINK, size: 60 }))).toBe('8')
+    expect(await render('%s %b', fs({ size: null }))).toBe('- ?')
   })
 
   it('handles long incomplete directives in linear time', async () => {
@@ -347,8 +356,8 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
   if (result === null) throw new Error('missing result')
   expect(DEC.decode(await materialize(result[0]))).toBe(
     '  File: /data/f.txt\n' +
-      '  Size: -         \tBlocks: ?          IO Block: ?      regular file\n' +
-      'Device: ?\tInode: ?           Links: ?\n' +
+      '  Size: -         \tBlocks: ?          IO Block: 4096   regular file\n' +
+      'Device: ?\tInode: ?           Links: 1\n' +
       'Access: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)\n' +
       'Access: -\nModify: -\nChange: -\n Birth: -\n',
   )
@@ -395,5 +404,5 @@ it('names a device type in the default layout', async () => {
     fs({ type: FileType.CHAR_DEVICE, size: null, extra: { [DEVICE_NUMBERS_KEY]: [1, 3] } }),
   )
   expect(lines[1]?.endsWith('character special file')).toBe(true)
-  expect(lines[2]).toBe('Device: ?\tInode: ?           Links: ?     Device type: 1,3')
+  expect(lines[2]).toBe('Device: ?\tInode: ?           Links: 1     Device type: 1,3')
 })

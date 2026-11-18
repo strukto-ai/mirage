@@ -196,7 +196,7 @@ export class MountCore {
       mtime: when,
       atime: atime === null ? when : new Date(atime),
       ctime: when,
-      nlink: isDir(s) ? 2 : 1,
+      nlink: s.nlink ?? (isDir(s) ? 2 : 1),
       size: size ?? contentSize(s),
       mode: posixMode(s),
       uid: typeof s.uid === 'number' ? s.uid : this.uid,

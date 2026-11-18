@@ -250,15 +250,25 @@ async def test_device_directives_split_the_mount_device():
         == "20015998343868 123456789abc 6298 591751100 591751100"
     )
     assert (await _default(fs))[2] == (
-        "Device: 6298,591751100\tInode: ?           Links: ?"
+        "Device: 6298,591751100\tInode: ?           Links: 1"
     )
 
 
 @pytest.mark.asyncio
 async def test_unbacked_directives_render_question_mark():
     fs = _fs()
-    for spec in ("%i", "%d", "%D", "%h", "%b", "%o", "%m", "%C"):
+    for spec in ("%i", "%d", "%D", "%m", "%C"):
         assert await _render(spec, fs) == "?", spec
+
+
+@pytest.mark.asyncio
+async def test_links_and_blocks_follow_what_ext4_allocates():
+    assert await _render("%h %b %B %o", _fs(size=6)) == "1 8 512 4096"
+    assert await _render("%h %b", _fs(size=0)) == "1 0"
+    assert await _render("%h %b", _fs(size=6, nlink=3, blocks=24)) == "3 24"
+    assert await _render("%h %b", _link_fs("t")) == "1 0"
+    assert await _render("%b", _link_fs("t" * 60)) == "8"
+    assert await _render("%s %b", _fs(size=None)) == "- ?"
 
 
 @pytest.mark.asyncio
@@ -430,8 +440,8 @@ async def test_default_stat_layout_and_unknown_metadata():
     assert (await materialize(out)).decode() == (
         "  File: /data/f.txt\n"
         "  Size: -         \tBlocks: ?          "
-        "IO Block: ?      regular file\n"
-        "Device: ?\tInode: ?           Links: ?\n"
+        "IO Block: 4096   regular file\n"
+        "Device: ?\tInode: ?           Links: 1\n"
         "Access: (0644/-rw-r--r--)  Uid: (    0/    root)   "
         "Gid: (    0/    root)\n"
         "Access: -\nModify: -\nChange: -\n Birth: -\n"
@@ -486,5 +496,5 @@ async def test_default_layout_names_a_device_type():
     )
     assert lines[1].endswith("character special file")
     assert lines[2] == (
-        "Device: ?\tInode: ?           Links: ?     Device type: 1,3"
+        "Device: ?\tInode: ?           Links: 1     Device type: 1,3"
     )

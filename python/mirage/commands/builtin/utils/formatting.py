@@ -42,7 +42,10 @@ from mirage.utils.clock import system_now
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
     ALL_MODE_BITS,
+    BLOCK_UNIT,
+    block_count,
     content_size,
+    link_count,
     posix_mode,
     size_unknown,
 )
@@ -50,6 +53,9 @@ from mirage.utils.stat_view import (
 logger = logging.getLogger(__name__)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# The unit ``ls -s`` and its ``total`` line count in when no
+# ``--block-size`` names another, GNU's default output block size.
+LS_BLOCK = 1024
 # The fraction of a second as the stamp spells it.
 _FRACTION = re.compile(r"\d\d:\d\d:\d\d\.(\d+)")
 
@@ -81,8 +87,8 @@ class LsColumns:
         numeric (bool): ``-n``: print the owner and group as ids.
         inode (bool): ``-i``; a VFS has no inode, so the column is ``?``,
             the answer ``stat %i`` already gives.
-        blocks (bool): ``-s``; nor does it know what a file allocates, so
-            ``?`` again.
+        blocks (bool): ``-s``: the blocks each entry takes, in the
+            ``--block-size`` unit, 1K by default.
         context (bool): ``-Z``; no security context here either, so ``?``
             as GNU prints it on a filesystem without one.
         time_kind (LsTimeKind): which timestamp the time column shows.
@@ -430,16 +436,90 @@ def _ls_size_and_time(
     return size, styled_time(when_iso, columns.time_style)
 
 
-def ls_prefix(columns: LsColumns) -> str:
-    """What ``-i``, ``-s`` and ``-Z`` put in front of a short row, in that
-    order: ``?`` for each, since a VFS has no inode, allocation or
-    security context.
+def block_text(
+    blocks: int | None, block: BlockSize | None, human: bool
+) -> str:
+    """A count of 512-byte blocks as ``ls -s`` and its ``total`` line
+    print it: in 1K units unless ``--block-size`` names another, rounded
+    up, or scaled under ``-h``; ``?`` when unknown.
 
     Args:
-        columns (LsColumns): the requested columns.
+        blocks (int | None): the 512-byte blocks, None when unknown.
+        block (BlockSize | None): the ``--block-size`` scale, if any.
+        human (bool): ``-h``, when no block size overrides it.
     """
-    count = columns.inode + columns.blocks + columns.context
-    return f"{UNKNOWN_STAT_FIELD} " * count
+    if blocks is None:
+        return UNKNOWN_STAT_FIELD
+    n = blocks * BLOCK_UNIT
+    if block is None and not human:
+        return str(-(-n // LS_BLOCK))
+    return scaled_size(n, block, human)
+
+
+def ls_total(stats: list[FileStat], columns: LsColumns, human: bool) -> str:
+    """The ``total`` line over a listed directory's rows: the blocks they
+    take, a row whose stat failed counting none; ``?`` when a row's
+    blocks are unknown.
+
+    Args:
+        stats (list[FileStat]): the rows listed.
+        columns (LsColumns): the ``--block-size`` scale.
+        human (bool): ``-h``.
+    """
+    counts = [
+        block_count(s) for s in stats if not s.extra.get(STAT_FAILED_KEY)
+    ]
+    blocks = (
+        None if None in counts else sum(n for n in counts if n is not None)
+    )
+    return f"total {block_text(blocks, columns.block_size, human)}"
+
+
+def _block_cells(
+    stats: list[FileStat], columns: LsColumns, human: bool
+) -> list[str]:
+    """The ``-s`` column of each row, right-aligned to the widest, ``?``
+    for a row whose stat failed.
+
+    Args:
+        stats (list[FileStat]): the rows.
+        columns (LsColumns): the ``--block-size`` scale.
+        human (bool): ``-h``.
+    """
+    cells = [
+        UNKNOWN_STAT_FIELD
+        if s.extra.get(STAT_FAILED_KEY)
+        else block_text(block_count(s), columns.block_size, human)
+        for s in stats
+    ]
+    width = max((len(cell) for cell in cells), default=1)
+    return [cell.rjust(width) for cell in cells]
+
+
+def ls_prefixes(
+    stats: list[FileStat], columns: LsColumns, human: bool, context: bool
+) -> list[str]:
+    """What ``-i``, ``-s`` and (on a short row) ``-Z`` put in front of
+    each row, in that order: ``?`` for the inode and the security
+    context, which a VFS has none of, and the blocks the row takes.
+
+    Args:
+        stats (list[FileStat]): the rows.
+        columns (LsColumns): the requested columns.
+        human (bool): ``-h``, which scales the blocks.
+        context (bool): whether ``-Z`` leads the row, as on a short one.
+    """
+    blocks = (
+        _block_cells(stats, columns, human)
+        if columns.blocks
+        else [""] * len(stats)
+    )
+    inode = f"{UNKNOWN_STAT_FIELD} " if columns.inode else ""
+    tail = f"{UNKNOWN_STAT_FIELD} " if context and columns.context else ""
+    return [
+        inode + (f"{cell} " if columns.blocks else "") + tail
+        for cell in blocks
+    ]
 
 
 def format_ls_long(
@@ -458,9 +538,10 @@ def format_ls_long(
     ``-n``); the group likewise, each padded to its column's widest
     cell. ``-g`` and ``-o``
     drop a column, ``--author`` adds the owner again after the group,
-    ``-i`` leads with the inode column, ``-s`` with the
-    block column after it, and ``-Z`` puts the context column before the
-    size, each ``?``, as a filesystem with none of them prints it. A row
+    ``-i`` leads with the inode column and ``-Z`` puts the context column
+    before the size, each ``?``, as a filesystem with none of them prints
+    it; ``-s`` leads with the blocks each row takes, after the inode. The
+    link and block columns are right-aligned to their widest cell. A row
     whose stat failed prints the type letter the listing gave, then ``?``
     for every stat field, the time right-aligned in its column.
 
@@ -500,6 +581,14 @@ def format_ls_long(
     ]
     owner_width = max((len(text) for text, _ in owners), default=1)
     group_width = max((len(text) for text, _ in groups), default=1)
+    links = [
+        UNKNOWN_STAT_FIELD
+        if s.extra.get(STAT_FAILED_KEY)
+        else str(link_count(s))
+        for s in stats
+    ]
+    links_width = max((len(text) for text in links), default=1)
+    leads = ls_prefixes(stats, columns, human, context=False)
     out: list[str] = []
     for i, (s, (raw_size, when)) in enumerate(zip(stats, cells)):
         failed = bool(s.extra.get(STAT_FAILED_KEY))
@@ -507,9 +596,10 @@ def format_ls_long(
             type_char = (
                 "d" if s.type == FileType.DIRECTORY else UNKNOWN_STAT_FIELD
             )
-            fields = [type_char + UNKNOWN_STAT_FIELD * 9, UNKNOWN_STAT_FIELD]
+            fields = [type_char + UNKNOWN_STAT_FIELD * 9]
         else:
-            fields = [ls_mode_string(s), "1"]
+            fields = [ls_mode_string(s)]
+        fields.append(links[i].rjust(links_width))
         if columns.owner:
             fields.append(_pad_id(owners[i], owner_width))
         if columns.group:
@@ -521,8 +611,7 @@ def format_ls_long(
         fields.append(raw_size.rjust(width))
         fields.append(when.rjust(time_width) if failed else when)
         fields.append(names[i] if names is not None else ls_name(s))
-        lead = f"{UNKNOWN_STAT_FIELD} " * (columns.inode + columns.blocks)
-        out.append(lead + " ".join(fields))
+        out.append(leads[i] + " ".join(fields))
     return out
 
 
@@ -612,9 +701,9 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     the allocated 1K blocks, then fixes every column's width (inode 9,
     blocks 6, links 3, owner and group 8 left-aligned, size 8) instead
     of fitting them to the listing, so a consumer can count fields.
-    The inode and block columns carry ``?``, the answer ``stat %i``
-    and ``%b`` already give: a VFS has no inode and no block
-    allocation, and a number invented for either would read as a fact.
+    The inode column carries ``?``, the answer ``stat %i`` already
+    gives: a VFS has no inode, and a number invented for one would read
+    as a fact. The blocks are ``%k``'s, the links ``%n``'s.
     The remaining columns are the ``ls -l`` ones, from the same
     helpers, so the two listings cannot disagree about a row; only the
     name is spelled differently, escaped (``escape_find_name``) so the
@@ -628,8 +717,9 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     size, when = _ls_size_and_time(s, False, find_rule=True)
     who = owner_label(s.uid, identity)
     grp = group_label(s.gid, identity)
+    blocks = block_text(block_count(s), None, False)
     return (
-        f"{UNKNOWN_STAT_FIELD:>9} {UNKNOWN_STAT_FIELD:>6} "
-        f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {when} "
-        f"{_find_ls_name(s)}"
+        f"{UNKNOWN_STAT_FIELD:>9} {blocks:>6} "
+        f"{ls_mode_string(s)} {link_count(s):>3} {who:<8} {grp:<8} "
+        f"{size:>8} {when} {_find_ls_name(s)}"
     )

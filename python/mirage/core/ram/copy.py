@@ -19,6 +19,7 @@ from mirage.core.ram.dest import (
     check_dest_parents,
     check_write_target,
     lookup_error,
+    touch_parent,
 )
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -65,7 +66,11 @@ async def copy(
         await target.write(data, dst_spec)
         return
     check_write_target(store, dst_spec, d)
+    made = d not in store.files
     with store.lock:
         check_capacity(store, dst_spec, d, len(data))
         store.files[d] = data
-    store.modified[d] = now_iso()
+    now = now_iso()
+    store.modified[d] = now
+    if made:
+        touch_parent(store, d, now)

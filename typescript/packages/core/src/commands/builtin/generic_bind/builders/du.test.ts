@@ -67,7 +67,8 @@ const OPS: Table = {
 
 const ACCESSOR = {} as Accessor
 
-// Run du on `table`, mounted at `/`, its links `links`.
+// Run du on `table`, mounted at `/`, its links `links`; in bytes (-b), the
+// sizes the tables hold, unless the flags say otherwise.
 async function du(
   table: Table,
   paths: PathSpec[],
@@ -95,9 +96,9 @@ async function du(
   return setMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(ACCESSOR, paths, [], {
       stdin: null,
-      flags: {},
       cwd: PathSpec.fromStrPath('/'),
       ...ctx,
+      flags: { bytes: true, ...ctx.flags },
       vfs,
     }),
   )
@@ -430,7 +431,7 @@ it('du -x counts a file listed past the mounts below', async () => {
   })
   try {
     const out = await ws.shell('du -x -a /ram/d')
-    expect(DEC.decode(out.stdout)).toBe('2\t/ram/d/z\n2\t/ram/d\n')
+    expect(DEC.decode(out.stdout)).toBe('4\t/ram/d/z\n8\t/ram/d\n')
   } finally {
     await ws.close()
   }

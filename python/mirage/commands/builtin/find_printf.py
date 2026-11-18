@@ -27,7 +27,7 @@ from mirage.rs.stream import OpenStream, open_stream, stream_output_chunks
 from mirage.shell.bytes import byte_view
 from mirage.types import FileStat, JsonValue, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.stat_view import content_size
+from mirage.utils.stat_view import block_count, content_size, link_count
 
 
 def compile_printf(parts: tuple[PrintfPart, ...]) -> OpenStream:
@@ -61,6 +61,8 @@ def _facts(
         "path": byte_view(row),
         "base": byte_view(search.raw_path or search.virtual),
         "size": content_size(st) if st is not None else 0,
+        "links": link_count(st) if st is not None else 0,
+        "blocks": (block_count(st) if st is not None else None) or 0,
         "kind": kind,
         "target": ("N" if target is None else printf_kind(target))
         if kind == "l"

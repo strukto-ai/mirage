@@ -296,7 +296,7 @@
       "command": "ls -iZ /data/lsf/a.txt; ls -s /data/lsf/a.txt; ls -si /data/lsf/a.txt; ls -sZ /data/lsf/a.txt; ls -s /data/lsf/dir1; ls -go -s --time-style=long-iso /data/lsf/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "? ? /data/lsf/a.txt\n? /data/lsf/a.txt\n? ? /data/lsf/a.txt\n? ? /data/lsf/a.txt\ntotal ?\n? k\n? -rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
+        "stdout": "? ? /data/lsf/a.txt\n4 /data/lsf/a.txt\n? 4 /data/lsf/a.txt\n4 ? /data/lsf/a.txt\ntotal 4\n4 k\n4 -rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
         "stderr": ""
       },
       "flags": [

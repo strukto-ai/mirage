@@ -21,7 +21,9 @@ class HistoryAccessor(Accessor):
 
     Args:
         observer (Observer): The workspace's hidden recorder.
+        made (str): when the view was made, its time before any command.
     """
 
-    def __init__(self, observer: Observer) -> None:
+    def __init__(self, observer: Observer, made: str) -> None:
         self.observer = observer
+        self.made = made

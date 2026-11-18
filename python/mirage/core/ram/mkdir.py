@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.dest import check_dest_parents, check_mkdir_target
+from mirage.core.ram.dest import (
+    check_dest_parents,
+    check_mkdir_target,
+    touch_parent,
+)
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
@@ -32,10 +36,14 @@ async def mkdir(
         now = now_iso()
         for part in parts:
             current += "/" + part
-            store.dirs.add(current)
+            if current not in store.dirs:
+                store.dirs.add(current)
+                touch_parent(store, current, now)
             if current not in store.modified:
                 store.modified[current] = now
         return
     check_dest_parents(store, path_spec, p)
+    now = now_iso()
     store.dirs.add(p)
-    store.modified[p] = now_iso()
+    store.modified[p] = now
+    touch_parent(store, p, now)

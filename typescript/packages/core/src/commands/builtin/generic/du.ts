@@ -38,6 +38,7 @@ import { UTC_ZONE } from '../../../utils/timezone.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { shellQuote, shellQuoteAlways } from '../../../utils/quote.ts'
+import { DIR_SIZE } from '../../../utils/stat_view.ts'
 import { usageHint } from '../../spec/usage.ts'
 import { listedNames } from '../utils/files0.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -70,8 +71,13 @@ export interface DuFlags {
   a: boolean
   /** -h, human-readable sizes. */
   h: boolean
-  /** Explicit unit, or null for bytes/-h. */
+  /** The unit, 1024-byte blocks unless another was typed; null under a last -h. */
   blockSize: BlockSize | null
+  /**
+   * --apparent-size or -b: a file counts its bytes and a directory nothing,
+   * where otherwise each counts the blocks it holds.
+   */
+  apparent?: boolean
   /** -c, append a grand total. */
   c: boolean
   /** -S/--separate-dirs, directories exclude subdirectory sizes. */
@@ -287,6 +293,7 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
     a: fl.asBool('all'),
     h: fl.asBool('human_readable'),
     blockSize: blockSizeOf(values.block_size),
+    apparent: values.apparent === true,
     c: fl.asBool('total'),
     S: fl.asBool('separate_dirs'),
     maxDepth: depth,
@@ -590,6 +597,28 @@ export function separateTotal(entries: [string, number][], root: string): number
  * The operand's own line is not included; the caller renders it with the
  * operand as typed.
  */
+/**
+ * Every directory strictly under the operand that `rollup` gives a row: each
+ * one above a leaf and each one a walk met, with the directories above it,
+ * the namespace's own included. Mirrors Python's folders_under.
+ */
+export function foldersUnder(
+  entries: readonly [string, number][],
+  root: string,
+  dirs: readonly string[],
+): Set<string> {
+  const rootKey = norm(root)
+  const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const found = new Set<string>()
+  for (let node of [...entries.map(([leaf]) => parentOf(norm(leaf))), ...dirs.map(norm)]) {
+    while (node !== rootKey && node.startsWith(prefix)) {
+      found.add(node)
+      node = parentOf(node)
+    }
+  }
+  return found
+}
+
 export function rollup(
   entries: [string, number][],
   root: string,
@@ -597,13 +626,16 @@ export function rollup(
   // them: the directories a walk met (an empty one, or one it could not
   // open) and the roots of descendant mounts, which still get GNU's `0` row.
   // `inodes`: each directory counts itself too, and under -S itself alone of
-  // the directories in it; the leaves come in as one each.
+  // the directories in it; the leaves come in as one each. `usage`: the bytes
+  // a directory holds of its own, which it counts as it counts itself under
+  // --inodes.
   ctx: {
     all: boolean
     maxDepth: number | null
     dirs?: readonly string[]
     separateDirs?: boolean
     inodes?: boolean
+    usage?: number
   },
 ): [string, number][] {
   const rootKey = norm(root)
@@ -640,17 +672,19 @@ export function rollup(
       node = parentOf(node)
     }
   }
-  if (ctx.inodes === true) {
+  const usage = ctx.usage ?? 0
+  if (ctx.inodes === true || usage > 0) {
     // Deepest first, so each directory's count of the directories in its
     // tree is complete before it is added to its parent's.
-    const own = new Map<string, number>([...sizes.keys()].map((node) => [node, 1]))
+    const weight = ctx.inodes === true ? 1 : usage
+    const own = new Map<string, number>([...sizes.keys()].map((node) => [node, weight]))
     const deepest = [...sizes.keys()].sort(
       (x, y) => (y.match(/\//g) ?? []).length - (x.match(/\//g) ?? []).length,
     )
     for (const node of deepest) {
       const parent = parentOf(node)
       const above = own.get(parent)
-      if (!separateDirs && above !== undefined) own.set(parent, above + (own.get(node) ?? 1))
+      if (!separateDirs && above !== undefined) own.set(parent, above + (own.get(node) ?? weight))
     }
     for (const [node, count] of own) sizes.set(node, (sizes.get(node) ?? 0) + count)
   }
@@ -727,12 +761,17 @@ async function duOne(
   const roots = mounts?.descendants(path.virtual) ?? []
   const timed = times !== undefined && flags.time != null
   const inodes = flags.inodes === true
+  const under = rootKey.replace(/\/$/, '') + '/'
+  // A directory holds one block of its own, which it counts beside what is in
+  // it; an apparent size counts it as nothing.
+  const usage = flags.apparent === true || inodes ? 0 : DIR_SIZE
 
-  if (flags.s && !flags.S && !inodes && roots.length === 0 && !pathsScoped([path])) {
+  if (flags.s && !flags.S && !inodes && usage === 0 && roots.length === 0 && !pathsScoped([path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
-    // entries walk below instead.
+    // entries walk below instead. A count of blocks takes the walk too,
+    // which names the folders whose blocks it adds.
     const total = await computeSize(path)
     const newest = timed ? newestUnder(times(), path.virtual).get(rootKey) : undefined
     return [row(total, flags, label, newest), total, null, newest]
@@ -743,7 +782,6 @@ async function duOne(
   const stamped: ReadonlyMap<string, string> = timed ? times() : new Map()
   const stamps = timed ? newestUnder(stamped, path.virtual) : new Map<string, Newest>()
   const newest = stamps.get(rootKey)
-  const under = rootKey.replace(/\/$/, '') + '/'
   const timeOfPath = (virtual: string): { modified?: string } => {
     const at = stamped.get(virtual)
     return at === undefined ? {} : { modified: at }
@@ -781,6 +819,9 @@ async function duOne(
     total = entries.reduce((acc, [, size]) => acc + size, 0)
   }
   const dirs = met.map((r) => r.path.virtual)
+  const folders = foldersUnder(entries, path.virtual, dirs)
+  const isDir = walked || folders.size > 0 || entries.some(([leaf]) => norm(leaf) !== rootKey)
+  total += usage * (folders.size + (isDir ? 1 : 0))
   const records: PathRecord[] = [ownRecord, ...kept, ...met]
   if (inodes) total = inodeCount(entries, path.virtual, dirs)
   // A file operand walks to itself. GNU prints it once, with or without -a,
@@ -794,7 +835,9 @@ async function duOne(
   // -S changes what the operand's own row counts, not what the operand
   // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
   // `du -bSc dir` prints `3 dir` then `6 total`).
-  const own = flags.S ? separateTotal(counts, path.virtual) + (inodes ? 1 : 0) : total
+  const own = flags.S
+    ? separateTotal(counts, path.virtual) + (inodes ? 1 : 0) + (isDir ? usage : 0)
+    : total
   if (flags.s) {
     return [row(own, flags, label, newest), total, records, newest]
   }
@@ -805,6 +848,7 @@ async function duOne(
     dirs,
     separateDirs: flags.S,
     inodes,
+    usage,
   })
   const shown = respellRaw(
     rows.map(([p]) => p),
@@ -937,9 +981,11 @@ function unreadOperand(raw: string, detail: string): string {
  * Run one whole `du` invocation over flags already read (`readFlags`), to
  * rendered bytes.
  *
- * --apparent-size preserves the existing apparent-byte measurement; only
- * explicit unit options change its scale. -l counts a file once per hard
- * link to it, and no backend here has hard links, so it changes nothing.
+ * A file counts the blocks it holds, as `stat %b` reports them (the backend's
+ * own count, else whole 4 KiB blocks, none for a link short enough to live in
+ * its inode), and a directory one block of its own; --apparent-size and -b
+ * count a file's bytes and a directory as nothing. -l counts a file once per
+ * hard link to it, and no backend here has hard links, so it changes nothing.
  *
  * Every caller needs the same steps in the same order: split the operands
  * into readable and unreadable, then render. Keeping them here means a backend
@@ -948,10 +994,7 @@ function unreadOperand(raw: string, detail: string): string {
  * -X match.
  *
  * The walks meet links as entries of their own; under -L they follow them
- * instead, which the operand's own was already, at dispatch. Deliberate
- * divergence: a link counts as its target string's length, the size `ls -l`
- * prints, where GNU counts the disk blocks it holds (0 for a target short
- * enough to live in the inode); mirage counts bytes throughout.
+ * instead, which the operand's own was already, at dispatch.
  */
 export async function duGeneric(
   flags: DuFlags,

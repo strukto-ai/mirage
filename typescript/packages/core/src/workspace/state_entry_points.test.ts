@@ -1564,7 +1564,7 @@ describe('command permissions end to end', () => {
     await ws.shell('rm /a/alias && rmdir /a/out /a/other')
     // A move into the directory holding the mount takes nothing of it.
     expect(await line(ws, 'echo m > /t/m && mv /t/m /a/b')).toEqual([0, '', ''])
-    expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n', ''])
+    expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '4\t/a/b/f\n4\t/a/b/m\n12\t/a/b\n', ''])
     // Nor does one naming the directory by an attached -t, one whose -S suffix
     // holds a t, or one reaching it through a link.
     await ws.shell('echo x > /t/n && echo x > /t/s && echo x > /t/l')
@@ -2212,9 +2212,10 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(findErr).toBe("find: '/data/t/sealed': Permission denied\npolicy denied: sealed\n")
     const [duCode, duOut, duErr] = await line(ws, 'du -a /data/t')
     expect(duCode).toBe(1)
-    expect(duOut).toContain('2\t/data/t/locked/y\n')
-    // GNU still prints the row of a directory it may not open, at 0.
-    expect(duOut).toContain('0\t/data/t/sealed\n')
+    expect(duOut).toContain('4\t/data/t/locked/y\n')
+    // GNU still prints the row of a directory it may not open, at the block
+    // it holds of its own.
+    expect(duOut).toContain('4\t/data/t/sealed\n')
     expect(duOut).not.toContain('/data/t/sealed/')
     expect(duErr).toBe(
       "du: cannot read directory '/data/t/sealed': Permission denied\npolicy denied: sealed\n",

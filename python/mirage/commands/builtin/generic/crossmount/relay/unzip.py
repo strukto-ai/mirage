@@ -30,6 +30,7 @@ async def run_unzip(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     cwd: str,
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Run an unzip whose archive and -d destination span mounts.
 
@@ -45,11 +46,13 @@ async def run_unzip(
         dispatch (DispatchFn): Workspace operation dispatcher.
         cwd (str): The session's working directory, which a name unzip
             tries beside its archive (``a.zip`` for ``a``) resolves against.
+        env (dict[str, str] | None): The session's environment, whose
+            ``TZ`` a DOS time is read in.
     """
     return await unzip_generic(
         flat_scopes(scopes),
         list(text_args),
-        Context(flags=flag_kwargs, cwd=PathSpec.from_str_path(cwd)),
+        Context(flags=flag_kwargs, cwd=PathSpec.from_str_path(cwd), env=env),
         transfer_primitives(dispatch)["read_stream"],
         dispatch,
     )

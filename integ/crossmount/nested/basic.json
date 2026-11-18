@@ -53,6 +53,20 @@
       }
     },
     {
+      "id": "nest_a_mount_point_is_a_folder_of_its_parent",
+      "seq": 950004,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "stat -c '%h %n' /data /data/inner /ghost /ghost/deep; find /data -maxdepth 0 -printf '%n\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 /data\n2 /data/inner\n3 /ghost\n2 /ghost/deep\n3\n",
+        "stderr": ""
+      },
+      "note": "A mount point is a folder of the directory it sits in, as on Linux, so it adds one to that directory's link count whether the store above holds it or the namespace does."
+    },
+    {
       "id": "nest_find_descends_child_mount",
       "seq": 950005,
       "targets": [

@@ -24,6 +24,7 @@ import { rename as sqlRename } from '../../core/sql/rename.ts'
 import { rmR as sqlRmR } from '../../core/sql/rm.ts'
 import { rmdir as sqlRmdir } from '../../core/sql/rmdir.ts'
 import { filesContaining as sqlFilesContaining } from '../../core/sql/search.ts'
+import { setAttrs as sqlSetAttrs } from '../../core/sql/set_attrs.ts'
 import { restore, snapshot, type SqlSnapshot } from '../../core/sql/snapshot.ts'
 import { stat as sqlStat } from '../../core/sql/stat.ts'
 import { readStream as sqlStream } from '../../core/sql/stream.ts'
@@ -37,6 +38,7 @@ import {
   VFSName,
   type CapacityResult,
   type FileStat,
+  type SetAttrFields,
 } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { BaseVFS } from '../base.ts'
@@ -243,6 +245,13 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
       if (!noCreate || (await this.exists(path))) held.growTo(length)
       await sqlTruncate(this.accessor, path, length, noCreate)
     })
+  }
+
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    return sqlSetAttrs(this.accessor, path, fields)
   }
 
   /** The database's quota when capped, counted afresh so a writer in

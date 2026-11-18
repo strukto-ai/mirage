@@ -16,8 +16,21 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { lookupError } from './dest.ts'
-import type { RAMStore } from '../../vfs/ram/store.ts'
+import { RAMDirs, type RAMStore } from '../../vfs/ram/store.ts'
+
+/** How many folders sit directly in the folder at key `p`. Mirrors
+ * Python's `subdir_count`. */
+export function subdirCount(store: RAMStore, p: string): number {
+  if (store.dirs instanceof RAMDirs) return store.dirs.subdirs.get(p) ?? 0
+  const prefix = `${rstripSlash(p)}/`
+  let count = 0
+  for (const key of store.dirs) {
+    if (key.startsWith(prefix) && key !== p && !key.slice(prefix.length).includes('/')) count++
+  }
+  return count
+}
 
 /**
  * What `stat` answers for the normalized key `p`, null when nothing is there.
@@ -28,12 +41,13 @@ export function keyStat(store: RAMStore, p: string): FileStat | null {
   if (store.dirs.has(p)) {
     return new FileStat({
       name: gnuBasename(p),
-      modified: store.modified.get(p) ?? null,
+      modified: store.modified.get(p) ?? store.made,
       type: FileType.DIRECTORY,
       mode: attrs.mode ?? null,
       uid: attrs.uid ?? null,
       gid: attrs.gid ?? null,
       atime: attrs.atime ?? null,
+      nlink: 2 + subdirCount(store, p),
     })
   }
   const data = store.files.get(p)
@@ -48,6 +62,7 @@ export function keyStat(store: RAMStore, p: string): FileStat | null {
     uid: attrs.uid ?? null,
     gid: attrs.gid ?? null,
     atime: attrs.atime ?? null,
+    nlink: 1,
   })
 }
 

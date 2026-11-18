@@ -3,6 +3,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import timezone, tzinfo
 
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
@@ -30,6 +31,7 @@ from mirage.types import (
     ReadStreamFn,
     StatFn,
 )
+from mirage.utils.dates import local_seconds
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView
 
@@ -115,6 +117,7 @@ async def zip_generic(
     links: LinkView | None = None,
     mounts: MountView | None = None,
     stdin: ByteSource | None = None,
+    zone: tzinfo = timezone.utc,
 ) -> tuple[ByteSource | None, IOResult]:
     """Walk the operands and hand what they hold to mirage-rs's zip,
     which names each member, refuses a name two paths share, deflates
@@ -138,6 +141,8 @@ async def zip_generic(
         mounts (MountView | None): where the mount boundaries are.
         stdin (ByteSource | None): standard input, which -@ names files on
             and -c and -z read comments from.
+        zone (tzinfo): the session's zone, the local time a member's DOS
+            stamp records and a file ``-u`` weighs is read in.
     """
     if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
@@ -209,15 +214,20 @@ async def zip_generic(
             # Info-ZIP never stores the archive it is writing.
             if read is not None and read.virtual == archive.virtual:
                 continue
+            mtime, mode = (
+                (link_time(links, entry.name_path), None)
+                if entry.kind == "link"
+                else await recorded_stamp(stat, read or entry.stamped)
+            )
             item: dict[str, JsonValue] = {
                 "spelled": byte_view(
                     respell_one(entry.name_path, base, spelling)
                 ),
                 "kind": entry.kind,
                 "target": byte_view(entry.target),
-                "mtime": link_time(links, entry.name_path)
-                if entry.kind == "link"
-                else (await recorded_stamp(stat, read))[0],
+                "mtime": None if mtime is None else local_seconds(mtime, zone),
+                "utc": mtime,
+                "mode": mode,
                 "source": byte_view(entry.name_path),
             }
             if read is not None:
@@ -254,7 +264,7 @@ async def zip_generic(
         "stdin_lines": [byte_view(line) for line in stdin_lines],
     }
     host = StreamHost(
-        reads, stream, None, dispatch, cwd, dash=False, links=links
+        reads, stream, None, dispatch, cwd, dash=False, links=links, zone=zone
     )
     io = IOResult()
     return hosted_stream("zip", config, host, io), io

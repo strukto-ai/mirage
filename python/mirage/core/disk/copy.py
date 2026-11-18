@@ -35,7 +35,6 @@ async def copy(
     try:
         try:
             await asyncio.to_thread(shutil.copyfile, s, d)
-            await asyncio.to_thread(shutil.copystat, s, d)
         except OSError as exc:
             # copyfile reports ENOENT and EACCES for either operand, so the
             # operand to blame is only knowable after the failure: probe whether

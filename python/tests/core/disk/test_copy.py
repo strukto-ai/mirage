@@ -39,6 +39,28 @@ async def test_copy_duplicates_a_file(accessor):
 
 
 @pytest.mark.asyncio
+async def test_copy_leaves_the_mode_and_times_to_the_copy(accessor):
+    src = accessor.root / "src"
+    os.chmod(src, 0o750)
+    os.utime(src, (1_000_000_000, 1_000_000_000))
+    held = accessor.root / "held"
+    held.write_text("old")
+    os.chmod(held, 0o600)
+    for name in ("held", "new"):
+        await copy(
+            accessor,
+            PathSpec.from_str_path("/src"),
+            PathSpec.from_str_path(f"/{name}"),
+        )
+    mask = os.umask(0)
+    os.umask(mask)
+    assert held.stat().st_mode & 0o7777 == 0o600
+    assert (accessor.root / "new").stat().st_mode & 0o7777 == 0o666 & ~mask
+    assert (accessor.root / "new").stat().st_mtime != 1_000_000_000
+    assert held.read_text() == "X"
+
+
+@pytest.mark.asyncio
 async def test_copy_does_not_create_the_destination_parent(accessor):
     with pytest.raises(FileNotFoundError):
         await copy(

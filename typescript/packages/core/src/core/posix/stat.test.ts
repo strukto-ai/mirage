@@ -20,20 +20,22 @@ const ENC = new TextEncoder()
 describe('treeCommand', () => {
   it('quotes the scope and the format', () => {
     expect(treeCommand('data/a b')).toBe(
-      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
+      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'",
     )
   })
 
   it('bounds the depth', () => {
     expect(treeCommand('/tmp', 1)).toBe(
-      "env LC_ALL=C find -L '/tmp' -maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
+      "env LC_ALL=C find -L '/tmp' -maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'",
     )
   })
 })
 
 describe('parseTree', () => {
   it('reads each record', () => {
-    const out = ENC.encode('d 755 4096 1700000000.5 1700000001.0 0 0 \0f 644 3 1 2 1000 50 x y\0')
+    const out = ENC.encode(
+      'd 755 4096 1700000000.5 1700000001.0 0 0 2 8 \0f 644 3 1 2 1000 50 1 8 x y\0',
+    )
     expect(parseTree(out)).toEqual([
       {
         kind: 'd',
@@ -45,6 +47,8 @@ describe('parseTree', () => {
         atimeMs: 1700000001000,
         uid: 0,
         gid: 0,
+        nlink: 2,
+        blocks: 8,
         rel: '',
       },
       {
@@ -57,6 +61,8 @@ describe('parseTree', () => {
         atimeMs: 2000,
         uid: 1000,
         gid: 50,
+        nlink: 1,
+        blocks: 8,
         rel: 'x y',
       },
     ])
@@ -69,20 +75,20 @@ describe('parseTree', () => {
     ['1.', 1000],
     ['-1.5000000000', -1500],
   ])('keeps %s to the millisecond', (stamp, want) => {
-    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} 0 0 x\0`))
+    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} 0 0 1 0 x\0`))
     expect(rows?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
   })
 
   // The whole seconds stay those SFTP reports, never rounded across a second
   // as the milliseconds are.
   it("keeps SFTP's whole seconds", () => {
-    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 0 0 x\0'))
+    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 0 0 1 0 x\0'))
     expect(rows?.map((r) => [r.mtime, r.mtimeMs])).toEqual([[1700000000, 1700000001000]])
   })
 
   it('refuses a cut record', () => {
-    expect(parseTree(ENC.encode('f 644 3 1 2 0 0 x'))).toBeNull()
-    expect(parseTree(ENC.encode('f 64z 3 1 2 0 0 x\0'))).toBeNull()
-    expect(parseTree(ENC.encode('f 644 3 1 2 root root x\0'))).toBeNull()
+    expect(parseTree(ENC.encode('f 644 3 1 2 0 0 1 0 x'))).toBeNull()
+    expect(parseTree(ENC.encode('f 64z 3 1 2 0 0 1 0 x\0'))).toBeNull()
+    expect(parseTree(ENC.encode('f 644 3 1 2 root root 1 0 x\0'))).toBeNull()
   })
 })

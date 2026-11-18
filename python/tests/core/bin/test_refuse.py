@@ -24,7 +24,9 @@ from mirage.types import PathSpec
 
 @pytest.mark.asyncio
 async def test_refuse_answers_every_write_as_a_read_only_file_system():
-    accessor = BinAccessor(lambda: ["ls"], lambda n: None)
+    accessor = BinAccessor(
+        lambda: ["ls"], lambda n: None, "2026-11-18T10:00:00Z"
+    )
     path = PathSpec(
         virtual="/usr/bin/ls", directory="/usr/bin", vfs_path="/ls"
     )

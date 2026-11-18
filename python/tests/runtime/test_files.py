@@ -409,6 +409,7 @@ def test_stat_projects_one_struct_for_every_surface():
         is_dir=False,
         mode=(FILE_MODE & ~0o7777) | 0o700,
         mtime_ns=st.mtime_ns,
+        blocks=8,
     )
     assert st.mtime_ns > 0
 
@@ -435,7 +436,7 @@ def test_stat_projects_character_type_bits_and_logical_device_numbers():
         },
     )
     assert vfs.stat("/dev/zero") == VFSStat(
-        size=0, is_dir=False, mode=CHAR_MODE, rdev=0x105
+        size=0, is_dir=False, mode=CHAR_MODE, rdev=0x105, blocks=0
     )
 
 

@@ -14,7 +14,7 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { lookupError } from './dest.ts'
+import { lookupError, touchParent } from './dest.ts'
 import { eisdir, fsError } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
 
@@ -33,5 +33,6 @@ export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<voi
   accessor.store.files.delete(p)
   accessor.store.modified.delete(p)
   accessor.store.attrs.delete(p)
+  touchParent(accessor.store, p)
   return Promise.resolve()
 }

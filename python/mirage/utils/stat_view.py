@@ -71,6 +71,11 @@ DIR_SIZE = 4096
 BLKSIZE = 4096
 BLOCK_UNIT = 512
 
+# The longest target ext4 keeps inside a symlink's inode, which takes no
+# block of its own (a "fast" symlink); a longer one takes blocks as a
+# file of that size does.
+FAST_LINK_MAX = 59
+
 # The bits chmod sets: permissions plus setuid, setgid and sticky,
 # everything but the file type.
 ALL_MODE_BITS = 0o7777
@@ -223,6 +228,40 @@ def content_size(st: FileStat) -> int:
     if is_dir(st):
         return DIR_SIZE
     return st.size or 0
+
+
+def link_count(st: FileStat) -> int:
+    """The link count a stat consumer should report: the backend's, else
+    1, what a file system that counts no links (btrfs for a directory)
+    reports.
+
+    Args:
+        st (FileStat): the stat to inspect.
+    """
+    return 1 if st.nlink is None else st.nlink
+
+
+def block_count(st: FileStat) -> int | None:
+    """The 512-byte blocks a stat consumer should report: the backend's,
+    else what ext4 allocates for the entry, whole ``BLKSIZE`` blocks for
+    its bytes, none for an empty file, a FIFO, a device or a symlink
+    short enough to sit in its inode; None for a file whose size is
+    unknown, whose blocks are unknown with it.
+
+    Args:
+        st (FileStat): the stat to inspect.
+    """
+    if st.blocks is not None:
+        return st.blocks
+    if st.type == FileType.FILE and st.size is None:
+        return None
+    if st.type in (FileType.FILE, FileType.DIRECTORY):
+        size = content_size(st)
+    elif is_link(st) and (st.size or 0) > FAST_LINK_MAX:
+        size = st.size or 0
+    else:
+        return 0
+    return -(-size // BLKSIZE) * (BLKSIZE // BLOCK_UNIT)
 
 
 def size_unknown(st: FileStat) -> bool:

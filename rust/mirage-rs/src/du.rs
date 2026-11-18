@@ -26,6 +26,9 @@ const INODE_UNITS: &str =
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let (mut summarize, mut all) = (false, false);
     let (mut inodes, mut apparent) = (false, false);
+    // `-h` typed after every other unit; with no unit typed the default
+    // is GNU's 1024-byte block.
+    let mut human = false;
     let mut block = Json::Null;
     let mut max_depth = None;
     let mut limit = Json::Null;
@@ -47,8 +50,14 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             },
             "summarize" => summarize = true,
             "all" => all = true,
-            "human_readable" => block = Json::Null,
-            "si" => block = crate::block_size::scale(1000, "", Some(1000)),
+            "human_readable" => {
+                block = Json::Null;
+                human = true;
+            }
+            "si" => {
+                block = crate::block_size::scale(1000, "", Some(1000));
+                human = false;
+            }
             "inodes" => inodes = true,
             "apparent_size" => apparent = true,
             "t" | "threshold" => {
@@ -65,12 +74,20 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             "bytes" => {
                 apparent = true;
                 block = crate::block_size::scale(1, "", None);
+                human = false;
             }
-            "k" => block = crate::block_size::scale(1024, "", None),
-            "m" => block = crate::block_size::scale(1048576, "", None),
+            "k" => {
+                block = crate::block_size::scale(1024, "", None);
+                human = false;
+            }
+            "m" => {
+                block = crate::block_size::scale(1048576, "", None);
+                human = false;
+            }
             "block_size" => {
                 block = crate::block_size::parse(raw, "du", "-B", 1, true)
                     .map_err(|error| fatal(&diagnostics, error))?;
+                human = false;
             }
             _ => return Err(unknown("du", name)),
         }
@@ -103,7 +120,11 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             Json::from(warnings.join("\n"))
         },
     );
+    if block.is_null() && !human {
+        block = crate::block_size::scale(1024, "", None);
+    }
     values.insert("block_size".to_owned(), block);
+    values.insert("apparent".to_owned(), Json::from(apparent));
     values.insert("threshold".to_owned(), limit);
     values.insert("time".to_owned(), time);
     values.insert("time_style".to_owned(), style);
@@ -259,7 +280,7 @@ mod tests {
         let typed: &[(&str, &[u8])] = &[("max_depth", b"-0"), ("summarize", b"")];
         assert_eq!(
             scan("du", typed).expect("read"),
-            json!({"block_size": null, "max_depth": 0, "threshold": null, "time": null, "time_style": null, "warning": "du: warning: summarizing is the same as using --max-depth=0"})
+            json!({"apparent": false, "block_size": {"divisor": "1024", "suffix": "", "human_base": null}, "max_depth": 0, "threshold": null, "time": null, "time_style": null, "warning": "du: warning: summarizing is the same as using --max-depth=0"})
         );
         let typed: &[(&str, &[u8])] = &[("max_depth", b"abc"), ("max_depth", b"1")];
         assert_eq!(
@@ -289,6 +310,24 @@ mod tests {
         }
         let typed: &[(&str, &[u8])] = &[("k", b""), ("human_readable", b"")];
         assert_eq!(scan("du", typed).expect("human")["block_size"], json!(null));
+        let typed: &[(&str, &[u8])] = &[("human_readable", b""), ("k", b"")];
+        assert_eq!(
+            scan("du", typed).expect("k")["block_size"]["divisor"],
+            json!("1024")
+        );
+    }
+
+    #[test]
+    fn no_unit_counts_kilobyte_blocks_and_bytes_count_apparent_sizes() {
+        let values = scan("du", &[]).expect("default");
+        assert_eq!(values["block_size"]["divisor"], json!("1024"));
+        assert_eq!(values["apparent"], json!(false));
+        let typed: &[(&str, &[u8])] = &[("apparent_size", b"")];
+        let values = scan("du", typed).expect("apparent");
+        assert_eq!(values["block_size"]["divisor"], json!("1024"));
+        assert_eq!(values["apparent"], json!(true));
+        let typed: &[(&str, &[u8])] = &[("bytes", b"")];
+        assert_eq!(scan("du", typed).expect("bytes")["apparent"], json!(true));
     }
 
     #[test]

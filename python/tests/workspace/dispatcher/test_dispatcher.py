@@ -3042,7 +3042,11 @@ async def test_a_search_past_the_walk_limit_stops_there(cls):
             "/ram/d\n|-- a0.txt\n`-- a1.txt\n\n1 directory, 2 files\n",
             2,
         ),
-        ("du -a /ram/d", "2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n", 1),
+        (
+            "du -a /ram/d",
+            "4\t/ram/d/a0.txt\n4\t/ram/d/a1.txt\n12\t/ram/d\n",
+            1,
+        ),
     ],
 )
 async def test_a_listing_past_the_walk_limit_stops_there(cls, line, out, code):
@@ -4311,5 +4315,30 @@ async def test_a_write_through_a_link_is_waited_out_where_it_lands():
         await ws.vfs.write("/alias", b"x")
         await ws.registry.changes.wait_out({"/data": 0.0}, "box")
         assert clock.monotonic() == 2.0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_point_is_one_folder_of_the_directory_it_sits_in():
+    outer = RAMVFS()
+    outer.load_state({"files": {}, "dirs": ["/", "/held", "/s"]})
+    ws = Workspace(
+        {
+            "/d": outer,
+            "/d/m": RAMVFS(),
+            "/d/held": RAMVFS(),
+            "/d/x/y": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    )
+    try:
+        result = await ws.shell(
+            "stat -c '%h %n' /d /d/x /d/m;"
+            " find /d -maxdepth 1 -type d -printf '%n %p\\n'"
+        )
+        assert await result.stdout_str() == (
+            "6 /d\n3 /d/x\n2 /d/m\n6 /d\n2 /d/held\n2 /d/m\n2 /d/s\n3 /d/x\n"
+        )
     finally:
         await ws.close()

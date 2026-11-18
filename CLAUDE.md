@@ -192,11 +192,11 @@ own, and `ctx.vfs` itself hands out neither table. A `filetype` registration
 on a mount is the only renderer extension point.
 
 Pinned behavior: `find -size` rounds up and the start row is the generic's;
-`du` derives directory rows, sorts siblings, counts bytes and exits 1 on a
-usage error; `tar` and `zip` plan on one traversal (`scan_operand`) and never
-cross a descendant mount; `MountRootPolicy` answers EBUSY for a mount root
-under `rm`/`mv`/`mkdir`/... and refuses it as a source of `tar -c`, `zip`,
-`cp`.
+`du` derives directory rows, sorts siblings, counts disk blocks (bytes
+under `--apparent-size`) and exits 1 on a usage error; `tar` and `zip` plan
+on one traversal (`scan_operand`) and never cross a descendant mount;
+`MountRootPolicy` answers EBUSY for a mount root under `rm`/`mv`/`mkdir`/...
+and refuses it as a source of `tar -c`, `zip`, `cp`.
 
 ### Shell
 

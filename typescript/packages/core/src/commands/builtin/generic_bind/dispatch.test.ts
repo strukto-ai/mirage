@@ -109,7 +109,7 @@ it('charges each mount its own limit in a du walk', async () => {
   }))
     ws.registry.mountFor('/a/b/x').register(cmd)
   try {
-    const result = await ws.shell('du -a /a')
+    const result = await ws.shell('du -a -b /a')
     const rows = new TextDecoder().decode(result.stdout).split('\n')
     expect(rows.filter((r) => r.includes('/a/f'))).toEqual(
       [0, 1, 2, 3].map((i) => `1\t/a/f${String(i)}`),
@@ -138,7 +138,7 @@ it('du -x never lists a mount below the operand', async () => {
   try {
     await ws.shell('echo aa > /a/f; echo d > /c/h')
     const result = await ws.shell('du -x /a /c')
-    expect(new TextDecoder().decode(result.stdout)).toBe('3\t/a\n2\t/c\n')
+    expect(new TextDecoder().decode(result.stdout)).toBe('8\t/a\n8\t/c\n')
     expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
   } finally {
@@ -312,7 +312,7 @@ it.each([
   ['find /repo', '/repo\n/repo/dev\n/repo/dev/x.txt\n/repo/main\n/repo/main/x.txt\n'],
   [
     'du -a /repo',
-    '4\t/repo/dev/x.txt\n4\t/repo/dev\n4\t/repo/main/x.txt\n4\t/repo/main\n8\t/repo\n',
+    '4\t/repo/dev/x.txt\n8\t/repo/dev\n4\t/repo/main/x.txt\n8\t/repo/main\n20\t/repo\n',
   ],
 ])('%s walks mounts without readTree under a synthetic directory', async (line, stdout) => {
   const enc = new TextEncoder()
@@ -348,7 +348,7 @@ it('a walk following a link onto a mount without readTree walks it', async () =>
     const r = await ws.shell('du -aL /repo')
     const dec = new TextDecoder()
     expect([dec.decode(r.stdout), dec.decode(r.stderr), r.exitCode]).toEqual([
-      '0\t/repo/a/sub\n0\t/repo/a\n4\t/repo/main/x.txt\n4\t/repo/main\n4\t/repo\n',
+      '4\t/repo/a/sub\n8\t/repo/a\n4\t/repo/main/x.txt\n8\t/repo/main\n20\t/repo\n',
       '',
       0,
     ])
@@ -361,18 +361,18 @@ it('a walk following a link onto a mount without readTree walks it', async () =>
 // is bound (another task's: there is no task isolation), so its walk descends.
 it('walks across mounts as a run across them, even inside a mount scope', async () => {
   const ws = new Workspace({ '/a': new RAMVFS(), '/a/b': new RAMVFS() }, { mode: MountMode.WRITE })
-  const run = (name: string): Promise<string> =>
+  const run = (name: string, flags: Record<string, boolean> = {}): Promise<string> =>
     setMountGate('/a/', MountMode.WRITE, async () => {
       const builder = BUILDERS.find((b) => b.name === name)
       if (builder === undefined) throw new Error(`missing builder ${name}`)
       const at = [PathSpec.fromStrPath('/a')]
-      const [out] = await runDispatch(builder, at, [], {}, ws.vfs.dispatch, '/', ws.vfs)
+      const [out] = await runDispatch(builder, at, [], flags, ws.vfs.dispatch, '/', ws.vfs)
       return new TextDecoder().decode(await materialize(out))
     })
   try {
     await ws.shell('echo aa > /a/f; echo bbbb > /a/b/g')
     expect(await run('find')).toBe('/a\n/a/b\n/a/b/g\n/a/f\n')
-    expect(await run('du')).toBe('5\t/a/b\n8\t/a\n')
+    expect(await run('du', { bytes: true })).toBe('5\t/a/b\n8\t/a\n')
   } finally {
     await ws.close()
   }

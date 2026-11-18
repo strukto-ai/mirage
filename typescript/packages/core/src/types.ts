@@ -817,6 +817,8 @@ export class FileStat {
   readonly ctime: string | null
   readonly birthtime: string | null
   readonly dev: number | null
+  readonly nlink: number | null
+  readonly blocks: number | null
   readonly extra: Record<string, unknown>
 
   constructor(
@@ -836,6 +838,8 @@ export class FileStat {
           | 'ctime'
           | 'birthtime'
           | 'dev'
+          | 'nlink'
+          | 'blocks'
           | 'extra'
         >
       >,
@@ -860,6 +864,8 @@ export class FileStat {
     this.ctime = init.ctime ?? null
     this.birthtime = init.birthtime ?? null
     this.dev = init.dev ?? null
+    this.nlink = init.nlink ?? null
+    this.blocks = init.blocks ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }
@@ -887,6 +893,8 @@ export class FileStat {
       ctime: this.ctime,
       birthtime: this.birthtime,
       dev: this.dev,
+      nlink: this.nlink,
+      blocks: this.blocks,
       extra: this.extra,
       ...update,
     })

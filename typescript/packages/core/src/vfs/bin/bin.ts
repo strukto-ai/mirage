@@ -19,6 +19,7 @@ import { refuse } from '../../core/bin/refuse.ts'
 import { stat as binStat } from '../../core/bin/stat.ts'
 import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
 import { VFSName } from '../../types.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { BaseVFS } from '../base.ts'
 import { type VFSStateBase } from '../types.ts'
 
@@ -36,7 +37,7 @@ export class BinViewVFS extends BaseVFS {
 
   constructor(programs: () => string[], note: (name: string) => string | null) {
     super()
-    this.accessor = new BinAccessor(programs, note)
+    this.accessor = new BinAccessor(programs, note, nowIso())
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

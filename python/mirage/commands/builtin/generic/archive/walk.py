@@ -147,6 +147,7 @@ async def _subtree(
                 kind=kind,
                 target=target,
                 read=_child_spec(virtual, root) if kind == "file" else None,
+                stamped=_child_spec(virtual, root) if kind == "dir" else None,
             )
         )
     entries.sort(key=lambda entry: entry.name_path)
@@ -230,13 +231,13 @@ async def _follow(
             [],
         )
     if not recurse:
-        return [Entry(name_path=virtual, kind="dir")], [], "", []
+        return [Entry(name_path=virtual, kind="dir", stamped=spec)], [], "", []
     entries, crossings, unreadable = await _subtree(
         root, target, virtual, walk, links, mounts
     )
     reasons = [OTHER_FILESYSTEM] * len(crossings)
     return (
-        [Entry(name_path=virtual, kind="dir"), *entries],
+        [Entry(name_path=virtual, kind="dir", stamped=spec), *entries],
         reasons,
         "",
         unreadable,
@@ -335,7 +336,7 @@ async def scan_operand(
                 )
             )
         else:
-            entries.append(Entry(name_path=base, kind="dir"))
+            entries.append(Entry(name_path=base, kind="dir", stamped=path))
             if recurse:
                 below, crossings, closed = await _subtree(
                     path, base, base, walk, links, mounts
@@ -385,12 +386,13 @@ def link_time(links: LinkView | None, name: str) -> int | None:
 async def recorded_stamp(
     stat: StatFn, path: PathSpec | None
 ) -> tuple[int | None, int | None]:
-    """What an archive records of a file from its stat: its modification
-    time and permission bits, none where the backend keeps neither.
+    """What an archive records of a file or a directory from its stat:
+    its modification time and permission bits, none where the backend
+    keeps neither.
 
     Args:
         stat (StatFn): backend stat.
-        path (PathSpec | None): the file; None for a directory or a link.
+        path (PathSpec | None): the file or directory; None for a link.
     """
     if path is None:
         return None, None

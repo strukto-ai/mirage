@@ -47,7 +47,8 @@ describe('system_time', () => {
     // ls shows the time, not the year, of a file stamped before now.
     clock.advance(60)
     expect(await out(ws, 'ls -l /data')).toContain(' Mar  2 09:00 a\n')
-    expect(await out(ws, 'find /data -mtime -1')).toBe('/data/a\n')
+    // Making a moves its folder's time too, as on a disk.
+    expect(await out(ws, 'find /data -mtime -1')).toBe('/data\n/data/a\n')
     expect(await out(ws, "echo '{}' | jq -r 'now|todate'")).toBe('2026-03-02T09:01:00Z\n')
   })
 

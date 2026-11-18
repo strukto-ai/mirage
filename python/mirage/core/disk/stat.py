@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import os
+import sys
 from pathlib import Path
 from stat import S_ISDIR
 
@@ -25,9 +27,39 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.filetype import content_type_for_path
 
+logger = logging.getLogger(__name__)
+
+# Linux counts a folder's links as itself, its "." and each subfolder's
+# "..", and its blocks as ext4 allocates them. Other hosts count
+# otherwise (APFS counts every entry and gives a folder no blocks), so
+# there the folder's links are counted as Linux would and its blocks
+# left to the ext4 default.
+LINUX = sys.platform.startswith("linux")
+
+
+def _folder_links(path: str) -> int | None:
+    """A folder's link count as Linux has it: 2, and 1 per subfolder;
+    None for one that went before it was counted.
+
+    Args:
+        path (str): the folder on the host.
+    """
+    try:
+        with os.scandir(path) as entries:
+            return 2 + sum(
+                entry.is_dir(follow_symlinks=False) for entry in entries
+            )
+    except OSError as exc:
+        logger.debug("%s: links not counted: %s", path, exc)
+        return None
+
 
 def stat_of(
-    name: str, st: os.stat_result, now_ns: int, versioned: bool
+    name: str,
+    st: os.stat_result,
+    now_ns: int,
+    versioned: bool,
+    path: str,
 ) -> FileStat:
     """What ``stat`` answers for a host entry, from its host stat.
 
@@ -36,6 +68,8 @@ def stat_of(
         st (os.stat_result): its host stat.
         now_ns (int): the wall clock, read before the stat.
         versioned (bool): whether the mount stores folder versions.
+        path (str): where the entry is on the host, whose subfolders
+            give a folder its link count off Linux.
     """
     modified = ns_to_iso(st.st_mtime_ns)
     # Only BSD and macOS report a birth time, and only as float seconds.
@@ -61,6 +95,8 @@ def stat_of(
             atime=ns_to_iso(st.st_atime_ns),
             ctime=ns_to_iso(st.st_ctime_ns),
             birthtime=birthtime,
+            nlink=st.st_nlink if LINUX else _folder_links(path),
+            blocks=st.st_blocks if LINUX else None,
         )
     return FileStat(
         name=name,
@@ -73,6 +109,8 @@ def stat_of(
         atime=ns_to_iso(st.st_atime_ns),
         ctime=ns_to_iso(st.st_ctime_ns),
         birthtime=birthtime,
+        nlink=st.st_nlink,
+        blocks=st.st_blocks,
     )
 
 
@@ -85,5 +123,8 @@ async def stat(accessor: DiskAccessor, path_spec: PathSpec) -> FileStat:
         with disk_errors(path_spec.virtual):
             return p, os.stat(p), now_ns
 
-    p, st, now_ns = await asyncio.to_thread(host)
-    return stat_of(p.name, st, now_ns, accessor.folder_versions)
+    def row() -> FileStat:
+        p, st, now_ns = host()
+        return stat_of(p.name, st, now_ns, accessor.folder_versions, str(p))
+
+    return await asyncio.to_thread(row)

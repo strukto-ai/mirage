@@ -19,6 +19,7 @@ import type { DevicePipe } from '../../core/dev/pipe.ts'
 import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
@@ -267,11 +268,12 @@ export class DevStore {
     readonly files = new DevFiles(),
     readonly modified = new Map<string, string>(),
     readonly attrs = new Map<string, RAMAttrs>(),
+    readonly made = nowIso(),
   ) {
     this.dirs = new DevDirs(files)
   }
 
   forSession(owner: string): DevStore {
-    return new DevStore(this.files.forSession(owner), this.modified, this.attrs)
+    return new DevStore(this.files.forSession(owner), this.modified, this.attrs, this.made)
   }
 }

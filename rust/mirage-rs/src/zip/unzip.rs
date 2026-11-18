@@ -39,6 +39,9 @@ const SKIPPED_EXIT: i32 = 81;
 const CREATE_EXIT: i32 = 50;
 /// A directory of a member's chain that could not be made.
 const CHECKDIR_EXIT: i32 = 2;
+/// The made-by host Info-ZIP records for a Unix system, whose entries carry
+/// permission bits in the external attributes' high half.
+const UNIX_HOST: u8 = 3;
 /// Where an answer to the replace prompt is read from.
 const STDIN: u32 = 1;
 
@@ -480,6 +483,46 @@ fn dos_epoch(date: u16, time: u16) -> i128 {
         + i128::from((time & 31) * 2)
 }
 
+/// The permission bits an entry made on a Unix system records, setuid,
+/// setgid and sticky dropped, as Info-ZIP's unzip drops them without -K.
+fn unix_mode(entry: &Entry) -> Option<u32> {
+    let mode = entry.external >> 16;
+    (entry.host() == UNIX_HOST && mode & 0o170000 != 0).then_some(mode & 0o777)
+}
+
+/// Give an extracted path the mode and time its entry records: the
+/// extended timestamp when there is one, else the DOS time, which is the
+/// local time it was stored in. One the host refuses leaves the path as it
+/// landed, as Info-ZIP's unzip does.
+async fn restamp(host: &Host, path: &[u8], entry: &Entry) {
+    if let Some(mode) = unix_mode(entry) {
+        let path = path.to_vec();
+        host.ask(Request::Chmod { path, mode }).await;
+    }
+    let (mtime, local) = match entry.utc {
+        Some(utc) => (utc, false),
+        None => (dos_epoch(entry.date, entry.time) as i64, true),
+    };
+    let path = path.to_vec();
+    host.ask(Request::Utime { path, mtime, local }).await;
+}
+
+/// Each entry's extended timestamp on the session's wall clock, which
+/// Info-ZIP's listings show in place of the DOS stamp; none for an entry
+/// without one, or when `shown` says no time is listed.
+async fn walls_of(host: &Host, entries: &[&Entry], shown: bool) -> Vec<Option<i64>> {
+    let times: Vec<i64> = entries.iter().filter_map(|entry| entry.utc).collect();
+    if !shown || times.is_empty() {
+        return vec![None; entries.len()];
+    }
+    let (reply, _) = host.ask(Request::Walls { times }).await;
+    let mut walls = reply.walls.into_iter();
+    entries
+        .iter()
+        .map(|entry| entry.utc.and_then(|_| walls.next()))
+        .collect()
+}
+
 /// Say `text` on stdout or stderr.
 fn tell(host: &Host, stdout: bool, text: &[u8]) {
     if stdout {
@@ -734,11 +777,17 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
             run.host.print(&out);
             return WARN_EXIT;
         }
-        for entry in &selected {
+        let walls = walls_of(
+            run.host,
+            &selected,
+            rows != Rows::None && rows != Rows::Names,
+        )
+        .await;
+        for (entry, wall) in selected.iter().zip(walls) {
             match rows {
                 Rows::None => {}
                 Rows::Names => out.extend(say("{}\n", &[&entry.name])),
-                rows => listing::row(entry, rows, &mut out),
+                rows => listing::row(entry, wall, rows, &mut out),
             }
         }
         if totals {
@@ -752,7 +801,8 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     // widens it into the verbose table; neither prints a caution.
     if (config.l || config.v) && !(config.t || config.p) {
         out.extend(opening(config, &directory.comment));
-        listing::list(&selected, config.q, config.v, &mut out);
+        let walls = walls_of(run.host, &selected, true).await;
+        listing::list(&selected, &walls, config.q, config.v, &mut out);
         run.host.print(&out);
         return nothing;
     }
@@ -1089,6 +1139,7 @@ async fn extract(
         }
     }
     host.warn(cautions);
+    let mut dirs: Vec<(Vec<u8>, &Entry)> = Vec::new();
     for entry in selected {
         if let Some(text) = run.misplaced(entry).await {
             host.warn(&text);
@@ -1147,12 +1198,23 @@ async fn extract(
             continue;
         }
         if !is_dir && (update || freshen) {
+            // A DOS time is the wall clock it was stored at, so it is
+            // weighed against the file's wall clock, a UTC one against UTC.
             let stored = entry
                 .utc
                 .map_or_else(|| dos_epoch(entry.date, entry.time), i128::from);
             match host.stat_time(&out_path).await {
                 None if freshen => continue,
-                Some((_, Some(held))) if stored <= i128::from(held) => continue,
+                Some((_, stamp)) => {
+                    let held = if entry.utc.is_some() {
+                        stamp.utc
+                    } else {
+                        stamp.wall.or(stamp.utc)
+                    };
+                    if held.is_some_and(|held| stored <= i128::from(held)) {
+                        continue;
+                    }
+                }
                 _ => {}
             }
         }
@@ -1168,6 +1230,7 @@ async fn extract(
             if !quiet && !existed {
                 host.print(&say("   creating: {}/\n", &[&state.shown(&out_path)]));
             }
+            dirs.push((out_path, entry));
             continue;
         }
         if let Some(text) = run.skips(entry, quiet) {
@@ -1223,6 +1286,7 @@ async fn extract(
             ));
             continue;
         }
+        restamp(host, &target, entry).await;
         state.written.insert(target);
         if !quiet {
             let verb: &[u8] = match entry.method {
@@ -1246,6 +1310,10 @@ async fn extract(
             };
             host.warn(&damage(&shown, entry.crc, &verdict, voice));
         }
+    }
+    dirs.sort_by_key(|(path, _)| std::cmp::Reverse(path.iter().filter(|&&b| b == b'/').count()));
+    for (path, entry) in dirs {
+        restamp(host, &path, entry).await;
     }
     if state.create_failed {
         CREATE_EXIT

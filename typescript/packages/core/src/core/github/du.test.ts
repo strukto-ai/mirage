@@ -101,5 +101,5 @@ it.each([
     defaultBranch: 'main',
     tree: TREE,
   })
-  expect(await runDu(accessor, operand, flags)).toEqual([expected, 0, ''])
+  expect(await runDu(accessor, operand, { bytes: true, ...flags })).toEqual([expected, 0, ''])
 })

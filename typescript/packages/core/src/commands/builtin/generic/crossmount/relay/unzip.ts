@@ -26,7 +26,8 @@ import type { FlagValue } from '../../../../spec/types.ts'
  * Pure wiring: the archive is read from its mount and every extracted path
  * lands on whichever mount owns it. `cwd` is the session's working
  * directory, which a name unzip tries beside its archive (`a.zip` for `a`)
- * resolves against.
+ * resolves against; `env` the session's environment, whose TZ a DOS time is
+ * read in.
  */
 export function runUnzip(
   scopes: PathSpec[],
@@ -34,12 +35,18 @@ export function runUnzip(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   cwd: string,
+  env?: Record<string, string>,
 ): CrossResult {
   const vfs = new Files(dispatch, null, null, { ledger: false }).servedBy(null)
   const result = unzipGeneric(
     flatScopes(scopes),
     textArgs,
-    { ...crossOpts(flagKwargs), cwd: PathSpec.fromStrPath(cwd), vfs },
+    {
+      ...crossOpts(flagKwargs),
+      cwd: PathSpec.fromStrPath(cwd),
+      vfs,
+      ...(env !== undefined ? { env } : {}),
+    },
     fileStreamOp(dispatch),
   )
   return result ?? [null, new IOResult()]

@@ -396,6 +396,23 @@ fn at(spelled: &str, mtime: i64) -> Json {
 const YEAR_2001: i64 = 1_000_000_000;
 
 #[test]
+fn a_member_keeps_its_utc_time_for_a_listing_or_an_unzip_in_another_zone() {
+    let mut host = Host::with(&[("a.txt", "one\n")], "");
+    let mut found = at("a.txt", YEAR_2001 + 9 * 3600);
+    found["utc"] = json!(YEAR_2001);
+    assert_eq!(zip(&mut host, "z.zip", json!([found])).0, 0);
+    let listed = unzip(&mut host, "z.zip", json!({"l": true})).1;
+    assert!(listed.contains("2001-09-09 01:46"), "{listed}");
+    host.offset = 9 * 3600;
+    let listed = unzip(&mut host, "z.zip", json!({"l": true})).1;
+    assert!(listed.contains("2001-09-09 10:46"), "{listed}");
+    let info = unzip(&mut host, "z.zip", json!({"Z": true, "s": true})).1;
+    assert!(info.contains(" tx stor 01-Sep-09 10:46 a.txt"), "{info}");
+    assert_eq!(unzip(&mut host, "z.zip", json!({"base": "/out"})).0, 0);
+    assert_eq!(host.mtimes["/out/a.txt"], YEAR_2001);
+}
+
+#[test]
 fn a_delete_drops_the_members_its_patterns_match() {
     let mut host = sample();
     let config =
@@ -644,4 +661,24 @@ fn a_refresh_under_y_weighs_what_stands_at_the_name() {
     assert_eq!(run(&mut host, "zip", refresh).0, 0);
     let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
     assert_eq!(piped.1, "real\n");
+}
+
+#[test]
+fn an_extraction_takes_each_entrys_mode_and_time() {
+    let mut host = Host::with(&[("a.txt", "a\n"), ("d/b.txt", "b\n")], "");
+    let mut setuid = at("a.txt", YEAR_2001);
+    setuid["mode"] = json!(0o4640);
+    let found = json!([
+        setuid,
+        {"spelled": "d", "kind": "dir", "mtime": YEAR_2001 + 4, "mode": 0o700},
+        at("d/b.txt", YEAR_2001 + 2),
+    ]);
+    assert_eq!(zip(&mut host, "z.zip", found).0, 0);
+    assert_eq!(unzip(&mut host, "z.zip", json!({"base": "/out"})).0, 0);
+    assert_eq!(host.modes["/out/a.txt"], 0o640);
+    assert_eq!(host.modes["/out/d"], 0o700);
+    assert_eq!(host.modes["/out/d/b.txt"], 0o644);
+    assert_eq!(host.mtimes["/out/a.txt"], YEAR_2001);
+    assert_eq!(host.mtimes["/out/d"], YEAR_2001 + 4);
+    assert_eq!(host.mtimes["/out/d/b.txt"], YEAR_2001 + 2);
 }

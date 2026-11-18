@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.core.history.read import read
+from mirage.core.history.read import view_events
+from mirage.core.history.render import render_bash_history
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.filetype import content_type_for_path
 
 
@@ -29,13 +31,16 @@ async def stat(
         path (PathSpec): Virtual path; only the view file resolves.
 
     Returns:
-        FileStat: File entry sized to the current rendering.
+        FileStat: File entry sized to the current rendering, dated by
+        its last command.
     """
-    data = await read(accessor, path)
+    events = await view_events(accessor, path)
+    stamps = [e["timestamp"] for e in events if "timestamp" in e]
     return FileStat(
         name=".bash_history",
-        size=len(data),
-        modified=None,
+        size=len(render_bash_history(events).encode()),
+        modified=ms_to_rfc3339(max(stamps)) if stamps else accessor.made,
         type=FileType.FILE,
         content=content_type_for_path(".bash_history"),
+        nlink=1,
     )

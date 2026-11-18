@@ -31,7 +31,7 @@
       "command": "du /data/a.txt /data/b.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n6\t/data/b.txt\n",
+        "stdout": "4\t/data/a.txt\n4\t/data/b.txt\n",
         "stderr": ""
       }
     },
@@ -66,7 +66,7 @@
       "command": "du /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n",
+        "stdout": "4\t/data/a.txt\n",
         "stderr": ""
       }
     },
@@ -101,7 +101,7 @@
       "command": "du /data",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/disptree/d\n20\t/data/disptree\n6\t/data/dr/x/sub\n17\t/data/dr/x\n6\t/data/dr/y/sub\n17\t/data/dr/y\n34\t/data/dr\n8\t/data/fs/sub\n13\t/data/fs\n6\t/data/guard/sub\n12\t/data/guard\n5\t/data/sub/deep\n20\t/data/sub\n894\t/data\n",
+        "stdout": "8\t/data/disptree/d\n16\t/data/disptree\n8\t/data/dr/x/sub\n24\t/data/dr/x\n8\t/data/dr/y/sub\n24\t/data/dr/y\n52\t/data/dr\n8\t/data/fs/sub\n20\t/data/fs\n8\t/data/guard/sub\n16\t/data/guard\n8\t/data/sub/deep\n16\t/data/sub\n248\t/data\n",
         "stderr": ""
       }
     }

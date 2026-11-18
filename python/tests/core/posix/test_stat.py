@@ -21,20 +21,21 @@ from mirage.core.posix.types import TreeRow
 def test_tree_command_quotes_the_scope_and_the_format():
     assert tree_command("data/a b") == (
         "env LC_ALL=C find -L 'data/a b' "
-        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
+        "-printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'"
     )
 
 
 def test_tree_command_bounds_the_depth():
     assert tree_command("/tmp", 1) == (
         "env LC_ALL=C find -L '/tmp' -maxdepth 1 "
-        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
+        "-printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'"
     )
 
 
 def test_parse_tree_reads_each_record():
     out = (
-        b"d 755 4096 1700000000.5 1700000001.0 0 0 \0f 644 3 1 2 1000 50 x y\0"
+        b"d 755 4096 1700000000.5 1700000001.0 0 0 2 8 \0"
+        b"f 644 3 1 2 1000 50 1 8 x y\0"
     )
     assert parse_tree(out) == [
         TreeRow(
@@ -47,9 +48,11 @@ def test_parse_tree_reads_each_record():
             1700000001000,
             0,
             0,
+            2,
+            8,
             "",
         ),
-        TreeRow("f", 0o644, 3, 1, 2, 1000, 2000, 1000, 50, "x y"),
+        TreeRow("f", 0o644, 3, 1, 2, 1000, 2000, 1000, 50, 1, 8, "x y"),
     ]
 
 
@@ -64,7 +67,7 @@ def test_parse_tree_reads_each_record():
     ],
 )
 def test_parse_tree_keeps_the_time_to_the_millisecond(stamp, want):
-    rows = parse_tree(f"f 644 0 {stamp} {stamp} 0 0 x\0".encode())
+    rows = parse_tree(f"f 644 0 {stamp} {stamp} 0 0 1 0 x\0".encode())
     assert rows is not None
     assert (rows[0].mtime_ms, rows[0].atime_ms) == (want, want)
 
@@ -72,12 +75,12 @@ def test_parse_tree_keeps_the_time_to_the_millisecond(stamp, want):
 # The whole seconds stay those SFTP reports, never rounded across a second
 # as the milliseconds are.
 def test_parse_tree_keeps_sftp_s_whole_seconds():
-    rows = parse_tree(b"f 644 0 1700000000.9996 1700000000.9996 0 0 x\0")
+    rows = parse_tree(b"f 644 0 1700000000.9996 1700000000.9996 0 0 1 0 x\0")
     assert rows is not None
     assert (rows[0].mtime, rows[0].mtime_ms) == (1700000000, 1700000001000)
 
 
 def test_parse_tree_refuses_a_cut_record():
-    assert parse_tree(b"f 644 3 1 2 0 0 x") is None
-    assert parse_tree(b"f 64z 3 1 2 0 0 x\0") is None
-    assert parse_tree(b"f 644 3 1 2 root root x\0") is None
+    assert parse_tree(b"f 644 3 1 2 0 0 1 0 x") is None
+    assert parse_tree(b"f 64z 3 1 2 0 0 1 0 x\0") is None
+    assert parse_tree(b"f 644 3 1 2 root root 1 0 x\0") is None

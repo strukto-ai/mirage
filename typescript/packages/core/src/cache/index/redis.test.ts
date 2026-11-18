@@ -1262,7 +1262,7 @@ ${script}`,
     )
     const c = await redis()
     expect(await c.get(`${prefix}mirage:idx:entry:/a.txt`)).toBe(
-      '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"/a.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{}}',
+      '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"/a.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"nlink":null,"blocks":null,"extra":{}}',
     )
   })
 
@@ -1270,7 +1270,7 @@ ${script}`,
     const c = await redis()
     await c.set(
       `${prefix}mirage:idx:entry:/b.txt`,
-      '{"name":"b.txt","size":null,"modified":null,"fingerprint":"/b.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{"size_bytes":9}}',
+      '{"name":"b.txt","size":null,"modified":null,"fingerprint":"/b.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"nlink":null,"blocks":null,"extra":{"size_bytes":9}}',
     )
     const r = await store.get('/b.txt')
     expect(r.entry?.type).toBe(FileType.FILE)

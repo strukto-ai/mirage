@@ -183,7 +183,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     this.commands.push(line)
     if (line.startsWith(`${FIND} `))
       return Promise.resolve({
-        stdout: ENC.encode('d 1777 4096 0 0 0 0 \0'),
+        stdout: ENC.encode('d 1777 4096 0 0 0 0 2 8 \0'),
         stderr: new Uint8Array(),
         exitCode: 0,
       })

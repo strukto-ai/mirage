@@ -19,6 +19,7 @@ import { stat as historyStat } from '../../core/history/stat.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { VFSName } from '../../types.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { BaseVFS } from '../base.ts'
 import { type VFSStateBase } from '../types.ts'
 
@@ -37,14 +38,14 @@ export class HistoryViewVFS extends BaseVFS {
   override readonly sizesAlwaysKnown = true
   override readonly accessor: HistoryAccessor
 
-  constructor(observer: Observer, session: string | null = null) {
+  constructor(observer: Observer, session: string | null = null, made: string = nowIso()) {
     super()
-    this.accessor = new HistoryAccessor(observer, session)
+    this.accessor = new HistoryAccessor(observer, made, session)
   }
 
   /** The view one session reads: its own commands, whatever else is bound. */
   forSession(session: string): HistoryViewVFS {
-    return new HistoryViewVFS(this.accessor.observer, session)
+    return new HistoryViewVFS(this.accessor.observer, session, this.accessor.made)
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "id": "tar_x_gives_each_member_its_time_unless_m",
+      "seq": 110000203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/tartime/p && printf x > /data/tartime/p/a && chmod 640 /data/tartime/p/a && touch -d '2025-08-13 10:00:00' /data/tartime/p/a /data/tartime/p && tar -cf /data/tartime.tar -C /data/tartime p && mkdir /data/tartime/x && tar -xf /data/tartime.tar -C /data/tartime/x && stat -c '%a %y %n' /data/tartime/x/p /data/tartime/x/p/a; mkdir /data/tartime/m && tar -xmf /data/tartime.tar -C /data/tartime/m && find /data/tartime/m -newermt 2025-08-14 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "755 2025-08-13 10:00:00.000000000 +0000 /data/tartime/x/p\n640 2025-08-13 10:00:00.000000000 +0000 /data/tartime/x/p/a\n/data/tartime/m\n/data/tartime/m/p\n/data/tartime/m/p/a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "x",
+        "f",
+        "m",
+        "C"
+      ],
+      "note": "tar -x restores each member's mtime, a directory's included, and -m leaves the extraction time."
+    }
+  ]
+}

@@ -81,8 +81,8 @@ it.each(['find /base', 'du /base', 'ls -R /base'])(
 
 it.each([
   ['find /base -type f', '/base/inner/g\n/base/top\n'],
-  ['du -s /base', '5\t/base\n'],
-  ['du -s /base/inner /other', '3\t/base/inner\n1\t/other\n'],
+  ['du -s /base', '16\t/base\n'],
+  ['du -s /base/inner /other', '8\t/base/inner\n8\t/other\n'],
 ])('walks a nested mount through the ops: %s', async (line, expected) => {
   const ws = new Workspace(
     { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },

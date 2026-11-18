@@ -50,7 +50,7 @@ import { concat } from '../../utils/bytes.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { quoteArg, shellQuoteAlways } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { contentSize } from '../../utils/stat_view.ts'
+import { blockCount, contentSize, linkCount } from '../../utils/stat_view.ts'
 import type { StatPath } from '../../view/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Files } from '../files.ts'
@@ -307,6 +307,8 @@ async function printfRow(
       ? null
       : {
           size: contentSize(st),
+          links: linkCount(st),
+          blocks: blockCount(st) ?? 0,
           kind: link ? 'l' : printfKind(st),
           mtimeEpoch: modifiedTs(st.modified) ?? 0,
           mode: st.mode,

@@ -909,7 +909,10 @@ async def _tested_ws() -> Workspace:
         ("ln -s a.txt d/l; find d -lname 'A*'", ""),
         ("ln -s a.txt d/l; find d -ilname 'A*'", "d/l\n"),
         ("ln -s gone d/l; find d -xtype l; find -L d -xtype l", "d/l\nd/l\n"),
-        ("find d -links 1 -name a.txt; find d -links +1", "d/a.txt\n"),
+        (
+            "find d -links 1 -name a.txt; find d -links +1",
+            "d/a.txt\nd\nd/sub\n",
+        ),
         ("find d -name a.txt -readable -writable ! -executable", "d/a.txt\n"),
         ("find d -true -name a.txt; find d -false", "d/a.txt\n"),
         (
@@ -960,7 +963,7 @@ async def test_find_tests_read_the_entry(line, stdout):
         (
             "touch -d '2024-03-05 06:07:08' /d/a; find /d/a -fls /d/o; "
             "cat /d/o",
-            "        ?      ? -rw-r--r--   1 root     root            0 "
+            "        ?      0 -rw-r--r--   1 root     root            0 "
             "Mar  5  2024 /d/a\n",
         ),
     ],

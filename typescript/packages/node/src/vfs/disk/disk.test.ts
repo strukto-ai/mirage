@@ -298,7 +298,7 @@ describe('DiskVFS — shared host-link contract', () => {
     expect(Object.keys((await vfs.getState()).files).sort()).toEqual(fixture.visible_files)
     expect(await shell(vfs, 'find /data -type f', 'du -s /data')).toEqual([
       fixture.visible_files.map((p) => `/data/${p}\n`).join(''),
-      '13\t/data\n',
+      '28\t/data\n',
     ])
     for (const p of fixture.hidden_paths) {
       expect(await existsCore(vfs.accessor, spec(p))).toBe(false)
@@ -314,7 +314,7 @@ describe('DiskVFS — shared host-link contract', () => {
     const alias = join(root, 'alias')
     await symlink(vfs.root, alias)
     const mounted = new DiskVFS({ root: alias })
-    expect(await shell(mounted, 'du -s /data')).toEqual(['13\t/data\n'])
+    expect(await shell(mounted, 'du -s /data')).toEqual(['28\t/data\n'])
     expect(Object.keys((await mounted.getState()).files).sort()).toEqual(fixture.visible_files)
   })
 

@@ -54,6 +54,8 @@ export const FileStatWireSchema = z.object({
   ctime: z.string().nullable().default(null),
   birthtime: z.string().nullable().default(null),
   dev: z.number().int().nullable().default(null),
+  nlink: z.number().int().nullable().default(null),
+  blocks: z.number().int().nullable().default(null),
   extra: z.record(z.string(), z.unknown()).default({}),
 })
 

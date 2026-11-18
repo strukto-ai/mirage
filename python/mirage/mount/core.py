@@ -351,7 +351,7 @@ class MountCore:
         return MountAttrs(
             mode=posix_mode(s),
             size=content_size(s) if size is None else size,
-            nlink=2 if is_dir(s) else 1,
+            nlink=s.nlink if s.nlink is not None else 2 if is_dir(s) else 1,
             uid=s.uid if isinstance(s.uid, int) else self._uid,
             gid=s.gid if isinstance(s.gid, int) else self._gid,
             rdev=device_rdev(s),

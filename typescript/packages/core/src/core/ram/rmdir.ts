@@ -15,7 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
-import { lookupError } from './dest.ts'
+import { lookupError, touchParent } from './dest.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { norm } from '../../utils/path.ts'
 
@@ -38,4 +38,5 @@ export async function rmdir(accessor: RAMAccessor, path: PathSpec): Promise<void
   if (keys.some((k) => k !== p && k.startsWith(prefix))) throw enotempty(path)
   store.dirs.delete(p)
   store.modified.delete(p)
+  touchParent(store, p)
 }

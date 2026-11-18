@@ -15,11 +15,12 @@
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { systemDate } from '../../utils/clock.ts'
+import { isoToEpoch } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import type { SqlRow, SqlStatement, SqlValue } from '../../vfs/sql/types.ts'
 import type { INODE_COLUMNS } from './constants.ts'
-import { DIR, FILE, LAST_INO, MAX_PARAMS, SQL } from './constants.ts'
+import { DIR, FILE, LAST_INO, MAX_PARAMS, SQL, subdirsOf } from './constants.ts'
 
 /** One `fs_inode` row. Mirrors Python's `Inode`. */
 export interface Inode {
@@ -67,9 +68,10 @@ export function nowStamp(): Stamp {
   return [seconds, (ms - seconds * 1000) * 1_000_000]
 }
 
-/** The stamp an ISO time names, to the nanosecond its fraction gives. */
+/** The stamp an ISO time names, to the nanosecond its fraction gives; one
+ * with no offset is UTC. */
 export function stampOf(iso: string): Stamp {
-  const seconds = Math.floor(Date.parse(iso) / 1000)
+  const seconds = isoToEpoch(iso)
   const fraction = /\.(\d+)/.exec(iso)?.[1] ?? ''
   return [seconds, Number(fraction.padEnd(9, '0').slice(0, 9))]
 }
@@ -82,18 +84,39 @@ export function isoOf(seconds: number, nanoseconds: number): string {
 }
 
 /**
- * What `stat` answers for the inode at mount path `p`: its type, size and
- * mtime. Mirrors Python's `inode_stat`.
+ * What `stat` answers for the inode at mount path `p`: its type, size, mtime
+ * and link count, a folder's being 2 and one per folder `subdirs` says it
+ * holds. Mirrors Python's `inode_stat`.
  */
-export function inodeStat(p: string, node: Inode): FileStat {
+export function inodeStat(p: string, node: Inode, subdirs = 0): FileStat {
   const common = { name: gnuBasename(p), modified: isoOf(node.mtime, node.mtimeNsec) }
-  if (isDir(node)) return new FileStat({ ...common, type: FileType.DIRECTORY })
+  if (isDir(node)) {
+    return new FileStat({ ...common, type: FileType.DIRECTORY, nlink: 2 + subdirs })
+  }
   return new FileStat({
     ...common,
     type: FileType.FILE,
     size: node.size,
     content: contentTypeForPath(p),
+    nlink: 1,
   })
+}
+
+/** How many folders sit directly in each folder of `nodes`, by inode; a
+ * folder holding none is left out. Mirrors Python's `subdir_counts`. */
+export async function subdirCounts(
+  accessor: SqlAccessor,
+  nodes: readonly Inode[],
+): Promise<Map<number, number>> {
+  const inos = nodes.filter(isDir).map((node) => node.ino)
+  const counts = new Map<number, number>()
+  for (let i = 0; i < inos.length; i += MAX_PARAMS) {
+    const batch = inos.slice(i, i + MAX_PARAMS)
+    for (const row of await accessor.query(subdirsOf(batch.length), batch)) {
+      counts.set(Number(row.parent_ino ?? 0), Number(row.subdirs ?? 0))
+    }
+  }
+  return counts
 }
 
 /**
@@ -124,6 +147,8 @@ export function byEntry(parent: InoRef, name: string): InoRef {
  * the inode was just given. The parent is named through its inode, so a
  * parent another writer removed since the lookup leaves the entry no parent,
  * which its column refuses, and the batch fails whole rather than strand it.
+ * The parent's mtime moves to `stamp`, as a folder's does when an entry is
+ * made in it.
  */
 export function makeNode(
   accessor: SqlAccessor,
@@ -131,8 +156,9 @@ export function makeNode(
   name: string,
   mode: number,
   size: number,
-  [seconds, nanoseconds]: Stamp,
+  stamp: Stamp,
 ): SqlStatement[] {
+  const [seconds, nanoseconds] = stamp
   return [
     {
       sql: SQL.newInode,
@@ -144,7 +170,17 @@ export function makeNode(
           ${LAST_INO[accessor.driver.dialect]})`,
       params: [name, ...parent.params],
     },
+    touched(parent, stamp),
   ]
+}
+
+/** Set the inode's mtime to `stamp`, as a folder's moves when an entry in it
+ * is made, removed or renamed. */
+export function touched(ino: InoRef, [seconds, nanoseconds]: Stamp): SqlStatement {
+  return {
+    sql: `UPDATE fs_inode SET mtime = ?, mtime_nsec = ? WHERE ino = ${ino.sql}`,
+    params: [seconds, nanoseconds, ...ino.params],
+  }
 }
 
 /** Set the inode's size, and its mtime to `stamp`. */

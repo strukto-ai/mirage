@@ -28,7 +28,7 @@ import {
 // The one wire format a row is stored in: what Python's `row_json` writes
 // for a FileStat, snake_case and every field. `test_config.py` pins the same literal.
 const WIRE =
-  '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"v1","revision":null,"type":"file","content":"text","mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{}}'
+  '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"v1","revision":null,"type":"file","content":"text","mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"nlink":null,"blocks":null,"extra":{}}'
 
 describe('row JSON', () => {
   it('stringifies to the JSON Python writes, and reads it back', () => {

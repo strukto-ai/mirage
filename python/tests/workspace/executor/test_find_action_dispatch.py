@@ -155,9 +155,9 @@ def test_print0_separates_with_nul() -> None:
 def test_ls_renders_finds_own_layout_per_match() -> None:
     # GNU findutils 4.10 `-ls` is not `ls -l`: inode and 1K blocks lead,
     # and every column has a fixed width (inode 9, blocks 6, links 3,
-    # owner and group 8 left-aligned, size 8). A VFS has neither an
-    # inode nor a block allocation, so those two columns carry `?`, the
-    # answer `stat %i` and `%b` already give.
+    # owner and group 8 left-aligned, size 8). A VFS has no inode, so
+    # that column carries `?`, the answer `stat %i` gives; the blocks are
+    # what ext4 allocates for the size, as `%k` says.
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
@@ -167,7 +167,7 @@ def test_ls_renders_finds_own_layout_per_match() -> None:
         assert len(lines) >= 2
         for line in lines:
             assert re.fullmatch(
-                r"        \?      \? -rw-r--r--   1 root     root     "
+                r"        \? {6}\d -rw-r--r--   1 root     root     "
                 r" {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d /.*\.html",
                 line,
             ), line

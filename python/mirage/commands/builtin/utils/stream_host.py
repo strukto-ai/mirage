@@ -21,6 +21,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import aclosing
+from datetime import timezone, tzinfo
 from functools import partial
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
@@ -56,8 +57,16 @@ from mirage.types import (
     JsonValue,
     PathSpec,
     ReadStreamFn,
+    SetAttrFields,
 )
-from mirage.utils.dates import clock_reply, stat_epoch
+from mirage.utils.dates import (
+    clock_reply,
+    epoch_of_local,
+    epoch_to_iso,
+    local_seconds,
+    now_iso,
+    stat_epoch,
+)
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
@@ -118,6 +127,11 @@ class StreamHost:
         sized (Callable[[PathSpec], Awaitable[int | None]] | None): An
             operand's length where a read may open past the bytes it
             skips (``file_size``); None opens every input at its start.
+        set_attrs (Callable[[PathSpec, SetAttrFields], Awaitable[None]]
+            | None): sets the mode and the time a ``chmod`` or ``utime``
+            request names; None refuses both.
+        zone (tzinfo): the session's zone, which a ``utime`` of a local
+            time is read in.
     """
 
     def __init__(
@@ -135,9 +149,12 @@ class StreamHost:
         mounts: MountView | None = None,
         unbuffered: bool = False,
         sized: Callable[[PathSpec], Awaitable[int | None]] | None = None,
-        chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
+        set_attrs: Callable[[PathSpec, SetAttrFields], Awaitable[None]]
+        | None = None,
+        zone: tzinfo = timezone.utc,
     ) -> None:
-        self.chmod = chmod
+        self.set_attrs = set_attrs
+        self.zone = zone
         self.operands = operands
         self.dash = dash
         self.command = command
@@ -283,8 +300,15 @@ class StreamHost:
         if op in ("unlink", "mkdir", "stat", "rmdir"):
             return await self._path_op(op, str(request["path"]))
         if op == "chmod":
-            return await self._chmod(
-                str(request["path"]), int(str(request["mode"]))
+            mode = int(str(request["mode"]))
+            return await self._set_attrs(str(request["path"]), {"mode": mode})
+        if op == "utime":
+            seconds = int(str(request["mtime"]))
+            if request.get("local"):
+                seconds = epoch_of_local(seconds, self.zone)
+            mtime = epoch_to_iso(seconds)
+            return await self._set_attrs(
+                str(request["path"]), {"mtime": mtime, "atime": now_iso()}
             )
         if op == "readlink":
             return await self._readlink(str(request["path"]))
@@ -322,6 +346,16 @@ class StreamHost:
             return await self._run(request)
         if op == "clock":
             return Served({}, clock_reply())
+        if op == "walls":
+            times = request.get("times")
+            return Served(
+                {
+                    "walls": [
+                        local_seconds(int(str(at)), self.zone)
+                        for at in (times if isinstance(times, list) else [])
+                    ]
+                }
+            )
         raise ValueError(f"unknown stream request: {op}")
 
     def _open(
@@ -474,13 +508,14 @@ class StreamHost:
         assert self.dispatch is not None
         await self.dispatch("write", path, data=source, atomic=atomic)
 
-    async def _chmod(self, name: str, mode: int) -> Served:
-        """Give a path a mode, through the workspace's attribute overlay."""
-        if self.chmod is None:
+    async def _set_attrs(self, name: str, fields: SetAttrFields) -> Served:
+        """Give a path a mode or a time, as its mount or the workspace's
+        attribute overlay keeps them."""
+        if self.set_attrs is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
-            await self.chmod(path, mode)
+            await self.set_attrs(path, fields)
         except WALK_ERRORS as exc:
             return Served(_failure(exc))
         return Served({})
@@ -498,8 +533,19 @@ class StreamHost:
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
-        mtime = stat_epoch(found.modified)
-        return Served({"kind": kind, "mtime": mtime})
+        return Served({"kind": kind, **self._stamp(found.modified)})
+
+    def _stamp(self, modified: str | None) -> dict[str, JsonValue]:
+        """A stat's time in UTC and on the session's wall clock, the time
+        a DOS stamp is weighed against.
+
+        Args:
+            modified (str | None): the stat's ``modified`` field.
+        """
+        mtime = stat_epoch(modified)
+        if mtime is None:
+            return {"mtime": None}
+        return {"mtime": mtime, "wall": local_seconds(mtime, self.zone)}
 
     def _where(self, path: PathSpec) -> str:
         """Where a name stands as lstat reaches it: every link above its
@@ -524,8 +570,9 @@ class StreamHost:
             target = None if link is None else link.extra.get(LINK_TARGET_KEY)
             if link is not None and isinstance(target, str):
                 await self.dispatch("readlink", path)
-                mtime = stat_epoch(link.modified)
-                return Served({"target": byte_view(target), "mtime": mtime})
+                return Served(
+                    {"target": byte_view(target), **self._stamp(link.modified)}
+                )
             found, _ = await self.dispatch("stat", path)
             if found is None:
                 raise enoent(path)

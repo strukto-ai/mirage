@@ -70,7 +70,7 @@ def parse_row(raw: str | bytes) -> FileStat:
     for name, value in known.items():
         if value is None and name not in ("name", "type", "extra"):
             continue
-        if name in ("size", "mode", "dev"):
+        if name in ("size", "mode", "dev", "nlink", "blocks"):
             fits = type(value) is int
         elif name in ("uid", "gid"):
             fits = type(value) in (int, str)

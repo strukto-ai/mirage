@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "cp_gives_a_new_copy_the_source_mode_under_the_umask",
+      "seq": 110000206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/cpm && cd /data/cpm && printf x > a && chmod 750 a && cp a b && printf y > c && chmod 600 c && cp a c && mkdir -m 700 d && cp -r d e && umask 077 && cp a f && umask 022 && chmod 4755 a && cp a g && stat -c '%a %n' b c e f g",
+      "expect": {
+        "exit": 0,
+        "stdout": "750 b\n600 c\n700 e\n700 f\n755 g\n",
+        "stderr": ""
+      },
+      "note": "Without -p, a file or directory cp makes takes the source's permission bits under the umask, setuid dropped, and a file that stood there keeps its own (debian:stable-slim)."
+    }
+  ]
+}
