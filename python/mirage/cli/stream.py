@@ -149,7 +149,9 @@ async def consume_stream(
 def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
     """The HTTP proxy the environment names for ``url`` and its
     credentials, or ``(None, None)`` to connect directly, so the line
-    takes the route every other command takes through httpx. aiohttp's
+    takes the route every other command takes through httpx: a proxy
+    without a scheme is ``http://``, and a ``NO_PROXY`` entry may name a
+    port. aiohttp's
     ``trust_env`` is not used: it also reads ``.netrc``, which clashes with
     the bearer header, and the macOS system proxies. A SOCKS proxy is not
     followed: aiohttp has none. The bearer header must go on the request,
@@ -164,11 +166,15 @@ def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
     target = urllib.parse.urlsplit(url)
     proxies = urllib.request.getproxies_environment()
     named = proxies.get(target.scheme) or proxies.get("all")
-    if not named or not named.startswith(("http://", "https://")):
+    if not named:
         return None, None
-    if urllib.request.proxy_bypass(target.hostname or ""):
+    proxy = urllib.parse.urlsplit(
+        named if "://" in named else f"http://{named}"
+    )
+    if proxy.scheme not in ("http", "https"):
         return None, None
-    proxy = urllib.parse.urlsplit(named)
+    if urllib.request.proxy_bypass(target.netloc.rpartition("@")[2]):
+        return None, None
     bare = proxy._replace(netloc=proxy.netloc.rpartition("@")[2]).geturl()
     if proxy.username is None:
         return bare, None

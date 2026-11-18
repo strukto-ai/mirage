@@ -609,3 +609,31 @@ async def test_the_proxy_tunnel_never_carries_the_daemon_token(
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("url", "http_proxy", "no_proxy", "proxy"),
+    [
+        ("http://d:8765", "proxy.corp:3128", None, "http://proxy.corp:3128"),
+        (
+            "http://d:8765",
+            "HTTP://proxy.corp:3128",
+            None,
+            "http://proxy.corp:3128",
+        ),
+        ("http://d:8765", "socks5://proxy.corp:1080", None, None),
+        ("http://127.0.0.1:8765", "http://p:1", "127.0.0.1:8765", None),
+        (
+            "http://127.0.0.1:8765",
+            "http://p:1",
+            "127.0.0.1:9999",
+            "http://p:1",
+        ),
+        ("http://127.0.0.1:8765", "http://p:1", "127.0.0.1", None),
+    ],
+)
+def test_the_proxy_is_the_one_httpx_picks(
+    monkeypatch, url, http_proxy, no_proxy, proxy
+):
+    _proxy_env(monkeypatch, http_proxy, no_proxy)
+    assert stream.proxy_for(url) == (proxy, None)
