@@ -162,14 +162,21 @@ EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 # (``command not found``), ``$3`` leads a file PATH holds that cannot run,
 # named by its path as bash names it (``bash: line 3: ``; empty to lead
 # with ``$1``), and ``$4`` is the program. An empty PATH entry is the
-# working directory, as it is to bash and to sh's exec. It runs in a subshell of its
-# own, so none of its names reaches the program's environment, and needs
-# only sh's builtins, so a PATH with no tools still runs it.
+# working directory, as it is to bash and to sh's exec. A path that names
+# nothing the machine user can see is reported by its nearest folder that
+# exists: one that is a file is ``Not a directory``, one the user cannot
+# search ``Permission denied``, as exec's ENOTDIR and EACCES are. It runs
+# in a subshell of its own, so none of its names reaches the program's
+# environment, and needs only sh's builtins, so a PATH with no tools still
+# runs it.
 PROGRAM_CHECK = (
     'case $4 in */*) if [ -d "$4" ]; then '
     "printf '%sIs a directory\\n' \"$1\" >&2; exit 126; "
-    'elif [ ! -e "$4" ]; then '
-    "printf '%sNo such file or directory\\n' \"$1\" >&2; exit 127; "
+    "elif [ ! -e \"$4\" ]; then e='No such file or directory'; c=127; d=$4; "
+    'while case $d in */*) d=${d%/*};; *) d=;; esac; [ -n "$d" ]; do '
+    "if [ -e \"$d\" ]; then if [ ! -d \"$d\" ]; then e='Not a directory'; c=126; "
+    "elif [ ! -x \"$d\" ]; then e='Permission denied'; c=126; fi; break; fi; done; "
+    "printf '%s%s\\n' \"$1\" \"$e\" >&2; exit $c; "
     'elif [ ! -x "$4" ]; then '
     "printf '%sPermission denied\\n' \"$1\" >&2; exit 126; fi;; "
     "*) f=; r=$PATH; while :; do d=${r%%:*}; d=${d:-.}; "

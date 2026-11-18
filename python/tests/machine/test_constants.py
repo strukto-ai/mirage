@@ -24,6 +24,7 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
+    PROGRAM_CHECK,
     RUN_PROGRAM_AT,
     SSHFS_LINE,
     SSHFS_OPTIONS,
@@ -105,6 +106,38 @@ def test_a_run_a_signal_ended_ends_its_stdout_with_nothing():
     done = subprocess.run(argv, capture_output=True, check=False)
     assert (done.returncode, done.stdout) == (137, b"out\n")
     assert done.stderr.endswith(run_exit_mark("n1") + b"137\n")
+
+
+def _checked(path):
+    done = subprocess.run(
+        ["/bin/sh", "-c", PROGRAM_CHECK, "sh", "x: ", "command not found", "", path],
+        capture_output=True,
+        check=False,
+    )
+    return done.returncode, done.stderr.decode()
+
+
+# A path that names nothing the user can see is reported by its nearest
+# folder that exists, as exec reports it: a file there is not a directory,
+# a folder the user cannot search denies it, and only a folder that can be
+# searched and lacks it makes the program missing.
+def test_a_program_path_is_reported_by_its_nearest_folder(tmp_path):
+    (tmp_path / "file").write_text("")
+    assert _checked(str(tmp_path / "file" / "x")) == (126, "x: Not a directory\n")
+    assert _checked(str(tmp_path / "gone" / "x")) == (
+        127,
+        "x: No such file or directory\n",
+    )
+    if os.geteuid() == 0:
+        return
+    locked = tmp_path / "locked"
+    (locked / "sub").mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        assert _checked(str(locked / "sub" / "x")) == (126, "x: Permission denied\n")
+        assert _checked(str(locked / "x")) == (126, "x: Permission denied\n")
+    finally:
+        locked.chmod(0o700)
 
 
 def _folder(home, spare, prefixes):

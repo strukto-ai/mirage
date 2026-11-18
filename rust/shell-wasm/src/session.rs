@@ -952,11 +952,14 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         return Ok(Item::list([fields, Item::Bool(more)]));
     }
     let answer = match op {
-        "answer_substituted" => Answer::Substituted(Substitution {
-            stdout: args.bytes()?,
-            stderr: args.bytes()?,
-            status: status(args.int()?)?,
-        }),
+        "answer_substituted" => Answer::Substituted {
+            ran: Substitution {
+                stdout: args.bytes()?,
+                stderr: args.bytes()?,
+                status: status(args.int()?)?,
+            },
+            now_us: args.int()?,
+        },
         "answer_path" => Answer::Path(
             args.bytes()?,
             args.maybe()?

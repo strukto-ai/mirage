@@ -39,6 +39,8 @@ describe('parseTree', () => {
         kind: 'd',
         mode: 0o755,
         size: 4096,
+        mtime: 1700000000,
+        atime: 1700000001,
         mtimeMs: 1700000000500,
         atimeMs: 1700000001000,
         user: 'root',
@@ -49,6 +51,8 @@ describe('parseTree', () => {
         kind: 'f',
         mode: 0o644,
         size: 3,
+        mtime: 1,
+        atime: 2,
         mtimeMs: 1000,
         atimeMs: 2000,
         user: 'a',
@@ -67,6 +71,13 @@ describe('parseTree', () => {
   ])('keeps %s to the millisecond', (stamp, want) => {
     const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} a b x\0`))
     expect(rows?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
+  })
+
+  // The whole seconds stay those SFTP reports, never rounded across a second
+  // as the milliseconds are.
+  it("keeps SFTP's whole seconds", () => {
+    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 a b x\0'))
+    expect(rows?.map((r) => [r.mtime, r.mtimeMs])).toEqual([[1700000000, 1700000001000]])
   })
 
   it('refuses a cut record', () => {

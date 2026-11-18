@@ -29,6 +29,9 @@ class TreeRow:
         kind (str): find's type letter (``f``, ``d``, ``l``, ``p``, ...).
         mode (int): the permission bits.
         size (int): the size in bytes.
+        mtime (int): the modification time, in whole seconds, as SFTP
+            reports it.
+        atime (int): the access time, in whole seconds.
         mtime_ms (int): the modification time, in epoch milliseconds.
         atime_ms (int): the access time, in epoch milliseconds.
         user (str): the owner's name, or its number when it has none.
@@ -39,6 +42,8 @@ class TreeRow:
     kind: str
     mode: int
     size: int
+    mtime: int
+    atime: int
     mtime_ms: int
     atime_ms: int
     user: str

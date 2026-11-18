@@ -23,7 +23,16 @@ from tests.fixtures.machine_files import DIR, ROW, bound, spec
 
 def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
     row = TreeRow(
-        "f", 0o640, 12, 1700000000123, 1700000001000, "app", "staff", ""
+        "f",
+        0o640,
+        12,
+        1700000000,
+        1700000001,
+        1700000000123,
+        1700000001000,
+        "app",
+        "staff",
+        "",
     )
     got = row_stat("x.py", row)
     assert (got.type, got.size, got.mode, got.uid, got.gid) == (
@@ -48,7 +57,7 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
     ],
 )
 def test_row_stat_maps_each_kind(kind, want, size):
-    got = row_stat("n", TreeRow(kind, 0o755, 7, 0, 0, "root", "root", ""))
+    got = row_stat("n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, "root", "root", ""))
     assert (got.type, got.size) == (want, size)
 
 

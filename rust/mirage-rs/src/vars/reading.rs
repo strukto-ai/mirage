@@ -210,10 +210,18 @@ impl Store {
         outcome.value.map(|value| value as u32)
     }
 
-    /// A value landing on `SECONDS` as the count it restarts from:
-    /// evaluated as arithmetic, as bash assigns it, 0 when it does not
-    /// evaluate.
+    /// A value landing on `SECONDS` as the count it restarts from, as bash
+    /// assigns it: evaluated as arithmetic once `SECONDS` is an integer
+    /// (`seconds_integer`), a decimal number before, white space ahead of it
+    /// and space or tab after allowed; 0 when it is neither.
     pub(super) fn seconds_from(&mut self, word: &[u8]) -> i64 {
+        if !self.seconds_integer() {
+            let mut number = word.trim_ascii_start();
+            while let [rest @ .., b' ' | b'\t'] = number {
+                number = rest;
+            }
+            return parse_decimal::<i64>(number).unwrap_or(0);
+        }
         let mut reading = Reading::plain(self);
         reading
             .evaluate(word, None, false, &[], false)

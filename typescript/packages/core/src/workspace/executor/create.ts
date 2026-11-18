@@ -18,6 +18,7 @@ import type { FileDescription } from '../../shell/descriptors.ts'
 import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ZERO_CHUNK_SIZE } from '../../core/dev/constants.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { drain, sliceStream } from '../../io/stream.ts'
 import type { SessionState } from '../session/session.ts'
@@ -255,6 +256,59 @@ async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | n
     return null
   }
   return stat instanceof FileStat ? stat.size : null
+}
+
+/**
+ * Open `scope` for an input redirect: its stream, and whether it is a
+ * character device that refuses a whole read, as an endless one does
+ * (`/dev/zero`, `/dev/urandom`), read instead as a kernel answers each read
+ * of one (`deviceRanges`). Mirrors Python's open_read.
+ */
+export async function openRead(
+  dispatch: DispatchFn,
+  scope: PathSpec,
+): Promise<[ByteSource, boolean]> {
+  try {
+    const read = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+    return [read ?? new Uint8Array(), false]
+  } catch (err) {
+    const code = err !== null && typeof err === 'object' ? (err as { code?: unknown }).code : null
+    if (code !== 'EINVAL' || !(await isDevice(dispatch, scope))) throw err
+    return [deviceRanges(dispatch, scope), true]
+  }
+}
+
+/** Whether `scope` is a character device. Mirrors Python's _is_device. */
+async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
+  let stat: unknown
+  try {
+    ;[stat] = await dispatch('stat', scope)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`read target ${scope.rawPath} has no stat: ${String(err)}`)
+    return false
+  }
+  return stat instanceof FileStat && stat.type === FileType.CHAR_DEVICE
+}
+
+/**
+ * A character device read in successive ranges, endless until the reader
+ * stops, ended by a short one. Each range is a dispatcher read, so hides,
+ * path rules and policies judge it. Mirrors Python's _device_ranges.
+ */
+async function* deviceRanges(dispatch: DispatchFn, scope: PathSpec): AsyncIterable<Uint8Array> {
+  let offset = 0
+  for (;;) {
+    const [read] = await dispatch('read', scope, [], {
+      offset,
+      size: ZERO_CHUNK_SIZE,
+      filetype: null,
+    })
+    const chunk = read as Uint8Array
+    if (chunk.byteLength > 0) yield chunk
+    if (chunk.byteLength < ZERO_CHUNK_SIZE) return
+    offset += chunk.byteLength
+  }
 }
 
 /** `createFile` that answers how many bytes it wrote. Mirrors Python's create_counted. */

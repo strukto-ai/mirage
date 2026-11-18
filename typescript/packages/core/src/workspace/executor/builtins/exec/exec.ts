@@ -15,7 +15,7 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { callerSignal, setProgramInvocation } from '../../../../context/session_context.ts'
-import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
+import { enoent, isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
 import { PipeInput, share, SharedInput } from '../../../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { asyncChain, discardStreams } from '../../../../io/stream.ts'
@@ -63,7 +63,7 @@ import type { ExecuteFn } from '../../../expand/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { createFile, writeDescription } from '../../create.ts'
+import { createFile, openRead, writeDescription } from '../../create.ts'
 import { programHead } from '../../find_action_dispatch.ts'
 import {
   answerClosed,
@@ -475,6 +475,11 @@ async function install(
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
     const named = namedDescriptor(redirect, (fd) => session.descriptors.has(fd))
+    if (named !== null && identity(session, named[0]?.target as number)[0] === CLOSED) {
+      const target = redirect.target
+      const label = target instanceof PathSpec ? target.rawPath : String(target)
+      return errorLine(label, enoent(label))
+    }
     for (const operation of named ?? redirectOperations(redirect)) {
       const error = await installDescriptor(owned, dispatch, session, operation, stdin)
       if (error !== null) return error
@@ -523,9 +528,9 @@ async function installDescriptor(
   try {
     if (redirect.kind === RedirectKind.STDIN || redirect.kind === RedirectKind.READWRITE) {
       let data: ByteSource
+      let endless = false
       try {
-        const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        data = opened ?? new Uint8Array()
+        ;[data, endless] = await openRead(dispatch, scope)
       } catch (error) {
         if (redirect.kind !== RedirectKind.READWRITE || !isMissingPath(error)) throw error
         data = new Uint8Array()
@@ -544,7 +549,7 @@ async function installDescriptor(
           await data.close()
           reading = new PipeInput(data.path, data.end, callerSignal)
         }
-        const source = new SharedInput(reading, null, !(data instanceof PipeStream))
+        const source = new SharedInput(reading, null, !(endless || data instanceof PipeStream))
         if (!(data instanceof PipeStream)) owned.push(source)
         bind(session, fd, OPEN_FOR_READING + scope.virtual, false, source)
       }

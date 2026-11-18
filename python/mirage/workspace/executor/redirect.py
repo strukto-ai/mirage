@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import dataclasses
+import errno
 import logging
 import posixpath
 from collections.abc import Awaitable, Callable
@@ -99,6 +100,7 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.create import (
     create_file,
+    open_read,
     sole_stream,
     write_description,
 )
@@ -1015,7 +1017,8 @@ class _Opened:
         files (list[FileDescription]): the files opened to write.
         targets (tuple[PathSpec, ...]): the paths named so far.
         read_paths (dict[int, str]): the file each descriptor reads.
-        piped (set[int]): the descriptors reading a pipe.
+        piped (set[int]): the descriptors reading a pipe, or an endless
+            device, whose output goes out as it is written.
         deferred (FileDescription | None): the final target, opened by
             the write of the command's output.
         opening_stderr (_FdDest): where stderr pointed when the deferred
@@ -1199,11 +1202,11 @@ async def _open_input(
     dispatch, session = opened.dispatch, opened.session
     inputs, outputs = opened.inputs, opened.outputs
     try:
-        data, _ = await dispatch("read", scope, stream=True)
+        data, endless = await open_read(dispatch, scope)
     except FileNotFoundError as exc:
         if r.kind != RedirectKind.READWRITE:
             return await opened.failed(_redirect_failure(scope, exc))
-        data = b""
+        data, endless = b"", False
     except Exception as exc:
         if is_aborting(exc):
             raise
@@ -1226,10 +1229,10 @@ async def _open_input(
         inputs[r.fd], outputs[r.fd] = file.source, file
         return None
     opened.read_paths[r.fd] = scope.virtual
-    if isinstance(data, PipeStream):
+    if endless or isinstance(data, PipeStream):
         opened.piped.add(r.fd)
     reading = SharedInput(
-        data or b"", seekable=not isinstance(data, PipeStream)
+        data or b"", seekable=not (endless or isinstance(data, PipeStream))
     )
     if not isinstance(data, PipeStream):
         owned.append(reading)
@@ -1509,6 +1512,8 @@ async def _handle_redirect(
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
         named = named_descriptor(r, opened.holds)
+        if named is not None and not opened.holds(named[0].target):
+            return await opened.failed(_unnamed(r.target))
         if named is not None:
             expanded.extend(named)
             for operation in named:
@@ -1897,6 +1902,18 @@ def _redirect_failure(
     _, io, node = _shell_failure(_redirect_error_line(scope, exc))
     node.unopened = True
     return None, io, node
+
+
+def _unnamed(target: str | int | PathSpec) -> tuple[None, IOResult, ExecutionNode]:
+    """The failure of a redirect onto the path of a descriptor the command
+    has closed (``0<&- </dev/fd/0``): bash opens the path, which names
+    nothing then, where ``0<&0`` copies a closed descriptor onto itself.
+
+    Args:
+        target (str | int | PathSpec): the descriptor's path.
+    """
+    missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
+    return _redirect_failure(_ensure_scope(target), missing)
 
 
 def _shell_failure(

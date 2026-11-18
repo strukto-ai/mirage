@@ -1548,8 +1548,12 @@ export class ShellTask {
     return this.asked
   }
 
-  answerSubstituted(stdout: Uint8Array, stderr: Uint8Array, status: number): void {
-    this.land(this.call('answer_substituted', stdout, stderr, status))
+  /**
+   * How a command substitution ran; `clock` is the time it ended in epoch
+   * microseconds (0 for no clock), which the words after it read.
+   */
+  answerSubstituted(stdout: Uint8Array, stderr: Uint8Array, status: number, clock = 0): void {
+    this.land(this.call('answer_substituted', stdout, stderr, status, clock))
   }
 
   answerPath(path: string, pid: number | null = null): void {

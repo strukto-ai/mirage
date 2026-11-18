@@ -78,6 +78,8 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
                     kind=kind,
                     mode=int(mode, 8),
                     size=int(size),
+                    mtime=int(mtime.split(".")[0]),
+                    atime=int(atime.split(".")[0]),
                     mtime_ms=_milliseconds(mtime),
                     atime_ms=_milliseconds(atime),
                     user=user,

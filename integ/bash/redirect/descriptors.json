@@ -1758,10 +1758,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "head -c 8 /dev/urandom | wc -c; head -c 8 /dev/random | wc -c; stat -c '%F %t %T' /dev/urandom /dev/random /dev/tty",
+      "command": "head -c 8 /dev/urandom | wc -c; head -c 8 /dev/random | wc -c; head -c 8 < /dev/urandom | wc -c; tr -dc a-z < /dev/urandom | head -c 8 | wc -c; exec 3< /dev/zero; head -c 2 <&3 | od -An -c; exec 3<&-; stat -c '%F %t %T' /dev/urandom /dev/random /dev/tty",
       "expect": {
         "exit": 0,
-        "stdout": "8\n8\ncharacter special file 1 9\ncharacter special file 1 8\ncharacter special file 5 0\n",
+        "stdout": "8\n8\n8\n8\n  \\0  \\0\ncharacter special file 1 9\ncharacter special file 1 8\ncharacter special file 5 0\n",
         "stderr": ""
       }
     },
@@ -1798,6 +1798,41 @@
         "exit": 0,
         "stdout": "code=1\ncode=1\n",
         "stderr": "bash: line 1: /dev/tty: No such device or address\ncat: /dev/tty: No such device or address\n"
+      }
+    },
+    {
+      "id": "a_closed_descriptor_s_path_names_nothing",
+      "seq": 1380037,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "true 0<&- </dev/fd/0; echo a=$?; true 0<&- 0<&0; echo b=$?; true 1>&- >/dev/stdout; echo c=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "a=1\nb=0\nc=1\n",
+        "stderr": "bash: line 1: /dev/fd/0: No such file or directory\nbash: line 1: /dev/stdout: No such file or directory\n"
       }
     }
   ]

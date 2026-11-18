@@ -74,6 +74,8 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
       kind,
       mode: Number.parseInt(mode, 8),
       size: Number(size),
+      mtime: Number(mtime.split('.')[0]),
+      atime: Number(atime.split('.')[0]),
       mtimeMs: milliseconds(mtime),
       atimeMs: milliseconds(atime),
       user,

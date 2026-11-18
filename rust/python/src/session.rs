@@ -1239,20 +1239,27 @@ impl ShellTask {
         self.asked.as_ref().map(|ask| ask.bind(py).clone())
     }
 
+    /// `clock` is the time the substitution ended, in epoch microseconds
+    /// (0 for no clock), which the words after it read.
+    #[pyo3(signature = (stdout, stderr, status, clock=0))]
     fn answer_substituted(
         &mut self,
         py: Python<'_>,
         stdout: &[u8],
         stderr: &[u8],
         status: i32,
+        clock: i64,
     ) -> PyResult<()> {
         self.answer(
             py,
-            Answer::Substituted(Substitution {
-                stdout: stdout.to_vec(),
-                stderr: stderr.to_vec(),
-                status,
-            }),
+            Answer::Substituted {
+                ran: Substitution {
+                    stdout: stdout.to_vec(),
+                    stderr: stderr.to_vec(),
+                    status,
+                },
+                now_us: clock,
+            },
         )
     }
 

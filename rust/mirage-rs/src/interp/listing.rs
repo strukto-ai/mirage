@@ -102,6 +102,16 @@ pub fn line(name: &str, var: &Var) -> Vec<u8> {
 /// `BASHPID` and `RANDOM` integers, `RANDOM` holding its last draw. None
 /// for any other name, or one no longer computed.
 pub fn computed(vars: &Store, name: &str) -> Option<Var> {
+    shaped(vars, name, Store::dynamic)
+}
+
+/// What `computed` makes of `name` for a bare listing, which reads
+/// `SECONDS` without making it an integer (`Store::peek`).
+fn shown(vars: &Store, name: &str) -> Option<Var> {
+    shaped(vars, name, Store::peek)
+}
+
+fn shaped(vars: &Store, name: &str, read: fn(&Store, &str) -> Option<Vec<u8>>) -> Option<Var> {
     let (value, base) = match name {
         RANDOM => {
             let held = vars.record(name).and_then(|var| var.value.clone());
@@ -120,12 +130,12 @@ pub fn computed(vars: &Store, name: &str) -> Option<Var> {
             let base = if array.is_empty() { UNASSIGNED } else { 0 };
             (Value::Indexed(array), base)
         }
-        LINENO | EPOCHSECONDS | EPOCHREALTIME => (Value::Scalar(vars.dynamic(name)?), 0),
+        LINENO | EPOCHSECONDS | EPOCHREALTIME => (Value::Scalar(read(vars, name)?), 0),
         SECONDS => (
-            Value::Scalar(vars.dynamic(name)?),
+            Value::Scalar(read(vars, name)?),
             if vars.seconds_assigned() { INTEGER } else { 0 },
         ),
-        BASHPID | SRANDOM => (Value::Scalar(vars.dynamic(name)?), INTEGER),
+        BASHPID | SRANDOM => (Value::Scalar(read(vars, name)?), INTEGER),
         _ => return None,
     };
     Some(Var {
@@ -147,7 +157,7 @@ pub fn listing(vars: &Store, letters: &str, skip: &[String]) -> Vec<Vec<u8>> {
         .into_iter()
         .filter(|name| !vars.hidden(name))
         .filter_map(|name| {
-            let var = match computed(vars, name) {
+            let var = match shown(vars, name) {
                 Some(mut var) => {
                     if ends_at_unset(name) && !(name == SECONDS && vars.seconds_assigned()) {
                         var.attrs |= UNASSIGNED;
@@ -189,7 +199,7 @@ pub fn assignments(vars: &Store, skip: &[String]) -> Vec<Vec<u8>> {
         .into_iter()
         .filter_map(|name| {
             let array =
-                computed(vars, name).filter(|var| matches!(var.value, Some(Value::Indexed(_))));
+                shown(vars, name).filter(|var| matches!(var.value, Some(Value::Indexed(_))));
             let var = match &array {
                 Some(var) => var,
                 None => vars.visible(name)?,
@@ -241,6 +251,19 @@ mod tests {
     use super::*;
     use crate::vars::{Assoc, Indexed, READONLY, Var};
     use std::sync::Arc;
+
+    #[test]
+    fn a_bare_listing_leaves_seconds_as_it_was() {
+        let mut vars = Store::new(Arc::new(|| 7));
+        vars.set_clock(4_000_000, 1_000_000);
+        vars.set_seconds(10);
+        listing(&vars, "a", &[]);
+        listing(&vars, "", &[]);
+        assignments(&vars, &[]);
+        assert!(!vars.seconds_read());
+        declaration(&mut vars, SECONDS);
+        assert!(vars.seconds_read());
+    }
 
     #[test]
     fn lines_as_bash_prints_them() {

@@ -243,6 +243,15 @@ impl Store {
         self.started_us = started_us;
     }
 
+    /// Move the clock to `now_us` microseconds, the shell's start kept: a
+    /// command substitution's answer brings the time it finished at, so a
+    /// read later in the same word counts the time the child took.
+    pub fn set_now(&mut self, now_us: i64) {
+        if self.now_us != 0 && now_us != 0 {
+            self.now_us = now_us;
+        }
+    }
+
     /// The line a statement run inside a loop stands on, `$LINENO`.
     pub fn set_line(&mut self, line: usize) {
         self.line = line;
@@ -275,6 +284,17 @@ impl Store {
     /// fresh random bits; None for any other name, a hidden one, or one
     /// unset or made local since, which reads as it was assigned.
     pub fn dynamic(&self, name: &str) -> Option<Vec<u8>> {
+        self.compute(name, true)
+    }
+
+    /// What `dynamic` computes, for a listing: bash's bare `declare` and
+    /// `set` show `SECONDS` without making it an integer, which a read
+    /// does (`seconds_read`).
+    pub fn peek(&self, name: &str) -> Option<Vec<u8>> {
+        self.compute(name, false)
+    }
+
+    fn compute(&self, name: &str, read: bool) -> Option<Vec<u8>> {
         let name = self.target(name);
         if !self.is_dynamic(&name) {
             return None;
@@ -284,7 +304,9 @@ impl Store {
             LINENO => self.line.to_string(),
             BASHPID => self.bash_pid.to_string(),
             SECONDS => {
-                self.seconds_read.0.store(true, Ordering::Relaxed);
+                if read {
+                    self.seconds_read.0.store(true, Ordering::Relaxed);
+                }
                 let (value, at) = self.seconds.unwrap_or((0, self.started_us));
                 value
                     .saturating_add((now - at).div_euclid(MICROS))
@@ -330,6 +352,12 @@ impl Store {
     /// integer: `SECONDS+=5` adds then, and appends before.
     pub fn seconds_read(&self) -> bool {
         self.seconds_read.0.load(Ordering::Relaxed)
+    }
+
+    /// Whether bash takes `SECONDS` as an integer: once it was read, or
+    /// declared one, a value assigned to it is evaluated as arithmetic.
+    pub fn seconds_integer(&self) -> bool {
+        self.seconds_read() || self.record(SECONDS).is_some_and(|var| var.has(INTEGER))
     }
 
     /// End the special meaning of a name `unset` makes ordinary
@@ -516,20 +544,10 @@ impl Store {
 
     /// The one place a record changes: `var` replaces the name's record,
     /// or None drops it, and the one it replaced comes back. A table a fork
-    /// still shares is copied first, pointers only. A value landing on a
-    /// special `SECONDS`, by any write a prefix assignment included,
-    /// restarts its count from the value read as arithmetic.
+    /// still shares is copied first, pointers only.
     pub fn place(&mut self, name: &str, var: Option<Arc<Var>>) -> Option<Arc<Var>> {
         if var.is_none() && !self.vars.contains_key(name) {
             return None;
-        }
-        let restart = match var.as_deref().and_then(|var| var.value.as_ref()) {
-            Some(Value::Scalar(text)) if self.counts_seconds(name) => Some(text.clone()),
-            _ => None,
-        };
-        if let Some(text) = restart {
-            let value = self.seconds_from(&text);
-            self.set_seconds(value);
         }
         self.stamp = fresh_stamp();
         if name == "GLOBIGNORE" {
@@ -718,8 +736,21 @@ impl Store {
         };
         if let Some(value) = &var.value {
             self.note_kind(name, value);
+            self.restart_seconds(name, value);
         }
         self.place(name, Some(Arc::new(var)));
+    }
+
+    /// Restart the count of a special `SECONDS` a value lands on, by any
+    /// write a prefix assignment included; marking it (`export`) or a scope
+    /// putting its record back restarts nothing.
+    fn restart_seconds(&mut self, name: &str, value: &Value) {
+        if let Value::Scalar(text) = value
+            && self.counts_seconds(name)
+        {
+            let count = self.seconds_from(text);
+            self.set_seconds(count);
+        }
     }
 
     /// Turn one attribute on or off, creating the name unset if needed, as
@@ -761,6 +792,7 @@ impl Store {
         }
         if let Some(value) = &var.value {
             self.note_kind(name, value);
+            self.restart_seconds(name, value);
         }
         self.place(name, Some(Arc::new(var)));
     }
@@ -1565,6 +1597,16 @@ mod tests {
         assert!(store.fork().dynamic(SECONDS).is_some());
         store.hide_vars(&[SRANDOM.to_owned()], &[]);
         assert_eq!(store.dynamic(SRANDOM), None);
+    }
+
+    #[test]
+    fn marking_seconds_keeps_its_count() {
+        let mut store = store();
+        store.set_clock(9_000_000, 1_000_000);
+        store.land(SECONDS, Value::Scalar(b"10".to_vec()), false);
+        store.set_clock(10_000_000, 1_000_000);
+        store.set_attr(SECONDS, Some(EXPORT), true);
+        assert_eq!(store.dynamic(SECONDS), Some(b"11".to_vec()));
     }
 
     #[test]

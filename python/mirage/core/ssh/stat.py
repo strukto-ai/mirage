@@ -131,8 +131,8 @@ async def tree(
                 type=FIND_TYPES[row.kind],
                 size=row.size,
                 permissions=row.mode,
-                atime=row.atime_ms // 1000,
-                mtime=row.mtime_ms // 1000,
+                atime=row.atime,
+                mtime=row.mtime,
             ),
         )
     return rows if top else None

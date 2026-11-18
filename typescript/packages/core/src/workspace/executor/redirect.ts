@@ -21,7 +21,7 @@ import {
   setRedirectPaths,
   type RedirectGuard,
 } from '../../context/session_context.ts'
-import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
+import { enoent, isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { share, SharedInput } from '../../io/async_line_iterator.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
@@ -85,7 +85,7 @@ import { descriptorName, routeRebound } from './builtins/exec/index.ts'
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
-import { createFile, soleStream, writeDescription } from './create.ts'
+import { createFile, openRead, soleStream, writeDescription } from './create.ts'
 import { drained, pump } from './background.ts'
 import { writeErrorLine } from './statement.ts'
 
@@ -927,10 +927,10 @@ async function openInput(
   owned: SharedInput[],
 ): Promise<RedirectResult | null> {
   const { dispatch, session, inputs, outputs } = opened
-  let source: ByteSource | null
+  let source: ByteSource
+  let endless = false
   try {
-    const read = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-    source = read ?? new Uint8Array()
+    ;[source, endless] = await openRead(dispatch, scope)
   } catch (error) {
     if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
     else {
@@ -958,8 +958,8 @@ async function openInput(
     return null
   }
   opened.readPaths.set(r.fd, scope.virtual)
-  if (data instanceof PipeStream) opened.piped.add(r.fd)
-  const reading = new SharedInput(data, null, !(data instanceof PipeStream))
+  if (endless || data instanceof PipeStream) opened.piped.add(r.fd)
+  const reading = new SharedInput(data, null, !(endless || data instanceof PipeStream))
   if (!(data instanceof PipeStream)) owned.push(reading)
   if (
     !(data instanceof PipeStream) &&
@@ -1180,6 +1180,9 @@ async function runRedirects(
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
     const named = namedDescriptor(r, (fd) => opened.holds(fd))
+    if (named !== null && !opened.holds(named[0]?.target as number)) {
+      return opened.failed(unnamed(r.target))
+    }
     if (named !== null) {
       expanded.push(...named)
       for (const operation of named) {
@@ -1483,6 +1486,19 @@ function redirectFailure(scope: PathSpec, err: unknown): RedirectResult {
   const [stdout, io, node] = shellFailure(redirectErrorLine(scope, err))
   node.unopened = true
   return [stdout, io, node]
+}
+
+/**
+ * The failure of a redirect onto the path of a descriptor the command has
+ * closed (`0<&- </dev/fd/0`): bash opens the path, which names nothing then,
+ * where `0<&0` copies a closed descriptor onto itself. Mirrors Python's
+ * `_unnamed`.
+ *
+ * @param target the descriptor's path.
+ */
+function unnamed(target: unknown): RedirectResult {
+  const scope = ensureScope(target)
+  return redirectFailure(scope, enoent(scope))
 }
 
 /**

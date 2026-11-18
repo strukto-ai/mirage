@@ -19,6 +19,7 @@ import { SESSION_SCOPED } from '../../policy/mixin.ts'
 import type { PolicyMethod } from '../../policy/types.ts'
 import { ShellTask } from '../../rs/shell.ts'
 import { DEFAULT_VISIBILITY } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { seedVar } from './state.ts'
 
@@ -107,6 +108,16 @@ describe('drive', () => {
       const result = await ws.shell('x=hello; echo "${x//l/L} ${x^^[lo]}"')
       expect(DEC.decode(result.stdout)).toBe('heLLo heLLO\n')
       expect(resumed).not.toHaveBeenCalled()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('brings a substitution\'s end time to the words after it', async () => {
+    const ws = new Workspace({}, { clock: new ManualClock(1_000_000) })
+    try {
+      const result = await ws.shell('SECONDS=0; echo "$(sleep 3)$SECONDS"')
+      expect(DEC.decode(result.stdout)).toBe('3\n')
     } finally {
       await ws.close()
     }

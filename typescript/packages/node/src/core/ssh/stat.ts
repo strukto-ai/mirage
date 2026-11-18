@@ -128,8 +128,8 @@ export async function tree(
       attrsToFileStat(row.rel.split('/').pop() ?? row.rel, {
         mode: type | row.mode,
         size: row.size,
-        mtime: Math.floor(row.mtimeMs / 1000),
-        atime: Math.floor(row.atimeMs / 1000),
+        mtime: row.mtime,
+        atime: row.atime,
       }),
     )
   }
