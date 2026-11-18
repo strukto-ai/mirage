@@ -46,6 +46,16 @@ function prog(): CLI {
   })
 }
 
+class Serving extends RAMVFS {
+  constructor(private readonly cli: CLI) {
+    super()
+  }
+
+  override commands(): readonly CLI[] {
+    return [this.cli]
+  }
+}
+
 function tool(verb: string): CLI {
   return new CLI({
     spec: new CommandSpec({
@@ -236,6 +246,34 @@ describe('a workspace checks command trees against its grammars', () => {
           profile: SessionProfile({ commands: { tool: { publish: 'deny' } } }),
         }),
       ).toThrow('no subcommand publish')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount added serving a CLI meets the rules naming it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { prog: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.addMount('/late', new Serving(prog()))
+      for (const verb of ['go', 'run']) {
+        expect((await ws.shell(`cd /late && prog ${verb}`)).exitCode).toBe(126)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount added serving a CLI a profile names wrongly is refused', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { p: SessionProfile({ commands: { prog: { walk: 'deny' } } }) } },
+    )
+    try {
+      expect(() => ws.addMount('/late', new Serving(prog()))).toThrow('no subcommand walk')
+      expect((await ws.shell('cd /late')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }

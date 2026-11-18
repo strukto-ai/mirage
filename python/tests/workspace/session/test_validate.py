@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from typing import Any
 
 import pytest
 
@@ -240,6 +241,44 @@ def test_a_session_naming_what_two_trees_read_differently_is_refused():
         ws.create_session(
             "publish", profile={"commands": {"tool": {"publish": "deny"}}}
         )
+
+
+class _Serving(RAMVFS):
+    def __init__(self, cli: CLI) -> None:
+        super().__init__()
+        self._cli = cli
+
+    def commands(self) -> list[Any]:
+        return [self._cli]
+
+
+@pytest.mark.asyncio
+async def test_a_mount_added_serving_a_cli_meets_the_rules_naming_it():
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        profiles={"default": {"commands": {"prog": {"go": "deny"}}}},
+    )
+    try:
+        ws.add_mount("/late", _Serving(_prog()))
+        for verb in ("go", "run"):
+            ran = await ws.shell(f"cd /late && prog {verb}")
+            assert ran.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_added_serving_a_cli_a_profile_names_wrongly_is_refused():
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        profiles={"p": {"commands": {"prog": {"walk": "deny"}}}},
+    )
+    try:
+        with pytest.raises(PolicyError, match="no subcommand walk"):
+            ws.add_mount("/late", _Serving(_prog()))
+        assert (await ws.shell("cd /late")).exit_code == 1
+    finally:
+        await ws.close()
 
 
 def test_register_cli_refuses_a_cli_a_profile_names_wrongly():
