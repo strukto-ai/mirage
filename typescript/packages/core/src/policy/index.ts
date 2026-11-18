@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export type { Policy } from './base.ts'
-export { PolicyDenied } from './errors.ts'
+export { PolicyDenied, describeDecision } from './errors.ts'
 export { Decisions, askRule, covers, decisionId, type AskHandler } from './decisions.ts'
 export { MountRootPolicy } from './builtin/mount_root.ts'
 export { PermissionsPolicy } from './builtin/permissions.ts'
@@ -27,7 +27,6 @@ export {
   postVfsGate,
   preNetworkGate,
   preVfsGate,
-  describeDecision,
   policyDenied,
   decisionOf,
   renderCommandDeny,

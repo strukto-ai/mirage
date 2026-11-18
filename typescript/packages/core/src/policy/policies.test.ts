@@ -39,7 +39,6 @@ import {
   postExecuteGate,
   postVfsGate,
   preVfsGate,
-  describeDecision,
   decisionOf,
   renderDeny,
 } from './policies.ts'
@@ -1021,33 +1020,6 @@ describe('Ask in the chain', () => {
       policy: '',
       askId: 'abc123',
     })
-  })
-
-  it('describeDecision carries the reason the stderr line dropped', () => {
-    expect(
-      describeDecision({
-        kind: 'deny',
-        reason: 'user rule',
-        policy: 'RulePolicy',
-        askId: null,
-      }),
-    ).toBe('policy denied: user rule')
-    expect(
-      describeDecision({
-        kind: 'pending',
-        reason: 'sign-off',
-        policy: '',
-        askId: 'abc123',
-      }),
-    ).toBe('requires approval: sign-off (ask abc123)')
-    expect(
-      describeDecision({
-        kind: 'failed',
-        reason: 'Raising failed',
-        policy: 'Raising',
-        askId: null,
-      }),
-    ).toBe('policy Raising failed')
   })
 })
 

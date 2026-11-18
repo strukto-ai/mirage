@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PolicyDenied, describeDecision } from '../../policy/index.ts'
+import { PolicyDenied, describeDecision } from '../../policy/errors.ts'
 import type { PolicyDecision } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
