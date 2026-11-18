@@ -4434,9 +4434,11 @@
         "gated": {
           "commands": {
             "printenv": {
-              "GATED": {
-                "decision": "deny",
-                "reason": "reading GATED is off here"
+              "operands": {
+                "GATED": {
+                  "decision": "deny",
+                  "reason": "reading GATED is off here"
+                }
               }
             }
           }
