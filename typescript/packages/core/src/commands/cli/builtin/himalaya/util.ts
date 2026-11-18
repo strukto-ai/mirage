@@ -22,24 +22,16 @@ import type { IdSource } from '../../../../utils/ids.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchRawMessage } from '../../../../core/email/client.ts'
-import { headerValue, parseMime, partAt, type MimeValue } from '../../../../core/email/mime.ts'
+import { renderMime } from '../../../../core/email/mime.ts'
 import { readOperand } from '../../operand.ts'
 import { build, readBody, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
-import { notice, rendered } from './printer.ts'
+import { notice } from './printer.ts'
 
 const NO_ENTRY = 2
 const NOT_A_DIRECTORY = 20
 const NO_BODY = 'FETCH returned no body for the requested message'
 const MISSING_UID = 'email: uid '
-const PARSE_FAILURE = 'Failed to parse composed message'
-const ADDRESS_SPECIALS = '()<>[]:;@\\,."'
-
-interface MailAddress {
-  name: string | null
-  address: string | null
-}
-
 /** A message's raw bytes, refused when the id matches nothing. */
 export async function fetchSource(
   accessor: EmailAccessor,
@@ -105,48 +97,6 @@ async function readNamed(
   return new TextDecoder().decode(await readFile(vfs, path, flag, label))
 }
 
-function mailboxText(entry: MailAddress): string {
-  const email = entry.address ?? ''
-  const name = entry.name
-  if (name === null || name === '') return email
-  if (Array.from(name).some((char) => ADDRESS_SPECIALS.includes(char))) {
-    return `"${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" <${email}>`
-  }
-  return `${name} <${email}>`
-}
-
-function addressesOf(value: MimeValue): string[] {
-  if (value === null || typeof value !== 'object' || !('Address' in value)) return []
-  const address = (
-    value as unknown as {
-      Address: { List?: MailAddress[]; Group?: { addresses: MailAddress[] }[] }
-    }
-  ).Address
-  if (address.List !== undefined) return address.List.map(mailboxText)
-  return (address.Group ?? []).flatMap((group) => group.addresses.map(mailboxText))
-}
-
-/** The decoded fields of a composed message. */
-export function templateDocument(raw: Uint8Array): Record<string, unknown> {
-  const message = parseMime(raw)
-  if (message === null) throw new Error(PARSE_FAILURE)
-  const headers = partAt(message, 0).headers
-  const document: Record<string, unknown> = {}
-  const senders = addressesOf(headerValue(headers, 'from'))
-  if (senders.length > 0) document.from = senders[0]
-  document.to = addressesOf(headerValue(headers, 'to'))
-  document.cc = addressesOf(headerValue(headers, 'cc'))
-  document.bcc = addressesOf(headerValue(headers, 'bcc'))
-  const subject = headerValue(headers, 'subject') as { Text?: string } | null
-  if (subject !== null && typeof subject === 'object' && subject.Text !== undefined) {
-    document.subject = subject.Text
-  }
-  const first = message.textBody[0]
-  const body = first === undefined ? undefined : message.parts[first]?.body
-  document.body = body !== undefined && 'Text' in body ? body.Text : ''
-  return document
-}
-
 /** Route composed bytes: to stdout, a mailbox, SMTP, or both. */
 export async function finishMessage(
   accessor: EmailAccessor,
@@ -157,7 +107,7 @@ export async function finishMessage(
   const save = fl.asStr('save') ?? null
   const noSave = fl.asBool('no_save')
   if (!send && save === null) {
-    if (fl.asBool('json')) return [rendered(fl, templateDocument(raw), ''), new IOResult()]
+    if (fl.asBool('json')) return [renderMime(raw, 'template'), new IOResult()]
     return [raw as ByteSource, new IOResult()]
   }
   if (!send) {
