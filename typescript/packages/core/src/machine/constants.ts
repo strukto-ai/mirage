@@ -91,8 +91,24 @@ export const SSHFS_LOG_NAME = 'sshfs'
 // so each instance knows its own mounts from another's on the same machine.
 export const SSHFS_SOURCE_PREFIX = 'mirage-'
 
+// The line that makes sure the machine has sshfs, exiting 0 once it does:
+// one it lacks is installed by its package manager, as root or through sudo
+// without a password, from the package lists the image keeps and, when that
+// fails, from fresh ones.
+export const SSHFS_LINE =
+  'command -v sshfs >/dev/null 2>&1 && exit 0; ' +
+  'if [ "$(id -u)" = 0 ]; then s=; ' +
+  'elif sudo -n true 2>/dev/null; then s="sudo -n"; else exit 1; fi; ' +
+  "a='env DEBIAN_FRONTEND=noninteractive apt-get -y -qq'; " +
+  '{ if command -v apt-get; then ' +
+  '$s $a install --no-install-recommends sshfs || ' +
+  '{ $s $a update && $s $a install --no-install-recommends sshfs; }; ' +
+  'elif command -v apk; then $s apk add --no-cache sshfs; ' +
+  'elif command -v dnf; then $s dnf install -y -q fuse-sshfs; ' +
+  'elif command -v yum; then $s yum install -y -q fuse-sshfs; fi; ' +
+  '} >/dev/null 2>&1; command -v sshfs >/dev/null 2>&1'
 export const SSHFS_HINT =
-  'serving the workspace into a machine needs sshfs there; install it in the image (apt-get update && apt-get install sshfs)'
+  'serving the workspace into a machine needs sshfs there, and it could not be installed: that takes root or sudo without a password, and apt-get, apk, dnf or yum; install it in the image (apt-get update && apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
   'this host serves no files into a machine: import @struktoai/mirage-core/mount/sftp, as node and cloudflare do, and install its ssh2 peer'
 

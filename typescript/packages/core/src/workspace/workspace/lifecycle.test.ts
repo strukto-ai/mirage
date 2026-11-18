@@ -31,6 +31,8 @@ import {
 import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
 import { Workspace } from './workspace.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
+import type { MachineMemory } from '../../machine/types.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { toStateDict } from '../snapshot/state.ts'
 import { Mount } from '../mount/spec.ts'
@@ -927,6 +929,71 @@ class Insomniac extends Napper {
     return Promise.reject(new Error('pause refused'))
   }
 }
+
+/** A machine Mirage started, as an E2B machine with no sandbox id reports once it connected. */
+class Started extends Unasked {
+  memoryGiven: MachineMemory | null = null
+
+  override get startedByMirage(): boolean {
+    return true
+  }
+
+  override bindMemory(memory: MachineMemory): void {
+    super.bindMemory(memory)
+    this.memoryGiven = memory
+  }
+
+  override destroy(): Promise<void> {
+    this.log.push('destroy')
+    return Promise.resolve()
+  }
+}
+
+describe('machines Mirage started', () => {
+  const build = (box: MachineHandle, store = new RAMWorkspaceStateStore()) =>
+    new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { box }, workspaceId: 'w', store },
+    )
+
+  it('pauses one on a plain close', async () => {
+    const box = new Started('box')
+    await build(box).close()
+    expect(box.log).toEqual(['close', 'pause'])
+  })
+
+  it('pauses one even when the pause names none', async () => {
+    const box = new Started('box')
+    await build(box).pause({ machines: [] })
+    expect(box.log).toEqual(['close', 'pause'])
+  })
+
+  it('removes one, never pausing it, when the workspace is deleted', async () => {
+    const box = new Started('box')
+    await build(box).delete()
+    expect(box.log).toEqual(['close', 'destroy'])
+  })
+
+  it('keeps what it started in the workspace record for the next build', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const first = new Started('box')
+    const ws = build(first, store)
+    const memory = first.memoryGiven
+    if (memory === null) throw new Error('no memory bound')
+    await memory.remember('box', 'sb-1')
+    await memory.remember('other', 'sb-2')
+    await ws.close()
+    const second = new Started('box')
+    const again = build(second, store)
+    const recalled = second.memoryGiven
+    if (recalled === null) throw new Error('no memory bound')
+    expect([await recalled.recall('box'), await recalled.recall('other')]).toEqual(['sb-1', 'sb-2'])
+    await recalled.forget('box')
+    expect([await recalled.recall('box'), await recalled.recall('other')]).toEqual([null, 'sb-2'])
+    expect((await store.loadMeta('w'))?.default_session_id).toBeTypeOf('string')
+    await again.close()
+  })
+})
 
 describe('pause', () => {
   it('raises a machine’s failed pause', async () => {

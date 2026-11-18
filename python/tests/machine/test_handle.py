@@ -224,6 +224,49 @@ async def test_first_line_connects_once():
         await ws.close()
 
 
+class WorkingMachine(RecordingMachine):
+    """A machine that records when Mirage's work there starts and ends."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.events: list[str] = []
+
+    async def connect(self) -> None:
+        self.events.append("connect")
+        await super().connect()
+
+    def _became_busy(self) -> None:
+        self.events.append("busy")
+
+    def _became_idle(self) -> None:
+        self.events.append("idle")
+
+
+@pytest.mark.asyncio
+async def test_a_run_is_work_from_before_it_connects_until_it_ends():
+    box = WorkingMachine(captures=("python3",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        await ws.shell("python3 x")
+        await ws.shell("python3 y")
+        assert box.events == ["busy", "connect", "idle", "busy", "idle"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_work_that_overlaps_is_one_busy_spell():
+    box = WorkingMachine()
+
+    async def line() -> None:
+        await MachineHandle.exec_line(box, "true", None, {}, "/")
+
+    async with box._at_work():
+        await asyncio.gather(line(), line())
+    await box.stop("tag", 15)
+    assert box.events == ["busy", "idle", "connect", "busy", "idle"]
+
+
 @pytest.mark.asyncio
 async def test_failed_connect_retries_on_the_next_line():
     class FlakyBox(RecordingMachine):

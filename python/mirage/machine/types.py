@@ -14,7 +14,7 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, Protocol, TypeAlias
 
 from mirage.runtime.types import ByteReader, PipeWriter
 
@@ -25,6 +25,27 @@ MountType: TypeAlias = Literal["ssh", "fuse", "both"]
 
 # What a provider does to its machine when the workspace pauses.
 PauseAction: TypeAlias = Literal["pause"]
+
+
+class MachineMemory(Protocol):
+    """Where a workspace keeps the machines Mirage started for it, each
+    its provider's id by the machine's name, so a later build of the
+    workspace reaches the one it started instead of starting another.
+    """
+
+    async def recall(self, name: str) -> str | None:
+        """The machine Mirage started for ``name``; None when it started
+        none."""
+        ...
+
+    async def remember(self, name: str, instance: str) -> None:
+        """Keep ``instance`` as the machine Mirage started for
+        ``name``."""
+        ...
+
+    async def forget(self, name: str) -> None:
+        """Drop the machine kept for ``name``, once it is gone."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

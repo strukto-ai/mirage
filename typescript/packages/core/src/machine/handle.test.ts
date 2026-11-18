@@ -195,7 +195,49 @@ function sandboxWorkspace(box: RecordingMachine): Workspace {
   )
 }
 
+// A box that records when Mirage's work there starts and ends.
+class WorkingBox extends RecordingMachine {
+  readonly events: string[] = []
+
+  override connect(): Promise<void> {
+    this.events.push('connect')
+    return super.connect()
+  }
+
+  protected override becameBusy(): void {
+    this.events.push('busy')
+  }
+
+  protected override becameIdle(): void {
+    this.events.push('idle')
+  }
+
+  // A line through the base class's own `execLine`, which counts as work.
+  baseLine(line: string): Promise<RunAnswer> {
+    return MachineHandle.prototype.execLine.call(this, line, null, {}, '/')
+  }
+}
+
 describe('MachineHandle', () => {
+  it('counts a run as work from before it connects until it ends', async () => {
+    const box = new WorkingBox({ captures: ['python3'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      await ws.shell('python3 x')
+      await ws.shell('python3 y')
+      expect(box.events).toEqual(['busy', 'connect', 'idle', 'busy', 'idle'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('counts overlapping work as one busy spell', async () => {
+    const box = new WorkingBox()
+    await Promise.all([box.baseLine('true'), box.baseLine('true')])
+    await box.stop('tag', 15)
+    expect(box.events).toEqual(['busy', 'idle', 'connect', 'busy', 'idle'])
+  })
+
   it.each(['python3 --version', 'python -V', 'node --version', 'node -v', 'tsc --version'])(
     'passes %s and its output through the remote environment',
     async (line) => {

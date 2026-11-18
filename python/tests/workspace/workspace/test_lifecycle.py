@@ -63,6 +63,7 @@ from mirage.workspace.executor.builtins.shared import expand_operands
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.snapshot import to_state_dict
+from mirage.workspace.store import RAMWorkspaceStateStore
 from mirage.workspace.types import ExecutionNode
 from tests.fixtures.vfs_io import override
 
@@ -1717,6 +1718,81 @@ class _Insomniac(_Napper):
     async def pause(self) -> None:
         self.log.append("pause")
         raise RuntimeError("pause refused")
+
+
+class _Started(_Unasked):
+    """A machine Mirage started, as an E2B machine with no sandbox id
+    reports once it connected."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.memory_given = None
+
+    @property
+    def started_by_mirage(self) -> bool:
+        return True
+
+    def bind_memory(self, memory) -> None:
+        super().bind_memory(memory)
+        self.memory_given = memory
+
+    async def destroy(self) -> None:
+        self.log.append("destroy")
+
+
+def _built(box: MachineHandle, store=None) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": box},
+        workspace_id="w",
+        store=store if store is not None else RAMWorkspaceStateStore(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_machine_mirage_started_is_paused_on_a_plain_close():
+    box = _Started("box")
+    await _built(box).close()
+    assert box.log == ["close", "pause"]
+
+
+@pytest.mark.asyncio
+async def test_a_machine_mirage_started_is_paused_when_the_pause_names_none():
+    box = _Started("box")
+    await _built(box).pause(machines=[])
+    assert box.log == ["close", "pause"]
+
+
+@pytest.mark.asyncio
+async def test_a_machine_mirage_started_is_removed_on_delete_never_paused():
+    box = _Started("box")
+    await _built(box).delete()
+    assert box.log == ["close", "destroy"]
+
+
+@pytest.mark.asyncio
+async def test_what_mirage_started_is_kept_in_the_record_for_the_next_build():
+    store = RAMWorkspaceStateStore()
+    first = _Started("box")
+    ws = _built(first, store)
+    await first.memory_given.remember("box", "sb-1")
+    await first.memory_given.remember("other", "sb-2")
+    await ws.close()
+    second = _Started("box")
+    again = _built(second, store)
+    memory = second.memory_given
+    assert [await memory.recall("box"), await memory.recall("other")] == [
+        "sb-1",
+        "sb-2",
+    ]
+    await memory.forget("box")
+    assert [await memory.recall("box"), await memory.recall("other")] == [
+        None,
+        "sb-2",
+    ]
+    assert isinstance((await store.load_meta("w"))["default_session_id"], str)
+    await again.close()
 
 
 @pytest.mark.asyncio

@@ -24,10 +24,16 @@ import type { E2BConfig } from '@struktoai/mirage-core/machine/e2b/config'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
-import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/machine/e2b/constants'
+import {
+  BUSY_REFRESH_SECONDS,
+  BUSY_TIMEOUT_SECONDS,
+  IDLE_TIMEOUT_SECONDS,
+  PTY_MARK,
+  PTY_RAW,
+} from '@struktoai/mirage-core/machine/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { MachineMemory, MachinePipe } from '@struktoai/mirage-core/machine/types'
 import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
@@ -251,8 +257,28 @@ class FakeMachine {
   static last: FakeMachine
   static paused: [string, Record<string, unknown>][] = []
   static pauseRefusal: Error | null = null
+  static created: [string, Record<string, unknown>][] = []
+  static killed: [string, Record<string, unknown>][] = []
+  static timeouts: [string, number][] = []
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
+  sandboxId = 'sb-live'
+  static async create(template: string, opts: Record<string, unknown>): Promise<FakeMachine> {
+    FakeMachine.created.push([template, opts])
+    await Promise.resolve()
+    FakeMachine.last = new FakeMachine()
+    FakeMachine.last.sandboxId = `sb-new-${String(FakeMachine.created.length)}`
+    return FakeMachine.last
+  }
+  static async kill(sandboxId: string, params: Record<string, unknown>): Promise<boolean> {
+    FakeMachine.killed.push([sandboxId, params])
+    await Promise.resolve()
+    return true
+  }
+  static async setTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
+    FakeMachine.timeouts.push([sandboxId, timeoutMs])
+    await Promise.resolve()
+  }
   static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeMachine> {
     FakeMachine.connected.push([sandboxId, params])
     await Promise.resolve()
@@ -291,8 +317,223 @@ beforeEach(() => {
   FakeMachine.last = new FakeMachine()
   FakeMachine.paused = []
   FakeMachine.pauseRefusal = null
+  FakeMachine.created = []
+  FakeMachine.killed = []
+  FakeMachine.timeouts = []
   vi.restoreAllMocks()
 })
+
+/** A workspace's memory of the machines Mirage started, in a map. */
+class MapMemory implements MachineMemory {
+  constructor(readonly kept = new Map<string, string>()) {}
+  recall(name: string): Promise<string | null> {
+    return Promise.resolve(this.kept.get(name) ?? null)
+  }
+  remember(name: string, instance: string): Promise<void> {
+    this.kept.set(name, instance)
+    return Promise.resolve()
+  }
+  forget(name: string): Promise<void> {
+    this.kept.delete(name)
+    return Promise.resolve()
+  }
+}
+
+/** A machine with no sandbox id, bound to `memory`. */
+function startable(memory: MachineMemory, config: Partial<E2BConfig> = {}): FakedE2BMachine {
+  const machine = new FakedE2BMachine('box', { apiKey: 'k', ...config })
+  machine.bindMemory(memory)
+  return machine
+}
+
+const STARTED = {
+  apiKey: 'k',
+  timeoutMs: BUSY_TIMEOUT_SECONDS * 1000,
+  lifecycle: { onTimeout: 'pause', autoResume: false },
+  metadata: { mirage_machine: 'box' },
+}
+
+describe('E2BMachine started by Mirage', () => {
+  it('starts a sandbox from its template at the first connect and remembers it', async () => {
+    const memory = new MapMemory()
+    const machine = startable(memory, { template: 'tpl' })
+    expect([machine.instance, machine.startedByMirage]).toEqual(['box', false])
+    await machine.connect()
+    expect(FakeMachine.created).toEqual([['tpl', STARTED]])
+    expect([machine.instance, machine.startedByMirage]).toEqual(['sb-new-1', true])
+    expect([...memory.kept]).toEqual([['box', 'sb-new-1']])
+  })
+  it("starts from E2B's base template when the config names none", async () => {
+    await startable(new MapMemory()).connect()
+    expect(FakeMachine.created.map(([template]) => template)).toEqual(['base'])
+  })
+  it('connects again, resuming it, to the sandbox the workspace remembers', async () => {
+    const machine = startable(new MapMemory(new Map([['box', 'sb-old']])))
+    await machine.connect()
+    expect(FakeMachine.connected).toEqual([
+      ['sb-old', { apiKey: 'k', timeoutMs: BUSY_TIMEOUT_SECONDS * 1000 }],
+    ])
+    expect([FakeMachine.created, machine.instance, machine.startedByMirage]).toEqual([
+      [],
+      'sb-old',
+      true,
+    ])
+  })
+  it('starts anew when the sandbox it remembers is gone', async () => {
+    const memory = new MapMemory(new Map([['box', 'sb-old']]))
+    FakeMachine.refusal = new FakeSandboxNotFoundError('gone')
+    await startable(memory).connect()
+    expect(FakeMachine.created).toHaveLength(1)
+    expect([...memory.kept]).toEqual([['box', 'sb-new-1']])
+  })
+  it('kills the sandbox it started as the workspace is deleted, and forgets it', async () => {
+    const memory = new MapMemory()
+    const machine = startable(memory)
+    await machine.connect()
+    await machine.destroy()
+    expect(FakeMachine.killed).toEqual([['sb-new-1', { apiKey: 'k' }]])
+    expect([memory.kept.size, machine.startedByMirage]).toEqual([0, false])
+  })
+  it('kills the one the workspace remembers when this build never connected', async () => {
+    const memory = new MapMemory(new Map([['box', 'sb-old']]))
+    await startable(memory).destroy()
+    expect(FakeMachine.killed).toEqual([['sb-old', { apiKey: 'k' }]])
+    expect(memory.kept.size).toBe(0)
+  })
+  it('never kills a sandbox the config names', async () => {
+    const machine = startable(new MapMemory(), { sandboxId: 'sb-live' })
+    await machine.connect()
+    await machine.destroy()
+    expect([FakeMachine.killed, FakeMachine.created, machine.startedByMirage]).toEqual([
+      [],
+      [],
+      false,
+    ])
+  })
+  it('pauses the sandbox it started', async () => {
+    const machine = startable(new MapMemory())
+    await machine.connect()
+    await machine.close()
+    await machine.pause()
+    expect(FakeMachine.paused).toEqual([['sb-new-1', { apiKey: 'k' }]])
+  })
+  it('sets a started sandbox to its busy timeout while Mirage works there, then idle', async () => {
+    const machine = startable(new MapMemory())
+    await machine.connect()
+    await busyWith(machine, async () => {
+      await settled()
+      expect(FakeMachine.timeouts).toEqual([['sb-new-1', BUSY_TIMEOUT_SECONDS * 1000]])
+    })
+    await settled()
+    expect(FakeMachine.timeouts).toEqual([
+      ['sb-new-1', BUSY_TIMEOUT_SECONDS * 1000],
+      ['sb-new-1', IDLE_TIMEOUT_SECONDS * 1000],
+    ])
+  })
+  it('sets the timeouts once for nested and overlapping work', async () => {
+    const machine = startable(new MapMemory())
+    await machine.connect()
+    const piece = () => busyWith(machine, () => new Promise((resolve) => setTimeout(resolve, 10)))
+    await busyWith(machine, () => Promise.all([piece(), piece()]))
+    await settled()
+    expect(FakeMachine.timeouts.map(([, ms]) => ms)).toEqual([
+      BUSY_TIMEOUT_SECONDS * 1000,
+      IDLE_TIMEOUT_SECONDS * 1000,
+    ])
+  })
+  it('takes the idle timeout from the config', async () => {
+    const machine = startable(new MapMemory(), { idleTimeout: 30 })
+    await machine.connect()
+    await busyWith(machine, () => Promise.resolve())
+    await settled()
+    expect(FakeMachine.timeouts.at(-1)).toEqual(['sb-new-1', 30_000])
+  })
+  it('sends only the newest of the timeouts asked while one is on its way', async () => {
+    const machine = startable(new MapMemory())
+    await machine.connect()
+    const push = (seconds: number) => {
+      ;(machine as unknown as { push(s: number): void }).push(seconds)
+    }
+    push(600)
+    push(20)
+    push(30)
+    await settled()
+    const sent = FakeMachine.timeouts.map(([, ms]) => ms)
+    expect(sent).not.toContain(20_000)
+    expect(sent.at(-1)).toBe(30_000)
+  })
+  it('leaves a sandbox the config names on its own timeout', async () => {
+    const machine = startable(new MapMemory(), { sandboxId: 'sb-live' })
+    await machine.connect()
+    await busyWith(machine, () => Promise.resolve())
+    await settled()
+    expect(FakeMachine.timeouts).toEqual([])
+  })
+  it('pushes the busy timeout out again while long work lasts', async () => {
+    vi.useFakeTimers()
+    try {
+      const machine = startable(new MapMemory())
+      await machine.connect()
+      await busyWith(machine, () => vi.advanceTimersByTimeAsync(BUSY_REFRESH_SECONDS * 1000 * 2))
+      await vi.advanceTimersByTimeAsync(BUSY_REFRESH_SECONDS * 1000 * 2)
+      expect(FakeMachine.timeouts.map(([, ms]) => ms)).toEqual([
+        BUSY_TIMEOUT_SECONDS * 1000,
+        BUSY_TIMEOUT_SECONDS * 1000,
+        BUSY_TIMEOUT_SECONDS * 1000,
+        IDLE_TIMEOUT_SECONDS * 1000,
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('connects again for work that comes after the idle timeout', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    const machine = startable(new MapMemory())
+    await machine.ensureConnected()
+    await busyWith(machine, () => Promise.resolve())
+    await settled()
+    now.mockReturnValue(1_000 + IDLE_TIMEOUT_SECONDS * 1000)
+    const before = FakeMachine.timeouts.length
+    await busyWith(machine, () => machine.ensureConnected())
+    await settled()
+    expect(FakeMachine.connected).toEqual([
+      ['sb-new-1', { apiKey: 'k', timeoutMs: BUSY_TIMEOUT_SECONDS * 1000 }],
+    ])
+    expect(FakeMachine.timeouts.slice(before)).toEqual([['sb-new-1', IDLE_TIMEOUT_SECONDS * 1000]])
+  })
+  it('resumes at a connect after the idle timeout, with no work', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    const machine = startable(new MapMemory())
+    await machine.ensureConnected()
+    await busyWith(machine, () => Promise.resolve())
+    now.mockReturnValue(1_000 + IDLE_TIMEOUT_SECONDS * 1000)
+    await machine.ensureConnected()
+    await machine.ensureConnected()
+    expect(FakeMachine.connected.map(([id]) => id)).toEqual(['sb-new-1'])
+  })
+  it('keeps the connection for work within the idle timeout', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    const machine = startable(new MapMemory())
+    await machine.ensureConnected()
+    await busyWith(machine, () => Promise.resolve())
+    now.mockReturnValue(1_000 + (IDLE_TIMEOUT_SECONDS * 1000) / 2)
+    await busyWith(machine, () => machine.ensureConnected())
+    expect(FakeMachine.connected).toEqual([])
+  })
+  it.each([0, -1, '10', true, Infinity, NaN])('rejects an idleTimeout of %s', (idle) => {
+    expect(() => new FakedE2BMachine('box', { idleTimeout: idle as never })).toThrow('idleTimeout')
+  })
+})
+
+/** Run `work` as Mirage's work on `machine` (its base class's private `busyWith`). */
+function busyWith<T>(machine: E2BMachine, work: () => Promise<T>): Promise<T> {
+  return (machine as unknown as { busyWith(w: () => Promise<T>): Promise<T> }).busyWith(work)
+}
+
+/** Let the timeouts under way reach the fake. */
+async function settled(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 describe('E2BMachine', () => {
   it('connects by sandbox id with api key', async () => {
@@ -341,9 +582,6 @@ describe('E2BMachine', () => {
     pty.refuse = true
     await expect(runtime.openPipe('exec sshfs x y')).rejects.toThrow('the machine went away')
     expect(pty.ended).toBe(true)
-  })
-  it('requires a sandbox id', () => {
-    expect(() => new FakedE2BMachine('box', {} as never)).toThrow('sandboxId')
   })
   it.each([
     null,
@@ -544,7 +782,7 @@ function deferred<T>() {
 }
 
 describe('E2B cancellation and validation', () => {
-  it.each([null, '', ' \t\n', 0, 1, false, [], {}].map((sandboxId) => ({ sandboxId })))(
+  it.each(['', ' \t\n', 0, 1, false, [], {}].map((sandboxId) => ({ sandboxId })))(
     'rejects an invalid sandbox id before connecting: $sandboxId',
     ({ sandboxId }) => {
       expect(() => new E2BMachine('box', { sandboxId: sandboxId as string })).toThrow(
@@ -553,6 +791,12 @@ describe('E2B cancellation and validation', () => {
       expect(FakeMachine.connected).toEqual([])
     },
   )
+
+  it.each(['', ' ', 0])('rejects a blank or non-string template: %j', (template) => {
+    expect(() => new E2BMachine('box', { template: template as string })).toThrow(
+      'nonblank template',
+    )
+  })
 
   it('does not connect for an already aborted call', async () => {
     const abort = new AbortController()

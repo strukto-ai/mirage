@@ -1,12 +1,15 @@
 ---
 title: E2B
 icon: /images/e2b-logo.svg
-description: Run captured programs in an E2B cloud sandbox you created.
+description: Run captured programs in an E2B cloud sandbox, one Mirage starts for the workspace or one you created.
 ---
 
-The `e2b` machine provider reaches a running [E2B](https://e2b.dev)
-sandbox, by ID, and runs the programs it captures in it. You create the sandbox from a template; Mirage only runs programs in
-it. Python SDK, Node and browsers.
+The `e2b` machine provider runs the programs it captures in an
+[E2B](https://e2b.dev) sandbox. Leave out `sandbox_id` and Mirage starts a
+sandbox from `template` when the first program needs one, pauses it when the
+workspace has no work there, and kills it when the workspace is deleted.
+Give `sandbox_id` and Mirage runs programs in your sandbox and leaves its
+lifetime to you. Python SDK, Node and browsers.
 
 ## Installation
 
@@ -24,8 +27,8 @@ it. Python SDK, Node and browsers.
 </Tabs>
 
 The `ssh` extra and `ssh2` serve the workspace into the sandbox with
-`mount_type: ssh`. Create the sandbox from a template that has what
-[connecting the workspace](#connecting-the-workspace) needs. Set `api_key`
+`mount_type: ssh`; see [connecting the workspace](#connecting-the-workspace).
+Set `api_key`
 in the config, as a value or a [credential pointer](/home/service-credentials#pointer-fields),
 or `E2B_API_KEY`.
 
@@ -33,7 +36,8 @@ or `E2B_API_KEY`.
 
 `captures` defaults to [`@external`](/home/setup/machine/overview#captures):
 every program Mirage does not have itself. Name `@python` to run
-Python in the sandbox too.
+Python in the sandbox too. Without `sandbox_id`, the first program starts
+the sandbox; Mirage's own commands start none.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -44,9 +48,8 @@ Python in the sandbox too.
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={
-            "box": {
+            "sandbox": {
                 "provider": "e2b",
-                "sandbox_id": "sandbox-id",
                 "mount_type": "ssh",
                 "captures": ["@python", "@external"],
             }
@@ -63,7 +66,7 @@ Python in the sandbox too.
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'e2b', sandboxId: 'sandbox-id', mountType: 'ssh', captures: ['@python', '@external'] } },
+        machines: { sandbox: { provider: 'e2b', mountType: 'ssh', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -77,9 +80,8 @@ Python in the sandbox too.
     ```yaml
     mode: exec
     machines:
-      box:
+      sandbox:
         provider: e2b
-        sandbox_id: ${E2B_SANDBOX_ID}
         mount_type: ssh
         captures: ["@python", "@external"]
     mounts:
@@ -96,9 +98,15 @@ each file call is about 150 ms for a small file from a laptop. With `fuse`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
-### A template for ssh
+### sshfs for ssh
 
-Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
+`ssh` and `both` need `sshfs` in the sandbox. One that lacks it gets it from
+its package manager as the workspace is first served, as root or through
+`sudo` without a password, with `apt-get`, `apk`, `dnf` or `yum`. E2B's
+default template takes about 3 seconds, once per sandbox. Where that cannot
+work, the line fails with what to install. To skip the install, build a
+template with `sshfs` and name it as `template`, or create your sandbox from
+it and pass its ID as `sandbox_id`:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -122,13 +130,40 @@ Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 </Tabs>
 
 Keep the base image's user, which has `sudo` for mountpoints such as
-`/data`. On the default template, run
-`sudo apt-get update && sudo apt-get install -y sshfs` instead.
+`/data`.
 
-## The sandbox's lifetime
+## A sandbox Mirage starts
+
+Without `sandbox_id`, the first program that needs the sandbox starts one
+from `template` (E2B's `base` when unset). The workspace keeps its ID in its
+state, so a later build of the same workspace reaches the same sandbox, and
+one that is gone is started anew.
+
+While Mirage has work there, a program's run or one of its own lines, the
+sandbox's E2B timeout is 10 minutes, pushed out every 5 minutes while the
+work lasts. Once the last of it ends, the timeout is `idle_timeout` seconds,
+10 when unset, after which E2B pauses the sandbox: its disk and memory are
+kept and its compute is not billed. Mirage's own commands on the
+workspace's files run while it stays paused. The next program resumes it,
+which takes about a second, and serves the workspace into it again:
+
+```yaml
+machines:
+  sandbox:
+    provider: e2b
+    template: my-template
+    idle_timeout: 30
+    mount_type: ssh
+```
+
+Closing the workspace pauses the sandbox; deleting the workspace kills it.
+A process a program left running on its own, outside the line's job, is
+paused with the sandbox and goes on when it resumes.
+
+## A sandbox you bring
 
 The timeout you give the sandbox at creation, one hour above, sets when it
-ends. Mirage never makes a sandbox, kills one or sets its timeout. Reaching a
+ends. Mirage never kills your sandbox or sets its timeout. Reaching a
 sandbox resumes it if it is paused and keeps it alive at least 5 more
 minutes, as any E2B connect does, so reaching it near the end moves the end
 back. Closing the workspace leaves the sandbox running.
@@ -138,7 +173,7 @@ machine:
 
 ```yaml
 machines:
-  box:
+  sandbox:
     provider: e2b
     sandbox_id: ${E2B_SANDBOX_ID}
     on_pause: pause
@@ -151,7 +186,7 @@ sandbox the workspace reached, and a sandbox that is already gone counts as
 paused. A pause interrupts anything else running in the sandbox, so leave
 `on_pause` unset when the sandbox is shared. Without it, `workspace.pause()`
 leaves the sandbox running, as `close()` does, unless the call names the
-machine (`pause(machines=["box"])`), which pauses it whatever its config says.
+machine (`pause(machines=["sandbox"])`), which pauses it whatever its config says.
 `pause` is the only value.
 
 Once the sandbox has ended, a line exits 1, and its error names the fix:
@@ -177,6 +212,6 @@ the workspace again.
   nothing, prints why and exits 127.
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
-- Templates, sizing and networking stay E2B settings.
+- Template contents, sizing and networking stay E2B settings.
 - A Mirage [timeout](/home/setup/machine/overview#timeouts) tries to kill the command; its child
   processes may survive.

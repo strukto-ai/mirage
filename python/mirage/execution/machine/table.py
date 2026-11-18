@@ -36,6 +36,7 @@ from mirage.execution.types import (
 )
 from mirage.machine.handle import MachineHandle
 from mirage.machine.registry import build_machine
+from mirage.machine.types import MachineMemory
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 from mirage.workspace.record.types import RecordFields
 
@@ -629,24 +630,49 @@ class MachineTable:
                 del self._found[key]
                 gone.set()
 
-    async def close(self, pause: frozenset[str] | None = None) -> None:
+    def bind_memory(self, memory: MachineMemory) -> None:
+        """Give every handle where the workspace keeps the machines Mirage
+        started for it (``MachineHandle.bind_memory``).
+
+        Args:
+            memory (MachineMemory): the workspace's memory of the machines
+                it started.
+        """
+        for handle in self._handles.values():
+            handle.bind_memory(memory)
+
+    async def close(
+        self, pause: frozenset[str] | None = None, destroy: bool = False
+    ) -> None:
         """Close every handle: unmount what each was served, and let go
         of it for another workspace. With ``pause``, each handle it names
         that this table held is then paused, every held handle staying
         held until then so no other workspace takes it first; a handle
-        whose close failed is still paused.
+        whose close failed is still paused. A machine Mirage started is
+        paused either way, and with ``destroy`` (the workspace is being
+        deleted) it is removed instead.
 
         Args:
             pause (frozenset[str] | None): the machines to pause after
                 closing, by name; None closes only.
+            destroy (bool): remove the machines Mirage started rather than
+                pause them.
         """
         held = {
             name: handle
             for name, handle in self._handles.items()
             if (ref := _HOLDERS.get(handle)) is not None and ref() is self
         }
-        if pause is not None:
-            results = await asyncio.shield(self._close_then_pause(held, pause))
+        started = frozenset(
+            name for name, handle in held.items() if handle.started_by_mirage
+        )
+        if destroy:
+            results = await asyncio.shield(self._close_then_destroy(held))
+        elif pause is not None or started:
+            pausing = (pause or frozenset()) | started
+            results = await asyncio.shield(
+                self._close_then_pause(held, pausing)
+            )
         else:
             for handle in held.values():
                 _HOLDERS.pop(handle, None)
@@ -661,6 +687,35 @@ class MachineTable:
                 if len(failures) == 1
                 else BaseExceptionGroup("machine close failed", failures)
             )
+
+    async def _close_then_destroy(
+        self, held: dict[str, MachineHandle]
+    ) -> list[BaseException | None]:
+        """Close every handle, then remove each held one's machine that
+        Mirage started (``MachineHandle.destroy``), once the signals still
+        queued for its machines have run; the handles stay held until
+        then. Shielded by ``close``.
+
+        Args:
+            held (dict[str, MachineHandle]): the handles this table held
+                when its close began, by name.
+        """
+        for lock in list(self._signaling.values()):
+            async with lock:
+                pass
+        try:
+            results = await asyncio.gather(
+                *(handle.close() for handle in self._handles.values()),
+                return_exceptions=True,
+            )
+            results += await asyncio.gather(
+                *(handle.destroy() for handle in held.values()),
+                return_exceptions=True,
+            )
+            return results
+        finally:
+            for handle in held.values():
+                _HOLDERS.pop(handle, None)
 
     async def _close_then_pause(
         self, held: dict[str, MachineHandle], pause: frozenset[str]

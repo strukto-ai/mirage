@@ -33,6 +33,21 @@ export type MountType = 'ssh' | 'fuse' | 'both'
 /** What a provider does to its machine when the workspace pauses. */
 export type PauseAction = 'pause'
 
+/**
+ * Where a workspace keeps the machines Mirage started for it, each its
+ * provider's id by the machine's name, so a later build of the workspace
+ * reaches the one it started instead of starting another. Mirrors Python's
+ * `MachineMemory`.
+ */
+export interface MachineMemory {
+  /** The machine Mirage started for `name`; null when it started none. */
+  recall(name: string): Promise<string | null>
+  /** Keep `instance` as the machine Mirage started for `name`. */
+  remember(name: string, instance: string): Promise<void>
+  /** Drop the machine kept for `name`, once it is gone. */
+  forget(name: string): Promise<void>
+}
+
 /** A command a machine runs with its stdin and stdout held open. */
 export interface MachinePipe {
   /** What the command writes. */

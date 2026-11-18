@@ -21,7 +21,7 @@ import { MachineName, type MachinePid, type MachineResources } from '../executio
 import type { ByteSource } from '../io/types.ts'
 import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
-import type { MountType, RunStatus, ScanFacts } from './types.ts'
+import type { MachineMemory, MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
@@ -211,9 +211,13 @@ export class ExitLineFilter {
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
- * Mirage never creates, provisions, or deletes a machine: you bring your
- * own (a running container, a live Daytona or E2B machine, an SSH host)
- * and its config says how to reach it. The workspace reaches the machine
+ * You bring your own machine (a running container, a live Daytona or E2B
+ * machine, an SSH host) and its config says how to reach it, or, for a
+ * provider that can start one, the config says what to start and Mirage
+ * starts it at the first run that needs it (`startedByMirage`): kept in the
+ * workspace's memory (`bindMemory`) so a later build reaches the same one,
+ * paused as the workspace closes and removed as it is deleted
+ * (`destroy`). A machine you brought is never removed. The workspace reaches the machine
  * at the same prefixes as the host's, so the session cwd and every path in
  * a line resolve unchanged: a machine with a `mountType` is served them
  * (MachineMounts), otherwise serve them inside it yourself (`mirage
@@ -250,6 +254,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   readonly joinsStreams: boolean = false
   // Set by a provider's connect that reached the machine; close hands it to `pausable` for the pause after.
   protected reached = false
+  // Where the workspace keeps the machines Mirage started for it; null for a handle no workspace bound.
+  protected memory: MachineMemory | null = null
   private pausable = false
   private mounts: MachineMounts | null = null
   // The libfaketime the machine holds, asked once the first program runs
@@ -259,6 +265,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The runs executing here right now; a scan asks only a machine with
   // one, or with processes an earlier scan found.
   private runs = 0
+  // The work Mirage has under way here: programs' runs, its own lines and
+  // stops, but not the pipe that serves the workspace (`busyWith`).
+  private working = 0
   // Whether the machine has a program, by name, asked once each.
   private readonly programs = new Map<string, Promise<boolean>>()
 
@@ -288,6 +297,34 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    */
   get instance(): string {
     return this.name
+  }
+
+  /**
+   * Give the handle where its workspace keeps the machines Mirage started,
+   * so a provider that starts one reaches the same machine on a later build.
+   *
+   * @param memory the workspace's memory of the machines it started.
+   */
+  bindMemory(memory: MachineMemory): void {
+    this.memory = memory
+  }
+
+  /**
+   * Whether Mirage started the machine this handle reaches, rather than the
+   * user bringing it: its workspace pauses it as it closes and removes it as
+   * it is deleted. False until a connect starts or recalls one.
+   */
+  get startedByMirage(): boolean {
+    return false
+  }
+
+  /**
+   * Remove the machine Mirage started for this handle, as its workspace is
+   * deleted, and forget it; one the user brought stays. A provider that
+   * starts machines overrides this.
+   */
+  destroy(): Promise<void> {
+    return Promise.resolve()
   }
 
   /**
@@ -329,7 +366,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
 
   /**
    * Connect once, validate the line, run it, then land what sshfs
-   * acknowledged, failing the run with a landing that failed.
+   * acknowledged, failing the run with a landing that failed. The machine
+   * has work from before it connects until the landing ends (`busyWith`).
    *
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.
@@ -338,7 +376,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
    */
-  async run(
+  run(
+    argv: readonly string[],
+    ctx: Context,
+    binding: WorkspaceBinding | null,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    return this.busyWith(() => this.runHere(argv, ctx, binding, output, errors))
+  }
+
+  /** `run`'s body, inside its work. */
+  private async runHere(
     argv: readonly string[],
     ctx: Context,
     binding: WorkspaceBinding | null,
@@ -550,15 +599,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     try {
       await this.ensureConnected(signal)
       const done = await abortable(
-        answerOf((output, errors) =>
-          this.execArgv(
-            ['/bin/sh', '-c', stopLine(tag, signum)],
-            null,
-            { ...this.config.env },
-            '/',
-            output,
-            errors,
-            signal,
+        this.busyWith(() =>
+          answerOf((output, errors) =>
+            this.execArgv(
+              ['/bin/sh', '-c', stopLine(tag, signum)],
+              null,
+              { ...this.config.env },
+              '/',
+              output,
+              errors,
+              signal,
+            ),
           ),
         ),
         signal,
@@ -586,6 +637,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       mountType,
       this.setup.bind(this),
       this.openPipe.bind(this),
+      () => this.working > 0,
     )
   }
 
@@ -649,9 +701,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return library === null ? {} : faketimeEnv(library, env)
   }
 
-  /** Connect once; after a disconnect the next call connects again. */
+  /**
+   * Connect once; after a disconnect, or once the provider says the
+   * connection went stale (`stale`), the next call connects again.
+   */
   async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
+    if (this.stale()) this.disconnected()
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
       throw err
@@ -702,9 +758,53 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunAnswer> {
-    return answerOf((output, errors) =>
-      this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
+    return this.busyWith(() =>
+      answerOf((output, errors) =>
+        this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
+      ),
     )
+  }
+
+  /**
+   * Count `work` as Mirage's work on the machine while it runs: the first
+   * piece to start tells the provider the machine is busy (`becameBusy`),
+   * and the last to end that it is idle (`becameIdle`). Mirrors Python's
+   * `MachineHandle._at_work`.
+   *
+   * @param work what runs on the machine.
+   */
+  private async busyWith<T>(work: () => Promise<T>): Promise<T> {
+    this.working += 1
+    if (this.working === 1) this.becameBusy()
+    try {
+      return await work()
+    } finally {
+      this.working -= 1
+      if (this.working === 0) this.becameIdle()
+    }
+  }
+
+  /**
+   * Told as Mirage starts work on the machine while it had none: a
+   * program's run, before it connects, or one of Mirage's own lines. A
+   * provider whose machine pauses itself when idle keeps it up from here.
+   */
+  protected becameBusy(): void {
+    return
+  }
+
+  /** Told as the last of Mirage's work on the machine ends. */
+  protected becameIdle(): void {
+    return
+  }
+
+  /**
+   * Whether the connection may have gone since the last work, so the next
+   * connect reaches the machine anew: a machine that paused itself once
+   * idle. Asked as each connect starts.
+   */
+  protected stale(): boolean {
+    return false
   }
 
   /**

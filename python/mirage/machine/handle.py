@@ -15,7 +15,8 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -54,7 +55,7 @@ from mirage.machine.errors import ConnectionLostError
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
 from mirage.machine.resources import parse_resources
-from mirage.machine.types import RunStatus, ScanFacts
+from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -230,9 +231,14 @@ class MachineHandle:
     """One machine a workspace runs programs on, reached through its
     provider: the live connection, held once per workspace.
 
-    Mirage never creates, provisions, or deletes a machine: you bring
-    your own (a running container, a live Daytona or E2B machine, an SSH
-    host) and its config says how to reach it. The workspace reaches the
+    You bring your own machine (a running container, a live Daytona or
+    E2B machine, an SSH host) and its config says how to reach it, or,
+    for a provider that can start one, the config says what to start and
+    Mirage starts it at the first run that needs it
+    (``started_by_mirage``): kept in the workspace's memory
+    (``bind_memory``) so a later build reaches the same one, paused as the
+    workspace closes and removed as it is deleted (``destroy``). A machine
+    you brought is never removed. The workspace reaches the
     machine at the same prefixes as the host's, so the session cwd and
     every path in a line resolve unchanged: a machine with a
     ``mount_type`` is served them (MachineMounts), otherwise serve them
@@ -279,6 +285,9 @@ class MachineHandle:
         # it to ``_pausable`` for the pause after.
         self._reached = False
         self._pausable = False
+        # Where the workspace keeps the machines Mirage started for it;
+        # None for a handle no workspace bound.
+        self._memory: MachineMemory | None = None
         self._mounts: MachineMounts | None = None
         # The libfaketime the machine holds, asked once the first program
         # runs there under a system_time: None for none. Its first runs
@@ -290,6 +299,10 @@ class MachineHandle:
         # The runs executing here right now; a scan asks only a machine
         # with one, or with processes an earlier scan found.
         self._executing = 0
+        # The work Mirage has under way here: programs' runs, its own
+        # lines and stops, but not the pipe that serves the workspace
+        # (``_at_work``).
+        self._working = 0
         # Whether the machine has a program, by name, asked once each.
         self._programs: dict[str, bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
@@ -304,6 +317,7 @@ class MachineHandle:
                 self.config.mount_type,
                 self._setup,
                 self.open_pipe,
+                lambda: self._working > 0,
             )
 
     @property
@@ -316,6 +330,30 @@ class MachineHandle:
         """What the provider calls the machine: its container, sandbox,
         pod or host there. Its name, for a provider that says nothing."""
         return self.name
+
+    def bind_memory(self, memory: MachineMemory) -> None:
+        """Give the handle where its workspace keeps the machines Mirage
+        started, so a provider that starts one reaches the same machine on
+        a later build.
+
+        Args:
+            memory (MachineMemory): the workspace's memory of the machines
+                it started.
+        """
+        self._memory = memory
+
+    @property
+    def started_by_mirage(self) -> bool:
+        """Whether Mirage started the machine this handle reaches, rather
+        than the user bringing it: its workspace pauses it as it closes and
+        removes it as it is deleted. False until a connect starts or
+        recalls one."""
+        return False
+
+    async def destroy(self) -> None:
+        """Remove the machine Mirage started for this handle, as its
+        workspace is deleted, and forget it; one the user brought stays. A
+        provider that starts machines overrides this."""
 
     def file_effects_dispatched(
         self, binding: WorkspaceBinding | None
@@ -367,13 +405,36 @@ class MachineHandle:
         errors: OutputFn,
     ) -> RunResult:
         """Connect once, validate the line, run it, then land what sshfs
-        acknowledged, failing the run with a landing that failed.
+        acknowledged, failing the run with a landing that failed. The
+        machine has work from before it connects until the landing ends
+        (``_at_work``).
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
             ctx (Context): the run's stdin, environment and cwd.
             binding (WorkspaceBinding | None): the workspace the run
                 serves, whose mounts the machine is served.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
+        """
+        async with self._at_work():
+            return await self._run_here(argv, ctx, binding, output, errors)
+
+    async def _run_here(
+        self,
+        argv: tuple[str, ...],
+        ctx: Context,
+        binding: WorkspaceBinding | None,
+        output: OutputFn,
+        errors: OutputFn,
+    ) -> RunResult:
+        """``run``'s body, inside its work.
+
+        Args:
+            argv (tuple[str, ...]): the program and its arguments.
+            ctx (Context): the run's stdin, environment and cwd.
+            binding (WorkspaceBinding | None): the workspace the run
+                serves.
             output (OutputFn): receives stdout as it arrives.
             errors (OutputFn): receives stderr as it arrives.
         """
@@ -611,16 +672,17 @@ class MachineHandle:
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
                 await self.ensure_connected()
-                done = await answer_of(
-                    lambda output, errors: self._exec_argv(
-                        ("/bin/sh", "-c", stop_line(tag, signum)),
-                        None,
-                        dict(self.config.env),
-                        "/",
-                        output,
-                        errors,
+                async with self._at_work():
+                    done = await answer_of(
+                        lambda output, errors: self._exec_argv(
+                            ("/bin/sh", "-c", stop_line(tag, signum)),
+                            None,
+                            dict(self.config.env),
+                            "/",
+                            output,
+                            errors,
+                        )
                     )
-                )
         except Exception:
             logger.debug(
                 "%s: run %s not stopped", self.machine, tag, exc_info=True
@@ -707,8 +769,11 @@ class MachineHandle:
             return await self._setup(line)
 
     async def ensure_connected(self) -> None:
-        """Connect once; after a disconnect the next call connects
+        """Connect once; after a disconnect, or once the provider says the
+        connection went stale (``_stale``), the next call connects
         again."""
+        if self._stale():
+            self._disconnected()
         async with self._connect_lock:
             if not self._connected:
                 await self.connect()
@@ -757,11 +822,45 @@ class MachineHandle:
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        return await answer_of(
-            lambda output, errors: self._exec_argv(
-                ("/bin/sh", "-c", line), stdin, env, cwd, output, errors
+        async with self._at_work():
+            return await answer_of(
+                lambda output, errors: self._exec_argv(
+                    ("/bin/sh", "-c", line), stdin, env, cwd, output, errors
+                )
             )
-        )
+
+    @asynccontextmanager
+    async def _at_work(self) -> AsyncIterator[None]:
+        """Count what runs inside as Mirage's work on the machine: the
+        first piece to start tells the provider the machine is busy
+        (``_became_busy``), and the last to end that it is idle
+        (``_became_idle``)."""
+        self._working += 1
+        if self._working == 1:
+            self._became_busy()
+        try:
+            yield
+        finally:
+            self._working -= 1
+            if self._working == 0:
+                self._became_idle()
+
+    def _became_busy(self) -> None:
+        """Told as Mirage starts work on the machine while it had none: a
+        program's run, before it connects, or one of Mirage's own lines.
+        A provider whose machine pauses itself when idle keeps it up from
+        here."""
+        return
+
+    def _became_idle(self) -> None:
+        """Told as the last of Mirage's work on the machine ends."""
+        return
+
+    def _stale(self) -> bool:
+        """Whether the connection may have gone since the last work, so
+        the next connect reaches the machine anew: a machine that paused
+        itself once idle. Asked as each connect starts."""
+        return False
 
     async def has_program(self, name: str) -> bool:
         """Whether the machine has a program of this name on its PATH,

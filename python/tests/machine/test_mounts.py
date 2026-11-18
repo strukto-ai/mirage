@@ -41,6 +41,8 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     PIPE_SERVER_HINT,
     RUN_PROGRAM_AT,
+    SSHFS_HINT,
+    SSHFS_LINE,
     SSHFS_OPTIONS,
     is_run,
 )
@@ -173,7 +175,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
             return RunAnswer(0 if source in self.running else 1)
         if line.startswith("d=$(PATH="):
             return RunAnswer(0, b"/home/u/.mirage")
-        if line == "command -v sshfs":
+        if line == SSHFS_LINE:
             return RunAnswer(0 if self.sshfs else 1)
         if line == "python3 slow.py":
             await asyncio.Event().wait()
@@ -687,10 +689,7 @@ async def test_a_sandbox_without_sshfs_fails_loud():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
-    assert await result.stderr_str() == (
-        "python3: fake: serving the workspace into a machine needs sshfs there; "
-        "install it in the image (apt-get update && apt-get install sshfs)\n"
-    )
+    assert await result.stderr_str() == (f"python3: fake: {SSHFS_HINT}\n")
     assert sandbox.pipes == []
     await ws.close()
 
@@ -1245,6 +1244,43 @@ async def _until(ready):
     assert ready()
 
 
+async def _ended_in_a_line(sandbox, agent):
+    """Start a slow program, then end /data's server while it runs.
+
+    Returns:
+        asyncio.Task: the program's line, still running.
+    """
+    line = asyncio.create_task(agent.shell("python3 slow.py"))
+    await _until(lambda: "python3 slow.py" in sandbox.commands)
+    sandbox.requests["/data"].feed_eof()
+    return line
+
+
+async def _cancelled(line):
+    line.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await line
+
+
+# With no work on the machine no program of Mirage's is blocked, and the
+# server most likely ended as the machine paused itself: nothing runs there
+# until the next line unmounts the sshfs and serves the prefix again.
+@pytest.mark.asyncio
+async def test_a_server_that_ends_with_no_work_on_the_machine_kills_nothing():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    source = sandbox.table["/data"][0]
+    sandbox.requests["/data"].feed_eof()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert kill_line(source) not in sandbox.commands
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/my notes", "/data"]
+    await ws.close()
+
+
 # A program blocked on a mount nobody answers is freed while its line runs;
 # the next line unmounts the mount and serves the prefix again.
 @pytest.mark.asyncio
@@ -1279,11 +1315,11 @@ async def test_a_kill_of_an_ended_servers_sshfs_that_fails_warns(caplog):
     sandbox.fail_kill = True
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    sandbox.requests["/data"].feed_eof()
+    line = await _ended_in_a_line(sandbox, agent)
     await _until(
         lambda: "fake: killing the sshfs for /data failed" in caplog.text
     )
+    await _cancelled(line)
     assert (await agent.shell("python3 job.py")).exit_code == 0
     await ws.close()
 
@@ -1294,11 +1330,11 @@ async def test_the_next_line_runs_while_an_ended_servers_kill_is_unanswered():
     sandbox.hang_kill = True
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    sandbox.requests["/data"].feed_eof()
+    line = await _ended_in_a_line(sandbox, agent)
     await _until(
         lambda: any(c.startswith("for p in /proc/") for c in sandbox.commands)
     )
+    await _cancelled(line)
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data", "/my notes", "/data"]
     await ws.close()
@@ -1313,12 +1349,12 @@ async def test_an_unanswered_kill_is_let_go_at_its_deadline_with_a_warning(
     sandbox.hang_kill = True
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    sandbox.requests["/data"].feed_eof()
+    line = await _ended_in_a_line(sandbox, agent)
     await _until(
         lambda: "fake: killing the sshfs for /data failed" in caplog.text
     )
     assert sandbox.kills_stopped == 1
+    await _cancelled(line)
     await ws.close()
 
 
@@ -1330,11 +1366,11 @@ async def test_an_unanswered_kill_is_let_go_quietly_when_the_mounts_close(
     sandbox.hang_kill = True
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    sandbox.requests["/data"].feed_eof()
+    line = await _ended_in_a_line(sandbox, agent)
     await _until(
         lambda: any(c.startswith("for p in /proc/") for c in sandbox.commands)
     )
+    await _cancelled(line)
     await ws.close()
     await _until(lambda: sandbox.kills_stopped == 1)
     assert "killing the sshfs" not in caplog.text
@@ -1348,9 +1384,10 @@ async def test_a_kill_that_lands_late_spares_the_sshfs_serving_the_prefix_again(
     sandbox.kill_seconds = 0.05
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
+    line = await _ended_in_a_line(sandbox, agent)
     source = sandbox.table["/data"][0]
-    sandbox.requests["/data"].feed_eof()
+    await _until(lambda: kill_line(source) in sandbox.commands)
+    await _cancelled(line)
     assert (await agent.shell("python3 job.py")).exit_code == 0
     again = sandbox.table["/data"][0]
     assert again != source
