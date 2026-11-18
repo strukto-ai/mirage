@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["gh-wasm", "mirage-rs", "pdf-wasm", "python", "shell-wasm", "wasm"]
+members = ["fuse", "gh-wasm", "mirage-rs", "pdf-wasm", "python", "shell-wasm", "wasm"]
 exclude = ["vendor/grep-regex"]
 
 [workspace.package]

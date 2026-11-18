@@ -33,12 +33,14 @@ await ws.shell("python3 -c 'print(1 + 1)'")
 
 In a browser, import `@struktoai/mirage-core/machine/e2b/handle` once
 to register the provider (`pnpm add @struktoai/mirage-core`), pass
-`apiKey`, and use `mountType: 'fuse'` or leave it unset.
+`apiKey`, and use `mountType: 'own'` or leave it unset.
 
 ## Connecting the workspace
 
-Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
-each file call is about 150 ms for a small file from a laptop. With `fuse`,
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
+`ssh` each file call is about 150 ms for a small file from a laptop; under
+`mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
+read, and its template needs `mirage-fuse`. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
@@ -64,5 +66,5 @@ import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
 ```
 
 Keep account keys out of shared frontend bundles; have your backend
-authenticate the app. `mountType` `ssh` and `both` need Node, so a browser
-uses `fuse` or none.
+authenticate the app. `mountType` `ssh`, `mirage` and `both` need Node, so a browser
+uses `own` or none.

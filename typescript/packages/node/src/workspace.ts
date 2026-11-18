@@ -42,11 +42,12 @@ import './commands/builtin/utils/http.ts'
 import './io/spool.ts'
 import './secrets/constants.ts'
 import { registerPipeServer } from '@struktoai/mirage-core/machine/mounts'
+import '@struktoai/mirage-core/mount/fsproto'
 import { PipeServer } from '@struktoai/mirage-core/mount/sftp'
 import { OWNER } from './mount/constants.ts'
 
 // A machine's files show as the mounting user's, as a kernel mount here shows them.
-registerPipeServer((files, session, run) => new PipeServer(files, session, run, OWNER))
+registerPipeServer('ssh', (files, session, run) => new PipeServer(files, session, run, OWNER))
 
 export type NodeWorkspaceOptions = WorkspaceOptions
 

@@ -99,7 +99,7 @@ Python in the pod too.
 ## Connecting the workspace
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the pod needs `sshfs` and
-access to `/dev/fuse`. With `fuse`, put `sandbox.yaml` in the pod and start Mirage:
+access to `/dev/fuse`; with `mirage`, `mirage-fuse` and the same access. With `own`, put `sandbox.yaml` in the pod and start Mirage:
 
 ```bash
 kubectl exec mirage-box -- mirage workspace create /tmp/sandbox.yaml

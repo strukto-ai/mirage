@@ -33,9 +33,10 @@ class MachineConfig(RuntimeConfig):
         env (dict[str, str]): environment set on the machine.
         mount_type (MountType | None): how the machine sees the
             workspace: ``ssh`` serves every prefix the session sees from
-            the host over SFTP (the image needs sshfs), ``fuse`` leaves
-            them to a mirage on the machine, ``both`` serves from the
-            host what the machine does not mount itself. None serves
+            the host over SFTP (the image needs sshfs), ``mirage`` serves
+            them over fsproto (the image needs mirage-fuse), ``own``
+            leaves them to a mirage on the machine, ``both`` serves over
+            fsproto what the machine does not mount itself. None serves
             nothing.
         captures (tuple[str, ...] | None): the commands the machine
             runs, ``@external`` and ``@line`` among them; None for
@@ -48,7 +49,7 @@ class MachineConfig(RuntimeConfig):
 
 
 def check_mount_type(provider: str, mount_type: str | None) -> None:
-    """Fail loud on a ``mount_type`` other than ssh, fuse or both.
+    """Fail loud on a ``mount_type`` other than ssh, mirage, own or both.
 
     Args:
         provider (str): the machine's provider, for the message.

@@ -639,4 +639,4 @@ export class PipeServer {
   }
 }
 
-registerPipeServer((files, session, run) => new PipeServer(files, session, run))
+registerPipeServer('ssh', (files, session, run) => new PipeServer(files, session, run))

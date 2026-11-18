@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { VFSName } from '../types.ts'
+
 /** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
 export const LISTING_CONCURRENCY = 16
 
@@ -57,3 +59,27 @@ export const PIPE_PACKET_SIZE = 64 * 1024
 // another changed in that time is waited out before a program starts there
 // (`RecentChanges`). Mirrors Python's `KERNEL_CACHE_SECONDS`.
 export const KERNEL_CACHE_SECONDS = 1
+
+// The fsproto version a host and a machine's mirage-fuse must share
+// (`mount/fsproto`). Mirrors Python's `FSPROTO_VERSION`.
+export const FSPROTO_VERSION = 1
+
+// The largest fsproto frame either side accepts.
+export const FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
+
+// The backends whose answers mirage-fuse may keep until told otherwise:
+// nothing but the workspace changes them, so every change reaches the
+// machine as an invalidation (`RecentChanges`). Any other backend's answers
+// last KERNEL_CACHE_SECONDS, as sshfs keeps them. Mirrors Python's
+// `FSPROTO_KEPT`.
+export const FSPROTO_KEPT: readonly string[] = [VFSName.RAM, VFSName.SQL]
+
+// The largest file read whole for mirage-fuse's cache, and the files and
+// total a folder's prefetch carries. Mirror Python's constants.
+export const FSPROTO_WHOLE_BYTES = 8 * 1024 * 1024
+export const FSPROTO_FETCH_FILE_BYTES = 256 * 1024
+export const FSPROTO_FETCH_DIR_BYTES = 4 * 1024 * 1024
+
+// The entries a folder's first listing carries for the folders under it,
+// so mirage-fuse walks a kept tree in a few round trips. Mirrors Python's.
+export const FSPROTO_TREE_ENTRIES = 20000

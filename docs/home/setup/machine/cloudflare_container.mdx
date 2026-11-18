@@ -138,7 +138,7 @@ Point a machine at one:
     ```
 
     In a browser, import `@struktoai/mirage-core/machine/cloudflare_container/handle`
-    once to register the provider, and use `mountType: 'fuse'` or leave it
+    once to register the provider, and use `mountType: 'own'` or leave it
     unset.
   </Tab>
 </Tabs>
@@ -210,7 +210,7 @@ message.
 | `url` | The relay route that names the container. Leave it out in the Durable Object. |
 | `token` | The relay's `MIRAGE_RELAY_TOKEN`. Required with `url`. |
 | `env` | Environment set for every program. |
-| `mount_type` | How the container sees the workspace: `ssh`, `fuse` or `both`, as on [every machine](/home/setup/machine/overview#connecting-the-workspace). |
+| `mount_type` | How the container sees the workspace: `ssh`, `mirage`, `own` or `both`, as on [every machine](/home/setup/machine/overview#connecting-the-workspace). |
 
 The container's image, instance type and network belong to the Durable
 Object that starts it, so none of them is a field. An entry with neither

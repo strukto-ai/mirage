@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
 from mirage.machine.types import MountType
-from mirage.mount.constants import KERNEL_CACHE_SECONDS
+from mirage.mount.constants import FSPROTO_VERSION, KERNEL_CACHE_SECONDS
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
 
@@ -65,7 +65,7 @@ def stop_signal(runner: ProcessHandle | None) -> int | None:
     return None if signal in (None, 9) else signal
 
 
-MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")
+MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "mirage", "own", "both")
 
 # How long a machine has to show a served prefix as mounted, and how
 # often it is asked.
@@ -102,10 +102,6 @@ SSHFS_OPTIONS = (
 # option is given it; an older one refuses an option it does not know.
 SSHFS_LINKS_OPTION = "no_contain_symlinks"
 
-# sshfs's errors go to a log of its own per prefix in Mirage's folder on
-# the machine (``MACHINE_DIR``): its stdout is the SFTP stream, and E2B's
-# pipe joins stderr to it.
-SSHFS_LOG_NAME = "sshfs"
 
 # How an sshfs source names the mirage serving it:
 # ``mirage-<id>-<instance>-<n>:<prefix>``, so each instance knows its own
@@ -138,6 +134,31 @@ SSHFS_HINT = (
 PIPE_SERVER_HINT = (
     "serving the workspace into a machine needs asyncssh; "
     "install with: pip install mirage-ai[ssh]"
+)
+
+# The mount types a machine's mount table gives a prefix a workspace served
+# it, each with the program that serves it.
+SERVED_KINDS: dict[str, str] = {
+    "fuse.sshfs": "sshfs",
+    "fuse.mirage": "mirage-fuse",
+}
+
+# Finds mirage-fuse on the machine, its PATH first and then Mirage's folder
+# in its home, into ``$f``.
+MIRAGE_FUSE_FIND = (
+    "f=$(command -v mirage-fuse 2>/dev/null) || "
+    'f="${HOME:-/root}/.mirage/bin/mirage-fuse"; '
+)
+
+# Exits 0 when the machine's mirage-fuse speaks this host's fsproto.
+MIRAGE_FUSE_LINE = (
+    MIRAGE_FUSE_FIND + 'case "$("$f" --version 2>/dev/null)" in '
+    f'(*" fsproto {FSPROTO_VERSION}") exit 0;; esac; exit 1'
+)
+MIRAGE_FUSE_HINT = (
+    "mount_type mirage needs a Linux machine with mirage-fuse speaking "
+    f"fsproto {FSPROTO_VERSION} on its PATH or in ~/.mirage/bin: put it in "
+    "the image, or use mount_type ssh"
 )
 
 # Every argv a machine runs goes under this POSIX sh prelude, with the

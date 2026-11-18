@@ -371,9 +371,15 @@
   "machine/mounts": {
    "typescript_only": {
     "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
-    "registerPipeServer": "a host opts into serving files by importing mount/sftp, which registers its PipeServer, since a bundle that cannot run ssh2 (the browser) must not import it; Python imports PipeServer directly.",
+    "pipeServers": "the file server each transport's import registered (registerPipeServer); Python imports the transport's server module on the first mount (pipe_server).",
+    "registerPipeServer": "a host opts into serving files by importing mount/sftp or mount/fsproto, each registering its server for its transport, since a bundle that cannot run ssh2 (the browser) must not import mount/sftp; Python imports the server module directly.",
     "sleep": "asyncio.sleep in Python.",
     "within": "asyncio.wait_for in Python."
+   }
+  },
+  "machine/constants": {
+   "typescript_only": {
+    "FSPROTO_SERVER_HINT": "a TypeScript host serves mirage-fuse only once it imports mount/fsproto, and says so when it has not; Python imports the fsproto server directly, so it is never missing."
    }
   },
   "machine/boxd/handle": {

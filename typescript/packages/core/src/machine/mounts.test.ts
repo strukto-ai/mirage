@@ -38,6 +38,7 @@ import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import {
   isRun,
+  MIRAGE_FUSE_LINE,
   MOUNT_GUARD,
   RUN_PROGRAM_AT,
   SSHFS_HINT,
@@ -76,10 +77,12 @@ function words(command: string): string[] {
 }
 
 // The source and mountpoint an sshfs pipe command names.
-function sshfsMount(command: string): [string, string] {
+// The source, prefix and mount type an sshfs or mirage-fuse pipe command mounts.
+function sshfsMount(command: string): [string, string, string] {
   const all = words(command)
   const at = all.indexOf('exec')
-  return [all[at + 5] ?? '', all[at + 6] ?? '']
+  if (all[at + 2] === 'serve') return [all[at + 3] ?? '', all[at + 4] ?? '', 'fuse.mirage']
+  return [all[at + 5] ?? '', all[at + 6] ?? '', 'fuse.sshfs']
 }
 
 // The argv a sandbox runs, as the line the fakes answer.
@@ -232,7 +235,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     if (line.startsWith('d=$(PATH=')) {
       return Promise.resolve(answer('/home/u/.mirage'))
     }
-    if (line === SSHFS_LINE) {
+    if (line === SSHFS_LINE || line === MIRAGE_FUSE_LINE) {
       return Promise.resolve(answer('', this.sshfs ? 0 : 1))
     }
     if (line.startsWith('fusermount3 -uz ')) {
@@ -249,9 +252,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
 
   openPipe(command: string): Promise<MachinePipe> {
     this.pipes.push(command)
-    const [source, prefix] = sshfsMount(command)
+    const [source, prefix, kind] = sshfsMount(command)
     if (this.sshfsMounts) {
-      this.table.set(prefix, [source, 'fuse.sshfs'])
+      this.table.set(prefix, [source, kind])
       this.running.add(source)
     }
     let end: () => void = () => undefined
@@ -381,7 +384,8 @@ const drain = (_files: unknown, session: SessionState): PipeServer => ({
 })
 
 beforeAll(() => {
-  registerPipeServer(drain)
+  registerPipeServer('ssh', drain)
+  registerPipeServer('mirage', drain)
 })
 
 describe('mountTable', () => {
@@ -759,7 +763,7 @@ describe('MachineMounts', () => {
     },
   )
 
-  it.each(['both', 'fuse'] as const)(
+  it.each(['both', 'own'] as const)(
     'refuses a line under %s while a rule covers a prefix the machine serves',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/data'])
@@ -774,7 +778,7 @@ describe('MachineMounts', () => {
   )
 
   it('refuses a line once the machine mounts a ruled prefix itself', async () => {
-    const sandbox = new FakeMachine('fuse')
+    const sandbox = new FakeMachine('own')
     const ws = workspace(sandbox, ['/data/secret.csv'])
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
@@ -786,7 +790,7 @@ describe('MachineMounts', () => {
   })
 
   it('serves nothing from the host over fuse and takes any session', async () => {
-    const sandbox = new FakeMachine('fuse', ['/data'])
+    const sandbox = new FakeMachine('own', ['/data'])
     const ws = workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
@@ -985,7 +989,7 @@ describe('MachineMounts', () => {
     await ws1.close()
   })
 
-  it.each(['both', 'fuse'] as const)(
+  it.each(['both', 'own'] as const)(
     'refuses a line under %s while a hidden mount is the machine own',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/data'])
@@ -1008,7 +1012,7 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
-  it.each(['both', 'fuse'] as const)(
+  it.each(['both', 'own'] as const)(
     'refuses a shown read-only path on a sandbox-owned mount under %s',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/data'])
@@ -1041,7 +1045,7 @@ describe('MachineMounts', () => {
 
   it('runs a server outside the line that started it', async () => {
     const bound: unknown[] = []
-    registerPipeServer((files, session) => ({
+    registerPipeServer('ssh', (files, session) => ({
       ...drain(files, session),
       serve: async (reader) => {
         bound.push([getCurrentSession(), getAdmission(), lineRunning()])
@@ -1060,7 +1064,7 @@ describe('MachineMounts', () => {
       ])
       await ws.close()
     } finally {
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1074,7 +1078,7 @@ describe('MachineMounts', () => {
     const holds: (() => void)[] = []
     const landed: [boolean, boolean][] = []
     const runs: ((op: () => Promise<void>) => Promise<void>)[] = []
-    registerPipeServer((files, session, run) => {
+    registerPipeServer('ssh', (files, session, run) => {
       runs.push(run)
       return {
         ...drain(files, session),
@@ -1118,7 +1122,7 @@ describe('MachineMounts', () => {
       expect(await Promise.all(runs.map(lentALine))).toEqual([false, false])
       await ws.close()
     } finally {
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1136,7 +1140,7 @@ describe('MachineMounts', () => {
         [['/my notes/b.txt', edquot('/my notes/b.txt')]],
         [['/data/a.bin', edquot('/data/a.bin')]],
       ]
-      registerPipeServer((files, session) => ({
+      registerPipeServer('ssh', (files, session) => ({
         ...drain(files, session),
         sync: () => Promise.resolve((lost ? failures.pop() : undefined) ?? []),
       }))
@@ -1148,7 +1152,7 @@ describe('MachineMounts', () => {
         expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
         await ws.close()
       } finally {
-        registerPipeServer(drain)
+        registerPipeServer('ssh', drain)
       }
     },
   )
@@ -1156,7 +1160,7 @@ describe('MachineMounts', () => {
   it('lands the writes of a line that times out', async () => {
     // Its status stays the timeout's; a landing that fails is logged.
     const synced: boolean[] = []
-    registerPipeServer((files, session) => ({
+    registerPipeServer('ssh', (files, session) => ({
       ...drain(files, session),
       sync: () => {
         synced.push(lineRunning())
@@ -1179,7 +1183,7 @@ describe('MachineMounts', () => {
       await ws.close()
     } finally {
       warn.mockRestore()
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1187,7 +1191,7 @@ describe('MachineMounts', () => {
     // One prefix's landing failed and the next one ran out the deadline: the
     // line hears of neither, so the failure that came back is logged.
     let calls = 0
-    registerPipeServer((files, session) => ({
+    registerPipeServer('ssh', (files, session) => ({
       ...drain(files, session),
       sync: async () => {
         calls += 1
@@ -1208,7 +1212,7 @@ describe('MachineMounts', () => {
       await ws.close()
     } finally {
       warn.mockRestore()
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1216,7 +1220,7 @@ describe('MachineMounts', () => {
     // The landing at the program's exit counts against the line's deadline;
     // one the deadline stops is landed again before the line returns.
     const synced: boolean[] = []
-    registerPipeServer((files, session) => ({
+    registerPipeServer('ssh', (files, session) => ({
       ...drain(files, session),
       sync: async () => {
         synced.push(lineRunning())
@@ -1233,7 +1237,7 @@ describe('MachineMounts', () => {
       expect(synced).toEqual([false, false, false])
       await ws.close()
     } finally {
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1293,7 +1297,7 @@ describe('MachineMounts', () => {
     ['fails', () => Promise.reject(new Error('no server here'))],
     ['ends', () => Promise.resolve()],
   ])('never takes a mount whose server %s before it shows', async (_, serve) => {
-    registerPipeServer((files, session) => ({ ...drain(files, session), serve }))
+    registerPipeServer('ssh', (files, session) => ({ ...drain(files, session), serve }))
     try {
       const sandbox = new FakeMachine('ssh')
       const ws = workspace(sandbox)
@@ -1306,7 +1310,7 @@ describe('MachineMounts', () => {
       expect(sandbox.stopped).toContain('/data')
       await ws.close()
     } finally {
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 
@@ -1496,7 +1500,7 @@ describe('MachineMounts', () => {
 
   // The sandbox mounts its own prefix again once it is back (its entrypoint
   // does): serving it meanwhile would leave the host's sshfs under that mount.
-  it.each(['fuse', 'both'] as const)(
+  it.each(['own', 'both'] as const)(
     'waits for a mount of its own it lost (%s)',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/data'])
@@ -1519,7 +1523,7 @@ describe('MachineMounts', () => {
     },
   )
 
-  it.each(['fuse', 'both'] as const)(
+  it.each(['own', 'both'] as const)(
     'refuses a line once its own /tmp mount is gone (%s)',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/tmp'])
@@ -1552,7 +1556,7 @@ describe('MachineMounts', () => {
     [['/data', '/my notes'], 1],
     [['/data'], 3],
   ])('reads the mounts over fuse until the machine holds them all (%j)', async (own, reads) => {
-    const sandbox = new FakeMachine('fuse', own)
+    const sandbox = new FakeMachine('own', own)
     const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     for (let i = 0; i < 3; i++) expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
@@ -1561,7 +1565,7 @@ describe('MachineMounts', () => {
   })
 
   it('guards a mount the machine lays after the first line over fuse', async () => {
-    const sandbox = new FakeMachine('fuse')
+    const sandbox = new FakeMachine('own')
     const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
@@ -1641,7 +1645,7 @@ describe('MachineMounts', () => {
 
   // A mount the workspace dropped is no longer the machine's to wait for, and
   // one added again at that prefix starts afresh.
-  it.each(['fuse', 'both'] as const)(
+  it.each(['own', 'both'] as const)(
     'does not wait for a mount the workspace dropped (%s)',
     async (mountType) => {
       const sandbox = new FakeMachine(mountType, ['/my notes'])
@@ -1658,7 +1662,7 @@ describe('MachineMounts', () => {
   )
 
   it('runs lines unguarded in a sandbox holding no mount', async () => {
-    const sandbox = new FakeMachine('fuse')
+    const sandbox = new FakeMachine('own')
     const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
@@ -1719,7 +1723,7 @@ describe('MachineMounts', () => {
   })
 
   it('says why a server that fails did', async () => {
-    registerPipeServer((files, session) => ({
+    registerPipeServer('ssh', (files, session) => ({
       ...drain(files, session),
       serve: () => Promise.reject(new Error('no server here')),
     }))
@@ -1729,10 +1733,10 @@ describe('MachineMounts', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toContain('the SFTP server failed: no server here')
+      expect(DEC.decode(result.stderr)).toContain('the file server failed: no server here')
       await ws.close()
     } finally {
-      registerPipeServer(drain)
+      registerPipeServer('ssh', drain)
     }
   })
 

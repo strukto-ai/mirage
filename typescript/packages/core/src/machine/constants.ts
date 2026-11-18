@@ -19,7 +19,7 @@ import { boundSystemClock, systemNow } from '../utils/clock.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachinePid } from '../execution/types.ts'
 import type { MountType } from './types.ts'
-import { KERNEL_CACHE_SECONDS } from '../mount/constants.ts'
+import { FSPROTO_VERSION, KERNEL_CACHE_SECONDS } from '../mount/constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -54,7 +54,7 @@ export function stopSignal(runner: ProcessHandle | null): number | null {
   return signal === null || signal === 9 ? null : signal
 }
 
-export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
+export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'mirage', 'own', 'both']
 
 // How long a machine has to show a served prefix as mounted, and how
 // often it is asked.
@@ -90,11 +90,6 @@ export const SSHFS_OPTIONS =
 // it; an older one refuses an option it does not know.
 export const SSHFS_LINKS_OPTION = 'no_contain_symlinks'
 
-// sshfs's errors go to a log of its own per prefix in Mirage's folder on the
-// machine (`MACHINE_DIR`): its stdout is the SFTP stream, and E2B's pipe joins
-// stderr to it.
-export const SSHFS_LOG_NAME = 'sshfs'
-
 // How an sshfs source names the mirage serving it: `mirage-<id>-<instance>-<n>:<prefix>`,
 // so each instance knows its own mounts from another's on the same machine.
 export const SSHFS_SOURCE_PREFIX = 'mirage-'
@@ -119,6 +114,26 @@ export const SSHFS_HINT =
   'serving the workspace into a machine needs sshfs there, and it could not be installed: that takes root or sudo without a password, and apt-get, apk, dnf or yum; install it in the image (apt-get update && apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
   'this host serves no files into a machine: import @struktoai/mirage-core/mount/sftp, as node and cloudflare do, and install its ssh2 peer'
+export const FSPROTO_SERVER_HINT =
+  'this host serves no files to mirage-fuse: import @struktoai/mirage-core/mount/fsproto, as node and cloudflare do'
+
+// The mount types a machine's mount table gives a prefix a workspace served
+// it, each with the program that serves it.
+export const SERVED_KINDS: ReadonlyMap<string, string> = new Map([
+  ['fuse.sshfs', 'sshfs'],
+  ['fuse.mirage', 'mirage-fuse'],
+])
+
+// Finds mirage-fuse on the machine, its PATH first and then Mirage's folder
+// in its home, into `$f`.
+export const MIRAGE_FUSE_FIND =
+  'f=$(command -v mirage-fuse 2>/dev/null) || f="${HOME:-/root}/.mirage/bin/mirage-fuse"; '
+
+// Exits 0 when the machine's mirage-fuse speaks this host's fsproto.
+export const MIRAGE_FUSE_LINE =
+  MIRAGE_FUSE_FIND +
+  `case "$("$f" --version 2>/dev/null)" in (*" fsproto ${String(FSPROTO_VERSION)}") exit 0;; esac; exit 1`
+export const MIRAGE_FUSE_HINT = `mount_type mirage needs a Linux machine with mirage-fuse speaking fsproto ${String(FSPROTO_VERSION)} on its PATH or in ~/.mirage/bin: put it in the image, or use mount_type ssh`
 
 /**
  * Every argv a machine runs goes under this POSIX sh prelude, with the

@@ -14,6 +14,8 @@
 
 import os
 
+from mirage.types import VFSName
+
 # Who owns what a mount shows when a row names its owner by name (the
 # kernel wants numbers): the mounting user. Windows has none; WinFsp
 # presents files as the mounting user's.
@@ -61,3 +63,26 @@ ERRORS = "surrogateescape"
 
 # The SFTP version sshfs and OpenSSH speak.
 SFTP_VERSION = 3
+
+# The fsproto version a host and a machine's mirage-fuse must share
+# (``mirage.mount.fsproto``).
+FSPROTO_VERSION = 1
+
+# The largest fsproto frame either side accepts.
+FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
+
+# The backends whose answers mirage-fuse may keep until told otherwise:
+# nothing but the workspace changes them, so every change reaches the
+# machine as an invalidation (``RecentChanges``). Any other backend's
+# answers last KERNEL_CACHE_SECONDS, as sshfs keeps them.
+FSPROTO_KEPT: frozenset[str] = frozenset({VFSName.RAM, VFSName.SQL})
+
+# The largest file read whole for mirage-fuse's cache, and the files and
+# total a folder's prefetch carries.
+FSPROTO_WHOLE_BYTES = 8 * 1024 * 1024
+FSPROTO_FETCH_FILE_BYTES = 256 * 1024
+FSPROTO_FETCH_DIR_BYTES = 4 * 1024 * 1024
+
+# The entries a folder's first listing carries for the folders under it,
+# so mirage-fuse walks a kept tree in a few round trips.
+FSPROTO_TREE_ENTRIES = 20000

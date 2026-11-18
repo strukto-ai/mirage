@@ -115,9 +115,9 @@ describe('DockerMachine', () => {
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
   })
 
-  it('takes a mountType of ssh, fuse or both', () => {
+  it('takes a mountType of ssh, mirage, own or both', () => {
     expect(() => new DockerMachine('box', { container: 'c', mountType: 'nfs' as never })).toThrow(
-      'docker mountType must be one of ssh, fuse, both, not "nfs"',
+      'docker mountType must be one of ssh, mirage, own, both, not "nfs"',
     )
     expect(() => new DockerMachine('box', { container: 'c', mountType: 'ssh' })).not.toThrow()
   })
@@ -277,7 +277,7 @@ describe('DockerMachine under session restrictions', () => {
   })
 
   it.each(RESTRICTIONS)('refuses a line on fuse mounts', async (profile) => {
-    const runtime = new MountingDockerMachine('box', { container: 'c', mountType: 'fuse' })
+    const runtime = new MountingDockerMachine('box', { container: 'c', mountType: 'own' })
     const ws = restricted(runtime, profile)
     try {
       const agent = await ws.session('agent', { profile: 'agent' })

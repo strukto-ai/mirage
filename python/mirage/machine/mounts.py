@@ -30,22 +30,26 @@ from mirage.context import (
 )
 from mirage.errors.fs import strerror_of
 from mirage.machine.constants import (
+    MIRAGE_FUSE_FIND,
+    MIRAGE_FUSE_HINT,
+    MIRAGE_FUSE_LINE,
     MOUNT_GUARD,
     MOUNT_POLL_SECONDS,
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
+    SERVED_KINDS,
     SSHFS_HINT,
     SSHFS_LINE,
     SSHFS_LINKS_OPTION,
-    SSHFS_LOG_NAME,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
     machine_dir_line,
     mount_field,
 )
-from mirage.machine.types import MachinePipe, MountType
+from mirage.machine.types import MachinePipe, MountType, Transport
 from mirage.mount.changes import SERVED_BY
+from mirage.mount.types import ServedPrefix
 from mirage.rs.policy import rule_table
 from mirage.runtime.binding import (
     WorkspaceBinding,
@@ -65,14 +69,21 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def pipe_server() -> Any:
-    """The SFTP pipe server class, imported on the first machine mount so
-    a process that never mounts into a machine does not load asyncssh,
-    as the machine registry defers a provider.
+def pipe_server(transport: Transport) -> Any:
+    """The file server class a transport's pipe runs, imported on the
+    first machine mount so a process that never mounts into a machine does
+    not load it, as the machine registry defers a provider: sshfs's SFTP
+    server, or mirage-fuse's fsproto server.
+
+    Args:
+        transport (Transport): ssh or mirage.
 
     Raises:
-        ImportError: the `ssh` extra (asyncssh) is not installed.
+        ImportError: sshfs's needs the `ssh` extra (asyncssh), not
+            installed.
     """
+    if transport == "mirage":
+        return importlib.import_module("mirage.mount.fsproto").FsprotoServer
     try:
         return importlib.import_module("mirage.mount.sftp").PipeServer
     except ModuleNotFoundError as exc:
@@ -201,6 +212,23 @@ def unmount_line(prefix: str) -> str:
     """
     path = single_quote(prefix)
     return f"fusermount3 -uz {path} || fusermount -uz {path}"
+
+
+def mirage_fuse_line(source: str, prefix: str, log: str) -> str:
+    """The pipe command that mounts ``source`` at ``prefix`` with
+    mirage-fuse, found on the machine's PATH or in Mirage's folder there
+    (``MIRAGE_FUSE_FIND``), its errors in ``log``. Its stdin and stdout
+    are the fsproto stream.
+
+    Args:
+        source (str): the mount's source.
+        prefix (str): the mountpoint.
+        log (str): the log's path in the machine.
+    """
+    return (
+        f'{MIRAGE_FUSE_FIND}exec "$f" serve {single_quote(source)} '
+        f"{single_quote(prefix)} 2>{single_quote(log)}"
+    )
 
 
 def sshfs_line(source: str, prefix: str, log: str) -> str:
@@ -337,7 +365,7 @@ class MachineMounts:
     Args:
         provider (str): the machine's provider, for messages.
         machine (str): the machine's name, its key under ``machines:``.
-        mount_type (MountType): ssh, fuse or both.
+        mount_type (MountType): ssh, mirage, own or both.
         run (Callable[[str], Awaitable[RunAnswer]]): runs one setup
             command in the machine, its answer kept whole.
         open_pipe (Callable[[str], Awaitable[MachinePipe]]): starts a
@@ -396,8 +424,31 @@ class MachineMounts:
 
     @property
     def file_effects_dispatched(self) -> bool:
-        """SSH mode serves every workspace prefix through the host's gate."""
-        return self._mount_type == "ssh"
+        """ssh and mirage serve every workspace prefix through the host's
+        gate."""
+        return self._serves_all
+
+    @property
+    def _transport(self) -> Transport:
+        """How the host serves its prefixes: sshfs under ``ssh``,
+        mirage-fuse otherwise."""
+        return "ssh" if self._mount_type == "ssh" else "mirage"
+
+    @property
+    def _kind(self) -> str:
+        """The type the machine's mount table gives a prefix the host
+        serves."""
+        return "fuse.sshfs" if self._transport == "ssh" else "fuse.mirage"
+
+    @property
+    def _program(self) -> str:
+        """The program that mounts a prefix the host serves."""
+        return "sshfs" if self._transport == "ssh" else "mirage-fuse"
+
+    @property
+    def _serves_all(self) -> bool:
+        """Whether the host serves every prefix, none the machine's own."""
+        return self._mount_type in ("ssh", "mirage")
 
     async def validate(
         self, binding: WorkspaceBinding | None, cwd: str, errors: OutputFn
@@ -436,7 +487,7 @@ class MachineMounts:
         seen = cwd.rstrip("/")
         local = binding.machine_prefixes(self._machine)
         if (
-            self._mount_type == "ssh"
+            self._serves_all
             and seen
             and not any(
                 seen == p.rstrip("/") or seen.startswith(p.rstrip("/") + "/")
@@ -514,7 +565,7 @@ class MachineMounts:
                 await errors(f"{unmounted(self._provider, lost)}\n".encode())
                 return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
             unserved = self._unserved(ruled)
-            if self._mount_type != "fuse" and (not unserved or self._served):
+            if self._mount_type != "own" and (not unserved or self._served):
                 self._session = session
         if unserved:
             return await refused_run(
@@ -524,6 +575,15 @@ class MachineMounts:
                 errors,
             )
         if self._served and binding.changes is not None:
+            if self._transport == "mirage":
+                await asyncio.gather(
+                    *(
+                        server.begin()
+                        for _, _, server, _ in self._served.values()
+                        if hasattr(server, "begin")
+                    )
+                )
+                return None
             self._since = {
                 source: self._since.get(source, begun)
                 for _, _, _, source in self._served.values()
@@ -551,7 +611,7 @@ class MachineMounts:
                 machine cannot run is reported in (``PROGRAM_CHECK``).
         """
         held = {
-            p: (source, "fuse.sshfs")
+            p: (source, self._kind)
             for p, (_, _, _, source) in self._served.items()
         } | self._own
         if not held:
@@ -768,7 +828,7 @@ class MachineMounts:
         served = served_prefixes(binding.resolver.prefixes(), local)
         visible = frozenset(
             await self._mountable(files, served)
-            if self._mount_type != "fuse"
+            if self._mount_type != "own"
             else ()
         )
         ended = [
@@ -777,7 +837,7 @@ class MachineMounts:
         if (
             self._seen == (frozenset(every), visible)
             and not ended
-            and (self._mount_type == "ssh" or not ruled)
+            and (self._serves_all or not ruled)
         ):
             return None
         self._seen = None
@@ -789,11 +849,11 @@ class MachineMounts:
             sorted(
                 p
                 for p in every
-                if self._mount_type != "ssh"
+                if not self._serves_all
                 and p in present
                 and p not in self._served
                 and not (
-                    present[p][1] == "fuse.sshfs"
+                    present[p][1] in SERVED_KINDS
                     and present[p][0].startswith(SSHFS_SOURCE_PREFIX)
                 )
             )
@@ -809,8 +869,8 @@ class MachineMounts:
                 for p in sorted(self._served)
                 if p in wanted
                 and p in present
-                and present[p] != (self._served[p][3], "fuse.sshfs")
-                and (p not in ended or present[p][1] != "fuse.sshfs")
+                and present[p] != (self._served[p][3], self._kind)
+                and (p not in ended or present[p][1] != self._kind)
                 and not (p in ended and present[p] == self._under.get(p))
             ),
             None,
@@ -835,18 +895,31 @@ class MachineMounts:
         for prefix in new:
             if await self._held(prefix, present):
                 return (
-                    f"another sshfs serves {prefix} in this machine; give "
+                    f"another {SERVED_KINDS[present[prefix][1]]} serves {prefix} "
+                    "in this machine; give "
                     "this workspace a machine of its own"
                 )
         if new:
-            server = pipe_server()
-            if (await self._run(SSHFS_LINE)).exit_code != 0:
-                raise RuntimeError(f"{self._provider}: {SSHFS_HINT}")
+            ssh = self._transport == "ssh"
+            server = pipe_server(self._transport)
+            line = SSHFS_LINE if ssh else MIRAGE_FUSE_LINE
+            if (await self._run(line)).exit_code != 0:
+                hint = SSHFS_HINT if ssh else MIRAGE_FUSE_HINT
+                raise RuntimeError(f"{self._provider}: {hint}")
             folder = await self._folder(served)
             try:
                 for prefix in new:
                     await self._serve(
-                        server(files, session, self._lend),
+                        server(files, session, self._lend)
+                        if ssh
+                        else server(
+                            files,
+                            session,
+                            self._lend,
+                            ServedPrefix(
+                                prefix, self._machine, binding.changes
+                            ),
+                        ),
                         prefix,
                         present,
                         folder,
@@ -854,7 +927,7 @@ class MachineMounts:
             except BaseException:
                 await self._unmount()
                 raise
-        if self._mount_type != "fuse" or set(top_prefixes(every)) <= set(own):
+        if self._mount_type != "own" or set(top_prefixes(every)) <= set(own):
             self._seen = (frozenset(every), visible)
         return None
 
@@ -880,14 +953,15 @@ class MachineMounts:
     async def _held(
         self, prefix: str, present: dict[str, tuple[str, str]]
     ) -> bool:
-        """Whether another sshfs still serves ``prefix``.
+        """Whether another workspace's sshfs or mirage-fuse still serves
+        ``prefix``.
 
         Args:
             prefix (str): the mountpoint.
             present (dict[str, tuple[str, str]]): the machine's mount table.
         """
         source, kind = present.get(prefix, ("", ""))
-        if kind != "fuse.sshfs" or self._ours(source, prefix):
+        if kind not in SERVED_KINDS or self._ours(source, prefix):
             return False
         found = await self._run(running_line(source))
         if found.exit_code not in (0, 1):
@@ -922,12 +996,12 @@ class MachineMounts:
         self._under[prefix] = present.get(prefix)
         old, kind = present.get(prefix, ("", ""))
         if (
-            kind == "fuse.sshfs"
+            kind in SERVED_KINDS
             and self._ours(old, prefix)
             and old not in self._sources
         ):
             await self._reclaim(old, prefix)
-        elif kind == "fuse.sshfs":
+        elif kind in SERVED_KINDS:
             await self._run(unmount_line(prefix))
         path = single_quote(prefix)
         made = await self._run(
@@ -939,12 +1013,16 @@ class MachineMounts:
                 f"{self._provider}: cannot make {prefix} in the machine: "
                 f"{said(made.stderr)}"
             )
-        log_path = f"{folder}/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log"
+        log_path = f"{folder}/{self._program}-{uuid.uuid4().hex}.log"
         log = single_quote(log_path)
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
-        pipe = await self._open_pipe(sshfs_line(source, prefix, log_path))
+        pipe = await self._open_pipe(
+            sshfs_line(source, prefix, log_path)
+            if self._transport == "ssh"
+            else mirage_fuse_line(source, prefix, log_path)
+        )
         context = Context()
         context.run(SERVED_BY.set, self._machine)
         task = asyncio.create_task(
@@ -957,7 +1035,7 @@ class MachineMounts:
             while True:
                 try:
                     row = (await self._table()).get(prefix)
-                    if not task.done() and row == (source, "fuse.sshfs"):
+                    if not task.done() and row == (source, self._kind):
                         return
                 except Exception as error:
                     diagnostic = (
@@ -967,8 +1045,8 @@ class MachineMounts:
                     )
                     if diagnostic:
                         raise RuntimeError(
-                            f"{self._provider}: sshfs did not mount {prefix}: "
-                            f"{error}; helper said: {diagnostic}"
+                            f"{self._provider}: {self._program} did not mount "
+                            f"{prefix}: {error}; helper said: {diagnostic}"
                         ) from error
                     raise
                 if task.done() or asyncio.get_running_loop().time() > deadline:
@@ -993,17 +1071,21 @@ class MachineMounts:
                             )
                     except Exception as error:
                         logger.debug(
-                            "%s: reading the sshfs log failed",
+                            "%s: reading the %s log failed",
                             self._provider,
+                            self._program,
                             exc_info=True,
                         )
                         if not reason:
-                            reason = f"cannot read the sshfs log: {error}"
-                    reason = reason or "no word from sshfs"
+                            reason = (
+                                f"cannot read the {self._program} log: {error}"
+                            )
+                    reason = reason or f"no word from {self._program}"
                     if failed is not None:
-                        reason += f"; the SFTP server failed: {failed}"
+                        reason += f"; the file server failed: {failed}"
                     raise RuntimeError(
-                        f"{self._provider}: sshfs did not mount {prefix}: {reason}"
+                        f"{self._provider}: {self._program} did not mount "
+                        f"{prefix}: {reason}"
                     )
                 await asyncio.sleep(MOUNT_POLL_SECONDS)
         finally:
@@ -1049,16 +1131,18 @@ class MachineMounts:
             )
         except Exception:
             logger.warning(
-                "%s: killing the sshfs for %s failed",
+                "%s: killing the %s for %s failed",
                 self._provider,
+                self._program,
                 prefix,
                 exc_info=True,
             )
             return
         if killed.exit_code != 0:
             logger.warning(
-                "%s: killing the sshfs for %s failed: %s",
+                "%s: killing the %s for %s failed: %s",
                 self._provider,
+                self._program,
                 prefix,
                 said(killed.stderr),
             )
@@ -1141,7 +1225,7 @@ class MachineMounts:
             await asyncio.wait_for(task, UNMOUNT_WAIT_SECONDS)
         except Exception:
             logger.warning(
-                "%s: ending the SFTP server for %s failed",
+                "%s: ending the file server for %s failed",
                 self._provider,
                 prefix,
                 exc_info=True,
@@ -1161,7 +1245,7 @@ class MachineMounts:
                     exc_info=True,
                 )
                 present = {
-                    p: (source, "fuse.sshfs")
+                    p: (source, self._kind)
                     for p, (_, _, _, source) in self._served.items()
                 }
         for prefix in list(self._served):

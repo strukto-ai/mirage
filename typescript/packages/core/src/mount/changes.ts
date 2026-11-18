@@ -45,6 +45,7 @@ export class RecentChanges {
   // slice once they make up half the list, so a write never shifts the rest.
   private changes: [number, string | null, string][] = []
   private head = 0
+  private readonly watchers = new Set<(path: string, by: string | null) => void>()
 
   /**
    * @param clock the workspace's clock.
@@ -67,6 +68,21 @@ export class RecentChanges {
     this.forget(now)
     const by = asyncContextIsolatesTasks ? (SERVED_BY.getStore() ?? null) : null
     this.changes.push([now, by, path])
+    for (const watcher of this.watchers) watcher(path, by)
+  }
+
+  /**
+   * Hear each change as it is noted, with the machine whose served mount
+   * made it, so a machine that keeps answers longer than the window learns
+   * of every change at once.
+   *
+   * @returns the call that stops hearing.
+   */
+  watch(listener: (path: string, by: string | null) => void): () => void {
+    this.watchers.add(listener)
+    return () => {
+      this.watchers.delete(listener)
+    }
   }
 
   /** The workspace clock's monotonic reading, which `waitOut` compares the start of a mount's caching with. */

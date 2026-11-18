@@ -28,7 +28,16 @@ export interface RunStatus {
   readonly started: number | null
 }
 
-export type MountType = 'ssh' | 'fuse' | 'both'
+/**
+ * Who serves the workspace's files to a machine: the host through sshfs
+ * (`ssh`) or mirage-fuse (`mirage`), the machine's own Mirage (`own`), or
+ * the machine's own mounts where it has them and mirage-fuse for the rest
+ * (`both`).
+ */
+export type MountType = 'ssh' | 'mirage' | 'own' | 'both'
+
+/** How the host serves a machine the prefixes it serves. */
+export type Transport = 'ssh' | 'mirage'
 
 /** What a provider does to its machine when the workspace pauses. */
 export type PauseAction = 'pause'

@@ -34,6 +34,61 @@
       ]
     },
     {
+      "id": "mount_type_mirage_fails_a_line_whose_write_cannot_land",
+      "note": "mirage-fuse lands a file's writes at its release, after close(2) told the program they were done, so the line reports the landing that failed, as under ssh.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/capped": {
+            "vfs": "ram",
+            "config": {
+              "capacity": 100
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 500 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        },
+        {
+          "command": "dash -c 'head -c 50 /dev/zero > /capped/small.bin; echo rc=$?'",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=0\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "wc -c /capped/small.bin",
+          "expect": {
+            "exit": 0,
+            "stdout": "50 /capped/small.bin\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "/tmp is the box's own, as / and /dev are, and the workspace shows it as a machine mount: sshfs does not serve over it, a file a program writes there is the file Mirage reads, and a line runs from it.",
@@ -64,6 +119,71 @@
         {
           "command": "cd / && rm $f && echo gone",
           "expect": { "exit": 0, "stdout": "gone\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_leaves_the_box_its_own_tmp",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "/tmp stays the box's own under mirage-fuse too: it does not serve over it, a file a program writes there is the file Mirage reads, and a line runs from it.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cat /served/seed.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "f=/tmp/mirage-integ-own-tmp.$$.$RANDOM && dash -c 'echo box > \"$1\"' dash $f && cat $f",
+          "expect": {
+            "exit": 0,
+            "stdout": "box\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /tmp && dash -c 'grep -c \" /tmp fuse.mirage \" /proc/mounts || true'",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd / && rm $f && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -106,6 +226,71 @@
       ]
     },
     {
+      "id": "mount_type_mirage_serves_links_that_leave_their_folder",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse and writes in the box's own /tmp, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "mirage-fuse reads a link's target from Mirage's namespace, so a link out of its folder reads and resolves as under ssh.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "up.txt": "up\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /served/a && ln -s ../up.txt /served/a/up && ln -s /tmp/mirage-integ-link-out.txt /served/a/out && dash -c 'echo box > /tmp/mirage-integ-link-out.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'readlink /served/a/up /served/a/out; cat /served/a/up /served/a/out'",
+          "expect": {
+            "exit": 0,
+            "stdout": "../up.txt\n../../tmp/mirage-integ-link-out.txt\nup\nbox\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'ln -s ../up.txt /served/a/again' && readlink /served/a/again && cat /served/a/again",
+          "expect": {
+            "exit": 0,
+            "stdout": "../up.txt\nup\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm /tmp/mirage-integ-link-out.txt && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_shows_served_files_as_the_box_users",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "A served file shows as owned by the box's user, as on a disk that user mounted: the host's uid means nothing in the box, and git refuses a repository another user owns. The modes stay the workspace's.",
@@ -124,6 +309,47 @@
         {
           "command": "chmod 640 /served/seed.txt && dash -c 'test -O /served/seed.txt && test -G /served/seed.txt && test -O /served && echo mine; stat -c %a /served/seed.txt'",
           "expect": { "exit": 0, "stdout": "mine\n640\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_shows_served_files_as_the_box_users",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "mirage-fuse shows a served file as the box user's own, as sshfs does, keeping the workspace's modes.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "chmod 640 /served/seed.txt && dash -c 'test -O /served/seed.txt && test -G /served/seed.txt && test -O /served && echo mine; stat -c %a /served/seed.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "mine\n640\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -152,6 +378,51 @@
       ]
     },
     {
+      "id": "mount_type_mirage_renames_over_an_existing_name",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "mirage-fuse renames over an existing name, refusing it only when the program asks for RENAME_NOREPLACE.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cd /served && echo a > x && echo b > y && mv y x && cat x && ls'",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\nx\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /served/x",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_leaves_a_file_mount_off_the_box",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs and places VFS.md through the SDK, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "sshfs mounts only a directory: a file mounted at a path of its own, such as the workspace's VFS.md, stays in the workspace, and the box sees the directories beside it.",
@@ -175,6 +446,55 @@
         {
           "command": "test -s /VFS.md && echo placed",
           "expect": { "exit": 0, "stdout": "placed\n" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_leaves_a_file_mount_off_the_box",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse and places VFS.md through the SDK, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "mirage-fuse serves directories only, as sshfs does: a file mounted at a path of its own stays in the workspace.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        },
+        "vfs_md": "/VFS.md"
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cat /served/seed.txt; test -e /VFS.md; echo $?'",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "test -s /VFS.md && echo placed",
+          "expect": {
+            "exit": 0,
+            "stdout": "placed\n"
+          }
         }
       ]
     },
@@ -283,6 +603,111 @@
       ]
     },
     {
+      "id": "mount_type_mirage_serves_the_sessions_view",
+      "note": "The session's view as under ssh, except that a write into a read-only mount is refused as Mirage refuses it, Read-only file system, where sshfs can only say Permission denied.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "plan.txt": "plan\n",
+              "secret.txt": "salaries\n"
+            }
+          },
+          "/served/ro": {
+            "vfs": "ram",
+            "mode": "read"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/served/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "dash -c 'ls /served'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan.txt\nro\n"
+          }
+        },
+        {
+          "command": "dash -c 'cat /served/secret.txt'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: /served/secret.txt: No such file or directory\n"
+          }
+        },
+        {
+          "command": "dash -c 'ln -s plan.txt /served/link && cat /served/link && readlink /served/link && rm /served/link'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan\nplan.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo made > /served/new.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /served/new.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "dash -c 'echo x > /served/ro/f'",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr": "dash: 1: cannot create /served/ro/f: Read-only file system\n"
+          }
+        },
+        {
+          "command": "rm /served/plan.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "dash -c 'ls /served'",
+          "expect": {
+            "exit": 0,
+            "stdout": "new.txt\nro\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_shows_mirages_change_to_the_next_command",
       "note": "The box's kernel keeps a served name, its absence and its attributes for a second, so an import's folder checks stay in the box; a command after a change Mirage made waits that out, so it sees the new size, a new file and a removed one at once.",
       "runtimes": ["docker", "e2b", "microsandbox", "kubernetes"],
@@ -305,6 +730,63 @@
         {
           "command": "dash -c 'test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'test -e /served/new.txt || echo gone'",
           "expect": { "exit": 0, "stdout": "there\ngone\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_shows_mirages_change_to_the_next_command",
+      "note": "mirage-fuse keeps what a RAM mount answers until Mirage pushes a change; a command after a change waits until the client dropped what it touched, so it sees the new size, a new file and a removed one at once.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "plan.txt": "plan\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'stat -c %s /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "5\n7\nlonger\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'cat /served/new.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "missing\nmade\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'test -e /served/new.txt || echo gone'",
+          "expect": {
+            "exit": 0,
+            "stdout": "there\ngone\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -474,6 +956,72 @@
       ]
     },
     {
+      "id": "mount_type_mirage_runs_no_line_over_a_mount_the_box_lost",
+      "note": "A mirage-fuse mount the box lost is found and served again before the next line, as an sshfs one is.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/restart": {
+            "vfs": "ram",
+            "files": {
+              "plan.txt": "plan\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cat /restart/plan.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan\n"
+          }
+        },
+        {
+          "command": "dash -c 'mount --move /restart \"$(mktemp -d)\"'",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo lost > /restart/lost.txt'",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "docker: /restart is no longer mounted in the machine (did it restart?); the line did not run\n"
+          }
+        },
+        {
+          "command": "dash -c 'ls /restart'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan.txt\n"
+          }
+        },
+        {
+          "command": "ls /restart",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan.txt\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_refuses_a_cwd_the_box_cannot_see",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "runtimes": [
@@ -495,6 +1043,55 @@
         ],
         "config": {
           "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /notes",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cd /notes && make",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "docker: the machine cannot see the working directory /notes; cd into a mount first\n"
+          }
+        },
+        {
+          "command": "cd /served && dash -c pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/served\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_refuses_a_cwd_the_box_cannot_see",
+      "sdk_only": "The case serves /served into the one shared docker box through mirage-fuse; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "The cwd rule does not depend on how the mounts are served.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "mirage"
         }
       },
       "steps": [

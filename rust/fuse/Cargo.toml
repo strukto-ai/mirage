@@ -1,0 +1,20 @@
+[package]
+name = "mirage-fuse"
+description = "The FUSE client a machine mounts the workspace's prefixes with, served by Mirage over fsproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "mirage-fuse"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fuser = { version = "=0.18.0", default-features = false }
+libc = "0.2"

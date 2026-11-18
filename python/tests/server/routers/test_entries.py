@@ -277,7 +277,7 @@ async def test_types_are_read_off_the_config_schemas(client):
     assert ssh["port"]["type"] == "number"
     assert ssh["port"]["required"] is False
     assert ssh["timeout"]["default"] == 30
-    assert ssh["mount_type"]["options"] == ["ssh", "fuse", "both"]
+    assert ssh["mount_type"]["options"] == ["ssh", "mirage", "own", "both"]
     assert ssh["private_key"]["secret"] is True
     assert "env" not in ssh
     assert "on_pause" not in ssh

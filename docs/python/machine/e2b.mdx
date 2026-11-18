@@ -38,8 +38,10 @@ await ws.shell("python3 -c 'print(1 + 1)'")
 
 ## Connecting the workspace
 
-Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
-each file call is about 150 ms for a small file from a laptop. With `fuse`,
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
+`ssh` each file call is about 150 ms for a small file from a laptop; under
+`mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
+read, and its template needs `mirage-fuse`. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
