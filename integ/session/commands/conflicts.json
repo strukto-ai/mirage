@@ -124,7 +124,7 @@
       }
     },
     {
-      "id": "conflict_one_grant_answers_the_line_whatever_tier_also_asks",
+      "id": "conflict_each_tree_that_asks_needs_its_own_grant",
       "seq": 923075,
       "targets": [
         "ram-commands"
@@ -133,9 +133,9 @@
       "answer": "allow_session",
       "command": "rm /scratch/both/b && ls /scratch/both",
       "expect": {
-        "exit": 0,
-        "stdout": "locked\n",
-        "stderr": ""
+        "exit": 126,
+        "stdout": "",
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -207,7 +207,7 @@
       }
     },
     {
-      "id": "conflict_the_deeper_ask_admits_the_line_over_the_broad_deny",
+      "id": "conflict_on_one_node_the_broad_deny_outranks_the_deeper_ask",
       "seq": 923244,
       "targets": [
         "ram-commands"
@@ -215,9 +215,9 @@
       "session": "carver",
       "command": "rm -r /scratch/carve",
       "expect": {
-        "exit": 126,
+        "exit": 1,
         "stdout": "",
-        "stderr": "rm: Permission denied\n"
+        "stderr": "rm: cannot remove '/scratch/carve': Permission denied\n"
       }
     },
     {

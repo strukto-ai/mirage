@@ -4048,7 +4048,7 @@
                     "reason": "history is read-only here"
                   },
                   "reset": {
-                    "--hard": {
+                    "-*": {
                       "decision": "deny",
                       "reason": "history is read-only here"
                     }
