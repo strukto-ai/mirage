@@ -1090,19 +1090,19 @@ def _opens_file(r: Redirect) -> bool:
 
 def unowned_redirects(
     node: Any, homes: Mapping[str, str] | None
-) -> list[Word]:
-    """The literal targets of every redirect in a parsed line that no
-    command owns: a compound statement's, a bare one's, a bare
-    ``exec``'s, an assignment's. A command's own redirects are its words
-    (``statement_redirects``); these are read for a line a runtime
-    takes whole, where no executor opens them.
+) -> list[tuple[Word, TSNodeLike]]:
+    """The literal target of every redirect in a parsed line that no
+    command owns, with the target's node: a compound statement's, a bare
+    one's, a bare ``exec``'s, an assignment's. A command's own redirects
+    are its words (``statement_redirects``); these are read for a line a
+    runtime takes whole, where no executor opens them.
 
     Args:
         node (Any): the parsed line, or any node in it.
         homes (Mapping[str, str] | None): the homes each ``~name``
             names, ``""`` for a bare ``~``.
     """
-    out: list[Word] = []
+    out: list[tuple[Word, TSNodeLike]] = []
     stack = [node]
     while stack:
         current = stack.pop()
@@ -1120,7 +1120,10 @@ def unowned_redirects(
         ):
             continue
         out.extend(
-            Word(str(r.target), literal_word(r.target_node, homes))
+            (
+                Word(str(r.target), literal_word(r.target_node, homes)),
+                r.target_node,
+            )
             for r in redirects
             if _opens_file(r)
         )

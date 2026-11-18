@@ -1471,7 +1471,8 @@ async def admit_line(
     statement's redirect targets are read as words of its command, so
     ``cat < /data/secret`` is judged on the file it opens, and a redirect
     no command owns (``{ cat; } < f``, ``> f``) is judged on its target
-    as the shell would open it (``admit_redirect``); the lines a
+    as the shell would open it, where it stands (``admit_redirect``),
+    so each open is a nod of its own; the lines a
     command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
     ``inner_lines``) are judged in turn; and what the runtime would do
     past the gate is refused under a rule, or a user ``pre_command``
@@ -1514,10 +1515,17 @@ async def admit_line(
             refused = await off_line_refusal(one, off_line)
         if refused is not None:
             return refused
-    targets = redirect_paths(
-        unowned_redirects(ast, tilde_homes(session)), registry, session.cwd
-    )
-    return await admit_redirect(targets, session, registry, namespace)
+    for word, at in unowned_redirects(ast, tilde_homes(session)):
+        refused = await admit_redirect(
+            redirect_paths([word], registry, session.cwd),
+            session,
+            registry,
+            namespace,
+            at,
+        )
+        if refused is not None:
+            return refused
+    return None
 
 
 async def off_line_refusal(

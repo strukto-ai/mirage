@@ -1199,7 +1199,8 @@ async function admitted(
  * the line's. A statement's redirect targets are read as words of its
  * command, so `cat < /data/secret` is judged on the file it opens, and a
  * redirect no command owns (`{ cat; } < f`, `> f`) is judged on its target
- * as the shell would open it (`admitRedirect`); the lines
+ * as the shell would open it, where it stands (`admitRedirect`), so each
+ * open is a nod of its own; the lines
  * a command runs (`eval`, `sh -c`, `xargs`, `env` ... see `innerLines`) are
  * judged in turn; and what the runtime would do past the gate is refused
  * under a rule, or a user `preCommand` policy, that would have read it
@@ -1246,8 +1247,17 @@ export async function admitLine(
       (offLine === null ? null : await offLineRefusal(one, offLine))
     if (refused !== null) return refused
   }
-  const targets = redirectPaths(unownedRedirects(root, tildeHomes(session)), registry, session.cwd)
-  return admitRedirect(targets, session, registry, namespace)
+  for (const [word, at] of unownedRedirects(root, tildeHomes(session))) {
+    const refused = await admitRedirect(
+      redirectPaths([word], registry, session.cwd),
+      session,
+      registry,
+      namespace,
+      at,
+    )
+    if (refused !== null) return refused
+  }
+  return null
 }
 
 /**

@@ -816,17 +816,17 @@ export function statementRedirects(
 }
 
 /**
- * The literal targets of every redirect in a parsed line that no command
- * owns: a compound statement's, a bare one's, a bare `exec`'s, an
- * assignment's. A command's own redirects are its words (`statementRedirects`); these are
- * read for a line a runtime takes whole, where no executor opens them.
- * Mirrors Python's unowned_redirects.
+ * The literal target of every redirect in a parsed line that no command
+ * owns, with the target's node: a compound statement's, a bare one's, a
+ * bare `exec`'s, an assignment's. A command's own redirects are its words
+ * (`statementRedirects`); these are read for a line a runtime takes whole,
+ * where no executor opens them. Mirrors Python's unowned_redirects.
  */
 export function unownedRedirects(
   node: TSNodeLike,
   homes: Readonly<Record<string, string>> | null,
-): Word[] {
-  const out: Word[] = []
+): [Word, TSNodeLike][] {
+  const out: [Word, TSNodeLike][] = []
   const stack: TSNodeLike[] = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
     stack.push(...[...current.namedChildren].reverse())
@@ -838,7 +838,8 @@ export function unownedRedirects(
     }
     if (owner !== null && REDIRECT_OWNERS.has(owner.type) && !isBareExec(owner)) continue
     for (const r of redirects.filter(opensFile)) {
-      out.push({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, homes) })
+      const at = r.targetNode as TSNodeLike
+      out.push([{ raw: String(r.target), text: literalWord(at, homes) }, at])
     }
   }
   return out
