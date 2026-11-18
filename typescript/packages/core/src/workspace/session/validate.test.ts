@@ -22,6 +22,7 @@ import type { Grammar } from '../../policy/types.ts'
 import { trees } from '../../test-utils.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { BUILTIN_GRAMMARS, normalizeTree, renormalized } from './validate.ts'
 
@@ -64,6 +65,15 @@ function tool(verb: string): CLI {
       subcommands: [new CommandSpec({ name: verb, aliases: ['go'] })],
     }),
     handlers: { [verb]: new CLIHandler({ fn: noopVerb }) },
+  })
+}
+
+function answering(): ReturnType<typeof command> {
+  return command({
+    name: 'tool',
+    vfs: null,
+    spec: new CommandSpec(),
+    fn: () => [new TextEncoder().encode('ran\n'), new IOResult()],
   })
 }
 
@@ -300,6 +310,52 @@ describe('a workspace checks command trees against its grammars', () => {
       expect((await ws.shell('ls /a')).exitCode).toBe(0)
     } finally {
       await ws.close()
+    }
+  })
+
+  it('a default rule no grammar can read holds after a snapshot', async () => {
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    let tar: Uint8Array
+    try {
+      ws.mount('/a').registerCommands(answering())
+      expect((await ws.shell('cd /a && tool go')).exitCode).toBe(126)
+      tar = await ws.snapshot()
+    } finally {
+      await ws.close()
+    }
+    const back = await Workspace.load(tar, {})
+    try {
+      back.mount('/a').registerCommands(answering())
+      expect((await back.shell('cd /a && tool go')).exitCode).toBe(126)
+      expect((await back.shell('ls /a')).exitCode).toBe(0)
+    } finally {
+      await back.close()
+    }
+  })
+
+  it('a default rule no grammar can read holds in a stored session', async () => {
+    const store = new RAMNamespaceStore()
+    const first = new Workspace(
+      { '/a': new RAMVFS() },
+      {
+        profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) },
+        sessionStore: store,
+      },
+    )
+    const second = new Workspace({ '/a': new RAMVFS() }, { sessionStore: store })
+    try {
+      first.mount('/a').registerCommands(answering())
+      second.mount('/a').registerCommands(answering())
+      expect((await first.shell('cd /a && tool go')).exitCode).toBe(126)
+      await first.flushSessions()
+      const held = await second.shell('cd /a && tool go', { sessionId: first.defaultSessionId })
+      expect(held.exitCode).toBe(126)
+    } finally {
+      await first.close()
+      await second.close()
     }
   })
 

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import io
 import re
 from typing import Any
 
@@ -28,6 +29,7 @@ from mirage.policy.profile import command_tree, tree_doc
 from mirage.policy.types import Grammar
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.session.validate import (
     BUILTIN_GRAMMARS,
     normalize_tree,
@@ -302,6 +304,50 @@ async def test_a_default_rule_no_grammar_can_read_refuses_its_command():
         assert (await ws.shell("ls /a")).exit_code == 0
     finally:
         await ws.close()
+
+
+UNREAD = {"default": {"commands": {"tool": {"go": "deny"}}}}
+
+
+@pytest.mark.asyncio
+async def test_a_default_rule_no_grammar_can_read_holds_after_a_snapshot():
+    tool = command("tool", vfs=None, spec=CommandSpec())(_answer)
+    ws = Workspace({"/a/": RAMVFS()}, profiles=UNREAD)
+    saved = io.BytesIO()
+    try:
+        ws.mount("/a").register_commands([tool])
+        assert (await ws.shell("cd /a && tool go")).exit_code == 126
+        await ws.snapshot(saved)
+    finally:
+        await ws.close()
+    saved.seek(0)
+    back = await Workspace.load(saved)
+    try:
+        back.mount("/a").register_commands([tool])
+        assert (await back.shell("cd /a && tool go")).exit_code == 126
+        assert (await back.shell("ls /a")).exit_code == 0
+    finally:
+        await back.close()
+
+
+@pytest.mark.asyncio
+async def test_a_default_rule_no_grammar_can_read_holds_in_a_stored_session():
+    tool = command("tool", vfs=None, spec=CommandSpec())(_answer)
+    store = RAMNamespaceStore()
+    first = Workspace({"/a/": RAMVFS()}, profiles=UNREAD, session_store=store)
+    second = Workspace({"/a/": RAMVFS()}, session_store=store)
+    try:
+        first.mount("/a").register_commands([tool])
+        second.mount("/a").register_commands([tool])
+        assert (await first.shell("cd /a && tool go")).exit_code == 126
+        await first.flush_sessions()
+        held = await second.shell(
+            "cd /a && tool go", session_id=first.default_session_id
+        )
+        assert held.exit_code == 126
+    finally:
+        await first.close()
+        await second.close()
 
 
 def _rooted() -> CLI:
