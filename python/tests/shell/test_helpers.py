@@ -873,9 +873,11 @@ def test_get_redirects_recovers_herestring_after_file_redirect():
     assert redirects[1].target == "here"
 
 
-def _literals(line: str, home: str | None = None) -> list[str | None]:
+def _literals(
+    line: str, homes: dict[str, str] | None = None
+) -> list[str | None]:
     _, parts = split_env_prefix(get_parts(_first(line)))
-    return [literal_word(p, home) for p in parts]
+    return [literal_word(p, homes) for p in parts]
 
 
 @pytest.mark.parametrize(
@@ -905,7 +907,8 @@ def test_literal_word_reads_what_a_word_names_before_expansion(line, expected):
 
 
 def test_literal_word_expands_a_leading_unquoted_tilde_only():
-    assert _literals('ls ~ ~/x "~/y" ~u a~ ~/x"y"', "/home/me") == [
+    homes = {"": "/home/me", "root": "/root"}
+    assert _literals('ls ~ ~/x "~/y" ~u a~ ~/x"y" ~root/s', homes) == [
         "ls",
         "/home/me",
         "/home/me/x",
@@ -913,6 +916,7 @@ def test_literal_word_expands_a_leading_unquoted_tilde_only():
         "~u",
         "a~",
         "/home/me/xy",
+        "/root/s",
     ]
     # No $HOME: the tilde stays, as in bash.
     assert _literals("ls ~/x") == ["ls", "~/x"]

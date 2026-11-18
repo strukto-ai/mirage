@@ -430,28 +430,31 @@ def _resolve_symlinks(
     return landing + suffix
 
 
-def expand_tilde(word: str, home: str | None) -> str:
-    """Expand a leading ``~`` against the home directory.
+def expand_tilde(word: str, homes: Mapping[str, str] | None) -> str:
+    """Expand a leading ``~`` or ``~name`` against the homes it names.
 
-    ``~`` alone or ``~/rest`` expands to ``home`` (or ``home/rest``).
-    ``~user`` and any non-leading ``~`` are left unchanged, matching
-    bash behavior when no matching user exists. When ``home`` is ``None``
-    the word is left unchanged.
+    ``~name`` and ``~name/rest`` expand to that name's home (or
+    ``home/rest``), the empty name being a bare ``~``. A name ``homes``
+    lacks and any non-leading ``~`` are left unchanged, as bash leaves a
+    user it cannot find. When ``homes`` is ``None`` the word is left
+    unchanged.
 
     Args:
-        word: The unexpanded word.
-        home: The home directory to substitute for ``~``, or ``None``.
+        word (str): the unexpanded word.
+        homes (Mapping[str, str] | None): the home each ``~name``
+            names, ``""`` for a bare ``~``.
 
     Returns:
-        The word with a leading ``~`` resolved, or the word unchanged.
+        The word with a leading tilde prefix resolved, or the word
+        unchanged.
     """
+    if homes is None or not word.startswith("~"):
+        return word
+    name, slash, rest = word[1:].partition("/")
+    home = homes.get(name)
     if home is None:
         return word
-    if word == "~":
-        return home
-    if word.startswith("~/"):
-        return home.rstrip("/") + word[1:]
-    return word
+    return home.rstrip("/") + "/" + rest if slash else home
 
 
 def respell_raw(paths: list[str], original: str, raw: str) -> list[str]:

@@ -208,12 +208,22 @@ export function groupLabel(gid: number | string | null, identity: Identity | nul
   return groupName(gid, identity) ?? String(groupId(gid, identity))
 }
 
-/** The user database as `find` reads it. */
+/**
+ * The user database as `find` reads it: a name held twice (a profile named
+ * `nogroup`) is its first entry's, as every lookup here and glibc's read of
+ * `/etc/group` take it.
+ */
 export function findIds(identity: Identity | null): Ids {
   const held = accounts(identity)
+  const users: Record<string, number> = {}
+  const groups: Record<string, number> = {}
+  for (const account of held) {
+    if (!Object.hasOwn(users, account.name)) users[account.name] = account.uid
+    if (!Object.hasOwn(groups, account.group)) groups[account.group] = account.gid
+  }
   return {
-    users: Object.fromEntries(held.map((account) => [account.name, account.uid])),
-    groups: Object.fromEntries(held.map((account) => [account.group, account.gid])),
+    users,
+    groups,
     uid: sessionUid(identity),
     gid: sessionGid(identity),
   }

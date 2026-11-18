@@ -70,7 +70,7 @@ import { CycleError, endsAtDot, ownerPrefix, posixNormpath } from '../../utils/p
 import type { EvaluationContext } from '../evaluation.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
-import { tildeHome } from '../session/shell_dirs.ts'
+import { tildeHomes } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
 import {
   CLOSED as EXEC_CLOSED,
@@ -1537,7 +1537,7 @@ export async function redirectStdin(
       const target =
         r.targetNode == null
           ? r.target
-          : literalWord(r.targetNode as TSNodeLike, tildeHome(session))
+          : literalWord(r.targetNode as TSNodeLike, tildeHomes(session))
       if (target === null) {
         sources.set(r.fd, new DeviceInput())
         continue

@@ -337,15 +337,22 @@ def group_label(gid: int | str | None, identity: Identity | None) -> str:
 
 
 def find_ids(identity: Identity | None) -> Ids:
-    """The user database as ``find`` reads it.
+    """The user database as ``find`` reads it: a name held twice (a
+    profile named ``nogroup``) is its first entry's, as every lookup
+    here and glibc's read of ``/etc/group`` take it.
 
     Args:
         identity (Identity | None): who the session is.
     """
     held = accounts(identity)
+    users: dict[str, int] = {}
+    groups: dict[str, int] = {}
+    for account in held:
+        users.setdefault(account.name, account.uid)
+        groups.setdefault(account.group, account.gid)
     return Ids(
-        users={account.name: account.uid for account in held},
-        groups={account.group: account.gid for account in held},
+        users=users,
+        groups=groups,
         uid=session_uid(identity),
         gid=session_gid(identity),
     )

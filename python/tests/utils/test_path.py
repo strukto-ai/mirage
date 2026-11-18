@@ -162,28 +162,37 @@ def test_posix_normpath_folds_a_double_leading_slash():
     assert posix_normpath("//a/./b/../c") == "/a/c"
 
 
+_HOMES = {"": "/home/u", "root": "/root"}
+
+
 def test_expand_tilde_alone():
-    assert expand_tilde("~", "/home/u") == "/home/u"
+    assert expand_tilde("~", _HOMES) == "/home/u"
 
 
 def test_expand_tilde_with_subpath():
-    assert expand_tilde("~/file.txt", "/home/u") == "/home/u/file.txt"
+    assert expand_tilde("~/file.txt", _HOMES) == "/home/u/file.txt"
 
 
 def test_expand_tilde_root_home():
-    assert expand_tilde("~/file.txt", "/") == "/file.txt"
+    assert expand_tilde("~/file.txt", {"": "/"}) == "/file.txt"
+
+
+def test_expand_tilde_reads_a_user_the_homes_hold():
+    assert expand_tilde("~root", _HOMES) == "/root"
+    assert expand_tilde("~root/x", _HOMES) == "/root/x"
 
 
 def test_expand_tilde_user_unchanged():
-    assert expand_tilde("~other/x", "/home/u") == "~other/x"
+    assert expand_tilde("~other/x", _HOMES) == "~other/x"
 
 
 def test_expand_tilde_non_leading_unchanged():
-    assert expand_tilde("a~b", "/home/u") == "a~b"
+    assert expand_tilde("a~b", _HOMES) == "a~b"
 
 
 def test_expand_tilde_plain_word_unchanged():
-    assert expand_tilde("file.txt", "/home/u") == "file.txt"
+    assert expand_tilde("file.txt", _HOMES) == "file.txt"
+    assert expand_tilde("~/x", None) == "~/x"
 
 
 def test_resolve_symlinks_prefix_substitution():

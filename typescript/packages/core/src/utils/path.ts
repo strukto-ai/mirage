@@ -221,11 +221,17 @@ export function walkNodes(
   return entered
 }
 
-export function expandTilde(word: string, home: string | null): string {
-  if (home === null) return word
-  if (word === '~') return home
-  if (word.startsWith('~/')) return rstripSlash(home) + word.slice(1)
-  return word
+// Expand a leading `~` or `~name` against the home each names, `''` for a
+// bare `~`; a name `homes` lacks, any non-leading `~`, and null `homes` leave
+// the word as written, as bash leaves a user it cannot find. Mirrors Python's
+// expand_tilde.
+export function expandTilde(word: string, homes: Readonly<Record<string, string>> | null): string {
+  if (homes === null || !word.startsWith('~')) return word
+  const slash = word.indexOf('/')
+  const name = slash === -1 ? word.slice(1) : word.slice(1, slash)
+  const home = Object.hasOwn(homes, name) ? homes[name] : undefined
+  if (home === undefined) return word
+  return slash === -1 ? home : `${rstripSlash(home)}/${word.slice(slash + 1)}`
 }
 
 // Rewrite the base of walked output paths (find/grep -r results) to the

@@ -54,8 +54,12 @@ function wordGlobs(node: TSNodeLike): boolean {
  * whether the runtime expands pathname patterns in this word; inside `[[ ]]`
  * it never does.
  */
-export function readWord(node: TSNodeLike, home: string | null = null, globs = true): Word {
-  return { raw: getText(node), text: literalWord(node, home), glob: globs && wordGlobs(node) }
+export function readWord(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null = null,
+  globs = true,
+): Word {
+  return { raw: getText(node), text: literalWord(node, homes), glob: globs && wordGlobs(node) }
 }
 
 /**
@@ -77,25 +81,28 @@ export interface TestRead {
  * gate answers. No word of it expands a pathname pattern, so none is a glob,
  * and a pattern side with no expansion in it (an extglob or regex node) is
  * matched as typed, so it names its own text. (`[` is a command, admitted on
- * its words as any command is.) `home` is the
- * home directory a leading tilde names. Mirrors Python's reads_of_test.
+ * its words as any command is.) `homes` maps a name to the homes its tilde
+ * names, `''` for a bare `~`. Mirrors Python's reads_of_test.
  */
-export function readsOfTest(node: TSNodeLike, home: string | null = null): TestRead[] {
+export function readsOfTest(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null = null,
+): TestRead[] {
   const opener: Word = { raw: '[[', text: '[[' }
   return condLeaves(new CondParser(condTokens(node)).parse()).map((leaf) => {
     let words: Word[]
     if (leaf.kind === 'unary') {
-      words = [{ raw: leaf.op, text: leaf.op }, readWord(leaf.operand, home, false)]
+      words = [{ raw: leaf.op, text: leaf.op }, readWord(leaf.operand, homes, false)]
     } else if (leaf.kind === 'binary') {
-      const right = readWord(leaf.right, home, false)
+      const right = readWord(leaf.right, homes, false)
       const typed = leaf.right.type === NT.EXTGLOB_PATTERN || leaf.right.type === NT.REGEX
       words = [
-        readWord(leaf.left, home, false),
+        readWord(leaf.left, homes, false),
         { raw: leaf.op, text: leaf.op },
         typed ? { raw: right.raw, text: right.raw } : right,
       ]
     } else {
-      words = [readWord(leaf.operand, home, false)]
+      words = [readWord(leaf.operand, homes, false)]
     }
     const stated = leaf.kind !== 'binary' || !PATTERN_OPS.has(leaf.op)
     return { words: [opener, ...words], stated }

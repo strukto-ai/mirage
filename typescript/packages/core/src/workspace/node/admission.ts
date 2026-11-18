@@ -722,7 +722,10 @@ export function statementStdin(node: TSNodeLike): Uint8Array | null {
   return statementRedirectsRaw(node).some((r) => r.fd === 0) ? new Uint8Array(0) : null
 }
 
-export function statementRedirects(node: TSNodeLike, home: string | null): Word[] {
+export function statementRedirects(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null,
+): Word[] {
   const words: Word[] = []
   for (const r of statementRedirectsRaw(node)) {
     if (
@@ -733,7 +736,7 @@ export function statementRedirects(node: TSNodeLike, home: string | null): Word[
       continue
     if (typeof r.target === 'number' || r.targetNode === null) continue
     const target = r.targetNode as TSNodeLike
-    words.push({ raw: String(r.target), text: literalWord(target, home) })
+    words.push({ raw: String(r.target), text: literalWord(target, homes) })
   }
   return words
 }

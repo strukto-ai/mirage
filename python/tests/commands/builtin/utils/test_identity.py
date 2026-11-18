@@ -158,6 +158,17 @@ async def test_a_name_the_database_lacks_prints_as_unknown_in_id_fields():
 
 
 @pytest.mark.asyncio
+async def test_a_group_name_held_twice_is_its_first_entry_everywhere():
+    ws = _ws(profiles={"nogroup": SessionProfile()}, profile="nogroup")
+    _, out = await _run(
+        ws,
+        "chgrp nogroup /data/f.txt; stat -c %g /data/f.txt;"
+        " find /data/f.txt -group nogroup",
+    )
+    assert out == "65534\n/data/f.txt\n"
+
+
+@pytest.mark.asyncio
 async def test_a_field_past_the_memory_budget_is_refused():
     ws = _ws(max_memory="1MB")
     io = await ws.shell("stat -c '%.9999999u' /data/f.txt")

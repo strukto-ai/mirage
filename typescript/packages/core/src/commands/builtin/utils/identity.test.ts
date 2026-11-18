@@ -155,6 +155,14 @@ describe('identity in a workspace', () => {
     await ws.close()
   })
 
+  it('reads a group name held twice as its first entry everywhere', async () => {
+    const ws = makeWs({ profiles: { nogroup: SessionProfile({}) }, profile: 'nogroup' })
+    const line =
+      'chgrp nogroup /data/f.txt; stat -c %g /data/f.txt; find /data/f.txt -group nogroup'
+    expect((await run(ws, line))[1]).toBe('65534\n/data/f.txt\n')
+    await ws.close()
+  })
+
   it('refuses a field past the memory budget', async () => {
     const ws = makeWs({ maxMemory: '1MB' })
     const io = await ws.shell("stat -c '%.9999999u' /data/f.txt")

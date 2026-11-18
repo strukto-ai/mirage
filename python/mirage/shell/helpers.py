@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
@@ -323,7 +323,9 @@ def brace_expands(text: str) -> bool:
     return False
 
 
-def literal_word(node: TSNodeLike, home: str | None = None) -> str | None:
+def literal_word(
+    node: TSNodeLike, homes: Mapping[str, str] | None = None
+) -> str | None:
     """The text a word names before any expansion, or None.
 
     A word is literal when nothing in it waits on the shell: a plain
@@ -337,19 +339,19 @@ def literal_word(node: TSNodeLike, home: str | None = None) -> str | None:
     Args:
         node (TSNodeLike): a command word node, or the
             command_name wrapping one.
-        home (str | None): the home directory a leading ``~`` names;
-            None leaves it literal, as bash does with no ``$HOME``.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``; None leaves it literal.
     """
     ntype = node.type
     if ntype == NT.COMMAND_NAME:
         named = node.named_children
-        return literal_word(named[0], home) if named else get_text(node)
+        return literal_word(named[0], homes) if named else get_text(node)
     if ntype in (NT.WORD, NT.NUMBER, NT.CONCATENATION) and brace_expands(
         get_text(node)
     ):
         return None
     if ntype in (NT.WORD, NT.NUMBER):
-        return expand_tilde(unescape_unquoted(get_text(node)), home)
+        return expand_tilde(unescape_unquoted(get_text(node)), homes)
     if ntype == NT.RAW_STRING:
         return get_text(node)[1:-1]
     if ntype == NT.ANSI_C_STRING:
@@ -381,7 +383,7 @@ def literal_word(node: TSNodeLike, home: str | None = None) -> str | None:
             ):
                 continue
             # Only a leading unquoted piece carries a tilde prefix.
-            piece = literal_word(child, home if not pieces else None)
+            piece = literal_word(child, homes if not pieces else None)
             if piece is None:
                 return None
             pieces.append(piece)
