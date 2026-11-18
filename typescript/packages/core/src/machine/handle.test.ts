@@ -17,6 +17,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../types.ts'
 import { LookupStatus } from '../cache/index/config.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
+import { PipeClosed } from '../io/errors.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
@@ -31,6 +32,7 @@ import {
   fifoLine,
   isRun,
   NOT_RUNNING_STATUS,
+  PIPE_SIGNAL,
   MACHINE_STOP_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
   RUN_EXIT_MARK,
@@ -631,6 +633,21 @@ describe('MachineHandle', () => {
     expect(tag).not.toBe('')
     expect(box.execs.map(([line]) => line)).toEqual(['yes', stopLine(tag)])
     expect(box.execs[1]?.[2]).not.toHaveProperty(PROCESS)
+  })
+
+  // A run whose output's reader has gone (head took what it wanted) is stopped
+  // in the box with SIGPIPE, as a pipe's writer is: a box that keeps the
+  // program past its exec stream would otherwise leave it running.
+  it('stops a run whose output reader has gone', async () => {
+    const box = new RecordingMachine({ captures: ['yes'] })
+    const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
+    const closed: OutputFn = () => Promise.reject(new PipeClosed())
+    await expect(
+      machineRuntime(box).runLine(undefined, [], [], ctx, closed, ignore),
+    ).rejects.toBeInstanceOf(PipeClosed)
+    const tag = box.execs[0]?.[2][PROCESS] ?? ''
+    expect(tag).not.toBe('')
+    expect(box.execs.map(([line]) => line)).toEqual(['yes', stopLine(tag, PIPE_SIGNAL)])
   })
 
   // A run a `kill` stopped is stopped in the box with the signal it named.

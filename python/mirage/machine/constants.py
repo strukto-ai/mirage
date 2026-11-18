@@ -395,6 +395,11 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
 # box it ran in holds nothing of the run.
 NOT_RUNNING_STATUS = 3
 
+# The signal a run gets once the reader of its output has gone, as a pipe's
+# writer does: a machine that keeps a program past its exec stream (kubectl)
+# would otherwise leave it running.
+PIPE_SIGNAL = 13
+
 
 def stop_line(process: str, signum: int = 15) -> str:
     """The shell line that stops every process of the run ``process``

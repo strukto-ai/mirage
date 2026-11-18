@@ -25,11 +25,13 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
+from mirage.io.errors import PipeClosed
 from mirage.io.types import materialize
 from mirage.machine import MachineConfig, MachineHandle
 from mirage.machine.constants import (
     FIFO_NAME,
     NOT_RUNNING_STATUS,
+    PIPE_SIGNAL,
     PROCESS,
     RUN_DRAIN_SECONDS,
     RUN_EXIT_MARK,
@@ -89,6 +91,14 @@ class RecordingMachine(MachineHandle):
         self.execs.append((line, stdin, cwd))
         self.exec_envs.append(dict(env))
         return RunAnswer(0, b"ran:" + line.encode())
+
+
+async def _closed_pipe(data: bytes) -> None:
+    raise PipeClosed
+
+
+async def _drop(data: bytes) -> None:
+    return None
 
 
 async def _line(box: MachineHandle, ctx: Context) -> RunAnswer:
@@ -414,6 +424,24 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     tag = box.exec_envs[0][PROCESS]
     assert [line for line, _, _ in box.execs] == ["yes", stop_line(tag)]
     assert PROCESS not in box.exec_envs[1]
+
+
+# A run whose output's reader has gone (head took what it wanted) is stopped
+# in the box with SIGPIPE, as a pipe's writer is: a box that keeps the program
+# past its exec stream would otherwise leave it running.
+@pytest.mark.asyncio
+async def test_a_run_whose_output_reader_has_gone_is_stopped():
+    box = RecordingMachine(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+    with pytest.raises(PipeClosed):
+        await machine_runtime(box).run_line(
+            None, [], [], ctx, _closed_pipe, _drop
+        )
+    tag = box.exec_envs[0][PROCESS]
+    assert [line for line, _, _ in box.execs] == [
+        "yes",
+        stop_line(tag, PIPE_SIGNAL),
+    ]
 
 
 # A run a ``kill`` stopped is stopped in the box with the signal it named.

@@ -371,6 +371,11 @@ export function wrapLine(
 // box it ran in holds nothing of the run.
 export const NOT_RUNNING_STATUS = 3
 
+// The signal a run gets once the reader of its output has gone, as a pipe's
+// writer does: a machine that keeps a program past its exec stream (kubectl)
+// would otherwise leave it running.
+export const PIPE_SIGNAL = 13
+
 /**
  * The shell line that stops every process of the run `process` tags.
  *

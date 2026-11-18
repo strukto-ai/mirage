@@ -18,6 +18,7 @@ import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
+import { PipeClosed } from '../io/errors.ts'
 import type { ByteSource } from '../io/types.ts'
 import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
@@ -38,6 +39,7 @@ import {
   FAKETIME_PROBE_SECONDS,
   MACHINE_STOP_WAIT_SECONDS,
   NOT_RUNNING_STATUS,
+  PIPE_SIGNAL,
   RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
   RUN_PID_HOLD,
@@ -498,6 +500,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } catch (error) {
       if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        throw error
+      }
+      if (error instanceof PipeClosed) {
+        await this.stop(tag, PIPE_SIGNAL)
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
