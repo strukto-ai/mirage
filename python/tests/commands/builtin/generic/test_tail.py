@@ -121,6 +121,15 @@ async def test_tail_counts_what_it_keeps_against_the_memory_budget():
 
 
 @pytest.mark.asyncio
+async def test_tail_c_counts_its_window_against_the_memory_budget():
+    memory = MemoryBudget(8, lambda: 0)
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), c=100))
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "parts,kwargs,expected",
     [

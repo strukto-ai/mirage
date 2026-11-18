@@ -64,6 +64,42 @@
           }
         }
       ]
+    },
+    {
+      "id": "tail_c_window_meets_max_memory",
+      "note": "tail -c holds its last N bytes until the input ends, so a window past the room is refused as sort refuses.",
+      "world": {
+        "machines": {},
+        "max_memory": "4MB"
+      },
+      "steps": [
+        {
+          "command": "head -c 8000000 /dev/zero | tail -c 6000000 | wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n",
+            "stderr": "tail: memory exhausted\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "head_minus_window_meets_max_memory",
+      "note": "head -c -N and -n -N hold the last N until the input ends, so a window past the room is refused.",
+      "world": {
+        "machines": {},
+        "max_memory": "4MB"
+      },
+      "steps": [
+        {
+          "command": "head -c 8000000 /dev/zero | head -c -6000000 | wc -c; yes | head -n 4000000 | head -n -3000000 | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n0\n",
+            "stderr": "head: memory exhausted\nhead: memory exhausted\n"
+          }
+        }
+      ]
     }
   ]
 }

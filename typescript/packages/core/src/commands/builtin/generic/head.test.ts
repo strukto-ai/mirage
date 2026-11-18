@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { eacces, efbig } from '../../../errors/fs.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -125,14 +127,14 @@ const firstLinesOrFail = (p: PathSpec): Promise<Uint8Array> => {
 }
 
 describe('headGeneric over chunks', () => {
-  async function headOf(parts: string[], lines: string): Promise<string[]> {
+  async function headOf(parts: string[], lines: string, flag = 'lines'): Promise<string[]> {
     async function* source(): AsyncIterable<Uint8Array> {
       for (const part of parts) {
         await Promise.resolve()
         yield ENC.encode(part)
       }
     }
-    const ctx = { stdin: source(), flags: { lines }, cwd: PathSpec.fromStrPath('/') }
+    const ctx = { stdin: source(), flags: { [flag]: lines }, cwd: PathSpec.fromStrPath('/') }
     const result = await headGeneric(
       [],
       [],
@@ -150,6 +152,16 @@ describe('headGeneric over chunks', () => {
   it.each(['3', '-2'])('-n %s writes what it keeps of a chunk in one piece', async (lines) => {
     expect(await headOf(['1\n2\n', '3\n4\n5\n'], lines)).toEqual(['1\n2\n', '3\n'])
   })
+
+  it.each(['lines', 'bytes'])(
+    '--%s=-N counts its window against the memory budget',
+    async (flag) => {
+      const memory = new MemoryBudget(8, () => 0)
+      await expect(
+        runWithMemory(memory, () => headOf(['ab\n', 'cd\n', 'ef\n', 'gh\n'], '-100', flag)),
+      ).rejects.toThrow(MemoryExhausted)
+    },
+  )
 
   it.each([
     [['a\nb\nc'], '-1', 'a\nb\n'],

@@ -28,6 +28,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.memory import check_memory
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -131,6 +132,8 @@ async def head_stream(
                     await budget.run()
                     output = engine.drain()
                 await budget.run()
+            if count < 0:
+                check_memory(progress(engine).retained)
             if selected:
                 yield chunk[:selected]
         if output := engine.finish():
