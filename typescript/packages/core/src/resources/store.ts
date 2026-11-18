@@ -16,7 +16,6 @@ import { compareCodePoints } from '../utils/sort.ts'
 import type { ResourceStore } from './base.ts'
 import { ENTRY_KINDS, NAME, NOUN } from './constants.ts'
 import { ResourceError } from './errors.ts'
-import { usesOf } from './refs.ts'
 import type {
   Entry,
   EntryInput,
@@ -192,10 +191,6 @@ export class RecordResourceStore implements ResourceStore {
   deleteEntry(kind: EntryKind, name: string): Promise<void> {
     return this.serial(async () => {
       await this.entryRecord(kind, name)
-      const usedBy = usesOf(await this.templates()).get(name) ?? []
-      if (usedBy.length > 0) {
-        throw new ResourceError('conflict', `${name} is used by ${usedBy.join(', ')}`)
-      }
       await this.sealer.wipe(kind, name)
       await this.records.remove(kind, name)
     })

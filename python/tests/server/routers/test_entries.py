@@ -22,7 +22,7 @@ from httpx import ASGITransport, AsyncClient
 
 from mirage.resources.base import ResourceStore
 from mirage.resources.memory import memory_resource_store
-from mirage.resources.types import TemplateInput
+from mirage.resources.types import EntryInput, TemplateInput
 from mirage.server import build_app
 
 GITHUB = {
@@ -68,7 +68,7 @@ async def test_an_entry_answers_its_sealed_fields_by_name_only(client, store):
     assert "ghp_x" not in r.text
     listed = (await client.get("/v1/vfs")).json()["items"]
     assert [i["name"] for i in listed] == ["github"]
-    assert listed[0]["used_by"] == 0
+    assert "used_by" not in listed[0]
     assert "sealed" not in listed[0]
     assert "ghp_x" not in str(listed)
     revealed = await store.reveal_entry("vfs", "github")
@@ -198,9 +198,7 @@ async def test_a_pointer_is_refused_until_its_store_is_saved(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
-    client, store
-):
+async def test_delete_wipes_even_while_a_template_uses_it(client, store):
     await client.post("/v1/vfs", json=GITHUB)
     config = {
         "mounts": {
@@ -217,12 +215,9 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
         }
     }
     await store.put_template(TemplateInput(name="agent", config=config))
-    assert (await client.get("/v1/vfs")).json()["items"][0]["used_by"] == 1
-    r = await client.delete("/v1/vfs/github")
-    assert r.status_code == 409
-    assert r.json()["error"]["message"] == "github is used by agent"
-    await store.delete_template("agent")
+    assert "used_by" not in (await client.get("/v1/vfs")).json()["items"][0]
     assert (await client.delete("/v1/vfs/github")).status_code == 204
+    assert (await store.get_template("agent")).config == config
     assert (await client.get("/v1/vfs/github")).status_code == 404
     assert (await client.delete("/v1/vfs/github")).status_code == 404
     await client.post("/v1/vfs", json={**GITHUB, "fields": {"token": "n"}})
@@ -377,3 +372,50 @@ async def test_a_remote_monty_takes_a_url_and_seals_its_key(client):
     )
     assert made.status_code == 201, made.text
     assert made.json()["config"] == {"runtime": "monty", "url": "https://m"}
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_an_entry_a_workspace_names_unless_forced(
+    tmp_path, store
+):
+    data = tmp_path / "data"
+    data.mkdir()
+    box = EntryInput(
+        name="box", type="disk", fields={}, sealed={"root": str(data)}
+    )
+    await store.create_entry("vfs", box)
+    root = {"from": "strukto", "ref": "box", "key": "root"}
+    config = {"mounts": {"/": {"vfs": "disk", "config": {"root": root}}}}
+    app = build_app(
+        idle_grace_seconds=10.0,
+        resource_store=store,
+        state_root=tmp_path / "state",
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {"id": "demo", "config": config}
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        assert (
+            await client.post("/v1/workspaces/demo/stop")
+        ).status_code == 200
+        r = await client.delete("/v1/vfs/box")
+        assert (r.status_code, r.json()["error"]) == (
+            409,
+            {"code": "conflict", "message": "box is used by workspaces demo"},
+        )
+        r = await client.delete("/v1/vfs/box?force=true")
+        assert r.status_code == 204
+        r = await client.post("/v1/workspaces/demo/start")
+        assert (r.status_code, r.json()["error"]["message"]) == (
+            400,
+            "box is not saved as a VFS, CLI or machine",
+        )
+        await store.create_entry("vfs", box)
+        r = await client.post("/v1/workspaces/demo/start")
+        assert r.status_code == 200, r.text
+        await client.post("/v1/vfs", json=GITHUB)
+        assert (await client.delete("/v1/vfs/github")).status_code == 204
+        await client.delete("/v1/workspaces/demo")

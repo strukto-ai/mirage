@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -43,7 +46,6 @@ afterEach(async () => {
 
 interface Item {
   name: string
-  used_by?: number
 }
 
 interface PolicyDecision {
@@ -91,7 +93,7 @@ describe('entries router', () => {
     expect(got.text).not.toContain('ghp_x')
     const listed = await call(app, 'GET', '/v1/vfs')
     expect(listed.body.items.map((i) => i.name)).toEqual(['github'])
-    expect(listed.body.items[0]?.used_by).toBe(0)
+    expect(listed.body.items[0]).not.toHaveProperty('used_by')
     expect(listed.body.items[0]).not.toHaveProperty('sealed')
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'ghp_x' })
   })
@@ -202,7 +204,7 @@ describe('entries router', () => {
     expect(stores.status).toBe(404)
   })
 
-  it('wipes on delete, refused while a template uses the entry', async () => {
+  it('wipes on delete, even while a template uses the entry', async () => {
     const { app, store } = setup()
     await call(app, 'POST', '/v1/vfs', GITHUB)
     const config = {
@@ -214,14 +216,9 @@ describe('entries router', () => {
       },
     }
     await store.putTemplate({ name: 'agent', config })
-    expect((await call(app, 'GET', '/v1/vfs')).body.items[0]?.used_by).toBe(1)
-    const refused = await call(app, 'DELETE', '/v1/vfs/github')
-    expect(refused).toMatchObject({
-      status: 409,
-      body: { error: { code: 'conflict', message: 'github is used by agent' } },
-    })
-    await store.deleteTemplate('agent')
+    expect((await call(app, 'GET', '/v1/vfs')).body.items[0]).not.toHaveProperty('used_by')
     expect((await call(app, 'DELETE', '/v1/vfs/github')).status).toBe(204)
+    expect((await store.getTemplate('agent')).config).toEqual(config)
     expect((await call(app, 'GET', '/v1/vfs/github')).status).toBe(404)
     await call(app, 'POST', '/v1/vfs', { ...GITHUB, fields: { ...GITHUB.fields, token: 'n' } })
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'n' })
@@ -337,5 +334,38 @@ describe('entries router', () => {
     })
     expect(r.status).toBe(201)
     expect(r.body.config).toEqual({ sandbox_id: 's1' })
+  })
+})
+
+describe('deleting an entry a workspace names', () => {
+  it('is refused unless forced, and the workspace starts once it is saved again', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'entry-in-use-'))
+    const data = join(dir, 'data')
+    mkdirSync(data)
+    const store = memoryResourceStore()
+    const box = { name: 'box', type: 'disk', fields: {}, sealed: { root: data } }
+    await store.createEntry('vfs', box)
+    open = buildApp({ idleGraceSeconds: 10, resourceStore: store, stateRoot: join(dir, 'state') })
+    const app = open
+    const root = { from: 'strukto', ref: 'box', key: 'root' }
+    const config = { mounts: { '/': { vfs: 'disk', config: { root } } } }
+    expect((await call(app, 'POST', '/v1/workspaces', { id: 'demo', config })).status).toBe(201)
+    expect((await call(app, 'POST', '/v1/workspaces/demo/stop')).status).toBe(200)
+    const refused = await call(app, 'DELETE', '/v1/vfs/box')
+    expect(refused).toMatchObject({
+      status: 409,
+      body: { error: { code: 'conflict', message: 'box is used by workspaces demo' } },
+    })
+    expect((await call(app, 'DELETE', '/v1/vfs/box?force=true')).status).toBe(204)
+    const start = await call(app, 'POST', '/v1/workspaces/demo/start')
+    expect([start.status, start.body.error.message]).toEqual([
+      400,
+      'box is not saved as a VFS, CLI or machine',
+    ])
+    await store.createEntry('vfs', box)
+    expect((await call(app, 'POST', '/v1/workspaces/demo/start')).status).toBe(200)
+    await call(app, 'POST', '/v1/vfs', GITHUB)
+    expect((await call(app, 'DELETE', '/v1/vfs/github')).status).toBe(204)
+    await call(app, 'DELETE', '/v1/workspaces/demo')
   })
 })

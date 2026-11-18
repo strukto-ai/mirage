@@ -15,7 +15,6 @@
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { NAME, NOUN } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
-import { usesOf } from '@struktoai/mirage-core/resources/refs'
 import type { Entry, EntryKind, Fields } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
@@ -24,6 +23,7 @@ import { checkValues, storesOf } from '../resources/values.ts'
 import { HttpError } from '../errors.ts'
 import type { RouteApp, ServerHost } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
+import { queryFlag } from './vfs.ts'
 
 /** Each kind's route. */
 export const ROUTES = {
@@ -47,11 +47,15 @@ interface ListQuery {
   q?: string
 }
 
+interface DeleteQuery {
+  force?: string
+}
+
 /**
  * An entry as a route answers it. The daemon keeps no id, creator or
  * times, so the id is the name and the rest are null.
  */
-function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string, JsonValue> {
+function present(kind: EntryKind, entry: Entry): Record<string, JsonValue> {
   return {
     id: entry.name,
     name: entry.name,
@@ -62,8 +66,15 @@ function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string,
     created_by: null,
     created_at: null,
     updated_at: null,
-    ...(usedBy !== undefined ? { used_by: usedBy } : {}),
   }
+}
+
+/**
+ * The refusal a delete answers while kept workspace configs name the
+ * entry: each fills its pointers in again when it starts.
+ */
+function inUse(name: string, ids: readonly string[]): HttpError {
+  return new HttpError('conflict', `${name} is used by workspaces ${ids.join(', ')}`)
 }
 
 function requiredString(body: Record<string, unknown>, key: string): string {
@@ -161,13 +172,12 @@ export function registerEntryRoutes(
   app.get<{ Querystring: ListQuery }>(route, (req) =>
     answered(registry, async () => {
       const entries = await resources.listEntries(kind)
-      const used = usesOf(await resources.listTemplates())
       const type = req.query.type ?? ''
       const text = (req.query.q ?? '').trim().toLowerCase()
       return {
         items: entries
           .filter((e) => (type === '' || e.type === type) && e.name.toLowerCase().includes(text))
-          .map((e) => present(kind, e, used.get(e.name)?.length ?? 0)),
+          .map((e) => present(kind, e)),
       }
     }),
   )
@@ -221,9 +231,13 @@ export function registerEntryRoutes(
     }),
   )
 
-  app.delete<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
+  app.delete<{ Params: RefParams; Querystring: DeleteQuery }>(`${route}/:ref`, (req, reply) =>
     answered(registry, async () => {
       const current = await entryNamed(resources, kind, req.params.ref)
+      if (!queryFlag(req.query, 'force').force) {
+        const ids = await registry.idsNaming(current.name, req.account)
+        if (ids.length > 0) throw inUse(current.name, ids)
+      }
       await resources.deleteEntry(kind, current.name)
       return reply.status(204).send()
     }),
