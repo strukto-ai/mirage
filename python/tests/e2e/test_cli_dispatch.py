@@ -395,6 +395,9 @@ LATER = CLI(
 )
 
 
+BOSS = {"--to": {"values": {"boss": "deny"}}}
+
+
 @pytest.mark.asyncio
 async def test_an_account_cli_under_hides_runs_where_the_tree_names_it():
     hidden = {"hide": ["/data/secret.txt"]}
@@ -411,15 +414,32 @@ async def test_an_account_cli_under_hides_runs_where_the_tree_names_it():
                 "paths": hidden,
                 "commands": {"*": "allow", "sl": "allow"},
             },
+            "only_a_deny": {
+                "paths": hidden,
+                "commands": {"*": "allow", "sl": {"message": {"send": BOSS}}},
+            },
+            "allowed_with_a_deny": {
+                "paths": hidden,
+                "commands": {
+                    "*": "allow",
+                    "sl": {"*": "allow", "message": {"send": BOSS}},
+                },
+            },
         },
     )
     workspace.register_cli("sl", make_tree(), config={"token": "tok"})
     workspace.register_cli("peek", PEEK)
     await workspace.shell("echo top > /data/secret.txt")
-    for name in ("hides", "wildcard", "named"):
+    for name in (
+        "hides",
+        "wildcard",
+        "named",
+        "only_a_deny",
+        "allowed_with_a_deny",
+    ):
         workspace.create_session(name, profile=name)
     try:
-        for name in ("hides", "wildcard"):
+        for name in ("hides", "wildcard", "only_a_deny"):
             io = await workspace.shell(
                 "sl message send -t x hi", session_id=name
             )
@@ -439,6 +459,17 @@ async def test_an_account_cli_under_hides_runs_where_the_tree_names_it():
         )
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"sent[tok] to=x: hi\n")
+        io = await workspace.shell(
+            "sl message send -t x hi", session_id="allowed_with_a_deny"
+        )
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (0, b"sent[tok] to=x: hi\n")
+        io = await workspace.shell(
+            "sl message send -t boss hi", session_id="allowed_with_a_deny"
+        )
+        assert io.exit_code == 126
+        assert io.decision is not None
+        assert io.decision.reason == "sl message send --to boss is not allowed"
         io = await workspace.shell("peek", session_id="hides")
         assert io.exit_code == 1
         code, out, _ = await run(workspace, "sl message send -t x hi")

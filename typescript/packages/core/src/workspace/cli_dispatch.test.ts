@@ -411,6 +411,7 @@ describe('policy cli fact', () => {
 
   it('an account CLI under hides runs where the tree names it', async () => {
     const hidden = { hide: ['/data/secret.txt'] }
+    const boss = { '--to': { values: { boss: 'deny' } } }
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -419,17 +420,25 @@ describe('policy cli fact', () => {
           hides: { paths: hidden },
           wildcard: SessionProfile({ paths: hidden, commands: { '*': 'allow' } }),
           named: SessionProfile({ paths: hidden, commands: { '*': 'allow', sl: 'allow' } }),
+          only_a_deny: SessionProfile({
+            paths: hidden,
+            commands: { '*': 'allow', sl: { message: { send: boss } } },
+          }),
+          allowed_with_a_deny: SessionProfile({
+            paths: hidden,
+            commands: { '*': 'allow', sl: { '*': 'allow', message: { send: boss } } },
+          }),
         },
       },
     )
     ws.registerCli('sl', makeTree(), { token: 'tok' })
     ws.registerCli('peek', PEEK)
     await ws.shell('echo top > /data/secret.txt')
-    for (const name of ['hides', 'wildcard', 'named']) {
+    for (const name of ['hides', 'wildcard', 'named', 'only_a_deny', 'allowed_with_a_deny']) {
       ws.createSession(name, { profile: name })
     }
     try {
-      for (const name of ['hides', 'wildcard']) {
+      for (const name of ['hides', 'wildcard', 'only_a_deny']) {
         const refused = await ws.shell('sl message send -t x hi', { sessionId: name })
         expect([refused.exitCode, refused.stderrText]).toEqual([126, 'sl: Permission denied\n'])
         expect(refused.decision?.reason).toBe('sl message send is not allowed')
@@ -439,6 +448,17 @@ describe('policy cli fact', () => {
       }
       const named = await ws.shell('sl message send -t x hi', { sessionId: 'named' })
       expect([named.exitCode, dec.decode(named.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
+      const allowed = await ws.shell('sl message send -t x hi', {
+        sessionId: 'allowed_with_a_deny',
+      })
+      expect([allowed.exitCode, dec.decode(allowed.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
+      const boss = await ws.shell('sl message send -t boss hi', {
+        sessionId: 'allowed_with_a_deny',
+      })
+      expect([boss.exitCode, boss.decision?.reason]).toEqual([
+        126,
+        'sl message send --to boss is not allowed',
+      ])
       const peeked = await ws.shell('peek', { sessionId: 'hides' })
       expect(peeked.exitCode).toBe(1)
       const open = await ws.shell('sl message send -t x hi')
