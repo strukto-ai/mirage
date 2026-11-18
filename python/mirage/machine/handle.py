@@ -26,6 +26,7 @@ from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
 from mirage.execution.types import MachineName, MachinePid, MachineResources
+from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
@@ -36,6 +37,7 @@ from mirage.machine.constants import (
     FAKETIME_PROBE_SECONDS,
     MACHINE_STOP_WAIT_SECONDS,
     NOT_RUNNING_STATUS,
+    PIPE_SIGNAL,
     RESOURCE_WAIT_SECONDS,
     RUN_DRAIN_SECONDS,
     RUN_PID_HOLD,
@@ -562,6 +564,9 @@ class MachineHandle:
                     else runner.interrupted
                 )
             await asyncio.shield(self.stop(tag, signum or 15))
+            raise
+        except PipeClosed:
+            await asyncio.shield(self.stop(tag, PIPE_SIGNAL))
             raise
         except ConnectionLostError:
             logger.debug("%s: connection lost", self.machine, exc_info=True)
