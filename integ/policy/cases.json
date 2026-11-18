@@ -190,6 +190,20 @@
    ]
   },
   {
+   "id": "a_mount_rule_with_no_paths_holds_where_a_command_reads_into_its_mount",
+   "settings": {"mode": "write", "mounts": {"/repo": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
+   "steps": [
+    {"op": "exec", "command": "export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q /repo && cd /repo && mkdir private && echo SECRET > private/s.txt && echo public > pub.txt && git add -A && git commit -q -m c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "session", "id": "deny", "profile": {"cwd": "/repo", "mounts": {"/repo/private": {"commands": {"git": {"decision": "deny", "reason": "private"}}}}}},
+    {"op": "session", "id": "ask", "profile": {"cwd": "/repo", "mounts": {"/repo/private": {"commands": {"git": {"decision": "ask", "reason": "private"}}}}}},
+    {"op": "exec", "session": "deny", "command": "git cat-file -p e97e9c7e81609428bcb70ec1e588bb73ce9c24e4", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "git cat-file: /repo/private/s.txt: Permission denied\n", "decision": "private"}}},
+    {"op": "exec", "session": "deny", "command": "git cat-file -p a48cf0de7af6613887a8f33ce5957001234ac817", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "deny", "command": "cd /repo/private && git cat-file -p e97e9c7e81609428bcb70ec1e588bb73ce9c24e4", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "private"}}},
+    {"op": "exec", "session": "ask", "command": "git cat-file -p e97e9c7e81609428bcb70ec1e588bb73ce9c24e4", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "git cat-file: /repo/private/s.txt: Permission denied\n", "decision": "private"}}},
+    {"op": "exec", "session": "ask", "command": "git cat-file -p a48cf0de7af6613887a8f33ce5957001234ac817", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "a_command_rule_reaches_the_entries_chmod_r_walks_into",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

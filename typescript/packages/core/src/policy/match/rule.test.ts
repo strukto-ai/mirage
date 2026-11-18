@@ -119,6 +119,24 @@ describe('command trees over paths', () => {
     expect(reach(null, find, '/repo')).toBe(false)
   })
 
+  it("a mount tree's leaf with no paths reaches its mount", () => {
+    const rules = trees(
+      { grep: 'ask' },
+      {
+        '/repo/private': { git: { decision: 'deny', reason: 'private' } },
+        '/repo/open': { git: 'allow' },
+      },
+    )
+    const git = line(['git', 'cat-file', '-p', 'x'], { cwd: '/repo' })
+    expect(reach(rules, git, '/repo')).toBe(true)
+    expect(reach(rules, git, '/repo/private/s.txt')).toBe(true)
+    expect(reach(rules, git, '/repo/open')).toBe(false)
+    expect(reach(rules, git, '/other')).toBe(false)
+    expect(refusal(rules, git, '/repo/private/s.txt')).toBe('private')
+    expect(refusal(rules, git, '/repo/pub.txt')).toBeNull()
+    expect(reach(rules, line(['grep', '-r', 'x', '/repo']), '/repo')).toBe(false)
+  })
+
   it('skippedAtDispatch names every tree', () => {
     const rules = trees({ rm: 'deny' }, { '/a': { cp: 'deny' } })
     expect(skippedAtDispatch(rules)).toEqual(['commands', 'mounts./a.commands'])

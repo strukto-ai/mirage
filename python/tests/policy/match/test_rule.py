@@ -144,6 +144,26 @@ def test_io_reach_reads_each_start_point_on_its_own():
     assert not _reach(None, find, "/repo")
 
 
+def test_a_mount_trees_leaf_with_no_paths_reaches_its_mount():
+    rules = trees(
+        {"grep": "ask"},
+        mounts={
+            "/repo/private": {
+                "git": {"decision": "deny", "reason": "private"}
+            },
+            "/repo/open": {"git": "allow"},
+        },
+    )
+    git = line("git", "cat-file", "-p", "x", cwd="/repo")
+    assert _reach(rules, git, "/repo")
+    assert _reach(rules, git, "/repo/private/s.txt")
+    assert not _reach(rules, git, "/repo/open")
+    assert not _reach(rules, git, "/other")
+    assert _refusal(rules, git, "/repo/private/s.txt") == "private"
+    assert _refusal(rules, git, "/repo/pub.txt") is None
+    assert not _reach(rules, line("grep", "-r", "x", "/repo"), "/repo")
+
+
 def test_skipped_at_dispatch_names_every_tree():
     rules = trees({"rm": "deny"}, mounts={"/a": {"cp": "deny"}})
     assert skipped_at_dispatch(rules) == ("commands", "mounts./a.commands")
