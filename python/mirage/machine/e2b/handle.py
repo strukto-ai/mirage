@@ -194,6 +194,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         self._pushing: asyncio.Task[None] | None = None
         # Whether the last timeout sent failed to arrive.
         self._missed = False
+        # Whether the sandbox Mirage started here is one the workspace
+        # failed to remember and that could not be killed either: the next
+        # connect saves it.
+        self._unsaved = False
         # Whether work that came out of idle found its busy timeout missed:
         # the sandbox may have paused first, so the next connect reaches it
         # anew.
@@ -232,6 +236,9 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 self._sandbox = await sdk.AsyncSandbox.connect(
                     self._sandbox_id, **extra, **self._api_params()
                 )
+                if self._unsaved and self._memory is not None:
+                    await self._memory.remember(self.name, self._sandbox_id)
+                self._unsaved = False
                 self._reached = True
                 return
             except Exception as exc:
@@ -262,22 +269,26 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     async def _drop_unkept(self) -> None:
         """Kill a sandbox just started that the workspace could not keep:
         no later build would reach it, so it would outlive the workspace
-        unseen. The next connect starts another."""
+        unseen. The next connect starts another. One the kill misses stays
+        this handle's, so the next connect reaches it and saves it, and a
+        delete removes it."""
         sandbox_id = self._sandbox_id
         self._sandbox = None
-        self._sandbox_id = None
-        self._started_here = False
         if sandbox_id is None:
             return
         try:
             await sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
         except Exception:
+            self._unsaved = True
             logger.debug(
                 "%s: unkept sandbox %s not killed",
                 self.machine,
                 sandbox_id,
                 exc_info=True,
             )
+            return
+        self._sandbox_id = None
+        self._started_here = False
 
     async def _became_busy(self) -> None:
         """Keep a sandbox Mirage manages up while Mirage has work there:

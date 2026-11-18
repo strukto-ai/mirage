@@ -261,6 +261,7 @@ class FakeMachine {
   static killed: [string, Record<string, unknown>][] = []
   static timeouts: [string, number][] = []
   static timeoutRefusal: Error | null = null
+  static killRefusal: Error | null = null
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
   sandboxId = 'sb-live'
@@ -274,6 +275,7 @@ class FakeMachine {
   static async kill(sandboxId: string, params: Record<string, unknown>): Promise<boolean> {
     FakeMachine.killed.push([sandboxId, params])
     await Promise.resolve()
+    if (FakeMachine.killRefusal) throw FakeMachine.killRefusal
     return true
   }
   static async setTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
@@ -323,6 +325,7 @@ beforeEach(() => {
   FakeMachine.killed = []
   FakeMachine.timeouts = []
   FakeMachine.timeoutRefusal = null
+  FakeMachine.killRefusal = null
   vi.restoreAllMocks()
 })
 
@@ -376,6 +379,21 @@ describe('E2BMachine started by Mirage', () => {
     await expect(machine.connect()).rejects.toThrow('store down')
     expect(FakeMachine.killed).toEqual([['sb-new-1', { apiKey: 'k' }]])
     expect([machine.instance, machine.startedByMirage]).toEqual(['box', false])
+  })
+  it('keeps a sandbox it could neither keep nor kill, saving it at the next connect', async () => {
+    const memory = new MapMemory()
+    const remember = memory.remember.bind(memory)
+    memory.remember = () => Promise.reject(new Error('store down'))
+    FakeMachine.killRefusal = new Error('kill refused')
+    const machine = startable(memory)
+    await expect(machine.connect()).rejects.toThrow('store down')
+    expect([machine.instance, machine.startedByMirage]).toEqual(['sb-new-1', true])
+    memory.remember = remember
+    FakeMachine.killRefusal = null
+    await machine.connect()
+    expect([FakeMachine.created.length, [...memory.kept]]).toEqual([1, [['box', 'sb-new-1']]])
+    await machine.destroy()
+    expect(FakeMachine.killed.map(([id]) => id)).toEqual(['sb-new-1', 'sb-new-1'])
   })
   it("starts from E2B's base template when the config names none", async () => {
     await startable(new MapMemory()).connect()

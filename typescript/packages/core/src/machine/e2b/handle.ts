@@ -184,6 +184,9 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   private pushing: Promise<void> | null = null
   // Whether the last timeout sent failed to arrive.
   private missed = false
+  // Whether the sandbox Mirage started here is one the workspace failed to
+  // remember and that could not be killed either: the next connect saves it.
+  private unsaved = false
   // Whether work that came out of idle found its busy timeout missed: the
   // sandbox may have paused first, so the next connect reaches it anew.
   private asleep = false
@@ -245,6 +248,10 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
           ...this.apiParams(),
           ...(this.startedHere ? { timeoutMs: BUSY_TIMEOUT_SECONDS * 1000 } : {}),
         })
+        if (this.unsaved) {
+          await this.memory?.remember(this.name, this.sandboxId)
+          this.unsaved = false
+        }
         this.reached = true
         return
       } catch (error) {
@@ -275,21 +282,24 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   /**
    * Kill a sandbox just started that the workspace could not keep: no later
    * build would reach it, so it would outlive the workspace unseen. The next
-   * connect starts another.
+   * connect starts another. One the kill misses stays this handle's, so the
+   * next connect reaches it and saves it, and a delete removes it.
    */
   private async dropUnkept(sdk: E2bSdk): Promise<void> {
     const id = this.sandboxId
     this.sandbox = null
-    this.sandboxId = null
-    this.startedHere = false
     if (id === null) return
     try {
       await sdk.Sandbox.kill(id, this.apiParams())
     } catch (error) {
+      this.unsaved = true
       logger.debug?.(
         `${this.machine.toString()}: unkept sandbox ${id} not killed: ${String(error)}`,
       )
+      return
     }
+    this.sandboxId = null
+    this.startedHere = false
   }
 
   /**

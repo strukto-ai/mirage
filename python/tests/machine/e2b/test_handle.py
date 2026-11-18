@@ -230,6 +230,7 @@ class FakeMachine:
     killed = []
     timeouts = []
     timeout_refusal = None
+    kill_refusal = None
 
     def __init__(self):
         self.commands = FakeCommands()
@@ -248,6 +249,8 @@ class FakeMachine:
     async def kill(cls, sandbox_id, **params):
         cls.killed.append((sandbox_id, params))
         await asyncio.sleep(0)
+        if cls.kill_refusal is not None:
+            raise cls.kill_refusal
         return True
 
     @classmethod
@@ -286,6 +289,7 @@ def fake_sdk(monkeypatch):
     FakeMachine.killed = []
     FakeMachine.timeouts = []
     FakeMachine.timeout_refusal = None
+    FakeMachine.kill_refusal = None
     monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
 
 
@@ -1411,3 +1415,25 @@ async def test_work_out_of_idle_connects_again_when_its_busy_timeout_misses():
     assert FakeMachine.connected == [
         ("sb-new-1", {"timeout": BUSY_TIMEOUT_SECONDS, "api_key": "k"})
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_neither_kept_nor_killed_is_saved_at_the_next_connect():
+    memory = MapMemory()
+
+    async def refuse(name, instance):
+        raise RuntimeError("store down")
+
+    remember = memory.remember
+    memory.remember = refuse
+    FakeMachine.kill_refusal = RuntimeError("kill refused")
+    machine = _startable(memory)
+    with pytest.raises(RuntimeError, match="store down"):
+        await machine.connect()
+    assert (machine.instance, machine.started_by_mirage) == ("sb-new-1", True)
+    memory.remember = remember
+    FakeMachine.kill_refusal = None
+    await machine.connect()
+    assert (len(FakeMachine.created), memory.kept) == (1, {"box": "sb-new-1"})
+    await machine.destroy()
+    assert [sid for sid, _ in FakeMachine.killed] == ["sb-new-1", "sb-new-1"]
