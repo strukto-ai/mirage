@@ -54,7 +54,6 @@ import {
   getIfBranches,
   getListParts,
   getNegatedCommand,
-  getParts,
   getPipelineStages,
   getRedirects,
   getText,
@@ -111,7 +110,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry, type SessionState } from '../session/session.ts'
 import { bindLastWord, positionalParams, sessionArith } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { type Admitted, admitRedirect, admitTest } from './admission.ts'
+import { type Admitted, admitRedirect, admitTest, isBareExec } from './admission.ts'
 import { executeAssignment } from './assignment.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { executeDeclaration } from './declaration.ts'
@@ -804,12 +803,6 @@ function namesProcessSub(word: TSNodeLike): boolean {
  * its redirects on the shell for every later statement; `exec cmd` is a
  * command.
  */
-function isBareExec(command: TSNodeLike | null): boolean {
-  if (command?.type !== NT.COMMAND) return false
-  const named = getParts(command)
-  return named.length === 1 && named[0]?.type === NT.COMMAND_NAME && getText(named[0]) === 'exec'
-}
-
 export async function executeNode(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,

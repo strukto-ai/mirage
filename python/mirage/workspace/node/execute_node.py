@@ -69,7 +69,6 @@ from mirage.shell.helpers import (
     get_if_branches,
     get_list_parts,
     get_negated_command,
-    get_parts,
     get_pipeline_stages,
     get_redirects,
     get_text,
@@ -142,7 +141,11 @@ from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.admission import admit_redirect, admit_test
+from mirage.workspace.node.admission import (
+    admit_redirect,
+    admit_test,
+    is_bare_exec,
+)
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
@@ -692,7 +695,7 @@ async def _run_redirected(
         forked=forked,
         links=namespace.session_links(context.session),
     )
-    if _is_bare_exec(command):
+    if is_bare_exec(command):
         if any(
             r.target_node is not None and _names_process_sub(r.target_node)
             for r in redirects
@@ -850,25 +853,6 @@ def _redirect_gate(
         return None, io, node
 
     return gate
-
-
-def _is_bare_exec(command: TSNodeLike | None) -> bool:
-    """Whether a redirected statement's command is a bare `exec`, which
-    installs its redirects on the shell for every later statement;
-    `exec cmd` is a command.
-
-    Args:
-        command (Any): the command node under the redirect,
-            or None for a command-less redirect (`> file`).
-    """
-    if command is None or command.type != NT.COMMAND:
-        return False
-    named = get_parts(command)
-    return (
-        len(named) == 1
-        and named[0].type == NT.COMMAND_NAME
-        and get_text(named[0]) == "exec"
-    )
 
 
 async def execute_node(

@@ -646,7 +646,14 @@
     {"op": "exec", "session": "asks", "command": "{ cat; } > /data/out < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "asks", "command": "{ cat; } > /data/out < /data/secret.txt; cat /data/out", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}}
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
+    {"op": "exec", "session": "sealed", "command": "exec > /data/secret.txt; echo after", "expect": {"value": {"exit_code": 0, "stdout": "after\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}}
    ]
   },
   {

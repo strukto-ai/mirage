@@ -57,11 +57,13 @@ from mirage.policy.types import CommandNode
 from mirage.rs.policy import Encoded
 from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
+    get_parts,
     get_redirects,
+    get_text,
     literal_word,
 )
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import Follow, LineFacts, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
@@ -1005,12 +1007,35 @@ def redirect_paths(
     return tuple(p for p in targets if isinstance(p, PathSpec))
 
 
+def is_bare_exec(command: TSNodeLike | None) -> bool:
+    """Whether a redirected statement's command is a bare `exec`, which
+    installs its redirects on the shell for every later statement;
+    `exec cmd` is a command.
+
+    Args:
+        command (TSNodeLike | None): the command node under the
+            redirect, or None for a command-less redirect (`> file`).
+    """
+    if command is None or command.type != NT.COMMAND:
+        return False
+    named = get_parts(command)
+    return (
+        len(named) == 1
+        and named[0].type == NT.COMMAND_NAME
+        and get_text(named[0]) == "exec"
+    )
+
+
 def statement_redirects_raw(node: Any) -> list[Redirect]:
     """Find redirects bound to this command along the last-command chain.
+    A bare ``exec`` (``exec 3< f``) has none: it installs them on the
+    shell, and ``admit_redirect`` judges each as it opens.
 
     Args:
         node (Any): the command's parsed node.
     """
+    if is_bare_exec(node):
+        return []
     owner = node
     parent = owner.parent
     while parent is not None and parent.type in REDIRECT_CHAIN:

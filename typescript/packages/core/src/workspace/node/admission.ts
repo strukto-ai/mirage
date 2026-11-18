@@ -44,7 +44,7 @@ import { commandRoute, settled } from '../../policy/policies.ts'
 import { type CommandNode, CommandWord, type EntryGate } from '../../policy/types.ts'
 import type { Encoded } from '../../rs/policy.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { getRedirects, literalWord } from '../../shell/helpers.ts'
+import { getParts, getRedirects, getText, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import { shellVoice } from '../../shell/voice.ts'
@@ -749,6 +749,19 @@ function wordHints(
 }
 
 /**
+ * Whether a redirected statement's command is a bare `exec`, which installs
+ * its redirects on the shell for every later statement; `exec cmd` is a
+ * command. Mirrors Python's is_bare_exec.
+ */
+export function isBareExec(command: TSNodeLike | null): boolean {
+  if (command?.type !== NodeType.COMMAND) return false
+  const named = getParts(command)
+  return (
+    named.length === 1 && named[0]?.type === NodeType.COMMAND_NAME && getText(named[0]) === 'exec'
+  )
+}
+
+/**
  * The redirect targets of the statement holding a command, as the gate
  * reads its words: the raw text and the literal it names, null when
  * only the runtime can expand it (refused wherever a rule reads the
@@ -765,9 +778,12 @@ function wordHints(
  * a pipeline and a `!`. A compound (`{ }`, a loop, a subshell) redirects
  * every command inside it, which is not a chain, so none is claimed
  * here: `admitRedirect` judges it as the shell opens it, and
- * `unownedRedirects` reads it for a line a runtime takes whole.
+ * `unownedRedirects` reads it for a line a runtime takes whole. A bare
+ * `exec` (`exec 3< f`) has none: it installs them on the shell, and
+ * `admitRedirect` judges each as it opens.
  */
 function statementRedirectsRaw(node: TSNodeLike): Redirect[] {
+  if (isBareExec(node)) return []
   let owner = node
   let parent = owner.parent
   while (parent !== undefined && parent !== null && REDIRECT_CHAIN.has(parent.type)) {
