@@ -1403,6 +1403,24 @@ async def test_work_out_of_idle_waits_for_its_busy_timeout():
 
 
 @pytest.mark.asyncio
+async def test_every_piece_of_work_out_of_idle_waits_for_the_busy_timeout():
+    machine = _startable(MapMemory())
+    await machine.ensure_connected()
+    async with machine._at_work():
+        pass
+    await _settled()
+    sent = len(FakeMachine.timeouts)
+    seen = []
+
+    async def piece():
+        async with machine._at_work():
+            seen.append(len(FakeMachine.timeouts) - sent)
+
+    await asyncio.gather(piece(), piece())
+    assert seen == [1, 1]
+
+
+@pytest.mark.asyncio
 async def test_work_out_of_idle_connects_again_when_its_busy_timeout_misses():
     machine = _startable(MapMemory())
     await machine.ensure_connected()

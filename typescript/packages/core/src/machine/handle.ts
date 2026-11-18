@@ -271,6 +271,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The work Mirage has under way here: programs' runs, its own lines and
   // stops, but not the pipe that serves the workspace (`busyWith`).
   private working = 0
+  // The provider's `becameBusy` for the work under way: every piece of it
+  // waits for that, not only the one that started it.
+  private waking: Promise<void> | null = null
   // Whether the machine has a program, by name, asked once each.
   private readonly programs = new Map<string, Promise<boolean>>()
 
@@ -779,11 +782,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   private async busyWith<T>(work: () => Promise<T>): Promise<T> {
     this.working += 1
     try {
-      if (this.working === 1) await this.becameBusy()
+      if (this.working === 1) this.waking = this.becameBusy()
+      await this.waking
       return await work()
     } finally {
       this.working -= 1
-      if (this.working === 0) this.becameIdle()
+      if (this.working === 0) {
+        this.waking = null
+        this.becameIdle()
+      }
     }
   }
 

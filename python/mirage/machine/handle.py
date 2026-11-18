@@ -307,6 +307,10 @@ class MachineHandle:
         # lines and stops, but not the pipe that serves the workspace
         # (``_at_work``).
         self._working = 0
+        # Set once the provider's ``_became_busy`` for the work under way
+        # has run: every piece of it waits for that, not only the one that
+        # started it.
+        self._waking: asyncio.Event | None = None
         # Whether the machine has a program, by name, asked once each.
         self._programs: dict[str, bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
@@ -842,11 +846,18 @@ class MachineHandle:
         self._working += 1
         try:
             if self._working == 1:
-                await self._became_busy()
+                waking = self._waking = asyncio.Event()
+                try:
+                    await self._became_busy()
+                finally:
+                    waking.set()
+            elif self._waking is not None:
+                await self._waking.wait()
             yield
         finally:
             self._working -= 1
             if self._working == 0:
+                self._waking = None
                 self._became_idle()
 
     async def _became_busy(self) -> None:

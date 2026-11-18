@@ -503,6 +503,21 @@ describe('E2BMachine started by Mirage', () => {
     })
     expect(FakeMachine.connected).toEqual([])
   })
+  it('holds every piece of work that comes out of idle until the busy timeout lands', async () => {
+    const machine = startable(new MapMemory())
+    await machine.ensureConnected()
+    await busyWith(machine, () => Promise.resolve())
+    await settled()
+    const sent = FakeMachine.timeouts.length
+    const seen: number[] = []
+    const piece = () =>
+      busyWith(machine, () => {
+        seen.push(FakeMachine.timeouts.length - sent)
+        return Promise.resolve()
+      })
+    await Promise.all([piece(), piece()])
+    expect(seen).toEqual([1, 1])
+  })
   it('connects again when the busy timeout misses as work comes out of idle', async () => {
     const machine = startable(new MapMemory())
     await machine.ensureConnected()
