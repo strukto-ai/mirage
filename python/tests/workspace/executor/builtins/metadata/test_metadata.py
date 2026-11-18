@@ -2,6 +2,8 @@ import os
 
 import pytest
 
+from mirage.commands.builtin.utils.identity import Identity
+from mirage.commands.errors import UsageError
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -32,16 +34,30 @@ def _make_disk_ws(root) -> Workspace:
 
 
 def test_parse_owner_forms():
-    assert parse_owner("1000:staff") == (1000, "staff")
-    assert parse_owner("alice") == ("alice", None)
-    assert parse_owner(":dev") == (None, "dev")
-    assert parse_owner("500:501") == (500, 501)
+    root = Identity()
+    assert parse_owner("1000:nogroup", root) == (1000, 65534)
+    assert parse_owner("nobody", root) == (65534, None)
+    assert parse_owner(":root", root) == (None, 0)
+    assert parse_owner("500:501", root) == (500, 501)
+    assert parse_owner("nobody:", root) == (65534, 65534)
+    assert parse_owner("agent", Identity(profile="agent")) == (1000, None)
+    for text, message in (
+        ("alice", "chown: invalid user: 'alice'"),
+        ("alice:root", "chown: invalid user: 'alice:root'"),
+        ("root:staff", "chown: invalid group: 'root:staff'"),
+        ("4242:", "chown: invalid spec: '4242:'"),
+    ):
+        with pytest.raises(UsageError) as caught:
+            parse_owner(text, root)
+        assert str(caught.value) == message
 
 
 def test_parse_group_forms():
-    assert parse_group("staff") == "staff"
-    assert parse_group("20") == 20
-    assert parse_group("") is None
+    root = Identity()
+    assert parse_group("nogroup", root) == 65534
+    assert parse_group("20", root) == 20
+    assert parse_group("staff", root) is None
+    assert parse_group("", root) is None
 
 
 def test_parse_touch_stamp_posix():
@@ -85,7 +101,7 @@ async def test_metadata_commands_respect_read_only_mount():
     ws = _make_ws(MountMode.READ)
     for cmd, action in (
         ("chmod 644", "changing permissions of"),
-        ("chown alice", "changing ownership of"),
+        ("chown nobody", "changing ownership of"),
         ("touch", "cannot touch"),
         ("touch -c", "setting times of"),
     ):
@@ -296,7 +312,7 @@ async def test_overlay_fallback_when_mount_has_no_setattr():
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, _, _ = await _run(
         ws,
-        "chmod 601 /data/f.txt && chown 500:dev /data/f.txt"
+        "chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt"
         " && touch -t 202603041200 /data/f.txt",
     )
     assert code == 0
@@ -304,7 +320,7 @@ async def test_overlay_fallback_when_mount_has_no_setattr():
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
     assert st.mode == 0o601
     assert st.uid == 500
-    assert st.gid == "dev"
+    assert st.gid == 65534
     assert st.modified == "2026-03-04T12:00:00Z"
 
 
@@ -315,12 +331,12 @@ async def test_overlay_attrs_render_in_ls_long():
     ws, _ = _make_overlay_ws({"/f.txt": b"hello"})
     await _run(
         ws,
-        "chmod 664 /data/f.txt && chown 500:dev /data/f.txt"
+        "chmod 664 /data/f.txt && chown 500:nogroup /data/f.txt"
         " && touch -t 202603041200 /data/f.txt",
     )
     _, out, _ = await _run(ws, "ls -l /data")
     assert "-rw-rw-r--" in out
-    assert " 500 dev " in out
+    assert " 500 nogroup " in out
     assert "Mar  4  2026" in out
 
 
@@ -357,13 +373,13 @@ async def test_disk_external_chmod_visible(tmp_path):
 @pytest.mark.asyncio
 async def test_disk_chown_overlays_and_renders(tmp_path):
     ws = _make_disk_ws(tmp_path)
-    code, _, _ = await _run(ws, "chown 500:dev /data/f.txt")
+    code, _, _ = await _run(ws, "chown 500:nogroup /data/f.txt")
     assert code == 0
     _, out, _ = await _run(ws, "ls -l /data")
-    assert " 500 dev " in out
+    assert " 500 nogroup " in out
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
     assert st.uid == 500
-    assert st.gid == "dev"
+    assert st.gid == 65534
 
 
 @pytest.mark.asyncio

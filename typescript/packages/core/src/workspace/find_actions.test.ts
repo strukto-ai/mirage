@@ -136,7 +136,7 @@ describe('find action layer', () => {
       expect(lines.length).toBeGreaterThanOrEqual(2)
       for (const line of lines) {
         expect(line).toMatch(
-          /^ {8}\? {6}\? -rw-r--r-- {3}1 - {8}- {8} {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \/.*\.html$/,
+          /^ {8}\? {6}\? -rw-r--r-- {3}1 root {5}root {5} {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \/.*\.html$/,
         )
       }
     })

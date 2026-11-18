@@ -1,11 +1,24 @@
 import pytest
 
 from mirage.commands.builtin.utils.identity import (
+    NOBODY,
+    ROOT,
+    Account,
     Identity,
-    group_name,
+    find_user,
+    group_id,
+    group_id_named,
+    group_label,
+    group_with_id,
+    home_of,
     identity_from,
     identity_of,
+    own_account,
+    owner_id,
+    owner_label,
     owner_name,
+    session_uid,
+    user_homes,
 )
 from mirage.commands.config import Context
 from mirage.io.types import materialize
@@ -17,15 +30,51 @@ from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import session_view
 
 
-def test_owner_and_group_prefer_the_entry_then_the_profile_then_dash():
+def test_no_profile_is_root_a_named_one_uid_1000_a_nameless_one_unnamed():
+    assert own_account(Identity()) == ROOT
+    assert own_account(None) == ROOT
+    assert own_account(Identity(profile="root")) == ROOT
+    assert own_account(Identity(profile="nobody")) == NOBODY
+    assert own_account(Identity(profile="admin")) == Account(
+        "admin", 1000, "admin", 1000, "/home/admin"
+    )
+    assert own_account(Identity(profile="")) is None
+    assert session_uid(Identity(profile="")) == 1000
+    assert home_of(Identity(profile="")) == "/"
+    assert home_of(Identity()) == "/root"
+
+
+def test_owner_and_group_prefer_the_entry_then_the_session():
     identity = Identity(profile="admin")
-    assert owner_name(501, identity) == "501"
-    assert owner_name(None, identity) == "admin"
-    assert owner_name(None, Identity()) == "-"
-    assert owner_name(None, None) == "-"
-    assert group_name("staff", identity) == "staff"
-    assert group_name(None, identity) == "admin"
-    assert group_name(None, Identity()) == "-"
+    assert owner_label(501, identity) == "501"
+    assert owner_label(None, identity) == "admin"
+    assert owner_label(1000, identity) == "admin"
+    assert owner_label("0", identity) == "root"
+    assert owner_label(None, Identity()) == "root"
+    assert owner_label(None, Identity(profile="")) == "1000"
+    assert owner_name(None, Identity(profile="")) is None
+    assert owner_label("user", identity) == "user"
+    assert owner_id("nobody", identity) == 65534
+    assert owner_id("user", identity) == "user"
+    assert group_label(65534, identity) == "nogroup"
+    assert group_label(None, identity) == "admin"
+    assert group_id(None, Identity()) == 0
+
+
+def test_lookups_read_root_nobody_and_the_session_user():
+    identity = Identity(profile="admin")
+    assert find_user(identity, "admin") == own_account(identity)
+    assert find_user(identity, "0") == ROOT
+    assert find_user(identity, "1000") == own_account(identity)
+    assert find_user(Identity(), "1000") is None
+    assert find_user(identity, "zz") is None
+    assert group_id_named(identity, "nogroup") == 65534
+    assert group_with_id(identity, 4242) is None
+    assert user_homes(identity) == {
+        "root": "/root",
+        "nobody": "/nonexistent",
+        "admin": "/home/admin",
+    }
 
 
 def test_identity_reads_the_session_plane():
@@ -65,12 +114,12 @@ async def test_ls_stat_find_and_whoami_render_the_profile():
 
 
 @pytest.mark.asyncio
-async def test_a_session_with_no_profile_renders_as_dash():
+async def test_a_session_with_no_profile_renders_as_root():
     ws = _ws()
     _, ls_out = await _run(ws, "ls -l /data/f.txt")
-    assert ls_out == "-rw-r--r-- 1 - - 5 - /data/f.txt\n"
-    _, stat_out = await _run(ws, 'stat -c "%U %G" /data/f.txt')
-    assert stat_out == "- -\n"
+    assert ls_out == "-rw-r--r-- 1 root root 5 - /data/f.txt\n"
+    _, stat_out = await _run(ws, 'stat -c "%U %u %G %g" /data/f.txt')
+    assert stat_out == "root 0 root 0\n"
 
 
 @pytest.mark.asyncio

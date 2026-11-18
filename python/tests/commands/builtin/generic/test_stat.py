@@ -167,14 +167,14 @@ async def test_a_link_target_is_quoted_by_the_same_rule():
 
 @pytest.mark.asyncio
 async def test_owner_directives():
-    owned = _fs(uid=1000, gid="dev")
+    owned = _fs(uid=1000, gid=65534)
     assert await _render("%u", owned) == "1000"
-    assert await _render("%U", owned) == "1000"
-    assert await _render("%g", owned) == "dev"
-    assert await _render("%G", owned) == "dev"
-    # No owner and no identity -> `-` in every slot (matches ls -l).
+    assert await _render("%U", owned) == "UNKNOWN"
+    assert await _render("%g", owned) == "65534"
+    assert await _render("%G", owned) == "nogroup"
+    # No owner on the entry: the session's, root outside a workspace.
     bare = _fs(uid=None, gid=None)
-    assert await _render("%u %U %g %G", bare) == "- - - -"
+    assert await _render("%u %U %g %G", bare) == "0 root 0 root"
 
 
 @pytest.mark.asyncio
@@ -295,10 +295,10 @@ async def test_stat_reflects_overlay_chmod_chown():
     vfs._store.files["/f.txt"] = b"hello"
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     await _run(ws, "chmod 600 /data/f.txt")
-    await _run(ws, "chown 501:staff /data/f.txt")
-    code, out, _ = await _run(ws, 'stat -c "%a %u %g" /data/f.txt')
+    await _run(ws, "chown 501:nogroup /data/f.txt")
+    code, out, _ = await _run(ws, 'stat -c "%a %u %g %G" /data/f.txt')
     assert code == 0
-    assert out == "600 501 staff\n"
+    assert out == "600 501 65534 nogroup\n"
 
 
 @pytest.mark.asyncio
@@ -318,13 +318,13 @@ async def test_owner_defaults_to_the_profile():
 
 
 @pytest.mark.asyncio
-async def test_owner_falls_back_to_dash_when_unclaimed():
+async def test_owner_without_a_profile_is_root():
     vfs = RAMVFS()
     vfs._store.files["/f.txt"] = b"hello"
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
     assert code == 0
-    assert out == "-:-\n"
+    assert out == "root:root\n"
 
 
 def _link_fs(target: str = "/data/f.txt") -> FileStat:
@@ -400,8 +400,8 @@ async def test_default_stat_layout_and_unknown_metadata():
         "  Size: -         \tBlocks: ?          "
         "IO Block: ?      regular file\n"
         "Device: ?\tInode: ?           Links: ?\n"
-        "Access: (0644/-rw-r--r--)  Uid: (    -/       -)   "
-        "Gid: (    -/       -)\n"
+        "Access: (0644/-rw-r--r--)  Uid: (    0/    root)   "
+        "Gid: (    0/    root)\n"
         "Access: -\nModify: -\nChange: -\n Birth: -\n"
     )
     assert await _render("%z %Z %w %W", info) == "- 0 - 0"

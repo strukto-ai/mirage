@@ -20,7 +20,17 @@ import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE, TYPE_CHARS, posixMode } from '../../utils/stat_view.ts'
-import type { Effects, FindEntry, Owner, Path, PredNode, PrintfKind, Regex } from './types.ts'
+import type {
+  Effects,
+  FindEntry,
+  Ids,
+  NoOwner,
+  Owner,
+  Path,
+  PredNode,
+  PrintfKind,
+  Regex,
+} from './types.ts'
 
 const ACCESS_BITS = { r: 0o400, w: 0o200, x: 0o100 } as const
 const PERMISSION_BITS = 0o7777
@@ -57,23 +67,36 @@ function stamp(entry: FindEntry, field: 'm' | 'a' | 'c'): number | null {
 
 const SECONDS_PER_DAY = 86400
 
-function count(st: FileStat, field: 'links' | 'uid' | 'gid' | 'inum'): number | null {
+// The id an entry's owner or group is: its own, else the session's; a name
+// a backend reported, through the database, null where the database lacks
+// it.
+function ownerId(value: number | string | null, group: boolean, ids: Ids): number | null {
+  if (value === null) return group ? ids.gid : ids.uid
+  if (typeof value === 'number') return value
+  if (/^[0-9]+$/.test(value)) return Number(value)
+  return (group ? ids.groups : ids.users)[value] ?? null
+}
+
+function count(st: FileStat, field: 'links' | 'uid' | 'gid' | 'inum', ids: Ids): number | null {
   // No backend here numbers its files, as `stat %i` says.
   if (field === 'inum') return null
   // One name per entry, as ls -l counts it: mirage has no hard links, and a
   // directory's own entries are not counted.
   if (field === 'links') return 1
-  const value = field === 'uid' ? st.uid : st.gid
-  if (typeof value === 'number') return value
-  if (typeof value === 'string' && /^[0-9]+$/.test(value)) return Number(value)
-  return null
+  const group = field === 'gid'
+  return ownerId(group ? st.gid : st.uid, group, ids)
 }
 
 function owns(node: Owner, st: FileStat): boolean {
+  return ownerId(node.group ? st.gid : st.uid, node.group, node.ids) === node.id
+}
+
+function nameless(node: NoOwner, st: FileStat | null): boolean {
+  if (st === null) return false
   const value = node.group ? st.gid : st.uid
-  if (value === null) return node.profile !== null && node.name === node.profile
-  if (String(value) === node.name) return true
-  return /^[0-9]+$/.test(node.name) && typeof value === 'number' && value === Number(node.name)
+  if (typeof value === 'string' && !/^[0-9]+$/.test(value)) return false
+  const id = ownerId(value, node.group, node.ids)
+  return id !== null && !Object.values(node.group ? node.ids.groups : node.ids.users).includes(id)
 }
 
 // The answer of a test that reads only the entry, null for a node that is
@@ -103,7 +126,7 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
       return node.mode === 0 || (mode & node.mode) !== 0
     }
     case 'count': {
-      const value = st === null ? null : count(st, node.field)
+      const value = st === null ? null : count(st, node.field, node.ids)
       if (value === null) return false
       if (node.cmp === '+') return value > node.count
       if (node.cmp === '-') return value < node.count
@@ -122,10 +145,8 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
     }
     case 'owner':
       return st !== null && owns(node, st)
-    case 'nouser': {
-      const owner = st === null ? null : node.group ? st.gid : st.uid
-      return typeof owner === 'number' || (typeof owner === 'string' && /^[0-9]+$/.test(owner))
-    }
+    case 'nouser':
+      return nameless(node, st)
     case 'access': {
       // access(2) follows a link: a live one answers with what it leads to,
       // which the walk read as the entry's target.

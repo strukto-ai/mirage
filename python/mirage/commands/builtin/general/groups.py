@@ -12,7 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.utils.identity import UNKNOWN_NAME, identity_of
+from mirage.commands.builtin.utils.identity import (
+    find_user,
+    identity_of,
+    own_account,
+    session_gid,
+)
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -27,17 +32,28 @@ async def groups(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Print the session's one group, its profile, as ``id`` does."""
-    profile = identity_of(ctx).profile
+    """Print each user's groups, as ``id -Gn`` names them: every user is
+    in its own group alone. With no operand, the session's, by number
+    where the user database holds no name for it.
+    """
+    identity = identity_of(ctx)
     if not texts:
-        return f"{profile or UNKNOWN_NAME}\n".encode(), IOResult()
+        own = own_account(identity)
+        if own is not None:
+            return f"{own.group}\n".encode(), IOResult()
+        gid = session_gid(identity)
+        return f"{gid}\n".encode(), IOResult(
+            exit_code=1,
+            stderr=f"groups: cannot find name for group ID {gid}\n".encode(),
+        )
     out: list[str] = []
     err: list[str] = []
     for name in texts:
-        if name == profile:
-            out.append(f"{name} : {name}\n")
-        else:
+        found = find_user(identity, name)
+        if found is None:
             err.append(f"groups: '{quote_text(name)}': no such user\n")
+        else:
+            out.append(f"{name} : {found.group}\n")
     return "".join(out).encode() or None, IOResult(
         exit_code=1 if err else 0, stderr="".join(err).encode() or None
     )

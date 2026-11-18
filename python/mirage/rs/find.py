@@ -36,6 +36,7 @@ from mirage.core.generic.types import (
     And,
     Count,
     Empty,
+    Ids,
     Lname,
     Mtime,
     Name,
@@ -422,7 +423,7 @@ class _Binding:
     now: float
     zone: tzinfo = timezone.utc
     utf8: bool = False
-    profile: str | None = None
+    ids: Ids = field(default_factory=Ids)
     window: tuple[float | None, float | None] | None = None
     fs_type: str | None = None
 
@@ -458,18 +459,20 @@ def _node(
             _count_field(_str(raw["field"])),
             _cmp(_str(raw["cmp"])),
             _int(raw["count"]),
+            ids=binding.ids,
         )
     if op == "fstype":
         same = text_view(_str(raw["name"])) == binding.fs_type
         return TrueNode() if same else Not(TrueNode())
     if op == "owner":
+        group = _flag(raw["group"])
         return Owner(
-            text_view(_str(raw["name"])),
-            group=_flag(raw["group"]),
-            profile=binding.profile,
+            _owner_id(text_view(_str(raw["name"])), group, binding),
+            group=group,
+            ids=binding.ids,
         )
     if op == "nouser":
-        return NoOwner(group=_flag(raw["group"]))
+        return NoOwner(group=_flag(raw["group"]), ids=binding.ids)
     if op == "access":
         return Access(_access_mode(_str(raw["mode"])))
     if op == "size":
@@ -504,6 +507,33 @@ def _perm_bits(bits: str) -> Literal["exact", "all", "any"]:
     if bits == "any":
         return "any"
     raise TypeError(f"find: mirage-rs answered the -perm kind {bits!r}")
+
+
+def _owner_id(text: str, group: bool, binding: _Binding) -> int:
+    """The id ``-user`` or ``-group`` names: a name the user database
+    holds, else a number.
+
+    Args:
+        text (str): the operand as typed.
+        group (bool): ``-group`` rather than ``-user``.
+        binding (_Binding): the session's user database and locale.
+
+    Raises:
+        UsageError: find's refusal for a name the database lacks.
+    """
+    ids = binding.ids
+    found = (ids.groups if group else ids.users).get(text)
+    if found is not None:
+        return found
+    if text.isdigit():
+        return int(text)
+    kind = "group name or GID" if group else "user name or UID"
+    test = "-group" if group else "-user"
+    raise UsageError(
+        f"find: invalid {kind} argument to {test}: "
+        f"{quote_arg(text, binding.utf8)}",
+        1,
+    )
 
 
 def _count_field(name: str) -> Literal["links", "uid", "gid", "inum"]:
@@ -640,7 +670,7 @@ class FindParse:
         newer_times: Sequence[float] = (),
         now: float | None = None,
         env: Mapping[str, str] | None = None,
-        profile: str | None = None,
+        ids: Ids | None = None,
         fs_type: str | None = None,
     ) -> FindExpr:
         """The expression with its time tests resolved.
@@ -657,18 +687,20 @@ class FindParse:
                 locale reads a ``-regex`` subject.
             fs_type (str | None): the type of the mount the line starts
                 on, which ``-fstype`` compares with.
-            profile (str | None): the session's name, the owner
-                ``-user`` sees on an entry that reports none.
+            ids (Ids | None): the session's user database, which
+                ``-user`` and ``-group`` look a name up in and whose ids
+                an entry that reports no owner has; root's by default.
 
         Raises:
-            UsageError: a ``-newermt`` text that is no date.
+            UsageError: a ``-newermt`` text that is no date, or a
+                ``-user`` or ``-group`` name the database lacks.
         """
         binding = _Binding(
             newer_times,
             system_now() if now is None else now,
             zone=zone_from_env(env),
             utf8=self.utf8 or utf8_locale(env),
-            profile=profile,
+            ids=Ids() if ids is None else ids,
             fs_type=fs_type,
         )
         tree = _node(_object(self.values["tree"]), binding)

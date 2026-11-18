@@ -25,8 +25,12 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.builtin.utils.identity import (
     Identity,
-    group_name,
-    owner_name,
+    find_user,
+    group_id,
+    group_id_named,
+    group_label,
+    owner_id,
+    owner_label,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.builtin.utils.tree import before_full_walk, tree_walk
@@ -52,50 +56,75 @@ from mirage.workspace.session import SessionState
 logger = logging.getLogger(__name__)
 
 
-def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
-    """Parse a chown OWNER[:GROUP] argument.
+def parse_owner(
+    text: str, identity: Identity, cmd: str = "chown"
+) -> tuple[int | None, int | None]:
+    """Parse a chown OWNER[:GROUP] argument against the user database.
 
-    Numeric ids become ints; names are kept as strings (mirage has no
-    user database; ownership is stored, not enforced).
+    A name the database holds is its id, and any number is an id; a
+    colon with no group after a user names that user's login group.
 
     Args:
         text (str): the OWNER[:GROUP] operand as typed.
+        identity (Identity): who the session is, whose database names
+            the users and groups.
+        cmd (str): the command the refusal names.
 
     Returns:
         tuple: (uid, gid); each is None when its part is absent.
 
+    Raises:
+        UsageError: an owner or group the database lacks, or a number
+            with a colon and no group after it, as chown refuses them.
+
     Example::
 
-        parse_owner("1000:staff")  -> (1000, "staff")
-        parse_owner("alice")       -> ("alice", None)
-        parse_owner(":dev")        -> (None, "dev")
+        parse_owner("root:nogroup", identity)  -> (0, 65534)
+        parse_owner("1000", identity)          -> (1000, None)
+        parse_owner("nobody:", identity)       -> (65534, 65534)
     """
     owner, sep, group = text.partition(":")
-    uid = (int(owner) if owner.isdigit() else owner) if owner else None
-    gid = (int(group) if group.isdigit() else group) if sep and group else None
+    found = find_user(identity, owner) if owner else None
+    uid = None
+    if owner:
+        if found is None and not owner.isdigit():
+            raise UsageError(f"{cmd}: invalid user: '{text}'", 1)
+        uid = int(owner) if found is None else found.uid
+    gid = None
+    if sep and group:
+        gid = parse_group(group, identity)
+        if gid is None:
+            raise UsageError(f"{cmd}: invalid group: '{text}'", 1)
+    elif sep and owner:
+        if found is None:
+            raise UsageError(f"{cmd}: invalid spec: '{text}'", 1)
+        gid = found.gid
     return uid, gid
 
 
-def parse_group(text: str) -> int | str | None:
-    """Parse a chgrp GROUP argument.
-
-    Numeric ids become ints; names are kept as strings (mirage has no
-    group database; ownership is stored, not enforced). Empty is invalid.
+def parse_group(text: str, identity: Identity) -> int | None:
+    """Parse a chgrp GROUP argument against the user database.
 
     Args:
         text (str): the GROUP operand as typed.
+        identity (Identity): who the session is, whose database names
+            the groups.
 
     Returns:
-        int | str | None: the gid, or None when the text is empty.
+        int | None: the gid, None for a name the database lacks or an
+        empty text.
 
     Example::
 
-        parse_group("staff")  -> "staff"
-        parse_group("20")     -> 20
+        parse_group("nogroup", identity)  -> 65534
+        parse_group("20", identity)       -> 20
     """
     if not text:
         return None
-    return int(text) if text.isdigit() else text
+    found = group_id_named(identity, text)
+    if found is not None:
+        return found
+    return int(text) if text.isdigit() else None
 
 
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
@@ -724,7 +753,8 @@ async def change_owner(
     operands: list[PathSpec],
     uid: int | str | None,
     gid: int | str | None,
-    current: tuple[int | str | None, int | str | None] | None = None,
+    current: tuple[int | None, int | None] | None = None,
+    spec: tuple[str | None, str | None] | None = None,
 ) -> Result:
     """Set the owner and group of every operand, the way chown and chgrp
     do: -R walks under -P unless -H or -L follows links, -h changes a
@@ -741,17 +771,23 @@ async def change_owner(
         operands (list[PathSpec]): the file operands.
         uid (int | str | None): the owner asked for, None to keep it.
         gid (int | str | None): the group asked for, None to keep it.
-        current (tuple[int | str | None, int | str | None] | None): the
-            owner and group a file must have to change, each None for
-            any; None for every file.
+        current (tuple[int | None, int | None] | None): the owner and
+            group a file must have to change, each None for any; None
+            for every file.
+        spec (tuple[str | None, str | None] | None): the owner and group
+            as typed, which ``-v`` and ``-c`` print; a part not typed
+            prints the name the user database gives its id.
     """
     follow, refused = follows_links(cmd, fl)
     if refused is not None:
         return refused
     report = verbosity(fl)
     identity = Identity(profile=session.profile)
-    user = None if uid is None else str(uid)
-    group = None if gid is None else str(gid)
+    typed_user, typed_group = (None, None) if spec is None else spec
+    user = typed_user or (None if uid is None else owner_label(uid, identity))
+    group = typed_group or (
+        None if gid is None else group_label(gid, identity)
+    )
     action = "changing ownership of" if cmd == "chown" else "changing group of"
     errors: list[str] = []
     out: list[str] = []
@@ -759,8 +795,10 @@ async def change_owner(
     def matches(stat: FileStat | None) -> bool:
         if current is None or stat is None:
             return True
-        return (current[0] is None or str(current[0]) == str(stat.uid)) and (
-            current[1] is None or str(current[1]) == str(stat.gid)
+        return (
+            current[0] is None or current[0] == owner_id(stat.uid, identity)
+        ) and (
+            current[1] is None or current[1] == group_id(stat.gid, identity)
         )
 
     def describe(name: str, stat: FileStat | None, failed: bool) -> None:
@@ -772,11 +810,11 @@ async def change_owner(
             return
         if stat is not None:
             old = (
-                owner_name(stat.uid, identity),
-                group_name(stat.gid, identity),
+                owner_label(stat.uid, identity),
+                group_label(stat.gid, identity),
             )
-            same = (uid is None or uid == stat.uid) and (
-                gid is None or gid == stat.gid
+            same = (uid is None or uid == owner_id(stat.uid, identity)) and (
+                gid is None or gid == group_id(stat.gid, identity)
             )
         status = "failed" if failed else "retained" if same else "changed"
         if report == "verbose" or (

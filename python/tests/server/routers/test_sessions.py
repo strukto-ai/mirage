@@ -346,7 +346,9 @@ async def test_update_session_takes_a_profile_document(tmp_path):
             params={"session_id": "a"},
             json={"command": "whoami"},
         )
-        assert r.json()["stderr"] == "whoami: cannot find name for user ID\n"
+        assert r.json()["stderr"] == (
+            "whoami: cannot find name for user ID 1000\n"
+        )
         r = await client.patch(
             f"/v1/workspaces/{wid}/sessions/a",
             json={"profile": {"commands": {"bogus": []}}},

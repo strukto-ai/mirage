@@ -14,7 +14,7 @@
 
 import type { FindAction, PrintfPart } from '../commands/builtin/types.ts'
 import { UsageError } from '../commands/errors.ts'
-import type { ActionKind, PredNode, RowActionKind } from '../core/generic/types.ts'
+import type { ActionKind, Ids, PredNode, RowActionKind } from '../core/generic/types.ts'
 import { textView, utf8Locale } from '../shell/bytes.ts'
 import type { JsonValue } from '../types.ts'
 import { systemNow } from '../utils/clock.ts'
@@ -313,7 +313,7 @@ interface Binding {
   readonly now: number
   readonly zone: Zone
   readonly utf8: boolean
-  readonly profile: string | null
+  readonly ids: Ids
   window: Bounds | null
   readonly fsType: string | null
 }
@@ -321,6 +321,20 @@ interface Binding {
 function permBits(bits: string): 'exact' | 'all' | 'any' {
   if (bits === 'exact' || bits === 'all' || bits === 'any') return bits
   throw new TypeError(`find: mirage-rs answered the -perm kind ${JSON.stringify(bits)}`)
+}
+
+// The id `-user` or `-group` names: a name the user database holds, else a
+// number. Throws find's UsageError for a name the database lacks.
+function ownerId(text: string, group: boolean, binding: Binding): number {
+  const found = (group ? binding.ids.groups : binding.ids.users)[text]
+  if (found !== undefined) return found
+  if (/^[0-9]+$/.test(text)) return Number(text)
+  const kind = group ? 'group name or GID' : 'user name or UID'
+  const test = group ? '-group' : '-user'
+  throw new UsageError(
+    `find: invalid ${kind} argument to ${test}: ${quoteArg(text, binding.utf8)}`,
+    1,
+  )
 }
 
 function countField(name: string): 'links' | 'uid' | 'gid' | 'inum' {
@@ -379,7 +393,7 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
         mode: int(raw.mode),
         bits: permBits(str(raw.bits)),
       }
-    case 'count':
+    case 'count': {
       if (str(raw.field) === 'used') {
         return { op: 'used', cmp: cmp(str(raw.cmp)), days: int(raw.count) }
       }
@@ -388,20 +402,24 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
         field: countField(str(raw.field)),
         cmp: cmp(str(raw.cmp)),
         count: int(raw.count),
+        ids: binding.ids,
       }
+    }
     case 'fstype':
       return textView(str(raw.name)) === binding.fsType
         ? { op: 'true' }
         : { op: 'not', kid: { op: 'true' } }
-    case 'owner':
+    case 'owner': {
+      const group = flag(raw.group)
       return {
         op: 'owner',
-        name: textView(str(raw.name)),
-        group: flag(raw.group),
-        profile: binding.profile,
+        id: ownerId(textView(str(raw.name)), group, binding),
+        group,
+        ids: binding.ids,
       }
+    }
     case 'nouser':
-      return { op: 'nouser', group: flag(raw.group) }
+      return { op: 'nouser', group: flag(raw.group), ids: binding.ids }
     case 'access':
       return { op: 'access', mode: accessMode(str(raw.mode)) }
     case 'size':
@@ -503,14 +521,16 @@ export class FindParse {
    * resolve. `now` is the clock `-mtime` counts from, the current time by
    * default. `env` is the command's environment, whose `TZ` places
    * `-daystart`'s midnight and whose locale reads a `-regex` subject;
-   * `profile` the session's name, the owner `-user` sees on an entry that
-   * reports none. Throws UsageError for a `-newermt` text that is no date.
+   * `ids` the session's user database, which `-user` and `-group` look a
+   * name up in and whose ids an entry that reports no owner has, root's by
+   * default. Throws UsageError for a `-newermt` text that is no date, or a
+   * `-user` or `-group` name the database lacks.
    */
   bind(
     newerTimes: readonly number[] = [],
     now: number = systemNow(),
     env: Readonly<Record<string, string>> | null = null,
-    profile: string | null = null,
+    ids: Ids | null = null,
     fsType: string | null = null,
   ): FindExpr {
     const binding: Binding = {
@@ -518,7 +538,7 @@ export class FindParse {
       now,
       zone: zoneFromEnv(env),
       utf8: this.utf8 || utf8Locale(env ?? undefined),
-      profile,
+      ids: ids ?? { users: { root: 0 }, groups: { root: 0 }, uid: 0, gid: 0 },
       window: null,
       fsType,
     }

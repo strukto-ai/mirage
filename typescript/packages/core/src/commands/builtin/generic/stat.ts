@@ -50,7 +50,15 @@ import {
 } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
-import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
+import {
+  UNKNOWN_ID_NAME,
+  groupId,
+  groupName,
+  identityOf,
+  ownerId,
+  ownerName,
+  type Identity,
+} from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError, wordRefusalError } from '../../spec/usage.ts'
 import { byteChar, encodeText } from '../../../shell/bytes.ts'
@@ -245,8 +253,10 @@ function directiveValue(
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)
   if (spec === 'f') return posixMode(s).toString(16)
-  if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
-  if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
+  if (spec === 'u') return String(ownerId(s.uid, identity))
+  if (spec === 'U') return ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME
+  if (spec === 'g') return String(groupId(s.gid, identity))
+  if (spec === 'G') return groupName(s.gid, identity) ?? UNKNOWN_ID_NAME
   if (spec === 'x') return statTime(s.atime ?? s.modified)
   if (spec === 'X') return epoch(s.atime ?? s.modified)
   if (spec === 'y') return statTime(s.modified)
@@ -503,16 +513,16 @@ function statTime(value: string | null): string {
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
  * rendered bytes, modes, logical owners and its mount's device, but no inode,
- * allocation blocks, IO block size or link count: those print '?'. An absent size,
- * owner number or time prints '-'. Each time is the one its directive
+ * allocation blocks, IO block size or link count: those print '?'. An absent size
+ * or time prints '-'. Each time is the one its directive
  * prints (`%x %y %z %w`), the name is unquoted as GNU's default prints it,
  * and times are UTC. */
 function renderStat(s: FileStat, name: string, identity: Identity | null): string {
   const size = directiveValue('s', s, name, identity)
-  const uid = String(s.uid ?? '-').padStart(5)
-  const gid = String(s.gid ?? '-').padStart(5)
-  const owner = ownerName(s.uid, identity).padStart(8)
-  const group = groupName(s.gid, identity).padStart(8)
+  const uid = String(ownerId(s.uid, identity)).padStart(5)
+  const gid = String(groupId(s.gid, identity)).padStart(5)
+  const owner = (ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
+  const group = (groupName(s.gid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
   const links = isCharDevice(s)
     ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
     : 'Links: ?'

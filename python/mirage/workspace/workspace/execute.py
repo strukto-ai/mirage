@@ -19,6 +19,12 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    home_of,
+    session_uid,
+    user_homes,
+)
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import (
     bind_caller,
@@ -118,6 +124,7 @@ from mirage.workspace.session.state import (
     env_is_readonly,
     seed_parent,
     seed_shell,
+    seed_user,
     visible_env,
 )
 from mirage.workspace.snapshot import ContentDriftError
@@ -631,6 +638,10 @@ async def execute_line(
     # it runs ends with the copy it ran on.
     if handed is None and deciding():
         session = _beside(ws, session)
+    identity = Identity(profile=session.profile)
+    seed_user(
+        session, session_uid(identity), home_of(identity), user_homes(identity)
+    )
     line_handle = line_handle or LineHandle(
         new_line_id(ws.registry.ids),
         session_id,

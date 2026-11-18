@@ -20,6 +20,7 @@ from mirage.core.generic.types import (
     Effects,
     Empty,
     FindEntry,
+    Ids,
     Lname,
     Mtime,
     Name,
@@ -750,6 +751,11 @@ def test_a_newermt_that_is_no_date_is_refused_in_gnus_words():
         parse_find(["-newermt", "nope"]).bind()
 
 
+IDS = Ids(
+    users={"root": 0, "bob": 1000}, groups={"root": 0}, uid=1000, gid=1000
+)
+
+
 def test_the_new_tests_bind_to_their_nodes():
     expr = parse_find(
         [
@@ -771,16 +777,16 @@ def test_the_new_tests_bind_to_their_nodes():
             "D*",
             "-quit",
         ]
-    ).bind(env={"LC_ALL": "C.UTF-8"}, profile="me")
+    ).bind(env={"LC_ALL": "C.UTF-8"}, ids=IDS)
     assert isinstance(expr.tree, And)
     assert expr.tree.kids == [
         Regex("a.*", utf8=True),
         Lname("x", icase=True),
         XType("l"),
         Perm(0o100, "any"),
-        Count("links", "+", 1),
-        Owner("bob", profile="me"),
-        NoOwner(group=True),
+        Count("links", "+", 1, ids=IDS),
+        Owner(1000, ids=IDS),
+        NoOwner(group=True, ids=IDS),
         Access("w"),
         Path("D*", icase=True),
         Quit(),

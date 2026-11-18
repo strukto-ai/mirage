@@ -208,7 +208,7 @@ async def test_arithmetic_a_global_declaration_runs_counts_the_global():
 @pytest.mark.asyncio
 async def test_a_prefix_s_set_aside_value_stops_counting_once_restored():
     out, _, code = await run(
-        "X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok"
+        "X=$(printf %0100d 0); X= eval :; Y=$(printf %040d 0); echo ok"
     )
     assert (out, code) == ("ok\n", 0)
 

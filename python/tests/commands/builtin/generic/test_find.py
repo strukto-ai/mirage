@@ -917,10 +917,15 @@ async def _tested_ws() -> Workspace:
             "chown 7 d/a.txt; find d -nouser; find d -uid 7",
             "d/a.txt\nd/a.txt\n",
         ),
-        ("chown 7 d/a.txt; find d -user 007; find d -uid -7", "d/a.txt\n"),
         (
-            "chown alice d/a.txt; find d -user alice; find d -nouser",
-            "d/a.txt\n",
+            "chown 7 d/a.txt; find d -user 007; find d -uid +6;"
+            " find d -uid 0 -name b.txt",
+            "d/a.txt\nd/a.txt\nd/b.txt\n",
+        ),
+        (
+            "chown nobody d/a.txt; find d -user nobody; find d -nouser;"
+            " find d -user root -name b.txt",
+            "d/a.txt\nd/b.txt\n",
         ),
         ("find d -name a.txt -follow -type f", "d/a.txt\n"),
     ],
@@ -956,7 +961,7 @@ async def test_find_tests_read_the_entry(line, stdout):
         (
             "touch -d '2024-03-05 06:07:08' /d/a; find /d/a -fls /d/o; "
             "cat /d/o",
-            "        ?      ? -rw-r--r--   1 -        -               0 "
+            "        ?      ? -rw-r--r--   1 root     root            0 "
             "Mar  5  2024 /d/a\n",
         ),
     ],

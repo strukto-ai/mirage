@@ -18,26 +18,38 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { quoteText } from '../../quote.ts'
-import { UNKNOWN_NAME, identityOf } from '../utils/identity.ts'
+import { findUser, identityOf, ownAccount, sessionGid } from '../utils/identity.ts'
 
 const ENC = new TextEncoder()
 
-// The session's one group, its profile, as id prints it.
+// Each user's groups, as `id -Gn` names them: every user is in its own group
+// alone. With no operand, the session's, by number where the user database
+// holds no name for it.
 function groups(
   _accessor: Accessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): CommandFnResult {
-  const profile = identityOf(ctx).profile
+  const identity = identityOf(ctx)
   if (texts.length === 0) {
-    return [ENC.encode(`${profile ?? UNKNOWN_NAME}\n`), new IOResult()]
+    const own = ownAccount(identity)
+    if (own !== null) return [ENC.encode(`${own.group}\n`), new IOResult()]
+    const gid = String(sessionGid(identity))
+    return [
+      ENC.encode(`${gid}\n`),
+      new IOResult({
+        exitCode: 1,
+        stderr: ENC.encode(`groups: cannot find name for group ID ${gid}\n`),
+      }),
+    ]
   }
   const out: string[] = []
   const err: string[] = []
   for (const name of texts) {
-    if (name === profile) out.push(`${name} : ${name}\n`)
-    else err.push(`groups: '${quoteText(name)}': no such user\n`)
+    const found = findUser(identity, name)
+    if (found === null) err.push(`groups: '${quoteText(name)}': no such user\n`)
+    else out.push(`${name} : ${found.group}\n`)
   }
   return [
     out.length > 0 ? ENC.encode(out.join('')) : null,

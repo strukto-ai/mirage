@@ -176,10 +176,10 @@ describe('stat -c directive formatting', () => {
     expect(await render('%N', linkFs('a\tb'))).toBe("'/data/f.txt' -> 'a'$'\\t''b'")
   })
 
-  it('renders owner directives, falling back to "-"', async () => {
-    const owned = fs({ uid: 1000, gid: 'dev' })
-    expect(await render('%u %U %g %G', owned)).toBe('1000 1000 dev dev')
-    expect(await render('%u %U %g %G', fs({ uid: null, gid: null }))).toBe('- - - -')
+  it('renders owner directives, the session root outside a workspace', async () => {
+    const owned = fs({ uid: 1000, gid: 65534 })
+    expect(await render('%u %U %g %G', owned)).toBe('1000 UNKNOWN 65534 nogroup')
+    expect(await render('%u %U %g %G', fs({ uid: null, gid: null }))).toBe('0 root 0 root')
   })
 
   it('renders time directives and epochs', async () => {
@@ -282,10 +282,10 @@ describe('stat -c workspace integration', () => {
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     await run(ws, 'chmod 600 /data/f.txt')
-    await run(ws, 'chown 501:staff /data/f.txt')
-    const [code, out] = await run(ws, 'stat -c "%a %u %g" /data/f.txt')
+    await run(ws, 'chown 501:nogroup /data/f.txt')
+    const [code, out] = await run(ws, 'stat -c "%a %u %g %G" /data/f.txt')
     expect(code).toBe(0)
-    expect(out).toBe('600 501 staff\n')
+    expect(out).toBe('600 501 65534 nogroup\n')
   })
 
   it('defaults owner to the profile', async () => {
@@ -305,13 +305,13 @@ describe('stat -c workspace integration', () => {
     expect(out).toBe('agent7:agent7\n')
   })
 
-  it('falls back to "-" when the workspace is unclaimed', async () => {
+  it('is root without a profile', async () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     const [code, out] = await run(ws, 'stat -c "%U:%G" /data/f.txt')
     expect(code).toBe(0)
-    expect(out).toBe('-:-\n')
+    expect(out).toBe('root:root\n')
   })
 })
 
@@ -327,7 +327,7 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
     '  File: /data/f.txt\n' +
       '  Size: -         \tBlocks: ?          IO Block: ?      regular file\n' +
       'Device: ?\tInode: ?           Links: ?\n' +
-      'Access: (0644/-rw-r--r--)  Uid: (    -/       -)   Gid: (    -/       -)\n' +
+      'Access: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)\n' +
       'Access: -\nModify: -\nChange: -\n Birth: -\n',
   )
   expect(await render('%z %Z %w %W', info)).toBe('- 0 - 0')

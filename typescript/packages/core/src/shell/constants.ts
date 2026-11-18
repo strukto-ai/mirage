@@ -84,6 +84,10 @@ export const BASH_VERSINFO = 'BASH_VERSINFO'
 export const SHLVL = 'SHLVL'
 export const VERSION_TEXT = '5.2.37(1)-release'
 export const VERSION_PARTS = ['5', '2', '37', '1', 'release', 'x86_64-pc-linux-gnu'] as const
+
+// The uid the shell runs as, which bash sets readonly at startup.
+export const UID = 'UID'
+export const EUID = 'EUID'
 // What the shell calls itself when no script is running, bash's "bash".
 // A nested `bash`/`sh` overrides it through SessionState.scriptName, and
 // `SessionState.argv0` is the one place the two are folded together.

@@ -22,8 +22,10 @@ from mirage.commands.builtin.utils import constants
 from mirage.commands.builtin.utils.identity import (
     UNKNOWN_NAME,
     Identity,
-    group_name,
-    owner_name,
+    group_id,
+    group_label,
+    owner_id,
+    owner_label,
 )
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.types import (
@@ -74,6 +76,7 @@ class LsColumns:
     Args:
         owner (bool): the owner column; ``-g`` drops it.
         group (bool): the group column; ``-o`` drops it.
+        numeric (bool): ``-n``: print the owner and group as ids.
         inode (bool): ``-i``; a VFS has no inode, so the column is ``?``,
             the answer ``stat %i`` already gives.
         blocks (bool): ``-s``; nor does it know what a file allocates, so
@@ -88,6 +91,7 @@ class LsColumns:
 
     owner: bool = True
     group: bool = True
+    numeric: bool = False
     author: bool = False
     inode: bool = False
     blocks: bool = False
@@ -447,8 +451,10 @@ def format_ls_long(
     """Render ``ls -l`` rows: mode, links, owner, group, size, time, name.
 
     The owner is the entry's uid when a backend or the attr overlay
-    reports one, else the workspace user; the group is the gid, else the
-    session's profile; ``-`` when nothing names one. ``-g`` and ``-o``
+    reports one, else the session's, named through the user database
+    and printed as a number where it holds no name (always, under
+    ``-n``); the group likewise, each padded to its column's widest
+    cell. ``-g`` and ``-o``
     drop a column, ``--author`` adds the owner again after the group,
     ``-i`` leads with the inode column, ``-s`` with the
     block column after it, and ``-Z`` puts the context column before the
@@ -460,7 +466,7 @@ def format_ls_long(
         stats (list[FileStat]): the rows to render.
         human (bool): render sizes with ``-h`` units.
         identity (Identity | None): who the session is; None outside a
-            workspace, where both columns fall back to ``-``.
+            workspace, which is root.
         columns (LsColumns): which columns to carry and how to spell the
             time.
         names (list[str] | None): the name column per row when the
@@ -474,6 +480,24 @@ def format_ls_long(
     ]
     width = max((len(size) for size, _ in cells), default=1)
     time_width = max((len(when) for _, when in cells), default=1)
+    owners = [
+        UNKNOWN_STAT_FIELD
+        if s.extra.get(STAT_FAILED_KEY)
+        else str(owner_id(s.uid, identity))
+        if columns.numeric
+        else owner_label(s.uid, identity)
+        for s in stats
+    ]
+    groups = [
+        UNKNOWN_STAT_FIELD
+        if s.extra.get(STAT_FAILED_KEY)
+        else str(group_id(s.gid, identity))
+        if columns.numeric
+        else group_label(s.gid, identity)
+        for s in stats
+    ]
+    owner_width = max(map(len, owners), default=1)
+    group_width = max(map(len, groups), default=1)
     out: list[str] = []
     for i, (s, (raw_size, when)) in enumerate(zip(stats, cells)):
         failed = bool(s.extra.get(STAT_FAILED_KEY))
@@ -485,17 +509,11 @@ def format_ls_long(
         else:
             fields = [ls_mode_string(s), "1"]
         if columns.owner:
-            fields.append(
-                UNKNOWN_STAT_FIELD if failed else owner_name(s.uid, identity)
-            )
+            fields.append(owners[i].ljust(owner_width))
         if columns.group:
-            fields.append(
-                UNKNOWN_STAT_FIELD if failed else group_name(s.gid, identity)
-            )
+            fields.append(groups[i].ljust(group_width))
         if columns.author:
-            fields.append(
-                UNKNOWN_STAT_FIELD if failed else owner_name(s.uid, identity)
-            )
+            fields.append(owners[i].ljust(owner_width))
         if columns.context:
             fields.append(UNKNOWN_STAT_FIELD)
         fields.append(raw_size.rjust(width))
@@ -563,11 +581,11 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     Args:
         s (FileStat): the row, named as find printed it.
         identity (Identity | None): who the session is; None outside a
-            workspace, where both name columns fall back to ``-``.
+            workspace, which is root.
     """
     size, when = _ls_size_and_time(s, False, find_rule=True)
-    who = owner_name(s.uid, identity)
-    grp = group_name(s.gid, identity)
+    who = owner_label(s.uid, identity)
+    grp = group_label(s.gid, identity)
     return (
         f"{UNKNOWN_STAT_FIELD:>9} {UNKNOWN_STAT_FIELD:>6} "
         f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {when} "

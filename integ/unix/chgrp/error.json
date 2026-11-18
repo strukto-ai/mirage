@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "chgrp staff /data/cg/missing.txt 2>&1",
+      "command": "chgrp nogroup /data/cg/missing.txt 2>&1",
       "expect": {
         "exit": 1,
         "stdout": "chgrp: cannot access '/data/cg/missing.txt': No such file or directory\n",

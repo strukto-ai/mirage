@@ -9,9 +9,12 @@ from mirage.commands.builtin.utils.formatting import (
     ls_mode_string,
 )
 from mirage.commands.builtin.utils.identity import (
+    UNKNOWN_ID_NAME,
     Identity,
+    group_id,
     group_name,
     identity_of,
+    owner_id,
     owner_name,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
@@ -307,10 +310,14 @@ def _directive_value(
         return ls_mode_string(s)
     if spec == "f":
         return format(posix_mode(s), "x")
-    if spec in ("u", "U"):
-        return owner_name(s.uid, identity)
-    if spec in ("g", "G"):
-        return group_name(s.gid, identity)
+    if spec == "u":
+        return str(owner_id(s.uid, identity))
+    if spec == "U":
+        return owner_name(s.uid, identity) or UNKNOWN_ID_NAME
+    if spec == "g":
+        return str(group_id(s.gid, identity))
+    if spec == "G":
+        return group_name(s.gid, identity) or UNKNOWN_ID_NAME
     if spec == "x":
         return _stat_time(s.atime or s.modified)
     if spec == "X":
@@ -647,8 +654,8 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
 
     A VFS has rendered bytes, modes, logical owners and its mount's
     device, but no inode, allocation blocks, IO block size or link
-    count: those print '?'. An absent size, owner number or time prints
-    '-'. Each time is the one its directive prints (``%x %y %z %w``),
+    count: those print '?'. An absent size or time prints '-'. Each
+    time is the one its directive prints (``%x %y %z %w``),
     the name is unquoted as GNU's default prints it, and times are UTC.
 
     Args:
@@ -657,10 +664,10 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
         identity (Identity | None): session owner and group defaults.
     """
     size = _directive_value("s", s, name, identity)
-    uid = str(s.uid) if s.uid is not None else "-"
-    gid = str(s.gid) if s.gid is not None else "-"
-    owner = owner_name(s.uid, identity)
-    group = group_name(s.gid, identity)
+    uid = str(owner_id(s.uid, identity))
+    gid = str(group_id(s.gid, identity))
+    owner = owner_name(s.uid, identity) or UNKNOWN_ID_NAME
+    group = group_name(s.gid, identity) or UNKNOWN_ID_NAME
     links = "Links: ?"
     if is_char_device(s):
         major = _directive_value("Hr", s, name, identity)
@@ -880,9 +887,10 @@ async def stat(
         mounts (MountView | None): the mount boundaries, so a mount root
             reports its own name rather than the backend's name for its
             root.
-        identity (Identity | None): who the session is: what ``%U`` and
-            ``%G`` print for an entry that reports no uid or gid of its
-            own; None outside a workspace, where both print ``-``.
+        identity (Identity | None): who the session is: the owner and
+            group of an entry that reports none of its own, and the user
+            database ``%U`` and ``%G`` name ids from; None outside a
+            workspace, which is root.
         statfs (StatfsFn | None): the type name and capacity of the
             mount holding a path, for -f; None outside a workspace.
     """

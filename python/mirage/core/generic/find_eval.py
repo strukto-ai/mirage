@@ -24,6 +24,7 @@ from mirage.core.generic.types import (
     Empty,
     FindArgs,
     FindEntry,
+    Ids,
     Lname,
     Mtime,
     Name,
@@ -168,7 +169,20 @@ def _stamp(entry: FindEntry, field: str) -> float | None:
     return iso_timestamp(other) if other else entry.mtime
 
 
-def _count(st: FileStat, field: str) -> int | None:
+def _owner_id(value: int | str | None, group: bool, ids: Ids) -> int | None:
+    """The id an entry's owner or group is: its own, else the session's;
+    a name a backend reported, through the database, None where the
+    database lacks it."""
+    if value is None:
+        return ids.gid if group else ids.uid
+    if isinstance(value, int):
+        return value
+    if value.isdigit():
+        return int(value)
+    return (ids.groups if group else ids.users).get(value)
+
+
+def _count(st: FileStat, field: str, ids: Ids) -> int | None:
     if field == "inum":
         # No backend here numbers its files, as `stat %i` says.
         return None
@@ -176,25 +190,23 @@ def _count(st: FileStat, field: str) -> int | None:
         # One name per entry, as ls -l counts it: mirage has no hard
         # links, and a directory's own entries are not counted.
         return 1
-    value = st.uid if field == "uid" else st.gid
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
+    group = field == "gid"
+    return _owner_id(st.gid if group else st.uid, group, ids)
 
 
 def _owns(node: Owner, st: FileStat) -> bool:
     value = st.gid if node.group else st.uid
-    if value is None:
-        return node.profile is not None and node.name == node.profile
-    if str(value) == node.name:
-        return True
-    return (
-        node.name.isdigit()
-        and isinstance(value, int)
-        and value == int(node.name)
-    )
+    return _owner_id(value, node.group, node.ids) == node.id
+
+
+def _nameless(node: NoOwner, st: FileStat | None) -> bool:
+    if st is None:
+        return False
+    value = st.gid if node.group else st.uid
+    if isinstance(value, str) and not value.isdigit():
+        return False
+    held = (node.ids.groups if node.group else node.ids.users).values()
+    return _owner_id(value, node.group, node.ids) not in held
 
 
 def _test(node: PredNode, entry: FindEntry) -> bool | None:
@@ -224,7 +236,7 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
             return mode & node.mode == node.mode
         return node.mode == 0 or mode & node.mode != 0
     if isinstance(node, Count):
-        value = _count(st, node.field) if st is not None else None
+        value = _count(st, node.field, node.ids) if st is not None else None
         if value is None:
             return False
         if node.cmp == "+":
@@ -248,10 +260,7 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
     if isinstance(node, Owner):
         return st is not None and _owns(node, st)
     if isinstance(node, NoOwner):
-        owner = None if st is None else st.gid if node.group else st.uid
-        return isinstance(owner, int) or (
-            isinstance(owner, str) and owner.isdigit()
-        )
+        return _nameless(node, st)
     if isinstance(node, Access):
         # access(2) follows a link: a live one answers with what it
         # leads to, which the walk read as the entry's target.
