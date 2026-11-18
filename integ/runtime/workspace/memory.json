@@ -47,6 +47,23 @@
           }
         }
       ]
+    },
+    {
+      "id": "dev_files_count_against_max_memory",
+      "note": "A file written under /dev is held in memory, so it counts against max_memory as a RAM mount's does.",
+      "world": {
+        "machines": {},
+        "max_memory": "8MB"
+      },
+      "steps": [
+        {
+          "command": "for i in 1 2 3; do head -c 3000000 /dev/zero > /dev/f$i 2>/dev/null || echo refused $i; done",
+          "expect": {
+            "exit": 0,
+            "stdout": "refused 3\n"
+          }
+        }
+      ]
     }
   ]
 }

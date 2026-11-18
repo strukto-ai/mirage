@@ -436,3 +436,15 @@ it.each([false, true])(
     }
   },
 )
+
+it('counts files under /dev against max_memory', async () => {
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE, maxMemory: '8MB' })
+  try {
+    const result = await ws.shell(
+      'for i in 1 2 3; do head -c 3000000 /dev/zero > /dev/f$i || echo refused $i; done',
+    )
+    expect(result.stdoutText).toBe('refused 3\n')
+  } finally {
+    await ws.close()
+  }
+})
