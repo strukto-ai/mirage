@@ -190,6 +190,25 @@
    ]
   },
   {
+   "id": "a_mount_serving_a_cli_late_meets_the_rules_naming_it",
+   "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}, "/b": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"go": {"decision": "deny", "reason": "no go"}}}}}},
+   "steps": [
+    {"op": "register_command", "path": "/a", "name": "tool", "verbs": [{"name": "send", "aliases": ["go"]}], "stdout": "sent\n", "expect": {"value": null}},
+    {"op": "exec", "command": "cd /a && tool go x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "no go"}}},
+    {"op": "exec", "command": "cd /a && tool send x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "no go"}}},
+    {"op": "register_command", "path": "/b", "name": "tool", "verbs": [{"name": "publish", "aliases": ["go"]}], "stdout": "published\n", "expect": {"error": "commands.tool: two mounts serve tool with trees that read these names differently; name only what both read alike"}},
+    {"op": "exec", "command": "cd /b && tool go x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "no go"}}}
+   ]
+  },
+  {
+   "id": "a_mount_serving_a_cli_a_rule_names_wrongly_is_refused",
+   "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"walk": "deny"}}}}},
+   "steps": [
+    {"op": "register_command", "path": "/a", "name": "tool", "verbs": [{"name": "send", "aliases": ["go"]}], "stdout": "sent\n", "expect": {"error": "commands.tool: no subcommand walk"}},
+    {"op": "exec", "command": "cd /a && tool send x", "expect": {"value": {"exit_code": 127, "stdout": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "a_mount_rule_with_no_paths_holds_where_a_command_reads_into_its_mount",
    "settings": {"mode": "write", "mounts": {"/repo": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
    "steps": [

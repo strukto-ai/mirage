@@ -65,7 +65,7 @@ import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { command, type Context } from '@struktoai/mirage-core/commands/config'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import { type ByteSource, IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import { sleep } from '@struktoai/mirage-core/utils/abort'
@@ -129,7 +129,14 @@ type Step = (
       runtime?: string
       config?: Record<string, unknown>
     }
-  | { op: 'register_command'; path: string; name: string; write?: boolean; stdout?: string }
+  | {
+      op: 'register_command'
+      path: string
+      name: string
+      write?: boolean
+      stdout?: string
+      verbs?: { name: string; aliases?: string[] }[]
+    }
   | { op: 'unregister_cli' | 'remove_machine' | 'stream_cli_stats'; name: string }
   | { op: 'add_machine'; name: string; machine: Record<string, unknown> }
   | {
@@ -604,6 +611,30 @@ async function action(
       break
     case 'register_command': {
       const out = new TextEncoder().encode(step.stdout ?? '')
+      if (step.verbs !== undefined) {
+        ws.mount(step.path).registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: step.name,
+              subcommands: step.verbs.map(
+                (verb) =>
+                  new CommandSpec({
+                    name: verb.name,
+                    aliases: verb.aliases ?? [],
+                    arguments: [new Argument('words', { nargs: '*' })],
+                  }),
+              ),
+            }),
+            handlers: Object.fromEntries(
+              step.verbs.map((verb) => [
+                verb.name,
+                new CLIHandler({ fn: () => [out, new IOResult()] }),
+              ]),
+            ),
+          }),
+        ])
+        break
+      }
       ws.mount(step.path).registerCommands(
         command({
           name: step.name,

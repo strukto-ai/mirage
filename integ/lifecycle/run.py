@@ -31,7 +31,7 @@ from typing import Any
 from mirage import ShellExecution
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_caller, set_current_session
 from mirage.errors import classify
@@ -478,6 +478,29 @@ async def action(
         ) -> tuple[bytes, IOResult]:
             return out, IOResult()
 
+        verbs = step.get("verbs")
+        if verbs is not None:
+            ws.mount(step["path"]).register_commands(
+                [
+                    CLI(
+                        spec=CommandSpec(
+                            name=step["name"],
+                            subcommands=tuple(
+                                CommandSpec(
+                                    name=verb["name"],
+                                    aliases=tuple(verb.get("aliases", ())),
+                                    arguments=(Argument("words", nargs="*"),),
+                                )
+                                for verb in verbs
+                            ),
+                        ),
+                        handlers={
+                            verb["name"]: CLIHandler(answer) for verb in verbs
+                        },
+                    )
+                ]
+            )
+            return None
         ws.mount(step["path"]).register_commands(
             [
                 command(
