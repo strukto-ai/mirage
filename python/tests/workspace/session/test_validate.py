@@ -221,3 +221,17 @@ def test_a_command_with_no_grammar_keeps_its_operands_and_can_wait():
     assert _normalized({"kubectl": {"--namespace": "deny"}}, defer=True) == {
         "kubectl": {"--namespace": "deny"}
     }
+
+
+def test_a_shell_builtin_waits_for_no_grammar():
+    with pytest.raises(
+        PolicyError,
+        match=re.escape(
+            "commands.printenv: GATED is no subcommand here; an operand "
+            "goes under operands"
+        ),
+    ):
+        _normalized({"printenv": {"GATED": "deny"}}, defer=True)
+    assert _normalized(
+        {"printenv": {"operands": {"GATED": "deny"}}}, defer=True
+    ) == {"printenv": {"operands": {"GATED": "deny"}}}

@@ -29,6 +29,7 @@ from mirage.policy.types import (
     ScopedTree,
     ValueRule,
 )
+from mirage.workspace.lookup.constants import NOT_INSTALLABLE
 
 BUILTIN_GRAMMARS: Mapping[str, Grammar] = MappingProxyType(
     {name: Grammar(spec) for name, spec in SPECS.items()}
@@ -269,7 +270,8 @@ def normalize_tree(
         where (str): the block's name, for the messages.
         defer (bool): keep a command with no grammar as written rather
             than refuse its names, for a check made before every CLI is
-            registered.
+            registered. A name no CLI can be installed under (a shell
+            builtin, a keyword) is checked all the same.
 
     Raises:
         PolicyError: a name does not fit its command's grammar.
@@ -279,7 +281,8 @@ def normalize_tree(
         grammar = grammars.get(name)
         at = f"{where}.{name}"
         if grammar is None:
-            commands[name] = node if defer else _no_grammar(node, at)
+            later = defer and name not in NOT_INSTALLABLE
+            commands[name] = node if later else _no_grammar(node, at)
             continue
         commands[name] = _node(node, grammar.spec, at, grammar.passthrough)
     return replace(tree, subcommands=commands)

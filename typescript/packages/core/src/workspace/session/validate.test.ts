@@ -203,4 +203,13 @@ describe('normalizeTree', () => {
       kubectl: { '--namespace': 'deny' },
     })
   })
+
+  it('waits for no grammar on a shell builtin', () => {
+    expect(() => normalized({ printenv: { GATED: 'deny' } }, true)).toThrow(
+      'commands.printenv: GATED is no subcommand here; an operand goes under operands',
+    )
+    expect(normalized({ printenv: { operands: { GATED: 'deny' } } }, true)).toEqual({
+      printenv: { operands: { GATED: 'deny' } },
+    })
+  })
 })

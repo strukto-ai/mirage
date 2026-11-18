@@ -19,6 +19,7 @@ import type { CommandSpec } from '../../commands/spec/types.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type { AdmissionRules, CommandNode, Grammar, OptionRule } from '../../policy/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { NOT_INSTALLABLE } from '../lookup/constants.ts'
 
 export const BUILTIN_GRAMMARS: ReadonlyMap<string, Grammar> = new Map(
   Object.entries(SPECS).map(([name, spec]) => [name, { spec, tree: false, passthrough: false }]),
@@ -207,7 +208,8 @@ function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boo
  * that takes none, or outside its choices; and options or subcommands on
  * a command with no grammar, since the line reader gives it only
  * operands. `defer` keeps a command with no grammar as written, for a
- * check made before every CLI is registered.
+ * check made before every CLI is registered; a name no CLI can be
+ * installed under (a shell builtin, a keyword) is checked all the same.
  */
 export function normalizeTree(
   tree: CommandNode,
@@ -219,7 +221,8 @@ export function normalizeTree(
   for (const [name, child] of tree.subcommands) {
     const grammar = grammars.get(name)
     const at = `${where}.${name}`
-    if (grammar === undefined) commands.set(name, defer ? child : noGrammar(child, at))
+    const later = defer && !NOT_INSTALLABLE.has(name)
+    if (grammar === undefined) commands.set(name, later ? child : noGrammar(child, at))
     else commands.set(name, node(child, grammar.spec, at, grammar.passthrough))
   }
   return { ...tree, subcommands: commands }
