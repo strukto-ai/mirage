@@ -623,6 +623,8 @@
     {"op": "exec", "session": "sealed", "command": "{ cat; } < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "sealed", "command": "while read -r l; do echo \"$l\"; done < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "sealed", "command": "(cat) < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
+    {"op": "exec", "session": "sealed", "command": "< /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
+    {"op": "exec", "session": "sealed", "command": "if true; then cat; fi < /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "sealed", "command": "> /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "sealed", "command": "exec > /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "sealed", "command": "{ echo hi; } > /data/out; cat /data/out", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}},
