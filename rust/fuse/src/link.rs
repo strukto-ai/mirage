@@ -54,7 +54,9 @@ impl Link {
     }
 
     /// Send `op` with `args` and `body`, and wait for its reply; a reply
-    /// later than the link's wait finds no one waiting and is dropped.
+    /// later than the link's wait finds no one waiting and is dropped. A
+    /// timeout that loses the race to `serve`, which already took the
+    /// waiter, takes the reply it hands over, so exactly one side owns it.
     pub fn call(&self, op: &str, args: Value, body: &[u8]) -> Result<Frame, Failure> {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let mut head = match args {
@@ -77,10 +79,14 @@ impl Link {
         let reply = match rx.recv_timeout(self.wait) {
             Ok(reply) => reply,
             Err(RecvTimeoutError::Timeout) => {
-                if let Some(pending) = locked(&self.pending).as_mut() {
-                    pending.remove(&id);
+                let mine = locked(&self.pending)
+                    .as_mut()
+                    .and_then(|p| p.remove(&id))
+                    .is_some();
+                if mine {
+                    return Err(Failure::Late);
                 }
-                return Err(Failure::Late);
+                rx.recv().map_err(|_| Failure::Lost)?
             }
             Err(RecvTimeoutError::Disconnected) => return Err(Failure::Lost),
         };

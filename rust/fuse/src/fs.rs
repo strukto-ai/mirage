@@ -116,6 +116,7 @@ struct Open {
     data: Option<Arc<Vec<u8>>>,
     attrs: Option<Attrs>,
     writes: bool,
+    detached: bool,
 }
 
 /// What the kernel must forget, and the host's barriers, in the order they
@@ -531,8 +532,19 @@ impl MirageFs {
     /// machine changed its bytes in place.
     fn rewritten(&self, path: &str) {
         for open in self.st().opens.values_mut() {
-            if open.path == path && open.host.is_none() {
+            if open.path == path && open.host.is_none() && !open.detached {
                 open.data = None;
+            }
+        }
+    }
+
+    /// Tie the opens at or under `path` to the file they hold, once its
+    /// name went to another file or to none: a write at the name later
+    /// no longer refreshes them.
+    fn detach(st: &mut State, path: &str) {
+        for open in st.opens.values_mut() {
+            if reaches(path, &open.path) {
+                open.detached = true;
             }
         }
     }
@@ -761,6 +773,7 @@ impl MirageFs {
                 data,
                 attrs,
                 writes,
+                detached: false,
             },
         );
         fh
@@ -1027,7 +1040,10 @@ impl Filesystem for MirageFs {
         let path = child(&dir, name);
         self.changed(&path);
         match self.call("unlink", json!({ "path": path }), &[]) {
-            Ok(_) => reply.ok(),
+            Ok(_) => {
+                MirageFs::detach(&mut self.st(), &path);
+                reply.ok()
+            }
             Err(err) => reply.error(err),
         }
     }
@@ -1118,6 +1134,7 @@ impl Filesystem for MirageFs {
                     }
                     st.paths.insert(ino, new);
                 }
+                MirageFs::detach(&mut st, &to);
                 for open in st.opens.values_mut() {
                     if reaches(&from, &open.path) {
                         open.path = format!("{to}{}", &open.path[from.len()..]);
@@ -1227,6 +1244,7 @@ impl Filesystem for MirageFs {
         let Some(host) = open.host else {
             let data = match (open.data, open.attrs) {
                 (Some(data), _) => data,
+                (None, Some(_)) if open.detached => return reply.error(Errno::ESTALE),
                 (None, Some(attrs)) => match self.whole(&open.path, attrs) {
                     Ok((data, now)) => {
                         if let Some(held) = self.st().opens.get_mut(&fh.0) {
@@ -1619,6 +1637,22 @@ mod tests {
         let found = asking.join().unwrap().unwrap();
         assert_eq!((found.size, found.kept), (5, true));
         assert_eq!(locked(&fs.shared.state).known["/w/a"].attrs.size, 5);
+    }
+
+    #[test]
+    fn a_reader_of_a_removed_name_keeps_its_bytes_when_the_name_is_rewritten() {
+        let (fs, _host) = hosted();
+        let held = |bytes: &[u8]| Some((Arc::new(bytes.to_vec()), attrs(true)));
+        let old = fs.opened("/w/a", None, held(b"old"), false);
+        MirageFs::detach(&mut fs.st(), "/w/a");
+        let new = fs.opened("/w/a", None, held(b"new"), false);
+        fs.rewritten("/w/a");
+        let st = fs.st();
+        assert_eq!(
+            st.opens[&old].data.as_deref().map(Vec::as_slice),
+            Some(&b"old"[..])
+        );
+        assert!(st.opens[&new].data.is_none());
     }
 
     #[test]
