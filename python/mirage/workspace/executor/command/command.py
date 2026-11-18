@@ -225,6 +225,7 @@ async def _finish_find(
     dispatch: DispatchFn,
     stdin: ByteSource | None = None,
     starts: list[PathSpec] | None = None,
+    sink: JobConsole | None = None,
 ) -> ByteSource | None:
     """Apply find's actions once, at the command boundary.
 
@@ -251,6 +252,8 @@ async def _finish_find(
             children.
         starts (list[PathSpec] | None): the start operands, for the
             stat ``-ls`` renders after a ``-delete``.
+        sink (JobConsole | None): where the command's statement writes,
+            which an ``-exec`` run's stderr goes to in order.
     """
     session = context.session
     return await _apply_find_actions(
@@ -272,6 +275,7 @@ async def _finish_find(
         ),
         stdin=stdin,
         starts=starts,
+        sink=sink,
     )
 
 
@@ -378,6 +382,7 @@ async def _bound_find(
     execute_fn: ExecuteFn | None,
     view: SessionView,
     stdin: ByteSource | None,
+    sink: JobConsole | None = None,
 ) -> FindExpr | tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Parse and bind a find line's expression.
 
@@ -396,6 +401,8 @@ async def _bound_find(
         The bound expression, or the result that ends the line: one find
         refuses, a -newer reference it cannot stat, a -files0-from run, or a
         file -fprint cannot create.
+        sink (JobConsole | None): where the command's statement writes,
+            which an ``-exec`` run's stderr goes to in order.
     """
     session = context.session
     try:
@@ -443,6 +450,7 @@ async def _bound_find(
             execute_fn,
             session.session_id,
             stdin,
+            sink,
         )
         return (
             listed.stdout,
@@ -475,6 +483,7 @@ async def _run_cross_mount(
     prepared: ParsedCommand | None,
     find_expr: FindExpr | None,
     stdin: ByteSource | None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a line whose operands span mounts.
 
@@ -496,6 +505,8 @@ async def _run_cross_mount(
         prepared (ParsedCommand | None): a program line already parsed.
         find_expr (FindExpr | None): the bound expression of a find line.
         stdin (ByteSource | None): the line's input.
+        sink (JobConsole | None): where the command's statement writes,
+            which an ``-exec`` run's stderr goes to in order.
     """
     session = context.session
     # Cross-mount execution bypasses a VFS command handler. Parse
@@ -637,6 +648,7 @@ async def _run_cross_mount(
             dispatch,
             stdin=stdin,
             starts=cross_scopes,
+            sink=sink,
         )
     if cross_parsed.warnings:
         warn = encode_text(
@@ -678,6 +690,7 @@ async def _run_single_mount(
     prepared: ParsedCommand | None,
     find_expr: FindExpr | None,
     stdin: ByteSource | None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a line on the one mount it resolved to.
 
@@ -700,6 +713,8 @@ async def _run_single_mount(
         prepared (ParsedCommand | None): a program line already parsed.
         find_expr (FindExpr | None): the bound expression of a find line.
         stdin (ByteSource | None): the line's input.
+        sink (JobConsole | None): where the command's statement writes,
+            which an ``-exec`` run's stderr goes to in order.
     """
     session = context.session
     # Parse flags upstream: the mount receives clean args
@@ -783,6 +798,7 @@ async def _run_single_mount(
                 dispatch,
                 stdin=stdin,
                 starts=paths,
+                sink=sink,
             )
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
@@ -822,6 +838,7 @@ async def _run_single_mount(
             dispatch,
             stdin=stdin,
             starts=paths,
+            sink=sink,
         )
 
     if warn_bytes:
@@ -1333,6 +1350,7 @@ async def handle_command(
             execute_fn,
             view,
             stdin,
+            sink,
         )
         if not isinstance(found, FindExpr):
             return found
@@ -1363,6 +1381,7 @@ async def handle_command(
             prepared,
             find_expr,
             stdin,
+            sink,
         )
 
     spanning = _spanning(
@@ -1423,4 +1442,5 @@ async def handle_command(
         prepared,
         find_expr,
         stdin,
+        sink,
     )

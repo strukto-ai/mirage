@@ -17,16 +17,21 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.general.interpreter import (
+    Relay,
     exec_refusal,
+    line_output,
     not_bound,
     run_interpreter,
     run_output,
     runtime_version,
 )
 from mirage.commands.config import Context
-from mirage.io.types import materialize
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.io.types import IOResult, materialize
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import CommandRuntime, Program, RunResult
+from mirage.shell.console import Channel
 from mirage.types import PathSpec
 
 
@@ -214,6 +219,41 @@ async def test_run_output_keeps_what_the_result_already_said_on_stderr():
     io.stderr = b"warning\n"
     await materialize(stdout)
     assert io.stderr == b"warning\nrun\n"
+
+
+@pytest.mark.asyncio
+async def test_run_output_counts_the_stderr_it_keeps_against_the_memory_budget():
+    async def run(output, errors):
+        for _ in range(3):
+            await errors(b"abcd")
+        return RunResult(exit_code=0)
+
+    stdout, _ = run_output(run)
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(MemoryBudget(8, lambda: 0), materialize(stdout))
+
+
+@pytest.mark.asyncio
+async def test_line_output_writes_stderr_to_the_callers_sink_in_order():
+    seen: list[tuple[str, bytes]] = []
+
+    async def errors(chunk):
+        seen.append(("err", chunk))
+
+    async def line(console):
+        await console.emit(Channel.STDOUT, b"o1")
+        await console.emit(Channel.STDERR, b"e1")
+        await console.emit(Channel.STDOUT, b"o2")
+        return IOResult()
+
+    async def unused(chunk):
+        raise AssertionError(chunk)
+
+    stdout, io = line_output(line, sink=Relay(unused, errors))
+    async for chunk in stdout:
+        seen.append(("out", chunk))
+    assert seen == [("out", b"o1"), ("err", b"e1"), ("out", b"o2")]
+    assert io.stderr is None
 
 
 # The run starts as its output is read, so the workspace settles the

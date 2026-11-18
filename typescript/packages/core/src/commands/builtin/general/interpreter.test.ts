@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { materialize } from '../../../io/types.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { Channel } from '../../../shell/console/index.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
 import type { OutputFn, RunResult } from '../../../runtime/types.ts'
 import { STOP_WAIT_SECONDS } from '../../../execution/job/constants.ts'
 import { ABORT_JOIN_MS } from '../../../utils/abort.ts'
 import type { Context } from '../../config.ts'
-import { runInterpreter, runOutput } from './interpreter.ts'
+import { Relay, lineOutput, runInterpreter, runOutput } from './interpreter.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -254,6 +257,46 @@ describe('runOutput', () => {
     expect(seen).toEqual([
       ['out', 'a'],
       ['err', 'e'],
+    ])
+    expect(io.stderr).toBeNull()
+  })
+
+  it('counts the stderr it keeps against the memory budget', async () => {
+    const run = async (_output: OutputFn, errors: OutputFn): Promise<RunResult> => {
+      for (let i = 0; i < 3; i++) await errors(new TextEncoder().encode('abcd'))
+      return { exitCode: 0 }
+    }
+    const [stdout] = runOutput(run)
+    await expect(
+      runWithMemory(new MemoryBudget(8, () => 0), () => materialize(stdout)),
+    ).rejects.toThrow(MemoryExhausted)
+  })
+
+  it("writes a line's stderr to the caller's sink in order", async () => {
+    const seen: [string, string][] = []
+    const errors = (chunk: Uint8Array): Promise<void> => {
+      seen.push(['err', DEC.decode(chunk)])
+      return Promise.resolve()
+    }
+    const unused = (chunk: Uint8Array): Promise<void> => {
+      throw new Error(DEC.decode(chunk))
+    }
+    const enc = new TextEncoder()
+    const [stdout, io] = lineOutput(
+      async (console) => {
+        await console.emit(Channel.STDOUT, enc.encode('o1'))
+        await console.emit(Channel.STDERR, enc.encode('e1'))
+        await console.emit(Channel.STDOUT, enc.encode('o2'))
+        return new IOResult()
+      },
+      0,
+      new Relay(unused, errors),
+    )
+    for await (const chunk of stdout) seen.push(['out', DEC.decode(chunk)])
+    expect(seen).toEqual([
+      ['out', 'o1'],
+      ['err', 'e1'],
+      ['out', 'o2'],
     ])
     expect(io.stderr).toBeNull()
   })

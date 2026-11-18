@@ -1519,6 +1519,7 @@ async function routeArgv(
       registry,
       stdin,
       context.frame.routing,
+      sink,
     )
   }
 

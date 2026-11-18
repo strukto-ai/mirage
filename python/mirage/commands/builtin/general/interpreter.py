@@ -16,11 +16,13 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
+from functools import partial
 from typing import Any
 
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller, with_caller
 from mirage.io.cooperative import chunks
+from mirage.io.memory import check_memory
 from mirage.io.pipe import BytePipe
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import (
@@ -85,6 +87,7 @@ def run_output(
     settled = False
     closing: asyncio.Task[None] | None = None
     kept: list[bytes] = []
+    held = 0
 
     async def ordered(chunk: bytes) -> None:
         # Stdout written before this chunk reaches its reader first, so
@@ -94,6 +97,9 @@ def run_output(
         await errors(chunk)
 
     async def keep(chunk: bytes) -> None:
+        nonlocal held
+        held += len(chunk)
+        check_memory(held)
         kept.append(chunk)
 
     async def execute() -> None:
@@ -169,7 +175,9 @@ class Relay(JobConsole):
 
 
 def line_output(
-    run: Callable[[JobConsole], Awaitable[IOResult]], least: int = 0
+    run: Callable[[JobConsole], Awaitable[IOResult]],
+    least: int = 0,
+    sink: JobConsole | None = None,
 ) -> CommandOutput:
     """A nested line run as a command's output, through ``run_output``:
     the line writes into a ``Relay`` as it runs, what it returned rather
@@ -182,6 +190,9 @@ def line_output(
         run (Callable[[JobConsole], Awaitable[IOResult]]): runs the line,
             given the console it writes into.
         least (int): the lowest status the line ends with.
+        sink (JobConsole | None): where the caller's statement writes,
+            which the line's stderr goes to in its order with stdout
+            (``run_output``); None lands it on the result.
     """
 
     async def program(output: OutputFn, errors: OutputFn) -> RunResult:
@@ -196,7 +207,10 @@ def line_output(
                     await errors(chunk)
         return RunResult(exit_code=max(ran.exit_code, least))
 
-    return run_output(program)
+    return run_output(
+        program,
+        errors=None if sink is None else partial(sink.emit, Channel.STDERR),
+    )
 
 
 def run_interpreter(

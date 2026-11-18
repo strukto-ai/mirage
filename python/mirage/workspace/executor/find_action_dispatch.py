@@ -186,6 +186,7 @@ async def _run_exec(
     stdin: SharedStdin | None,
     where: str | None = None,
     utf8: bool = False,
+    sink: JobConsole | None = None,
 ) -> IOResult:
     """Start one ``-exec`` invocation, its output passed on as the child
     writes it (``line_output``).
@@ -213,6 +214,8 @@ async def _run_exec(
         where (str | None): ``-execdir``'s directory as printed, which the
             run enters first; None runs where find does.
         utf8 (bool): the line runs under a UTF-8 locale.
+        sink (JobConsole | None): where find's statement writes, which
+            each run's stderr goes to in order with its stdout.
     """
     # GNU substitutes the matches into the words and only then hands
     # them to execvp, so the head looked up is the substituted one:
@@ -242,19 +245,19 @@ async def _run_exec(
     if process is not None:
         process.one_command = False
 
-    async def run(sink: JobConsole) -> IOResult:
+    async def run(relay: JobConsole) -> IOResult:
         token = (
             set_program_invocation(session) if session is not None else None
         )
         try:
             return await execute_fn(
-                f"( {line} )", session_id=session_id, stdin=stdin, sink=sink
+                f"( {line} )", session_id=session_id, stdin=stdin, sink=relay
             )
         finally:
             if token is not None:
                 reset_caller(token)
 
-    stdout, io = line_output(run)
+    stdout, io = line_output(run, sink=sink)
     io.stdout = stdout
     return io
 
@@ -535,6 +538,7 @@ async def run_listed_find(
     execute_fn: ExecuteFn | None,
     session_id: str,
     stdin: ByteSource | None,
+    sink: JobConsole | None = None,
 ) -> IOResult:
     """``find -files0-from LIST``: find over the start points a list of
     NUL-terminated names holds, ``-`` reading the list from stdin.
@@ -554,6 +558,8 @@ async def run_listed_find(
         execute_fn (ExecuteFn | None): runs the find over the names.
         session_id (str): the session the find runs under.
         stdin (ByteSource | None): find's input, the list under ``-``.
+        sink (JobConsole | None): where find's statement writes, which
+            each run's stderr goes to in order with its stdout.
     """
     source = "-" if expr.files0_from is None else expr.files0_from
     typed = [w for w in words[: expr.start] if w not in _LINK_OPTIONS]
@@ -616,13 +622,13 @@ async def run_listed_find(
     line = shell_join(["find", *words[: expr.start], *starts, *rest])
     given = None if source == "-" else stdin
 
-    async def run(sink: JobConsole) -> IOResult:
+    async def run(relay: JobConsole) -> IOResult:
         assert execute_fn is not None
         return await execute_fn(
-            line, session_id=session_id, stdin=given, sink=sink
+            line, session_id=session_id, stdin=given, sink=relay
         )
 
-    stdout, io = line_output(run, 1 if refused else 0)
+    stdout, io = line_output(run, 1 if refused else 0, sink)
     io.stdout = stdout
     io.stderr = encode_text(refused) or None
     return io
@@ -723,6 +729,7 @@ async def _apply_find_actions(
     identity: Identity | None = None,
     stdin: ByteSource | None = None,
     starts: list[PathSpec] | None = None,
+    sink: JobConsole | None = None,
 ) -> ByteSource | None:
     """Apply find's actions (-exec / -delete / -print0 / -ls / -printf)
     to its rows.
@@ -809,6 +816,8 @@ async def _apply_find_actions(
         takes the expression's warnings first, then what the actions say,
         and the status they impose (1 over a selection's 0) as the stream
         ends (``IOResult.output``).
+        sink (JobConsole | None): where find's statement writes, which
+            each run's stderr goes to in order with its stdout.
     """
     warned = b"".join(encode_text(f"{line}\n") for line in expr.warnings)
     reorders = expr.depth_first
@@ -969,6 +978,7 @@ async def _apply_find_actions(
                         once,
                         where,
                         expr.utf8,
+                        sink,
                     )
                     async with aclosing(ran(run)) as output:
                         async for chunk in output:
@@ -1046,6 +1056,7 @@ async def _apply_find_actions(
                     once,
                     where,
                     expr.utf8,
+                    sink,
                 )
                 try:
                     async with aclosing(ran(run)) as output:

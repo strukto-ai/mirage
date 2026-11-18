@@ -1468,6 +1468,48 @@
       },
       "flags": [],
       "note": "A word quote() names turns curly; a quote the message spells itself (`-name') stays ASCII."
+    },
+    {
+      "id": "find_exec_stderr_keeps_its_order",
+      "seq": 19996015,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fx && touch /data/fx/f && find /data/fx -type f -exec sh -c 'echo o1; echo e1 >&2; echo o2' \\; 2>&1; rm -r /data/fx",
+      "expect": {
+        "exit": 0,
+        "stdout": "o1\ne1\no2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_exec_batch_stderr_keeps_its_order",
+      "seq": 19996016,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fx && touch /data/fx/f && find /data/fx -type f -exec sh -c 'echo o1; echo e1 >&2; echo o2' sh {} + 2>&1; rm -r /data/fx",
+      "expect": {
+        "exit": 0,
+        "stdout": "o1\ne1\no2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_files0_from_exec_stderr_keeps_its_order",
+      "seq": 19996017,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fx && touch /data/fx/f && printf '/data/fx/f\\0' | find -files0-from - -exec sh -c 'echo o1; echo e1 >&2; echo o2' \\; 2>&1; rm -r /data/fx",
+      "expect": {
+        "exit": 0,
+        "stdout": "o1\ne1\no2\n",
+        "stderr": ""
+      }
     }
   ]
 }

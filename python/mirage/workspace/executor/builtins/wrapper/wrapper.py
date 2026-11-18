@@ -64,10 +64,12 @@ def _run_program(
     stdin: ByteSource | None,
     traits: ProcessTraits,
     warned: str = "",
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a wrapper's program in Mirage, as the program it execs, its
     output handed over as it runs: the process it runs as, and all it
-    starts, carry what the wrapper changed.
+    starts, carry what the wrapper changed. Its stderr goes to ``sink``
+    in order with its stdout, or lands on the result without one.
 
     Args:
         execute_fn (ExecuteFn): runs a line in the session.
@@ -77,31 +79,32 @@ def _run_program(
         stdin (ByteSource | None): its input.
         traits (ProcessTraits): what the wrappers around it changed.
         warned (str): what the wrapper says before it runs the program.
+        sink (JobConsole | None): where the wrapper's statement writes.
     """
     node = ExecutionNode(command=name)
 
-    async def run(sink: JobConsole) -> IOResult:
+    async def run(relay: JobConsole) -> IOResult:
         if warned:
-            await sink.emit(Channel.STDERR, encode_text(warned))
+            await relay.emit(Channel.STDERR, encode_text(warned))
         token = set_program_invocation(session)
         worn = set_traits(traits)
         try:
             ran = await execute_fn(
-                line, session_id=session.session_id, stdin=stdin, sink=sink
+                line, session_id=session.session_id, stdin=stdin, sink=relay
             )
             async with aclosing(chunks(ran.stdout or b"")) as returned:
                 async for chunk in returned:
-                    await sink.emit(Channel.STDOUT, chunk)
+                    await relay.emit(Channel.STDOUT, chunk)
             async with aclosing(chunks(ran.stderr or b"")) as said:
                 async for chunk in said:
-                    await sink.emit(Channel.STDERR, chunk)
+                    await relay.emit(Channel.STDERR, chunk)
         finally:
             reset_caller(worn)
             reset_caller(token)
         node.exit_code = ran.exit_code
         return IOResult(exit_code=ran.exit_code)
 
-    stdout, io = line_output(run)
+    stdout, io = line_output(run, sink=sink)
     return stdout, io, node
 
 
@@ -113,6 +116,7 @@ def handle_wrapper(
     registry: MountRegistry,
     stdin: ByteSource | None,
     routing: RouteDecision[RuntimeIdentity] | None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """A wrapper Mirage runs (``nice``, ``nohup``, ``setsid``,
     ``stdbuf``, ``ionice``): it answers for itself (``nice`` alone, a bad
@@ -130,6 +134,7 @@ def handle_wrapper(
         registry (MountRegistry): mount registry (command registration).
         stdin (ByteSource | None): its input.
         routing (RouteDecision | None): the line's placement.
+        sink (JobConsole | None): where the wrapper's statement writes.
     """
     caller = current_caller()
     answer = wrapper_answer(
@@ -154,7 +159,9 @@ def handle_wrapper(
         _execs(args[answer.runs_from :], session, registry, routing),
     ):
         traits = dataclasses.replace(traits, leads=False)
-    return _run_program(execute_fn, name, line, session, stdin, traits, warned)
+    return _run_program(
+        execute_fn, name, line, session, stdin, traits, warned, sink
+    )
 
 
 def _execs(

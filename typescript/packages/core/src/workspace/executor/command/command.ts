@@ -190,6 +190,7 @@ async function finishFind(
   stdin: ByteSource | null,
   starts: readonly PathSpec[],
   signal: AbortSignal | undefined,
+  sink?: JobConsole,
 ): Promise<ByteSource | null> {
   const session = context.session
   return applyFindActions(stdout, io, expr, registry, session.cwd, {
@@ -202,6 +203,7 @@ async function finishFind(
     stdin,
     starts,
     ...(signal !== undefined ? { signal } : {}),
+    ...(sink !== undefined ? { sink } : {}),
   })
 }
 
@@ -323,6 +325,7 @@ async function boundFind(
   executeFn: ExecuteFn | undefined,
   view: SessionView,
   stdin: ByteSource | null,
+  sink?: JobConsole,
 ): Promise<FindExpr | RedirectResult> {
   const session = context.session
   let findExpr: FindExpr
@@ -375,6 +378,7 @@ async function boundFind(
       executeFn ?? null,
       session.sessionId,
       stdin,
+      sink,
     )
     return [listed.stdout, listed, await execNode(cmdStr, listed)]
   }
@@ -534,6 +538,7 @@ async function runCrossMount(
       stdin,
       csScopes,
       mergeSignals(signal, context.frame.abortSignal),
+      runCtx.sink,
     )
     csExec.exitCode = csIo.exitCode
     csExec.stderr = await csIo.materializeStderr()
@@ -653,6 +658,7 @@ async function runSingleMount(
         stdin,
         paths,
         mergeSignals(signal, context.frame.abortSignal),
+        runCtx.sink,
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
@@ -688,6 +694,7 @@ async function runSingleMount(
       stdin,
       paths,
       mergeSignals(signal, context.frame.abortSignal),
+      runCtx.sink,
     )
   }
   if (warnBytes !== null) {
@@ -990,6 +997,7 @@ export async function handleCommand(
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
     ...(executeFn !== undefined ? { executeFn } : {}),
+    ...(sink !== undefined ? { sink } : {}),
   }
 
   // Unknown name: nobody registers it; fail like bash before any
@@ -1171,6 +1179,7 @@ export async function handleCommand(
       executeFn,
       view,
       stdin,
+      sink,
     )
     if (Array.isArray(found)) return found
     findExpr = found

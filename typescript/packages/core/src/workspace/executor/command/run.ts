@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../../shell/voice.ts'
+import type { JobConsole } from '../../../shell/console/index.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
@@ -53,6 +54,8 @@ export interface RunOnMountCtx {
   executeFn?: ExecuteFn
   // The line's operand resolution, for the command's globs.
   follow?: FollowOperands
+  // Where the command's statement writes; an `-exec` run's stderr goes there in order.
+  sink?: JobConsole
 }
 
 /**

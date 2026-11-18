@@ -14,6 +14,7 @@
 
 import { currentCaller, withCaller } from '../../../context/session_context.ts'
 import { chunks } from '../../../io/cooperative.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { BytePipe } from '../../../io/pipe.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
@@ -91,7 +92,10 @@ export function runOutput(
     await pipe.drain()
     await errors?.(chunk)
   }
+  let held = 0
   const keep = (chunk: Uint8Array): Promise<void> => {
+    held += chunk.byteLength
+    checkMemory(held)
     kept.push(new Uint8Array(chunk))
     return Promise.resolve()
   }
@@ -177,17 +181,25 @@ export class Relay extends JobConsole {
  * @param run runs the line, given the console it writes into and the
  *   signal that stops it.
  * @param least the lowest status the line ends with.
+ * @param sink where the caller's statement writes, which the line's stderr
+ *   goes to in its order with stdout (`runOutput`); none lands it on the
+ *   result.
  */
 export function lineOutput(
   run: (sink: JobConsole, signal: AbortSignal) => Promise<IOResult>,
   least = 0,
+  sink?: JobConsole,
 ): [OutputStream, IOResult] {
-  return runOutput(async (output, errors, signal) => {
-    const ran = await run(new Relay(output, errors), signal)
-    if (ran.stdout !== null) for await (const chunk of chunks(ran.stdout)) await output(chunk)
-    if (ran.stderr !== null) for await (const chunk of chunks(ran.stderr)) await errors(chunk)
-    return { exitCode: Math.max(ran.exitCode, least) }
-  })
+  return runOutput(
+    async (output, errors, signal) => {
+      const ran = await run(new Relay(output, errors), signal)
+      if (ran.stdout !== null) for await (const chunk of chunks(ran.stdout)) await output(chunk)
+      if (ran.stderr !== null) for await (const chunk of chunks(ran.stderr)) await errors(chunk)
+      return { exitCode: Math.max(ran.exitCode, least) }
+    },
+    null,
+    sink === undefined ? undefined : (chunk) => sink.emit(Channel.STDERR, chunk),
+  )
 }
 
 /**
