@@ -62,6 +62,12 @@ impl Stream for Mime {
                 "Failed to parse RFC 5322 message"
             })
         })?;
+        if too_deep(&message) {
+            dismantle(message);
+            return Err(StreamError::new(format!(
+                "Message nests more than {MAX_DEPTH} attached messages"
+            )));
+        }
         if self.config.node {
             strip_bom(&mut message);
         }
@@ -74,6 +80,37 @@ impl Stream for Mime {
                 attachments(out, &message, payloads, self.config.node)
             }
             View::Addresses => unreachable!(),
+        }
+    }
+}
+
+/// Rendering and freeing a message walk its attached messages on the
+/// stack, so a message nested deeper than this is refused.
+const MAX_DEPTH: usize = 64;
+
+fn too_deep(message: &Message<'_>) -> bool {
+    let mut stack = vec![(message, 0)];
+    while let Some((message, depth)) = stack.pop() {
+        for part in &message.parts {
+            if let PartType::Message(nested) = &part.body {
+                if depth == MAX_DEPTH {
+                    return true;
+                }
+                stack.push((nested, depth + 1));
+            }
+        }
+    }
+    false
+}
+
+/// Drops a message one level at a time, as its own drop would recurse.
+fn dismantle(message: Message<'_>) {
+    let mut stack = vec![message];
+    while let Some(mut message) = stack.pop() {
+        for part in &mut message.parts {
+            if let PartType::Message(nested) = std::mem::take(&mut part.body) {
+                stack.push(nested);
+            }
         }
     }
 }
@@ -356,4 +393,60 @@ fn read_part(
         writeln!(out, "\n{body}")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::open;
+
+    fn render(view: &str, raw: &[u8]) -> Result<Vec<u8>, String> {
+        let config = format!(r#"{{"view":"{view}","payloads":false,"node":true}}"#);
+        let mut stream = open("mime", config.as_bytes()).expect("opens");
+        let mut out = Vec::new();
+        stream.feed(raw, &mut out).expect("feeds");
+        stream
+            .finish(&mut out)
+            .map(|()| out)
+            .map_err(|error| error.message)
+    }
+
+    fn nested(depth: usize) -> Vec<u8> {
+        let mut raw = b"Content-Type: message/rfc822\n\n".repeat(depth);
+        raw.extend_from_slice(b"Subject: x\n\nbody\n");
+        raw
+    }
+
+    fn digests(depth: usize) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for level in 0..depth {
+            raw.extend_from_slice(
+                format!("Content-Type: multipart/digest; boundary=b{level}\n\n--b{level}\n\n")
+                    .as_bytes(),
+            );
+        }
+        raw.extend_from_slice(b"Subject: x\n\nbody\n");
+        raw
+    }
+
+    #[test]
+    fn a_message_nested_to_the_limit_renders_in_every_view() {
+        for raw in [nested(64), digests(64)] {
+            for view in ["json", "read", "template", "attachments"] {
+                assert!(render(view, &raw).is_ok(), "{view} refused");
+            }
+        }
+    }
+
+    #[test]
+    fn a_message_nested_past_the_limit_is_refused_in_every_view() {
+        for raw in [nested(65), digests(65), nested(100_000), digests(100_000)] {
+            for view in ["json", "read", "template", "attachments"] {
+                assert_eq!(
+                    render(view, &raw).err().as_deref(),
+                    Some("Message nests more than 64 attached messages"),
+                    "{view}"
+                );
+            }
+        }
+    }
 }

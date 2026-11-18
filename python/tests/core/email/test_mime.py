@@ -93,3 +93,19 @@ def test_an_attachment_reports_the_content_type_the_parser_decoded():
     )
     (attachment,) = parse_attachments(raw, payloads=False)
     assert attachment.mime == "application/octet-stream"
+
+
+def nested(depth: int) -> bytes:
+    return (
+        b"Content-Type: message/rfc822\r\n\r\n" * depth
+        + b"Subject: x\r\n\r\nbody\r\n"
+    )
+
+
+def test_a_message_nested_past_64_levels_is_refused():
+    assert json.loads(render_mime(nested(64), "json"))["parts"]
+    for depth in (65, 100_000):
+        with pytest.raises(
+            StreamRefusal, match="Message nests more than 64 attached messages"
+        ):
+            render_mime(nested(depth), "read")

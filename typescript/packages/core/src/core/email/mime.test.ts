@@ -70,3 +70,19 @@ test('an attached message still drops its UTF-8 BOM inside a UTF-16 labelled par
   )?.body as { Message: Projection } | undefined
   expect(nested?.Message.parts[0]?.body).toEqual({ Text: 'inner' })
 })
+
+function nested(depth: number): Uint8Array {
+  return encoder.encode(
+    'Content-Type: message/rfc822\r\n\r\n'.repeat(depth) + 'Subject: x\r\n\r\nbody\r\n',
+  )
+}
+
+test('a message nested past 64 levels is refused, not a trap', () => {
+  const result = JSON.parse(decoder.decode(renderMime(nested(64), 'json'))) as Projection
+  expect(result.parts.length).toBeGreaterThan(0)
+  for (const depth of [65, 100_000]) {
+    expect(() => renderMime(nested(depth), 'read')).toThrow(
+      'Message nests more than 64 attached messages',
+    )
+  }
+})
