@@ -290,7 +290,9 @@ export function commandRules(
       })
     }
   }
-  return trees.length > 0 ? { trees, unread: unreadNames(trees, grammars) } : null
+  if (trees.length === 0) return null
+  const unread = unreadNames(trees, grammars)
+  return unread.size > 0 ? { trees, unread } : { trees }
 }
 
 /**

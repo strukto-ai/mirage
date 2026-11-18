@@ -276,5 +276,6 @@ export function renormalized(
     ...scoped,
     tree: normalizeTree(scoped.tree, grammars, 'commands', true),
   }))
-  return { trees, unread: unreadNames(trees, grammars) }
+  const unread = unreadNames(trees, grammars)
+  return unread.size > 0 ? { trees, unread } : { trees }
 }
