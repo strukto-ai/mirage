@@ -13,10 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 
 from mirage.commands.spec.parser import ParsedArgs
 from mirage.commands.spec.types import FlagValue
-from mirage.policy.types import CommandRead, FlagFact
+from mirage.policy.errors import PolicyError
+from mirage.policy.types import (
+    CommandNode,
+    CommandRead,
+    FlagFact,
+    Grammar,
+    ScopedTree,
+)
 from mirage.types import PathSpec
 
 
@@ -76,4 +84,57 @@ def leaf_read(path: tuple[str, ...], parsed: ParsedArgs) -> CommandRead:
             *(FlagFact(_unread(word), ()) for word in unread),
         ),
         tuple(word for word, _ in parsed.raw_operands),
+    )
+
+
+def no_grammar(tree: CommandNode, at: str) -> CommandNode:
+    """A command's subtree for a command no grammar reads, which the
+    line reader gives operands only.
+
+    Args:
+        tree (CommandNode): the subtree as written.
+        at (str): where it is written, for the messages.
+
+    Raises:
+        PolicyError: the subtree names an option or a subcommand.
+    """
+    if tree.options or tree.other_options:
+        raise PolicyError(
+            f"{at}: this command has no grammar here to read an option by"
+        )
+    if tree.subcommands:
+        raise PolicyError(
+            f"{at}: {next(iter(tree.subcommands))} is no subcommand here; "
+            "an operand goes under operands"
+        )
+    return replace(
+        tree,
+        operands={
+            word: no_grammar(node, f"{at}.operands.{word}")
+            for word, node in tree.operands.items()
+        },
+    )
+
+
+def unread_names(
+    trees: Iterable[ScopedTree], grammars: Mapping[str, Grammar]
+) -> frozenset[str]:
+    """The commands the trees name options or subcommands of while no
+    grammar reads them, which ``no_grammar`` would refuse.
+
+    Args:
+        trees (Iterable[ScopedTree]): the session's trees.
+        grammars (Mapping[str, Grammar]): each command's grammar by name.
+    """
+    return frozenset(
+        name
+        for scoped in trees
+        for name, node in scoped.tree.subcommands.items()
+        if name not in grammars and _names_words(node)
+    )
+
+
+def _names_words(node: CommandNode) -> bool:
+    return bool(node.options or node.other_options or node.subcommands) or any(
+        _names_words(child) for child in node.operands.values()
     )

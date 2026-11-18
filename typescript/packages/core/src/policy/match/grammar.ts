@@ -15,7 +15,8 @@
 import type { ParsedArgs } from '../../commands/spec/parser.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { PathSpec } from '../../types.ts'
-import type { CommandRead, FlagFact } from '../types.ts'
+import { PolicyError } from '../errors.ts'
+import type { CommandNode, CommandRead, FlagFact, Grammar, ScopedTree } from '../types.ts'
 
 function values(value: FlagValue | undefined): string[] {
   if (Array.isArray(value)) return value.flatMap((part) => values(part))
@@ -62,4 +63,47 @@ export function leafRead(path: readonly string[], parsed: ParsedArgs): CommandRe
     ],
     operands: parsed.rawOperands.map(([word]) => word),
   }
+}
+
+/**
+ * A command's subtree for a command no grammar reads, which the line
+ * reader gives operands only. Throws `PolicyError` when the subtree names
+ * an option or a subcommand. Mirrors Python's `no_grammar`.
+ */
+export function noGrammar(tree: CommandNode, at: string): CommandNode {
+  if (tree.options.size > 0 || tree.otherOptions.length > 0)
+    throw new PolicyError(`${at}: this command has no grammar here to read an option by`)
+  const [first] = tree.subcommands.keys()
+  if (first !== undefined)
+    throw new PolicyError(`${at}: ${first} is no subcommand here; an operand goes under operands`)
+  return {
+    ...tree,
+    operands: new Map(
+      [...tree.operands].map(([word, child]) => [word, noGrammar(child, `${at}.operands.${word}`)]),
+    ),
+  }
+}
+
+/**
+ * The commands the trees name options or subcommands of while no grammar
+ * reads them, which `noGrammar` would refuse. Mirrors Python's
+ * `unread_names`.
+ */
+export function unreadNames(
+  trees: readonly ScopedTree[],
+  grammars: ReadonlyMap<string, Grammar>,
+): ReadonlySet<string> {
+  const out = new Set<string>()
+  for (const scoped of trees) {
+    for (const [name, node] of scoped.tree.subcommands) {
+      if (!grammars.has(name) && namesWords(node)) out.add(name)
+    }
+  }
+  return out
+}
+
+function namesWords(node: CommandNode): boolean {
+  if (node.options.size > 0 || node.otherOptions.length > 0 || node.subcommands.size > 0)
+    return true
+  return [...node.operands.values()].some(namesWords)
 }

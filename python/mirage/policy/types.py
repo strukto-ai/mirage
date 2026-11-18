@@ -683,9 +683,14 @@ class AdmissionRules:
 
     Args:
         trees (tuple[ScopedTree, ...]): the trees, in document order.
+        unread (frozenset[str]): the commands a tree names options or
+            subcommands of while no grammar reads them yet, held as
+            written for a CLI still to come; a line running one is
+            refused as the session's creation would have been.
     """
 
     trees: tuple[ScopedTree, ...] = ()
+    unread: frozenset[str] = frozenset()
     _hash: int | None = field(
         default=None, init=False, repr=False, compare=False
     )

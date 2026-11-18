@@ -22,6 +22,7 @@ import {
   type Ruling,
 } from '../types.ts'
 import type { PathSpec } from '../../types.ts'
+import { noGrammar } from './grammar.ts'
 import { commandFacts, reasonOf } from './rule.ts'
 
 /**
@@ -68,6 +69,12 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       matched: null,
       reason: '',
     }
+  if (rules.unread?.has(ctx.command) === true) {
+    for (const scoped of rules.trees) {
+      const held = scoped.tree.subcommands.get(ctx.command)
+      if (held !== undefined) noGrammar(held, `commands.${ctx.command}`)
+    }
+  }
   const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as {
     readonly outcome: Outcome
     readonly rule: number | null

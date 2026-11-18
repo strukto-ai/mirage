@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.execution.process.config import ProcessPermissions
 from mirage.policy.errors import PolicyError
+from mirage.policy.match.grammar import unread_names
 from mirage.policy.profile import (
     CompiledProfile,
     PathsBlock,
@@ -338,7 +339,9 @@ def command_rules(
                 where = f"mounts[{prefix}].commands"
                 tree = normalize_tree(entry.commands, grammars, where, defer)
                 trees.append(ScopedTree(tree, prefix, stated))
-    return AdmissionRules(tuple(trees)) if trees else None
+    if not trees:
+        return None
+    return AdmissionRules(tuple(trees), unread_names(trees, grammars))
 
 
 def compile_profile(

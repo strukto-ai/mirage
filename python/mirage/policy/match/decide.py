@@ -14,6 +14,7 @@
 
 from collections.abc import Sequence
 
+from mirage.policy.match.grammar import no_grammar
 from mirage.policy.match.rule import command_facts, reason_of
 from mirage.policy.types import (
     AdmissionRules,
@@ -61,6 +62,11 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     """
     if rules is None:
         return Ruling(Outcome.ALLOW)
+    if ctx.command in rules.unread:
+        for scoped in rules.trees:
+            held = scoped.tree.subcommands.get(ctx.command)
+            if held is not None:
+                no_grammar(held, f"commands.{ctx.command}")
     result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
     table = rule_table(rules)
     rule = None if result["rule"] is None else table[result["rule"]]

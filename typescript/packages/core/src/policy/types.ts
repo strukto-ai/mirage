@@ -515,11 +515,15 @@ export interface ScopedTree {
  * A session's command trees, compiled: the profile's top-level tree, each
  * of its mounts' trees, and the inline permissions' trees, in document
  * order. Each tree is judged on its own and the strictest result wins, so
- * a mount's tree or inline permissions only tighten. Mirrors the Python
- * `AdmissionRules`.
+ * a mount's tree or inline permissions only tighten. `unread` names the
+ * commands a tree names options or subcommands of while no grammar reads
+ * them yet, held as written for a CLI still to come; a line running one
+ * is refused as the session's creation would have been. Mirrors the
+ * Python `AdmissionRules`.
  */
 export interface AdmissionRules {
   readonly trees: readonly ScopedTree[]
+  readonly unread?: ReadonlySet<string>
 }
 
 /**

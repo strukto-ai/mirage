@@ -17,6 +17,7 @@ import { argumentDest, compileSpec } from '../../commands/spec/compile.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import type { CommandSpec } from '../../commands/spec/types.ts'
 import { PolicyError } from '../../policy/errors.ts'
+import { noGrammar, unreadNames } from '../../policy/match/grammar.ts'
 import type { AdmissionRules, CommandNode, Grammar, OptionRule } from '../../policy/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { NOT_INSTALLABLE } from '../lookup/constants.ts'
@@ -126,20 +127,6 @@ function options(
     })
   }
   return out
-}
-
-function noGrammar(tree: CommandNode, at: string): CommandNode {
-  if (tree.options.size > 0 || tree.otherOptions.length > 0)
-    throw new PolicyError(`${at}: this command has no grammar here to read an option by`)
-  const [first] = tree.subcommands.keys()
-  if (first !== undefined)
-    throw new PolicyError(`${at}: ${first} is no subcommand here; an operand goes under operands`)
-  return {
-    ...tree,
-    operands: new Map(
-      [...tree.operands].map(([word, child]) => [word, noGrammar(child, `${at}.operands.${word}`)]),
-    ),
-  }
 }
 
 function reserved(spec: CommandSpec): string | null {
@@ -255,10 +242,9 @@ export function renormalized(
   grammars: ReadonlyMap<string, Grammar>,
 ): AdmissionRules | null {
   if (rules === null) return null
-  return {
-    trees: rules.trees.map((scoped) => ({
-      ...scoped,
-      tree: normalizeTree(scoped.tree, grammars, 'commands', true),
-    })),
-  }
+  const trees = rules.trees.map((scoped) => ({
+    ...scoped,
+    tree: normalizeTree(scoped.tree, grammars, 'commands', true),
+  }))
+  return { trees, unread: unreadNames(trees, grammars) }
 }

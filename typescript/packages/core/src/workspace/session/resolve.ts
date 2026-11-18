@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PolicyError } from '../../policy/errors.ts'
+import { unreadNames } from '../../policy/match/grammar.ts'
 import {
   compileProgram,
   type CompiledProfile,
@@ -289,7 +290,7 @@ export function commandRules(
       })
     }
   }
-  return trees.length > 0 ? { trees } : null
+  return trees.length > 0 ? { trees, unread: unreadNames(trees, grammars) } : null
 }
 
 /**

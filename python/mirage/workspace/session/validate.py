@@ -21,6 +21,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.types import CommandSpec
 from mirage.policy.errors import PolicyError
+from mirage.policy.match.grammar import no_grammar, unread_names
 from mirage.policy.types import (
     AdmissionRules,
     CommandNode,
@@ -152,25 +153,6 @@ def _options(
     return out
 
 
-def _no_grammar(tree: CommandNode, at: str) -> CommandNode:
-    if tree.options or tree.other_options:
-        raise PolicyError(
-            f"{at}: this command has no grammar here to read an option by"
-        )
-    if tree.subcommands:
-        raise PolicyError(
-            f"{at}: {next(iter(tree.subcommands))} is no subcommand here; "
-            "an operand goes under operands"
-        )
-    return replace(
-        tree,
-        operands={
-            word: _no_grammar(node, f"{at}.operands.{word}")
-            for word, node in tree.operands.items()
-        },
-    )
-
-
 def _reserved(node: CommandSpec) -> str | None:
     return next(
         (
@@ -283,7 +265,7 @@ def normalize_tree(
         at = f"{where}.{name}"
         if grammar is None:
             later = defer and name not in NOT_INSTALLABLE
-            commands[name] = node if later else _no_grammar(node, at)
+            commands[name] = node if later else no_grammar(node, at)
             continue
         held = _node(node, grammar.spec, at, grammar.passthrough)
         for other in grammar.others:
@@ -312,13 +294,12 @@ def renormalized(
     """
     if rules is None:
         return None
-    return AdmissionRules(
-        tuple(
-            ScopedTree(
-                normalize_tree(scoped.tree, grammars, defer=True),
-                scoped.mount,
-                scoped.inline,
-            )
-            for scoped in rules.trees
+    trees = tuple(
+        ScopedTree(
+            normalize_tree(scoped.tree, grammars, defer=True),
+            scoped.mount,
+            scoped.inline,
         )
+        for scoped in rules.trees
     )
+    return AdmissionRules(trees, unread_names(trees, grammars))
