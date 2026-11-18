@@ -138,7 +138,7 @@ from mirage.workspace.workspace.line import run_whole_line
 from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.routing import Router
 from mirage.workspace.workspace.runtimes import Runtimes
-from mirage.workspace.workspace.utils import fork_for_call
+from mirage.workspace.workspace.utils import fork_for_call, seed_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -631,6 +631,7 @@ async def execute_line(
     # it runs ends with the copy it ran on.
     if handed is None and deciding():
         session = _beside(ws, session)
+    seed_session_user(session)
     line_handle = line_handle or LineHandle(
         new_line_id(ws.registry.ids),
         session_id,

@@ -66,7 +66,7 @@ async def main() -> None:
     print("=== metadata overlay on /fashion/Men/Shoes/White/3.md ===")
     meta_res = await ws.shell(
         'chmod 640 "/fashion/Men/Shoes/White/3.md"'
-        ' && chown 500:dev "/fashion/Men/Shoes/White/3.md"'
+        ' && chown 500:nogroup "/fashion/Men/Shoes/White/3.md"'
         ' && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

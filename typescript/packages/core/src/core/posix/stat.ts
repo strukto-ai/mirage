@@ -67,8 +67,13 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
       return null
     }
     start = end + 1
-    const [kind = '', mode = '', size = '', mtime = '', atime = '', user = '', group = ''] = fields
-    if (fields.length < 8 || !/^[0-7]+$/.test(mode) || !/^\d+$/.test(size)) return null
+    const [kind = '', mode = '', size = '', mtime = '', atime = '', uid = '', gid = ''] = fields
+    if (
+      fields.length < 8 ||
+      !/^[0-7]+$/.test(mode) ||
+      ![size, uid, gid].every((n) => /^\d+$/.test(n))
+    )
+      return null
     if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
     rows.push({
       kind,
@@ -78,8 +83,8 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
       atime: Number(atime.split('.')[0]),
       mtimeMs: milliseconds(mtime),
       atimeMs: milliseconds(atime),
-      user,
-      group,
+      uid: Number(uid),
+      gid: Number(gid),
       rel: fields.slice(7).join(' '),
     })
   }

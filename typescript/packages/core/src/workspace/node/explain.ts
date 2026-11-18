@@ -54,7 +54,7 @@ import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
-import { tildeHome } from '../session/shell_dirs.ts'
+import { tildeHomes } from '../session/shell_dirs.ts'
 import { envIsReadonly, seedVar, setAttr } from '../session/state.ts'
 import {
   classifiedWords,
@@ -618,9 +618,9 @@ async function* judgeWords(
 }
 
 /** One command node's words, name first, the env prefix dropped. */
-function wordsOf(node: TSNodeLike, home: string | null): Word[] {
+function wordsOf(node: TSNodeLike, homes: Readonly<Record<string, string>> | null): Word[] {
   const [, parts] = splitEnvPrefix(getParts(node))
-  return parts.map((part) => readWord(part, home))
+  return parts.map((part) => readWord(part, homes))
 }
 
 /**
@@ -630,7 +630,11 @@ function wordsOf(node: TSNodeLike, home: string | null): Word[] {
  * will. A value only the run expands is read as typed, as the command's
  * words are, and a readonly name is left as it is.
  */
-function seeded(node: TSNodeLike, session: SessionState, home: string | null): SessionState {
+function seeded(
+  node: TSNodeLike,
+  session: SessionState,
+  homes: Readonly<Record<string, string>> | null,
+): SessionState {
   const [assigned] = splitEnvPrefix(getParts(node))
   if (assigned.length === 0) return session
   const forked = session.fork()
@@ -644,7 +648,7 @@ function seeded(node: TSNodeLike, session: SessionState, home: string | null): S
     seedVar(
       forked,
       key,
-      value !== undefined ? wordValue(readWord(value, home)) : text.slice(eq + 1),
+      value !== undefined ? wordValue(readWord(value, homes)) : text.slice(eq + 1),
     )
     setAttr(forked, key, VarAttr.Export)
   }
@@ -673,7 +677,7 @@ function seeded(node: TSNodeLike, session: SessionState, home: string | null): S
 function* walkSubstitution(
   tree: TSNodeLike,
   session: SessionState,
-  home: string | null,
+  homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost: boolean,
@@ -681,26 +685,26 @@ function* walkSubstitution(
 ): Walk {
   const redirect = inputSubstitutionRedirect(tree)
   if (redirect === null) {
-    return yield* walkNode(tree, session, home, frame, reparse, lost, elsewhere)
+    return yield* walkNode(tree, session, homes, frame, reparse, lost, elsewhere)
   }
   const target = redirect.targetNode as TSNodeLike
   yield {
     words: [{ raw: 'cat', text: 'cat' }],
-    redirects: [{ raw: getText(target), text: literalWord(target, home) }],
+    redirects: [{ raw: getText(target), text: literalWord(target, homes) }],
     session,
     occurrence: occurrenceIn(tree, frame),
     intrinsic: true,
     lost,
     elsewhere,
   }
-  yield* walkNode(target, session, home, frame, reparse, lost, elsewhere)
+  yield* walkNode(target, session, homes, frame, reparse, lost, elsewhere)
   return [session, lost, elsewhere]
 }
 
 function* walkNode(
   node: TSNodeLike,
   session: SessionState,
-  home: string | null,
+  homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost = false,
@@ -710,10 +714,10 @@ function* walkNode(
   if (node.type === NodeType.TEST_COMMAND) {
     // The shell's own test, judged as a command of its own name, a test at
     // a time as the gate admits it.
-    for (const test of readsOfTest(node, home)) {
+    for (const test of readsOfTest(node, homes)) {
       yield {
         words: test.words,
-        redirects: statementRedirects(node, home),
+        redirects: statementRedirects(node, homes),
         stdin: statementStdin(node),
         session,
         occurrence: occurrenceIn(node, frame),
@@ -724,28 +728,28 @@ function* walkNode(
       }
     }
     for (const child of node.children) {
-      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
     }
     return [session, lost, elsewhere]
   }
   if (node.type === NodeType.COMMAND) {
     let walked: Stand = [session, lost, elsewhere]
-    const words = wordsOf(node, home)
+    const words = wordsOf(node, homes)
     if (words.length > 0) {
       yield {
         words,
-        redirects: statementRedirects(node, home),
+        redirects: statementRedirects(node, homes),
         stdin: statementStdin(node),
-        session: seeded(node, session, home),
+        session: seeded(node, session, homes),
         occurrence: occurrenceIn(node, frame),
         lost,
-        elsewhere: elsewhere.map((e) => seeded(node, e, home)),
+        elsewhere: elsewhere.map((e) => seeded(node, e, homes)),
       }
       walked = afterCd(words, session, lost, elsewhere)
     }
     // A substitution among the words runs in its own shell.
     for (const child of node.children) {
-      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
     }
     return walked
   }
@@ -760,27 +764,35 @@ function* walkNode(
       // parsed again once its backslashes are gone, because the node's
       // subtree is not what runs.
       for (const inner of segments) {
-        yield* walkSubstitution(reparse(inner.text), session, home, inner, reparse, lost, elsewhere)
+        yield* walkSubstitution(
+          reparse(inner.text),
+          session,
+          homes,
+          inner,
+          reparse,
+          lost,
+          elsewhere,
+        )
       }
       return [session, lost, elsewhere]
     }
     const inner = bodyFrame(node, frame)
     if (node.type === NodeType.COMMAND_SUBSTITUTION && inner !== null) {
       const body = { ...inner, base: 0 }
-      yield* walkSubstitution(reparse(inner.text), session, home, body, reparse, lost, elsewhere)
+      yield* walkSubstitution(reparse(inner.text), session, homes, body, reparse, lost, elsewhere)
       return [session, lost, elsewhere]
     }
-    yield* walkChildren(node, session, home, inner ?? frame, reparse, lost, elsewhere)
+    yield* walkChildren(node, session, homes, inner ?? frame, reparse, lost, elsewhere)
     return [session, lost, elsewhere]
   }
   if (node.type === NodeType.PIPELINE) {
     for (const child of node.children) {
-      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
     }
     return [session, lost, elsewhere]
   }
-  if (REPEATED_SCOPES.has(node.type) && moves(node, session, home)) lost = true
-  return yield* walkChildren(node, session, home, frame, reparse, lost, elsewhere)
+  if (REPEATED_SCOPES.has(node.type) && moves(node, session, homes)) lost = true
+  return yield* walkChildren(node, session, homes, frame, reparse, lost, elsewhere)
 }
 
 /**
@@ -790,12 +802,16 @@ function* walkNode(
  * body carries into its next run. Read off the tree, so a nested scope costs
  * one more scan, not another walk.
  */
-function moves(node: TSNodeLike, session: SessionState, home: string | null): boolean {
+function moves(
+  node: TSNodeLike,
+  session: SessionState,
+  homes: Readonly<Record<string, string>> | null,
+): boolean {
   const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
     if (FORK_SCOPES.has(current.type) || current.type === NodeType.PIPELINE) continue
     if (current.type === NodeType.COMMAND) {
-      const words = wordsOf(current, home)
+      const words = wordsOf(current, homes)
       if (words.length > 0) {
         const [moved, lost] = afterCd(words, session, false, [])
         if (lost || moved !== session) return true
@@ -815,7 +831,7 @@ function moves(node: TSNodeLike, session: SessionState, home: string | null): bo
 function* walkChildren(
   node: TSNodeLike,
   session: SessionState,
-  home: string | null,
+  homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost: boolean,
@@ -826,7 +842,7 @@ function* walkChildren(
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index]
     if (child === undefined) continue
-    const ended = yield* walkNode(child, walked[0], home, frame, reparse, walked[1], walked[2])
+    const ended = yield* walkNode(child, walked[0], homes, frame, reparse, walked[1], walked[2])
     if (children[index + 1]?.type === '&') continue
     walked = ended
   }
@@ -896,7 +912,7 @@ function* walkedLine(
   frame: Frame | null = null,
   lost = false,
 ): Generator<Walked> {
-  yield* walkNode(root, session, tildeHome(session), frame ?? rootFrame(root, null), reparse, lost)
+  yield* walkNode(root, session, tildeHomes(session), frame ?? rootFrame(root, null), reparse, lost)
 }
 
 /**

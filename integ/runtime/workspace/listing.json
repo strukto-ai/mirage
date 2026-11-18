@@ -33,7 +33,7 @@
           "command": "ls -l /api/items | grep -F 2.json",
           "expect": {
             "exit": 0,
-            "stdout": "?????????? ? ? ?    ?            ? 2.json\n",
+            "stdout": "?????????? ? ?    ?       ?            ? 2.json\n",
             "stderr": "ls: cannot access '/api/items/2.json': upstream 502 Bad Gateway\n"
           }
         },

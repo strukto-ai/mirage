@@ -258,16 +258,20 @@ export function braceExpands(text: string): boolean {
  * A word is literal when nothing in it waits on the shell: a plain
  * word, a number, a quoted string with no expansion inside, or a
  * concatenation of those. Quotes are removed, escapes resolved and a
- * leading unquoted `~` expanded the way expansion would (`home` null
- * leaves it literal, as bash does with no `$HOME`). A word carrying a
+ * leading unquoted `~` or `~name` expanded the way expansion would (`homes`
+ * maps a name to its homes, `''` for a bare `~`; null leaves it literal). A
+ * word carrying a
  * parameter, command, arithmetic or process substitution, or a brace
  * expression, answers null: what it names is known only when it runs.
  */
-export function literalWord(node: TSNodeLike, home: string | null = null): string | null {
+export function literalWord(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null = null,
+): string | null {
   const ntype = node.type
   if (ntype === NT.COMMAND_NAME) {
     const first = node.namedChildren[0]
-    return first === undefined ? node.text : literalWord(first, home)
+    return first === undefined ? node.text : literalWord(first, homes)
   }
   if (
     (ntype === NT.WORD || ntype === NT.NUMBER || ntype === NT.CONCATENATION) &&
@@ -276,7 +280,7 @@ export function literalWord(node: TSNodeLike, home: string | null = null): strin
     return null
   }
   if (ntype === NT.WORD || ntype === NT.NUMBER) {
-    return expandTilde(unescapeUnquoted(node.text), home)
+    return expandTilde(unescapeUnquoted(node.text), homes)
   }
   if (ntype === NT.RAW_STRING) return node.text.slice(1, -1)
   if (ntype === NT.ANSI_C_STRING) return decodeAnsiC(node.text.slice(2, -1))
@@ -307,7 +311,7 @@ export function literalWord(node: TSNodeLike, home: string | null = null): strin
       // The `$` of a `$"..."` is the translation marker, not text.
       if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
       // Only a leading unquoted piece carries a tilde prefix.
-      const piece = literalWord(child, pieces.length === 0 ? home : null)
+      const piece = literalWord(child, pieces.length === 0 ? homes : null)
       if (piece === null) return null
       pieces.push(piece)
     }

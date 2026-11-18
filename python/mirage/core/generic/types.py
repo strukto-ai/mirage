@@ -1,3 +1,5 @@
+import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -5,6 +7,25 @@ from mirage.types import FileStat
 
 # find's row actions: -print, -print0, -ls and -delete.
 RowActionKind = Literal["print", "print0", "ls", "delete"]
+
+
+@dataclass(frozen=True, slots=True)
+class Ids:
+    """The session's user database as find reads it: each user and group
+    name with its id, and the uid and gid an entry that reports no owner
+    has, the session's own.
+
+    Args:
+        users (Mapping[str, int]): each user name and its uid.
+        groups (Mapping[str, int]): each group name and its gid.
+        uid (int): the session's uid.
+        gid (int): the session's gid.
+    """
+
+    users: Mapping[str, int] = field(default_factory=lambda: {"root": 0})
+    groups: Mapping[str, int] = field(default_factory=lambda: {"root": 0})
+    uid: int = 0
+    gid: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,11 +144,14 @@ class Perm:
 @dataclass(frozen=True, slots=True)
 class Count:
     """``-links``, ``-uid``, ``-gid`` and ``-inum``: a number compared more than
-    (``+``), less than (``-``) or equal to (``=``) ``count``."""
+    (``+``), less than (``-``) or equal to (``=``) ``count``. ``ids`` is
+    the user database ``-uid`` and ``-gid`` read an entry's owner
+    through, as ``-user`` does."""
 
     field: Literal["links", "uid", "gid", "inum"]
     cmp: Literal["+", "-", "="]
     count: int
+    ids: Ids = dataclasses.field(default_factory=Ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,26 +166,26 @@ class Used:
 
 @dataclass(frozen=True, slots=True)
 class Owner:
-    """``-user`` and ``-group``: the owner or group as ``ls -l`` names
-    it. mirage keeps any name ``chown`` was given, so every name is a
-    user and none is refused; a number also matches the id it spells.
-    ``profile`` is the session's own name, which owns an entry that
-    reports none.
+    """``-user`` and ``-group``: the id the operand names, which the
+    binding looked up in the user database. An entry matches when its
+    owner is that id, or a name the database gives that id (a machine
+    reports names); one that reports none is the session's.
     """
 
-    name: str
+    id: int
     group: bool = False
-    profile: str | None = None
+    ids: Ids = field(default_factory=Ids)
 
 
 @dataclass(frozen=True, slots=True)
 class NoOwner:
-    """``-nouser`` and ``-nogroup``: an owner or group known only by its
-    number. mirage keeps no user database, so a number names no one, as
-    ``ls -l`` shows it; a name ``chown`` stored, or the session owning an
-    entry that reports none, is someone."""
+    """``-nouser`` and ``-nogroup``: an owner or group whose id the user
+    database holds no name for, as ``ls -l`` shows it by number. A name
+    a backend reports (a machine names its owners) is someone; an entry
+    that reports none is the session's."""
 
     group: bool = False
+    ids: Ids = field(default_factory=Ids)
 
 
 @dataclass(frozen=True, slots=True)

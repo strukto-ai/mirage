@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "id_without_a_profile_is_root",
+      "seq": 16100215,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "id; id -u; id -un; id -G; id -Gn; id nobody; id -u 0; id 1000; whoami; groups; groups root nobody",
+      "expect": {
+        "exit": 0,
+        "stdout": "uid=0(root) gid=0(root) groups=0(root)\n0\nroot\n0\nroot\nuid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n0\nroot\nroot\nroot : root\nnobody : nogroup\n",
+        "stderr": "id: '1000': no such user\n"
+      }
+    },
+    {
+      "id": "id_uid_and_tilde_follow_the_session_user",
+      "seq": 16100216,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo $UID $EUID ~ ~/x ~root ~nobody ~zz; readonly -p | grep UID; cd; echo rc=$?; UID=5; echo unreached",
+      "expect": {
+        "exit": 1,
+        "stdout": "0 0 /root /root/x /root /nonexistent ~zz\ndeclare -ir EUID=\"0\"\ndeclare -ir UID=\"0\"\nrc=1\n",
+        "stderr": "bash: line 1: cd: HOME not set\nbash: line 1: UID: readonly variable\n"
+      }
+    }
+  ]
+}

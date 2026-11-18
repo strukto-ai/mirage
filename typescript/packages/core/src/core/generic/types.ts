@@ -128,6 +128,8 @@ export interface Count {
   field: 'links' | 'uid' | 'gid' | 'inum'
   cmp: '+' | '-' | '='
   count: number
+  /** The user database `-uid` and `-gid` read an entry's owner through, as `-user` does. */
+  ids: Ids
 }
 
 /** `-used`: whole days from an entry's status change to its last access. */
@@ -138,27 +140,40 @@ export interface Used {
 }
 
 /**
- * `-user` and `-group`: the owner or group as `ls -l` names it. mirage
- * keeps any name `chown` was given, so every name is a user and none is
- * refused; a number also matches the id it spells. `profile` is the
- * session's own name, which owns an entry that reports none.
+ * The session's user database as find reads it: each user and group name
+ * with its id, and the uid and gid an entry that reports no owner has, the
+ * session's own.
  */
-export interface Owner {
-  op: 'owner'
-  name: string
-  group: boolean
-  profile: string | null
+export interface Ids {
+  readonly users: Readonly<Record<string, number>>
+  readonly groups: Readonly<Record<string, number>>
+  readonly uid: number
+  readonly gid: number
 }
 
 /**
- * `-nouser` and `-nogroup`: an owner or group known only by its number.
- * mirage keeps no user database, so a number names no one, as `ls -l`
- * shows it; a name `chown` stored, or the session owning an entry that
- * reports none, is someone.
+ * `-user` and `-group`: the id the operand names, which the binding looked
+ * up in the user database. An entry matches when its owner is that id, or a
+ * name the database gives that id (a machine reports names); one that
+ * reports none is the session's.
+ */
+export interface Owner {
+  op: 'owner'
+  id: number
+  group: boolean
+  ids: Ids
+}
+
+/**
+ * `-nouser` and `-nogroup`: an owner or group whose id the user database
+ * holds no name for, as `ls -l` shows it by number. A name a backend reports
+ * (a machine names its owners) is someone; an entry that reports none is the
+ * session's.
  */
 export interface NoOwner {
   op: 'nouser'
   group: boolean
+  ids: Ids
 }
 
 /**

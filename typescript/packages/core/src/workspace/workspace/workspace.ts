@@ -1346,14 +1346,15 @@ export class Workspace {
 
   /**
    * The name of the profile `baseProfile` resolves, which its programs
-   * read as `ctx.profile`; empty for a profile document passed without
-   * one.
+   * read as `ctx.profile` and the session runs as; empty for a profile
+   * document passed without one, null for no profile at all, which runs as
+   * root.
    */
-  private profileName(profile: string | SessionProfile | null): string {
+  private profileName(profile: string | SessionProfile | null): string | null {
     if (typeof profile === 'string') return profile
     if (profile === null && this.defaultProfileName !== null) return this.defaultProfileName
     if (profile === null && DEFAULT_PROFILE in this.profiles) return DEFAULT_PROFILE
-    return ''
+    return profile === null ? null : ''
   }
 
   /**

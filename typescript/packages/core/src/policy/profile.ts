@@ -246,8 +246,8 @@ export interface ProfilePolicies {
  * boundary read), and what it may do (`policies`, which the policy
  * chain judges). `hideReasons` are the operator's reasons for grouped
  * hides, never rendered to the agent; `profile` is the profile's name,
- * null for a document passed without one, and what the session reports
- * as its group.
+ * empty for a document passed without one, null for no profile, and who
+ * the session runs as.
  */
 export interface CompiledProfile {
   readonly setup: ProfileSetup

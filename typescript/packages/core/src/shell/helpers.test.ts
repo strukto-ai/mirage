@@ -373,10 +373,13 @@ describe('getTestArgv / getNegatedCommand / getFunction*', () => {
 })
 
 describe('literalWord', () => {
-  function literals(line: string, home: string | null = null): (string | null)[] {
+  function literals(
+    line: string,
+    homes: Readonly<Record<string, string>> | null = null,
+  ): (string | null)[] {
     const first = parse(line).children[0] as TSNodeLike
     const [, parts] = splitEnvPrefix(getParts(first))
-    return parts.map((p) => literalWord(p, home))
+    return parts.map((p) => literalWord(p, homes))
   }
 
   it.each([
@@ -402,7 +405,8 @@ describe('literalWord', () => {
   })
 
   it('expands a leading unquoted tilde only', () => {
-    expect(literals('ls ~ ~/x "~/y" ~u a~ ~/x"y"', '/home/me')).toEqual([
+    const homes = { '': '/home/me', root: '/root' }
+    expect(literals('ls ~ ~/x "~/y" ~u a~ ~/x"y" ~root/s', homes)).toEqual([
       'ls',
       '/home/me',
       '/home/me/x',
@@ -410,6 +414,7 @@ describe('literalWord', () => {
       '~u',
       'a~',
       '/home/me/xy',
+      '/root/s',
     ])
     // No $HOME: the tilde stays, as in bash.
     expect(literals('ls ~/x')).toEqual(['ls', '~/x'])

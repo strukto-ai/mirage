@@ -75,6 +75,10 @@ export const BLOCK_UNIT = 512
 // everything but the file type.
 export const ALL_MODE_BITS = 0o7777
 
+// The largest id a uid_t or gid_t holds. chown and chgrp refuse it, which
+// the kernel reads as "leave it unchanged".
+export const ID_MAX = 0xffffffff
+
 // FNV-1a, 64-bit: the same arithmetic on both hosts and in every runtime,
 // so one path reports one inode whoever asks.
 const FNV_OFFSET = 0xcbf29ce484222325n
@@ -216,4 +220,19 @@ export function contentSize(st: FileStat): number {
  */
 export function sizeUnknown(st: FileStat): boolean {
   return st.size === null && !isDir(st) && !isFifo(st)
+}
+
+/**
+ * The id an owner or group names as a number: ASCII digits after an optional
+ * `+`, the form `chown`, `id` and `find -user` read as a number, leading
+ * zeros and all; null for anything else or an id past `ID_MAX`. Mirrors
+ * python's id_number.
+ */
+export function idNumber(text: string): number | null {
+  const digits = text.startsWith('+') ? text.slice(1) : text
+  if (!/^[0-9]+$/.test(digits)) return null
+  const significant = digits.replace(/^0+/, '')
+  if (significant.length > String(ID_MAX).length) return null
+  const id = Number(significant || '0')
+  return id <= ID_MAX ? id : null
 }

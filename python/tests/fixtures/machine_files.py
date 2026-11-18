@@ -17,13 +17,14 @@ import posixpath
 import shlex
 
 from mirage.accessor.machine import MachineAccessor
+from mirage.core.posix.constants import TREE_FORMAT
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
 from tests.fixtures.machine import failed, ok, table_of
 
-ROW = b"f 644 3 1700000000 1700000001 root staff \0"
-DIR = b"d 755 4096 1700000000 1700000001 root root \0"
+ROW = b"f 644 3 1700000000 1700000001 0 50 \0"
+DIR = b"d 755 4096 1700000000 1700000001 0 0 \0"
 
 
 def bound(*handles, root="/tmp", **config):
@@ -94,9 +95,9 @@ class FakeFiles:
 
     def _row(self, path: str, rel: str) -> bytes:
         if path in self.dirs:
-            return f"d 755 4096 0 0 root root {rel}\0".encode()
+            return f"d 755 4096 0 0 0 0 {rel}\0".encode()
         size = len(self.files[path])
-        return f"f 644 {size} 0 0 root root {rel}\0".encode()
+        return f"f 644 {size} 0 0 0 0 {rel}\0".encode()
 
     def _missing(self, tool: str, path: str) -> RunAnswer:
         return failed(
@@ -112,6 +113,7 @@ class FakeFiles:
                 return failed(b"")
             return ok(f"{real}\n".encode())
         if words[:4] == ["env", "LC_ALL=C", "find", "-L"]:
+            assert words[-2:] == ["-printf", TREE_FORMAT], words
             path = self._real(words[4])
             depth = int(words[6]) if words[5] == "-maxdepth" else None
             if any(path.startswith(f + "/") for f in self.files):

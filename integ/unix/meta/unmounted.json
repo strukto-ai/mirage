@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "chgrp staff '/unmounted/*.txt'",
+      "command": "chgrp nogroup '/unmounted/*.txt'",
       "expect": {
         "exit": 1,
         "stdout": "",

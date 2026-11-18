@@ -12,29 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+  ownAccount,
+  sessionUid,
+  type Identity,
+} from '../../../../commands/builtin/utils/identity.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall } from '../types.ts'
 
-export function handleWhoami(profile: string | null): RedirectResult {
-  // GNU whoami reports the effective user and never consults $USER; the
-  // session's profile is the effective identity here. With no profile it
-  // fails like GNU does for a uid with no passwd entry.
-  if (profile === null) {
-    const err = encodeText('whoami: cannot find name for user ID\n')
+/**
+ * Print the name of the effective user, as whoami does: it never reads
+ * `$USER`, and fails for a uid the user database lacks.
+ */
+export function handleWhoami(identity: Identity): RedirectResult {
+  const account = ownAccount(identity)
+  if (account === null) {
+    const err = encodeText(`whoami: cannot find name for user ID ${String(sessionUid(identity))}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
       new ExecutionNode({ command: 'whoami', exitCode: 1, stderr: err }),
     ]
   }
-  const out = encodeText(`${profile}\n`)
+  const out = encodeText(`${account.name}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
 }
 
 /** The `whoami` arm. */
 export function whoamiBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return Promise.resolve(handleWhoami(call.context.session.profile ?? null))
+  return Promise.resolve(handleWhoami({ profile: call.context.session.profile ?? null }))
 }

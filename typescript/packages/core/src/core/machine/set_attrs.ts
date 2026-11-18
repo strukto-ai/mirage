@@ -18,6 +18,15 @@ import { singleQuote } from '../../utils/quote.ts'
 import { checked, remote } from './utils.ts'
 
 /**
+ * An owner or group as the machine's chown reads it: a number takes a `+`,
+ * which skips the name lookup, so a numeric account name on the machine cannot
+ * take it; a name stays as given.
+ */
+function idSpec(id: number | string): string {
+  return typeof id === 'number' ? `+${String(id)}` : id
+}
+
+/**
  * The line that sets a file's mode, owners and times on a machine, null
  * when nothing is asked.
  *
@@ -30,10 +39,10 @@ export function attrsCommand(target: string, fields: SetAttrFields): string | nu
   if (fields.mode !== undefined) steps.push(`chmod ${fields.mode.toString(8)} -- ${q}`)
   if (fields.uid !== undefined) {
     const owner =
-      fields.gid === undefined ? String(fields.uid) : `${String(fields.uid)}:${String(fields.gid)}`
+      fields.gid === undefined ? idSpec(fields.uid) : `${idSpec(fields.uid)}:${idSpec(fields.gid)}`
     steps.push(`chown ${singleQuote(owner)} -- ${q}`)
   } else if (fields.gid !== undefined) {
-    steps.push(`chgrp ${singleQuote(String(fields.gid))} -- ${q}`)
+    steps.push(`chgrp ${singleQuote(idSpec(fields.gid))} -- ${q}`)
   }
   for (const [flag, when] of [
     ['-a', fields.atime],

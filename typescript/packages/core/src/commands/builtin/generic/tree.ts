@@ -33,7 +33,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import type { LinkResolve, MountView } from '../../../view/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { charWidth } from '../../../io/async_line_iterator.ts'
-import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
+import { groupLabel, identityOf, ownerLabel, type Identity } from '../utils/identity.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { parent, posixNormpath } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -898,8 +898,8 @@ function meta(flags: TreeFlags, node: TreeNode): string {
   const fields: string[] = []
   if (flags.inodes) fields.push(UNKNOWN_INODE.padStart(7))
   if (flags.perms) fields.push(lsModeString(node.stat))
-  if (flags.owner) fields.push(ownerName(node.stat.uid, flags.identity).padEnd(8))
-  if (flags.group) fields.push(groupName(node.stat.gid, flags.identity).padEnd(8))
+  if (flags.owner) fields.push(ownerLabel(node.stat.uid, flags.identity).padEnd(8))
+  if (flags.group) fields.push(groupLabel(node.stat.gid, flags.identity).padEnd(8))
   if (flags.si) fields.push(siText(size(flags, node)))
   else if (flags.sizes || flags.du) fields.push(String(size(flags, node)).padStart(11))
   if (flags.dates) fields.push(timeText(flags, node))
@@ -1071,8 +1071,8 @@ function jsonEntry(flags: TreeFlags, node: TreeNode, level: number, root = false
     const mode = (posixMode(node.stat) & 0o7777).toString(8).padStart(4, '0')
     text += `,"mode":"${mode}","prot":"${lsModeString(node.stat)}"`
   }
-  if (flags.owner) text += `,"user":"${ownerName(node.stat.uid, flags.identity)}"`
-  if (flags.group) text += `,"group":"${groupName(node.stat.gid, flags.identity)}"`
+  if (flags.owner) text += `,"user":"${ownerLabel(node.stat.uid, flags.identity)}"`
+  if (flags.group) text += `,"group":"${groupLabel(node.stat.gid, flags.identity)}"`
   if (flags.sizes || flags.du || flags.si) text += `,"size":${String(size(flags, node))}`
   if (flags.dates) text += `,"time":"${timeText(flags, node)}"`
   if (node.note !== '') {

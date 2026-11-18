@@ -245,7 +245,7 @@ async def main():
     print("=== metadata overlay on /supabase/example.json ===")
     meta_res = await ws.shell(
         'chmod 640 "/supabase/example.json"'
-        ' && chown 500:dev "/supabase/example.json"'
+        ' && chown 500:nogroup "/supabase/example.json"'
         ' && touch -t 202601021530 "/supabase/example.json"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

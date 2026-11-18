@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../../../types.ts'
-import { fullIsoTime, humanSize, formatLsLong, lsModeString, styledTime } from './formatting.ts'
+import {
+  DEFAULT_COLUMNS,
+  formatLsLong,
+  fullIsoTime,
+  humanSize,
+  lsModeString,
+  styledTime,
+} from './formatting.ts'
 import { resolveTz } from '../../../utils/timezone.ts'
 
 it.each([
@@ -9,7 +16,7 @@ it.each([
   [null, null, '- -'],
 ] as const)('keeps unknown size and time independent', (size, modified, expected) => {
   const row = new FileStat({ name: 'file', type: FileType.FILE, size, modified })
-  expect(formatLsLong([row])[0]).toBe(`-rw-r--r-- 1 - - ${expected} file`)
+  expect(formatLsLong([row])[0]).toBe(`-rw-r--r-- 1 root root ${expected} file`)
 })
 
 it('a fifo row is prw with size zero', () => {
@@ -86,7 +93,7 @@ describe('formatLsLong', () => {
       modified: '2026-01-01T00:00:00Z',
     })
     const [line] = formatLsLong([stat])
-    expect(line).toBe('-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt')
+    expect(line).toBe('-rw-r--r-- 1 root root 5 Jan  1  2026 file.txt')
   })
 
   it('renders the profile as both the owner and the group', () => {
@@ -108,18 +115,37 @@ describe('formatLsLong', () => {
     )
   })
 
+  it('aligns a number right and a name left', () => {
+    const stat = new FileStat({
+      name: 'f',
+      size: 0,
+      type: FileType.FILE,
+      modified: '2026-01-01T00:00:00Z',
+    })
+    const rows = [stat.with({ uid: 77, gid: 77 }), stat.with({ uid: 0, gid: 0 })]
+    expect(formatLsLong(rows).map((line) => line.slice(0, 22))).toEqual([
+      '-rw-r--r-- 1   77   77',
+      '-rw-r--r-- 1 root root',
+    ])
+    const numeric = formatLsLong(rows, { columns: { ...DEFAULT_COLUMNS, numeric: true } })
+    expect(numeric.map((line) => line.slice(0, 18))).toEqual([
+      '-rw-r--r-- 1 77 77',
+      '-rw-r--r-- 1  0  0',
+    ])
+  })
+
   it('keeps the owner columns on a metadata-less row', () => {
     // A synthetic directory with neither size nor mtime shows DIR_SIZE
     // and `-` for the time rather than inventing the epoch, and still
     // names who the session is; a file with neither shows `-` for both.
     const stat = new FileStat({ name: 'dev', type: FileType.DIRECTORY })
-    expect(formatLsLong([stat])[0]).toBe('drwxr-xr-x 1 - - 4096 - dev')
+    expect(formatLsLong([stat])[0]).toBe('drwxr-xr-x 1 root root 4096 - dev')
     expect(formatLsLong([stat], { identity: { profile: 'admin' } })[0]).toBe(
       'drwxr-xr-x 1 admin admin 4096 - dev',
     )
-    expect(formatLsLong([stat], { human: true })[0]).toBe('drwxr-xr-x 1 - - 4.0K - dev')
+    expect(formatLsLong([stat], { human: true })[0]).toBe('drwxr-xr-x 1 root root 4.0K - dev')
     const page = new FileStat({ name: 'page', type: FileType.FILE })
-    expect(formatLsLong([page])[0]).toBe('-rw-r--r-- 1 - - - - page')
+    expect(formatLsLong([page])[0]).toBe('-rw-r--r-- 1 root root - - page')
   })
 
   it('renders a device row with its numbers in the size column', () => {

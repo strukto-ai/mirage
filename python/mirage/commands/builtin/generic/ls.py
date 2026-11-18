@@ -436,6 +436,7 @@ def parse_flags(
     columns = formatting.LsColumns(
         owner=not fl.as_bool("g"),
         group=not (fl.as_bool("o") or fl.as_bool("no_group")),
+        numeric=fl.as_bool("numeric_uid_gid"),
         author=fl.as_bool("author"),
         inode=fl.as_bool("inode"),
         blocks=fl.as_bool("size"),

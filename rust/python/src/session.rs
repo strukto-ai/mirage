@@ -356,6 +356,22 @@ impl Shell {
         Ok(self.store()?.same_records(other.store()?))
     }
 
+    /// Read `~` and `~name` against the session's user database: `home`
+    /// while `HOME` is unset, and each of `names` at its `homes` entry.
+    fn use_homes(
+        &mut self,
+        home: Bound<'_, PyAny>,
+        names: Vec<Bound<'_, PyAny>>,
+        homes: Vec<Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let home = bytes_of(&home)?;
+        let names = names.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
+        let homes = homes.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
+        self.store_mut()?
+            .set_homes(home, names.into_iter().zip(homes));
+        Ok(())
+    }
+
     /// Hide the names a session's visibility lists, exactly or by glob.
     fn hide(&mut self, names: Vec<String>, patterns: Vec<String>) -> PyResult<()> {
         self.store_mut()?.hide_vars(&names, &patterns);

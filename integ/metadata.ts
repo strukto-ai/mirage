@@ -81,7 +81,7 @@ async function runOverlaySnapshotRoundtrip(
   // (s3 snapshots redact creds and require a VFS override).
   await ws.shell('echo alpha > /data/f.txt')
   await ws.shell(
-    'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202601021530 /data/f.txt',
+    'chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt && touch -t 202601021530 /data/f.txt',
   )
   const dir = mkdtempSync(join(tmpdir(), 'mirage-meta-osnap-'))
   const snap = join(dir, 'ws.tar')
@@ -121,7 +121,7 @@ async function runSnapshotRoundtrip(): Promise<Record<string, string>> {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell('echo alpha > /data/f.txt')
   await ws.shell(
-    'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202601021530 /data/f.txt',
+    'chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt && touch -t 202601021530 /data/f.txt',
   )
   const dir = mkdtempSync(join(tmpdir(), 'mirage-meta-snap-'))
   const snap = join(dir, 'ws.tar')

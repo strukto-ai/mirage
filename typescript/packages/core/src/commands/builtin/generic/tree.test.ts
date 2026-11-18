@@ -545,11 +545,11 @@ describe('treeGeneric while it is read', () => {
 })
 
 it.each([
-  ['touch /d/a; tree -u -g --noreport /d', '[-        -       ]  /d\n`-- [-        -       ]  a\n'],
+  ['touch /d/a; tree -u -g --noreport /d', '[root     root    ]  /d\n`-- [root     root    ]  a\n'],
   ['touch /d/a; tree --inodes --noreport /d', '[      ?]  /d\n`-- [      ?]  a\n'],
   [
     'touch /d/a; tree -J -u -g --noreport /d',
-    '[\n  {"type":"directory","name":"/d","user":"-","group":"-","contents":[\n    {"type":"file","name":"a","user":"-","group":"-"}\n  ]}\n\n]\n',
+    '[\n  {"type":"directory","name":"/d","user":"root","group":"root","contents":[\n    {"type":"file","name":"a","user":"root","group":"root"}\n  ]}\n\n]\n',
   ],
   ['truncate -s 9947 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [9.9k]  a\n'],
   ['truncate -s 9948 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [ 10k]  a\n'],

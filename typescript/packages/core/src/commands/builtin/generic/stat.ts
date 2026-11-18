@@ -17,6 +17,8 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { atOffsets, operandStat } from '../utils/operands.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { IOResult } from '../../../io/types.ts'
 import {
   CapacityState,
@@ -49,11 +51,19 @@ import {
   sizeUnknown,
 } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
-import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
+import { fullIsoTime, idText, lsModeString } from '../utils/formatting.ts'
+import {
+  UNKNOWN_ID_NAME,
+  groupId,
+  groupName,
+  identityOf,
+  ownerId,
+  ownerName,
+  type Identity,
+} from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError, wordRefusalError } from '../../spec/usage.ts'
-import { byteChar, encodeText } from '../../../shell/bytes.ts'
+import { byteChar, decodeText, encodeText } from '../../../shell/bytes.ts'
 import { linksOf, mountsOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 
@@ -79,7 +89,10 @@ function epoch(iso: string | null): string {
   return Number.isNaN(secs) ? '0' : String(secs)
 }
 
-const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
+const STR_DIRECTIVES = new Set(['n', 'N', 'F', 'U', 'G'])
+// The ids, which a precision pads to that many digits, as printf pads an
+// unsigned integer.
+const ID_DIRECTIVES = new Set(['u', 'g'])
 const FORMAT_FLAGS = new Set(["'", '-', '+', ' ', '#', '0', 'I'])
 const ASCII_DIGITS = new Set('0123456789')
 
@@ -91,6 +104,12 @@ const KNOWN = new Set([...Array.from('aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%'), 'Hd',
 // The placeholders for a value that is not known, which a 0 flag pads with
 // spaces rather than zeros.
 const PLACEHOLDERS = new Set(['-', '?'])
+// The widest field printf takes, INT_MAX: past it a directive prints nothing,
+// as GNU stat does.
+const FIELD_MAX = 2147483647
+// The longest field either host builds, V8's longest string: a longer one is
+// "memory exhausted" on both, whatever the workspace's max_memory.
+const FIELD_ROOM = 2 ** 29 - 24
 
 // The conversions %H and %L split into a device's major and minor; in
 // file-system mode they are no prefix at all.
@@ -211,8 +230,9 @@ function quoteName(name: string): string {
   return singleQuoted(name)
 }
 
-// Apply GNU printf flags, width and precision to a rendered directive; a
-// precision cuts short only a directive that prints a string (`text`).
+// Apply GNU printf flags, width and precision to a rendered directive,
+// counting bytes as printf does; a precision cuts short only a directive that
+// prints a string (`text`).
 function applyFlags(
   value: string,
   flags: string,
@@ -220,16 +240,33 @@ function applyFlags(
   precision: string | undefined,
   text: boolean,
 ): string {
-  if (precision !== undefined && text) {
-    value = precision === '' ? '' : value.slice(0, Number(precision))
-  }
-  if (width !== '' && value.length < Number(width)) {
-    const w = Number(width)
-    if (flags.includes('-')) value = value.padEnd(w)
-    else if (flags.includes('0') && !PLACEHOLDERS.has(value)) value = value.padStart(w, '0')
-    else value = value.padStart(w)
-  }
-  return value
+  let raw = encodeText(value)
+  if (precision !== undefined && text) raw = raw.subarray(0, fieldNumber(precision))
+  const pad = fieldNumber(width) - raw.length
+  if (pad <= 0) return decodeText(raw)
+  checkField(raw.length + pad)
+  const fill = flags.includes('0') && !flags.includes('-') && !PLACEHOLDERS.has(value) ? '0' : ' '
+  const padding = fill.repeat(pad)
+  return flags.includes('-') ? decodeText(raw) + padding : padding + decodeText(raw)
+}
+
+// Whether a width or precision is past FIELD_MAX.
+function pastFieldMax(digits: string | undefined): boolean {
+  const significant = (digits ?? '').replace(/^0+/, '')
+  return significant.length > String(FIELD_MAX).length || fieldNumber(significant) > FIELD_MAX
+}
+
+// Refuse a field too long to build: past the workspace's memory budget or
+// FIELD_ROOM. Throws MemoryExhausted.
+function checkField(size: number): void {
+  checkMemory(size)
+  if (size > FIELD_ROOM) throw new MemoryExhausted()
+}
+
+// A width or precision as a number, leading zeros and all; empty is 0, as
+// printf reads a bare `.`.
+function fieldNumber(digits: string | undefined): number {
+  return Number((digits ?? '').replace(/^0+/, '') || '0')
 }
 
 function directiveValue(
@@ -245,8 +282,10 @@ function directiveValue(
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)
   if (spec === 'f') return posixMode(s).toString(16)
-  if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
-  if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
+  if (spec === 'u') return idText(ownerId(s.uid, identity))
+  if (spec === 'U') return ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME
+  if (spec === 'g') return idText(groupId(s.gid, identity))
+  if (spec === 'G') return groupName(s.gid, identity) ?? UNKNOWN_ID_NAME
   if (spec === 'x') return statTime(s.atime ?? s.modified)
   if (spec === 'X') return epoch(s.atime ?? s.modified)
   if (spec === 'y') return statTime(s.modified)
@@ -309,6 +348,7 @@ function renderDirective(
   identity: Identity | null,
 ): string {
   if (!KNOWN.has(d.spec)) return '?'
+  if (pastFieldMax(d.width) || pastFieldMax(d.precision)) return ''
   if (d.spec === 'N') {
     // GNU formats the name and a symlink's target as two separate fields,
     // so a width pads each one rather than the joined line.
@@ -319,7 +359,14 @@ function renderDirective(
   }
   let value = directiveValue(d.spec, s, name, identity)
   if (d.flags.includes('#') && d.spec === 'a' && !value.startsWith('0')) value = '0' + value
-  return applyFlags(value, d.flags, d.width, d.precision, STR_DIRECTIVES.has(d.spec))
+  let flags = d.flags
+  if (ID_DIRECTIVES.has(d.spec) && d.precision !== undefined && /^[0-9]+$/.test(value)) {
+    const digits = fieldNumber(d.precision)
+    checkField(digits)
+    value = value === '0' && digits === 0 ? '' : value.padStart(digits, '0')
+    flags = flags.replaceAll('0', '')
+  }
+  return applyFlags(value, flags, d.width, d.precision, STR_DIRECTIVES.has(d.spec))
 }
 
 // A byte count as 1K blocks, rounded up like df, or '-' when unknown.
@@ -503,16 +550,16 @@ function statTime(value: string | null): string {
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
  * rendered bytes, modes, logical owners and its mount's device, but no inode,
- * allocation blocks, IO block size or link count: those print '?'. An absent size,
- * owner number or time prints '-'. Each time is the one its directive
+ * allocation blocks, IO block size or link count: those print '?'. An absent size
+ * or time prints '-'. Each time is the one its directive
  * prints (`%x %y %z %w`), the name is unquoted as GNU's default prints it,
  * and times are UTC. */
 function renderStat(s: FileStat, name: string, identity: Identity | null): string {
   const size = directiveValue('s', s, name, identity)
-  const uid = String(s.uid ?? '-').padStart(5)
-  const gid = String(s.gid ?? '-').padStart(5)
-  const owner = ownerName(s.uid, identity).padStart(8)
-  const group = groupName(s.gid, identity).padStart(8)
+  const uid = idText(ownerId(s.uid, identity)).padStart(5)
+  const gid = idText(groupId(s.gid, identity)).padStart(5)
+  const owner = (ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
+  const group = (groupName(s.gid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
   const links = isCharDevice(s)
     ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
     : 'Links: ?'

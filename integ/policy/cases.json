@@ -197,7 +197,7 @@
     {"op": "exec", "command": "mkdir -p /data/b && echo x > /data/b/f && echo s > /data/b/secret", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "chmod -R 700 /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "chmod: /data/b/secret: Permission denied\n", "decision": "sealed"}}},
     {"op": "exec", "session": "agent", "command": "chown -R 5 /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "chown: /data/b/secret: Permission denied\n", "decision": "sealed"}}},
-    {"op": "exec", "session": "agent", "command": "stat -c '%a %u' /data/b/secret /data/b/f", "expect": {"value": {"exit_code": 0, "stdout": "644 -\n700 5\n", "stderr": "", "decision": null}}}
+    {"op": "exec", "session": "agent", "command": "stat -c '%a %u' /data/b/secret /data/b/f", "expect": {"value": {"exit_code": 0, "stdout": "644 1000\n700 5\n", "stderr": "", "decision": null}}}
    ]
   },
   {

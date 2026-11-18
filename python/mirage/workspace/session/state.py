@@ -34,8 +34,10 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
     BASH_VERSINFO,
     BASH_VERSION,
+    EUID,
     PPID,
     SHLVL,
+    UID,
     VERSION_PARTS,
     VERSION_TEXT,
 )
@@ -825,6 +827,34 @@ def seed_shell(session: SessionState, nested: bool = False) -> None:
     level = int(held) if held is not None and held.isdigit() else 0
     seed_var(session, SHLVL, str(level + 1))
     set_attr(session, SHLVL, VarAttr.EXPORT)
+
+
+def seed_user(
+    session: SessionState, uid: int, home: str, homes: Mapping[str, str]
+) -> None:
+    """Give a session the user its profile runs as: ``$UID`` and
+    ``$EUID``, readonly integers no line can change, as bash sets them,
+    and the user database ``~`` reads. A value the environment handed
+    in wins, as bash keeps an imported one; the variables are seeded
+    again only when the profile moved the session to another uid.
+
+    Args:
+        session (SessionState): the session.
+        uid (int): the uid its profile runs as.
+        home (str): what ``~`` names while ``HOME`` is unset.
+        homes (Mapping[str, str]): each user's home, for ``~name``.
+    """
+    value = str(uid)
+    for name in (UID, EUID):
+        current = env_get(session, name)
+        if current is not None and (
+            current == value or not env_is_readonly(session, name)
+        ):
+            continue
+        seed_var(session, name, value)
+        set_attr(session, name, VarAttr.INTEGER)
+        set_attr(session, name, VarAttr.READONLY)
+    session.vars.shell.use_homes(home, list(homes), list(homes.values()))
 
 
 def set_attr(

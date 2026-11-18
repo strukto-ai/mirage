@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   // dispatch-level stat.
   console.log(`=== metadata overlay on /fashion/Men/Shoes/White/3.md ===`)
   const metaRes = await ws.shell(
-    `chmod 640 "/fashion/Men/Shoes/White/3.md" && chown 500:dev "/fashion/Men/Shoes/White/3.md" && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"`,
+    `chmod 640 "/fashion/Men/Shoes/White/3.md" && chown 500:nogroup "/fashion/Men/Shoes/White/3.md" && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', `/fashion/Men/Shoes/White/3.md`)) as FileStat

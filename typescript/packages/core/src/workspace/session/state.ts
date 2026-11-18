@@ -24,8 +24,10 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import {
   BASH_VERSINFO,
   BASH_VERSION,
+  EUID,
   PPID,
   SHLVL,
+  UID,
   VERSION_PARTS,
   VERSION_TEXT,
 } from '../../shell/constants.ts'
@@ -612,6 +614,31 @@ export function seedShell(session: SessionState, nested = false): void {
   const level = held !== null && /^[0-9]+$/.test(held) ? Number(held) : 0
   seedVar(session, SHLVL, String(level + 1))
   setAttr(session, SHLVL, VarAttr.Export)
+}
+
+/**
+ * Give a session the user its profile runs as: `$UID` and `$EUID`, readonly
+ * integers no line can change, as bash sets them, and the user database `~`
+ * reads (`home` while `HOME` is unset, `homes` for `~name`). A value the
+ * environment handed in wins, as bash keeps an imported one; the variables
+ * are seeded again only when the profile moved the session to another uid.
+ * Mirrors Python's seed_user.
+ */
+export function seedUser(
+  session: SessionState,
+  uid: number,
+  home: string,
+  homes: Readonly<Record<string, string>>,
+): void {
+  const value = String(uid)
+  for (const name of [UID, EUID]) {
+    const current = envGet(session, name)
+    if (current !== null && (current === value || !envIsReadonly(session, name))) continue
+    seedVar(session, name, value)
+    setAttr(session, name, VarAttr.Integer)
+    setAttr(session, name, VarAttr.Readonly)
+  }
+  session.vars.shell.useHomes(home, Object.keys(homes), Object.values(homes))
 }
 
 /**

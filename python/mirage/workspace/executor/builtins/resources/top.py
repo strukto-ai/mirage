@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 
-from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
+from mirage.commands.builtin.utils.identity import Identity, owner_label
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
@@ -252,7 +252,7 @@ def _table(
     rows: list[Process],
     options: TopOptions,
     several: bool,
-    owner: str | None,
+    owner: str,
 ) -> list[str]:
     """The process table, with a ``MACHINE`` column before ``COMMAND``
     for several machines.
@@ -261,7 +261,7 @@ def _table(
         rows (list[Process]): the processes.
         options (TopOptions): how to print.
         several (bool): say which machine each row is about.
-        owner (str | None): the session's profile.
+        owner (str): the session's user, by name or else by number.
     """
     machines = [info.shown_machine for info in rows]
     width = max([len(MACHINE_HEADER), *map(len, machines)])
@@ -275,7 +275,7 @@ def _table(
         state = info.shown_state or STATES[info.state]
         place = f"{info.shown_machine:<{width}} " if several else ""
         line = (
-            f"{info.shown_pid:>5} {owner or UNKNOWN_NAME:<8} {20:>3} {0:>3} "
+            f"{info.shown_pid:>5} {owner:<8} {20:>3} {0:>3} "
             f"{_kib(usage.vsz, 7):>7} {_kib(usage.rss, 6):>6} {0:>6} {state} "
             f"{usage.cpu_percent:>5.1f} {usage.memory_percent:>5.1f} "
             f"{_cpu_clock(usage.cpu_seconds):>9} {place}"
@@ -371,9 +371,12 @@ async def _frame_of(
                 with_machine(line, row.machine) if scope.several else line
             )
     lines.append("")
-    profile = session.profile if session is not None else None
+    owner = owner_label(
+        None,
+        Identity(profile=session.profile if session is not None else None),
+    )
     shown = _since(rows, samples, time.monotonic())
-    lines += _table(shown, options, scope.several, profile)
+    lines += _table(shown, options, scope.several, owner)
     if options.narrowed and not scope.several:
         lines = [line[: options.width] for line in lines]
     return "".join(f"{line}\n" for line in lines), errors

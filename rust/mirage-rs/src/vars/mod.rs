@@ -171,6 +171,10 @@ pub struct Store {
     local_plain: Vec<(String, bool)>,
     /// How the shell leads a diagnostic of its own (`bash: line 3: `).
     voice: Vec<u8>,
+    /// The home a bare `~` names while `HOME` is unset, and each user's
+    /// for `~name`: the session's user database.
+    home: Vec<u8>,
+    homes: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl std::fmt::Debug for Store {
@@ -211,6 +215,8 @@ impl Store {
             plain: Vec::new(),
             local_plain: Vec::new(),
             voice: b"bash: ".to_vec(),
+            home: b"/".to_vec(),
+            homes: Vec::new(),
         }
     }
 
@@ -463,6 +469,30 @@ impl Store {
     /// Draw first seeds from `ids` from now on.
     pub fn set_ids(&mut self, ids: Ids) {
         self.ids = ids;
+    }
+
+    /// Read `~` and `~name` against the session's user database from now
+    /// on: `home` while `HOME` is unset, and each user's own.
+    pub fn set_homes(
+        &mut self,
+        home: Vec<u8>,
+        homes: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
+    ) {
+        self.home = home;
+        self.homes = homes.into_iter().collect();
+    }
+
+    /// The home a bare `~` names while `HOME` is unset.
+    pub fn own_home(&self) -> &[u8] {
+        &self.home
+    }
+
+    /// The home `~name` names, None for a user the database lacks.
+    pub fn home_of(&self, name: &[u8]) -> Option<&[u8]> {
+        self.homes
+            .iter()
+            .find(|(user, _)| user == name)
+            .map(|(_, home)| home.as_slice())
     }
 
     /// Hide the names `matcher` hides: they read as unset and refuse

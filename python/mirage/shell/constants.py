@@ -105,6 +105,9 @@ OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 # (`SessionState.function_names`), which the variable store does not hold.
 FUNCNAME = "FUNCNAME"
 PPID = "PPID"
+# The uid the shell runs as, which bash sets readonly at startup.
+UID = "UID"
+EUID = "EUID"
 
 # What a bash shell sets of itself as it starts, as the pinned bash 5.2.37
 # does: its version as text and as a readonly array of its parts, and how

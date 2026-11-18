@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   console.log('(mode hits the real inode AND a sidecar, so ls -l is umask-independent;')
   console.log(' uid/gid are sidecar-only; times hit the real inode)')
   await run(ws, 'chmod 640 /data/mirage_hello.txt')
-  await run(ws, 'chown 500:staff /data/mirage_hello.txt')
+  await run(ws, 'chown 500:nogroup /data/mirage_hello.txt')
   await run(ws, 'touch -t 202601021530 /data/mirage_hello.txt')
   await run(ws, 'ls -l /data/mirage_hello.txt')
   const real = statSync(join(filesDir, 'mirage_hello.txt'))

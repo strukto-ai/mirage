@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import tzinfo
 
+from mirage.commands.builtin.utils.identity import Identity
+
 
 @dataclass(frozen=True, slots=True)
 class PsOptions:
@@ -48,8 +50,8 @@ class PsContext:
     Args:
         now (float): the moment ps runs, epoch seconds.
         zone (tzinfo): the zone times print in, the session's TZ.
-        group (str | None): the session's profile, its runners' owner
-            and group.
+        identity (Identity): who the calling session is, its runners'
+            owner and group.
         session_id (str): the calling session.
         shell_pid (int | None): the calling session's ``$$``.
         running (int | None): the process running this ``ps``.
@@ -59,7 +61,7 @@ class PsContext:
 
     now: float
     zone: tzinfo
-    group: str | None
+    identity: Identity
     session_id: str
     shell_pid: int | None
     running: int | None

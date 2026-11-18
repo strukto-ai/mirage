@@ -12,21 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    home_of,
+    user_homes,
+)
 from mirage.shell.variable import VarAttr
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import env_get, seed_var, set_attr
 
 
-def tilde_home(session: SessionState) -> str:
-    """What a ``~`` names: ``$HOME``, or ``/`` when it is unset, as bash
-    answers for a user with no entry in its user database, which mirage
-    has none of.
+def tilde_homes(session: SessionState) -> dict[str, str]:
+    """The home each ``~name`` names, as the shell expands it: each
+    user's in the session's user database, and for a bare ``~`` (the
+    empty name) ``$HOME``, or the session user's own while it is unset.
 
     Args:
         session (SessionState): the shell session.
     """
+    identity = Identity(profile=session.profile)
     home = env_get(session, "HOME")
-    return "/" if home is None else home
+    return {
+        **user_homes(identity),
+        "": home_of(identity) if home is None else home,
+    }
 
 
 def home_dir(session: SessionState) -> str | None:

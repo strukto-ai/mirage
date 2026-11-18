@@ -60,16 +60,21 @@ describe('renderPrintf', () => {
     const warnings: string[] = []
     const identity = { profile: 'admin' }
     // No uid/gid on the entry: the owner and the group are the session's
-    // profile, the rule ls -l draws its columns by.
+    // user, the rule ls -l draws its columns by; %U and %G are its ids.
     expect(await expand('%u %U %g %G\n', '/data/a.txt', '/data', stat, warnings, identity)).toBe(
-      'admin admin admin admin\n',
+      'admin 1000 admin 1000\n',
     )
-    // A reported owner wins; `-` when nothing names one.
+    // A reported owner wins, by name where the user database holds one;
+    // outside a workspace the session is root.
     const owned = { ...stat, uid: 501, gid: 'staff' }
     expect(await expand('%u %g\n', '/data/a.txt', '/data', owned, warnings, identity)).toBe(
       '501 staff\n',
     )
-    expect(await expand('%u %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('- -\n')
+    expect(await expand('%u %U %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('root 0 root\n')
+    const named = { ...stat, uid: 'alice', gid: 'staff' }
+    expect(await expand('%U %G %u %g\n', '/data/a.txt', '/data', named, warnings)).toBe(
+      '? ? alice staff\n',
+    )
     expect(printfNeedsStat('%u %g\n')).toBe(true)
     expect(warnings).toEqual([])
   })

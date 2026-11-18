@@ -63,7 +63,7 @@ async def main():
     print("=== metadata overlay on /seaweedfs/notes.txt ===")
     meta_res = await ws.shell(
         'chmod 640 "/seaweedfs/notes.txt"'
-        ' && chown 500:dev "/seaweedfs/notes.txt"'
+        ' && chown 500:nogroup "/seaweedfs/notes.txt"'
         ' && touch -t 202601021530 "/seaweedfs/notes.txt"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

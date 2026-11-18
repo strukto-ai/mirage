@@ -37,7 +37,11 @@ struct Row {
     #[serde(deserialize_with = "crate::latin1")]
     owner: Vec<u8>,
     #[serde(deserialize_with = "crate::latin1")]
+    uid: Vec<u8>,
+    #[serde(deserialize_with = "crate::latin1")]
     group: Vec<u8>,
+    #[serde(deserialize_with = "crate::latin1")]
+    gid: Vec<u8>,
     timestamp: f64,
     #[serde(skip)]
     epoch: i64,
@@ -189,8 +193,10 @@ fn directive(code: char, row: &Row) -> Vec<u8> {
         's' => row.size.to_string().into_bytes(),
         'y' => vec![row.kind as u8],
         'Y' => vec![row.target as u8],
-        'u' | 'U' => row.owner.clone(),
-        'g' | 'G' => row.group.clone(),
+        'u' => row.owner.clone(),
+        'U' => row.uid.clone(),
+        'g' => row.group.clone(),
+        'G' => row.gid.clone(),
         'm' => format!("{:o}", mode(row)).into_bytes(),
         'M' => mode_text(row),
         _ => Vec::new(),
@@ -261,7 +267,7 @@ mod tests {
         parts.extend((0..200).map(|_| json!({"dir":"P"})));
         parts.push(json!({"dir":"M"}));
         let mut engine = open(&serde_json::to_vec(&json!({"parts":parts})).unwrap()).unwrap();
-        engine.begin(&serde_json::to_vec(&json!({"path":"d","base":"d","size":0,"kind":"p","target":"p","mode":null,"owner":"-","group":"-","timestamp":0})).unwrap()).unwrap();
+        engine.begin(&serde_json::to_vec(&json!({"path":"d","base":"d","size":0,"kind":"p","target":"p","mode":null,"owner":"root","uid":"0","group":"root","gid":"0","timestamp":0})).unwrap()).unwrap();
         let mut piece = Vec::new();
         engine.finish(&mut piece).unwrap();
         let mut out = piece.clone();
@@ -282,7 +288,7 @@ mod tests {
     fn rows_reuse_the_format_and_preserve_raw_bytes_and_fractional_times() {
         let mut engine = open(br#"{"parts":[{"dir":"P"},{"lit":"|"},{"dir":"M"},{"lit":"|"},{"time":"+"},{"lit":"|"},{"time":"@"}]}"#).unwrap();
         for path in ["/d/\u{ff}", "/d/z"] {
-            engine.begin(&serde_json::to_vec(&json!({"path":path,"base":"/d","size":7,"kind":"f","target":"f","mode":0o4751,"owner":"-","group":"-","timestamp":-0.876544})).unwrap()).unwrap();
+            engine.begin(&serde_json::to_vec(&json!({"path":path,"base":"/d","size":7,"kind":"f","target":"f","mode":0o4751,"owner":"root","uid":"0","group":"root","gid":"0","timestamp":-0.876544})).unwrap()).unwrap();
             let mut out = Vec::new();
             engine.finish(&mut out).unwrap();
             while engine.busy() {

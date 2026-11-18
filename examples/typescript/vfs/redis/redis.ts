@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   // Redis has a native setattr slot: chmod/chown/touch persist in
   // per-path attr hashes and render in ls -l.
   await ws.shell('chmod 640 /data/hello.txt')
-  await ws.shell('chown 500:staff /data/hello.txt')
+  await ws.shell('chown 500:nogroup /data/hello.txt')
   await ws.shell('touch -t 202601021530 /data/hello.txt')
   await runLabeled(ws, 'METADATA (chmod / chown / touch, native)', 'ls -l /data/hello.txt')
   await runLabeled(ws, 'jq .name /data/user.json', 'jq ".name" /data/user.json')

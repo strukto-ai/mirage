@@ -44,15 +44,28 @@ def attrs_command(
     if mode is not None:
         steps.append(f"chmod {mode:o} -- {q}")
     if uid is not None:
-        owner = single_quote(f"{uid}" if gid is None else f"{uid}:{gid}")
-        steps.append(f"chown {owner} -- {q}")
+        owner = _id_spec(uid)
+        if gid is not None:
+            owner += ":" + _id_spec(gid)
+        steps.append(f"chown {single_quote(owner)} -- {q}")
     elif gid is not None:
-        steps.append(f"chgrp {single_quote(str(gid))} -- {q}")
+        steps.append(f"chgrp {single_quote(_id_spec(gid))} -- {q}")
     for flag, when in (("-a", atime), ("-m", mtime)):
         if when is not None:
             stamp = datetime.fromisoformat(when).timestamp()
             steps.append(f"touch -c {flag} -d @{stamp} -- {q}")
     return " && ".join(steps) or None
+
+
+def _id_spec(value: int | str) -> str:
+    """An owner or group as the machine's chown reads it: a number takes
+    a ``+``, which skips the name lookup, so a numeric account name on
+    the machine cannot take it; a name stays as given.
+
+    Args:
+        value (int | str): the id or name.
+    """
+    return f"+{value}" if isinstance(value, int) else value
 
 
 async def set_attrs(
