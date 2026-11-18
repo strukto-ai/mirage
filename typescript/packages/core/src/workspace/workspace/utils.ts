@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { homeOf, sessionUid, userHomes } from '../../commands/builtin/utils/identity.ts'
 import { varsFromEnv } from '../session/session.ts'
 import type { SessionState } from '../session/session.ts'
+import { seedUser } from '../session/state.ts'
 
 /** First word of a command line, the name diagnostics report ('' when blank). */
 export function commandName(command: string): string {
@@ -25,8 +27,8 @@ export function commandName(command: string): string {
  *
  * A per-call `cwd`/`env` runs in an ephemeral clone, matching a bash
  * subshell: `cd` and `export` inside the line do not leak back to the
- * persistent session. Without overrides the persistent session is used
- * as is.
+ * persistent session, and the clone runs as the same user. Without
+ * overrides the persistent session is used as is.
  */
 export function forkForCall(
   session: SessionState,
@@ -34,10 +36,21 @@ export function forkForCall(
   env: Record<string, string> | undefined,
 ): SessionState {
   if (cwd === undefined && env === undefined) return session
-  return session.fork({
+  const forked = session.fork({
     ...(cwd !== undefined ? { cwd } : {}),
     ...(env !== undefined
       ? { vars: { ...Object.fromEntries(session.vars.records()), ...varsFromEnv(env) } }
       : {}),
   })
+  seedSessionUser(forked)
+  return forked
+}
+
+/**
+ * Give a session the user its profile runs as: `$UID`, `$EUID` and the
+ * homes `~` reads, which a fork does not carry.
+ */
+export function seedSessionUser(session: SessionState): void {
+  const identity = { profile: session.profile ?? null }
+  seedUser(session, sessionUid(identity), homeOf(identity), userHomes(identity))
 }

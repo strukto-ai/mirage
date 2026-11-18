@@ -2329,3 +2329,40 @@ async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
         assert (r.exit_code, r.stdout) == (0, b"harmless\n")
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operand", ["~/secret", "~agent/secret"])
+async def test_a_tilde_names_the_users_home_when_the_line_is_judged(operand):
+    # HOME is unset, so `~` is the user's home in the user database, as
+    # the run expands it; the whole-line check reads the same path.
+    agent = {
+        "commands": {
+            "*": "deny",
+            "echo": "allow",
+            "cat": [
+                "allow",
+                {
+                    "decision": "deny",
+                    "reason": "the secret is refused",
+                    "paths": ["/home/agent/secret"],
+                },
+            ],
+        },
+    }
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/home/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"agent": agent},
+    )
+    try:
+        await ws.shell("mkdir -p /home/agent")
+        await ws.vfs.write("/home/agent/secret", b"s\n")
+        ws.create_session("a", profile="agent")
+        ran = await ws.shell(
+            f"echo changed > /data/marker; cat {operand}", session_id="a"
+        )
+        assert ran.exit_code == 1
+        assert "/data/marker" not in await ws.vfs.readdir("/data")
+    finally:
+        await ws.close()

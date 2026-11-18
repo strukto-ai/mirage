@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -70,18 +70,21 @@ def _word_globs(node: TSNodeLike) -> bool:
 
 
 def read_word(
-    node: TSNodeLike, home: str | None = None, globs: bool = True
+    node: TSNodeLike,
+    homes: Mapping[str, str] | None = None,
+    globs: bool = True,
 ) -> Word:
     """Read a word without losing which glob characters are quoted.
 
     Args:
         node (TSNodeLike): the command word's syntax node.
-        home (str | None): the home directory a leading tilde names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
         globs (bool): whether the runtime expands pathname patterns in
             this word; inside ``[[ ]]`` it never does.
     """
     return Word(
-        get_text(node), literal_word(node, home), globs and _word_globs(node)
+        get_text(node), literal_word(node, homes), globs and _word_globs(node)
     )
 
 
@@ -103,7 +106,9 @@ class TestRead:
     stated: bool = True
 
 
-def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
+def reads_of_test(
+    node: TSNodeLike, homes: Mapping[str, str] | None = None
+) -> list[TestRead]:
     """A ``[[ ]]`` as the tests the gate admits, read with the tokens and
     the grammar the run evaluates it by: a test per leaf, each admitted
     as the run reaches it, since a branch never reached never expands;
@@ -116,7 +121,8 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
 
     Args:
         node (TSNodeLike): the test_command node.
-        home (str | None): the home directory a leading tilde names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     opener = Word("[[", "[[")
     out: list[TestRead] = []
@@ -124,19 +130,19 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
         if leaf[0] == "unary":
             words = [
                 Word(leaf[1], leaf[1]),
-                read_word(leaf[2], home, globs=False),
+                read_word(leaf[2], homes, globs=False),
             ]
         elif leaf[0] == "binary":
-            right = read_word(leaf[3], home, globs=False)
+            right = read_word(leaf[3], homes, globs=False)
             if leaf[3].type in (NT.EXTGLOB_PATTERN, NT.REGEX):
                 right = Word(right.raw, right.raw)
             words = [
-                read_word(leaf[2], home, globs=False),
+                read_word(leaf[2], homes, globs=False),
                 Word(leaf[1], leaf[1]),
                 right,
             ]
         else:
-            words = [read_word(leaf[1], home, globs=False)]
+            words = [read_word(leaf[1], homes, globs=False)]
         stated = leaf[0] != "binary" or leaf[1] not in PATTERN_OPS
         out.append(TestRead([opener, *words], stated))
     return out

@@ -124,7 +124,7 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on {msg_path} ===")
     result = await ws.shell(
-        f"chmod 640 {shlex.quote(msg_path)} && chown 500:dev"
+        f"chmod 640 {shlex.quote(msg_path)} && chown 500:nogroup"
         f" {shlex.quote(msg_path)}"
         f" && touch -t 202601021530 {shlex.quote(msg_path)}"
     )

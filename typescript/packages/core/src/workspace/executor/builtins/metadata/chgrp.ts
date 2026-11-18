@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { groupId, type Identity } from '../../../../commands/builtin/utils/identity.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -22,10 +23,11 @@ import { fail, parseLine } from '../shared.ts'
 import { changeOwner, parseGroup, referenceOperands, referenceStat } from './metadata.ts'
 
 // chgrp GROUP FILE...: set group ownership via setattr. The group half of
-// chown: writes gid and leaves uid untouched. Group is stored, not enforced
-// (mirage has no group model); a name is kept verbatim, a numeric id becomes
-// a number. `-h` writes the link node's own group, and --reference copies a
-// file's group.
+// chown: writes gid and leaves uid untouched. The group is stored as an id,
+// not enforced: a name the session's user database holds is its id, any
+// number is one, and a name it lacks is refused. `-h` writes the link node's
+// own group, and --reference copies a file's group, the session's for a file
+// that reports none.
 export async function handleChgrp(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -34,6 +36,7 @@ export async function handleChgrp(
 ): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chgrp', args, session.cwd)
   if (refused !== null) return refused
+  const identity: Identity = { profile: session.profile ?? null }
   const reference = fl.asPath('reference')
   if (reference !== undefined) {
     const operands = referenceOperands(parsed.texts, parsed.paths, session.cwd)
@@ -43,16 +46,28 @@ export async function handleChgrp(
     }
     const found = await referenceStat(namespace.sessionLinks(session), dispatch, 'chgrp', reference)
     if (!(found instanceof FileStat)) return found
-    return changeOwner(namespace, dispatch, session, 'chgrp', fl, operands, null, found.gid)
+    return changeOwner(
+      namespace,
+      dispatch,
+      session,
+      'chgrp',
+      fl,
+      operands,
+      null,
+      groupId(found.gid, identity),
+    )
   }
   const groupText = parsed.texts[0]
   if (groupText === undefined || parsed.paths.length === 0) {
     const error = missingOperandError('chgrp', groupText ?? null)
     return fail('chgrp', `${error.message}\n`, error.exitCode)
   }
-  const gid = parseGroup(groupText)
+  const gid = parseGroup(groupText, identity)
   if (gid === null) {
     return fail('chgrp', `chgrp: invalid group: '${groupText}'\n`, 1)
   }
-  return changeOwner(namespace, dispatch, session, 'chgrp', fl, parsed.paths, null, gid)
+  return changeOwner(namespace, dispatch, session, 'chgrp', fl, parsed.paths, null, gid, null, [
+    null,
+    groupText,
+  ])
 }

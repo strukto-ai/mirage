@@ -25,7 +25,7 @@ import { Workspace } from './workspace/workspace.ts'
 // empty document changes one side and this battery goes red.
 const BATTERY = [
   'ls /a',
-  'ls -la /a && ls /b',
+  'ls -ago /a && ls /b',
   'echo /a/* /b/*',
   'find /a',
   'find /b -type f',
@@ -86,7 +86,8 @@ describe('the empty-profile pin', () => {
   it('an empty profile changes nothing', async () => {
     // profile {} compiles to all-null narrowing, so every gate must
     // stay inert: the battery is byte-identical to a session with no
-    // profile at all.
+    // profile at all. A document without a name runs as uid 1000 where
+    // no profile runs as root, so the listing leaves the owner out.
     const bare = await seeded()
     bare.createSession('probe')
     const profiled = await seeded()

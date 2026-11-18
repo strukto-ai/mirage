@@ -284,7 +284,7 @@ def test_chown_h_on_a_link_goes_through_the_dispatcher():
     async def run():
         made = await ws.shell("ln -s x.txt /a/lk")
         assert made.exit_code == 0
-        return await ws.shell("chown -h alice /a/lk")
+        return await ws.shell("chown -h nobody /a/lk")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -906,7 +906,7 @@ def test_hidden_home_reads_as_unset_everywhere():
 
     home_out, tilde_out, cd = asyncio.run(run())
     assert home_out == "[]\n"
-    assert tilde_out == "/\n"
+    assert tilde_out == "/root\n"
     assert cd.exit_code == 1
 
 

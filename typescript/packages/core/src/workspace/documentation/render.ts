@@ -311,9 +311,9 @@ function supported(
   const searches = SEARCHES.filter((c) => runs([...c.split(' '), ...word])).map(code)
   if (searches.length > 0 && mount.answers('files_containing')) {
     const wordText = word.length > 0 ? ' with `-w`' : ''
-    parts.push(
-      `${listing(searches)}${wordText} ${agree(searches, 'ask')} ${name} which files may match.`,
-    )
+    const query = mount.vfs.name === 'sql' ? 'can ask SQLite' : `${agree(searches, 'ask')} ${name}`
+    parts.push(`${listing(searches)}${wordText} ${query} which files may match.`)
+    if (mount.vfs.name === 'sql') parts.push('Postgres searches walk the files.')
   }
   const finds = FINDS.filter((c) => runs([c])).map(code)
   if (finds.length > 0 && mount.answers('lines_containing'))

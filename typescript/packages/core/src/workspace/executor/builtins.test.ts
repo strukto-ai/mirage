@@ -383,17 +383,23 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
 describe('handleWhoami', () => {
   it('prints the profile + newline, exit 0, no stderr', () => {
-    const [out, io] = handleWhoami('reviewer')
+    const [out, io] = handleWhoami({ profile: 'reviewer' })
     expect(decode(out as Uint8Array)).toBe('reviewer\n')
     expect(io.exitCode).toBe(0)
     expect(io.stderr).toBeNull()
   })
 
-  it('errors without a profile', () => {
-    const [out, io] = handleWhoami(null)
+  it('is root without a profile', () => {
+    const [out, io] = handleWhoami({ profile: null })
+    expect(decode(out as Uint8Array)).toBe('root\n')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('errors for a document without a name', () => {
+    const [out, io] = handleWhoami({ profile: '' })
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr as Uint8Array)).toBe('whoami: cannot find name for user ID\n')
+    expect(decode(io.stderr as Uint8Array)).toBe('whoami: cannot find name for user ID 1000\n')
   })
 })
 

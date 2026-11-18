@@ -301,7 +301,7 @@ expect "sym.cat_follow" "sym1"
 expect "sym.write_through" "via"
 # A link row is a real GNU row now: lrwxrwxrwx (a link carries no
 # permission bits of its own) and the size is the target's length.
-expect "sym.ls_arrow" "lrwxrwxrwx 1 - - 11 link.txt -> /data/s.txt"
+expect "sym.ls_arrow" "lrwxrwxrwx 1 root root 11 link.txt -> /data/s.txt"
 expect "sym.mv_entry" "/data/s.txt"
 expect "sym.rm_entry" "1"
 expect "sym.dangle" "1"

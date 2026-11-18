@@ -392,10 +392,16 @@ def supported(
     searches = [code(c) for c in SEARCHES if runs((*c.split(), *word))]
     if searches and mount.answers("files_containing"):
         word_text = " with `-w`" if word else ""
-        parts.append(
-            f"{listing(searches)}{word_text} {agree(searches, 'ask')} "
-            f"{name} which files may match."
+        query = (
+            "can ask SQLite"
+            if mount.vfs.name == "sql"
+            else f"{agree(searches, 'ask')} {name}"
         )
+        parts.append(
+            f"{listing(searches)}{word_text} {query} which files may match."
+        )
+        if mount.vfs.name == "sql":
+            parts.append("Postgres searches walk the files.")
     finds = [code(c) for c in FINDS if runs((c,))]
     if finds and mount.answers("lines_containing"):
         parts.append(

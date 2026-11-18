@@ -1368,7 +1368,7 @@ async def test_a_command_rule_reaches_what_chmod_r_walks_into():
         )
         assert await _line(ws, "stat -c '%a %u' /a/b/secret /a/b/f") == (
             0,
-            "644 default\n700 5\n",
+            "644 1000\n700 5\n",
             "",
         )
     finally:

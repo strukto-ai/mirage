@@ -32,7 +32,7 @@ from mirage.commands.builtin.generic.program import (
     program_files,
     value_refusal,
 )
-from mirage.commands.builtin.utils.identity import identity_from
+from mirage.commands.builtin.utils.identity import find_ids, identity_from
 from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.commands.errors import UsageError
@@ -429,7 +429,7 @@ async def _bound_find(
         find_expr = parsed.bind(
             newer_times,
             env=env_snapshot(session),
-            profile=identity_from(view).profile,
+            ids=find_ids(identity_from(view)),
             fs_type=on.vfs.name if on is not None else None,
         )
     except UsageError as exc:

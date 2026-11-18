@@ -868,8 +868,9 @@ class CompiledProfile:
             policy chain judges.
         hide_reasons (tuple[HideReason, ...]): the operator's reasons
             for grouped hides, never rendered to the agent.
-        profile (str | None): the profile's name, None for a document
-            passed without one; what the session reports as its group.
+        profile (str | None): the profile's name, empty for a document
+            passed without one, None for no profile; who the session
+            runs as.
     """
 
     setup: ProfileSetup = ProfileSetup()

@@ -23,6 +23,7 @@ import { readdir as sqlReaddir, tree as sqlTree } from '../../core/sql/readdir.t
 import { rename as sqlRename } from '../../core/sql/rename.ts'
 import { rmR as sqlRmR } from '../../core/sql/rm.ts'
 import { rmdir as sqlRmdir } from '../../core/sql/rmdir.ts'
+import { filesContaining as sqlFilesContaining } from '../../core/sql/search.ts'
 import { restore, snapshot, type SqlSnapshot } from '../../core/sql/snapshot.ts'
 import { stat as sqlStat } from '../../core/sql/stat.ts'
 import { readStream as sqlStream } from '../../core/sql/stream.ts'
@@ -85,6 +86,7 @@ function sharedUsage(
  */
 export class SqlVFS extends BaseVFS<SqlAccessor> {
   override readonly name: string = VFSName.SQL
+  override readonly searchCoversTree: boolean = true
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
@@ -147,8 +149,16 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     await super.close()
   }
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return sqlTree(this.accessor, path)
+  override filesContaining(
+    path: PathSpec,
+    text: string,
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> {
+    return sqlFilesContaining(this.accessor, path, text, opts.ignoreCase)
+  }
+
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return sqlTree(this.accessor, path, handed?.limit)
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

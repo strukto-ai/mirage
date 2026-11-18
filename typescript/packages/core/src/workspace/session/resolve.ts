@@ -294,17 +294,19 @@ export function commandRules(
 
 /**
  * The session fields a profile compiles to; its `processes` over the
- * workspace's (`workspaceProcesses`), field by field. `commands` are the
- * session's command trees, read off the profile and the inline document
- * (`commandRules`).
+ * workspace's (`workspaceProcesses`), field by field. `name` is the
+ * profile's name, empty for a document passed without one, null for no
+ * profile at all; carried onto its programs for `ctx.profile` and onto the
+ * session as the user it runs as. `commands` are the session's command
+ * trees, read off the profile and the inline document (`commandRules`).
  */
 export function compileProfile(
   effective: SessionProfile | null,
-  name = '',
+  name: string | null = null,
   workspaceProcesses: ProcessesBlock | null = null,
   commands: AdmissionRules | null = null,
 ): CompiledProfile {
-  const profile = name === '' ? null : name
+  const profile = name
   const processes = Object.freeze(layerProcesses([effective?.processes, workspaceProcesses]))
   if (effective === null) {
     return {
@@ -332,7 +334,7 @@ export function compileProfile(
           ? null
           : new Map(plan.mount_modes.map(([prefix, mode]) => [fromUnits(prefix), mode])),
       commands,
-      scripts: compileScripts(effective, name),
+      scripts: compileScripts(effective, name ?? ''),
       commandLimits: effective.commandLimits ?? null,
       processes,
       network: effective.network ?? null,

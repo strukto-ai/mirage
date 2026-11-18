@@ -228,7 +228,7 @@ describe('name-plane writes go through the dispatcher', () => {
     const seen = dispatched(ws)
     const made = await ws.shell('ln -s x.txt /a/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.shell('chown -h alice /a/lk')
+    const io = await ws.shell('chown -h nobody /a/lk')
     expect(io.exitCode).toBe(0)
     expect(seen).toContainEqual(['setattr', '/a/lk'])
   })
@@ -699,7 +699,7 @@ describe('hidden vars across the shell tier', () => {
     const home = await ws.shell('echo "[$HOME]"', { sessionId: 'agent' })
     expect(stdoutStr(home)).toBe('[]\n')
     const tilde = await ws.shell('echo ~', { sessionId: 'agent' })
-    expect(stdoutStr(tilde)).toBe('/\n')
+    expect(stdoutStr(tilde)).toBe('/root\n')
     const cd = await ws.shell('cd', { sessionId: 'agent' })
     expect(cd.exitCode).toBe(1)
   })
@@ -1606,7 +1606,7 @@ describe('command permissions end to end', () => {
     ])
     expect(await line(ws, "stat -c '%a %u' /a/b/secret /a/b/f")).toEqual([
       0,
-      '644 default\n700 5\n',
+      '644 1000\n700 5\n',
       '',
     ])
   })

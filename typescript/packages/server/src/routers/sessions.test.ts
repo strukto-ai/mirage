@@ -274,7 +274,9 @@ describe('session cancel and kill', () => {
         url: `/v1/workspaces/${id}/shell?session_id=a`,
         payload: { command: 'whoami' },
       })
-      expect(run.json<{ stderr: string }>().stderr).toBe('whoami: cannot find name for user ID\n')
+      expect(run.json<{ stderr: string }>().stderr).toBe(
+        'whoami: cannot find name for user ID 1000\n',
+      )
       const refused = await app.inject({
         method: 'PATCH',
         url: `/v1/workspaces/${id}/sessions/a`,

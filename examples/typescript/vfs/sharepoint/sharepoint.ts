@@ -270,7 +270,7 @@ async function runSuite(
   // dispatch-level stat.
   console.log(`=== metadata overlay on ${testFile} ===`)
   const metaRes = await ws.shell(
-    `chmod 640 ${shellQuote(testFile)} && chown 500:dev ${shellQuote(testFile)} && touch -t 202601021530 ${shellQuote(testFile)}`,
+    `chmod 640 ${shellQuote(testFile)} && chown 500:nogroup ${shellQuote(testFile)} && touch -t 202601021530 ${shellQuote(testFile)}`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', testFile)) as FileStat

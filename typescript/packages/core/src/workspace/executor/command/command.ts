@@ -27,7 +27,7 @@ import {
   programFiles,
   valueRefusal,
 } from '../../../commands/builtin/generic/program.ts'
-import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
+import { findIds, identityFrom } from '../../../commands/builtin/utils/identity.ts'
 import type { CLI } from '../../../commands/cli/types.ts'
 import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -356,7 +356,7 @@ async function boundFind(
       newerTimes,
       undefined,
       envSnapshot(session),
-      identityFrom(view).profile,
+      findIds(identityFrom(view)),
       registry.tryMountFor(starts[0] ?? session.cwd)?.vfs.name ?? null,
     )
   } catch (err) {

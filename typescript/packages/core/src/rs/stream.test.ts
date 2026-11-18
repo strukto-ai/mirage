@@ -73,20 +73,22 @@ describe('stream lifetime', () => {
     }
   })
 
-  it('rechecks live handles before completing deferred retirement', async () => {
+  it('allocates one instance on demand on a synchronous host', async () => {
     const module = new Streams(compiledModule())
-    const stream = module.openSync('base64', DECODE, false)
-    const grown = instance(stream)
-    memory(stream).grow(513)
-    stream.close()
-    const pin = module.openSync('base64', DECODE, false)
-    await module.ready()
-    expect(instance(pin)).toBe(grown)
-    expect(new TextDecoder().decode(pin.feed(new TextEncoder().encode('aGk=')))).toBe('hi')
-    pin.close()
-    const fresh = await module.open('base64', DECODE)
-    expect(instance(fresh)).not.toBe(grown)
-    fresh.close()
+    const make = vi.spyOn(WebAssembly, 'instantiate')
+    try {
+      await Promise.all([module.ready(), module.ready()])
+      const stream = await module.open('base64', DECODE)
+      expect(make).toHaveBeenCalledTimes(1)
+      memory(stream).grow(513)
+      stream.close()
+      expect(make).toHaveBeenCalledTimes(1)
+      const fresh = await module.open('base64', DECODE)
+      expect(make).toHaveBeenCalledTimes(2)
+      fresh.close()
+    } finally {
+      make.mockRestore()
+    }
   })
 
   it('detaches a trapped wrapper and replaces the poisoned instance', async () => {

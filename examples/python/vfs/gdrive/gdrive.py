@@ -69,7 +69,7 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on /gdrive/{first} ===")
     result = await ws.shell(
-        f"chmod 640 {shlex.quote(f'/gdrive/{first}')} && chown 500:dev"
+        f"chmod 640 {shlex.quote(f'/gdrive/{first}')} && chown 500:nogroup"
         f" {shlex.quote(f'/gdrive/{first}')}"
         f" && touch -t 202601021530 {shlex.quote(f'/gdrive/{first}')}"
     )

@@ -9,7 +9,7 @@
       "command": "id; id -u; id -un; id -G; id -uz | od -An -c",
       "expect": {
         "exit": 0,
-        "stdout": "uid=ops gid=ops groups=ops\nops\nops\nops\n   o   p   s  \\0\n",
+        "stdout": "uid=1000(ops) gid=1000(ops) groups=1000(ops)\n1000\nops\n1000\n   1   0   0   0  \\0\n",
         "stderr": ""
       }
     },
@@ -23,7 +23,7 @@
       "command": "id; id -gn",
       "expect": {
         "exit": 0,
-        "stdout": "uid=auditor gid=auditor groups=auditor\nauditor\n",
+        "stdout": "uid=1000(auditor) gid=1000(auditor) groups=1000(auditor)\nauditor\n",
         "stderr": ""
       }
     },
@@ -36,8 +36,8 @@
       "command": "id ops; id -u nobody ops; id ''",
       "expect": {
         "exit": 1,
-        "stdout": "uid=ops gid=ops groups=ops\nops\n",
-        "stderr": "id: 'nobody': no such user\nid: '': no such user: No such file or directory\n"
+        "stdout": "uid=1000(ops) gid=1000(ops) groups=1000(ops)\n65534\n1000\n",
+        "stderr": "id: '': no such user: No such file or directory\n"
       }
     },
     {
@@ -51,6 +51,19 @@
         "exit": 1,
         "stdout": "",
         "stderr": "id: --context (-Z) works only on an SELinux-enabled kernel\nid: cannot print \"only\" of more than one choice\nid: printing only names or real IDs requires -u, -g, or -G\nid: printing only names or real IDs requires -u, -g, or -G\nid: option --zero not permitted in default format\n"
+      }
+    },
+    {
+      "id": "id_a_profile_is_uid_1000_with_a_home",
+      "seq": 16100217,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "echo $UID $EUID ~ ~ops; whoami; stat -c '%U %u %G %g' /vfs",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000 1000 /home/ops /home/ops\nops\nops 1000 ops 1000\n",
+        "stderr": ""
       }
     }
   ]

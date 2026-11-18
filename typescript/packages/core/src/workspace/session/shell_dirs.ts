@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { homeOf, userHomes } from '../../commands/builtin/utils/identity.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { seedVar, setAttr } from './state.ts'
 import type { SessionState } from './session.ts'
 import { envGet } from './state.ts'
 
-// What a `~` names: $HOME, or `/` when it is unset, as bash answers for a
-// user with no entry in its user database, which mirage has none of.
-export function tildeHome(session: SessionState): string {
-  return envGet(session, 'HOME') ?? '/'
+// The home each `~name` names, as the shell expands it: each user's in the
+// session's user database, and for a bare `~` (the empty name) $HOME, or the
+// session user's own while it is unset. Mirrors Python's tilde_homes.
+export function tildeHomes(session: SessionState): Record<string, string> {
+  const identity = { profile: session.profile }
+  return { ...userHomes(identity), '': envGet(session, 'HOME') ?? homeOf(identity) }
 }
 
 // Returns $HOME from the session env, or null when unset/empty, matching

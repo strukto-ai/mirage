@@ -288,7 +288,7 @@ it('ps lists the session leader with its owner', async () => {
     const line = 'ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$'
     expect(stdoutStr(await ws.shell(line))).toBe(
       '    PID    PPID    PGID     SID STAT USER       UID GROUP      GID CMD\n' +
-        `${String(FIRST_PID)}       0 ${String(FIRST_PID)} ${String(FIRST_PID)} Rs   admin    admin admin    admin ${line}\n`,
+        `${String(FIRST_PID)}       0 ${String(FIRST_PID)} ${String(FIRST_PID)} Rs   admin     1000 admin     1000 ${line}\n`,
     )
   } finally {
     await ws.close()

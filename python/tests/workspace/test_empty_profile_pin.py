@@ -25,7 +25,7 @@ from mirage.workspace import Workspace
 # empty document changes one side and this battery goes red.
 BATTERY = (
     "ls /a",
-    "ls -la /a && ls /b",
+    "ls -ago /a && ls /b",
     "echo /a/* /b/*",
     "find /a",
     "find /b -type f",
@@ -78,7 +78,8 @@ def _outputs(
 def test_an_empty_profile_changes_nothing():
     # profile {} compiles to all-None narrowing, so every gate must
     # stay inert: the battery is byte-identical to a session with no
-    # profile at all.
+    # profile at all. A document without a name runs as uid 1000 where
+    # no profile runs as root, so the listing leaves the owner out.
     #
     # Both sessions read ONE workspace, because the claim is about the
     # profile and nothing else. Two separately seeded worlds differ in a

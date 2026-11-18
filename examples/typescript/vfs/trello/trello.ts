@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`\n=== metadata overlay on ${wsBase}/workspace.json ===`)
     const metaRes = await ws.shell(
-      `chmod 640 ${shellQuote(`${wsBase}/workspace.json`)} && chown 500:dev ${shellQuote(`${wsBase}/workspace.json`)} && touch -t 202601021530 ${shellQuote(`${wsBase}/workspace.json`)}`,
+      `chmod 640 ${shellQuote(`${wsBase}/workspace.json`)} && chown 500:nogroup ${shellQuote(`${wsBase}/workspace.json`)} && touch -t 202601021530 ${shellQuote(`${wsBase}/workspace.json`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `${wsBase}/workspace.json`)) as FileStat

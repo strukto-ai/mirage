@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    own_account,
+    session_uid,
+)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -20,19 +25,25 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def handle_whoami(
-    profile: str | None,
+    identity: Identity,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    # GNU whoami reports the effective user and never consults $USER;
-    # the session's profile is the effective identity here. With no
-    # profile it fails like GNU does for a uid with no passwd entry.
-    if profile is None:
-        err = b"whoami: cannot find name for user ID\n"
+    """Print the name of the effective user, as whoami does: it never
+    reads ``$USER``, and fails for a uid the user database lacks.
+
+    Args:
+        identity (Identity): who the session is.
+    """
+    account = own_account(identity)
+    if account is None:
+        err = encode_text(
+            f"whoami: cannot find name for user ID {session_uid(identity)}\n"
+        )
         return (
             None,
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="whoami", exit_code=1, stderr=err),
         )
-    out = encode_text(f"{profile}\n")
+    out = encode_text(f"{account.name}\n")
     return out, IOResult(), ExecutionNode(command="whoami", exit_code=0)
 
 
@@ -42,4 +53,4 @@ async def whoami_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_whoami(call.context.session.profile)
+    return await handle_whoami(Identity(profile=call.context.session.profile))

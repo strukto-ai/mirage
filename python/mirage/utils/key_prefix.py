@@ -12,8 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from bisect import bisect_left
+from collections.abc import Iterator
+
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import QUOTED_CHARS
+
+
+def sorted_prefix(keys: list[str], prefix: str) -> Iterator[str]:
+    """Iterate a prefix range in already sorted keys."""
+    for index in range(bisect_left(keys, prefix), len(keys)):
+        key = keys[index]
+        if not key.startswith(prefix):
+            break
+        yield key
 
 
 def normalize(raw: str | None) -> str:

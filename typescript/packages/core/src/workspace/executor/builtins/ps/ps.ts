@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UNKNOWN_NAME } from '../../../../commands/builtin/utils/identity.ts'
+import {
+  UNKNOWN_NAME,
+  groupLabel,
+  ownerLabel,
+  sessionGid,
+  sessionUid,
+} from '../../../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../../../commands/builtin/utils/strftime.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -248,9 +254,9 @@ function started(fact: string, info: Process, ctx: PsContext): string {
 }
 
 /**
- * One -o cell for a process. The owner columns print the workspace user and
- * the session's profile, names in the id columns too, as `id` does, and `-`
- * where nobody claimed one or the runner is another session's, whose profile
+ * One -o cell for a process. The owner columns print the calling session's
+ * user and group, by name in the name columns and by number in the id
+ * columns, as `id` does, and `-` for another session's runner, whose profile
  * this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group. The machine column
  * names the machine a program runs on, `mirage` for a process that is
@@ -311,8 +317,11 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
     return state + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
   if (fact === 'comm') return branch + comm(info)
-  if (fact === 'user' || fact === 'group') {
-    return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
+  if (fact === 'user' || fact === 'uid' || fact === 'group' || fact === 'gid') {
+    if (info.sessionId !== ctx.sessionId) return UNKNOWN_NAME
+    if (fact === 'user') return ownerLabel(null, ctx.identity)
+    if (fact === 'group') return groupLabel(null, ctx.identity)
+    return String(fact === 'uid' ? sessionUid(ctx.identity) : sessionGid(ctx.identity))
   }
   const age = Math.max(0, Math.floor(ctx.now - info.startedAt))
   if (fact === 'etime') return elapsed(age)
@@ -452,7 +461,7 @@ export async function handlePs(
   const ctx: PsContext = {
     now: systemNow(),
     zone: zoneFromEnv(session?.env),
-    group: session?.profile ?? null,
+    identity: { profile: session?.profile ?? null },
     sessionId: sid,
     shellPid: session?.shellPid ?? null,
     running: running?.id.pid ?? null,

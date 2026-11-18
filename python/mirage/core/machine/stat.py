@@ -56,8 +56,8 @@ def row_stat(name: str, row: TreeRow) -> FileStat:
         type=kind,
         content=content_type_for_path(name) if regular else None,
         mode=row.mode,
-        uid=row.user,
-        gid=row.group,
+        uid=row.uid,
+        gid=row.gid,
         atime=ms_to_rfc3339(row.atime_ms),
     )
 

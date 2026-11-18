@@ -343,7 +343,7 @@ def command_rules(
 
 def compile_profile(
     effective: SessionProfile | None,
-    name: str = "",
+    name: str | None = None,
     workspace_processes: ProcessPermissions | None = None,
     commands: AdmissionRules | None = None,
 ) -> CompiledProfile:
@@ -353,10 +353,10 @@ def compile_profile(
         effective (SessionProfile | None): the resolved profile with any
             inline document already added; None is an unrestricted
             session.
-        name (str): the profile's name, empty for a document passed
-            without one; carried onto its programs for ``ctx["profile"]``,
-            for refusals to print, and onto the session as the group an
-            owner-rendering command shows.
+        name (str | None): the profile's name, empty for a document
+            passed without one, None for no profile at all; carried onto
+            its programs for ``ctx["profile"]``, for refusals to print,
+            and onto the session as the user it runs as.
         workspace_processes (ProcessPermissions | None): the workspace's
             ``processes``, which the profile's overrides field by field.
         commands (AdmissionRules | None): the session's command trees,
@@ -372,7 +372,7 @@ def compile_profile(
     if effective is None:
         return CompiledProfile(
             policies=ProfilePolicies(processes=processes),
-            profile=name or None,
+            profile=name,
         )
     value = _compile_plan(effective)
     return CompiledProfile(
@@ -388,13 +388,13 @@ def compile_profile(
             }
             or None,
             commands=commands,
-            scripts=compile_scripts(effective, name),
+            scripts=compile_scripts(effective, name or ""),
             command_limits=effective.command_limits,
             processes=processes,
             network=effective.network,
         ),
         hide_reasons=tuple(_reason_from(v) for v in value["hide_reasons"]),
-        profile=name or None,
+        profile=name,
     )
 
 

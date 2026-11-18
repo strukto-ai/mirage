@@ -99,7 +99,7 @@ async def main():
     print(f"=== metadata overlay on {coll_doc} ===")
     meta_res = await ws.shell(
         f'chmod 640 "{coll_doc}"'
-        f' && chown 500:dev "{coll_doc}"'
+        f' && chown 500:nogroup "{coll_doc}"'
         f' && touch -t 202601021530 "{coll_doc}"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

@@ -14,7 +14,15 @@
 
 import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
 import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
-import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
+import {
+  groupId,
+  groupIdNamed,
+  groupLabel,
+  ownerId,
+  ownerLabel,
+  userNamed,
+  type Identity,
+} from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { beforeFullWalk, treeWalk } from '../../../../commands/builtin/utils/tree.ts'
 import { UsageError } from '../../../../commands/errors.ts'
@@ -41,28 +49,53 @@ import { systemDate } from '../../../../utils/clock.ts'
 import { ancestors, CycleError } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { ID_MAX, idNumber } from '../../../../utils/stat_view.ts'
 import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, result } from '../shared.ts'
 
-export function parseOwner(text: string): [number | string | null, number | string | null] {
+/**
+ * Parse a chown OWNER[:GROUP] argument against the user database. A name the
+ * database holds is its id, and any number is an id; a leading `+` forces a
+ * number, skipping the name lookup. A colon with no group after a user name
+ * names that user's login group, which a number has none of. Throws
+ * UsageError for an
+ * owner or group the database lacks, or a number with a colon and no group
+ * after it, as chown refuses them.
+ */
+export function parseOwner(
+  text: string,
+  identity: Identity,
+  cmd = 'chown',
+): [number | null, number | null] {
   const sep = text.indexOf(':')
   const owner = sep >= 0 ? text.slice(0, sep) : text
   const group = sep >= 0 ? text.slice(sep + 1) : ''
-  const uid = owner.length > 0 ? (/^\d+$/.test(owner) ? parseInt(owner, 10) : owner) : null
-  const gid =
-    sep >= 0 && group.length > 0 ? (/^\d+$/.test(group) ? parseInt(group, 10) : group) : null
+  const named = owner.length > 0 && !owner.startsWith('+') ? userNamed(identity, owner) : null
+  let uid: number | null = null
+  if (owner.length > 0) {
+    uid = named?.uid ?? idNumber(owner)
+    if (uid === null || uid === ID_MAX) throw new UsageError(`${cmd}: invalid user: '${text}'`, 1)
+  }
+  let gid: number | null = null
+  if (sep >= 0 && group.length > 0) {
+    gid = parseGroup(group, identity)
+    if (gid === null) throw new UsageError(`${cmd}: invalid group: '${text}'`, 1)
+  } else if (sep >= 0 && owner.length > 0) {
+    if (named === null) throw new UsageError(`${cmd}: invalid spec: '${text}'`, 1)
+    gid = named.gid
+  }
   return [uid, gid]
 }
 
-// Parse a chgrp GROUP argument. Numeric ids become numbers; names are kept
-// as strings (mirage has no group database; ownership is stored, not
-// enforced). Null when the text is empty.
-export function parseGroup(text: string): number | string | null {
+// Parse a chgrp GROUP argument against the user database: the gid, null for
+// a name the database lacks or an empty text; a leading `+` forces a number.
+export function parseGroup(text: string, identity: Identity): number | null {
   if (text.length === 0) return null
-  return /^\d+$/.test(text) ? parseInt(text, 10) : text
+  const found = (text.startsWith('+') ? null : groupIdNamed(identity, text)) ?? idNumber(text)
+  return found === ID_MAX ? null : found
 }
 
 // Resolve touch -t/-d into an ISO timestamp. `t` is a POSIX
@@ -535,7 +568,9 @@ export function ownerLine(
 /**
  * Set the owner and group of every operand, the way chown and chgrp do: -R
  * walks under an implicit -P, -h changes a link itself, -v and -c report,
- * -f drops the per-file errors. Mirrors Python's change_owner.
+ * -f drops the per-file errors. `spec` is the owner and group as typed,
+ * which -v and -c print; a part not typed prints the name the user database
+ * gives its id. Mirrors Python's change_owner.
  */
 export async function changeOwner(
   namespace: Namespace,
@@ -546,14 +581,16 @@ export async function changeOwner(
   operands: readonly PathSpec[],
   uid: number | string | null,
   gid: number | string | null,
-  current: [number | string | null, number | string | null] | null = null,
+  current: [number | null, number | null] | null = null,
+  spec: [string | null, string | null] | null = null,
 ): Promise<RedirectResult> {
   const [follow, refused] = followsLinks(cmd, fl)
   if (refused !== null) return refused
   const report = verbosity(fl)
-  const identity = { profile: session.profile ?? null }
-  const user = uid === null ? null : String(uid)
-  const group = gid === null ? null : String(gid)
+  const identity: Identity = { profile: session.profile ?? null }
+  const [typedUser, typedGroup] = spec ?? [null, null]
+  const user = typedUser ?? (uid === null ? null : ownerLabel(uid, identity))
+  const group = typedGroup ?? (gid === null ? null : groupLabel(gid, identity))
   const fields: SetAttrFields = {
     ...(uid !== null ? { uid } : {}),
     ...(gid !== null ? { gid } : {}),
@@ -564,8 +601,8 @@ export async function changeOwner(
   const matches = (stat: FileStat | null): boolean =>
     current === null ||
     stat === null ||
-    ((current[0] === null || String(current[0]) === String(stat.uid)) &&
-      (current[1] === null || String(current[1]) === String(stat.gid)))
+    ((current[0] === null || current[0] === ownerId(stat.uid, identity)) &&
+      (current[1] === null || current[1] === groupId(stat.gid, identity)))
   const describe = (name: string, stat: FileStat | null, failed: boolean): void => {
     let old: [string, string] | null = null
     let same = false
@@ -574,8 +611,10 @@ export async function changeOwner(
       return
     }
     if (stat !== null) {
-      old = [ownerName(stat.uid, identity), groupName(stat.gid, identity)]
-      same = (uid === null || uid === stat.uid) && (gid === null || gid === stat.gid)
+      old = [ownerLabel(stat.uid, identity), groupLabel(stat.gid, identity)]
+      same =
+        (uid === null || uid === ownerId(stat.uid, identity)) &&
+        (gid === null || gid === groupId(stat.gid, identity))
     }
     const status = failed ? 'failed' : same ? 'retained' : 'changed'
     if (report === 'verbose' || (report === 'changes' && status === 'changed')) {

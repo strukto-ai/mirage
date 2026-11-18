@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { groupId, ownerId, type Identity } from '../../../../commands/builtin/utils/identity.ts'
+import { UsageError } from '../../../../commands/errors.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -22,10 +24,11 @@ import { fail, parseLine } from '../shared.ts'
 import { changeOwner, parseOwner, referenceOperands, referenceStat } from './metadata.ts'
 
 // chown OWNER[:GROUP] FILE...: set ownership via setattr. Ownership is
-// stored, not enforced (mirage has no user model); names are kept
-// verbatim, numeric ids become numbers. --reference copies a file's owner
-// and group, and --from changes only a file that has the owner and group it
-// names.
+// stored as ids, not enforced: a name the session's user database holds is
+// its id, any number is one, and a name it lacks is refused as chown
+// refuses it. --reference copies a file's owner and group, the session's for
+// a file that reports none, and --from changes only a file that has the
+// owner and group it names.
 export async function handleChown(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -34,8 +37,15 @@ export async function handleChown(
 ): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chown', args, session.cwd)
   if (refused !== null) return refused
+  const identity: Identity = { profile: session.profile ?? null }
   const fromText = fl.asStr('from')
-  const current = fromText === undefined ? null : parseOwner(fromText)
+  let current: [number | null, number | null] | null
+  try {
+    current = fromText === undefined ? null : parseOwner(fromText, identity)
+  } catch (err) {
+    if (err instanceof UsageError) return fail('chown', `${err.message}\n`, err.exitCode)
+    throw err
+  }
   const reference = fl.asPath('reference')
   if (reference !== undefined) {
     const operands = referenceOperands(parsed.texts, parsed.paths, session.cwd)
@@ -52,8 +62,8 @@ export async function handleChown(
       'chown',
       fl,
       operands,
-      found.uid,
-      found.gid,
+      ownerId(found.uid, identity),
+      groupId(found.gid, identity),
       current,
     )
   }
@@ -62,9 +72,20 @@ export async function handleChown(
     const error = missingOperandError('chown', ownerText ?? null)
     return fail('chown', `${error.message}\n`, error.exitCode)
   }
-  const [uid, gid] = parseOwner(ownerText)
+  let uid: number | null
+  let gid: number | null
+  try {
+    ;[uid, gid] = parseOwner(ownerText, identity)
+  } catch (err) {
+    if (err instanceof UsageError) return fail('chown', `${err.message}\n`, err.exitCode)
+    throw err
+  }
   if (uid === null && gid === null) {
     return fail('chown', `chown: invalid spec: '${ownerText}'\n`, 1)
   }
-  return changeOwner(namespace, dispatch, session, 'chown', fl, parsed.paths, uid, gid, current)
+  const [owner = '', group = ''] = ownerText.split(':')
+  return changeOwner(namespace, dispatch, session, 'chown', fl, parsed.paths, uid, gid, current, [
+    owner.length > 0 ? owner : null,
+    group.length > 0 ? group : null,
+  ])
 }

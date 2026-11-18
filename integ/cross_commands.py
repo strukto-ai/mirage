@@ -492,13 +492,13 @@ async def check_metadata(
     await run(ws, f"printf 'mmm\n' > {dst}/copied/m.txt")
     await run(
         ws,
-        f"chmod 601 {dst}/copied/m.txt && chown 500:dev {dst}/copied/m.txt"
+        f"chmod 601 {dst}/copied/m.txt && chown 500:nogroup {dst}/copied/m.txt"
         f" && touch -t 202601021530 {dst}/copied/m.txt",
     )
     st = await stat_of(ws, f"{dst}/copied/m.txt")
     check(f"{label}: chmod lands on dst mount", st.mode == 0o601)
     check(
-        f"{label}: chown lands on dst mount", (st.uid, st.gid) == (500, "dev")
+        f"{label}: chown lands on dst mount", (st.uid, st.gid) == (500, 65534)
     )
     check(
         f"{label}: touch stamps dst mtime",
@@ -540,7 +540,7 @@ async def check_metadata(
     check(
         f"{label}: symbolic chmod applies against 644 base", st.mode == 0o664
     )
-    await run(ws, f"chown 500:dev {dst}/copied/n.txt")
+    await run(ws, f"chown 500:nogroup {dst}/copied/n.txt")
     await run(ws, f"touch -t 202603041200 {dst}/copied/n.txt")
     # ls builds rows from the backend stat, which carries chmod/chown/touch
     # only when the backend applies setattr natively. Pure-overlay backends
@@ -549,7 +549,11 @@ async def check_metadata(
     if native_attrs:
         out, _, _ = await run(ws, f"ls -l {dst}/copied")
         check(f"{label}: ls -l renders overlay bits", "-rw-rw-r--" in out)
-        check(f"{label}: ls -l renders overlay owner", " 500 dev " in out)
+        rows = [line.split() for line in out.splitlines()]
+        check(
+            f"{label}: ls -l renders overlay owner",
+            any(row[2:4] == ["500", "nogroup"] for row in rows),
+        )
         check(f"{label}: ls -l renders touched mtime", "Mar  4  2026" in out)
     await run(ws, f"touch -r {dst}/copied/n.txt /ram/tref.txt")
     st = await stat_of(ws, "/ram/tref.txt")
@@ -564,11 +568,12 @@ async def check_metadata(
         code == 0 and "absent.txt" not in out,
     )
     await run(ws, f"ln -s {dst}/copied/n.txt /ram/nl.txt")
-    await run(ws, "chown -h 501:ops /ram/nl.txt")
+    _, _, code = await run(ws, "chown -h 501:root /ram/nl.txt")
+    link, _, _ = await run(ws, "stat -c '%u %g' /ram/nl.txt")
     st = await stat_of(ws, f"{dst}/copied/n.txt")
     check(
         f"{label}: chown -h leaves target owner",
-        (st.uid, st.gid) == (500, "dev"),
+        code == 0 and link == "501 0\n" and (st.uid, st.gid) == (500, 65534),
     )
     await run(ws, "printf 'x\n' >> /ram/nl.txt")
     st = await stat_of(ws, f"{dst}/copied/n.txt")

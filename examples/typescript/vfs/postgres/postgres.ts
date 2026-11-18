@@ -75,7 +75,7 @@ try {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${dir}/rows.jsonl ===`)
     const metaRes = await ws.shell(
-      `chmod 640 ${shellQuote(`${dir}/rows.jsonl`)} && chown 500:dev ${shellQuote(`${dir}/rows.jsonl`)} && touch -t 202601021530 ${shellQuote(`${dir}/rows.jsonl`)}`,
+      `chmod 640 ${shellQuote(`${dir}/rows.jsonl`)} && chown 500:nogroup ${shellQuote(`${dir}/rows.jsonl`)} && touch -t 202601021530 ${shellQuote(`${dir}/rows.jsonl`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     try {

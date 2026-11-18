@@ -1245,6 +1245,7 @@ export function parseFlags(
   const columns: LsColumns = Object.freeze({
     owner: !fl.asBool('g'),
     group: !(fl.asBool('o') || fl.asBool('no_group')),
+    numeric: fl.asBool('numeric_uid_gid'),
     author: fl.asBool('author'),
     inode: fl.asBool('inode'),
     blocks: fl.asBool('size'),

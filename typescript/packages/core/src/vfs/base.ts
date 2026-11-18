@@ -243,6 +243,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * answer, as a full scan would.
    */
   readonly searchable: readonly string[] | null = null
+
+  /** The search covers every ordinary file and omitted entries have no per-file access failures. */
+  readonly searchCoversTree: boolean = false
   /**
    * `filesContaining` answers only a whole-word search (grep -w, rg -w);
    * any other pattern reads every file.

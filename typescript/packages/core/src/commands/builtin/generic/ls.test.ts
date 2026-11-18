@@ -415,7 +415,7 @@ describe('honest per-entry errors', () => {
     [
       stamped('/apple.txt', 'ENOENT'),
       { args_l: true },
-      '?????????? ? ? ? ?            ? apple.txt',
+      '?????????? ? ?    ?    ?            ? apple.txt',
       "ls: cannot access '/apple.txt': No such file or directory\n",
     ],
     [
@@ -427,7 +427,7 @@ describe('honest per-entry errors', () => {
     [
       stamped('/apple.txt', 'EIO'),
       { args_l: true },
-      '?????????? ? ? ? ?            ? apple.txt',
+      '?????????? ? ?    ?    ?            ? apple.txt',
       "ls: cannot access '/apple.txt': Input/output error\n",
     ],
   ])('lists an entry whose stat failed with %s under %o', async (err, flags, row, expected) => {
@@ -723,8 +723,8 @@ describe('dot entries respect mount boundaries', () => {
           const dotMode = subdir ? 'drwxr-x---' : 'drwxr-x--x'
           const parentMode =
             subdir || !prefix ? 'drwxr-x--x' : namespace ? 'drwx------' : 'drwxr-xr-x'
-          expect(output).toContain(`${dotMode} 1 - - 4096 - .\n`)
-          expect(output).toContain(`${parentMode} 1 - - 4096 - ..\n`)
+          expect(output).toContain(`${dotMode} 1 root root 4096 - .\n`)
+          expect(output).toContain(`${parentMode} 1 root root 4096 - ..\n`)
           if (namespace) {
             const parent = subdir ? root : root.slice(0, root.lastIndexOf('/')) || '/'
             expect(statPath.mock.calls.slice(-2)).toEqual([[directory], [parent]])
@@ -968,7 +968,7 @@ describe('ls formats, quoting and ignore patterns', () => {
 it.each([
   [
     "touch -d '2024-03-05 06:07:08' /d/a; ls -lD /d/a",
-    '  -rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n//DIRED// 34 38\n//DIRED-OPTIONS// --quoting-style=literal\n',
+    '  -rw-r--r-- 1 root root 0 Mar  5  2024 /d/a\n//DIRED// 40 44\n//DIRED-OPTIONS// --quoting-style=literal\n',
   ],
   ['mkdir /d/e; ls --dired -l /d/e', '  total 0\n//DIRED-OPTIONS// --quoting-style=literal\n'],
   [
@@ -977,15 +977,15 @@ it.each([
   ],
   [
     "touch -d '2024-03-05 06:07:08' '/d/b c'; ls -lDQ '/d/b c'",
-    '  -rw-r--r-- 1 - - 0 Mar  5  2024 "/d/b c"\n//DIRED// 34 42\n//DIRED-OPTIONS// --quoting-style=c\n',
+    '  -rw-r--r-- 1 root root 0 Mar  5  2024 "/d/b c"\n//DIRED// 40 48\n//DIRED-OPTIONS// --quoting-style=c\n',
   ],
   [
     "touch -d '2024-03-05 06:07:08' /d/a; ls -l --author /d/a",
-    '-rw-r--r-- 1 - - - 0 Mar  5  2024 /d/a\n',
+    '-rw-r--r-- 1 root root root 0 Mar  5  2024 /d/a\n',
   ],
   [
     "touch -d '2024-03-05 06:07:08' /d/a; ls -lg --author /d/a",
-    '-rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n',
+    '-rw-r--r-- 1 root root 0 Mar  5  2024 /d/a\n',
   ],
   ['touch /d/a; ls -D -C /d/a', '/d/a\n'],
 ])('%s', async (line, stdout) => {

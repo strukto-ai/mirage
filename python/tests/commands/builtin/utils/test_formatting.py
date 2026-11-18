@@ -83,7 +83,7 @@ def test_size_and_time_are_independently_unknown(size, modified, expected):
     )
     assert (
         formatting.format_ls_long([row])[0]
-        == f"-rw-r--r-- 1 - - {expected} file"
+        == f"-rw-r--r-- 1 root root {expected} file"
     )
 
 
@@ -168,7 +168,7 @@ def test_format_ls_long_regular_file():
         modified="2026-01-01T00:00:00Z",
     )
     [line] = formatting.format_ls_long([stat])
-    assert line == "-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt"
+    assert line == "-rw-r--r-- 1 root root 5 Jan  1  2026 file.txt"
 
 
 def test_format_ls_long_owner_and_group_are_the_profile():
@@ -187,23 +187,39 @@ def test_format_ls_long_owner_and_group_are_the_profile():
     assert line == "-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt"
 
 
+def test_format_ls_long_aligns_a_number_right_and_a_name_left():
+    stat = FileStat(
+        name="f", size=0, type=FileType.FILE, modified="2026-01-01T00:00:00Z"
+    )
+    rows = [replace(stat, uid=77, gid=77), replace(stat, uid=0, gid=0)]
+    long = [line[:22] for line in formatting.format_ls_long(rows)]
+    assert long == ["-rw-r--r-- 1   77   77", "-rw-r--r-- 1 root root"]
+    numeric = formatting.format_ls_long(
+        rows, columns=replace(formatting.DEFAULT_COLUMNS, numeric=True)
+    )
+    assert [line[:18] for line in numeric] == [
+        "-rw-r--r-- 1 77 77",
+        "-rw-r--r-- 1  0  0",
+    ]
+
+
 def test_format_ls_long_metadata_less_row_keeps_the_owner_columns():
     # A synthetic directory with neither size nor mtime shows DIR_SIZE
     # and `-` for the time rather than inventing the epoch, and still
     # names who the session is; a file with neither shows `-` for both.
     stat = FileStat(name="dev", type=FileType.DIRECTORY)
     [line] = formatting.format_ls_long([stat])
-    assert line == "drwxr-xr-x 1 - - 4096 - dev"
+    assert line == "drwxr-xr-x 1 root root 4096 - dev"
     [line] = formatting.format_ls_long(
         [stat], identity=Identity(profile="admin")
     )
     assert line == "drwxr-xr-x 1 admin admin 4096 - dev"
     [line] = formatting.format_ls_long([stat], human=True)
-    assert line == "drwxr-xr-x 1 - - 4.0K - dev"
+    assert line == "drwxr-xr-x 1 root root 4.0K - dev"
     [line] = formatting.format_ls_long(
         [FileStat(name="page", type=FileType.FILE)]
     )
-    assert line == "-rw-r--r-- 1 - - - - page"
+    assert line == "-rw-r--r-- 1 root root - - page"
 
 
 def test_format_ls_long_device_row():

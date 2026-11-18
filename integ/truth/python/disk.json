@@ -127,7 +127,7 @@
     "=== metadata writes refuse on read-only mounts ===",
     "$ chmod 600 /data/example.json",
     "  exit=1  chmod: changing permissions of '/data/example.json': Read-only file system",
-    "$ chown 500:dev /data/example.json",
+    "$ chown 500:nogroup /data/example.json",
     "  exit=1  chown: changing ownership of '/data/example.json': Read-only file system",
     "$ touch -t 202601021530 /data/example.json",
     "  exit=1  touch: cannot touch '/data/example.json': Read-only file system",

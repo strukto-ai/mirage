@@ -77,11 +77,23 @@ async def test_cd_slash_and_pwd():
 
 
 @pytest.mark.asyncio
-async def test_cd_tilde_unset_home_goes_to_root():
+async def test_cd_tilde_unset_home_goes_to_the_users_home():
     ws = _make_ws()
     r = await ws.shell("cd /ram/subdir && cd ~ && pwd")
-    assert r.exit_code == 0
-    assert await r.stdout_str() == "/\n"
+    assert r.exit_code == 1
+    assert (
+        await r.stderr_str()
+        == "bash: line 1: cd: /root: No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_per_call_cwd_or_env_keeps_the_session_user():
+    ws = _make_ws()
+    r = await ws.shell("echo ~ ~root $UID", cwd="/ram")
+    assert await r.stdout_str() == "/root /root 0\n"
+    r = await ws.shell("declare -p UID EUID", env={"UID": "5"})
+    assert await r.stdout_str() == 'declare -x UID="5"\ndeclare -ir EUID="0"\n'
 
 
 @pytest.mark.asyncio

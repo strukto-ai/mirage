@@ -417,7 +417,7 @@ async def main():
     print("=== metadata overlay on /gcs/data/example.jsonl ===")
     meta_res = await ws.shell(
         'chmod 640 "/gcs/data/example.jsonl"'
-        ' && chown 500:dev "/gcs/data/example.jsonl"'
+        ' && chown 500:nogroup "/gcs/data/example.jsonl"'
         ' && touch -t 202601021530 "/gcs/data/example.jsonl"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

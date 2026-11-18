@@ -39,7 +39,8 @@
     "integ/unix/find/hosts.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
     "integ/unix/cp/debug.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
     "integ/crossmount/cp/debug.json": "This flag is read above the backend, so ram and disk cover what a copy across two mounts reports.",
-    "integ/unix/tar/umask.json": "The case reads back each extracted member's permission bits, a directory's included, under two umasks and with -p, so it needs a backend that keeps an empty directory and its mode: ram, disk, redis and opfs. hf keeps no empty directory."
+    "integ/unix/tar/umask.json": "The case reads back each extracted member's permission bits, a directory's included, under two umasks and with -p, so it needs a backend that keeps an empty directory and its mode: ram, disk, redis and opfs. hf keeps no empty directory.",
+    "integ/unix/id/root.json": "Each case pins the user a session with no profile runs as, root. statvfs, the directory's modal target, runs every session under a profile, so these run on ram and disk, which declare none; what they read (id, whoami, groups, $UID, ~) sits above every backend."
   },
   "entries": {
     "integ/unix/bc/files.json :: bc_a_file_is_named_by_its_bytes": {

@@ -14,7 +14,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1076,7 +1076,9 @@ def _opens_file(r: Redirect) -> bool:
     )
 
 
-def unowned_redirects(node: Any, home: str | None) -> list[Word]:
+def unowned_redirects(
+    node: Any, homes: Mapping[str, str] | None
+) -> list[Word]:
     """The literal targets of every redirect in a parsed line that no
     command owns: a compound statement's, a bare one's, a bare
     ``exec``'s, an assignment's. A command's own redirects are its words
@@ -1085,7 +1087,8 @@ def unowned_redirects(node: Any, home: str | None) -> list[Word]:
 
     Args:
         node (Any): the parsed line, or any node in it.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     out: list[Word] = []
     stack = [node]
@@ -1105,7 +1108,7 @@ def unowned_redirects(node: Any, home: str | None) -> list[Word]:
         ):
             continue
         out.extend(
-            Word(str(r.target), literal_word(r.target_node, home))
+            Word(str(r.target), literal_word(r.target_node, homes))
             for r in redirects
             if _opens_file(r)
         )
@@ -1123,7 +1126,9 @@ def statement_stdin(node: Any) -> bytes | None:
     )
 
 
-def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
+def statement_redirects(
+    node: Any, homes: Mapping[str, str] | None
+) -> tuple[Word, ...]:
     """The redirect targets of the statement holding a command, as the
     gate reads its words: the raw text and the literal it names, None
     when only the runtime can expand it (refused wherever a rule reads
@@ -1145,10 +1150,11 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
 
     Args:
         node (Any): the command's parsed node.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     return tuple(
-        Word(str(r.target), literal_word(r.target_node, home))
+        Word(str(r.target), literal_word(r.target_node, homes))
         for r in statement_redirects_raw(node)
         if _opens_file(r)
     )

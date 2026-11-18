@@ -93,7 +93,7 @@ export class DevVFS extends RAMVFS {
   }
 
   /** Null: a walk of /dev is one readdir. Mirrors Python's `read_tree`. */
-  override readTree(_path: PathSpec): Promise<Map<string, FileStat> | null> {
+  override readTree(_path: PathSpec, _handed?: Handed): Promise<Map<string, FileStat> | null> {
     return Promise.resolve(null)
   }
 

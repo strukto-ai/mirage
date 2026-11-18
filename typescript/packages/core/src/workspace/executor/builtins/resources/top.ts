@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UNKNOWN_NAME } from '../../../../commands/builtin/utils/identity.ts'
+import { ownerLabel } from '../../../../commands/builtin/utils/identity.ts'
 import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
@@ -179,7 +179,7 @@ function table(
   rows: readonly Process[],
   options: TopOptions,
   many: boolean,
-  owner: string | null,
+  owner: string,
 ): string[] {
   const width = Math.max(MACHINE_HEADER.length, ...rows.map((info) => shownMachine(info).length))
   const place = many ? `${MACHINE_HEADER.padEnd(width)} ` : ''
@@ -193,7 +193,7 @@ function table(
     const state = info.shownState ?? STATES[info.state]
     const where = many ? `${shownMachine(info).padEnd(width)} ` : ''
     const line =
-      `${String(shownPid(info)).padStart(5)} ${(owner ?? UNKNOWN_NAME).padEnd(8)} ${'20'.padStart(3)} ` +
+      `${String(shownPid(info)).padStart(5)} ${owner.padEnd(8)} ${'20'.padStart(3)} ` +
       `${'0'.padStart(3)} ${kib(usage.vsz, 7).padStart(7)} ${kib(usage.rss, 6).padStart(6)} ` +
       `${'0'.padStart(6)} ${state} ${oneDecimal(usage.cpuPercent).padStart(5)} ` +
       `${oneDecimal(usage.memoryPercent).padStart(5)} ${cpuClock(usage.cpuSeconds).padStart(9)} ${where}`
@@ -266,7 +266,14 @@ async function frameOf(
       lines.push(scope.several ? withMachine(line, row.machine) : line)
   lines.push('')
   const shown = since(rows, samples, performance.now() / 1000)
-  lines.push(...table(shown, options, scope.several, session?.profile ?? null))
+  lines.push(
+    ...table(
+      shown,
+      options,
+      scope.several,
+      ownerLabel(null, { profile: session?.profile ?? null }),
+    ),
+  )
   const cut =
     options.narrowed && !scope.several ? lines.map((line) => line.slice(0, options.width)) : lines
   return [cut.map((line) => `${line}\n`).join(''), errors]

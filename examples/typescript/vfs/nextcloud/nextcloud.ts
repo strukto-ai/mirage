@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${testFile} ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${testFile}" && chown 500:dev "${testFile}" && touch -t 202601021530 "${testFile}"`,
+      `chmod 640 "${testFile}" && chown 500:nogroup "${testFile}" && touch -t 202601021530 "${testFile}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', testFile)) as FileStat

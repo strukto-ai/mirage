@@ -94,7 +94,7 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
       { mode: MountMode.WRITE, namespaceStore: makeStore(prefix) },
     )
     await ws.shell('echo alpha > /data/f.txt')
-    await ws.shell('chmod 601 /data/f.txt && chown 500:dev /data/f.txt')
+    await ws.shell('chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt')
     await ws.shell('ln -s /data/f.txt /data/link')
     await ws.close()
 
@@ -106,7 +106,7 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
     const st = (await reborn.dispatch('stat', '/data/f.txt')) as FileStat
     expect(st.mode).toBe(0o601)
     expect(st.uid).toBe(500)
-    expect(st.gid).toBe('dev')
+    expect(st.gid).toBe(65534)
     const r = await reborn.shell('readlink /data/link')
     expect(r.stdoutText).toBe('/data/f.txt\n')
     const cleaner = makeStore(prefix)

@@ -19,6 +19,7 @@ from collections.abc import (
     Callable,
     Generator,
     Iterator,
+    Mapping,
     Sequence,
 )
 from dataclasses import dataclass
@@ -103,7 +104,7 @@ from mirage.workspace.node.occurrence import (
     whole_occurrence,
 )
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.shell_dirs import tilde_home
+from mirage.workspace.session.shell_dirs import tilde_homes
 from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
 
 # How the explanation tree names a parse node that shapes a line; a node
@@ -842,19 +843,20 @@ Stand = tuple[SessionState, bool, tuple[SessionState, ...]]
 Walk = Generator[Walked, None, Stand]
 
 
-def _words_of(node: Any, home: str | None) -> list[Word]:
+def _words_of(node: Any, homes: Mapping[str, str] | None) -> list[Word]:
     """One command node's words, name first, the env prefix dropped.
 
     Args:
         node (Any): the command's parsed node.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     _, parts = split_env_prefix(get_parts(node))
-    return [read_word(part, home) for part in parts]
+    return [read_word(part, homes) for part in parts]
 
 
 def _seeded(
-    node: Any, session: SessionState, home: str | None
+    node: Any, session: SessionState, homes: Mapping[str, str] | None
 ) -> SessionState:
     """The session a command runs in: ``session`` with the command's own
     ``NAME=value`` prefix exported, as the executor seeds it before the
@@ -865,7 +867,8 @@ def _seeded(
     Args:
         node (Any): the command's tree-sitter node.
         session (SessionState): the session the command stands in.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     assigned, _ = split_env_prefix(get_parts(node))
     if not assigned:
@@ -879,7 +882,7 @@ def _seeded(
             c for c in part.named_children if c.type != NodeType.VARIABLE_NAME
         ]
         seed_var(
-            seeded, key, read_word(values[0], home).value if values else raw
+            seeded, key, read_word(values[0], homes).value if values else raw
         )
         set_attr(seeded, key, VarAttr.EXPORT)
     return seeded
@@ -888,7 +891,7 @@ def _seeded(
 def _walk_substitution(
     tree: Any,
     session: SessionState,
-    home: str | None,
+    homes: Mapping[str, str] | None,
     frame: Frame,
     lost: bool,
     elsewhere: tuple[SessionState, ...],
@@ -898,7 +901,8 @@ def _walk_substitution(
     Args:
         tree (Any): the freshly parsed substitution body.
         session (SessionState): the shell whose paths are read.
-        home (str | None): home directory for literal tilde expansion.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
         frame (Frame): the body's occurrence frame.
         lost (bool): whether the shell's cwd is lost, as ``Walked``
             carries it.
@@ -908,27 +912,27 @@ def _walk_substitution(
     redirect = input_substitution_redirect(tree)
     if redirect is None:
         return (
-            yield from _walk_node(tree, session, home, frame, lost, elsewhere)
+            yield from _walk_node(tree, session, homes, frame, lost, elsewhere)
         )
     target = redirect.target_node
     assert target is not None
     yield Walked(
         [Word("cat", "cat")],
-        (Word(get_text(target), literal_word(target, home)),),
+        (Word(get_text(target), literal_word(target, homes)),),
         session,
         occurrence_in(tree, frame),
         True,
         lost,
         elsewhere=elsewhere,
     )
-    yield from _walk_node(target, session, home, frame, lost, elsewhere)
+    yield from _walk_node(target, session, homes, frame, lost, elsewhere)
     return session, lost, elsewhere
 
 
 def _walk_node(
     node: Any,
     session: SessionState,
-    home: str | None,
+    homes: Mapping[str, str] | None,
     frame: Frame,
     lost: bool = False,
     elsewhere: tuple[SessionState, ...] = (),
@@ -964,7 +968,8 @@ def _walk_node(
     Args:
         node (Any): the parsed node to walk.
         session (SessionState): the session this node begins in.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
         frame (Frame): the scope the node is read in.
         lost (bool): whether the node begins with its cwd lost, as
             ``Walked`` carries it.
@@ -976,10 +981,10 @@ def _walk_node(
     if node.type == NodeType.TEST_COMMAND:
         # The shell's own test, judged as a command of its own name, a
         # test at a time as the gate admits it.
-        for test in reads_of_test(node, home):
+        for test in reads_of_test(node, homes):
             yield Walked(
                 test.words,
-                statement_redirects(node, home),
+                statement_redirects(node, homes),
                 session,
                 occurrence_in(node, frame),
                 True,
@@ -989,25 +994,29 @@ def _walk_node(
                 elsewhere=elsewhere,
             )
         for child in node.children:
-            yield from _walk_node(child, session, home, frame, lost, elsewhere)
+            yield from _walk_node(
+                child, session, homes, frame, lost, elsewhere
+            )
         return session, lost, elsewhere
     if node.type == NodeType.COMMAND:
         walked: Stand = session, lost, elsewhere
-        words = _words_of(node, home)
+        words = _words_of(node, homes)
         if words:
             yield Walked(
                 words,
-                statement_redirects(node, home),
-                _seeded(node, session, home),
+                statement_redirects(node, homes),
+                _seeded(node, session, homes),
                 occurrence_in(node, frame),
                 lost=lost,
                 stdin=statement_stdin(node),
-                elsewhere=tuple(_seeded(node, e, home) for e in elsewhere),
+                elsewhere=tuple(_seeded(node, e, homes) for e in elsewhere),
             )
             walked = _after_cd(words, session, lost, elsewhere)
         for child in node.children:
             # A substitution among the words runs in its own shell.
-            yield from _walk_node(child, session, home, frame, lost, elsewhere)
+            yield from _walk_node(
+                child, session, homes, frame, lost, elsewhere
+            )
         return walked
     if node.type in FORK_SCOPES:
         segments = segment_frames(node, frame)
@@ -1019,7 +1028,7 @@ def _walk_node(
                 yield from _walk_substitution(
                     parse(segment.text, expanding_aliases(session)),
                     session,
-                    home,
+                    homes,
                     segment,
                     lost,
                     elsewhere,
@@ -1030,7 +1039,7 @@ def _walk_node(
             yield from _walk_substitution(
                 parse(inner.text, expanding_aliases(session)),
                 session,
-                home,
+                homes,
                 Frame(inner.text, 0, inner.parent),
                 lost,
                 elsewhere,
@@ -1039,7 +1048,7 @@ def _walk_node(
         yield from _walk_children(
             node,
             session,
-            home,
+            homes,
             frame if inner is None else inner,
             lost,
             elsewhere,
@@ -1047,16 +1056,20 @@ def _walk_node(
         return session, lost, elsewhere
     if node.type == NodeType.PIPELINE:
         for child in node.children:
-            yield from _walk_node(child, session, home, frame, lost, elsewhere)
+            yield from _walk_node(
+                child, session, homes, frame, lost, elsewhere
+            )
         return session, lost, elsewhere
-    if node.type in REPEATED_SCOPES and _moves(node, session, home):
+    if node.type in REPEATED_SCOPES and _moves(node, session, homes):
         lost = True
     return (
-        yield from _walk_children(node, session, home, frame, lost, elsewhere)
+        yield from _walk_children(node, session, homes, frame, lost, elsewhere)
     )
 
 
-def _moves(node: Any, session: SessionState, home: str | None) -> bool:
+def _moves(
+    node: Any, session: SessionState, homes: Mapping[str, str] | None
+) -> bool:
     """Whether a command in a scope may move the shell's cwd, outside the
     child shells it forks (a subshell, a substitution, a pipeline's
     stages, a job sent to the background), as ``_walk_node`` reads them:
@@ -1066,7 +1079,8 @@ def _moves(node: Any, session: SessionState, home: str | None) -> bool:
     Args:
         node (Any): the scope's parsed node.
         session (SessionState): the session the scope begins in.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
     """
     stack = [node]
     while stack:
@@ -1074,7 +1088,7 @@ def _moves(node: Any, session: SessionState, home: str | None) -> bool:
         if current.type in FORK_SCOPES or current.type == NodeType.PIPELINE:
             continue
         if current.type == NodeType.COMMAND:
-            words = _words_of(current, home)
+            words = _words_of(current, homes)
             if words:
                 moved, lost, _ = _after_cd(words, session, False, ())
                 if lost or moved is not session:
@@ -1091,7 +1105,7 @@ def _moves(node: Any, session: SessionState, home: str | None) -> bool:
 def _walk_children(
     node: Any,
     session: SessionState,
-    home: str | None,
+    homes: Mapping[str, str] | None,
     frame: Frame,
     lost: bool,
     elsewhere: tuple[SessionState, ...],
@@ -1102,7 +1116,8 @@ def _walk_children(
     Args:
         node (Any): the parsed node whose children form the scope.
         session (SessionState): the session the scope begins in.
-        home (str | None): the home directory a leading ``~`` names.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
         frame (Frame): the scope the children are read in.
         lost (bool): whether the scope begins with its cwd lost.
         elsewhere (tuple[SessionState, ...]): the other places the
@@ -1112,7 +1127,7 @@ def _walk_children(
     for index, child in enumerate(children):
         after = children[index + 1] if index + 1 < len(children) else None
         ended = yield from _walk_node(
-            child, session, home, frame, lost, elsewhere
+            child, session, homes, frame, lost, elsewhere
         )
         if after is not None and after.type == "&":
             continue
@@ -1200,7 +1215,7 @@ def _walked_line(
     """
     if frame is None:
         frame = root_frame(ast, None)
-    yield from _walk_node(ast, session, tilde_home(session), frame, lost)
+    yield from _walk_node(ast, session, tilde_homes(session), frame, lost)
 
 
 async def line_judgments(
@@ -1500,7 +1515,7 @@ async def admit_line(
         if refused is not None:
             return refused
     targets = redirect_paths(
-        unowned_redirects(ast, tilde_home(session)), registry, session.cwd
+        unowned_redirects(ast, tilde_homes(session)), registry, session.cwd
     )
     return await admit_redirect(targets, session, registry, namespace)
 

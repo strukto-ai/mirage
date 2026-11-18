@@ -34,6 +34,111 @@
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
         "stderr": "chown: unrecognized option '--bogus'\nTry 'chown --help' for more information.\nchown: -R --dereference requires either -H or -L\nchown: invalid option -- 'Q'\nTry 'chown --help' for more information.\nchown: missing operand after '0'\nTry 'chown --help' for more information.\n"
       }
+    },
+    {
+      "id": "chown_resolves_names_through_the_user_database",
+      "seq": 15000023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fcn.txt; chown zz /data/fcn.txt; chown root:zz /data/fcn.txt; chown 4242: /data/fcn.txt; chown -v nobody: /data/fcn.txt; stat -c '%U %u %G %g' /data/fcn.txt; find /data -maxdepth 1 -user nobody -name fcn.txt; find /data -maxdepth 1 -user zz; chown 4242 /data/fcn.txt; ls -l /data/fcn.txt | cut -d' ' -f3,4; find /data -maxdepth 1 -nouser -name fcn.txt; rm /data/fcn.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "changed ownership of '/data/fcn.txt' from root:root to nobody:nogroup\nnobody 65534 nogroup 65534\n/data/fcn.txt\n4242 nogroup\n/data/fcn.txt\n",
+        "stderr": "chown: invalid user: 'zz'\nchown: invalid group: 'root:zz'\nchown: invalid spec: '4242:'\nfind: invalid user name or UID argument to -user: 'zz'\n"
+      }
+    },
+    {
+      "id": "chown_reference_copies_the_session_owner_a_file_reports_none_of",
+      "seq": 15000024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fc0r1.txt; printf y > /data/fc0r2.txt; chown 4242:4343 /data/fc0r2.txt; chown -v --reference=/data/fc0r1.txt /data/fc0r2.txt; stat -c '%u:%g %U:%G' /data/fc0r2.txt; chgrp 77 /data/fc0r2.txt; chgrp -c --reference=/data/fc0r1.txt /data/fc0r2.txt; stat -c '%g %G' /data/fc0r2.txt; rm -f /data/fc0r1.txt /data/fc0r2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "changed ownership of '/data/fc0r2.txt' from 4242:4343 to root:root\n0:0 root:root\nchanged group of '/data/fc0r2.txt' from 77 to root\n0 root\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chown_plus_forces_a_number_and_a_number_has_no_login_group",
+      "seq": 15000025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fcp.txt; chown +65534 /data/fcp.txt; chgrp +20 /data/fcp.txt; stat -c '%u %g' /data/fcp.txt; chown 0: /data/fcp.txt; echo $?; chown ++5 /data/fcp.txt; echo $?; find /data -maxdepth 1 -user +65534 -name fcp.txt; groups 0; echo $?; id -u +0; chown 0000077:00077 /data/fcp.txt; printf y > /data/fcq.txt; ls -l /data/fcp.txt /data/fcq.txt | cut -c1-22; ls -n /data/fcp.txt /data/fcq.txt | cut -c1-18; stat -c '[%.5u] [%.2U:%.2G] [%.0g]' /data/fcq.txt; chown 4294967295 /data/fcp.txt; echo $?; chgrp 99999999999 /data/fcp.txt; echo $?; rm /data/fcp.txt /data/fcq.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "65534 20\n1\n1\n/data/fcp.txt\n1\n0\n-rw-r--r-- 1   77   77\n-rw-r--r-- 1 root root\n-rw-r--r-- 1 77 77\n-rw-r--r-- 1  0  0\n[00000] [ro:ro] []\n1\n1\n",
+        "stderr": "chown: invalid spec: '0:'\nchown: invalid user: '++5'\ngroups: '0': no such user\nchown: invalid user: '4294967295'\nchgrp: invalid group: '99999999999'\n"
+      }
     }
   ]
 }

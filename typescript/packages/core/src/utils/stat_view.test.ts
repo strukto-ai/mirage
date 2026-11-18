@@ -22,6 +22,7 @@ import {
   DIR_SIZE,
   FIFO_MODE,
   FILE_MODE,
+  idNumber,
   isDir,
   isFifo,
   isLink,
@@ -185,4 +186,21 @@ it('reads directory and regular type bits and leaves unspecified types unknown',
   expect(modeType(0o100644)).toBe(FileType.FILE)
   expect(modeType(0o644)).toBeUndefined()
   expect(modeType(undefined)).toBeUndefined()
+})
+
+describe('idNumber', () => {
+  it('reads ASCII digits after an optional plus', () => {
+    expect(idNumber('1000')).toBe(1000)
+    expect(idNumber('+0')).toBe(0)
+    for (const text of ['', '+', '++5', '-5', ' 5', 'root', '\u00b2']) {
+      expect(idNumber(text)).toBeNull()
+    }
+  })
+
+  it('reads leading zeros up to the largest id', () => {
+    expect(idNumber(`+${'0'.repeat(5000)}1`)).toBe(1)
+    expect(idNumber('4294967295')).toBe(4294967295)
+    expect(idNumber('4294967296')).toBeNull()
+    expect(idNumber('99999999999')).toBeNull()
+  })
 })

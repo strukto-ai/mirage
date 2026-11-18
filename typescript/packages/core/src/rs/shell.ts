@@ -988,6 +988,14 @@ export class Shell {
     return this.call('held') as number
   }
 
+  /**
+   * Read `~` and `~name` against the session's user database: `home` while
+   * `HOME` is unset, and each of `names` at its `homes` entry.
+   */
+  useHomes(home: string, names: readonly string[], homes: readonly string[]): void {
+    this.call('use_homes', home, names, homes)
+  }
+
   /** Hide the names a session's visibility lists, exactly or by glob. */
   hide(names: readonly string[], patterns: readonly string[]): void {
     this.call('hide', names, patterns)

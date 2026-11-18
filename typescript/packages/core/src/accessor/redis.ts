@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CommandKey } from '../cache/index/scope.ts'
 import { Accessor } from './base.ts'
 import type { RedisStoreLike } from '../vfs/redis/store.ts'
 
 export class RedisAccessor extends Accessor {
   readonly store: RedisStoreLike
+  readonly walks = new WeakMap<CommandKey, { base: string; names: string[] | null }>()
 
   constructor(store: RedisStoreLike) {
     super()

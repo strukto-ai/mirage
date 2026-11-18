@@ -175,6 +175,9 @@ class BaseVFS:
     # what is below it); None for every file. grep and rg read any other
     # file whatever the answer, as a full scan would.
     searchable: tuple[str, ...] | None = None
+    # Search covers every ordinary file, including files in nested directories.
+    # Omitted entries have no per-file access failures.
+    search_covers_tree: bool = False
 
     # ``files_containing`` answers only a whole-word search (grep -w,
     # rg -w); any other pattern reads every file.

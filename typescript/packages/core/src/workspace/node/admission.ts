@@ -805,10 +805,13 @@ export function statementStdin(node: TSNodeLike): Uint8Array | null {
   return statementRedirectsRaw(node).some((r) => r.fd === 0) ? new Uint8Array(0) : null
 }
 
-export function statementRedirects(node: TSNodeLike, home: string | null): Word[] {
+export function statementRedirects(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null,
+): Word[] {
   return statementRedirectsRaw(node)
     .filter(opensFile)
-    .map((r) => ({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, home) }))
+    .map((r) => ({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, homes) }))
 }
 
 /**
@@ -818,7 +821,10 @@ export function statementRedirects(node: TSNodeLike, home: string | null): Word[
  * read for a line a runtime takes whole, where no executor opens them.
  * Mirrors Python's unowned_redirects.
  */
-export function unownedRedirects(node: TSNodeLike, home: string | null): Word[] {
+export function unownedRedirects(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null,
+): Word[] {
   const out: Word[] = []
   const stack: TSNodeLike[] = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
@@ -831,7 +837,7 @@ export function unownedRedirects(node: TSNodeLike, home: string | null): Word[] 
     }
     if (owner !== null && REDIRECT_OWNERS.has(owner.type) && !isBareExec(owner)) continue
     for (const r of redirects.filter(opensFile)) {
-      out.push({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, home) })
+      out.push({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, homes) })
     }
   }
   return out

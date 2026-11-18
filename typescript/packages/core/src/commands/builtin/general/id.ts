@@ -19,7 +19,14 @@ import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { UNKNOWN_NAME, identityOf } from '../utils/identity.ts'
+import {
+  findUser,
+  identityOf,
+  ownAccount,
+  sessionGid,
+  sessionUid,
+  type Account,
+} from '../utils/identity.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,10 +35,14 @@ const ONE_CHOICE = 'id: cannot print "only" of more than one choice\n'
 const NAMES_NEED = 'id: printing only names or real IDs requires -u, -g, or -G\n'
 const ZERO_DEFAULT = 'id: option --zero not permitted in default format\n'
 
-// GNU `id` over mirage's identity: the session's profile, as both its user
-// and its group. Mirage has names but no numbers, so every id slot holds the
-// name, `-` for a session with no profile; errors and their order are
-// coreutils 9.7's.
+function named(number: number, name: string | null): string {
+  return name === null ? String(number) : `${String(number)}(${name})`
+}
+
+// GNU `id` over the session's user database: root for a session with no
+// profile, the profile's user (uid 1000) for a named one, and uid 1000 with
+// no name for a document passed without one. Each user is in its own group
+// alone; errors and their order are coreutils 9.7's.
 function idCmd(
   _accessor: Accessor,
   _paths: PathSpec[],
@@ -50,28 +61,42 @@ function idCmd(
   if (only.length === 0 && zero)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(ZERO_DEFAULT) })]
   const identity = identityOf(ctx)
-  const user = identity.profile ?? UNKNOWN_NAME
-  const group = user
   const end = zero ? '\0' : '\n'
   const out: string[] = []
   const err: string[] = []
+  const rows: [number, string | null, number, string | null][] = []
   const names: (string | null)[] = texts.length > 0 ? texts : [null]
   for (const name of names) {
-    if (name !== null && name !== identity.profile) {
-      const why = name === '' ? ': No such file or directory' : ''
-      err.push(`id: '${quoteText(name)}': no such user${why}\n`)
-      continue
+    let found: Account | null
+    if (name === null) {
+      found = ownAccount(identity)
+      if (found === null) {
+        rows.push([sessionUid(identity), null, sessionGid(identity), null])
+        continue
+      }
+    } else {
+      found = findUser(identity, name)
+      if (found === null) {
+        const why = name === '' ? ': No such file or directory' : ''
+        err.push(`id: '${quoteText(name)}': no such user${why}\n`)
+        continue
+      }
     }
+    rows.push([found.uid, found.name, found.gid, found.group])
+  }
+  const many = zero && only.length === 1 && only[0] === 'groups' && texts.length > 1
+  for (const [uid, user, gid, group] of rows) {
     const choice = only[0]
     if (choice === undefined) {
-      out.push(`uid=${user} gid=${group} groups=${group}${end}`)
+      out.push(`uid=${named(uid, user)} gid=${named(gid, group)} groups=${named(gid, group)}${end}`)
       continue
     }
     const kind = choice === 'user' ? 'user' : 'group'
-    const known = identity.profile
-    if (useName && known === null) err.push(`id: cannot find name for ${kind} ID\n`)
-    const many = zero && choice === 'groups' && texts.length > 1
-    out.push((kind === 'user' ? user : group) + (many ? '\0\0' : end))
+    const [number, label] = kind === 'user' ? [uid, user] : [gid, group]
+    if (useName && label === null)
+      err.push(`id: cannot find name for ${kind} ID ${String(number)}\n`)
+    const shown = useName && label !== null ? label : String(number)
+    out.push(shown + (many ? '\0\0' : end))
   }
   const body = out.join('')
   return [

@@ -454,19 +454,21 @@ class FakeRedis {
         for (const [field, value] of fields) out.push(ENC.encode(field), ENC.encode(value))
         return out
       }
-      case 'SCAN': {
-        if (rest.length === 0) throw wrongArity(name)
-        const cursor = Number(key)
+      case 'SCAN':
+      case 'SSCAN': {
+        const start = name === 'SSCAN' ? 1 : 0
+        if (rest[start] === undefined) throw wrongArity(name)
+        const cursor = Number(argText(rest[start]))
         let match: RegExp | null = null
         let count = 10
-        for (let i = 1; i < rest.length; i += 2) {
+        for (let i = start + 1; i < rest.length; i += 2) {
           const option = argText(rest[i] ?? '').toUpperCase()
           const value = argText(rest[i + 1] ?? '')
           if (option === 'MATCH') match = globRegExp(value)
           else if (option === 'COUNT') count = Number(value)
           else throw new Error('ERR syntax error')
         }
-        const keys = [...this.data.keys()]
+        const keys = name === 'SSCAN' ? [...(this.setAt(key, false) ?? [])] : [...this.data.keys()]
         const page = Math.min(count, this.scanPageSize)
         const slice = keys.slice(cursor, cursor + page)
         const next = cursor + page >= keys.length ? 0 : cursor + page

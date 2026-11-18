@@ -591,7 +591,7 @@ async def main():
         # workspace namespace (durable, snapshot-captured) and merge
         # into dispatch-level stat.
         r = await mv_ws.shell(
-            f"chmod 640 {remote} && chown 500:dev"
+            f"chmod 640 {remote} && chown 500:nogroup"
             f" {remote} && touch -t 202601021530"
             f" {remote}"
         )

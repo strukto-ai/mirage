@@ -103,7 +103,7 @@ async def run_overlay_snapshot_roundtrip(
     # (s3 snapshots redact creds and require a mounts= override).
     await ws.shell("echo alpha > /data/f.txt")
     await ws.shell(
-        "chmod 601 /data/f.txt && chown 500:dev /data/f.txt"
+        "chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt"
         " && touch -t 202601021530 /data/f.txt"
     )
     snap = Path(tempfile.mkdtemp(prefix="mirage-meta-osnap-")) / "ws.tar"
@@ -140,7 +140,7 @@ async def run_snapshot_roundtrip() -> dict[str, MetaValue]:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("echo alpha > /data/f.txt")
     await ws.shell(
-        "chmod 601 /data/f.txt && chown 500:dev /data/f.txt"
+        "chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt"
         " && touch -t 202601021530 /data/f.txt"
     )
     snap = Path(tempfile.mkdtemp(prefix="mirage-meta-snap-")) / "ws.tar"

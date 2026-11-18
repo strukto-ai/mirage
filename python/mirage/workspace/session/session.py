@@ -415,9 +415,10 @@ class SessionState:
     # that method. A durable restriction like commands, so it persists
     # with the session record.
     scripts: ProfileScripts = field(default_factory=dict)
-    # The name of the profile the session runs under, None for an
-    # unrestricted session. What an owner-rendering command prints as
-    # the group. Stamped by the profile like script, so it persists.
+    # The name of the profile the session runs under, None for no
+    # profile (root), empty for a document passed without a name (a uid
+    # with no name). Who the session runs as. Stamped by the profile
+    # like script, so it persists.
     profile: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
     # Where the session's lines may connect besides the workspace's

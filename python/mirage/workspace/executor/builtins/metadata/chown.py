@@ -12,6 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    group_id,
+    owner_id,
+)
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
@@ -35,14 +41,15 @@ async def handle_chown(
 ) -> Result:
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
 
-    Ownership is stored, not enforced (mirage has no user model); names
-    are kept verbatim, numeric ids become ints. ``-R`` walks the
-    operand's subtree; POSIX gives it an implicit ``-P``, so a symlink
-    is changed itself rather than followed, whether it is the operand
-    or reached during the walk, unless ``-H`` follows the operand or
-    ``-L`` every link. ``--reference`` copies a file's owner and group,
-    and ``--from`` changes only a file that has the owner and group it
-    names.
+    Ownership is stored as ids, not enforced: a name the session's user
+    database holds is its id, any number is one, and a name it lacks is
+    refused as chown refuses it. ``-R`` walks the operand's subtree;
+    POSIX gives it an implicit ``-P``, so a symlink is changed itself
+    rather than followed, whether it is the operand or reached during
+    the walk, unless ``-H`` follows the operand or ``-L`` every link.
+    ``--reference`` copies a file's owner and group, the session's for
+    a file that reports none, and ``--from`` changes only a file that
+    has the owner and group it names.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -53,8 +60,14 @@ async def handle_chown(
     parsed, fl, refused = parse_line("chown", args, session.cwd)
     if refused is not None:
         return refused
+    identity = Identity(profile=session.profile)
     from_text = fl.as_str("from")
-    current = None if from_text is None else parse_owner(from_text)
+    try:
+        current = (
+            None if from_text is None else parse_owner(from_text, identity)
+        )
+    except UsageError as exc:
+        return fail("chown", f"{exc}\n", exc.exit_code)
     reference = fl.as_path("reference")
     if reference is not None:
         operands = reference_operands(parsed.texts, parsed.paths, session.cwd)
@@ -73,8 +86,8 @@ async def handle_chown(
             "chown",
             fl,
             operands,
-            found.uid,
-            found.gid,
+            owner_id(found.uid, identity),
+            group_id(found.gid, identity),
             current,
         )
     if not parsed.texts or not parsed.paths:
@@ -82,9 +95,13 @@ async def handle_chown(
         error = missing_operand_error("chown", last)
         return fail("chown", f"{error}\n", error.exit_code)
     owner_text = parsed.texts[0]
-    uid, gid = parse_owner(owner_text)
+    try:
+        uid, gid = parse_owner(owner_text, identity)
+    except UsageError as exc:
+        return fail("chown", f"{exc}\n", exc.exit_code)
     if uid is None and gid is None:
         return fail("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
+    owner, _, group = owner_text.partition(":")
     return await change_owner(
         namespace,
         dispatch,
@@ -95,4 +112,5 @@ async def handle_chown(
         uid,
         gid,
         current,
+        spec=(owner or None, group or None),
     )

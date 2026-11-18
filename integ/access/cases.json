@@ -307,7 +307,7 @@
     {"id": "runs_the_new_definition_by_name", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt; whoami"}, "expect": {"text": "key\nreader\n", "is_error": false}},
     {"id": "moves_onto_a_document", "input": {"step": "session_update", "id": "w", "session": "s4", "profile": {"paths": {"hide": ["/vault"]}}}, "expect": {"text": "s4"}},
     {"id": "the_document_applies", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
-    {"id": "the_document_has_no_name", "input": {"step": "shell", "id": "w", "session": "s4", "command": "whoami"}, "expect": {"text": "whoami: cannot find name for user ID\n", "is_error": true}},
+    {"id": "the_document_has_no_name", "input": {"step": "shell", "id": "w", "session": "s4", "command": "whoami"}, "expect": {"text": "whoami: cannot find name for user ID 1000\n", "is_error": true}},
     {"id": "deletes_the_redefined_session", "input": {"step": "session_delete", "id": "w", "session": "s4"}, "expect": {"text": "deleted"}},
     {"id": "creates_another_session", "input": {"step": "session_create", "id": "w", "session": "s2", "profile": "asker"}, "expect": {"text": "s2"}},
     {"id": "starts_a_job_in_it", "input": {"step": "shell", "id": "w", "session": "s2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},

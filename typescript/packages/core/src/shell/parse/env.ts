@@ -306,8 +306,9 @@ function cdReads(args: (string | null)[]): ReadonlySet<string> {
  *
  * Tilde expansion resolves `~` and `~/...` against `$HOME` wherever a
  * word expands (patterns, `=~`'s regex and redirect targets included),
- * and the word scan mirrors the expansion exactly: `~user`, a mid-word
- * tilde and a quoted one stay literal. `cd` reads `$HOME` bare, `$OLDPWD` for `-`
+ * and the word scan mirrors the expansion exactly: `~user` (read off the user
+ * database), a mid-word tilde and a quoted one read no `$HOME`. `cd` reads
+ * `$HOME` bare, `$OLDPWD` for `-`
  * and `$CDPATH` for a searchable relative operand; `read` splits on
  * `$IFS`; `getopts` resumes from `$OPTIND` and consults `$OPTERR`.
  * These join the fill plan exactly as a spelled reference does, so a

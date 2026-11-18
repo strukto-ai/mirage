@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   // dispatch-level stat.
   console.log(`=== metadata overlay on /github/python/mirage/types.py ===`)
   const metaRes = await ws.shell(
-    `chmod 640 "/github/python/mirage/types.py" && chown 500:dev "/github/python/mirage/types.py" && touch -t 202601021530 "/github/python/mirage/types.py"`,
+    `chmod 640 "/github/python/mirage/types.py" && chown 500:nogroup "/github/python/mirage/types.py" && touch -t 202601021530 "/github/python/mirage/types.py"`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', `/github/python/mirage/types.py`)) as FileStat

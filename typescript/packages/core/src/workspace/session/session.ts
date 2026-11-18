@@ -196,9 +196,10 @@ export interface SessionInit {
    */
   scripts?: ProfileScripts
   /**
-   * The name of the profile the session runs under, null for an
-   * unrestricted session. What an owner-rendering command prints as the
-   * group. Stamped by the profile like script, so it persists.
+   * The name of the profile the session runs under, null for no profile
+   * (root), empty for a document passed without a name (a uid with no
+   * name). Who the session runs as. Stamped by the profile like script, so
+   * it persists.
    */
   profile?: string | null
   commandLimits?: Readonly<Record<string, Limit>>

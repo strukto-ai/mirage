@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.types import PrintfLiteral, PrintfPart, PrintfTime
+from mirage.commands.builtin.utils.formatting import id_text
 from mirage.commands.builtin.utils.identity import (
     Identity,
-    group_name,
-    owner_name,
+    group_id,
+    group_label,
+    owner_id,
+    owner_label,
 )
 from mirage.core.generic.find_eval import printf_kind
 from mirage.io.stream import materialize
@@ -52,6 +55,8 @@ def _facts(
     identity: Identity | None,
 ) -> dict[str, JsonValue]:
     kind = "U" if st is None else printf_kind(st)
+    uid = st.uid if st is not None else None
+    gid = st.gid if st is not None else None
     return {
         "path": byte_view(row),
         "base": byte_view(search.raw_path or search.virtual),
@@ -61,12 +66,10 @@ def _facts(
         if kind == "l"
         else kind,
         "mode": st.mode if st is not None else None,
-        "owner": byte_view(
-            owner_name(st.uid if st is not None else None, identity)
-        ),
-        "group": byte_view(
-            group_name(st.gid if st is not None else None, identity)
-        ),
+        "owner": byte_view(owner_label(uid, identity)),
+        "uid": byte_view(id_text(owner_id(uid, identity))),
+        "group": byte_view(group_label(gid, identity)),
+        "gid": byte_view(id_text(group_id(gid, identity))),
         "timestamp": iso_timestamp(st.modified) or 0.0
         if st is not None and st.modified is not None
         else 0.0,
