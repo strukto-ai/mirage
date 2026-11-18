@@ -84,7 +84,8 @@ EXTRA_FEATURES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     (
         "Code search",
         ("ast-grep",),
-        "Search, scan and rewrite workspace files with [ast-grep](/python/cli/ast-grep).",
+        "Search, scan and rewrite workspace files with "
+        "[ast-grep](/python/cli/ast-grep).",
     ),
     (
         "Runtimes",
