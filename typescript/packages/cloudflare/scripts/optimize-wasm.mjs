@@ -18,7 +18,7 @@ const options = [
   '--enable-multivalue',
 ]
 const cache = join(
-  process.env.MIRAGE_WASM_CACHE ??
+  process.env.MIRAGE_WASM_OPT_CACHE ??
     fileURLToPath(new URL('../node_modules/.cache/', import.meta.url)),
   'cloudflare',
 )

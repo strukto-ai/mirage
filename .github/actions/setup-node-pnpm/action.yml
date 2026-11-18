@@ -13,9 +13,10 @@ inputs:
     default: "10.32.1"
   wasm-cache:
     description: >-
-      Take the wasm modules core embeds from an earlier run built from the
-      same sources. The release passes false, so the tarballs it packs carry
-      the modules it compiled itself.
+      Take the wasm modules core embeds and the SDK modules the Cloudflare
+      build shrinks from an earlier run built from the same sources. The
+      release passes false, so the tarballs it packs carry the modules it
+      compiled itself.
     default: "true"
 runs:
   using: composite
@@ -92,6 +93,7 @@ runs:
         scripts=$(git rev-parse HEAD:typescript/packages/core/scripts)
         echo "key=embed-rs-${{ runner.os }}-$rust-$scripts" >> "$GITHUB_OUTPUT"
         echo "MIRAGE_WASM_CACHE=$RUNNER_TEMP/embed-rs" >> "$GITHUB_ENV"
+        echo "MIRAGE_WASM_OPT_CACHE=$RUNNER_TEMP/wasm-opt" >> "$GITHUB_ENV"
 
     - name: Cache the wasm modules
       if: inputs.wasm-cache == 'true'
@@ -99,3 +101,16 @@ runs:
       with:
         path: ${{ runner.temp }}/embed-rs
         key: ${{ steps.wasm.outputs.key }}
+
+    # wasm-opt shrinking the Monty and 1Password SDK modules was ten and a
+    # half of the twelve minutes the build took in pre-commit. Kept beside
+    # core's modules, it was saved only when the first job to save a rust/
+    # tree had built Cloudflare, so nearly every run shrank them again. Their
+    # bytes come from the lockfile and the scripts that strip and shrink them,
+    # never from rust/, so they keep an entry of their own under those three.
+    - name: Cache the shrunk SDK modules
+      if: inputs.wasm-cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/wasm-opt
+        key: wasm-opt-${{ runner.os }}-${{ hashFiles('typescript/pnpm-lock.yaml', 'typescript/packages/cloudflare/scripts/optimize-wasm.mjs', 'typescript/packages/core/scripts/strip-custom-sections.mjs') }}
