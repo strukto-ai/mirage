@@ -696,7 +696,13 @@
     {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}}
+    {"op": "exec", "session": "asks", "command": "exec 3< /data/secret.txt; echo x", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/secret.txt; > /data/secret.txt", "expect": {"value": {"exit_code": 1, "stdout": "top\n", "stderr": "bash: line 1: /data/secret.txt: Permission denied\n", "decision": "secret needs a nod"}}},
+    {"op": "exec", "command": "cat /data/secret.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/secret.txt; > /data/secret.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /data/secret.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}
    ]
   },
   {

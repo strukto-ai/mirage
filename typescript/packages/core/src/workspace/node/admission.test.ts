@@ -19,8 +19,8 @@ import { command, type CommandFn } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Action } from '../../policy/index.ts'
-import { PolicyDenied } from '../../policy/index.ts'
+import type { Action, AskHandler } from '../../policy/index.ts'
+import { Outcome, PolicyDenied, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import type { CommandContext } from '../../policy/types.ts'
 import { ruleTable } from '../../rs/policy.ts'
@@ -995,5 +995,40 @@ describe('a redirect no command owns', () => {
     ]) {
       expect(await admitLine(parse(text), session, w.registry, w.namespace, reparse)).toBeNull()
     }
+  })
+})
+
+const ASKS = SessionProfile({
+  commands: {
+    '*': ['allow', { decision: 'ask', reason: 'nod', paths: ['/data/f'] }],
+  },
+})
+
+describe('each redirect no command owns', () => {
+  it.each([
+    '{ cat; } < /data/f; > /data/f',
+    '{ cat; } < /data/f > /data/f',
+    "eval '> /data/f'; eval '> /data/f'",
+    "sh -c '> /data/f'; sh -c '> /data/f'",
+    ': $(> /data/f) $(> /data/f)',
+    'for i in 1 2; do > /data/f; done; > /data/f',
+  ])('needs a nod of its own: %s', async (line) => {
+    const asked: string[] = []
+    const allowsOnce: AskHandler = (record) => {
+      asked.push(record.id)
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { asks: ASKS }, onAsk: allowsOnce },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/f')
+    w.createSession('s', { profile: 'asks' })
+    const io = await w.shell(line, { sessionId: 's' })
+    expect(io.exitCode).toBe(0)
+    expect(asked).toHaveLength(2)
+    const kept = await w.shell('cat /data/f')
+    expect(new TextDecoder().decode(kept.stdout)).toBe('')
   })
 })

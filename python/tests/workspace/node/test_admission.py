@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 
 import pytest
@@ -21,7 +22,15 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
-from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.policy import (
+    Action,
+    Decision,
+    Deny,
+    Outcome,
+    Policy,
+    PolicyDenied,
+    Scope,
+)
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import CommandContext
 from mirage.rs.policy import rule_table
@@ -1197,5 +1206,54 @@ async def test_admit_line_judges_a_redirect_no_command_owns():
                 await admit_line(parse(line), session, registry, namespace)
                 is None
             )
+    finally:
+        await ws.close()
+
+
+ASKS = {
+    "commands": {
+        "*": [
+            "allow",
+            {"decision": "ask", "reason": "nod", "paths": ["/data/f"]},
+        ]
+    }
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "{ cat; } < /data/f; > /data/f",
+        "{ cat; } < /data/f > /data/f",
+        "eval '> /data/f'; eval '> /data/f'",
+        "sh -c '> /data/f'; sh -c '> /data/f'",
+        ": $(> /data/f) $(> /data/f)",
+        "for i in 1 2; do > /data/f; done; > /data/f",
+    ],
+)
+async def test_each_redirect_no_command_owns_needs_a_nod_of_its_own(line):
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(
+            record, outcome=Outcome.ALLOW, scope=Scope.ONCE
+        )
+
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"asks": ASKS},
+        on_ask=allows_once,
+    )
+    try:
+        await ws.shell("echo top > /data/f")
+        ws.create_session("s", profile="asks")
+        io = await ws.shell(line, session_id="s")
+        assert io.exit_code == 0
+        assert len(asked) == 2
+        kept = await ws.shell("cat /data/f")
+        assert await kept.materialize_stdout() == b""
     finally:
         await ws.close()
