@@ -98,6 +98,15 @@ def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
     assert done.stderr.endswith(b"err\n" + run_exit_mark("n1") + b"3\n")
 
 
+# A program a signal ended gets no line at the end of its stdout, which may
+# have no reader left; its status still comes on stderr.
+def test_a_run_a_signal_ended_ends_its_stdout_with_nothing():
+    argv = run_argv("w:7", "n1", ("sh", "-c", "echo out; kill -9 $$"))
+    done = subprocess.run(argv, capture_output=True, check=False)
+    assert (done.returncode, done.stdout) == (137, b"out\n")
+    assert done.stderr.endswith(run_exit_mark("n1") + b"137\n")
+
+
 def _folder(home, spare, prefixes):
     done = subprocess.run(
         [
