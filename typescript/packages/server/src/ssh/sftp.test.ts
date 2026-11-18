@@ -338,7 +338,7 @@ describe('sftp', () => {
       sftp.setstat('/link', { uid: 1234, gid: 5678, atime: 1e9, mtime: 1.1e9 }, cb)
     })
     expect(await run(client, "stat -c '%u %Y' /real; stat -c %u /link")).toBe(
-      '1234 1100000000\n-\n',
+      '1234 1100000000\n0\n',
     )
   })
 
