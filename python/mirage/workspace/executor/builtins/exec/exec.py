@@ -260,9 +260,8 @@ async def _install(
     expand: Callable[[Redirect], Awaitable[Redirect]] | None,
     guard: RedirectGuard | None,
 ) -> bytes | RedirectResult | None:
-    for redirect in redirects:
-        if expand is not None:
-            redirect = await expand(redirect)
+    for raw in redirects:
+        redirect = raw if expand is None else await expand(raw)
         named = named_descriptor(
             redirect, lambda fd: fd in session.descriptors
         )
@@ -287,7 +286,7 @@ async def _install(
             and redirect.kind not in OPENS_NO_FILE
         ):
             scope = _to_scope(target) if isinstance(target, str) else target
-            refused = await guard((scope,), stdin)
+            refused = await guard((scope,), stdin, raw)
             if refused is not None:
                 return refused
         for operation in named or redirect_operations(redirect):

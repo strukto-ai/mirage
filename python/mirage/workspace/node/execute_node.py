@@ -823,6 +823,8 @@ def _redirect_gate(
     opens (``admit_redirect``), and a refusal replaces the statement's
     run as a failed open does. The opener passes every target so far;
     only the last is new, and one already judged is not asked again.
+    Each target is judged at the redirect that opens it, so two opens
+    on one line each need a nod of their own.
 
     Args:
         context (EvaluationContext): the evaluation's session.
@@ -831,10 +833,16 @@ def _redirect_gate(
     """
 
     async def gate(
-        paths: tuple[PathSpec, ...], given: ByteSource | None
+        paths: tuple[PathSpec, ...],
+        given: ByteSource | None,
+        opening: Redirect | None,
     ) -> RedirectResult | None:
         refused = await admit_redirect(
-            paths[-1:], context.session, registry, namespace
+            paths[-1:],
+            context.session,
+            registry,
+            namespace,
+            None if opening is None else opening.target_node,
         )
         if refused is None:
             return None

@@ -495,7 +495,11 @@ async function install(
       (typeof target === 'string' || target instanceof PathSpec) &&
       !OPENS_NO_FILE.has(redirect.kind)
     ) {
-      const refused = await guard([typeof target === 'string' ? toScope(target) : target], stdin)
+      const refused = await guard(
+        [typeof target === 'string' ? toScope(target) : target],
+        stdin,
+        raw,
+      )
       if (refused !== null) return refused
     }
     for (const operation of named ?? redirectOperations(redirect)) {

@@ -86,7 +86,7 @@ from mirage.shell.helpers import (
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.types import AliasExpansion, TSNodeLike
+from mirage.shell.types import AliasExpansion, Redirect, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellVar, VarAttr
 from mirage.shell.voice import shell_voice
@@ -893,7 +893,9 @@ async def _run_argv(
     asked: tuple[bool | str, ...] | None = None
 
     async def guard(
-        paths: tuple[PathSpec, ...], given: ByteSource | None
+        paths: tuple[PathSpec, ...],
+        given: ByteSource | None,
+        opening: Redirect | None = None,
     ) -> RedirectResult | None:
         nonlocal admitted, asked
         key: tuple[bool | str, ...] = (

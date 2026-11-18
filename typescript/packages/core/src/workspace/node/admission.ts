@@ -86,6 +86,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { wordValue, type Word } from './inner_lines.ts'
+import { occurrenceOf } from './occurrence.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 126 for
@@ -854,14 +855,18 @@ export function unownedRedirects(
  * the open answers ENOENT; links are followed as a command's redirect
  * targets are. A deny, or an ask the host did not grant, refuses in
  * bash's voice for a redirect it could not open (`bash: line 1: f:
- * Permission denied`, exit 1), with the decision on the result. Mirrors
- * Python's admit_redirect.
+ * Permission denied`, exit 1), with the decision on the result. An ask is
+ * claimed for the place the redirect stands on its line (`at`, the target
+ * word of the redirect that opens them; null for targets no one redirect
+ * opens, a line judged whole), so each open is a nod of its own, as each
+ * command is. Mirrors Python's admit_redirect.
  */
 export async function admitRedirect(
   targets: readonly PathSpec[],
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
+  at: TSNodeLike | null = null,
 ): Promise<Refused | null> {
   const rules = session.commands
   if (rules === null || targets.length === 0) return null
@@ -891,7 +896,13 @@ export async function admitRedirect(
     const claimant: Claimant | null =
       call === null
         ? null
-        : { line: call, occurrence: { parent: null, source: named, start: 0, end: 0 } }
+        : {
+            line: call,
+            occurrence:
+              at === null
+                ? { parent: null, source: named, start: 0, end: 0 }
+                : occurrenceOf(at, call),
+          }
     const asked: Ask = {
       kind: 'ask',
       reason: ruling.reason,

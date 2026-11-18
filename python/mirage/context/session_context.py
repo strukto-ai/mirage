@@ -89,13 +89,15 @@ DecisionSink = Callable[[PolicyDecision], None]
 
 # Runs a prepared command under ordered redirects, with a gate for
 # each target and the command identity for the single-output fast path.
+# The gate is shown the redirect that opens the last target, None when
+# no one redirect does.
 RedirectResult = tuple["ByteSource | None", "IOResult", "ExecutionNode"]
 RedirectRun = Callable[
     ["ByteSource | None", "JobConsole | None", tuple[PathSpec, ...]],
     Awaitable[RedirectResult],
 ]
 RedirectGuard = Callable[
-    [tuple[PathSpec, ...], "ByteSource | None"],
+    [tuple[PathSpec, ...], "ByteSource | None", Redirect | None],
     Awaitable[RedirectResult | None],
 ]
 RedirectRunner = Callable[

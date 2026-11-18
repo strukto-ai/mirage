@@ -117,6 +117,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (
     Word,
 )
+from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import SessionState, env_snapshot
 
 # The nodes a redirected statement may wrap whose last command is the
@@ -778,6 +779,7 @@ async def admit_redirect(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
+    at: TSNodeLike | None = None,
 ) -> Refused | None:
     """The gate of the files a redirect opens that no command owns: a
     compound statement's (``{ cat; } < f``, a loop, a subshell, an
@@ -791,7 +793,9 @@ async def admit_redirect(
     are followed as a command's redirect targets are. A deny, or an ask
     the host did not grant, refuses in bash's voice for a redirect it
     could not open (``bash: line 1: f: Permission denied``, exit 1),
-    with the decision on the result.
+    with the decision on the result. An ask is claimed for the place
+    the redirect stands on its line (``at``), so each open is a nod of
+    its own, as each command is.
 
     Args:
         targets (Sequence[PathSpec]): the redirect's targets so far,
@@ -799,6 +803,9 @@ async def admit_redirect(
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the decision ledger.
         namespace (Namespace | None): the link table.
+        at (TSNodeLike | None): the target word of the redirect that
+            opens them, None for targets no one redirect opens (a line
+            judged whole).
     """
     rules = session.commands
     if rules is None or not targets:
@@ -836,7 +843,12 @@ async def admit_redirect(
         claimant = (
             None
             if call is None
-            else Claimant(call, Occurrence(None, named, 0, 0))
+            else Claimant(
+                call,
+                Occurrence(None, named, 0, 0)
+                if at is None
+                else occurrence_of(at, call),
+            )
         )
         asked = Ask(
             ruling.reason,
