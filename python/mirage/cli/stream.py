@@ -6,9 +6,9 @@ import os
 import stat
 import sys
 import urllib.parse
-import urllib.request
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from typing import Any
+from urllib.request import getproxies_environment, proxy_bypass
 
 import aiohttp
 
@@ -164,7 +164,7 @@ def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
         url (str): the daemon URL the line goes to.
     """
     target = urllib.parse.urlsplit(url)
-    proxies = urllib.request.getproxies_environment()
+    proxies = getproxies_environment()
     named = proxies.get(target.scheme) or proxies.get("all")
     if not named:
         return None, None
@@ -174,9 +174,7 @@ def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
     if proxy.scheme not in ("http", "https"):
         return None, None
     authority = target.netloc.rpartition("@")[2]
-    if urllib.request.proxy_bypass(authority) or urllib.request.proxy_bypass(
-        target.hostname or ""
-    ):
+    if proxy_bypass(authority) or proxy_bypass(target.hostname or ""):
         return None, None
     bare = proxy._replace(netloc=proxy.netloc.rpartition("@")[2]).geturl()
     if proxy.username is None:
