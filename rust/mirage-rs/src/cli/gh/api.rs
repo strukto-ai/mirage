@@ -689,7 +689,7 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
             }
         }
         let cursor = end_cursor(&page.data);
-        held += page.raw.len() as u64;
+        held += (page.raw.len() + page.head.len() + target.len()) as u64;
         pages.push(page);
         if !flags.gh_bool("paginate") {
             continue;

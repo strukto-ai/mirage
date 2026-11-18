@@ -205,4 +205,16 @@ describe('runLeaf', () => {
     ])
     expect(transport.calls.length).toBe(2)
   })
+
+  it('counts empty --paginate pages toward the workspace budget', async () => {
+    const transport = new PagingTransport(
+      (n) => `/items?page=${String(n + 1)}&pad=${'x'.repeat(200)}`,
+    )
+    await expect(
+      runWithMemory(new MemoryBudget(8192, () => 0), () =>
+        run(transport, 'api', ['/items'], { paginate: true }),
+      ),
+    ).rejects.toThrow(MemoryExhausted)
+    expect(transport.calls).toBeLessThan(200)
+  })
 })
