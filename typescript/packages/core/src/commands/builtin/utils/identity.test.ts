@@ -149,6 +149,9 @@ describe('identity in a workspace', () => {
     expect((await run(ws, 'ls -n /data/f.txt; ls -l /data/f.txt'))[1]).toBe(
       '-rw-r--r-- 1 ? ? 5 - /data/f.txt\n-rw-r--r-- 1 alice staff 5 - /data/f.txt\n',
     )
+    await ws.vfs.symlink('/data/l', 'f.txt')
+    await ws.vfs.setattr('/data/l', { uid: 'bob', gid: 'ops', nofollow: true })
+    expect((await run(ws, "stat -c '%u %g %U %G' /data/l"))[1]).toBe('? ? bob ops\n')
     await ws.close()
   })
 

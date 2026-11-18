@@ -151,6 +151,10 @@ async def test_a_name_the_database_lacks_prints_as_unknown_in_id_fields():
         "-rw-r--r-- 1 ? ? 5 - /data/f.txt\n"
         "-rw-r--r-- 1 alice staff 5 - /data/f.txt\n"
     )
+    await ws.vfs.symlink("/data/l", "f.txt")
+    await ws.vfs.setattr("/data/l", uid="bob", gid="ops", nofollow=True)
+    _, link_out = await _run(ws, "stat -c '%u %g %U %G' /data/l")
+    assert link_out == "? ? bob ops\n"
 
 
 @pytest.mark.asyncio
