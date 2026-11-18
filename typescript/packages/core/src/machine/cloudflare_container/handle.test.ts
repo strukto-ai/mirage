@@ -245,7 +245,7 @@ class FakeContainer implements Container {
         ? check
         : line.startsWith('d=$(')
           ? folder
-          : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
+          : (this.programs[execPart(line).split(' ')[0] ?? ''] ?? (() => 0))
     const proc = new FakeProcess(line, program, this.log)
     this.execs.push({ argv, options, proc })
     this.starting = false
@@ -741,6 +741,13 @@ class Sshfs {
   }
 }
 
+// The part of a line its last `exec` runs, as the sshfs line ends; the whole
+// line when it has none.
+function execPart(line: string): string {
+  const at = line.lastIndexOf('; exec ')
+  return at < 0 ? line : line.slice(at + 2)
+}
+
 // sh -c's own reading of a single-quoted word, enough for the mount lines.
 function words(line: string): string[] {
   return [...line.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
@@ -771,7 +778,8 @@ function mounting(job: (fs: Sshfs, proc: FakeProcess) => Promise<number>): FakeC
       return 0
     },
     exec: async (proc) => {
-      table.set(words(proc.line)[6] ?? '', words(proc.line)[5] ?? '')
+      const mount = words(execPart(proc.line))
+      table.set(mount[6] ?? '', mount[5] ?? '')
       const fs = new Sshfs(proc)
       await fs.request(FXP.INIT, 3)
       mounted.resolve(fs)

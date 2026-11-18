@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from mirage.policy.profile import command_tree, tree_doc
 from mirage.policy.types import (
@@ -31,17 +31,48 @@ from mirage.secrets.config import SecretRef
 from mirage.workspace.session.constants import OLDER_FORMAT
 
 
-def rule_to_dict(rule: CommandRule) -> dict[str, Any]:
+class RuleJSON(TypedDict):
+    reason: str
+    decision: NotRequired[str]
+    paths: list[str]
+    at: NotRequired[str]
+    mount: NotRequired[str]
+    commands: NotRequired[list[str]]
+
+
+class ScriptJSON(TypedDict):
+    profile: str
+    language: str
+    source: str
+    runtime: str
+    config: NotRequired[dict[str, Any]]
+    env: NotRequired[dict[str, str | dict[str, Any]]]
+
+
+class DecisionJSON(TypedDict):
+    id: str
+    session_id: str
+    command: str
+    argv: list[str]
+    cwd: str
+    paths: list[str]
+    reason: str
+    rule: RuleJSON
+    outcome: str | None
+    scope: str
+    note: str
+
+
+def rule_to_dict(rule: CommandRule) -> RuleJSON:
     """The rule an approval is keyed on, as the session record stores
     it.
 
     Args:
         rule (CommandRule): the rule.
     """
-    data: dict[str, Any] = {"reason": rule.reason}
+    data: RuleJSON = {"reason": rule.reason, "paths": list(rule.paths)}
     if rule.decision is not Outcome.ASK:
         data["decision"] = rule.decision.value
-    data["paths"] = list(rule.paths)
     if rule.at:
         data["at"] = rule.at
     if rule.mount:
@@ -116,7 +147,7 @@ def commands_from_dict(
     )
 
 
-def script_to_dict(entry: ProfileScript) -> dict[str, Any]:
+def script_to_dict(entry: ProfileScript) -> ScriptJSON:
     """A session's profile script as the record stores it.
 
     Args:
@@ -188,7 +219,7 @@ def scripts_from_dict(
     }
 
 
-def decision_to_dict(record: Decision) -> dict[str, Any]:
+def decision_to_dict(record: Decision) -> DecisionJSON:
     """A ledger record as the session record stores it.
 
     Args:

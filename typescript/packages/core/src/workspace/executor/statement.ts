@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
 import { spooledPair } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { asyncChain, discardStreams } from '../../io/stream.ts'
@@ -442,7 +442,7 @@ export function asWritten(stdout: ByteSource | null, stderr: Uint8Array | null):
  * stream lands among what it writes. Mirrors Python's recording.
  */
 export async function recording<T>(recorder: Recorder, run: () => Promise<T>): Promise<T> {
-  return runWithCaller({ ...currentCaller(), enclosing: recorder }, run)
+  return bindCaller({ ...currentCaller(), enclosing: recorder }, run)
 }
 
 /**

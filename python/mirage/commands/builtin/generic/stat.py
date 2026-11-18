@@ -57,6 +57,7 @@ from mirage.utils.stat_view import (
     BLOCK_UNIT,
     content_size,
     device_rdev,
+    is_char_device,
     posix_mode,
     size_unknown,
 )
@@ -661,7 +662,7 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
     owner = owner_name(s.uid, identity)
     group = group_name(s.gid, identity)
     links = "Links: ?"
-    if s.type is FileType.CHAR_DEVICE:
+    if is_char_device(s):
         major = _directive_value("Hr", s, name, identity)
         minor = _directive_value("Lr", s, name, identity)
         links = f"Links: {'?':<5} Device type: {major},{minor}"

@@ -96,14 +96,6 @@ class VFSStateKey(StrEnum):
     MODIFIED = "modified"
 
 
-# The four below name sub-shapes that typescript spells as literals at
-# the point of use rather than as a frozen table (`keys.ts` stops at
-# VFSStateKey). They belong to the same snapshot vocabulary, so
-# they live here too instead of staying behind in `types.py`.
-# NodeMetaKey is the exception: it names NodeMeta's own fields, so it
-# lives beside NodeMeta in `mount/namespace/namespace.py`. Snapshot
-# serializes the namespace, not the other way round, and importing
-# this package from there closes an import cycle.
 class FingerprintKey(StrEnum):
     PATH = "path"
     MOUNT_PREFIX = "mount_prefix"

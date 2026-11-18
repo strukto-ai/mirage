@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import type { MongoIterOptions } from './_driver.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { DEPTH, holdsFilter, linesContaining } from './search.ts'
@@ -39,7 +39,7 @@ function accessorOf(
       return arrayIter(docs)()
     },
   })
-  return new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h', ...config }))
+  return new MongoDBAccessor(driver, MongoDBConfig.parse({ uri: 'mongodb://h', ...config }))
 }
 
 async function drain(stream: AsyncIterable<Uint8Array> | null): Promise<string | null> {

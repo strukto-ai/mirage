@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '../../runtime/config.ts'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '../config.ts'
+import { MachineConfig } from '../config.ts'
 
 /**
  * How a Cloudflare Container is reached. Its image, instance type and
@@ -32,8 +32,8 @@ export interface ContainerConfig extends MachineConfig {
   token?: string
 }
 
-export const CONTAINER_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
+export const ContainerConfig = {
+  ...MachineConfig,
   url: { type: 'string' },
   token: { type: 'string' },
-}
+} satisfies ConfigFields<ContainerConfig>

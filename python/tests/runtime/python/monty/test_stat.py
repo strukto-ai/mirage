@@ -14,13 +14,14 @@
 
 import pytest
 
-from mirage.runtime.python.monty.loader import pydantic_monty
-from mirage.runtime.python.monty.stat import stat_result
+from mirage.runtime.python.monty.stat import (
+    is_dir_row,
+    is_regular_row,
+    stat_result,
+)
 from mirage.runtime.types import VFSStat
 
-pytestmark = pytest.mark.skipif(
-    pydantic_monty is None, reason="the monty extra is not installed"
-)
+pytest.importorskip("pydantic_monty", exc_type=ModuleNotFoundError)
 
 
 def test_file_row_keeps_size_mode_and_stamp() -> None:
@@ -63,3 +64,14 @@ def test_the_sequence_half_is_this_host_s_alone() -> None:
     assert len(st) == 10
     assert st[0] == st.st_mode
     assert st[6] == st.st_size
+
+
+def test_explicit_type_wins_when_the_directory_hint_disagrees() -> None:
+    row = VFSStat(size=5, is_dir=True, mode=0o100640, mtime_ns=0)
+    assert is_regular_row(row)
+    assert not is_dir_row(row)
+    stat = stat_result(row)
+    assert (stat.st_mode, stat.st_size, stat.st_nlink) == (0o100640, 5, 1)
+    assert is_regular_row(
+        VFSStat(size=5, is_dir=False, mode=0o640, mtime_ns=0)
+    )

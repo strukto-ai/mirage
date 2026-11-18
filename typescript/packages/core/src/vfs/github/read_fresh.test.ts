@@ -435,11 +435,11 @@ describe('github cannot-see versus gone', () => {
     gh.set('docs/a.txt', OLD)
     gh.truncatedRecursive = true
     const vfs = await vfsOf()
-    // create builds it truncated.
-    expect(vfs.accessor.truncated).toBe(true)
+    expect(vfs.accessor.treeLoaded).toBe(false)
     const w = ws(vfs)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
+      expect(vfs.accessor.truncated).toBe(true)
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       // One listing of docs/, by the operand probe; cat's own stat and the

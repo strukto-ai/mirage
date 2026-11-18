@@ -234,6 +234,98 @@ export function shownCounts(flags: WcFlags): number {
   return selectedValues({ lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }, flags).length
 }
 
+async function formatMulti(
+  paths: readonly PathSpec[],
+  parsed: WcFlags,
+  ctx: Context,
+  stream: ReadStreamFn,
+  listedFrom: string | null,
+  lineCount?: (p: PathSpec) => Promise<number | null>,
+  sizeOf?: (p: PathSpec) => Promise<number | null>,
+): Promise<CommandFnResult> {
+  const rows: WcRow[] = []
+  const records: PathRecord[] = []
+  const sizes: (number | null)[] = []
+  const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
+  const notes: [number, string][] = []
+  // A listed name may sit on another mount than the one that counts lines,
+  // so a list reads every file it names.
+  const counted =
+    parsed.lines &&
+    !(parsed.words || parsed.bytes || parsed.chars || parsed.maxLineLength) &&
+    lineCount !== undefined &&
+    listedFrom === null
+      ? lineCount
+      : null
+  const sized =
+    parsed.bytes &&
+    !(parsed.lines || parsed.words || parsed.chars || parsed.maxLineLength) &&
+    sizeOf !== undefined
+      ? sizeOf
+      : null
+  let pushed = false
+  for (const [run, p] of paths.entries()) {
+    if (listedFrom !== null) {
+      const refusal = listedRefusal(listedFrom, p, run)
+      if (refusal !== '') {
+        notes.push([rows.length, refusal])
+        continue
+      }
+    }
+    let counts: WcCounts
+    try {
+      const found = counted === null || isStdin(p) ? null : await counted(p)
+      const size = sized === null || isStdin(p) ? null : await sized(p)
+      if (found !== null) {
+        counts = { lines: found, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
+        pushed = true
+      } else if (size !== null) {
+        counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
+      } else {
+        counts = await wc(stream(p), ctx, parsed)
+      }
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      // GNU opens a directory and fails only to read it, so it prints a row
+      // of zeros, then the error, and pads as for a stream.
+      if (isEisdir(e)) {
+        const zero = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
+        rows.push({ values: selectedValues(zero, parsed), label: p.rawPath })
+        records.push({ path: p, run, values: selectedValues(zero, parsed) })
+        sizes.push(null)
+      }
+      notes.push([rows.length, fsErrorLine('wc', p, e)])
+      continue
+    }
+    rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
+    records.push({ path: p, run, values: selectedValues(counts, parsed) })
+    sizes.push(isStdin(p) ? null : counts.bytes)
+    total.lines += counts.lines
+    total.words += counts.words
+    total.bytes += counts.bytes
+    total.chars += counts.chars
+    total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
+  }
+  const width = pushed
+    ? null
+    : listedFrom === '-'
+      ? 1
+      : numberWidth(sizes, paths.length, shownCounts(parsed))
+  const io = new IOResult({ exitCode: notes.length > 0 ? 1 : 0, records })
+  const printed = countLines(rows, selectedValues(total, parsed), paths.length, parsed.total, width)
+  const starts = [0]
+  for (const line of printed) starts.push((starts.at(-1) ?? 0) + formatRecords([line]).byteLength)
+  const placed = notes.map(
+    ([row, line]) =>
+      [
+        parsed.total === 'only' ? 0 : (starts[Math.min(row, printed.length)] ?? 0),
+        encodeText(line),
+      ] as const,
+  )
+  if (printed.length === 0 && placed.length === 0) return [null, io]
+  return [atOffsets(formatRecords(printed), placed, io), io]
+}
+
 /**
  * Run wc over resolved operands, GNU semantics. Lines counted alone are asked
  * of `lineCount` first, so a mount that can count a file's lines on its own
@@ -272,93 +364,7 @@ export async function wcGeneric(
     paths = found
   }
   if (paths.length > 0 || listedFrom !== null) {
-    const rows: WcRow[] = []
-    const records: PathRecord[] = []
-    const sizes: (number | null)[] = []
-    const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
-    const notes: [number, string][] = []
-    // A listed name may sit on another mount than the one that counts lines,
-    // so a list reads every file it names.
-    const counted =
-      parsed.lines &&
-      !(parsed.words || parsed.bytes || parsed.chars || parsed.maxLineLength) &&
-      lineCount !== undefined &&
-      listedFrom === null
-        ? lineCount
-        : null
-    const sized =
-      parsed.bytes &&
-      !(parsed.lines || parsed.words || parsed.chars || parsed.maxLineLength) &&
-      sizeOf !== undefined
-        ? sizeOf
-        : null
-    let pushed = false
-    for (const [run, p] of paths.entries()) {
-      if (listedFrom !== null) {
-        const refusal = listedRefusal(listedFrom, p, run)
-        if (refusal !== '') {
-          notes.push([rows.length, refusal])
-          continue
-        }
-      }
-      let counts: WcCounts
-      try {
-        const found = counted === null || isStdin(p) ? null : await counted(p)
-        const size = sized === null || isStdin(p) ? null : await sized(p)
-        if (found !== null) {
-          counts = { lines: found, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
-          pushed = true
-        } else if (size !== null) {
-          counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
-        } else {
-          counts = await wc(stream(p), ctx, parsed)
-        }
-      } catch (e) {
-        if (!isFsError(e)) throw e
-        // GNU opens a directory and fails only to read it, so it prints a row
-        // of zeros, then the error, and pads as for a stream.
-        if (isEisdir(e)) {
-          const zero = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
-          rows.push({ values: selectedValues(zero, parsed), label: p.rawPath })
-          records.push({ path: p, run, values: selectedValues(zero, parsed) })
-          sizes.push(null)
-        }
-        notes.push([rows.length, fsErrorLine('wc', p, e)])
-        continue
-      }
-      rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
-      records.push({ path: p, run, values: selectedValues(counts, parsed) })
-      sizes.push(isStdin(p) ? null : counts.bytes)
-      total.lines += counts.lines
-      total.words += counts.words
-      total.bytes += counts.bytes
-      total.chars += counts.chars
-      total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
-    }
-    const width = pushed
-      ? null
-      : listedFrom === '-'
-        ? 1
-        : numberWidth(sizes, paths.length, shownCounts(parsed))
-    const io = new IOResult({ exitCode: notes.length > 0 ? 1 : 0, records })
-    const printed = countLines(
-      rows,
-      selectedValues(total, parsed),
-      paths.length,
-      parsed.total,
-      width,
-    )
-    const starts = [0]
-    for (const line of printed) starts.push((starts.at(-1) ?? 0) + formatRecords([line]).byteLength)
-    const placed = notes.map(
-      ([row, line]) =>
-        [
-          parsed.total === 'only' ? 0 : (starts[Math.min(row, printed.length)] ?? 0),
-          encodeText(line),
-        ] as const,
-    )
-    if (printed.length === 0 && placed.length === 0) return [null, io]
-    return [atOffsets(formatRecords(printed), placed, io), io]
+    return formatMulti(paths, parsed, ctx, stream, listedFrom, lineCount, sizeOf)
   }
   const counts = await wc(resolveSource(ctx.stdin), ctx, parsed)
   const values = selectedValues(counts, parsed)

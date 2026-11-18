@@ -41,8 +41,8 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { currentCaller, runWithCaller } from '../../context/session_context.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { currentCaller, bindCaller } from '../../context/session_context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { driveFingerprint } from './fingerprint.ts'
 import { read, readFileVersioned } from './read.ts'
 import { statFromItem } from './readdir.ts'
@@ -210,7 +210,7 @@ describe('gdrive versioned reads', () => {
   it('a pinned path reads that revision, not live content', async () => {
     const enc = new TextEncoder()
     drive.downloadRevision.mockResolvedValue(enc.encode('pinned'))
-    const data = await runWithCaller(
+    const data = await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([['/data/f.txt', 'r1']]) } },
       () => readFileVersioned(drive, 'f1', '/data/f.txt', VERSIONED_ENTRY),
     )
@@ -234,7 +234,7 @@ describe('gdrive read record path', () => {
     drive.captureFileMetadata.mockResolvedValue([null, null])
     drive.downloadFile.mockResolvedValue(new TextEncoder().encode('live'))
     const path = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
-    const [data, records] = await runWithRecording(() =>
+    const [data, records] = await recordingScope(() =>
       read(makeAccessor(), path, undefined, row('f1', 'k.txt')),
     )
     expect(new TextDecoder().decode(data)).toBe('live')
@@ -271,7 +271,7 @@ describe('the gdrive read record', () => {
     // alone still holds under a chain mutated to md5-only while every native
     // file silently loses its token.
     const path = specFor()
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), path, undefined, binaryRow()),
     )
     const st = await stat(makeAccessor(), path, binaryRow())
@@ -282,7 +282,7 @@ describe('the gdrive read record', () => {
   it('records the virtual path on a root mount too', async () => {
     // On a root mount the virtual and mount paths agree, so this is the
     // control for the /gd row: only that one tells them apart.
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), undefined, binaryRow()),
     )
     expect(records[0]?.path).toBe('/report.pdf')
@@ -292,7 +292,7 @@ describe('the gdrive read record', () => {
     // A mount at /gd holding 'gd-report.pdf': the index key is derived from
     // the mount prefix, and a name sharing its leading text must still
     // resolve under /gd, or the read throws ENOENT before it records.
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor('gd-report.pdf', '/gd'), undefined, binaryRow()),
     )
     expect(records[0]?.path).toBe('/gd/gd-report.pdf')
@@ -309,7 +309,7 @@ describe('the gdrive read record', () => {
       headRevisionId: REVISION,
     }
     const listed = statFromItem(item)
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), undefined, listed),
     )
     expect(listed.fingerprint).toBe(DIGEST)
@@ -320,7 +320,7 @@ describe('the gdrive read record', () => {
     // A window proves nothing about the revision: the bytes are a slice of
     // the object the capture named, so the pin is still true even though the
     // fingerprint cannot be stamped.
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), { offset: 1, size: 4 }, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBeNull()
@@ -335,7 +335,7 @@ describe('the gdrive read record', () => {
       md5Hex(new TextEncoder().encode('the previous content')),
       REVISION,
     ])
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), undefined, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBeNull()
@@ -348,7 +348,7 @@ describe('the gdrive read record', () => {
 
   it('stamps no token on a size-capped read from zero', async () => {
     // `head -c N`: offset 0 alone does not make a read whole.
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), { offset: 0, size: 4 }, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBeNull()
@@ -360,7 +360,7 @@ describe('the gdrive read record', () => {
     // verify, and dropping the token would leave the read at null against
     // stat's head revision -- the mismatch this change removes.
     drive.captureFileMetadata.mockResolvedValue([null, REVISION])
-    const [, records] = await runWithRecording(async () =>
+    const [, records] = await recordingScope(async () =>
       read(makeAccessor(), specFor(), undefined, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBe(REVISION)
@@ -383,7 +383,7 @@ describe('the gdrive read record', () => {
         resolve()
       }, 0),
     )
-    const reading = runWithRecording(async () =>
+    const reading = recordingScope(async () =>
       read(makeAccessor(), specFor(), undefined, binaryRow()),
     ).then((v) => {
       order.push('read')
@@ -421,7 +421,7 @@ describe('the native gdrive read record', () => {
       // A revision pin REPLACES the drift check and the native branch can
       // never honour one, so recording it would kill the check it displaced.
       renderer().mockResolvedValue(new TextEncoder().encode('{}'))
-      const [, records] = await runWithRecording(async () =>
+      const [, records] = await recordingScope(async () =>
         read(
           makeAccessor(),
           specFor(vfsName, '/gd'),
@@ -438,7 +438,7 @@ describe('the native gdrive read record', () => {
       // it would cache a partial body that reads FRESH for the life of the
       // entry.
       renderer().mockResolvedValue(new TextEncoder().encode('{"tabs": [1,2,3]}'))
-      const [, records] = await runWithRecording(async () =>
+      const [, records] = await recordingScope(async () =>
         read(
           makeAccessor(),
           specFor(vfsName, '/gd'),
@@ -538,7 +538,7 @@ describe('an unrecorded gdrive read', () => {
   it('stamps no entry token on a pinned read', async () => {
     // Pinned bytes are an old revision; the entry's md5 describes head.
     drive.downloadRevision.mockResolvedValue(BODY)
-    await runWithCaller(
+    await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([['/gd/a.txt', 'r1']]) } },
       () =>
         read(
@@ -557,7 +557,7 @@ describe('an unrecorded gdrive read', () => {
     // The capture is the fresher of the two; the entry can be a TTL old.
     drive.downloadFile.mockResolvedValue(BODY)
     drive.captureFileMetadata.mockResolvedValue([BODY_MD5, 'r9'])
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       read(
         makeAccessor(),
         UNRECORDED_SPEC,
@@ -576,7 +576,7 @@ describe('the native gdrive read record path', () => {
         // The cache fill matches on the virtual path; the mount path names
         // nothing under a mount at /gd.
         renderer().mockResolvedValue(new TextEncoder().encode('{}'))
-        const [, records] = await runWithRecording(() =>
+        const [, records] = await recordingScope(() =>
           read(
             makeAccessor(),
             specFor(vfsName, mount),

@@ -19,12 +19,7 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import {
-  commandRecords,
-  recordStream,
-  revisionFor,
-  runWithRecording,
-} from '../../observe/context.ts'
+import { commandRecords, recordStream, revisionFor, recordingScope } from '../../observe/context.ts'
 import { readVersioned } from '../../cache/context.ts'
 import { ANY_WRITE } from '../../cache/types.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -984,7 +979,7 @@ it('a collected read stays in the records around it', async () => {
   vfs.store.files.set('/f', new TextEncoder().encode('old'))
   const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
   try {
-    const [mine] = await runWithRecording(() =>
+    const [mine] = await recordingScope(() =>
       commandRecords(async (records) => {
         await ws.mount('/m').call('read', '/m/f')
         return records
@@ -1042,7 +1037,7 @@ it('parallel collected reads keep their own versions', async () => {
     const mount = ws.mount('/m')
     const read = (): Promise<[unknown, string | null]> =>
       readVersioned(PathSpec.fromStrPath('/m/f'), () => mount.call('read', '/m/f'))
-    const [[older, newer]] = await runWithRecording(() =>
+    const [[older, newer]] = await recordingScope(() =>
       commandRecords(async () => {
         const first = read()
         await vfs.started

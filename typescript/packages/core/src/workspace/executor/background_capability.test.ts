@@ -17,7 +17,7 @@ import { makeWorkspace, stdoutStr } from '../../../tests/workspace/fixtures/work
 
 describe("background jobs respect the session's hides (regression)", () => {
   // This passes both before and after the SessionState.fork() migration: the
-  // bg-job promise is created inside the parent's runWithSession() scope,
+  // bg-job promise is created inside the parent's setCurrentSession() scope,
   // so AsyncLocalStorage propagates the *parent* session to the hide
   // filter even though the bgSession object itself does not carry the
   // hidden-paths spec. Pinning this so a future change to ALS scoping

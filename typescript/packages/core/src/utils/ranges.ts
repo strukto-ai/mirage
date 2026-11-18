@@ -88,6 +88,7 @@ function errorFields(err: unknown): {
     return { status: undefined, code: undefined, message: String(err) }
   const e = err as {
     $metadata?: { httpStatusCode?: number }
+    response?: { status?: number }
     statusCode?: number
     status?: number
     Code?: string
@@ -95,7 +96,7 @@ function errorFields(err: unknown): {
     name?: string
     message?: string
   }
-  const status = e.$metadata?.httpStatusCode ?? e.statusCode ?? e.status
+  const status = e.$metadata?.httpStatusCode ?? e.response?.status ?? e.statusCode ?? e.status
   return {
     status: typeof status === 'number' ? status : undefined,
     code: e.Code ?? e.code ?? e.name,

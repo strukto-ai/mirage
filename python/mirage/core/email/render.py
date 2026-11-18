@@ -14,9 +14,37 @@
 
 from datetime import timezone
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from mirage.core.render.json import compact_json_text
+
+
+class EnvelopeFlag(TypedDict):
+    raw: str
+    iana: str | None
+
+
+class EnvelopeAddress(TypedDict):
+    name: str | None
+    email: str
+
+
+Envelope = TypedDict(
+    "Envelope",
+    {
+        "id": str,
+        "message-id": str | None,
+        "in-reply-to": list[str],
+        "flags": list[EnvelopeFlag],
+        "subject": str,
+        "from": list[EnvelopeAddress],
+        "to": list[EnvelopeAddress],
+        "date": str | None,
+        "size": int,
+        "has-attachment": bool | None,
+    },
+)
+
 
 _TRANSPORT_KEYS = frozenset({"internal_date", "raw_size"})
 _IANA_FLAGS = (
@@ -91,7 +119,7 @@ def _message_ids(raw: str) -> list[str]:
     return [found for c in chunks if (found := _normalized_id(c)) is not None]
 
 
-def _flag_documents(flags: list[str]) -> list[dict[str, str | None]]:
+def _flag_documents(flags: list[str]) -> list[EnvelopeFlag]:
     """A message's flags as upstream renders them.
 
     Classified against the IANA registry, one entry per flag, IANA flags
@@ -101,7 +129,7 @@ def _flag_documents(flags: list[str]) -> list[dict[str, str | None]]:
     Args:
         flags (list[str]): the flags as the server spelled them.
     """
-    found: dict[str, dict[str, str | None]] = {}
+    found: dict[str, EnvelopeFlag] = {}
     for raw in flags:
         if raw.lower() == "\\recent":
             continue
@@ -111,14 +139,14 @@ def _flag_documents(flags: list[str]) -> list[dict[str, str | None]]:
     return sorted(found.values(), key=_flag_rank)
 
 
-def _flag_rank(flag: dict[str, str | None]) -> tuple[int, str]:
+def _flag_rank(flag: EnvelopeFlag) -> tuple[int, str]:
     iana = flag["iana"]
     if iana is not None:
         return _IANA_FLAGS.index(iana), ""
     return len(_IANA_FLAGS), str(flag["raw"]).lower()
 
 
-def _addresses(entries: list[dict[str, str]]) -> list[dict[str, str | None]]:
+def _addresses(entries: list[dict[str, str]]) -> list[EnvelopeAddress]:
     return [
         {"name": entry.get("name") or None, "email": entry["email"]}
         for entry in entries
@@ -144,7 +172,7 @@ def _rfc3339(date: str) -> str | None:
 
 def _envelope_document(
     message: dict[str, Any], with_attachment: bool
-) -> dict[str, Any]:
+) -> Envelope:
     """Project a fetched message onto upstream himalaya's envelope.
 
     Args:
@@ -170,7 +198,7 @@ def _envelope_document(
 
 def envelope_documents(
     messages: list[dict[str, Any]], with_attachment: bool = False
-) -> list[dict[str, Any]]:
+) -> list[Envelope]:
     """The envelope records a listing shows, one per message.
 
     Args:

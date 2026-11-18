@@ -71,7 +71,7 @@ import { type ByteSource, IOResult, materialize } from '@struktoai/mirage-core/i
 import { sleep } from '@struktoai/mirage-core/utils/abort'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { setCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 
@@ -519,7 +519,9 @@ async function action(
 ): Promise<unknown> {
   if (['read', 'write', 'readdir', 'stat'].includes(step.op) && step.session !== undefined) {
     const { session, ...unbound } = step
-    return runWithSession(ws.getSession(session), () => action(host, ws, unbound, policies, held))
+    return setCurrentSession(ws.getSession(session), () =>
+      action(host, ws, unbound, policies, held),
+    )
   }
   switch (step.op) {
     case 'register_stream_cli': {

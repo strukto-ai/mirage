@@ -17,7 +17,6 @@ import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/type
 import { VFSName } from '@struktoai/mirage-core/types'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { create as hfCreate } from '../../core/hf_buckets/create.ts'
@@ -32,7 +31,7 @@ import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { write as hfWrite } from '../../core/hf_buckets/write.ts'
 import type { HfBucketsConfig } from '@struktoai/mirage-core/vfs/hf_buckets/config'
 import {
-  assertHfRepoId,
+  normalizeHfBucketsConfig,
   HF_ENDPOINT,
   redactHfBucketsConfig,
 } from '@struktoai/mirage-core/vfs/hf_buckets/config'
@@ -54,15 +53,7 @@ export class HfBucketsVFS extends BaseVFS {
 
   constructor(config: HfBucketsConfig) {
     super()
-    assertHfRepoId(config.bucket, 'bucket')
-    const normalized = normalizeKeyPrefix(config.keyPrefix)
-    const cfg: HfBucketsConfig = { ...config }
-    if (normalized !== undefined) {
-      cfg.keyPrefix = normalized
-    } else {
-      delete cfg.keyPrefix
-    }
-    this.config = cfg
+    this.config = normalizeHfBucketsConfig(config)
     this.accessor = new HfBucketsAccessor(this.config)
   }
 

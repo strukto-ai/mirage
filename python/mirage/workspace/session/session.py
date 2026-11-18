@@ -21,7 +21,10 @@ from typing import Any, TypeVar
 from mirage.cache.versions import VersionHistory
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.waits import Hold, JobWaits
-from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.config import (
+    DEFAULT_PROCESS_PERMISSIONS,
+    ProcessPermissions,
+)
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
 from mirage.policy.builtin.output_cap import command_limits_to_json
@@ -421,7 +424,7 @@ class SessionState:
     # network, from its profile. A durable restriction like commands.
     network: NetworkSetting | None = None
     terminal_output: bool = True
-    processes: ProcessPermissions = ProcessPermissions()
+    processes: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS
     process_id: int | None = None
     shell_pid: int | None = None
     process_depth: int = 0
@@ -820,7 +823,7 @@ class SessionState:
             )
         if self.network is not None:
             data["network"] = self.network
-        if self.processes != ProcessPermissions():
+        if self.processes != DEFAULT_PROCESS_PERMISSIONS:
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:
             data["profile"] = self.profile
@@ -993,7 +996,9 @@ class SessionState:
                     if vars_ is not None
                     else None
                 ),
-                processes=data.get("processes", ProcessPermissions()).list,
+                processes=data.get(
+                    "processes", DEFAULT_PROCESS_PERMISSIONS
+                ).list,
             )
         if "vars" in data:
             data["vars"] = ShellVars.of(data["vars"])

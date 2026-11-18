@@ -22,6 +22,9 @@ from mirage.core.gmail.date_query import (
     span_to_gmail_query,
 )
 from mirage.core.gmail.messages import (
+    GmailMessageRaw,
+    GmailMessageStub,
+    GmailPayload,
     _extract_attachments,
     _extract_header,
     message_json_bytes,
@@ -76,7 +79,7 @@ def _date_from_internal(internal_date: str) -> str:
 ATTACHMENT = entry_stat("attachment_id")
 
 
-def _attachment_entries(payload: dict[str, Any]) -> list[FileStat]:
+def _attachment_entries(payload: GmailPayload) -> list[FileStat]:
     return [
         ATTACHMENT(
             att["filename"],
@@ -88,7 +91,7 @@ def _attachment_entries(payload: dict[str, Any]) -> list[FileStat]:
 
 
 def _date_children(
-    raws: list[dict[str, Any]],
+    raws: list[GmailMessageRaw],
     keep_text: bool,
 ) -> tuple[list[FileStat], dict[str, list[FileStat]]]:
     """One date directory's children, plus its attachment-dir seeds.
@@ -141,9 +144,9 @@ def _date_children(
 
 
 async def _group_by_date(
-    accessor: GmailAccessor, msg_ids: list[dict[str, Any]]
-) -> dict[str, list[dict[str, Any]]]:
-    groups: dict[str, list[dict[str, Any]]] = {}
+    accessor: GmailAccessor, msg_ids: list[GmailMessageStub]
+) -> dict[str, list[GmailMessageRaw]]:
+    groups: dict[str, list[GmailMessageRaw]] = {}
     for m in msg_ids:
         raw = await accessor.gmail.get_message_raw(m["id"])
         date_str = _date_from_internal(raw.get("internalDate", "0"))

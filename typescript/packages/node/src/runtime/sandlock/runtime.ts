@@ -29,7 +29,7 @@ import {
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
+import { MachineConfig } from '@struktoai/mirage-core/machine/config'
 import type { SandlockConfig } from './config.ts'
 import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
 import {
@@ -46,7 +46,7 @@ export class SandlockRuntime
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
   static override readonly configFields: ConfigFields = {
-    ...BASE_CONFIG_FIELDS,
+    ...MachineConfig,
     fsReadable: { type: 'list' },
     fsWritable: { type: 'list' },
     maxMemory: { type: 'string' },

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gc
+import sys
 
 import pytest
 
@@ -111,4 +113,26 @@ async def test_a_policy_reads_the_session_while_a_task_waits():
         assert await result.stderr_str() == ""
         assert await result.stdout_str() == "1\n"
     finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_nested_expansion_error_releases_the_native_task_on_its_thread(
+    monkeypatch,
+):
+    ws = Workspace({})
+    raised = []
+    gc.collect()
+    enabled = gc.isenabled()
+    try:
+        gc.disable()
+        monkeypatch.setattr(sys, "unraisablehook", raised.append)
+        result = await ws.shell("echo $(echo $((1/0)))")
+        assert "division by 0" in await result.stderr_str()
+        del result
+        await asyncio.to_thread(gc.collect)
+        assert raised == []
+    finally:
+        if enabled:
+            gc.enable()
         await ws.close()

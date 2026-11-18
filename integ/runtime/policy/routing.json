@@ -44,6 +44,63 @@
       ]
     },
     {
+      "id": "per_command_routes_across_one_line",
+      "note": "Three captures claim python3. One pipeline streams Monty's result into host Python, then the processbox fixture records the argv sent to the third machine.",
+      "world": {
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          },
+          "cpu": {
+            "provider": "host",
+            "captures": [
+              "python3"
+            ]
+          },
+          "worker": {
+            "provider": "in_process",
+            "runtime": "processbox",
+            "captures": [
+              "python3"
+            ]
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "agent": {
+            "policy": {
+              "pre_command": [
+                {
+                  "script": {
+                    "source": "def pre_command(ctx):\n    if ctx[\"command\"] == \"python3\":\n        return {\"kind\": \"route\", \"machine\": ctx[\"env\"][\"PLACE\"]}\n"
+                  },
+                  "runtime": "monty"
+                }
+              ]
+            }
+          }
+        },
+        "profile": "agent"
+      },
+      "steps": [
+        {
+          "command": "PLACE=monty python3 -c \"print(6 * 7)\" | PLACE=cpu python3 -c \"import sys; print(sys.stdin.read().strip() + '-cpu')\" && PLACE=worker python3 train.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "42-cpu\n[\"python3\",\"train.py\"]\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "global_policy",
       "world": {
         "machines": {

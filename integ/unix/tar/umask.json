@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "id": "tar_x_gives_a_member_its_mode_under_the_umask",
+      "seq": 19990141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tum && (cd /data/tum && printf x > exe && chmod 755 exe && printf y > rw && chmod 666 rw && printf z > priv && chmod 600 priv && mkdir d && tar -cf a.tar exe rw priv d && mkdir o && cd o && tar -xf ../a.tar && stat -c '%a %n' exe rw priv d && cd .. && mkdir m && cd m && umask 077 && tar -xf ../a.tar && stat -c '%a %n' exe rw priv d && cd .. && mkdir p && cd p && tar -xpf ../a.tar && stat -c '%a %n' exe rw priv d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "755 exe\n644 rw\n600 priv\n755 d\n700 exe\n600 rw\n600 priv\n700 d\n755 exe\n666 rw\n600 priv\n755 d\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "f",
+        "p"
+      ]
+    }
+  ]
+}

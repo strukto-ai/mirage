@@ -31,7 +31,7 @@ import { IndexView } from './view.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -102,7 +102,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           sessionId: 'agent',
           visibility: { paths: { paths: ['/data/source/private'] } },
         })
-        const reading = runWithSession(session, () =>
+        const reading = setCurrentSession(session, () =>
           ws.dispatch(
             op,
             '/data/source',

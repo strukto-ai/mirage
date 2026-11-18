@@ -14,7 +14,7 @@
 
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
+import { normalizeKeyPrefix } from '@struktoai/mirage-core/utils/key_prefix'
 import { S3VFS as CoreS3VFS } from '@struktoai/mirage-core/vfs/s3/s3'
 import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
 import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'

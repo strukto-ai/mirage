@@ -23,7 +23,7 @@ import type { ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { currentCaller, runWithCaller, type Caller } from '../../../context/session_context.ts'
+import { currentCaller, bindCaller, type Caller } from '../../../context/session_context.ts'
 import type { FollowOperands } from '../../../view/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -40,7 +40,7 @@ export async function* callerStream(
   caller: Caller,
   path: PathSpec,
 ): AsyncIterable<Uint8Array> {
-  const data = await runWithCaller(caller, async () => {
+  const data = await bindCaller(caller, async () => {
     if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
     return (await dispatch('read', path, [], { stream: true }))[0] as ByteSource
   })
@@ -77,7 +77,7 @@ export async function runDispatch(
   find?: FindExpr,
   env?: Record<string, string>,
 ): Promise<[ByteSource | null, IOResult]> {
-  return runWithCaller({ ...currentCaller(), mount: null }, async () => {
+  return bindCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
       stdin,
       flags: virtualFlags(bag),

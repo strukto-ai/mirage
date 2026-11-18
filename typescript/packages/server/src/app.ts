@@ -55,7 +55,7 @@ import {
   resolveForwardedAllowIps,
 } from './host_validation.ts'
 import { registerApi } from './api.ts'
-import { registerSshRoutes } from './routers/ssh.ts'
+import { router as registerSshRoutes } from './routers/ssh.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { loadDaemonId, mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'

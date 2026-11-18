@@ -165,10 +165,10 @@ class RAMVFS(BaseVFS):
         self._store.files.clear()
         for key, data in state.get("files", {}).items():
             self._store.files[key] = data
-        self._store.dirs = set(state.get("dirs", ["/"]))
+        self._store.dirs = set(state.get("dirs", ())) | {"/"}
         self._store.modified = dict(state.get("modified", {}))
         self._store.attrs = {
-            k: dict(v) for k, v in state.get("attrs", {}).items()
+            k: v.copy() for k, v in state.get("attrs", {}).items()
         }
 
     async def capacity(self) -> CapacityResult:

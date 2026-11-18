@@ -141,7 +141,7 @@ export interface SessionProfile {
    * stating only a policy hides nothing, and the policy is its whole
    * admission policy.
    */
-  readonly policy?: ProfilePolicy | null
+  readonly policy?: ProfilePrograms | null
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
   /** A bare scope for both `list` and `kill`, or any of the fields. */
   readonly processes?: ProcessesBlock | null
@@ -168,7 +168,7 @@ export interface SessionProfile {
  * pointer read from its source when the program first runs. None of the
  * session's reach it.
  */
-export interface ProfilePolicySpec {
+export interface ProfilePolicy {
   readonly script: ScriptSource | string
   readonly runtime?:
     | string
@@ -177,7 +177,7 @@ export interface ProfilePolicySpec {
 }
 
 /** A profile's policy: each `pre` method's programs, asked in order. */
-export type ProfilePolicy = Readonly<Partial<Record<ScriptMethod, readonly ProfilePolicySpec[]>>>
+export type ProfilePrograms = Readonly<Partial<Record<ScriptMethod, readonly ProfilePolicy[]>>>
 
 /**
  * What a profile seeds a new session with; the agent's to change
@@ -502,7 +502,7 @@ export function parseProfileMounts(
  * document does (`pre_command`, `auto_load_from_imports`); code, with
  * `code` set, as the interface does (`preCommand`, `autoLoadFromImports`).
  */
-export function parseProfilePolicy(raw: unknown, where: string, code = false): ProfilePolicy {
+export function parseProfilePolicy(raw: unknown, where: string, code = false): ProfilePrograms {
   const keys: readonly string[] = code ? Object.keys(METHODS) : Object.values(METHODS)
   if (typeof raw === 'string' || raw instanceof ScriptSource) {
     throw new Error(`${where} must be a mapping of method to programs`)
@@ -515,7 +515,7 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
         keys.join(', '),
     )
   }
-  const out: Partial<Record<ScriptMethod, readonly ProfilePolicySpec[]>> = {}
+  const out: Partial<Record<ScriptMethod, readonly ProfilePolicy[]>> = {}
   for (const key of keys) {
     const programs = obj[key]
     if (programs === undefined) continue
@@ -532,7 +532,7 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
  * workspace's `route_policy`. `code` reads a runtime's settings as the
  * interface spells them, as `parseProfilePolicy` does.
  */
-export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicySpec {
+export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicy {
   const program = asObject(raw, at)
   rejectUnknownKeys(program, ['script', 'runtime', 'env'], at)
   const given = program.script
@@ -611,7 +611,7 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
  * @throws Error - the script is still a path, which only the config
  * loader loads.
  */
-export function compileProgram(program: ProfilePolicySpec, profile: string): ProfileScript {
+export function compileProgram(program: ProfilePolicy, profile: string): ProfileScript {
   if (typeof program.script === 'string') {
     throw new Error(
       `names a policy by path ('${program.script}'); only the config loader loads one, ` +
@@ -655,7 +655,7 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     paths?: PathsBlock | null
     vars?: VarsBlock | null
     commands?: CommandNode | null
-    policy?: ProfilePolicy | null
+    policy?: ProfilePrograms | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: Partial<ProcessPermissions>
     network?: NetworkSetting

@@ -236,9 +236,10 @@ async def expand(
         raw = word.text or b""
         if PLAIN_WORD.fullmatch(raw):
             return [raw.decode()]
-    task = session.vars.shell.expand(node, mode)
     host = ExpandHost(context, execute_fn, call_stack, word)
-    return await drive(task, host, context.frame.diagnostics)
+    return await drive(
+        session.vars.shell.expand(node, mode), host, context.frame.diagnostics
+    )
 
 
 async def run_on_shell(

@@ -1656,7 +1656,7 @@
       "target": "$.paths[\"/v1/vfs/{ref}\"].delete",
       "update": {
         "x-mint": {
-          "content": "Delete a saved VFS configuration.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Delete a saved VFS configuration. Refused with `conflict` while a kept workspace config names it, since that workspace would not start again; `force` deletes it anyway.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `409` | The request conflicts with the current state. The id or name is taken (`already_exists`), the workspace is busy on another server or starting or stopping (`workspace_busy`), the workspace is stopped (`workspace_stopped`), a file changed since it was read (`stale_write`), or the state allows no such change (`conflict`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },
@@ -1674,6 +1674,10 @@
     },
     {
       "target": "$.paths[\"/v1/vfs/{ref}\"].delete.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/vfs/{ref}\"].delete.responses[\"409\"]",
       "remove": true
     },
     {
@@ -1836,7 +1840,7 @@
       "target": "$.paths[\"/v1/clis/{ref}\"].delete",
       "update": {
         "x-mint": {
-          "content": "Delete a saved CLI configuration.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Delete a saved CLI configuration. Refused with `conflict` while a kept workspace config names it, since that workspace would not start again; `force` deletes it anyway.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `409` | The request conflicts with the current state. The id or name is taken (`already_exists`), the workspace is busy on another server or starting or stopping (`workspace_busy`), the workspace is stopped (`workspace_stopped`), a file changed since it was read (`stale_write`), or the state allows no such change (`conflict`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },
@@ -1854,6 +1858,10 @@
     },
     {
       "target": "$.paths[\"/v1/clis/{ref}\"].delete.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/clis/{ref}\"].delete.responses[\"409\"]",
       "remove": true
     },
     {
@@ -2016,7 +2024,7 @@
       "target": "$.paths[\"/v1/machines/{ref}\"].delete",
       "update": {
         "x-mint": {
-          "content": "Delete a saved machine configuration.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Delete a saved machine configuration. Refused with `conflict` while a kept workspace config names it, since that workspace would not start again; `force` deletes it anyway.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `409` | The request conflicts with the current state. The id or name is taken (`already_exists`), the workspace is busy on another server or starting or stopping (`workspace_busy`), the workspace is stopped (`workspace_stopped`), a file changed since it was read (`stale_write`), or the state allows no such change (`conflict`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },
@@ -2034,6 +2042,10 @@
     },
     {
       "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"409\"]",
       "remove": true
     },
     {

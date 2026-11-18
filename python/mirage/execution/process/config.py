@@ -97,3 +97,6 @@ def nearer(a: ProcessScope, b: ProcessScope) -> ProcessScope:
         b (ProcessScope): the other.
     """
     return _SCOPES[min(_SCOPES.index(a), _SCOPES.index(b))]
+
+
+DEFAULT_PROCESS_PERMISSIONS = ProcessPermissions()

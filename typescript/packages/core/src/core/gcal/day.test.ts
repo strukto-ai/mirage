@@ -128,12 +128,31 @@ describe('gcal day bucketing', () => {
     ['2026-08-10--2026-08-16', true],
     ['2026-02-30', false],
     ['2026-13-01', false],
+    ['0000-01-01', false],
     ['2026-08-10--2026-02-30', false],
     ['2026-08-10--', false],
     ['not-a-date', false],
   ])('judges %s a bucket: %s', (name, ok) => {
     expect(validBucket(name)).toBe(ok)
     expect(validDay(name)).toBe(ok && !name.includes('--'))
+  })
+
+  it.each(['2026-08-11T01:02:03.123', '0042-08-11T01:02:03.123'])(
+    'preserves the year and fractional seconds of %s in UTC',
+    (dateTime) => {
+      expect(slotInstant({ dateTime }, 'UTC')).toBe(Date.parse(`${dateTime}Z`))
+    },
+  )
+
+  it('uses the first occurrence of an ambiguous event time', () => {
+    expect(slotInstant({ dateTime: '2026-11-01T01:30:00' }, 'America/New_York')).toBe(
+      Date.parse('2026-11-01T05:30:00Z'),
+    )
+  })
+
+  it('retains a skipped midnight and second-resolution historical offsets', () => {
+    expect(dayBounds('2018-11-04', 'America/Sao_Paulo')[0]).toBe('2018-11-04T00:00:00-03:00')
+    expect(dayBounds('1900-01-01', 'Europe/Paris')[0]).toBe('1900-01-01T00:00:00+00:09:21')
   })
 
   it('parses offsets and Z', () => {
@@ -203,4 +222,13 @@ describe('gcal day bucketing', () => {
   ])('reads a zone-less dateTime %j in a zone', (slot, tz) => {
     expect(slotInstant(slot, tz)).toBe(Date.parse('2026-08-11T01:00:00Z'))
   })
+})
+
+it.each([
+  { date: '2026-02-30' },
+  { dateTime: 'unreadable' },
+  { dateTime: '2026-02-30T03:02:01Z' },
+  { dateTime: '2026-04-01T24:00:00' },
+])('skips an invalid event slot %o', (slot) => {
+  expect(slotInstant(slot, 'UTC')).toBeNull()
 })

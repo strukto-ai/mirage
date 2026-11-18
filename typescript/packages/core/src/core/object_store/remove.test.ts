@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import {
   codeOf,
   FakeAccessor,
@@ -134,7 +134,7 @@ describe('object_store remove', () => {
 })
 
 async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
-  const [, records] = await runWithRecording(async () => {
+  const [, records] = await recordingScope(async () => {
     await fn()
   })
   return records.map((r) => [r.op, r.path])
@@ -190,7 +190,7 @@ describe('a retraction records even when the driver call throws', () => {
       ...makeDriver(new FakeStore({ 'a/b.txt': 'b' })),
       deleteFile: () => Promise.reject(new Error('store on fire')),
     }
-    const [, records] = await runWithRecording(async () => {
+    const [, records] = await recordingScope(async () => {
       await expect(makeUnlink(driver)(accessor, spec('/a/b.txt'))).rejects.toThrow('store on fire')
     })
     expect(records.map((r) => [r.op, r.path])).toEqual([['unlink', '/mnt/a/b.txt']])

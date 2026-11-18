@@ -1,4 +1,4 @@
-import { writeItem } from './drive.ts'
+import { asNumber, parentPath, writeItem } from './drive.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
@@ -693,3 +693,11 @@ it('stream source failure never starts an upload', async () => {
 })
 
 vi.mock('./paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))
+
+it.each([true, -1, 0.5, '12'])('keeps an invalid Graph count unknown', (value) => {
+  expect(asNumber(value)).toBeNull()
+})
+
+it('resolves the parent of a directory with a trailing slash', () => {
+  expect(parentPath('parent/nested/')).toBe('parent')
+})

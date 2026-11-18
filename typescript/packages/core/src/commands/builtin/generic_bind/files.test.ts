@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { currentCaller, runWithCaller, runWithMountGate } from '../../../context/session_context.ts'
+import { currentCaller, bindCaller, setMountGate } from '../../../context/session_context.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
 import { yieldBytes } from '../../../io/stream.ts'
@@ -116,7 +116,7 @@ function contextFor(
 // The command's files as the factory hands them to a builder on a mount.
 function guarded(ctx: Context): Promise<CommandFiles> {
   const reading = withReading(ctx, { split: true, stream: null })
-  return runWithMountGate('/', MountMode.WRITE, () => Promise.resolve(commandFiles(reading)))
+  return setMountGate('/', MountMode.WRITE, () => Promise.resolve(commandFiles(reading)))
 }
 
 async function drain(stream: AsyncIterable<Uint8Array>): Promise<string> {
@@ -248,7 +248,7 @@ describe('fileSize', () => {
       return Promise.resolve([name === 'read' ? null : row, new IOResult()])
     }
     const ctx = contextFor(dispatch)
-    await runWithMountGate('/', MountMode.WRITE, async () => {
+    await setMountGate('/', MountMode.WRITE, async () => {
       expect(await fileSize(commandFiles(ctx), ctx, opened)(at('/f'))).toBeNull()
     })
   })
@@ -258,7 +258,7 @@ describe('fileSize', () => {
     const ctx = contextFor(keyed({ stored: { '/f': 'raw' } }, calls), {
       row: { prefix: '/', kind: 'ram', mode: MountMode.WRITE, calls: new Set(['read_range']) },
     })
-    await runWithMountGate('/', MountMode.WRITE, async () => {
+    await setMountGate('/', MountMode.WRITE, async () => {
       expect(commandFiles(ctx).answers('read_range')).toBe(true)
       const run = withReading(ctx, {
         split: true,
@@ -278,7 +278,7 @@ describe('fileSize', () => {
     [0, 0, null],
   ])('checks opened size %s against current size %s', async (size, now, expected) => {
     const ctx = contextFor(answering(stat({ size, mode: 0o644 }), stat({ size: now, mode: 0o644 })))
-    await runWithMountGate('/', MountMode.WRITE, async () => {
+    await setMountGate('/', MountMode.WRITE, async () => {
       expect(await fileSize(commandFiles(ctx), ctx, true)(at('/f'))).toBe(expected)
     })
   })
@@ -296,7 +296,7 @@ describe('fileSize', () => {
     const bound = fileSize(await guarded(ctx), ctx)
     const pins = pinned ? new Map([['/f', 'v1']]) : null
     expect(
-      await runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () => bound(at('/f'))),
+      await bindCaller({ ...currentCaller(), revisions: { map: pins } }, () => bound(at('/f'))),
     ).toBe(size)
   })
 })

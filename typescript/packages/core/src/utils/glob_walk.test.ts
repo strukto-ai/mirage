@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { runWithSession } from '../context/session_context.ts'
+import { setCurrentSession } from '../context/session_context.ts'
 import { FileStat, FileType, PathSpec } from '../types.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { eacces, enoent } from '../errors/fs.ts'
@@ -301,7 +301,7 @@ describe('resolveGlobWith under hidden paths', () => {
   it('drops hidden matches', async () => {
     const sess = new SessionState({ sessionId: 'narrowed' })
     sess.visibility = { ...sess.visibility, paths: { patterns: ['*.json'] } }
-    const result = await runWithSession(sess, () =>
+    const result = await setCurrentSession(sess, () =>
       resolveGlobWith(
         fakeReaddir,
         null,
@@ -315,7 +315,7 @@ describe('resolveGlobWith under hidden paths', () => {
   it('an all-hidden match set falls back to the literal', async () => {
     const sess = new SessionState({ sessionId: 'narrowed' })
     sess.visibility = { ...sess.visibility, paths: { patterns: ['*.json'] } }
-    const result = await runWithSession(sess, () =>
+    const result = await setCurrentSession(sess, () =>
       resolveGlobWith(
         fakeReaddir,
         null,

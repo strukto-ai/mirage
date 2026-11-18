@@ -14,6 +14,7 @@
 
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.cache.types import LiveVersion
@@ -36,7 +37,7 @@ def token_of(value: JsonValue) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def live_of(entry: dict[str, Any] | None) -> LiveVersion | None:
+def live_of(entry: Mapping[str, Any] | None) -> LiveVersion | None:
     """A looked-up entry's live tokens, None when it is no file.
 
     Args:

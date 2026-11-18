@@ -12,11 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres import client
 from mirage.vfs.secrets import reveal_secret
+
+
+class ReferencedColumn(TypedDict):
+    schema: str
+    table: str
+    column: str
+
+
+class EntityColumn(client.ColumnInfo):
+    primary_key: NotRequired[bool]
+    references: NotRequired[ReferencedColumn]
 
 
 async def build_database_json(accessor: PostgresAccessor) -> dict[str, Any]:
@@ -67,7 +78,7 @@ async def build_entity_schema_json(
         rows = await client.estimated_row_count(conn, schema, name)
         size = await client.table_size_bytes(conn, schema, name)
     pk_set = set(pk)
-    fk_map: dict[str, dict[str, Any]] = {}
+    fk_map: dict[str, ReferencedColumn] = {}
     for fk in fks:
         ref = fk["references"]
         for from_col, to_col in zip(fk["columns"], ref["columns"]):
@@ -76,16 +87,19 @@ async def build_entity_schema_json(
                 "table": ref["table"],
                 "column": to_col,
             }
-    for col in cols:
+    annotated: list[EntityColumn] = []
+    for column in cols:
+        col: EntityColumn = {**column}
         if col["name"] in pk_set:
             col["primary_key"] = True
         if col["name"] in fk_map:
             col["references"] = fk_map[col["name"]]
+        annotated.append(col)
     return {
         "schema": schema,
         "name": name,
         "kind": kind,
-        "columns": cols,
+        "columns": annotated,
         "primary_key": pk,
         "foreign_keys": fks,
         "indexes": idx,

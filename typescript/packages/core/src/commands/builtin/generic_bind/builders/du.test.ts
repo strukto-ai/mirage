@@ -14,7 +14,7 @@
 
 import { BUILDER } from './du.ts'
 import { describe, expect, it } from 'vitest'
-import { runWithMountGate } from '../../../../context/session_context.ts'
+import { setMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
@@ -92,7 +92,7 @@ async function du(
     ],
     links,
   )
-  return runWithMountGate('/', MountMode.WRITE, async () =>
+  return setMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(ACCESSOR, paths, [], {
       stdin: null,
       flags: {},

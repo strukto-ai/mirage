@@ -36,7 +36,7 @@ interface SshParams {
  * one JSON-RPC message per WebSocket message: `mirage codex-exec` relays
  * `codex exec-server forward` there with the CLI's token.
  */
-export function registerSshRoutes(
+export function router(
   app: FastifyInstance,
   deps: {
     registry: WorkspaceRegistry

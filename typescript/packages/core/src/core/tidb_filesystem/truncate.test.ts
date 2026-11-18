@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import {
   makeAccessor,
   serve,
@@ -49,7 +49,7 @@ describe('truncate', () => {
   it('cuts a large file moving only the last part', async () => {
     const data = big(9 * MIB)
     drive9.files.set('/root/big.bin', data)
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       truncate(accessor, spec('/fs/big.bin'), 8 * MIB + 5),
     )
     const got = Buffer.from(drive9.files.get('/root/big.bin') ?? [])

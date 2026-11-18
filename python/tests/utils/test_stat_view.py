@@ -153,6 +153,16 @@ def test_posix_mode_defaults_by_kind():
     dir_st = FileStat(name="d", type=FileType.DIRECTORY)
     assert posix_mode(file_st) == FILE_MODE
     assert posix_mode(dir_st) == DIR_MODE
+    assert (
+        posix_mode(
+            FileStat(name="block", type=FileType.BLOCK_DEVICE, mode=0o640)
+        )
+        == 0o060640
+    )
+    assert (
+        posix_mode(FileStat(name="socket", type=FileType.SOCKET, mode=0o775))
+        == 0o140775
+    )
 
 
 def test_posix_mode_takes_the_overlay_bits_and_keeps_the_kind():

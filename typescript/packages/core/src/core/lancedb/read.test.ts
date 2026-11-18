@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
+import { LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import type { LanceDriver } from './types.ts'
 import { read } from './tree.ts'
@@ -25,7 +25,7 @@ function makeAccessor(blob: unknown): LanceDBAccessor {
   const driver = {
     rowRecord: vi.fn().mockResolvedValue({ id: '1', blob }),
   } as unknown as LanceDriver
-  const config = resolveLanceDBConfig({
+  const config = LanceDBConfig.parse({
     uri: '/tmp/db',
     table: 'items',
     idColumn: 'id',

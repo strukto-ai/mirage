@@ -16,7 +16,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 
 from mirage.policy.base import Policy
-from mirage.policy.profile import ProfilePolicy, compile_program
+from mirage.policy.profile import compile_program, parse_program
 from mirage.policy.script import ScriptPolicy
 from mirage.policy.types import Action, ProfileScript, Route, RouteContext
 from mirage.runtime.routing.errors import RouteError
@@ -64,11 +64,7 @@ class RoutePolicy(Policy):
         if callable(route):
             self._call = route
             return
-        program = (
-            route
-            if isinstance(route, ProfilePolicy)
-            else ProfilePolicy.model_validate(route)
-        )
+        program = parse_program(route)
         try:
             self._program = compile_program(program, "")
         except ValueError as exc:

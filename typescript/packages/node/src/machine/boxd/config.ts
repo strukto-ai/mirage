@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import { MachineConfig } from '@struktoai/mirage-core/machine/config'
 
 /** How to reach the user's boxd machine. */
 export interface BoxdConfig extends MachineConfig {
@@ -25,9 +25,9 @@ export interface BoxdConfig extends MachineConfig {
   region?: string
 }
 
-export const BOXD_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
+export const BoxdConfig = {
+  ...MachineConfig,
   machineId: { type: 'string', required: true },
   apiKey: { type: 'string' },
   region: { type: 'string' },
-}
+} satisfies ConfigFields<BoxdConfig>

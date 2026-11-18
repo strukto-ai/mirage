@@ -304,6 +304,7 @@ describe('helpers', () => {
   it.each([
     [['/usr/bin/bash', '-lc', 'ls | wc -l'], 'ls | wc -l'],
     [['sh', '-c', 'echo hi'], 'echo hi'],
+    [['echo', '\udcff'], "echo ''$'\\xff'''"],
     [['grep', '-n', 'a b', '/f'], "grep -n 'a b' /f"],
     [['bash', '-c', 'echo $1', 'sh', 'x'], "bash -c 'echo $1' sh x"],
   ])('runs %j as the line %s', (argv, line) => {

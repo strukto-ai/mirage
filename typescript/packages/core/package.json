@@ -131,6 +131,7 @@
     "bson": "^6.10.4",
     "buffer": "^6.0.3",
     "isomorphic-git": "^1.38.6",
+    "yaml": "^2.6.0",
     "zod": "^4.6.6"
   },
   "peerDependencies": {

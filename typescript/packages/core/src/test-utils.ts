@@ -26,7 +26,7 @@ import { RAMVFS } from './vfs/ram/ram.ts'
 import { stripSlash } from './utils/slash.ts'
 import { makeResolveGlob } from './utils/glob_walk.ts'
 import type { Accessor } from './accessor/base.ts'
-import { runWithMountGate } from './context/session_context.ts'
+import { setMountGate } from './context/session_context.ts'
 import { MountEntry } from './workspace/mount/mount.ts'
 import { Workspace } from './workspace/workspace/workspace.ts'
 import { Files, type FilesOptions } from './workspace/files.ts'
@@ -272,7 +272,7 @@ export function onMount<T>(
   }
   const files = ws.vfs
   const at = prefix.endsWith('/') ? prefix : `${prefix}/`
-  return runWithMountGate(at, MountMode.WRITE, async () => fn(files))
+  return setMountGate(at, MountMode.WRITE, async () => fn(files))
 }
 
 /**

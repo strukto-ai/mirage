@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { Context } from '../../commands/config.ts'
-import { runExplaining, runWithDecisionSink } from '../../context/session_context.ts'
+import { setExplaining, setDecisionSink } from '../../context/session_context.ts'
 import type {
   Action,
   AskHandler,
@@ -123,10 +123,10 @@ async function judged(
 ): Promise<Judgment[]> {
   await w.ensureSessionsLoaded()
   const session = w.getSession(sessionId === '' ? w.defaultSessionId : sessionId)
-  const said = await runWithDecisionSink(
+  const said = await setDecisionSink(
     () => undefined,
     () =>
-      runExplaining(DryRun.DECIDING, () =>
+      setExplaining(DryRun.DECIDING, () =>
         explainLine(
           parse(line),
           session,

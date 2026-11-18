@@ -15,6 +15,16 @@
 import { FileType, type FileStat } from '../types.ts'
 import { isoTimestamp } from './dates.ts'
 
+export type PrintfKind = 'f' | 'd' | 'l' | 'c' | 'b' | 'p' | 's'
+export const TYPE_CHARS: Partial<Record<FileType, PrintfKind>> = {
+  [FileType.DIRECTORY]: 'd',
+  [FileType.SYMLINK]: 'l',
+  [FileType.CHAR_DEVICE]: 'c',
+  [FileType.BLOCK_DEVICE]: 'b',
+  [FileType.FIFO]: 'p',
+  [FileType.SOCKET]: 's',
+}
+
 // The one spelling of "a directory looks like drwxr-xr-x and a file
 // like -rw-r--r--" for every stat translator (FUSE attrs, guest
 // st_mode); mirrors mirage/utils/stat_view.py.
@@ -32,6 +42,24 @@ export const FIFO_MODE = 0o010000 | 0o600
 // by any POSIX system, so this is the one mode every translator reports
 // for one (the FUSE attr fold, find's -type l row, a guest's lstat).
 export const LINK_MODE = S_IFLNK | 0o777
+const BASE_MODES: Record<FileType, number> = {
+  [FileType.FILE]: FILE_MODE,
+  [FileType.DIRECTORY]: DIR_MODE,
+  [FileType.SYMLINK]: LINK_MODE,
+  [FileType.CHAR_DEVICE]: CHAR_MODE,
+  [FileType.FIFO]: FIFO_MODE,
+  [FileType.BLOCK_DEVICE]: 0o060644,
+  [FileType.SOCKET]: 0o140644,
+}
+
+const MODE_TYPES = new Map(
+  Object.values(FileType).map((type) => [BASE_MODES[type] & S_IFMT, type] as const),
+)
+
+/** Read the POSIX node kind from an optional mode which may carry only permissions. */
+export function modeType(mode: number | undefined): FileType | undefined {
+  return mode === undefined ? undefined : MODE_TYPES.get(mode & S_IFMT)
+}
 // A directory is one ext4 block, the st_size GNU tools show for one,
 // whatever aggregate a backend reports; ls, stat, find and FUSE all
 // report this, so find -size agrees with what the listing shows.
@@ -141,15 +169,32 @@ export function deviceRdev(st: FileStat): number {
  */
 export function posixMode(st: FileStat): number {
   if (isLink(st)) return LINK_MODE
-  const base = isCharDevice(st)
-    ? CHAR_MODE
-    : isFifo(st)
-      ? FIFO_MODE
-      : isDir(st)
-        ? DIR_MODE
-        : FILE_MODE
+  const base = BASE_MODES[st.type]
   if (st.mode === null) return base
   return (base & ~ALL_MODE_BITS) | (st.mode & ALL_MODE_BITS)
+}
+
+function permTriplet(bits: number, special?: string): string {
+  const execBit =
+    special !== undefined
+      ? bits & 1
+        ? special.toLowerCase()
+        : special.toUpperCase()
+      : bits & 1
+        ? 'x'
+        : '-'
+  return (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + execBit
+}
+
+/** Render POSIX type and permission bits as an ls or SFTP long listing. */
+export function fileMode(mode: number): string {
+  const type = modeType(mode)
+  return (
+    (type === undefined ? '?' : (TYPE_CHARS[type] ?? '-')) +
+    permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
+    permTriplet(mode >> 3, mode & 0o2000 ? 's' : undefined) +
+    permTriplet(mode, mode & 0o1000 ? 't' : undefined)
+  )
 }
 
 /**

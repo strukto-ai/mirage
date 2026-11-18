@@ -29,8 +29,6 @@ from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import (
     DiskStoreBlock,
-    RamCacheBlock,
-    RedisCacheBlock,
     RedisStoreBlock,
     S3StoreBlock,
     WorkspaceConfig,
@@ -90,7 +88,7 @@ async def test_load_full_yaml_with_env_interpolation():
     cfg = load_config(FIXTURES / "full.yaml", env=env)
     assert cfg.mode == MountMode.WRITE
     assert cfg.read is None
-    assert isinstance(cfg.cache, RamCacheBlock)
+    assert isinstance(cfg.cache, CacheConfig)
     assert cfg.cache.limit == "256MB"
     assert cfg.mounts["/s3"].config["bucket"] == "my-test-bucket"
     assert cfg.mounts["/s3"].config["aws_access_key_id"] == "AKIAEXAMPLE"
@@ -129,7 +127,7 @@ def test_missing_env_var_raises_with_full_list():
 
 def test_redis_cache_discriminated_union():
     cfg = load_config(FIXTURES / "redis_cache.yaml")
-    assert isinstance(cfg.cache, RedisCacheBlock)
+    assert isinstance(cfg.cache, RedisCacheConfig)
     assert cfg.cache.url == "redis://localhost:6379/3"
     assert cfg.cache.key_prefix == "test_cache:"
 

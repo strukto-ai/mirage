@@ -19,7 +19,11 @@ from urllib.parse import quote
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.api.errors import ApiError
-from mirage.core.github.client import GitHubApiError, github_get
+from mirage.core.github.client import (
+    GitHubApiError,
+    GitHubTreeItem,
+    github_get,
+)
 from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree_entry import TreeEntry
@@ -33,6 +37,26 @@ log = logging.getLogger(__name__)
 def _head_of(data: dict[str, Any]) -> str | None:
     head = data.get("sha")
     return head if isinstance(head, str) and head else None
+
+
+def _tree_entries(
+    data: dict[str, Any], owner: str, repo: str, ref: str
+) -> list[TreeEntry]:
+    items: list[GitHubTreeItem] | None = data.get("tree")
+    if not isinstance(items, list):
+        raise GitHubApiError(
+            f"GitHub tree response for {owner}/{repo} {ref} carries no tree", 0
+        )
+    return [
+        TreeEntry(
+            path=item["path"],
+            type=item["type"],
+            sha=item["sha"],
+            size=item.get("size"),
+        )
+        for item in items
+        if item["type"] != "commit"
+    ]
 
 
 async def fetch_tree(
@@ -71,18 +95,9 @@ async def fetch_tree(
         log.warning(
             "GitHub tree response truncated for %s/%s@%s", owner, repo, ref
         )
-    result: dict[str, TreeEntry] = {}
-    for item in data.get("tree", []):
-        # Submodule gitlinks (type "commit") have no size and no blob to
-        # read; exclude them from the tree entirely.
-        if item["type"] == "commit":
-            continue
-        result[item["path"]] = TreeEntry(
-            path=item["path"],
-            type=item["type"],
-            sha=item["sha"],
-            size=item.get("size"),
-        )
+    result = {
+        item.path: item for item in _tree_entries(data, owner, repo, ref)
+    }
     return result, truncated, _head_of(data)
 
 
@@ -146,24 +161,7 @@ async def fetch_dir_page(
         repo=repo,
         tree_sha=quote(tree_sha, safe=""),
     )
-    if "tree" not in data:
-        raise GitHubApiError(
-            f"GitHub tree response for {owner}/{repo} {tree_sha} carries "
-            "no tree",
-            0,
-        )
-    result: list[TreeEntry] = []
-    for item in data["tree"]:
-        if item["type"] == "commit":
-            continue
-        result.append(
-            TreeEntry(
-                path=item["path"],
-                type=item["type"],
-                sha=item["sha"],
-                size=item.get("size"),
-            )
-        )
+    result = _tree_entries(data, owner, repo, tree_sha)
     return result, bool(data.get("truncated"))
 
 

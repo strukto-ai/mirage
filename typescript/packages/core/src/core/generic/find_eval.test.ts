@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileType, type FileStat } from '../../types.ts'
+import { FileType, FileStat } from '../../types.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 import {
   bindTree,
@@ -22,6 +22,7 @@ import {
   emitStartPath,
   evaluate,
   keep,
+  printfKind,
   treeHasAction,
   treeHasPrune,
   treeHasTime,
@@ -534,4 +535,11 @@ describe('unrespellRaw', () => {
     expect(unrespellRaw('.', '/data', '.')).toBe('/data')
     expect(unrespellRaw('/data/x', '/data', '/data')).toBe('/data/x')
   })
+})
+
+it.each([
+  [FileType.BLOCK_DEVICE, 'b'],
+  [FileType.SOCKET, 's'],
+] as const)('renders a backend %s as %s in find', (type, letter) => {
+  expect(printfKind(new FileStat({ name: 'special', type }))).toBe(letter)
 })

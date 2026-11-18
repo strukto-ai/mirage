@@ -13,16 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import cast
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.paginate import cursor_pages
+from mirage.core.slack.types import SlackUser
 
 
-def _is_real_user(m: dict[str, Any]) -> bool:
+def _is_real_user(m: SlackUser) -> bool:
     return (
         not m.get("deleted")
         and not m.get("is_bot")
@@ -32,7 +33,7 @@ def _is_real_user(m: dict[str, Any]) -> bool:
 
 async def list_users_stream(
     accessor: SlackAccessor, limit: int = 200
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncIterator[list[SlackUser]]:
     """Page-streaming user list; yields filtered humans per page.
 
     Args:
@@ -54,7 +55,7 @@ async def list_users_stream(
 
 async def list_users(
     accessor: SlackAccessor, limit: int = 200, stop_at: int | None = None
-) -> list[dict[str, Any]]:
+) -> list[SlackUser]:
     """List workspace users (eager; collects all pages, and none past the
     one that brings ``stop_at``).
 
@@ -69,7 +70,7 @@ async def list_users(
     return await held_pages(list_users_stream(accessor, limit=limit), stop_at)
 
 
-def user_json_bytes(user: dict[str, Any]) -> bytes:
+def user_json_bytes(user: SlackUser) -> bytes:
     """Render one user object as its .json byte content.
 
     The single renderer behind both read and the readdir-time size.
@@ -91,9 +92,7 @@ def user_json_bytes(user: dict[str, Any]) -> bytes:
     return compact_json_bytes(user)
 
 
-async def get_user_profile(
-    accessor: SlackAccessor, user_id: str
-) -> dict[str, Any]:
+async def get_user_profile(accessor: SlackAccessor, user_id: str) -> SlackUser:
     """Get a single user's profile.
 
     Args:
@@ -104,12 +103,12 @@ async def get_user_profile(
         dict: user info.
     """
     data = await slack_get(accessor, "users.info", params={"user": user_id})
-    return cast(dict[str, Any], data.get("user", {}))
+    return cast(SlackUser, data.get("user", {}))
 
 
 async def search_users(
     accessor: SlackAccessor, query: str, limit: int = 200
-) -> list[dict[str, Any]]:
+) -> list[SlackUser]:
     """Search users by name, real name, or email.
 
     Args:

@@ -20,6 +20,7 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type DaemonClient, makeClient } from './client.ts'
 import {
   emit,
+  errorMessage,
   fail,
   formatTable,
   handleResponse,
@@ -344,12 +345,10 @@ function formatEntry(entry: {
   ].join('\n')
 }
 
-function formatEntries(listing: {
-  items?: { name: string; type: string; used_by?: number }[]
-}): string {
+function formatEntries(listing: { items?: { name: string; type: string }[] }): string {
   return formatTable(
-    ['NAME', 'TYPE', 'USED BY'],
-    (listing.items ?? []).map((i) => [i.name, i.type, String(i.used_by ?? 0)]),
+    ['NAME', 'TYPE'],
+    (listing.items ?? []).map((i) => [i.name, i.type]),
   )
 }
 
@@ -520,12 +519,20 @@ function registerKindCommands(program: Command, kind: Kind): void {
 
   group
     .command('delete')
-    .description('Delete an entry and wipe its sealed values; there is no restore.')
+    .description(
+      'Delete an entry and wipe its sealed values; there is no restore. Refused while a kept workspace config names it.',
+    )
     .argument('<id>', ID_HELP)
-    .action(async (name: string) => {
+    .option('--force', 'Delete it even while a workspace uses it.')
+    .action(async (name: string, opts: { force?: boolean }) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      await handleResponse(await c.request('DELETE', entryPath(name)))
+      const path = opts.force === true ? `${entryPath(name)}?force=true` : entryPath(name)
+      const r = await c.request('DELETE', path)
+      if (r.status === 409) {
+        fail(`error 409: ${errorMessage(await r.text())}; pass --force to delete it anyway`, 2)
+      }
+      await handleResponse(r)
       process.stdout.write(`Deleted ${kind.noun} ${name}.\n`)
     })
 }

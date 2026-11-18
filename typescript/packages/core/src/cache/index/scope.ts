@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, liveCallers, runWithCaller } from '../../context/session_context.ts'
+import { currentCaller, liveCallers, bindCaller } from '../../context/session_context.ts'
 
 let sequence = 0
 
@@ -65,6 +65,6 @@ export function soleCommandStarted(): number | null {
  * nested command (a `$(...)`, a function body) gets its own later stamp,
  * and the outer one comes back when it ends.
  */
-export function runInCommandScope<T>(fn: () => Promise<T>): Promise<T> {
-  return runWithCaller({ ...currentCaller(), started: tick() }, fn)
+export function commandScope<T>(fn: () => Promise<T>): Promise<T> {
+  return bindCaller({ ...currentCaller(), started: tick() }, fn)
 }

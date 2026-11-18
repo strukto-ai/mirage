@@ -68,7 +68,7 @@ async function stored<T>(registry: WorkspaceRegistry, run: () => Promise<T>): Pr
   }
 }
 
-export function registerTemplatesRoutes(
+export function router(
   app: RouteApp,
   deps: {
     resources: ResourceStore

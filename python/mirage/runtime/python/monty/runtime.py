@@ -26,10 +26,9 @@ from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
 from mirage.runtime.python.monty.config import MontyConfig, remote_url
-from mirage.runtime.python.monty.constants import MISSING_PACKAGE_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
-from mirage.runtime.python.monty.loader import pydantic_monty
+from mirage.runtime.python.monty.loader import load_monty_module
 from mirage.runtime.types import (
     FilesystemOperation,
     OutputFn,
@@ -95,8 +94,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         captures: Sequence[str] | None = None,
         config: MontyConfig | dict[str, Any] | None = None,
     ) -> None:
-        if pydantic_monty is None:
-            raise ImportError(MISSING_PACKAGE_HINT)
+        load_monty_module()
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
         self._url = remote_url(self.config)

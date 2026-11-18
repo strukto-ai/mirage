@@ -16,7 +16,7 @@ import { enotsup, staleWrite } from '../errors/fs.ts'
 import type { FsError, StaleWriteError } from '../errors/types.ts'
 import { markLost } from '../observe/context.ts'
 import type { PathSpec } from '../types.ts'
-import { currentCaller, liveCallers, runWithCaller } from '../context/session_context.ts'
+import { currentCaller, liveCallers, bindCaller } from '../context/session_context.ts'
 import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
@@ -76,7 +76,7 @@ export async function settleAfter<T>(
   try {
     result = await op()
   } catch (error) {
-    await runWithCaller({ ...currentCaller(), versionReads: false }, () => settle(undefined)).catch(
+    await bindCaller({ ...currentCaller(), versionReads: false }, () => settle(undefined)).catch(
       (settleError: unknown) => {
         console.warn(`settling after a failed op: ${String(settleError)}`)
       },
@@ -93,7 +93,7 @@ export async function captureRead<T>(
   fetch: () => Promise<T>,
 ): Promise<[T, (string | null)[]]> {
   const facts = new WeakMap<Uint8Array, (string | null)[]>()
-  return runWithCaller({ ...currentCaller(), readFacts: { path, facts } }, async () => {
+  return bindCaller({ ...currentCaller(), readFacts: { path, facts } }, async () => {
     const data = await fetch()
     return [data, data instanceof Uint8Array ? (facts.get(data) ?? []) : []]
   })
@@ -129,7 +129,7 @@ export function runWithWriteContext<T>(
   context: WriteContext | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return runWithCaller({ ...currentCaller(), write: { prefix, context } }, fn)
+  return bindCaller({ ...currentCaller(), write: { prefix, context } }, fn)
 }
 
 /**

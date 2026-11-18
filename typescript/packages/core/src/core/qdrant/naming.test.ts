@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { byteLength, NAME_MAX_BYTES } from '../../utils/sanitize.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { groupName, pointIdFromStem, rowStem } from './naming.ts'
@@ -38,7 +38,7 @@ describe('qdrant VFS naming', () => {
   })
 
   it('keeps the point id in a payload-derived filename', () => {
-    const config = resolveQdrantConfig({ nameField: 'metadata.page' })
+    const config = QdrantConfig.parse({ nameField: 'metadata.page' })
     const stem = rowStem({ id: 17, metadata: { page: '004' } }, config)
     expect(stem).toBe('004__17')
     expect(pointIdFromStem(stem, config)).toBe('17')
@@ -46,14 +46,14 @@ describe('qdrant VFS naming', () => {
   })
 
   it('reads a dotted id field as the literal synthetic key', () => {
-    const config = resolveQdrantConfig({ idField: 'meta.id', nameField: 'title' })
+    const config = QdrantConfig.parse({ idField: 'meta.id', nameField: 'title' })
     const stem = rowStem({ 'meta.id': 17, title: 'report' }, config)
     expect(stem).toBe('report__17')
     expect(pointIdFromStem(stem, config)).toBe('17')
   })
 
   it('reserves room for every enabled file suffix', () => {
-    const config = resolveQdrantConfig({
+    const config = QdrantConfig.parse({
       nameField: 'title',
       textField: 'text',
       blobField: 'blob',
@@ -105,7 +105,7 @@ describe('qdrant naming spells values as their JSON', () => {
   })
 
   it('spells a non-string label the way its .json spells it', () => {
-    const config = resolveQdrantConfig({ nameField: 'flag' })
+    const config = QdrantConfig.parse({ nameField: 'flag' })
     expect(rowStem({ id: 17, flag: true }, config)).toBe('true__17')
     expect(rowStem({ id: 17, flag: 1.0 }, config)).toBe('1__17')
     expect(rowStem({ id: 17, flag: 1e-7 }, config)).toBe('1e-7__17')
@@ -116,7 +116,7 @@ describe('qdrant naming spells values as their JSON', () => {
     // A leaf named `.env__17.json` is hidden from the listing and refused
     // as a path, so the label takes the escape lead. A blank label keeps
     // the readable `unknown` fallback: the id addresses.
-    const config = resolveQdrantConfig({ nameField: 'title' })
+    const config = QdrantConfig.parse({ nameField: 'title' })
     expect(rowStem({ id: 17, title: '.env' }, config)).toBe('⁄.env__17')
     expect(pointIdFromStem('⁄.env__17', config)).toBe('17')
     expect(rowStem({ id: 17, title: '' }, config)).toBe('unknown__17')

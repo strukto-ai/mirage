@@ -12,19 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncGenerator, Mapping
+from typing import Any, Literal, overload
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.api.paginate import PageShape
+from mirage.core.api.paginate import cursor_pages as api_pages
 from mirage.core.slack.client import slack_get
+from mirage.core.slack.types import SlackChannel, SlackMessage, SlackUser
 
 
-async def cursor_pages(
+@overload
+def cursor_pages(
+    accessor: SlackAccessor,
+    endpoint: str,
+    base_params: dict[str, Any],
+    items_key: Literal["channels"],
+) -> AsyncGenerator[list[SlackChannel], None]: ...
+
+
+@overload
+def cursor_pages(
+    accessor: SlackAccessor,
+    endpoint: str,
+    base_params: dict[str, Any],
+    items_key: Literal["messages"],
+) -> AsyncGenerator[list[SlackMessage], None]: ...
+
+
+@overload
+def cursor_pages(
+    accessor: SlackAccessor,
+    endpoint: str,
+    base_params: dict[str, Any],
+    items_key: Literal["members"],
+) -> AsyncGenerator[list[SlackUser], None]: ...
+
+
+def cursor_pages(
     accessor: SlackAccessor,
     endpoint: str,
     base_params: dict[str, Any],
     items_key: str,
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncGenerator[list[Any], None]:
     """Walk a cursor-paginated Slack endpoint, one page per round-trip.
 
     Args:
@@ -37,13 +67,17 @@ async def cursor_pages(
         list[dict]: items in each page. Generator returns when Slack
         signals last page (empty next_cursor).
     """
-    cursor: str | None = None
-    while True:
-        params = dict(base_params)
-        if cursor:
-            params["cursor"] = cursor
-        data = await slack_get(accessor, endpoint, params=params)
-        yield data.get(items_key, []) or []
-        cursor = data.get("response_metadata", {}).get("next_cursor") or None
-        if cursor is None:
-            return
+
+    async def fetch_page(cursor: str | None) -> dict[str, Any]:
+        params = {**base_params, "cursor": cursor} if cursor else base_params
+        return await slack_get(accessor, endpoint, params=params)
+
+    return api_pages(fetch_page, shape=PageShape(items_key, _next_cursor))
+
+
+def _next_cursor(data: Mapping[str, Any]) -> str | None:
+    metadata = data.get("response_metadata")
+    cursor = (
+        metadata.get("next_cursor") if isinstance(metadata, dict) else None
+    )
+    return cursor if isinstance(cursor, str) and cursor else None

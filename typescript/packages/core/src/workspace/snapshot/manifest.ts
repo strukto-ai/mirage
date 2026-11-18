@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isPlainObject } from '../../utils/records.ts'
 import type { JsonObject } from '../../types.ts'
 import { VFSName } from '../../types.ts'
 import { CacheKey, JobKey, MountKey, StateKey, VFSStateKey } from './keys.ts'
@@ -26,10 +27,6 @@ class BlobAllocator {
     this.counters.set(category, i + 1)
     return `${category}/${String(i)}.bin`
   }
-}
-
-function isDict(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Uint8Array)
 }
 
 /**
@@ -105,13 +102,13 @@ function mountToManifest(mount: JsonObject, a: BlobAllocator): JsonObject {
       `mounts/${String(idx)}/files`,
     )
   } else if (ptype === VFSName.DISK) {
-    const newFiles: Record<string, JsonObject> = {}
-    for (const [rel, data] of Object.entries(files)) {
-      const tarPath = `mounts/${String(idx)}/files/${rel}`
-      a.blobs[tarPath] = data
-      newFiles[rel] = { [BLOB_REF_KEY]: tarPath }
-    }
-    ps[VFSStateKey.FILES] = newFiles
+    ps[VFSStateKey.FILES] = Object.fromEntries(
+      Object.entries(files).map(([rel, data]) => {
+        const tarPath = `mounts/${String(idx)}/files/${rel}`
+        a.blobs[tarPath] = data
+        return [rel, { [BLOB_REF_KEY]: tarPath }]
+      }),
+    )
   } else if (ptype === VFSName.REDIS) {
     ps[VFSStateKey.FILES] = stashBlobs(
       files,
@@ -127,12 +124,7 @@ function mountToManifest(mount: JsonObject, a: BlobAllocator): JsonObject {
       `mounts/${String(idx)}/files`,
     )
   }
-  const out: JsonObject = {}
-  for (const [k, v] of Object.entries(mount)) {
-    if (k !== MountKey.VFS_STATE) out[k] = v
-  }
-  out[MountKey.VFS_STATE] = ps
-  return out
+  return { ...mount, [MountKey.VFS_STATE]: ps }
 }
 
 function stashBlobs(
@@ -141,14 +133,14 @@ function stashBlobs(
   category: string,
   tarDir: string,
 ): Record<string, JsonObject> {
-  const out: Record<string, JsonObject> = {}
-  for (const [k, data] of Object.entries(files)) {
-    const slot = a.alloc(category).split('/').pop() ?? ''
-    const tarPath = `${tarDir}/${slot}`
-    a.blobs[tarPath] = data
-    out[k] = { [BLOB_REF_KEY]: tarPath }
-  }
-  return out
+  return Object.fromEntries(
+    Object.entries(files).map(([key, data]) => {
+      const slot = a.alloc(category).split('/').pop() ?? ''
+      const tarPath = `${tarDir}/${slot}`
+      a.blobs[tarPath] = data
+      return [key, { [BLOB_REF_KEY]: tarPath }]
+    }),
+  )
 }
 
 function historyToManifest(records: unknown, a: BlobAllocator): unknown {
@@ -174,7 +166,7 @@ function historyToManifest(records: unknown, a: BlobAllocator): unknown {
 }
 
 function nodeToManifest(node: unknown, a: BlobAllocator): unknown {
-  if (!isDict(node)) return node
+  if (!isPlainObject(node)) return node
   const out: JsonObject = { ...node }
   const data = out.stderr
   if (data instanceof Uint8Array && data.byteLength > 0) {
@@ -198,16 +190,16 @@ export function resolveManifest(
 }
 
 function resolve(node: unknown, blobReader: (path: string) => Uint8Array): unknown {
-  if (isDict(node)) {
+  if (isPlainObject(node)) {
     const keys = Object.keys(node)
     if (keys.length === 1 && keys[0] === BLOB_REF_KEY) {
       const path = node[BLOB_REF_KEY]
       if (!isSafeBlobPath(path)) throw new Error(`Unsafe blob path in manifest: ${String(path)}`)
       return blobReader(path)
     }
-    const out: JsonObject = {}
-    for (const [k, v] of Object.entries(node)) out[k] = resolve(v, blobReader)
-    return out
+    return Object.fromEntries(
+      Object.entries(node).map(([key, value]) => [key, resolve(value, blobReader)]),
+    )
   }
   if (Array.isArray(node)) return (node as unknown[]).map((v) => resolve(v, blobReader))
   return node

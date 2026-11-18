@@ -158,3 +158,15 @@ describe('s3 core readdir', () => {
     await expect(run(['a', 'a/x.txt'], '/a')).resolves.toEqual(['/a/x.txt'])
   })
 })
+
+it.each([
+  [{ IsTruncated: true }, /no continuation token/, 1],
+  [{ IsTruncated: true, NextContinuationToken: 'same' }, /cursor/, 2],
+] as const)('refuses an incomplete S3 listing', async (page, error, requests) => {
+  mockBucket([])
+  const send = vi.fn().mockResolvedValue(page)
+  vi.mocked(clientMod.createS3Client).mockResolvedValue({ send } as never)
+  const accessor = new S3Accessor({ bucket: 'b' })
+  await expect(readdir(accessor, spec('/'))).rejects.toThrow(error)
+  expect(send).toHaveBeenCalledTimes(requests)
+})

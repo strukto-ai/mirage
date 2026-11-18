@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import * as montyLoader from '../runtime/python/monty/loader.ts'
+import { MontyUnavailableError } from '../runtime/python/monty/errors.ts'
+import { MISSING_PACKAGE_HINT } from '../runtime/python/monty/constants.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -296,9 +299,9 @@ describe('profile policies', () => {
   }, 120000)
 
   it('without @pydantic/monty a program on monty fails closed', async () => {
-    vi.doMock('@pydantic/monty', () => {
-      throw new Error('not installed')
-    })
+    const load = vi
+      .spyOn(montyLoader, 'loadMontyModule')
+      .mockRejectedValue(new MontyUnavailableError(MISSING_PACKAGE_HINT))
     const ws = build({
       release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
     })
@@ -309,7 +312,7 @@ describe('profile policies', () => {
       expect(refused.decision?.reason).toMatch(/^profile 'release' policy .*@pydantic\/monty/)
     } finally {
       await ws.close()
-      vi.doUnmock('@pydantic/monty')
+      load.mockRestore()
     }
   }, 120000)
 

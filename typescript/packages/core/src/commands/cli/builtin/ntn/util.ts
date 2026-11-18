@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { plainTextOf } from '../../../../core/notion/normalize.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { NotionAccessor } from '../../../../accessor/notion.ts'
 import { HttpNotionTransport } from '../../../../core/notion/client.ts'
@@ -22,7 +23,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { asObject, stringOf } from '../../../../utils/records.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
+import { sortedJson } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const CHECKED = '✓'
@@ -70,20 +71,11 @@ export function notionTransport(
   return httpTransport(notionConfig(accessor, bag))
 }
 
-function sortDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortDeep)
-  if (value === null || typeof value !== 'object') return value
-  const source = value as Record<string, unknown>
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(source).sort(compareCodePoints)) out[key] = sortDeep(source[key])
-  return out
-}
-
 // Two spaces of indent and keys in sorted order, matching the upstream
 // binary's serializer, so a golden recorded from the real CLI compares byte
 // for byte. JSON.stringify keeps insertion order, so the sort is explicit.
 export function prettyJson(value: unknown): ByteSource {
-  return ENC.encode(`${JSON.stringify(sortDeep(value), null, 2)}\n`)
+  return ENC.encode(`${sortedJson(value, 2)}\n`)
 }
 
 // What `ntn api` prints: one line, no spaces, same sorted keys.
@@ -115,7 +107,7 @@ export function uploadOutput(upload: Record<string, unknown>, asJson: boolean): 
 }
 
 export function compactJson(value: unknown): ByteSource {
-  return ENC.encode(`${JSON.stringify(sortDeep(value))}\n`)
+  return ENC.encode(`${sortedJson(value)}\n`)
 }
 
 // Quote a string the way Rust's `{:?}` renders one. `ntn` interpolates the
@@ -159,16 +151,6 @@ export async function contentOrStdin(
   for await (const chunk of stdin) chunks.push(chunk)
   const joined = concat(chunks)
   return new TextDecoder().decode(joined)
-}
-
-export function plainTextOf(fragments: unknown): string {
-  if (!Array.isArray(fragments)) return ''
-  let out = ''
-  for (const fragment of fragments) {
-    const text = asObject(fragment).plain_text
-    if (typeof text === 'string') out += text
-  }
-  return out
 }
 
 function namesOf(value: unknown): string {

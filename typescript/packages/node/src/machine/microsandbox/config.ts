@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import { MachineConfig } from '@struktoai/mirage-core/machine/config'
 import type { PauseAction } from '@struktoai/mirage-core/machine/types'
 import { ON_PAUSE } from './constants.ts'
 
@@ -25,8 +25,8 @@ export interface MicrosandboxConfig extends MachineConfig {
   onPause?: PauseAction
 }
 
-export const MICROSANDBOX_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
+export const MicrosandboxConfig = {
+  ...MachineConfig,
   sandbox: { type: 'string', required: true },
   onPause: { type: 'string', options: ON_PAUSE },
-}
+} satisfies ConfigFields<MicrosandboxConfig>

@@ -4830,7 +4830,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5084,6 +5083,13 @@ paths:
           schema:
             type: string
           description: Saved configuration name.
+        - name: force
+          in: query
+          description: Delete it even while a kept workspace config names it.
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '204':
           description: No content
@@ -5093,12 +5099,16 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
       summary: Delete VFS
-      description: Delete a saved VFS configuration.
+      description: Delete a saved VFS configuration. Refused with `conflict` while a kept
+        workspace config names it, since that workspace would not start again; `force` deletes
+        it anyway.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -5141,7 +5151,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5362,6 +5371,13 @@ paths:
           schema:
             type: string
           description: Saved configuration name.
+        - name: force
+          in: query
+          description: Delete it even while a kept workspace config names it.
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '204':
           description: No content
@@ -5371,12 +5387,16 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
       summary: Delete CLI
-      description: Delete a saved CLI configuration.
+      description: Delete a saved CLI configuration. Refused with `conflict` while a kept
+        workspace config names it, since that workspace would not start again; `force` deletes
+        it anyway.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -5419,7 +5439,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5621,6 +5640,13 @@ paths:
           schema:
             type: string
           description: Saved configuration name.
+        - name: force
+          in: query
+          description: Delete it even while a kept workspace config names it.
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '204':
           description: No content
@@ -5630,12 +5656,16 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
       summary: Delete machine
-      description: Delete a saved machine configuration.
+      description: Delete a saved machine configuration. Refused with `conflict` while a kept
+        workspace config names it, since that workspace would not start again; `force` deletes
+        it anyway.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -8767,9 +8797,6 @@ components:
             - string
             - 'null'
           format: date-time
-        used_by:
-          type: integer
-          description: Number of templates using this configuration. Included in list responses only.
       required:
         - id
         - name

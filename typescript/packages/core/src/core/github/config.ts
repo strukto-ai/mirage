@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 /**
  * A GitHub App installation that mirage mints tokens for. Each token lasts an
@@ -80,7 +80,7 @@ function requireOne(config: { token?: unknown; app?: unknown }, ctx: z.Refinemen
 
 export const GitHubConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     token: secretStr()
       .optional()
       .describe(
@@ -95,7 +95,7 @@ export const GitHubConfig = z
       .string()
       .optional()
       .describe(
-        "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created.",
+        "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved on first use.",
       ),
     baseUrl: z.string().optional().meta({
       description: 'GitHub API root; set it for GitHub Enterprise.',
@@ -108,7 +108,7 @@ export type GitHubConfig = ConfigOf<typeof GitHubConfig>
 
 export const GhConfig = z
   .object({
-    ...timeoutShape,
+    ...TimeoutConfig.shape,
     token: secretStr().optional(),
     app: GitHubAppAuth.optional(),
     baseUrl: z.string().optional(),

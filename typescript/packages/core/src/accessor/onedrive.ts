@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  MSGRAPH_CONFIG_SHAPE,
-  optionalText,
-  resolveMsGraphConfig,
-  type MsGraphConfig,
-} from '../core/msgraph/config.ts'
+import { MsGraphConfig, optionalText, resolveMsGraphConfig } from '../core/msgraph/config.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { Accessor } from './base.ts'
 
@@ -47,7 +42,7 @@ function driveTargetError(named: readonly string[]): string {
 
 export const OneDriveConfig = z
   .object({
-    ...MSGRAPH_CONFIG_SHAPE,
+    ...MsGraphConfig.shape,
     driveId: z
       .string()
       .optional()
@@ -75,7 +70,7 @@ export const OneDriveConfig = z
   // mount silently address whichever won, which is the kind of
   // misconfiguration that only shows up as a confusing 404.
   .superRefine((c, ctx) => {
-    const named = DRIVE_TARGETS.filter((f) => c[f] !== undefined)
+    const named = DRIVE_TARGETS.filter((f) => optionalText(c[f]) !== null)
     if (named.length > 1) ctx.addIssue({ code: 'custom', message: driveTargetError(named) })
   })
 

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ObserverStore } from '../../observe/store.ts'
-import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
+import { normalize } from '../../utils/key_prefix.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
 import type { ExecutionStore } from '../../execution/base.ts'
 import { S3RecordClient } from '../record/s3.ts'
@@ -49,7 +50,7 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
   constructor(config: S3Config, overrides: WorkspaceStateStoreOverrides = {}) {
     super(overrides)
     this.config = config
-    this.prefix = normalizeKeyPrefix(config.keyPrefix) ?? ''
+    this.prefix = normalize(config.keyPrefix)
     this.meta = new S3RecordClient(config, `${this.prefix}workspaces/`)
   }
 
@@ -77,7 +78,7 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
   protected makeSessions(workspaceId: string): NamespaceStore {
     let table = this.sessionTables.get(workspaceId)
     if (table === undefined) {
-      const scoped = normalizeKeyPrefix(`${this.prefix}${workspaceId}/`) ?? ''
+      const scoped = normalize(`${this.prefix}${workspaceId}/`)
       table = new RecordNamespaceStore(new S3RecordClient(this.config, `${scoped}sessions/`))
       this.sessionTables.set(workspaceId, table)
     }

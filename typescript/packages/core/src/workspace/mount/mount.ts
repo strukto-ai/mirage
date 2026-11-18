@@ -48,7 +48,7 @@ import {
   currentCaller,
   effectiveMountMode,
   requirePathsWritable,
-  runWithCaller,
+  bindCaller,
   sessionVisibility,
   strongestModeUnder,
   withCaller,
@@ -72,7 +72,7 @@ import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import {
   activeRecords,
   commandRecords,
-  runWithRecording,
+  recordingScope,
   withMountContext,
 } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -291,7 +291,7 @@ async function recorded<T>(
       }
     })
   return activeRecords() === undefined
-    ? (await runWithRecording(collect, null, clock))[0]
+    ? (await recordingScope(collect, null, clock))[0]
     : await collect()
 }
 
@@ -1780,7 +1780,7 @@ export class MountEntry {
     const stream =
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)
-        : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
+        : asStream(bindCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
     return this.activity.hold(
       withEgress(withCaller(this.observeStream(scope, this.index, stream), caller)),
     ) as AsyncIterable<Uint8Array>
@@ -2054,7 +2054,7 @@ export class MountEntry {
   private inCommandScope<T>(ctx: Partial<Context>, fn: () => Promise<T>): Promise<T> {
     const outer = currentCaller()
     const files = ctx.vfs
-    return runWithCaller(
+    return bindCaller(
       {
         ...this.onMount(outer),
         cache: { manager: this.cacheManager },
@@ -2242,7 +2242,7 @@ export class MountEntry {
     // with no grace, so a body, or a renderer of the rows it handed over,
     // that ignores the abort is let go rather than waited on. The command's
     // walks resolve their walkLimit with its own declared limit.
-    return runWithCaller({ ...currentCaller(), declared: producer.declared }, () =>
+    return bindCaller({ ...currentCaller(), declared: producer.declared }, () =>
       runHandler(call(ctx), name, producer, voice, {
         scope: (result) => wrapMountStreams(result, this.activity),
         ...(writes ? { drop: () => this.dropCaches() } : {}),
@@ -2387,7 +2387,7 @@ export class MountEntry {
    * itself. Mirrors Python's `_framed`.
    */
   framed<T>(work: () => Promise<T>, owner?: Egress | null): Promise<T> {
-    return runWithCaller(
+    return bindCaller(
       this.onMount(currentCaller()),
       async () => wrapStream(await work(), this.mountId, this.activity, owner) as T,
     )

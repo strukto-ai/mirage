@@ -39,9 +39,17 @@ export type WordRefusalKind = 'ambiguous' | 'invalid'
  * `matched` so a caller cannot read a refusal as a word, mirroring
  * Python's `WordMatch | WordRefusal`.
  */
-export type WordChoiceResult =
-  | { readonly matched: true; readonly word: string }
-  | { readonly matched: false; readonly kind: WordRefusalKind }
+export interface WordMatch {
+  readonly matched: true
+  readonly word: string
+}
+
+export interface WordRefusal {
+  readonly matched: false
+  readonly kind: WordRefusalKind
+}
+
+export type WordChoiceResult = WordMatch | WordRefusal
 
 /**
  * `choices` as one array of alias words per value.

@@ -16,7 +16,6 @@ import { EnvVar } from '../secrets/config.ts'
 import { isConfigPointer } from '../secrets/sources.ts'
 import { isPlainObject } from '../utils/records.ts'
 import { STRUKTO } from './constants.ts'
-import type { Template } from './types.ts'
 
 /** Whether an `env` block's entry is a managed one, `{from, ref, key?, readonly?, fetch?}`. */
 function managed(entry: Record<string, unknown>): boolean {
@@ -55,17 +54,4 @@ export function secretRefs(config: unknown): string[] {
   }
   walk(config)
   return found
-}
-
-/** The templates whose config names each entry, by the entry's name. */
-export function usesOf(templates: readonly Template[]): Map<string, string[]> {
-  const out = new Map<string, string[]>()
-  for (const template of templates) {
-    for (const ref of secretRefs(template.config)) {
-      const names = out.get(ref)
-      if (names === undefined) out.set(ref, [template.name])
-      else if (!names.includes(template.name)) names.push(template.name)
-    }
-  }
-  return out
 }

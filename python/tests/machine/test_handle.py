@@ -25,11 +25,13 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
+from mirage.io.errors import PipeClosed
 from mirage.io.types import materialize
 from mirage.machine import MachineConfig, MachineHandle
 from mirage.machine.constants import (
     FIFO_NAME,
     NOT_RUNNING_STATUS,
+    PIPE_SIGNAL,
     PROCESS,
     RUN_DRAIN_SECONDS,
     RUN_EXIT_MARK,
@@ -39,6 +41,7 @@ from mirage.machine.constants import (
     faketime_probe,
     fifo_line,
     is_run,
+    run_done_mark,
     run_exit_mark,
     run_tag,
     stop_line,
@@ -88,6 +91,14 @@ class RecordingMachine(MachineHandle):
         self.execs.append((line, stdin, cwd))
         self.exec_envs.append(dict(env))
         return RunAnswer(0, b"ran:" + line.encode())
+
+
+async def _closed_pipe(data: bytes) -> None:
+    raise PipeClosed
+
+
+async def _drop(data: bytes) -> None:
+    return None
 
 
 async def _line(box: MachineHandle, ctx: Context) -> RunAnswer:
@@ -413,6 +424,24 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     tag = box.exec_envs[0][PROCESS]
     assert [line for line, _, _ in box.execs] == ["yes", stop_line(tag)]
     assert PROCESS not in box.exec_envs[1]
+
+
+# A run whose output's reader has gone (head took what it wanted) is stopped
+# in the box with SIGPIPE, as a pipe's writer is: a box that keeps the program
+# past its exec stream would otherwise leave it running.
+@pytest.mark.asyncio
+async def test_a_run_whose_output_reader_has_gone_is_stopped():
+    box = RecordingMachine(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+    with pytest.raises(PipeClosed):
+        await machine_runtime(box).run_line(
+            None, [], [], ctx, _closed_pipe, _drop
+        )
+    tag = box.exec_envs[0][PROCESS]
+    assert [line for line, _, _ in box.execs] == [
+        "yes",
+        stop_line(tag, PIPE_SIGNAL),
+    ]
 
 
 # A run a ``kill`` stopped is stopped in the box with the signal it named.
@@ -909,6 +938,111 @@ async def test_a_run_ends_on_its_exit_line_while_the_exec_stays_open():
             io = await ws.shell("train")
         assert io.exit_code == 3
         assert await materialize(io.stderr) == b""
+    finally:
+        await ws.close()
+
+
+class ExitsFirstBox(RecordingMachine):
+    """A program that has exited, its exit line out, while the exec still
+    hands on what it wrote: 200 chunks of 4 KiB."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"0\n")
+        for _ in range(200):
+            await output(b"x" * 4096)
+        await output(run_done_mark(nonce) + b"0\n")
+        return RunResult(exit_code=0)
+
+
+# A reader slow to take the output (here one that waits past the drain
+# time before it reads) still gets all of it: the run is let go only once
+# its output stops moving, not a set time after its exit line.
+@pytest.mark.asyncio
+async def test_a_slow_reader_gets_all_a_run_wrote_after_its_exit_line():
+    box = ExitsFirstBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(10):
+            io = await ws.shell(
+                f"train | {{ sleep {RUN_DRAIN_SECONDS * 2}; cat; }} | wc -c"
+            )
+        assert (io.exit_code, await materialize(io.stdout)) == (
+            0,
+            b"819200\n",
+        )
+    finally:
+        await ws.close()
+
+
+class LogsOnBox(RecordingMachine):
+    """A program that has exited, its exit line out, while what it left
+    running writes a line to the exec's output every 0.1 s."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"3\n")
+        await output(b"main\n" + run_done_mark(nonce) + b"3\n")
+        while True:
+            await output(b"log\n")
+            await asyncio.sleep(0.1)
+
+
+# What the program left running writing now and then does not hold the
+# run: the pauses between its lines add up to the drain time.
+@pytest.mark.asyncio
+async def test_a_run_ends_while_what_it_left_running_keeps_writing():
+    box = LogsOnBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(5):
+            io = await ws.shell("train")
+        assert io.exit_code == 3
+        assert (await materialize(io.stdout)).startswith(b"main\nlog\n")
+    finally:
+        await ws.close()
+
+
+class SpacedBox(RecordingMachine):
+    """A program that has exited while its last output still comes over
+    the transport in chunks 50 ms apart, the exec held open after it."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"0\n")
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            await output(b"x" * 4096)
+        await output(run_done_mark(nonce) + b"0\n")
+        await asyncio.Event().wait()
+
+
+# Output the program wrote still arriving in spaced chunks after its exit
+# line all comes before the run is let go: the line ending its stdout says
+# when it has.
+@pytest.mark.asyncio
+async def test_a_run_waits_for_the_end_of_what_its_program_wrote():
+    box = SpacedBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(10):
+            io = await ws.shell("train | wc -c")
+        assert (io.exit_code, await materialize(io.stdout)) == (
+            0,
+            b"163840\n",
+        )
     finally:
         await ws.close()
 

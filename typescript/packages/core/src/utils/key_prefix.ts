@@ -29,6 +29,10 @@ export function normalize(raw: string | undefined): string {
   return stripped.endsWith('/') ? stripped : `${stripped}/`
 }
 
+export function normalizeKeyPrefix(raw: string | undefined): string | undefined {
+  return normalize(raw) || undefined
+}
+
 /** Prepend a normalized prefix to a virtual path. */
 export function apply(prefix: string, path: string): string {
   return prefix + lstripSlash(path)

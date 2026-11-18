@@ -38,6 +38,7 @@ from mirage.policy.types import (
     ProfileScripts,
     WorkspaceContext,
 )
+from mirage.resources.refs import secret_refs
 from mirage.server.constants import MAX_SESSIONS
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import (
@@ -702,6 +703,26 @@ class WorkspaceRegistry:
             return None
         record, _ = await self._configs.get(workspace_id)
         return None if record is None else record["config"]
+
+    async def ids_naming(
+        self, name: str, account: str | None
+    ) -> Sequence[str]:
+        """The ids of the workspaces ``account`` may use whose kept config
+        names the saved entry ``name`` with a ``{from: strukto}`` pointer,
+        in order. Each fills the pointer in again when it starts.
+
+        Args:
+            name (str): the saved entry.
+            account (str | None): the caller's account.
+        """
+        if self._configs is None:
+            return []
+        ids: list[str] = []
+        for wid in sorted(await self._configs.list_names()):
+            config = await self.saved_config(wid, account)
+            if config is not None and name in secret_refs(config):
+                ids.append(wid)
+        return ids
 
     async def stopped_ids(self, account: str | None) -> Sequence[str]:
         """The ids of the stopped workspaces ``account`` may use, in

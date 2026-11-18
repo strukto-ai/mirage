@@ -119,6 +119,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.voice import shell_voice
 from mirage.types import (
+    DEFAULT_READ_SPEC,
     FileChangeKind,
     FileStat,
     FileType,
@@ -146,7 +147,7 @@ from mirage.vfs.call import declared, declared_calls
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
-from mirage.view.types import StatPath
+from mirage.view.types import SessionAccess, StatPath
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.executor.command.handler import (
     answered,
@@ -625,7 +626,7 @@ class MountEntry:
         # downgrade the policy exists to remove, so it is refused rather
         # than kept. The TypeScript twin freezes its copy at the same
         # point for the mirror-image reason.
-        spec = read if read is not None else ReadSpec()
+        spec = read if read is not None else DEFAULT_READ_SPEC
         self.read = dataclasses.replace(
             spec, policy=coerce_read_policy(spec.policy)
         )
@@ -738,13 +739,13 @@ class MountEntry:
         if self.retiring:
             raise ebusy(self.prefix)
 
-    def effective_mode(self) -> MountMode:
+    def effective_mode(self, access: SessionAccess | None = None) -> MountMode:
         """This mount's mode narrowed by the current session's cap.
 
         The configured mode is the ceiling; a session's mode can only
         weaken it.
         """
-        return effective_mount_mode(self.prefix, self.mode)
+        return effective_mount_mode(self.prefix, self.mode, access)
 
     # ── command registration ──────────────────────────
 
@@ -1376,9 +1377,12 @@ class MountEntry:
                 cache_manager=self.cache_manager,
                 mount=(self.prefix, self.mode),
                 walk_probe=(
-                    WalkProbe(
-                        stat=functools.partial(dispatch_stat, dispatch),
-                        follow=link_follow(links),
+                    (
+                        self.prefix,
+                        WalkProbe(
+                            stat=functools.partial(dispatch_stat, dispatch),
+                            follow=link_follow(links),
+                        ),
                     )
                     if dispatch is not None
                     else outer.walk_probe

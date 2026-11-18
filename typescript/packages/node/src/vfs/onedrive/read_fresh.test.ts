@@ -15,8 +15,8 @@
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import { read } from '@struktoai/mirage-core/core/onedrive/read'
 import { readStream } from '@struktoai/mirage-core/core/onedrive/stream'
-import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { currentCaller, bindCaller } from '@struktoai/mirage-core/context/session_context'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import {
   DEFAULT_READ_TTL,
   type FileStat,
@@ -131,7 +131,7 @@ describe('onedrive under read: fresh', () => {
       const graph = await graphOf(OLD)
       graph.write(ME, 'a.txt', NEW)
       const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
-      const [data, records] = await runWithRecording(async () => {
+      const [data, records] = await recordingScope(async () => {
         if (slot === 'bytes') return read(accessor, SPEC)
         const parts: Uint8Array[] = []
         for await (const chunk of readStream(accessor, SPEC)) parts.push(chunk)
@@ -151,7 +151,7 @@ describe('onedrive under read: fresh', () => {
     graph.write(ME, 'a.txt', NEW)
     const vfs = await vfsOf(graph)
     const pinned = (): Promise<Uint8Array> =>
-      runWithCaller({ ...currentCaller(), revisions: { map: new Map([['/a.txt', pin]]) } }, () =>
+      bindCaller({ ...currentCaller(), revisions: { map: new Map([['/a.txt', pin]]) } }, () =>
         read(vfs.accessor as OneDriveAccessor, SPEC),
       )
     try {
@@ -171,9 +171,7 @@ describe('onedrive under read: fresh', () => {
   it('a ranged read stamps the whole item cTag', async () => {
     const graph = await graphOf(OLD)
     const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
-    const [data, records] = await runWithRecording(() =>
-      read(accessor, SPEC, { offset: 2, size: 3 }),
-    )
+    const [data, records] = await recordingScope(() => read(accessor, SPEC, { offset: 2, size: 3 }))
     expect(DEC.decode(data)).toBe(DEC.decode(OLD.slice(2, 5)))
     expect(records.map((r) => r.fingerprint)).toEqual(['c1'])
     expect([graph.count('download'), graph.count('content')]).toEqual([1, 0])

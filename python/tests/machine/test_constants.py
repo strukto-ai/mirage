@@ -32,6 +32,7 @@ from mirage.machine.constants import (
     machine_dir_line,
     mount_field,
     run_argv,
+    run_done_mark,
     run_exit_mark,
     run_tag,
     stop_line,
@@ -76,7 +77,8 @@ def test_the_wrapped_argv_reaches_the_program_unchanged(tmp_path):
 
 
 # A run's wrapper hands its program the words and the tag unchanged, and
-# says how the program ended on stderr after all the program wrote.
+# says how the program ended on stderr after all the program wrote, and
+# ends its stdout with the same status.
 def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
     program = (
         "sh",
@@ -89,8 +91,20 @@ def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
     argv = run_argv("w:7", "n1", program)
     assert (argv[RUN_PROGRAM_AT:], run_tag(argv)) == (program, "w:7")
     done = subprocess.run(argv, capture_output=True, check=False)
-    assert (done.returncode, done.stdout) == (3, b"a b||w:7|")
+    assert (done.returncode, done.stdout) == (
+        3,
+        b"a b||w:7|" + run_done_mark("n1") + b"3\n",
+    )
     assert done.stderr.endswith(b"err\n" + run_exit_mark("n1") + b"3\n")
+
+
+# A program a signal ended gets no line at the end of its stdout, which may
+# have no reader left; its status still comes on stderr.
+def test_a_run_a_signal_ended_ends_its_stdout_with_nothing():
+    argv = run_argv("w:7", "n1", ("sh", "-c", "echo out; kill -9 $$"))
+    done = subprocess.run(argv, capture_output=True, check=False)
+    assert (done.returncode, done.stdout) == (137, b"out\n")
+    assert done.stderr.endswith(run_exit_mark("n1") + b"137\n")
 
 
 def _folder(home, spare, prefixes):

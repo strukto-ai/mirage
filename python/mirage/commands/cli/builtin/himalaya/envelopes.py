@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timedelta
-from typing import Any
 
 from mirage.commands.cli.builtin.himalaya.table import (
     Cell,
@@ -21,6 +20,7 @@ from mirage.commands.cli.builtin.himalaya.table import (
     format_size,
     render_table,
 )
+from mirage.core.email.render import Envelope, EnvelopeAddress, EnvelopeFlag
 
 UNSEEN_CHAR = "*"
 REPLIED_CHAR = "R"
@@ -28,7 +28,7 @@ FLAGGED_CHAR = "!"
 ATTACHMENT_CHAR = "@"
 
 
-def _flags_cell(flags: list[Any]) -> str:
+def _flags_cell(flags: list[EnvelopeFlag]) -> str:
     names = {flag["iana"] for flag in flags}
     return (
         (" " if "seen" in names else UNSEEN_CHAR)
@@ -49,12 +49,12 @@ def _date_cell(value: str | None) -> str:
     )
 
 
-def _address_cell(entries: list[Any]) -> str:
+def _address_cell(entries: list[EnvelopeAddress]) -> str:
     return ", ".join(entry["name"] or entry["email"] for entry in entries)
 
 
 def envelopes_table(
-    documents: list[dict[str, Any]],
+    documents: list[Envelope],
     with_attachment: bool,
     recipient: bool,
     max_width: int | None,
@@ -62,7 +62,7 @@ def envelopes_table(
     """The listing a human reads.
 
     Args:
-        documents (list[dict[str, Any]]): the rendered envelopes.
+        documents (list[Envelope]): the rendered envelopes.
         with_attachment (bool): show the ATT column.
         recipient (bool): show recipients instead of senders.
         max_width (int | None): the width to squeeze the table into.

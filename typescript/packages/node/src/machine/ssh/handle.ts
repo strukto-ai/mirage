@@ -26,8 +26,8 @@ import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
-import type { Ssh2Sdk } from './sdk.ts'
-import { SSH_RUNTIME_CONFIG_FIELDS, type SSHMachineConfig } from './config.ts'
+import type { SshSdk } from './sdk.ts'
+import { SSHMachineConfig } from './config.ts'
 import { isRun, stopSignal, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { feed } from '@struktoai/mirage-core/io/stream'
@@ -52,7 +52,7 @@ import type { Client, ClientChannel } from 'ssh2'
  * the network path as trusted.
  */
 export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeTransport {
-  static override readonly configFields: ConfigFields = SSH_RUNTIME_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = SSHMachineConfig
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'ssh'
   private client: Client | null = null
@@ -68,7 +68,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
-  protected loadSdk(): Promise<Ssh2Sdk> {
+  protected loadSdk(): Promise<SshSdk> {
     return loadOptionalPeer(() => import('ssh2'), {
       feature: "the 'ssh' runtime",
       packageName: 'ssh2',

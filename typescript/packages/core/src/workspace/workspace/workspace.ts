@@ -28,12 +28,12 @@ import {
   getAdmission,
   getCurrentSessionFor,
   getCurrentSessionUnlessForeign,
-  runAsProgram,
-  runExplaining,
-  runWithCaller,
+  setProgramInvocation,
+  setExplaining,
+  bindCaller,
   runAsProcess,
-  runWithDecisionSink,
-  runWithSession,
+  setDecisionSink,
+  setCurrentSession,
   sessionAccess,
   sessionCaller,
   sessionVisibility,
@@ -1182,13 +1182,13 @@ export class Workspace {
           // spawn holds the spawning one's.
           const { process: runner } = currentCaller()
           const bound = { ...caller, process: runner }
-          const result = await runWithCaller(bound, async () => {
+          const result = await bindCaller(bound, async () => {
             const view = sessionView(child)
             for (const [name, value] of Object.entries(env ?? {})) {
               await view.set(name, value)
               await view.mark(name, VarAttr.Export, true)
             }
-            return runAsProgram(child, () =>
+            return setProgramInvocation(child, () =>
               executeLine(
                 this.executeEnv(),
                 shellJoin(argv),
@@ -1815,9 +1815,9 @@ export class Workspace {
     if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
     // Judged inside a line, as the line runs: an ask a deciding policy's
     // read meets refuses like a deny and records nothing.
-    return runWithDecisionSink(
+    return setDecisionSink(
       () => undefined,
-      () => runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId)),
+      () => setExplaining(DryRun.DECIDING, () => this.explained(line, sessionId)),
     )
   }
 
@@ -2220,7 +2220,7 @@ export class Workspace {
     // unrestricted default instead.
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    return runWithSession(session, () => run(session), { owner: this.sessionManager })
+    return setCurrentSession(session, () => run(session), { owner: this.sessionManager })
   }
 
   /**
@@ -2447,7 +2447,7 @@ export class Workspace {
     try {
       while (this.capturing) await abortable(this.admitting, signal)
       this.admitted.add(stop)
-      return await runWithCaller({ ...currentCaller(), stop }, () =>
+      return await bindCaller({ ...currentCaller(), stop }, () =>
         this.executeInternal(command, { ...options, signal }),
       )
     } finally {
@@ -2552,7 +2552,7 @@ export class Workspace {
       })
     }
     try {
-      return await runWithCaller({ ...currentCaller(), writeHeld: true }, write)
+      return await bindCaller({ ...currentCaller(), writeHeld: true }, write)
     } finally {
       if (--this.writes === 0) this.settleWrites()
     }

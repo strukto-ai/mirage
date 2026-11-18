@@ -23,11 +23,11 @@ from mirage.context import session_context as caller
 from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
-    push_mount_context,
     record,
     record_stream,
     recording_active,
     revision_for,
+    set_mount_context,
     start_op,
     with_mount_context,
 )
@@ -97,9 +97,9 @@ def test_record_without_prefix():
     assert records[0].path == "/data/file.json"
 
 
-def test_push_mount_context_carries_mount_id():
+def test_set_mount_context_carries_mount_id():
     scope = RecordingScope()
-    token = push_mount_context("mount-a")
+    token = set_mount_context("mount-a")
     try:
         record("read", "/s3/a", "s3", 1, start_op())
         record_stream("read", "/s3/b", "s3")
@@ -114,8 +114,8 @@ def test_push_mount_context_carries_mount_id():
     ]
 
 
-def test_push_mount_context_no_recorder_is_noop():
-    token = push_mount_context("mount-a")
+def test_set_mount_context_no_recorder_is_noop():
+    token = set_mount_context("mount-a")
     try:
         assert not recording_active()
         record("read", "/s3/a", "s3", 1, start_op())
@@ -127,7 +127,7 @@ def test_push_mount_context_no_recorder_is_noop():
 async def _record_under_mount(
     mount_id: str, path: str, opened: set[str], other: str
 ) -> None:
-    token = push_mount_context(mount_id)
+    token = set_mount_context(mount_id)
     try:
         opened.add(mount_id)
         while other not in opened:
@@ -138,7 +138,7 @@ async def _record_under_mount(
 
 
 @pytest.mark.asyncio
-async def test_push_mount_context_is_task_local_across_concurrent_branches():
+async def test_set_mount_context_is_task_local_across_concurrent_branches():
     # Each branch records only after the other has pushed its own frame.
     scope = RecordingScope()
     opened: set[str] = set()
@@ -181,7 +181,7 @@ async def test_with_mount_context_keeps_mount_id_across_steps():
     wrapped = with_mount_context(
         RecordingIterator(["/s3/a", "/s3/b"]), "mount-a"
     )
-    outer = push_mount_context("mount-b")
+    outer = set_mount_context("mount-b")
     try:
         chunks = [chunk async for chunk in wrapped]
         record("read", "/r/x", "ram", 1, start_op())
@@ -200,7 +200,7 @@ async def test_with_mount_context_keeps_mount_id_across_steps():
 async def test_with_mount_context_without_id_inherits_the_frame():
     scope = RecordingScope()
     wrapped = with_mount_context(RecordingIterator(["/s3/a"]), None)
-    outer = push_mount_context("mount-b")
+    outer = set_mount_context("mount-b")
     try:
         _ = [chunk async for chunk in wrapped]
     finally:
@@ -293,7 +293,7 @@ def test_a_recorded_op_is_timed_and_stamped_on_the_line_clock():
     timer = start_op()
     clock.advance(2.5)
     record("read", "/s3/a", "s3", 1, timer)
-    token = push_mount_context("mount-a")
+    token = set_mount_context("mount-a")
     try:
         clock.advance(1)
         stream = record_stream("read", "/s3/b", "s3")

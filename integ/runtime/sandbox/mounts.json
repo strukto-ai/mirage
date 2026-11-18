@@ -68,6 +68,90 @@
       ]
     },
     {
+      "id": "mount_type_ssh_serves_links_that_leave_their_folder",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs and writes in the box's own /tmp, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "sshfs since the fix for CVE-2026-47187 refuses a link whose target is absolute or holds a `..` unless told otherwise; the server is the workspace, so a box's sshfs that knows the option passes every target. An absolute target shows relative to the link's folder, so the box resolves it on its own disk.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/served": { "vfs": "ram", "files": { "up.txt": "up\n" } }
+        }
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /served/a && ln -s ../up.txt /served/a/up && ln -s /tmp/mirage-integ-link-out.txt /served/a/out && dash -c 'echo box > /tmp/mirage-integ-link-out.txt'",
+          "expect": { "exit": 0, "stdout": "", "stderr": "" }
+        },
+        {
+          "command": "dash -c 'readlink /served/a/up /served/a/out; cat /served/a/up /served/a/out'",
+          "expect": {
+            "exit": 0,
+            "stdout": "../up.txt\n../../tmp/mirage-integ-link-out.txt\nup\nbox\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'ln -s ../up.txt /served/a/again' && readlink /served/a/again && cat /served/a/again",
+          "expect": { "exit": 0, "stdout": "../up.txt\nup\n", "stderr": "" }
+        },
+        {
+          "command": "rm /tmp/mirage-integ-link-out.txt && echo gone",
+          "expect": { "exit": 0, "stdout": "gone\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_ssh_shows_served_files_as_the_box_users",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "A served file shows as owned by the box's user, as on a disk that user mounted: the host's uid means nothing in the box, and git refuses a repository another user owns. The modes stay the workspace's.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/served": { "vfs": "ram", "files": { "seed.txt": "seed\n" } }
+        }
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "chmod 640 /served/seed.txt && dash -c 'test -O /served/seed.txt && test -G /served/seed.txt && test -O /served && echo mine; stat -c %a /served/seed.txt'",
+          "expect": { "exit": 0, "stdout": "mine\n640\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_ssh_renames_over_an_existing_name",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "sshfs renames over an existing name only through the posix-rename extension; SFTP v3's own rename refuses the target. The server names the extension, so `mv` over a file, git's config writes and every save through a temporary file work in the box.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": { "/served": { "vfs": "ram" } }
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cd /served && echo a > x && echo b > y && mv y x && cat x && ls'",
+          "expect": { "exit": 0, "stdout": "b\nx\n", "stderr": "" }
+        },
+        {
+          "command": "cat /served/x",
+          "expect": { "exit": 0, "stdout": "b\n" }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_leaves_a_file_mount_off_the_box",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs and places VFS.md through the SDK, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "sshfs mounts only a directory: a file mounted at a path of its own, such as the workspace's VFS.md, stays in the workspace, and the box sees the directories beside it.",

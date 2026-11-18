@@ -32,6 +32,8 @@ GITLINK = 0o160000
 # A subtree, which git spells 40000 in a tree object and 040000 when it
 # prints one.
 TREE = 0o040000
+TREE_MODE = f"{TREE:06o}"
+GITLINK_MODE = f"{GITLINK:06o}"
 OWNER_EXECUTE = 0o100
 # The part of a tree entry's mode that is a permission: what a restored
 # entry's own bits are set from, the object type above it being the

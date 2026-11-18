@@ -25,6 +25,7 @@ from langfuse.api import (
 from langfuse.api.core.api_error import ApiError as SdkError
 from langfuse.api.core.pydantic_utilities import parse_obj_as
 
+from mirage.core.api.errors import PaginationStalledError
 from mirage.core.langfuse.client import (
     LangfuseApiError,
     fetch_dataset_runs,
@@ -225,3 +226,14 @@ async def test_fetch_dataset_runs_lists_experiments_by_dataset_id():
             "value": "run,alpha",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_trace_refuses_a_repeated_cursor():
+    api = MagicMock()
+    api.observations.get_many = AsyncMock(
+        return_value=_observations([ROOT], cursor="same")
+    )
+    with pytest.raises(PaginationStalledError):
+        await fetch_trace(api, "t1")
+    assert api.observations.get_many.await_count == 2

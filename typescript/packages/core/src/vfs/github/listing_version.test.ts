@@ -19,7 +19,7 @@ import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RedisIndexCacheStore } from '../../cache/index/redis.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import { FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import { stat } from '../../core/github/stat.ts'
 import { ListingVersion, MountMode, PathSpec, ReadPolicy } from '../../types.ts'
@@ -154,7 +154,7 @@ describe('github versions a listing by its head commit', () => {
       const index = w.registry.mountFor('/gh').index
       const reads = countListDirs(w.registry.mountFor('/gh').indexStore)
       const found = scoped
-        ? await runInCommandScope(() => stat(vfs.accessor, ROOT, null, index))
+        ? await commandScope(() => stat(vfs.accessor, ROOT, null, index))
         : await stat(vfs.accessor, ROOT, null, index)
       expect(version).not.toBeNull()
       expect(found.fingerprint).toBeNull()
@@ -345,7 +345,7 @@ describe('github versions a listing by its head commit', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const rec = new Reconciler(w.cache, w.namespace)
     expect(
-      await runInCommandScope(() => rec.mayServeListing(mount, '/gh/d1', before.version ?? null)),
+      await commandScope(() => rec.mayServeListing(mount, '/gh/d1', before.version ?? null)),
     ).toBe(false)
     expect((await mount.indexStore.listDir('/gh/d1')).entries).toEqual(before.entries)
     expect(warn).toHaveBeenCalled()

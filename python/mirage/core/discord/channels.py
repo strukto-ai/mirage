@@ -13,17 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_request
+
+
+class DiscordChannel(TypedDict):
+    id: str
+    name: NotRequired[str]
+    type: NotRequired[int]
+    last_message_id: NotRequired[str | None]
+
 
 TEXT_CHANNEL_TYPES = (0, 5, 15)
 
 
 async def list_channels_stream(
     accessor: DiscordAccessor, guild_id: str
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncIterator[list[DiscordChannel]]:
     """List text channels in a guild as a single-page stream.
 
     Discord returns all guild channels in one response (no pagination
@@ -47,7 +55,7 @@ async def list_channels_stream(
 
 async def list_channels(
     accessor: DiscordAccessor, guild_id: str
-) -> list[dict[str, Any]]:
+) -> list[DiscordChannel]:
     """List text channels in a guild.
 
     Args:
@@ -57,7 +65,7 @@ async def list_channels(
     Returns:
         list[dict]: channel dicts (text channels only).
     """
-    out: list[dict[str, Any]] = []
+    out: list[DiscordChannel] = []
     async for page in list_channels_stream(accessor, guild_id):
         out.extend(page)
     return out

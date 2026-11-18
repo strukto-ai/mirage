@@ -2,7 +2,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.core.linear.client import LinearAPIError, list_team_issues
+from mirage.accessor.linear import LinearAccessor
+from mirage.core.linear.client import (
+    LinearAPIError,
+    graphql_request,
+    list_team_issues,
+)
+from mirage.core.linear.config import LinearConfig
 
 
 def test_linear_api_error_preserves_explicit_empty_error_list():
@@ -47,3 +53,15 @@ async def test_a_project_scoped_listing_asks_only_for_those_projects():
     assert asked.await_args.args[2]["filter"] == {
         "project": {"id": {"in": ["P1", "P2"]}}
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [None, {}, {"data": []}, {"data": None}])
+async def test_invalid_graphql_response_is_a_service_error(body):
+    async with LinearAccessor(LinearConfig(api_key="token")) as accessor:
+        with patch(
+            "mirage.core.linear.client.api_request",
+            AsyncMock(return_value=body),
+        ):
+            with pytest.raises(LinearAPIError, match="no data object"):
+                await graphql_request(accessor, "query { viewer { id } }")

@@ -1,6 +1,6 @@
 import type * as AsyncContext from '../../utils/async_context.ts'
 import { expect, it, vi } from 'vitest'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { DevicePipe } from '../../core/dev/pipe.ts'
 import { DevFiles } from './store.ts'
@@ -31,7 +31,7 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
     doneResolve = resolve
   })
   const pipe = new DevicePipe(true)
-  const owner = runWithSession(new SessionState({ sessionId: 'owner' }), async () => {
+  const owner = setCurrentSession(new SessionState({ sessionId: 'owner' }), async () => {
     const [path, allocation] = files.allocateInput(pipe)
     readyResolve()
     await done
@@ -40,7 +40,7 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
   })
   await ready
   try {
-    await runWithSession(new SessionState({ sessionId: 'peer' }), () => {
+    await setCurrentSession(new SessionState({ sessionId: 'peer' }), () => {
       expect(files.has('/fd/63')).toBe(false)
       expect(files.get('/fd/63')).toBeUndefined()
       expect([...files.keys()]).not.toContain('/fd/63')

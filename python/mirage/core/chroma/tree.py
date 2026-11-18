@@ -9,6 +9,7 @@ from mirage.core.slug_tree.rows import (
     dir_rows,
     drop_collisions,
     normalize_slug,
+    scalar_string,
 )
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import DirRows
@@ -59,7 +60,7 @@ def refuse_collision(ancestor: str, path: str) -> None:
 
 def file_row(path: str, metadata: dict[str, Any]) -> FileStat:
     slug = path.strip("/")
-    updated_at = metadata_or_none(metadata, "updated_at")
+    updated_at = scalar_string(metadata.get("updated_at"))
     # The path tree's `size` describes the producer's source document,
     # not the chunk join mirage serves, so it rides in extra and never
     # becomes the reported byte length: sizes.ensure_dir_sizes measures
@@ -72,17 +73,10 @@ def file_row(path: str, metadata: dict[str, Any]) -> FileStat:
         extra={
             "slug": slug,
             "source_size": metadata_int_or_none(metadata, "size"),
-            "created_at": metadata_or_none(metadata, "created_at"),
+            "created_at": scalar_string(metadata.get("created_at")),
             "updated_at": updated_at,
         },
     )
-
-
-def metadata_or_none(metadata: dict[str, Any], key: str) -> str | None:
-    value = metadata.get(key)
-    if value is None:
-        return None
-    return str(value)
 
 
 def metadata_int_or_none(metadata: dict[str, Any], key: str) -> int | None:

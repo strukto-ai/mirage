@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../context/session_context.ts'
-import { currentCaller, runWithEvaluation, whilePaused } from '../../context/session_context.ts'
+import { currentCaller, setCurrentEvaluation, whilePaused } from '../../context/session_context.ts'
 import { CAPACITY } from '../../io/pipe.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -255,7 +255,7 @@ export async function handlePipe(
       }
     }
     const isolated = () =>
-      asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
+      asyncContextIsolatesTasks ? setCurrentEvaluation(childEvaluation, run) : run()
     if (inParent || processes === undefined) return isolated()
     const process = startShell(
       processes,

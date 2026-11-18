@@ -23,8 +23,8 @@ import {
   redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
-  runWithCaller,
-  runWithRedirectPaths,
+  bindCaller,
+  setRedirectPaths,
   sessionAccess,
   syntaxHead,
 } from '../../context/session_context.ts'
@@ -262,7 +262,7 @@ async function runAlias(
         // ran on the first's nod.
         const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
         try {
-          return await runWithRedirectPaths(
+          return await setRedirectPaths(
             ast,
             [],
             () =>
@@ -1068,7 +1068,7 @@ async function runArgv(
     // no declared limit until its mount binds its own, so a command a
     // registered one runs keeps none of that one's.
     const outer = currentCaller()
-    const result = await runWithCaller(
+    const result = await bindCaller(
       {
         ...outer,
         gate: gated ?? outer.gate,
@@ -1192,7 +1192,7 @@ async function runArgv(
   }
   const outer = currentCaller()
   if ((machine?.toString() ?? null) === (outer.machine?.toString() ?? null)) return run()
-  return runWithCaller({ ...outer, machine }, run)
+  return bindCaller({ ...outer, machine }, run)
 }
 
 /**

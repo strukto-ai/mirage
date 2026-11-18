@@ -13,60 +13,45 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
-import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
-import type { ConfigOf, RedactedSchema } from '../secrets.ts'
-import { REDACTED_SECRET, secretStr } from '../secrets.ts'
+import { defaultRequestTimeout } from '../../core/api/config.ts'
+import { secretStr } from '../secrets.ts'
 
 // `dsn` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `PostgresConfig` declares.
-export const PostgresConfig = z.object({
-  ...timeoutShape,
-  dsn: secretStr().describe(
-    "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
-  ),
-  schemas: z
-    .array(z.string())
-    .readonly()
-    .optional()
-    .describe(
-      'Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.',
+export const PostgresConfig = z
+  .object({
+    timeout: defaultRequestTimeout,
+    dsn: secretStr().describe(
+      "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
     ),
-  defaultRowLimit: z.number().optional().meta({
-    description:
-      'Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.',
-    default: 1000,
-  }),
-  maxReadRows: z.number().optional().meta({
-    description:
-      'Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.',
-    default: 10_000,
-  }),
-  maxReadBytes: z
-    .number()
-    .optional()
-    .meta({
+    schemas: z
+      .array(z.string())
+      .readonly()
+      .nullable()
+      .default(null)
+      .describe(
+        'Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.',
+      ),
+    defaultRowLimit: z.number().int().default(1000).meta({
       description:
-        'Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).',
-      default: 10 * 1024 * 1024,
+        'Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.',
+      default: 1000,
     }),
-})
+    maxReadRows: z.number().int().default(10_000).meta({
+      description:
+        'Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.',
+      default: 10_000,
+    }),
+    maxReadBytes: z
+      .number()
+      .int()
+      .default(10 * 1024 * 1024)
+      .meta({
+        description:
+          'Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).',
+        default: 10 * 1024 * 1024,
+      }),
+  })
+  .strict()
 
-export type PostgresConfig = ConfigOf<typeof PostgresConfig>
-
-export function resolvePostgresConfig(config: PostgresConfig) {
-  return {
-    timeout: config.timeout ?? DEFAULT_TIMEOUT,
-    dsn: config.dsn,
-    schemas: config.schemas ?? null,
-    defaultRowLimit: config.defaultRowLimit ?? 1000,
-    maxReadRows: config.maxReadRows ?? 10_000,
-    maxReadBytes: config.maxReadBytes ?? 10 * 1024 * 1024,
-  }
-}
-
-export function redactPostgresConfig(
-  config: ReturnType<typeof resolvePostgresConfig>,
-): RedactedSchema<typeof PostgresConfig, ReturnType<typeof resolvePostgresConfig>> {
-  return { ...config, dsn: REDACTED_SECRET }
-}
+export type PostgresConfig = z.input<typeof PostgresConfig>

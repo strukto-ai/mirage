@@ -1,9 +1,21 @@
+import re
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from mirage.core.nextcloud.search.constants import SEARCH_ENDPOINT_PATH
 from mirage.core.nextcloud.search.types import SearchTarget
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import raw_path_of
+
+
+def _decode_path(path: str) -> str:
+    if re.search(r"%(?![0-9A-Fa-f]{2})", path):
+        raise ValueError(f"invalid percent-encoding in Nextcloud path: {path}")
+    try:
+        return unquote(path, errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"invalid percent-encoding in Nextcloud path: {path}"
+        ) from exc
 
 
 def search_target(url: str) -> SearchTarget | None:
@@ -20,7 +32,7 @@ def search_target(url: str) -> SearchTarget | None:
         (parsed.scheme, parsed.netloc, parsed.path[:dav_end], "", "")
     )
     return SearchTarget(
-        endpoint=endpoint, vfs_scope=unquote("/" + "/".join(parts))
+        endpoint=endpoint, vfs_scope=_decode_path("/" + "/".join(parts))
     )
 
 
@@ -39,11 +51,11 @@ def strip_scope(path: str, scope: str) -> str | None:
 
 
 def relative_path(href: str, target: SearchTarget) -> str:
-    href_path = unquote(urlsplit(href).path).rstrip("/")
+    href_path = _decode_path(urlsplit(href).path).rstrip("/")
     vfs_scope = target.vfs_scope.rstrip("/")
     relative = strip_scope(href_path, vfs_scope)
     if relative is None:
-        dav_root = unquote(urlsplit(target.endpoint).path).rstrip("/")
+        dav_root = _decode_path(urlsplit(target.endpoint).path).rstrip("/")
         relative = strip_scope(href_path, dav_root + vfs_scope)
     if relative is None:
         raise ValueError(

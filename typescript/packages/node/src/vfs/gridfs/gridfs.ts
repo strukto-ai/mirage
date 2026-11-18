@@ -18,7 +18,6 @@ import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/type
 import { VFSName } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
@@ -36,7 +35,7 @@ import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
 import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
 import { replace as gridfsReplace, write as gridfsWrite } from '../../core/gridfs/write.ts'
-import { GridFSConfig } from './config.ts'
+import { GridFSConfig, normalizeGridFSConfig } from './config.ts'
 
 export class GridFSVFS extends BaseVFS {
   override readonly name: string = VFSName.GRIDFS
@@ -52,14 +51,7 @@ export class GridFSVFS extends BaseVFS {
 
   constructor(config: GridFSConfig) {
     super()
-    const normalized = normalizeKeyPrefix(config.keyPrefix)
-    const cfg: GridFSConfig = { ...config }
-    if (normalized !== undefined) {
-      cfg.keyPrefix = normalized
-    } else {
-      delete cfg.keyPrefix
-    }
-    this.config = cfg
+    this.config = normalizeGridFSConfig(config)
     this.accessor = new GridFSAccessor(this.config)
   }
 

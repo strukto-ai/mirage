@@ -25,7 +25,9 @@ from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.context import require_supported
 from mirage.cache.types import WriteCondition
 from mirage.core.gridfs.client import (
+    GridFSFileDoc,
     bucket,
+    file_by_id,
     files_coll,
     iter_latest,
     latest_file,
@@ -122,11 +124,11 @@ async def _head_revision(
     conn: GridFSAccessor, key: str, revision: str
 ) -> ObjectMeta | None:
     # A pinned stat: the revision by its _id, wherever rm or mv moved it.
-    doc = await files_coll(conn).find_one({"_id": ObjectId(revision)})
+    doc = await file_by_id(conn, ObjectId(revision))
     return _meta_of(doc)
 
 
-def _meta_of(doc: dict[str, Any] | None) -> ObjectMeta | None:
+def _meta_of(doc: GridFSFileDoc | None) -> ObjectMeta | None:
     if doc is None:
         return None
     revision = str(doc["_id"])

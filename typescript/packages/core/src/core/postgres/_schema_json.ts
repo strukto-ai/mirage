@@ -29,9 +29,15 @@ import {
   tableSizeBytes,
 } from './client.ts'
 
+interface ReferencedColumn {
+  schema: string
+  table: string
+  column: string
+}
+
 interface EntityColumn extends ColumnInfo {
   primary_key?: boolean
-  references?: { schema: string; table: string; column: string }
+  references?: ReferencedColumn
 }
 
 export async function buildDatabaseJson(accessor: PostgresAccessor) {
@@ -83,7 +89,7 @@ export async function buildEntitySchemaJson(
   const size = await tableSizeBytes(accessor, schema, name)
 
   const pkSet = new Set(pk)
-  const fkMap = new Map<string, EntityColumn['references']>()
+  const fkMap = new Map<string, ReferencedColumn>()
   for (const fk of fks) {
     const ref = fk.references
     fk.columns.forEach((fromCol, i) => {

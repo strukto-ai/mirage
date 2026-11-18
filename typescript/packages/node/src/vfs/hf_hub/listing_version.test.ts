@@ -16,7 +16,7 @@ import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import { LISTING_TRUST_WINDOW } from '@struktoai/mirage-core/cache/index/constants'
 import { ListingCheckStore, RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { RedisIndexCacheStore } from '@struktoai/mirage-core/cache/index/redis'
-import { runInCommandScope } from '@struktoai/mirage-core/cache/index/scope'
+import { commandScope } from '@struktoai/mirage-core/cache/index/scope'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { FileType, MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
@@ -237,7 +237,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     fake.log.length = 0
     const index = w.registry.mountFor('/m').index
     const reads = countListDirs(w.registry.mountFor('/m').indexStore)
-    const found = await runInCommandScope(() => stat(accessorOf(vfs), ROOT, null, index))
+    const found = await commandScope(() => stat(accessorOf(vfs), ROOT, null, index))
     expect(version).not.toBeNull()
     expect(found.fingerprint).toBeNull()
     expect(reads).toEqual([])
@@ -406,7 +406,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     const rec = new Reconciler(w.cache, w.namespace)
-    const verdict = runInCommandScope(() =>
+    const verdict = commandScope(() =>
       rec.mayServeListing(mount, '/m/docs/sub', before.version ?? null),
     )
     await vi.runAllTimersAsync()

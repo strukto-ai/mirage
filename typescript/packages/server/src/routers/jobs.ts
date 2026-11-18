@@ -79,7 +79,7 @@ function toResponse(record: Job): JobResponse {
   }
 }
 
-export function registerJobsRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

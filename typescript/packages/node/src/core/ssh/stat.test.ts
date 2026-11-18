@@ -63,6 +63,16 @@ const FILE_MODE = 0o100644
 const DIR_MODE = 0o040755
 
 describe('attrsToFileStat', () => {
+  it.each([
+    [0o010640, FileType.FIFO],
+    [0o020666, FileType.CHAR_DEVICE],
+    [0o060660, FileType.BLOCK_DEVICE],
+    [0o140755, FileType.SOCKET],
+  ] as const)('preserves special file kind for mode %i', (mode, type) => {
+    const row = attrsToFileStat('entry', { mode })
+    expect(row.type).toBe(type)
+    expect(row.content).toBeNull()
+  })
   it('returns DIRECTORY type for a directory mode', () => {
     const s = attrsToFileStat('mydir', { mode: DIR_MODE, size: 0 })
     expect(s.type).toBe(FileType.DIRECTORY)

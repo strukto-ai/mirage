@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { S_IFDIR, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
+import { FileType, type PathSpec } from '@struktoai/mirage-core/types'
+import { modeType } from '@struktoai/mirage-core/utils/stat_view'
 import type { FileEntryWithStats, OpenMode, SFTPWrapper } from 'ssh2'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
 
@@ -55,16 +55,6 @@ export function sftpCall<T = void>(
   })
 }
 
-export function isDirectoryAttrs(attrs: { mode?: number }): boolean {
-  if (attrs.mode === undefined) return false
-  return (attrs.mode & S_IFMT) === S_IFDIR
-}
-
-export function isFileAttrs(attrs: { mode?: number }): boolean {
-  if (attrs.mode === undefined) return false
-  return (attrs.mode & S_IFMT) === S_IFREG
-}
-
 /**
  * Open a remote file with consistent filesystem errors.
  *
@@ -87,7 +77,7 @@ export async function openForWrite(
     if (isFailure(err)) {
       const isDir = await new Promise<boolean>((resolveFn) => {
         sftp.stat(remote, (statErr, attrs) => {
-          resolveFn(statErr ? false : isDirectoryAttrs(attrs))
+          resolveFn(statErr ? false : modeType(attrs.mode) === FileType.DIRECTORY)
         })
       })
       if (isDir) throw eisdir(p)

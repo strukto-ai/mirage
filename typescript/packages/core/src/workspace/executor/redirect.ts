@@ -17,8 +17,8 @@ import type { Caller, RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
   runLanding,
-  runWithCaller,
-  runWithRedirectPaths,
+  bindCaller,
+  setRedirectPaths,
   type RedirectGuard,
 } from '../../context/session_context.ts'
 import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
@@ -195,7 +195,7 @@ export class PipeRecorder extends Recorder {
       file,
       new ByteWriter(async (source) => {
         // The write is the redirect's own, so it waits on no hold of its file.
-        await runWithCaller({ ...currentCaller(), streamed: [] }, async () => {
+        await bindCaller({ ...currentCaller(), streamed: [] }, async () => {
           if (offset === null) {
             await this.dispatch(file.append ? 'append' : 'write', file.where, [source])
             return
@@ -999,7 +999,7 @@ async function openOutput(
       const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
       pipe =
         command !== null && guard !== undefined
-          ? await runWithRedirectPaths(command, targets, open)
+          ? await setRedirectPaths(command, targets, open)
           : await open()
     } catch (error) {
       if (error instanceof PipeClosed || isAborting(error)) throw error
@@ -1140,7 +1140,7 @@ async function landOutput(
       }
     }
     if (command === null) await writeFiles()
-    else await runWithRedirectPaths(command, targets, writeFiles)
+    else await setRedirectPaths(command, targets, writeFiles)
     stdout = await deliverRouted(routed, opened.sink, io)
   } finally {
     await route.release()
@@ -1269,22 +1269,20 @@ async function runRedirects(
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
     } else {
       try {
-        const result = await runWithCaller(
-          { ...currentCaller(), enclosing: recorder, streamed },
-          () =>
-            runWithRedirectPaths(command, targets, () =>
-              executeNode(
-                command,
-                context,
-                given === UNREADABLE ? unreadableStdin() : given,
-                callStack,
-                { sink: recorder },
-              ),
+        const result = await bindCaller({ ...currentCaller(), enclosing: recorder, streamed }, () =>
+          setRedirectPaths(command, targets, () =>
+            executeNode(
+              command,
+              context,
+              given === UNREADABLE ? unreadableStdin() : given,
+              callStack,
+              { sink: recorder },
             ),
+          ),
         )
         refused = result[2].refused
-        await runWithCaller({ ...currentCaller(), streamed }, () =>
-          runWithRedirectPaths(command, targets, async () => {
+        await bindCaller({ ...currentCaller(), streamed }, () =>
+          setRedirectPaths(command, targets, async () => {
             await beforeDrain(recorder, result, outputs, files, name)
             const [, execIo] = await drained(recorder, ...result)
             io = execIo

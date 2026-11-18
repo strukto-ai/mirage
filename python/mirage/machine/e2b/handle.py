@@ -16,8 +16,10 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from functools import cached_property
+from math import ceil
 from time import monotonic
-from typing import Any
+from typing import Any, cast
 
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
@@ -32,7 +34,6 @@ from mirage.machine.constants import (
     stop_signal,
     wrap_line,
 )
-from mirage.machine.e2b import sdk
 from mirage.machine.e2b.config import E2BConfig
 from mirage.machine.e2b.constants import (
     BUSY_REFRESH_SECONDS,
@@ -45,11 +46,11 @@ from mirage.machine.e2b.constants import (
     PTY_RAW,
     SANDBOX_GONE,
 )
+from mirage.machine.e2b.sdk import E2bSdk
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.types import MachinePipe
-from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     config_cls = E2BConfig
     config: E2BConfig
 
+    @cached_property
+    def _sdk(self) -> E2bSdk:
+        return cast(E2bSdk, self._load_sdk("e2b", E2bSdk))
+
     _sandbox: Any = None
 
     def __init__(
@@ -222,19 +227,18 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         ``BUSY_TIMEOUT_SECONDS``. A started one that is
         gone is forgotten and started anew; the config's fails with how to
         replace it."""
-        if sdk.AsyncSandbox is None:
-            raise ImportError(sdk_install_hint("e2b"))
+        sandbox = self._sdk.AsyncSandbox
         if self.config.sandbox_id is None and self._sandbox_id is None:
             if self._memory is not None:
                 self._sandbox_id = await self._memory.recall(self.name)
             self._started_here = self._sandbox_id is not None
         if self._sandbox_id is not None:
-            extra = (
-                {"timeout": BUSY_TIMEOUT_SECONDS} if self._started_here else {}
-            )
+            params = self._api_params()
+            if self._started_here:
+                params["timeout"] = BUSY_TIMEOUT_SECONDS
             try:
-                self._sandbox = await sdk.AsyncSandbox.connect(
-                    self._sandbox_id, **extra, **self._api_params()
+                self._sandbox = await sandbox.connect(
+                    self._sandbox_id, **params
                 )
                 if self._unsaved and self._memory is not None:
                     await self._memory.remember(self.name, self._sandbox_id)
@@ -249,7 +253,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 if self._memory is not None:
                     await self._memory.forget(self.name)
                 self._sandbox_id = None
-        self._sandbox = await sdk.AsyncSandbox.create(
+        self._sandbox = await sandbox.create(
             self.config.template or DEFAULT_TEMPLATE,
             timeout=BUSY_TIMEOUT_SECONDS,
             lifecycle={"on_timeout": "pause", "auto_resume": False},
@@ -277,7 +281,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         if sandbox_id is None:
             return
         try:
-            await sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
+            await self._sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
         except Exception:
             self._unsaved = True
             logger.debug(
@@ -387,8 +391,8 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 if sandbox_id is None or not self._started_here:
                     continue
                 try:
-                    await sdk.AsyncSandbox.set_timeout(
-                        sandbox_id, seconds, **self._api_params()
+                    await self._sdk.AsyncSandbox.set_timeout(
+                        sandbox_id, ceil(seconds), **self._api_params()
                     )
                     self._missed = False
                 except Exception:
@@ -412,7 +416,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             sandbox_id = await self._memory.recall(self.name)
         if sandbox_id is None:
             return
-        await sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
+        await self._sdk.AsyncSandbox.kill(sandbox_id, **self._api_params())
         if self._memory is not None:
             await self._memory.forget(self.name)
         self._sandbox_id = None
@@ -429,10 +433,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         if self._sandbox_id is None:
             return
         try:
-            await sdk.AsyncSandbox.pause(
+            await self._sdk.AsyncSandbox.pause(
                 self._sandbox_id, **self._api_params()
             )
-        except sdk.SandboxNotFoundException:
+        except self._sdk.SandboxNotFoundException:
             logger.debug(
                 "%s: sandbox already gone, nothing to pause",
                 self.machine,
@@ -446,9 +450,9 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         Args:
             exc (BaseException): what an SDK call raised.
         """
-        if isinstance(exc, sdk.SandboxNotFoundException):
+        if isinstance(exc, self._sdk.SandboxNotFoundException):
             state = "deleted"
-        elif isinstance(exc, sdk.SandboxNotRunningException):
+        elif isinstance(exc, self._sdk.SandboxNotRunningException):
             state = "ended"
         else:
             return None
@@ -520,9 +524,9 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 lambda exc: (
                     self._gone(exc) is None
                     and (
-                        isinstance(exc, sdk.NotFoundException)
+                        isinstance(exc, self._sdk.NotFoundException)
                         or (
-                            isinstance(exc, sdk.SandboxException)
+                            isinstance(exc, self._sdk.SandboxException)
                             and any(
                                 message in str(exc) for message in CLOSED_INPUT
                             )
@@ -537,7 +541,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             # its exit, not the end of the input, ends the line.
             try:
                 result = await handle.wait()
-            except sdk.CommandExitException as exc:
+            except self._sdk.CommandExitException as exc:
                 result = exc
             exited.set()
             if not feeding.done():
@@ -628,7 +632,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         pty = self._sandbox.pty
         try:
             handle = await pty.create(
-                sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
+                self._sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
             )
         except Exception as exc:
             if (lost := self._lost(exc)) is None:

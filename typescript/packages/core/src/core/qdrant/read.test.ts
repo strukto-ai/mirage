@@ -16,13 +16,13 @@ import type { QdrantClient } from '@qdrant/js-client-rest'
 import { expect, it, vi } from 'vitest'
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
+import { QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { read } from './tree.ts'
 
 function lineageAccessor(requested: unknown[]): QdrantAccessor {
   const accessor = new QdrantAccessor(
-    resolveQdrantConfig({
+    QdrantConfig.parse({
       collection: 'docs',
       groupBy: ['metadata.source'],
       basenameFields: ['metadata.source'],

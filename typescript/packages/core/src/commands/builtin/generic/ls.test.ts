@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { setMountGate } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
@@ -266,7 +266,7 @@ describe('structure-only directories', () => {
   // A structure chain (a link's ancestors) continues below the first
   // level, so -R descends it: only a mount root stops the walk.
   it('-R descends structure that continues below', async () => {
-    const [out, io] = await runWithMountGate('/', MountMode.WRITE, () =>
+    const [out, io] = await setMountGate('/', MountMode.WRITE, () =>
       drained(
         lsGeneric(
           [PathSpec.fromStrPath('/ghost')],
@@ -298,7 +298,7 @@ describe('structure-only directories', () => {
           type: p.virtual === '/base/x' ? FileType.FILE : FileType.DIRECTORY,
         }),
       )
-    const [out, io] = await runWithMountGate('/', MountMode.WRITE, () =>
+    const [out, io] = await setMountGate('/', MountMode.WRITE, () =>
       drained(
         lsGeneric(
           [PathSpec.fromStrPath('/base')],
@@ -367,7 +367,7 @@ describe('structure-only directories', () => {
   // Absence of the dispatcher can only mean "nobody can answer", so the row keeps
   // the shape every caller outside a workspace already saw.
   it('falls back to a directory row with no dispatcher', async () => {
-    const result = await runWithMountGate('/', MountMode.WRITE, () =>
+    const result = await setMountGate('/', MountMode.WRITE, () =>
       lsGeneric(
         [PathSpec.fromStrPath('/ghost')],
         {

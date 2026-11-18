@@ -205,12 +205,13 @@ describe('DiskVFS — fs methods', () => {
 
 describe('DiskVFS — getState / loadState round-trip', () => {
   it('snapshots files', async () => {
+    await ops(res).write(spec('/__proto__'), new TextEncoder().encode('P'))
     await ops(res).write(spec('/a.txt'), new TextEncoder().encode('A'))
     await ops(res).mkdir(spec('/d'))
     await ops(res).write(spec('/d/b.txt'), new TextEncoder().encode('B'))
 
     const state = await res.getState()
-    expect(Object.keys(state.files).sort()).toEqual(['a.txt', 'd/b.txt'])
+    expect(Object.keys(state.files).sort()).toEqual(['__proto__', 'a.txt', 'd/b.txt'])
     expect(state).not.toHaveProperty('needsOverride')
     expect(state).not.toHaveProperty('redactedFields')
 
@@ -218,6 +219,7 @@ describe('DiskVFS — getState / loadState round-trip', () => {
     try {
       const res2 = new DiskVFS({ root: root2 })
       await res2.loadState(state)
+      expect(new TextDecoder().decode(await ops(res2).read(spec('/__proto__')))).toBe('P')
       expect(new TextDecoder().decode(await ops(res2).read(spec('/a.txt')))).toBe('A')
       expect(new TextDecoder().decode(await ops(res2).read(spec('/d/b.txt')))).toBe('B')
     } finally {

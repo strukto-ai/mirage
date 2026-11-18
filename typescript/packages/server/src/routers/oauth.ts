@@ -22,7 +22,7 @@ import { errorResponse, HttpError } from '../errors.ts'
  * signs in as. A server that publishes no login answers 404, so the CLI
  * knows it needs none.
  */
-export function registerOAuthRoutes(
+export function router(
   app: RouteApp,
   deps: {
     auth: AuthConfig

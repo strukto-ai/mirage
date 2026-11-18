@@ -1,69 +1,59 @@
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
-import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { defaultRequestTimeout } from '../../core/api/config.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import type { ConfigOf } from '../secrets.ts'
 import { secretStr } from '../secrets.ts'
 
-export const Mem0Config = z.object({
-  ...timeoutShape,
-  apiKey: secretStr().describe('Mem0 Platform API key.'),
-  host: z
-    .string()
-    .optional()
-    .meta({ description: 'Mem0 API base URL.', default: 'https://api.mem0.ai' }),
-  userId: z
-    .string()
-    .optional()
-    .describe("Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`."),
-  agentId: z
-    .string()
-    .optional()
-    .describe("Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`."),
-  runId: z
-    .string()
-    .optional()
-    .describe("Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`."),
-  defaultPageSize: z.number().optional().meta({
-    description: 'Memories fetched per request while listing the scope.',
-    default: 100,
-  }),
-  defaultSearchLimit: z.number().optional().meta({
-    description: 'How many results `search` returns unless the line sets `top_k`.',
-    default: 10,
-  }),
-})
+export const Mem0Config = z
+  .object({
+    timeout: defaultRequestTimeout,
+    apiKey: secretStr().describe('Mem0 Platform API key.'),
+    host: z
+      .string()
+      .default('https://api.mem0.ai')
+      .transform(rstripSlash)
+      .meta({ description: 'Mem0 API base URL.', default: 'https://api.mem0.ai' }),
+    userId: z
+      .string()
+      .refine((value) => value.trim() !== '', 'Mem0 scope id cannot be empty')
+      .nullable()
+      .default(null)
+      .describe("Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+    agentId: z
+      .string()
+      .refine((value) => value.trim() !== '', 'Mem0 scope id cannot be empty')
+      .nullable()
+      .default(null)
+      .describe("Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+    runId: z
+      .string()
+      .refine((value) => value.trim() !== '', 'Mem0 scope id cannot be empty')
+      .nullable()
+      .default(null)
+      .describe("Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+    defaultPageSize: z
+      .number()
+      .int()
+      .positive('defaultPageSize must be positive')
+      .default(100)
+      .meta({
+        description: 'Memories fetched per request while listing the scope.',
+        default: 100,
+      }),
+    defaultSearchLimit: z
+      .number()
+      .int()
+      .positive('defaultSearchLimit must be positive')
+      .default(10)
+      .meta({
+        description: 'How many results `search` returns unless the line sets `top_k`.',
+        default: 10,
+      }),
+  })
+  .strict()
+  .refine(
+    ({ userId, agentId, runId }) =>
+      [userId, agentId, runId].filter((value) => value !== null).length === 1,
+    'Mem0Config requires exactly one of userId, agentId, runId',
+  )
 
-export type Mem0Config = ConfigOf<typeof Mem0Config>
-
-function positive(value: number | undefined, fallback: number, name: string): number {
-  const resolved = value ?? fallback
-  if (!Number.isInteger(resolved) || resolved <= 0) throw new Error(`${name} must be positive`)
-  return resolved
-}
-
-export function resolveMem0Config(config: Mem0Config) {
-  const scopes = [
-    ['user_id', config.userId] as const,
-    ['agent_id', config.agentId] as const,
-    ['run_id', config.runId] as const,
-  ].filter((scope) => scope[1] !== undefined)
-  if (scopes.length !== 1) {
-    throw new Error('Mem0Config requires exactly one of userId, agentId, runId')
-  }
-  const scope = scopes[0]
-  if (scope?.[1]?.trim() === '' || scope?.[1] === undefined) {
-    throw new Error('Mem0 scope id cannot be empty')
-  }
-  return {
-    timeout: config.timeout ?? DEFAULT_TIMEOUT,
-    apiKey: config.apiKey,
-    host: rstripSlash(config.host ?? 'https://api.mem0.ai'),
-    userId: config.userId ?? null,
-    agentId: config.agentId ?? null,
-    runId: config.runId ?? null,
-    defaultPageSize: positive(config.defaultPageSize, 100, 'defaultPageSize'),
-    defaultSearchLimit: positive(config.defaultSearchLimit, 10, 'defaultSearchLimit'),
-    scopeFilter: { [scope[0]]: scope[1] },
-  }
-}
+export type Mem0Config = z.input<typeof Mem0Config>

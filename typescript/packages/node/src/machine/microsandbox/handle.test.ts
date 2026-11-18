@@ -18,7 +18,12 @@ import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
-import { EXEC_PRELUDE, runArgv, runExitMark } from '@struktoai/mirage-core/machine/constants'
+import {
+  EXEC_PRELUDE,
+  runArgv,
+  runDoneMark,
+  runExitMark,
+} from '@struktoai/mirage-core/machine/constants'
 import { ownSession } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
@@ -55,7 +60,10 @@ it('runs a program in a session of its own as given', () => {
     runArgv('t', 'n1', ['sh', '-c', 'printf "%s|" "$@"; exit 4', 'sh', 'a b', '']),
   )
   const done = spawnSync(argv[0] ?? '', argv.slice(1))
-  expect([done.status, done.stdout.toString()]).toEqual([4, 'a b||'])
+  expect([done.status, done.stdout.toString()]).toEqual([
+    4,
+    `a b||${DEC.decode(runDoneMark('n1'))}4\n`,
+  ])
   expect(done.stderr.toString().endsWith(`${DEC.decode(runExitMark('n1'))}4\n`)).toBe(true)
 })
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from http import HTTPStatus
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.accessor.sharepoint import SharePointAccessor
@@ -40,6 +40,25 @@ from mirage.events.delta import (
 from mirage.types import Delta, FileChangeKind, PathSpec
 
 logger = logging.getLogger(__name__)
+
+
+class DriveState(TypedDict):
+    virtual: str
+    folder: str | None
+    top: str
+    link: str
+    folders: dict[str, list[str]]
+    seen: dict[str, str]
+
+
+class GraphItem(TypedDict, total=False):
+    id: str
+    name: str
+    parentReference: dict[str, str]
+    createdDateTime: str
+    lastModifiedDateTime: str
+    deleted: dict[str, Any]
+    folder: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +126,7 @@ class GraphDeltaHook:
         state = _decode(checkpoint)
         targets = {t.drive: t for t in await self._targets(root)}
         if state is None:
-            drives: dict[str, dict[str, Any]] = {}
+            drives: dict[str, DriveState] = {}
             for drive, target in targets.items():
                 drives[drive] = await self._baseline(target)
             return Delta((), _encode(drives))
@@ -135,7 +154,7 @@ class GraphDeltaHook:
             _encode(drives),
         )
 
-    async def _baseline(self, target: DeltaTarget) -> dict[str, Any]:
+    async def _baseline(self, target: DeltaTarget) -> DriveState:
         """A drive's state at its present: the feed link that lists
         nothing yet, the mount root's id, and nothing placed.
 
@@ -155,7 +174,7 @@ class GraphDeltaHook:
     async def _read(
         self,
         drive: str,
-        kept: dict[str, Any],
+        kept: DriveState,
         changes: list[tuple[FileChangeKind, str]],
     ) -> None:
         """Read one drive's feed into ``changes`` and move ``kept`` on.
@@ -167,7 +186,7 @@ class GraphDeltaHook:
 
         Args:
             drive (str): The drive's Graph URL.
-            kept (dict[str, Any]): What the checkpoint holds for it.
+            kept (DriveState): What the checkpoint holds for it.
             changes (list[tuple[FileChangeKind, str]]): The changes so far.
         """
         virtual = str(kept["virtual"])
@@ -181,17 +200,19 @@ class GraphDeltaHook:
             changes.append((FileChangeKind.UNKNOWN, virtual))
             top = await self._top(drive, folder)
             kept.update(
-                link=await self._latest(drive),
-                top=top or "",
-                folders={},
-                seen={},
+                {
+                    "link": await self._latest(drive),
+                    "top": top or "",
+                    "folders": {},
+                    "seen": {},
+                }
             )
             return
         if folder:
             top = await self._top(drive, folder) or ""
             if top != kept["top"]:
                 changes.append((FileChangeKind.UNKNOWN, virtual))
-                kept.update(top=top, folders={}, seen={})
+                kept.update({"top": top, "folders": {}, "seen": {}})
         top = str(kept["top"])
         if not top:
             return
@@ -241,7 +262,7 @@ class GraphDeltaHook:
                 moves[was] = now
         moved_below(seen, moves, {item["id"] for item in placed_items})
 
-    async def _feed(self, link: str) -> tuple[list[dict[str, Any]], str]:
+    async def _feed(self, link: str) -> tuple[list[GraphItem], str]:
         """Every item a feed link lists, once each at its last row, and
         the link the next read starts from.
 
@@ -251,14 +272,14 @@ class GraphDeltaHook:
         Args:
             link (str): Where the last read ended.
         """
-        items: dict[str, dict[str, Any]] = {}
+        items: dict[str, GraphItem] = {}
         url = link
         while True:
             data = await graph_get(self._accessor, url)
             for item in data.get("value", []):
                 if isinstance(item, dict) and isinstance(item.get("id"), str):
                     items.pop(item["id"], None)
-                    items[item["id"]] = item
+                    items[item["id"]] = cast(GraphItem, item)
             if data.get("@odata.deltaLink"):
                 return list(items.values()), str(data["@odata.deltaLink"])
             url = str(data["@odata.nextLink"])
@@ -335,7 +356,7 @@ def _join(virtual: str, relative: str) -> str:
     return f"{virtual.rstrip('/')}/{relative}"
 
 
-def _encode(drives: dict[str, dict[str, Any]]) -> str:
+def _encode(drives: dict[str, DriveState]) -> str:
     return json.dumps({"graph": {"drives": drives}}, sort_keys=True)
 
 

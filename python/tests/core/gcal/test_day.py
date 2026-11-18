@@ -289,3 +289,16 @@ def test_a_zone_less_event_buckets_without_raising():
     span = span_of(item, "UTC")
     assert days_covered(span, HK) == ["2026-08-11"]
     assert clamped_hhmm(span, "2026-08-11", HK) == "0900-1030"
+
+
+@pytest.mark.parametrize(
+    "slot",
+    [
+        {"date": "2026-02-30"},
+        {"dateTime": "unreadable"},
+        {"dateTime": "2026-02-30T03:02:01Z"},
+        {"dateTime": "2026-04-01T24:00:00"},
+    ],
+)
+def test_invalid_event_slot_is_absent(slot):
+    assert slot_instant(slot, "UTC") is None

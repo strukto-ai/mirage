@@ -222,7 +222,7 @@ def recording_active() -> bool:
     return current_caller().recorder is not None
 
 
-def push_mount_context(mount_id: str | None) -> CallerToken:
+def set_mount_context(mount_id: str | None) -> CallerToken:
     """Bind the mount instance that owns records in this async frame.
 
     Task-isolated: replaces the Recorder for the current task via
@@ -272,7 +272,7 @@ async def with_mount_context(
     try:
         while True:
             previous = current_caller().recorder
-            token = push_mount_context(
+            token = set_mount_context(
                 mount_id
                 if mount_id is not None
                 else previous.mount_id

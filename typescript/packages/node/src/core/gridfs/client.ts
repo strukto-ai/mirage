@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Collection, Db, Document, GridFSBucket, ObjectId } from 'mongodb'
+import type { Collection, Document, GridFSBucket, ObjectId } from 'mongodb'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
@@ -26,14 +26,6 @@ export interface GridFSFileDoc {
   uploadDate: Date
 }
 
-interface GridFSModule {
-  GridFSBucket: new (
-    db: Db,
-    options?: { bucketName?: string; chunkSizeBytes?: number },
-  ) => GridFSBucket
-  ObjectId: new (id?: string) => ObjectId
-}
-
 // Newest revision of a filename wins; _id breaks uploadDate ties because
 // ObjectIds are monotonic within a process.
 const LATEST_SORT: Record<string, -1> = { uploadDate: -1, _id: -1 }
@@ -44,8 +36,8 @@ const PRUNE_SORT: Record<string, -1> = { filename: -1, uploadDate: -1, _id: -1 }
 
 const BATCH = 1000
 
-export async function loadGridFSModule(): Promise<GridFSModule> {
-  return loadOptionalPeer(() => import('mongodb') as unknown as Promise<GridFSModule>, {
+export function loadGridFSModule() {
+  return loadOptionalPeer(() => import('mongodb'), {
     feature: 'GridFSVFS',
     packageName: 'mongodb',
   })

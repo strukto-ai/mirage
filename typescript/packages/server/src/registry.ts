@@ -34,6 +34,7 @@ import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import type { RecordClient } from '@struktoai/mirage-core/workspace/record/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { secretRefs } from '@struktoai/mirage-core/resources/refs'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { resolve } from 'node:path'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
@@ -571,6 +572,21 @@ export class WorkspaceRegistry {
     if (this.configs === null || !(await this.allows(id, account, 0))) return null
     const [record] = await this.configs.get(id)
     return record === null ? null : (record.config as Record<string, JsonValue>)
+  }
+
+  /**
+   * The ids of the workspaces `account` may use whose kept config names
+   * the saved entry `name` with a `{from: strukto}` pointer, in order. Each
+   * fills the pointer in again when it starts.
+   */
+  async idsNaming(name: string, account: string | null): Promise<string[]> {
+    if (this.configs === null) return []
+    const ids: string[] = []
+    for (const id of (await this.configs.listNames()).sort(compareCodePoints)) {
+      const config = await this.savedConfig(id, account)
+      if (config !== null && secretRefs(config).includes(name)) ids.push(id)
+    }
+    return ids
   }
 
   /**

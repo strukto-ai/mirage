@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import { describe, expect, it } from 'vitest'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
@@ -93,7 +93,7 @@ describe('only a complete listing proves absence', () => {
     )
     const ws = new Workspace({ '/docs/': vfs })
     // One command lists and stats, so its own complete listing is proof.
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await ws.dispatch('readdir', '/docs/owned')
       const stat = ws.dispatch('stat', PATH.virtual) as Promise<FileStat>
       if (complete) {

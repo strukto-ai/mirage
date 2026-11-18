@@ -1208,9 +1208,9 @@ async def _run_limited(
             ws.registry.policies,
             run_with_memory(
                 ws.registry.memory,
-                run_with_timeout(
-                    run_with_env_limit(
-                        ws.registry.max_env,
+                run_with_env_limit(
+                    ws.registry.max_env,
+                    run_with_timeout(
                         run_command_tree(
                             ws.dispatch,
                             ws.registry,
@@ -1227,11 +1227,11 @@ async def _run_limited(
                             line_handle=line_handle,
                             route=route,
                         ),
+                        timeout,
+                        LINE_NAME,
+                        budget_start,
+                        expire_caller,
                     ),
-                    timeout,
-                    LINE_NAME,
-                    budget_start,
-                    expire_caller,
                 ),
                 body=ws.registry.body_limit,
             ),

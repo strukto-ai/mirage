@@ -83,3 +83,20 @@ async def test_an_empty_directory_has_no_rows():
 )
 async def test_anything_but_a_clean_find_leaves_the_walk(answer):
     assert await tree(RunAccessor("/", answer), _scope()) is None
+
+
+@pytest.mark.parametrize(
+    ("wire", "mode", "kind"),
+    [
+        (asyncssh.FILEXFER_TYPE_FIFO, 0o640, FileType.FIFO),
+        (asyncssh.FILEXFER_TYPE_CHAR_DEVICE, 0o666, FileType.CHAR_DEVICE),
+        (asyncssh.FILEXFER_TYPE_UNKNOWN, 0o060660, FileType.BLOCK_DEVICE),
+        (asyncssh.FILEXFER_TYPE_SOCKET, 0o755, FileType.SOCKET),
+    ],
+)
+def test_special_entries_keep_their_kind(wire, mode, kind):
+    row = attrs_to_file_stat(
+        "entry", asyncssh.SFTPAttrs(type=wire, permissions=mode)
+    )
+    assert row.type == kind
+    assert row.content is None

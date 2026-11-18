@@ -12,6 +12,7 @@ from mirage.core.msgraph.drive import (
     DriveLoc,
     _move_body,
     _parent_reference,
+    as_number,
     copy_tree,
     iter_tree,
     rename_replace,
@@ -800,3 +801,12 @@ async def test_stream_upload_source_failure_never_starts_upload(
 
 
 pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+
+
+@pytest.mark.parametrize("value", [True, -1, 0.5, "12"])
+def test_invalid_counts_stay_unknown(value):
+    assert as_number(value) is None
+
+
+def test_parent_of_directory_with_trailing_slash():
+    assert _loc("d1", "parent/nested/").parent() == "parent"

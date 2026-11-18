@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import cast
+from typing import Any, cast
 
 import pyarrow as pa
 
 from mirage.accessor.lancedb import LanceDBAccessor
+from mirage.core.api.paginate import cursor_items
 from mirage.core.lancedb.render import cell_text
 from mirage.core.lancedb.types import LanceRow, ValueTest
 from mirage.rs.stream import open_stream
@@ -63,9 +64,18 @@ def _predicate(column: str, filters: dict[str, str], prefix: str) -> str:
 
 async def list_tables(accessor: LanceDBAccessor) -> list[str]:
     db = await accessor.db()
-    result = await db.list_tables()
-    names = result.tables if hasattr(result, "tables") else result
-    return sorted(names)
+
+    async def fetch(cursor: str | None) -> dict[str, Any]:
+        result = await db.list_tables(page_token=cursor)
+        if isinstance(result, list):
+            return {"results": result}
+        return {
+            "results": result.tables,
+            "has_more": bool(result.page_token),
+            "next_cursor": result.page_token,
+        }
+
+    return sorted(await cursor_items(fetch))
 
 
 async def table_exists(accessor: LanceDBAccessor, name: str) -> bool:

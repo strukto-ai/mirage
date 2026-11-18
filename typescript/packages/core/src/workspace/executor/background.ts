@@ -15,7 +15,7 @@
 import { RUN_START_WAIT_SECONDS } from '../../machine/constants.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
-import { type Caller, currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { type Caller, currentCaller, bindCaller } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { holdInputs, type SharedInput } from '../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../io/errors.ts'
@@ -757,7 +757,7 @@ export async function handleBackground(
       refusals: lineSink !== null ? note : null,
     }
     try {
-      return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
+      return await (asyncContextIsolatesTasks ? bindCaller(own, body) : body())
     } finally {
       unfollow()
       releaseProgram()

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr, z } from '../../vfs/secrets.ts'
 import { API_BASE } from './constants.ts'
@@ -29,7 +29,7 @@ import { API_BASE } from './constants.ts'
 export const HfConfig = z.object({
   token: secretStr().optional(),
   endpoint: z.string().default(API_BASE),
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
 })
 
 export type HfConfig = ConfigOf<typeof HfConfig>

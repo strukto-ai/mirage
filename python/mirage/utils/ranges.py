@@ -90,43 +90,37 @@ _UNSATISFIABLE_CODES = frozenset(
 )
 
 
-def _status_of(exc: BaseException) -> int | None:
-    """The HTTP status an exception carries, across the client libraries.
-
-    botocore stamps it into ``response["ResponseMetadata"]``, aiohttp onto
-    ``.status``, httpx onto ``.response.status_code``. None of them share a
-    base class, so the shapes are read rather than the types matched.
+def _error_fields(exc: BaseException) -> tuple[int | None, str | None]:
+    """Read an SDK's response status and service error code.
 
     Args:
-        exc (BaseException): whatever the backend reader raised.
+        exc (BaseException): the backend reader's error.
     """
     response = getattr(exc, "response", None)
-    if isinstance(response, dict):
-        meta = response.get("ResponseMetadata")
-        if isinstance(meta, dict):
-            status = meta.get("HTTPStatusCode")
-            if isinstance(status, int):
-                return status
-    inner = getattr(response, "status_code", None)
-    if isinstance(inner, int):
-        return inner
-    for attr in ("status", "status_code"):
-        status = getattr(exc, attr, None)
-        if isinstance(status, int):
-            return status
-    return None
-
-
-def _code_of(exc: BaseException) -> str | None:
-    response = getattr(exc, "response", None)
-    if isinstance(response, dict):
-        error = response.get("Error")
-        if isinstance(error, dict):
-            code = error.get("Code")
-            if isinstance(code, str):
-                return code
-    code = getattr(exc, "code", None)
-    return code if isinstance(code, str) else None
+    meta = (
+        response.get("ResponseMetadata")
+        if isinstance(response, dict)
+        else None
+    )
+    error = response.get("Error") if isinstance(response, dict) else None
+    status = next(
+        (
+            value
+            for value in (
+                meta.get("HTTPStatusCode") if isinstance(meta, dict) else None,
+                getattr(response, "status_code", None),
+                getattr(response, "status", None),
+                getattr(exc, "status", None),
+                getattr(exc, "status_code", None),
+            )
+            if isinstance(value, int)
+        ),
+        None,
+    )
+    code = error.get("Code") if isinstance(error, dict) else None
+    if not isinstance(code, str):
+        code = getattr(exc, "code", None)
+    return status, code if isinstance(code, str) else None
 
 
 def is_unsatisfiable_range(exc: BaseException) -> bool:
@@ -145,9 +139,10 @@ def is_unsatisfiable_range(exc: BaseException) -> bool:
     Args:
         exc (BaseException): whatever the backend reader raised.
     """
-    if _status_of(exc) == 416:
+    status, code = _error_fields(exc)
+    if status == 416:
         return True
-    if _code_of(exc) in _UNSATISFIABLE_CODES:
+    if code in _UNSATISFIABLE_CODES:
         return True
     text = str(exc).lower()
     if "range not satisfiable" in text:

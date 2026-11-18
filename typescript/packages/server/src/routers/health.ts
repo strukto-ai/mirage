@@ -12,42 +12,59 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RouteApp } from '../routes.ts'
+import type { RouteApp, RouteRequest, RouteReply } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import type { HealthResponse } from '../schemas.ts'
 import { errorResponse, HttpError } from '../errors.ts'
 
-export function registerHealthRoutes(
-  app: RouteApp,
-  deps: {
-    registry: WorkspaceRegistry
-    startedAt: number
-    exit: () => void
-  },
-): void {
-  app.get('/v1/health', () => ({
+interface ShutdownResponse {
+  status: string
+  pid: number
+}
+
+interface HealthRoutesDeps {
+  registry: WorkspaceRegistry
+  startedAt: number
+  exit: () => void
+}
+
+function health(deps: HealthRoutesDeps): HealthResponse {
+  return {
     status: 'ok',
     workspaces: deps.registry.size(),
     uptime_ms: Math.round(Date.now() - deps.startedAt * 1000),
-  }))
+  }
+}
+
+function ready(deps: HealthRoutesDeps, _req: RouteRequest, reply: RouteReply) {
+  const { registry } = deps
+  let status = 'ready'
+  if (registry.draining) status = 'shutting_down'
+  else if (!registry.hasRoom(false)) status = 'full'
+  return reply.status(status === 'ready' ? 200 : 503).send({ status })
+}
+
+function shutdown(
+  deps: HealthRoutesDeps,
+  req: RouteRequest,
+  reply: RouteReply,
+): ShutdownResponse | RouteReply {
+  if (req.account !== null) {
+    return errorResponse(
+      reply,
+      new HttpError('forbidden', 'an account may not shut the server down'),
+    )
+  }
+  deps.exit()
+  return { status: 'shutting_down', pid: process.pid }
+}
+
+export function router(app: RouteApp, deps: HealthRoutesDeps): void {
+  app.get('/v1/health', health.bind(undefined, deps))
   // Whether the server takes new workspaces: 503 while it drains for
   // shutdown or holds maxWorkspaces, so a load balancer sends new work
   // elsewhere. /v1/health only says the process is up.
-  app.get('/v1/daemon/ready', (_req, reply) => {
-    const { registry } = deps
-    let status = 'ready'
-    if (registry.draining) status = 'shutting_down'
-    else if (!registry.hasRoom(false)) status = 'full'
-    return reply.status(status === 'ready' ? 200 : 503).send({ status })
-  })
+  app.get('/v1/daemon/ready', ready.bind(undefined, deps))
   // The daemon serves every account, so an account may not stop it.
-  app.post('/v1/daemon/shutdown', (req, reply) => {
-    if (req.account !== null) {
-      return errorResponse(
-        reply,
-        new HttpError('forbidden', 'an account may not shut the server down'),
-      )
-    }
-    deps.exit()
-    return { status: 'shutting_down', pid: process.pid }
-  })
+  app.post('/v1/daemon/shutdown', shutdown.bind(undefined, deps))
 }

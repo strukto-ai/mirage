@@ -44,7 +44,7 @@ import * as api from './api.ts'
 import { read, readStream } from './read.ts'
 import { DropboxVFS } from '../../vfs/dropbox/dropbox.ts'
 import { readdir } from './readdir.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
@@ -150,7 +150,7 @@ describe('dropbox read stamps content_hash', () => {
     vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1, 2, 3]), HEADER])
     const accessor = makeAccessor()
     const entry = await listed(accessor, spec)
-    const [data, records] = await runWithRecording(() => read(accessor, spec, window, entry))
+    const [data, records] = await recordingScope(() => read(accessor, spec, window, entry))
     expect(data).toEqual(new Uint8Array([1, 2, 3]))
     expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
   })
@@ -180,7 +180,7 @@ describe('dropbox read stamps content_hash', () => {
       expect(await drain()).toEqual([2, 1])
       return
     }
-    const [sizes, records] = await runWithRecording(drain)
+    const [sizes, records] = await recordingScope(drain)
     expect(sizes).toEqual([2, 1])
     expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
   })

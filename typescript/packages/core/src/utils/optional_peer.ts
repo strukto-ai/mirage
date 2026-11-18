@@ -41,9 +41,8 @@ export function loadOptionalPeer<T>(
  */
 export function missingPeer(config: OptionalPeerConfig): (err: unknown) => never {
   return (err) => {
-    const code = (err as { code?: string } | null)?.code
     const docsLine = config.docsUrl !== undefined ? `\nSee ${config.docsUrl} for details.` : ''
-    if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') {
+    if (isMissingPeer(err, config.packageName)) {
       throw new Error(
         `${config.feature} requires the optional peer dependency ` +
           `\`${config.packageName}\`. Install it with:\n\n` +
@@ -54,7 +53,13 @@ export function missingPeer(config: OptionalPeerConfig): (err: unknown) => never
     // The package resolved and would not load. Installing it again is the
     // wrong advice here, so without a hint the original error is the most
     // honest thing to report.
-    if (config.systemHint === undefined) throw err
+    const code = (err as { code?: string } | null)?.code
+    if (
+      config.systemHint === undefined ||
+      code === 'ERR_MODULE_NOT_FOUND' ||
+      code === 'MODULE_NOT_FOUND'
+    )
+      throw err
     const reason = err instanceof Error ? err.message : String(err)
     throw new Error(
       `${config.feature} could not load \`${config.packageName}\`: ${reason}\n\n` +
@@ -62,4 +67,12 @@ export function missingPeer(config: OptionalPeerConfig): (err: unknown) => never
       { cause: err },
     )
   }
+}
+
+export function isMissingPeer(err: unknown, packageName: string): boolean {
+  const code = (err as { code?: string } | null)?.code
+  if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return false
+  const message = err instanceof Error ? err.message : String(err)
+  const missing = /^Cannot find (?:package|module) ['"]([^'"]+)['"]/.exec(message)?.[1]
+  return missing === undefined || missing === packageName
 }

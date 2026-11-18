@@ -19,7 +19,7 @@
 
 import json
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, NotRequired, TypedDict
 
 import aiohttp
 
@@ -50,7 +50,6 @@ from mirage.core.linear.queries import (
     USER_LOOKUP_QUERY,
 )
 from mirage.errors.fs import enoent, is_aborting
-from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
 
@@ -78,6 +77,11 @@ def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
     return LinearAPIError(message, errors=errors, status=resp.status)
 
 
+class GraphQLResponse(TypedDict, total=False):
+    data: dict[str, Any] | None
+    errors: list[dict[str, Any]]
+
+
 async def graphql_request(
     accessor: LinearAccessor,
     query: str,
@@ -87,7 +91,7 @@ async def graphql_request(
         "query": query,
         "variables": variables or {},
     }
-    data: dict[str, Any] = await api_request(
+    data: GraphQLResponse = await api_request(
         "POST",
         accessor.config.base_url,
         error_of=_error_of,
@@ -100,10 +104,14 @@ async def graphql_request(
     )
     # GraphQL reports failures in-band: a 200 whose body carries an
     # errors array is still a failed call.
+    if not isinstance(data, dict):
+        raise LinearAPIError("Linear API response has no data object")
     if data.get("errors"):
         message = _error_message(data["errors"]) or "Linear API error"
         raise LinearAPIError(message, errors=data["errors"])
-    result: dict[str, Any] = data["data"]
+    result = data.get("data")
+    if not isinstance(result, dict):
+        raise LinearAPIError("Linear API response has no data object")
     return result
 
 
@@ -144,14 +152,18 @@ async def paginate_connection(
     return nodes
 
 
-async def list_teams(accessor: LinearAccessor) -> list[dict[str, Any]]:
+async def list_teams(
+    accessor: LinearAccessor,
+) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor, TEAM_LIST_QUERY, None, ("teams",)
     )
 
 
 async def list_team_members(
-    accessor: LinearAccessor, team_id: str, limit: int | None = None
+    accessor: LinearAccessor,
+    team_id: str,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor,
@@ -179,7 +191,9 @@ async def list_team_issues(
 
 
 async def list_team_projects(
-    accessor: LinearAccessor, team_id: str, limit: int | None = None
+    accessor: LinearAccessor,
+    team_id: str,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor,
@@ -191,7 +205,9 @@ async def list_team_projects(
 
 
 async def list_team_cycles(
-    accessor: LinearAccessor, team_id: str, limit: int | None = None
+    accessor: LinearAccessor,
+    team_id: str,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor,
@@ -211,7 +227,9 @@ async def list_team_labels(
 
 
 async def list_team_documents(
-    accessor: LinearAccessor, team_id: str, limit: int | None = None
+    accessor: LinearAccessor,
+    team_id: str,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor,
@@ -295,6 +313,22 @@ async def resolve_user_id(
     return found
 
 
+class IssueCreateInput(TypedDict):
+    teamId: str
+    title: str
+    description: NotRequired[str]
+
+
+class IssueUpdateInput(TypedDict, total=False):
+    title: str
+    description: str
+    stateId: str
+    assigneeId: str
+    priority: int
+    projectId: str
+    labelIds: list[str]
+
+
 async def issue_create(
     accessor: LinearAccessor,
     *,
@@ -302,14 +336,20 @@ async def issue_create(
     title: str,
     description: str | None,
 ) -> dict[str, Any]:
-    input_payload: dict[str, JsonValue] = {"title": title, "teamId": team_id}
+    if not team_id:
+        raise ValueError("teamId is required")
+    input_payload: IssueCreateInput = {"title": title, "teamId": team_id}
     if description:
         input_payload["description"] = description
     data = await graphql_request(
         accessor, ISSUE_CREATE_MUTATION, {"input": input_payload}
     )
-    issue = data["issueCreate"]["issue"]
-    return await get_issue(accessor, issue["id"])
+    created = data.get("issueCreate")
+    issue = created.get("issue") if isinstance(created, dict) else None
+    issue_id = issue.get("id") if isinstance(issue, dict) else None
+    if not isinstance(issue_id, str) or not issue_id:
+        raise LinearAPIError("issueCreate returned no id")
+    return await get_issue(accessor, issue_id)
 
 
 async def issue_update(
@@ -324,7 +364,7 @@ async def issue_update(
     project_id: str | None = None,
     label_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, JsonValue] = {}
+    payload: IssueUpdateInput = {}
     if title is not None:
         payload["title"] = title
     if description is not None:
@@ -469,7 +509,10 @@ async def get_relation_issue(
 
 
 async def list_issue_relations(
-    accessor: LinearAccessor, issue_id: str, *, incoming: bool = False
+    accessor: LinearAccessor,
+    issue_id: str,
+    *,
+    incoming: bool = False,
 ) -> list[dict[str, Any]]:
     field = "inverseRelations" if incoming else "relations"
     query = INCOMING_RELATIONS_QUERY if incoming else OUTGOING_RELATIONS_QUERY

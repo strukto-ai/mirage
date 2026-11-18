@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ensureRef } from './repo.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
@@ -83,7 +84,7 @@ export function treeListing(
   const folders = treeRows(tree)
   const entries = folders.get(rel)
   if (entries === undefined) {
-    if (rel in tree) throw enotdir(virtual)
+    if (Object.hasOwn(tree, rel)) throw enotdir(virtual)
     throw enoent(virtual)
   }
   const lead = rel === '' ? '' : `${rel}/`
@@ -104,6 +105,20 @@ export function reseatTree(
 ): void {
   accessor.truncated = truncated
   accessor.tree = tree
+  accessor.treeLoaded = true
+}
+
+/** Search consults the last listing directly, including a complete empty tree. */
+export async function ensureTree(accessor: GitHubAccessor): Promise<void> {
+  if (accessor.treeLoaded) return
+  if (accessor.treePending !== null) return accessor.treePending
+  const generation = accessor.generation
+  accessor.treePending = refreshTree(accessor)
+    .then(() => undefined)
+    .finally(() => {
+      if (accessor.generation === generation) accessor.treePending = null
+    })
+  return accessor.treePending
 }
 
 /**
@@ -126,7 +141,7 @@ export async function refreshTree(accessor: GitHubAccessor): Promise<{
     accessor.account.transport,
     accessor.owner,
     accessor.repo,
-    accessor.ref,
+    await ensureRef(accessor),
   )
   // A drop while GitHub answered may be for the very write this tree
   // predates, so it is handed back but not kept.
@@ -163,7 +178,8 @@ export async function pointRow(
   const cut = trimmed.lastIndexOf('/')
   const parent = cut < 0 ? '' : trimmed.slice(0, cut)
   const name = cut < 0 ? trimmed : trimmed.slice(cut + 1)
-  const expression = parent === '' ? accessor.ref : `${accessor.ref}:${parent}`
+  const ref = await ensureRef(accessor)
+  const expression = parent === '' ? ref : `${ref}:${parent}`
   let page: { tree: TreeEntry[]; truncated: boolean }
   try {
     page = await fetchDirPage(accessor.account.transport, accessor.owner, accessor.repo, expression)
@@ -198,13 +214,9 @@ export async function fetchTree(
       recursive: '1',
     },
   )) as { tree?: GitHubTreeItem[]; truncated?: boolean; sha?: unknown }
-  const tree: Record<string, TreeEntry> = {}
-  // Submodule gitlinks (type "commit") have no size and no blob to read;
-  // exclude them from the tree entirely.
-  for (const item of data.tree ?? []) {
-    if (item.type === 'commit') continue
-    tree[item.path] = { path: item.path, type: item.type, sha: item.sha, size: item.size ?? null }
-  }
+  const tree = Object.fromEntries(
+    treeEntries(data.tree, owner, repo, ref).map((row) => [row.path, row]),
+  )
   return { tree, truncated: data.truncated === true, sha: headOf(data) }
 }
 
@@ -258,18 +270,26 @@ export async function fetchDirPage(
     tree?: GitHubTreeItem[]
     truncated?: boolean
   }
-  if (data.tree === undefined) {
-    throw new GitHubApiError(
-      `GitHub tree response for ${owner}/${repo} ${treeSha} carries no tree`,
-      0,
-    )
-  }
-  const tree: TreeEntry[] = []
-  for (const item of data.tree) {
-    if (item.type === 'commit') continue
-    tree.push({ path: item.path, type: item.type, sha: item.sha, size: item.size ?? null })
-  }
+  const tree = treeEntries(data.tree, owner, repo, treeSha)
   return { tree, truncated: data.truncated === true }
+}
+
+function treeEntries(
+  items: readonly GitHubTreeItem[] | undefined,
+  owner: string,
+  repo: string,
+  ref: string,
+): TreeEntry[] {
+  if (!Array.isArray(items)) {
+    throw new GitHubApiError(`GitHub tree response for ${owner}/${repo} ${ref} carries no tree`, 0)
+  }
+  const entries: TreeEntry[] = []
+  for (const item of items as readonly GitHubTreeItem[]) {
+    if (item.type !== 'commit') {
+      entries.push({ path: item.path, type: item.type, sha: item.sha, size: item.size ?? null })
+    }
+  }
+  return entries
 }
 
 /**

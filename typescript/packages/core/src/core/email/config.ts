@@ -12,20 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 import type { ConfigOf } from '../../vfs/secrets.ts'
-import { secretStr, z } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, secretStr, z } from '../../vfs/secrets.ts'
 
-// Doubles as the himalaya CLI's configModel: parse applies the same
-// defaults buildEmailConfig fills in, and secretStr marks the password
-// for snapshot redaction.
+// The mount and the himalaya CLI share this schema and its secret markers.
 export const EmailConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   imapHost: z.string().describe('IMAP server hostname.'),
-  imapPort: z.number().default(993).describe('IMAP server port.'),
+  imapPort: z.number().int().default(993).describe('IMAP server port.'),
   smtpHost: z.string().describe('SMTP server hostname `himalaya` sends mail through.'),
   smtpPort: z
     .number()
+    .int()
     .default(587)
     .describe(
       'SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it.',
@@ -40,6 +39,7 @@ export const EmailConfig = z.object({
     ),
   maxMessages: z
     .number()
+    .int()
     .default(200)
     .describe(
       "How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.",
@@ -76,18 +76,5 @@ export type EmailConfig = ConfigOf<typeof EmailConfig>
 export type EmailConfigInput = z.input<typeof EmailConfig>
 
 export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
-  return {
-    imapHost: input.imapHost,
-    imapPort: input.imapPort ?? 993,
-    smtpHost: input.smtpHost,
-    smtpPort: input.smtpPort ?? 587,
-    username: input.username,
-    password: input.password,
-    useSsl: input.useSsl ?? true,
-    maxMessages: input.maxMessages ?? 200,
-    saveCopy: input.saveCopy ?? true,
-    sentFolder: input.sentFolder ?? null,
-    trashFolder: input.trashFolder ?? null,
-    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
-  }
+  return parseConfigWithSchema(EmailConfig, input)
 }

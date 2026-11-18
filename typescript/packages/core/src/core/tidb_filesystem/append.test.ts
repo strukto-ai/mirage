@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import {
   makeAccessor,
   serve,
@@ -46,7 +46,7 @@ describe('append', () => {
   it('hands a large file the bytes natively', async () => {
     drive9.partSize = 25_000
     drive9.files.set('/root/big.bin', new Uint8Array(60_000).fill(120))
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       append(accessor, spec('/fs/big.bin'), stream(ENC.encode('ab'), ENC.encode('cd'))),
     )
     const want = new Uint8Array(60_004).fill(120)

@@ -16,9 +16,11 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
+import boxd
 import pytest
 from boxd.errors import APIConnectionError, ConflictError, NotFoundError
 
@@ -26,7 +28,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
-from mirage.machine.boxd import BoxdMachine, sdk
+from mirage.machine.boxd import BoxdMachine
 from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.registry import build_machine
@@ -203,7 +205,7 @@ def fake_client(monkeypatch):
     FakeClient.get_error = None
     FakeClient.stream_error = None
     FakeClient.stream_error_after = 0
-    monkeypatch.setattr(sdk, "AsyncBoxd", FakeClient)
+    monkeypatch.setattr(boxd, "AsyncBoxd", FakeClient)
 
 
 def _machine(**config) -> BoxdMachine:
@@ -277,7 +279,7 @@ async def test_unset_api_key_and_region_leave_them_to_the_sdk():
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
-    monkeypatch.setattr(sdk, "AsyncBoxd", None)
+    monkeypatch.setitem(sys.modules, "boxd", None)
     with pytest.raises(ImportError, match="mirage-ai\\[boxd\\]"):
         await _machine().connect()
 

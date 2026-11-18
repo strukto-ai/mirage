@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeoutShape } from '../../core/api/config.ts'
+import { TimeoutConfig } from '../../core/api/config.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { ConfigOf } from '../secrets.ts'
 import { secretStr } from '../secrets.ts'
@@ -28,7 +28,7 @@ function normalizeRootPath(value: string): string {
 }
 
 export const TiDBFilesystemConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   host: z
     .string()
     .transform(rstripSlash)

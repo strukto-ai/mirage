@@ -57,6 +57,7 @@ from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
+    DEFAULT_READ_SPEC,
     Ceilings,
     Limit,
     MountMode,
@@ -229,7 +230,7 @@ class MountRegistry:
         # The workspace-level default a mount overrides, kept so the
         # runtime entry point (`Workspace.add_mount`) has something to resolve
         # an unset policy against.
-        self._default_read: ReadSpec = ReadSpec()
+        self._default_read: ReadSpec = DEFAULT_READ_SPEC
         self._default_write: WritePolicy = WritePolicy.UNCONDITIONAL
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None
@@ -242,7 +243,7 @@ class MountRegistry:
             DEV_PREFIX,
             DevVFS(),
             MountMode.WRITE,
-            ReadSpec(),
+            DEFAULT_READ_SPEC,
             write=WritePolicy.UNCONDITIONAL,
             store=NULL_INDEX,
         )

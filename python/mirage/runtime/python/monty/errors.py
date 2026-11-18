@@ -22,6 +22,10 @@ from mirage.errors import FsCondition, classify
 from mirage.errors.posix import LINUX_ERRNO, posix_phrase
 
 
+class MontyUnavailableError(ImportError):
+    """The optional Monty engine is absent."""
+
+
 @dataclass(frozen=True, slots=True)
 class CPythonError:
     """The error as guest CPython raises it for one condition.

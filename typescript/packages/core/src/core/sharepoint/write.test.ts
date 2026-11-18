@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { write } from './write.ts'
 
@@ -43,7 +43,7 @@ describe('SharePoint write', () => {
       site: 'Team',
       drive: 'Documents',
     })
-    const [, records] = await runWithRecording(() =>
+    const [, records] = await recordingScope(() =>
       write(accessor, SPEC, new TextEncoder().encode('hi')),
     )
     const [url, init] = fetchMock.mock.calls[2] as unknown as [string, RequestInit]

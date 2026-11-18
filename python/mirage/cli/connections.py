@@ -29,6 +29,7 @@ from mirage.cli.output import (
     OUTPUT,
     Output,
     emit,
+    error_message,
     fail,
     format_table,
     handle_response,
@@ -374,11 +375,8 @@ def format_entry(entry: dict[str, Any]) -> str:
 
 
 def format_entries(listing: dict[str, Any]) -> str:
-    rows = [
-        [i["name"], i["type"], str(i.get("used_by", 0))]
-        for i in listing.get("items", [])
-    ]
-    return format_table(["NAME", "TYPE", "USED BY"], rows)
+    rows = [[i["name"], i["type"]] for i in listing.get("items", [])]
+    return format_table(["NAME", "TYPE"], rows)
 
 
 def format_fields(spec: list[dict[str, Any]]) -> str:
@@ -561,12 +559,19 @@ def kind_app(kind: Kind) -> typer.Typer:
     @app.command("delete")
     def delete_cmd(
         name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+        force: bool = typer.Option(
+            False, "--force", help="Delete it even while a workspace uses it."
+        ),
     ) -> None:
         """Delete an entry and wipe its sealed values; there is no
-        restore."""
+        restore. Refused while a kept workspace config names it."""
+        params = {"force": "true"} if force else None
         with make_client() as client:
             client.ensure_running(allow_spawn=False)
-            r = client.request("DELETE", entry_path(name))
+            r = client.request("DELETE", entry_path(name), params=params)
+        if r.status_code == 409:
+            message = error_message(r.text)
+            fail(f"error 409: {message}; pass --force to delete it anyway", 2)
         handle_response(r)
         typer.echo(f"Deleted {kind.noun} {name}.")
 

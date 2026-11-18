@@ -115,7 +115,7 @@ export function toResponse(record: Process, ws: Workspace): ProcessResponse {
   }
 }
 
-export function registerProcessesRoutes(
+export function router(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry

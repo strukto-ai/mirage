@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import type { Policy } from '../../policy/base.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { SessionProfile } from '../../policy/profile.ts'
@@ -354,7 +354,7 @@ describe('a session', () => {
   it('keeps a session already bound rather than widening it', async () => {
     const guarded = await guardedWs()
     const wide = guarded.tools
-    const read = await runWithSession(guarded.getSession('agent'), () =>
+    const read = await setCurrentSession(guarded.getSession('agent'), () =>
       wide.call('read', { path: '/vault/key.txt' }),
     )
     await guarded.close()

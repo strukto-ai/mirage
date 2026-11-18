@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PaginationStalledError } from '../api/errors.ts'
 import { callerSignal, currentCaller } from '../../context/session_context.ts'
 import { ABORT_JOIN_MS, runCancellable, hasAborted, makeAbortError } from '../../utils/abort.ts'
 import { MoveError } from '../../errors/types.ts'
@@ -72,13 +73,21 @@ function isoOf(modified: Date | string | undefined): string {
 }
 
 async function* listPages(conn: S3Conn, input: Record<string, unknown>): AsyncIterable<Listing> {
+  const seen = new Set<string>()
   let continuationToken: string | undefined
   do {
     const page: Record<string, unknown> = { ...input }
     if (continuationToken !== undefined) page.ContinuationToken = continuationToken
     const resp = (await conn.send(new conn.mod.ListObjectsV2Command(page))) as Listing
-    yield resp
     continuationToken = resp.IsTruncated === true ? resp.NextContinuationToken : undefined
+    if (resp.IsTruncated === true) {
+      if (typeof continuationToken !== 'string' || continuationToken === '') {
+        throw new Error('truncated S3 listing has no continuation token')
+      }
+      if (seen.has(continuationToken)) throw new PaginationStalledError(continuationToken)
+      seen.add(continuationToken)
+    }
+    yield resp
   } while (continuationToken !== undefined)
 }
 

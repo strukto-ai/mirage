@@ -19,10 +19,10 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
 import { posixNormpath } from '../utils/path.ts'
-import { S_IFDIR, S_IFLNK, S_IFMT } from '../utils/stat_view.ts'
+import { fileMode, S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
-import { OPEN, PIPE_PACKET_SIZE, STATUS } from './constants.ts'
+import { OPEN, PIPE_PACKET_SIZE, POSIX_RENAME, STATUS } from './constants.ts'
 import { MountCore } from './core.ts'
 import { messageCondition, SFTPStatusError } from './errors.ts'
 import type { MountAttrs } from './types.ts'
@@ -99,11 +99,7 @@ export function toAttrs(a: MountAttrs): Attributes {
 
 /** The `ls -l` line an SFTP v3 client prints for an entry. */
 export function longname(name: string, a: Attributes): string {
-  let permissions = (a.mode & S_IFMT) === S_IFDIR ? 'd' : (a.mode & S_IFMT) === S_IFLNK ? 'l' : '-'
-  for (let shift = 6; shift >= 0; shift -= 3) {
-    const triplet = (a.mode >> shift) & 0o7
-    permissions += (triplet & 4 ? 'r' : '-') + (triplet & 2 ? 'w' : '-') + (triplet & 1 ? 'x' : '-')
-  }
+  const permissions = fileMode(a.mode)
   const when = new Date(a.mtime * 1000)
   const day = String(when.getDate()).padStart(2)
   const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
@@ -280,8 +276,17 @@ export class MirageSFTPServer {
         this.simple(id, (core) => core.symlink(targetPath, workspacePath(linkPath))),
       )
     })
-    s.on('EXTENDED', (id: number) => {
-      this.sftp.status(id, STATUS.OP_UNSUPPORTED, 'extension not supported')
+    s.on('EXTENDED', (id: number, name: string, data?: Uint8Array) => {
+      const paths =
+        name === POSIX_RENAME && data !== undefined ? MirageSFTPServer.strings(data) : []
+      const [from, to] = paths
+      if (paths.length !== 2 || from === undefined || to === undefined) {
+        this.sftp.status(id, STATUS.OP_UNSUPPORTED, 'extension not supported')
+        return
+      }
+      this.serve(id, () =>
+        this.simple(id, (core) => core.rename(workspacePath(from), workspacePath(to))),
+      )
     })
     return new Promise((resolve, reject) => {
       s.on('end', () => {
@@ -289,6 +294,21 @@ export class MirageSFTPServer {
         this.queue.then(resolve, reject)
       })
     })
+  }
+
+  // The SFTP strings `data` holds, each a length and its UTF-8 bytes; empty
+  // when one runs past the end.
+  private static strings(data: Uint8Array): string[] {
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const out: string[] = []
+    let at = 0
+    while (at + 4 <= data.byteLength) {
+      const size = view.getUint32(at)
+      if (at + 4 + size > data.byteLength) return []
+      out.push(new TextDecoder().decode(data.subarray(at + 4, at + 4 + size)))
+      at += 4 + size
+    }
+    return at === data.byteLength ? out : []
   }
 
   private serve(id: number, task: () => Promise<void>): void {
@@ -527,10 +547,12 @@ export class PipeServer {
       packageName: 'ssh2',
     })) as { SFTP: Ssh2Sftp }
     const side = () => ({ id: 0, window: Infinity, packetSize: PIPE_PACKET_SIZE, state: 'open' })
+    let greeted = false
     const protocol = {
       _remoteIdentRaw: undefined,
       channelData: (_id: number, data: Uint8Array) => {
-        writer.write(data)
+        writer.write(greeted ? data : PipeServer.greeting(data))
+        greeted = true
       },
       channelClose: () => {
         writer.end()
@@ -562,6 +584,30 @@ export class PipeServer {
       sftp.push(null)
       await served
     }
+  }
+
+  /**
+   * ssh2's VERSION packet with POSIX_RENAME named, as asyncssh names it on the
+   * python host, so sshfs renames over an existing name; any other packet as
+   * it is.
+   */
+  private static greeting(data: Uint8Array): Uint8Array {
+    const version = data.byteLength === 9 && data[4] === 2
+    if (!version) return data
+    const enc = new TextEncoder()
+    const parts = [enc.encode(POSIX_RENAME), enc.encode('1')]
+    const size = 5 + parts.reduce((n, p) => n + 4 + p.byteLength, 0)
+    const out = new Uint8Array(4 + size)
+    const view = new DataView(out.buffer)
+    view.setUint32(0, size)
+    out.set(data.subarray(4, 9), 4)
+    let at = 9
+    for (const part of parts) {
+      view.setUint32(at, part.byteLength)
+      out.set(part, at + 4)
+      at += 4 + part.byteLength
+    }
+    return out
   }
 
   /** Keep a release's failure for the next sync, unless a sync already reported its handle. */

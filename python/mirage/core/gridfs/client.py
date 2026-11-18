@@ -14,8 +14,10 @@
 
 import re
 from collections.abc import AsyncIterator
-from typing import Any
+from datetime import datetime
+from typing import Any, TypedDict, cast
 
+from bson import ObjectId
 from gridfs import AsyncGridFSBucket
 from pymongo.asynchronous.collection import AsyncCollection
 
@@ -23,6 +25,14 @@ from mirage.accessor.gridfs import GridFSAccessor
 from mirage.core.gridfs.constants import TRASH_PREFIX
 from mirage.utils import key_prefix as kp
 from mirage.vfs.gridfs.config import GridFSConfig
+
+
+class GridFSFileDoc(TypedDict):
+    _id: ObjectId
+    filename: str
+    length: int
+    uploadDate: datetime
+
 
 # Newest revision of a filename wins; _id breaks uploadDate ties because
 # ObjectIds are monotonic within a process.
@@ -81,15 +91,23 @@ def trashed(key: str) -> str:
 
 async def latest_file(
     accessor: GridFSAccessor, key: str
-) -> dict[str, Any] | None:
-    return await files_coll(accessor).find_one(
+) -> GridFSFileDoc | None:
+    doc = await files_coll(accessor).find_one(
         {"filename": key}, sort=LATEST_SORT
     )
+    return cast(GridFSFileDoc | None, doc)
+
+
+async def file_by_id(
+    accessor: GridFSAccessor, file_id: ObjectId
+) -> GridFSFileDoc | None:
+    doc = await files_coll(accessor).find_one({"_id": file_id})
+    return cast(GridFSFileDoc | None, doc)
 
 
 async def iter_latest(
     accessor: GridFSAccessor, query: dict[str, Any]
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncIterator[GridFSFileDoc]:
     """Yield the newest revision of each filename matching a query.
 
     Args:

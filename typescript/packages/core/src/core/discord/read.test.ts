@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
-import { runInCommandScope } from '../../cache/index/scope.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 import { FileStat, FileType, PathSpec, ReadPolicy } from '../../types.ts'
 import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { snowflakeAt } from './history.ts'
@@ -137,7 +137,7 @@ describe('a read after its day listing', () => {
   it('takes the messages the listing fetched', async () => {
     const t = history()
     const accessor = new DiscordAccessor(t)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await listDay(accessor)
       expect(decoder.decode(await readChat(accessor))).toContain('hello')
     })
@@ -148,7 +148,7 @@ describe('a read after its day listing', () => {
   it('keeps only the last listed day, for one read', async () => {
     const t = history()
     const accessor = new DiscordAccessor(t)
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await listDay(accessor)
       await readChat(accessor)
       await readChat(accessor)
@@ -167,7 +167,7 @@ describe('a read after its day listing', () => {
     if (drop === 'fresh') accessor.govern?.({ policy: ReadPolicy.FRESH, ttl: 600 })
     const realNow = Date.now.bind(Date)
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await listDay(accessor)
         if (drop === 'forget') accessor.forget?.()
         if (drop === 'late') {
@@ -183,7 +183,7 @@ describe('a read after its day listing', () => {
 
   // Twin of test_only_the_listing_command_takes_the_day.
   const scopes: [string, (fn: () => Promise<unknown>) => Promise<unknown>][] = [
-    ['the next command', runInCommandScope],
+    ['the next command', commandScope],
     ['no command', (fn) => fn()],
   ]
   it.each(scopes)('fetches the day again for a read in %s', async (_name, scope) => {

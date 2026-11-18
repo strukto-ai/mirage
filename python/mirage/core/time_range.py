@@ -2,7 +2,13 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -138,9 +144,8 @@ A = TypeVar("A", bound=Accessor)
 
 # A channel's messages from a run's first day through its last, a page at
 # a time, as ``pages(channel_id, first, last)``.
-RunPages = Callable[
-    [str, str, str], AsyncGenerator[list[dict[str, Any]], None]
-]
+M = TypeVar("M", bound=Mapping[str, Any])
+RunPages = Callable[[str, str, str], AsyncGenerator[list[M], None]]
 
 
 def day_channel_id(
@@ -204,11 +209,11 @@ def day_stat(guard: Guard[A] | None = None) -> StatHook[A]:
 
 
 async def followed_day(
-    messages: list[dict[str, Any]],
+    messages: list[M],
     n: int,
     end: float,
     interval: float,
-    after: Callable[[dict[str, Any] | None], Awaitable[list[dict[str, Any]]]],
+    after: Callable[[M | None], Awaitable[list[M]]],
 ) -> AsyncIterator[bytes]:
     """A chat day's last ``n`` messages, then each one posted to it after
     them, as its chat.jsonl lines.
@@ -222,7 +227,7 @@ async def followed_day(
     answer ended, so none is lost or printed twice.
 
     Args:
-        messages (list[dict[str, Any]]): the day so far, oldest first.
+        messages (list[M]): the day so far, oldest first.
         n (int): how many of its last lines come first, 0 for none.
         end (float): when the day, clipped to the mount's scope, ends.
         interval (float): seconds between two asks.
@@ -250,9 +255,9 @@ async def read_days(
     entries: list[FileStat | None],
     parents: list[FileStat | None],
     detect: DetectFn,
-    pages: RunPages,
-    order: Callable[[dict[str, Any]], float],
-    within: Callable[[dict[str, Any], float, float], bool],
+    pages: RunPages[M],
+    order: Callable[[M], float],
+    within: Callable[[M, float, float], bool],
     limit: int,
 ) -> dict[str, bytes]:
     """Several chat days' chat.jsonl files, one walk per run of a
@@ -319,9 +324,9 @@ async def _read_run(
     named: dict[str, str],
     *,
     scope: TimeRange,
-    pages: RunPages,
-    order: Callable[[dict[str, Any]], float],
-    within: Callable[[dict[str, Any], float, float], bool],
+    pages: RunPages[M],
+    order: Callable[[M], float],
+    within: Callable[[M, float, float], bool],
     limit: int,
 ) -> dict[str, bytes]:
     """One run of a channel's consecutive days, walked once.
@@ -341,7 +346,7 @@ async def _read_run(
         limit (int): as ``read_days`` takes it.
     """
     budget = limit * len(run)
-    lines: list[tuple[dict[str, Any], bytes]] = []
+    lines: list[tuple[M, bytes]] = []
     size = 0
     async with aclosing(pages(channel_id, run[0], run[-1])) as walk:
         async for page in walk:

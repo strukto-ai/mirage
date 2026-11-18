@@ -220,7 +220,8 @@ class MountingDockerMachine extends FakeDockerMachine {
 
   override openPipe(command: string): Promise<MachinePipe> {
     const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
-    this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
+    const at = words.indexOf('exec')
+    this.table.set(words[at + 6] ?? '', [words[at + 5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {

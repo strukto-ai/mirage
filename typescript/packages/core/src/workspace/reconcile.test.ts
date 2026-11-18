@@ -35,7 +35,7 @@ import type { MountEntry } from './mount/mount.ts'
 const ENC = new TextEncoder()
 import { enotsup } from '../errors/fs.ts'
 import { Reconciler } from './reconcile.ts'
-import { runInCommandScope } from '../cache/index/scope.ts'
+import { commandScope } from '../cache/index/scope.ts'
 import { ops } from '../test-utils.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { VersionedVFS, versionedWorkspace } from '../../tests/workspace/fixtures/versioned_vfs.ts'
@@ -175,7 +175,7 @@ describe('Reconciler', () => {
       expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(true)
       clock.advance(LISTING_TRUST_WINDOW)
       expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(false)
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(false)
         await index.setDir('/data/d', [])
         expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(true)
@@ -597,7 +597,7 @@ it('a write in the command sends the next probe to the backend', async () => {
     await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
     const rec = new Reconciler(ws.cache, ws.namespace)
     const spec = PathSpec.fromStrPath('/data/f.txt')
-    await runInCommandScope(async () => {
+    await commandScope(async () => {
       await rec.reconcileRead(mount, '/data/f.txt')
       expect(mount.cacheManager?.probedStat(spec)?.size).toBe(2)
       resource.store.files.delete('/f.txt')
@@ -641,7 +641,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
       })
       await ws.cache.set('/data/f.txt', ENC.encode('v1'), { fingerprint: 'fp1' })
       const rec = new Reconciler(ws.cache, ws.namespace)
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         const probing = rec.reconcileRead(mount, '/data/f.txt')
         await capturedPromise
         await mount.cacheManager?.invalidate(
@@ -687,7 +687,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   it('reuses the operand probe', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await rec.reconcileRead(mount, '/data/f.txt')
         expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(true)
       })
@@ -702,7 +702,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   it('still compares a reused answer with the cache', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         mount.cacheManager?.noteProbed(
           PathSpec.fromStrPath('/data/f.txt'),
           new FileStat({ name: 'f.txt', size: 2, type: FileType.FILE, fingerprint: 'fp2' }),
@@ -744,7 +744,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   it('asks the backend after a write in the command', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await rec.reconcileRead(mount, '/data/f.txt')
         await mount.cacheManager?.invalidate(
           PathSpec.fromStrPath('/data/g.txt'),
@@ -764,7 +764,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   it('asks the backend after an external drop', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await rec.reconcileRead(mount, '/data/f.txt')
         await ws.registry.dropCaches()
         await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
@@ -781,7 +781,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   it('asks the backend outside a command', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
-      await runInCommandScope(() => rec.reconcileRead(mount, '/data/f.txt'))
+      await commandScope(() => rec.reconcileRead(mount, '/data/f.txt'))
       await rec.mayServeCached(mount, '/data/f.txt')
       expect(calls()).toBe(2)
     } finally {
@@ -802,7 +802,7 @@ describe('the listing version gate', () => {
     folder: string,
     version: string | null,
   ): Promise<boolean> {
-    return runInCommandScope(() => rec.mayServeListing(mount, folder, version))
+    return commandScope(() => rec.mayServeListing(mount, folder, version))
   }
 
   async function settle(): Promise<void> {
@@ -827,7 +827,7 @@ describe('the listing version gate', () => {
   it("trusts this command's own listing unchecked", async () => {
     const vfs = new VersionedVFS('mount')
     await withVersioned(vfs, async ({ mount, rec }) => {
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         await mount.index.setDir('/m/a', [], null, { version: 'v1' })
         expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
       })
@@ -941,7 +941,7 @@ describe('the listing version gate', () => {
       const sent = vfs.sent()
       const first = inCommand(rec, mount, '/m/a', 'v1')
       await sent
-      await runInCommandScope(async () => {
+      await commandScope(async () => {
         vfs.release()
         expect(await first).toBe(true)
         expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
@@ -956,7 +956,7 @@ describe('the listing version gate', () => {
     entered: () => void,
     go: Promise<void>,
   ): Promise<boolean> {
-    return runInCommandScope(async () => {
+    return commandScope(async () => {
       entered()
       await go
       return rec.mayServeListing(mount, '/m/a', 'v1')

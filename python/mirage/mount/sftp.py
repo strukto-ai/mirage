@@ -17,16 +17,12 @@ import errno
 import logging
 import os
 import posixpath
-import stat
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
 import asyncssh
 from asyncssh.constants import (
-    FILEXFER_TYPE_DIRECTORY,
-    FILEXFER_TYPE_REGULAR,
-    FILEXFER_TYPE_SYMLINK,
     FILEXFER_TYPE_UNKNOWN,
     FXF_APPEND,
     FXF_CREAT,
@@ -37,6 +33,7 @@ from asyncssh.constants import (
 )
 from asyncssh.sftp import run_sftp_server
 
+from mirage.core.ssh.constants import SFTP_TYPES
 from mirage.errors.fs import eexist, enoent
 from mirage.errors.types import NoMountError
 from mirage.mount.constants import ENCODING, ERRORS, SFTP_VERSION
@@ -45,6 +42,7 @@ from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.types import ByteReader, PipeWriter
+from mirage.utils.stat_view import mode_type
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
@@ -89,13 +87,8 @@ def opened(file_obj: Any) -> OpenFile:
 
 
 def filetype(mode: int) -> int:
-    if stat.S_ISDIR(mode):
-        return FILEXFER_TYPE_DIRECTORY
-    if stat.S_ISLNK(mode):
-        return FILEXFER_TYPE_SYMLINK
-    if stat.S_ISREG(mode):
-        return FILEXFER_TYPE_REGULAR
-    return FILEXFER_TYPE_UNKNOWN
+    kind = mode_type(mode)
+    return SFTP_TYPES[kind] if kind is not None else FILEXFER_TYPE_UNKNOWN
 
 
 def to_attrs(st: MountAttrs) -> asyncssh.SFTPAttrs:

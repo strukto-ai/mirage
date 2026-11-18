@@ -22,7 +22,7 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { DaytonaSdk } from './sdk.ts'
-import { DAYTONA_CONFIG_FIELDS, type DaytonaConfig } from './config.ts'
+import { DaytonaConfig } from './config.ts'
 import type { Daytona, Sandbox } from '@daytonaio/sdk'
 
 /**
@@ -41,7 +41,7 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
  * the next connect starts it again.
  */
 export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
-  static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
+  static override readonly configFields: ConfigFields = DaytonaConfig
   static override readonly provider = 'daytona'
   protected override readonly pauses = true
   override readonly takesInput = false

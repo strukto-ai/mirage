@@ -15,10 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
-import { timeoutShape } from '../api/config.ts'
+import { TimeoutConfig } from '../api/config.ts'
 
 export const SlackConfig = z.object({
-  ...timeoutShape,
+  ...TimeoutConfig.shape,
   token: secretStr().describe(
     'Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`).',
   ),

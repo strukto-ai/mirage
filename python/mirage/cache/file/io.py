@@ -18,6 +18,7 @@ from typing import Callable
 from weakref import WeakKeyDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
+from mirage.cache.file.utils import token_or_none
 from mirage.observe.context import line_version
 from mirage.observe.record import (
     READ_FINGERPRINT_OPS,
@@ -71,7 +72,7 @@ def latest_fingerprint(
         return None
     for rec in reversed(records):
         if rec.op in READ_FINGERPRINT_OPS and rec.path == path:
-            return rec.fingerprint or None
+            return token_or_none(rec.fingerprint)
     return None
 
 

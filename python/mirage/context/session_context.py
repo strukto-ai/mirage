@@ -62,7 +62,7 @@ from mirage.utils.hidden import (
     leads_hidden,
     path_visible,
 )
-from mirage.utils.path import norm, parent
+from mirage.utils.path import norm, owner_prefix, parent
 from mirage.view.types import SessionAccess
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.history.line import LineHistory
@@ -133,7 +133,7 @@ class Caller:
             policy's refusal; None outside a line.
         explaining (list[VfsExplanation] | DryRun | None): a dry run's
             trace, DECIDING while its policies decide, None to run.
-        walk_probe (WalkProbe | None): what a command's dot walks read.
+        walk_probe (tuple[str, WalkProbe] | None): the mount and its dot-walk probe.
         redirects (tuple | None): a statement's expanded redirect
             targets, keyed by its command node.
         program (SessionState | None): the session a program line (find
@@ -196,7 +196,7 @@ class Caller:
     mount: tuple[str, MountMode] | None = None
     refusals: DecisionSink | None = None
     explaining: list[VfsExplanation] | DryRun | None = None
-    walk_probe: WalkProbe | None = None
+    walk_probe: tuple[str, WalkProbe] | None = None
     redirects: (
         tuple[
             int,
@@ -277,12 +277,14 @@ class CallerToken:
     after: Caller
 
 
-_caller: ContextVar[Caller] = ContextVar("mirage_caller", default=Caller())
+_caller_storage: ContextVar[Caller] = ContextVar(
+    "mirage_caller", default=Caller()
+)
 
 
 def current_caller() -> Caller:
     """The caller bound to the current async context."""
-    return _caller.get()
+    return _caller_storage.get()
 
 
 async def while_paused(caller: Caller | None = None) -> None:
@@ -313,15 +315,15 @@ def bind_caller(caller: Caller) -> CallerToken:
     Args:
         caller (Caller): the caller to bind.
     """
-    before = _caller.get()
-    _caller.set(caller)
+    before = _caller_storage.get()
+    _caller_storage.set(caller)
     return CallerToken(before, caller)
 
 
-def _bind(**changes: Any) -> CallerToken:
-    before = _caller.get()
+def _bind_changes(**changes: Any) -> CallerToken:
+    before = _caller_storage.get()
     after = before.changed(changes)
-    _caller.set(after)
+    _caller_storage.set(after)
     return CallerToken(before, after)
 
 
@@ -331,9 +333,9 @@ def reset_caller(token: CallerToken) -> None:
     Args:
         token (CallerToken): the binding's token.
     """
-    current = _caller.get()
+    current = _caller_storage.get()
     if current is token.after:
-        _caller.set(token.before)
+        _caller_storage.set(token.before)
         return
     before, after = token.before, token.after
     restored = {
@@ -341,12 +343,12 @@ def reset_caller(token: CallerToken) -> None:
         for name in Caller.__slots__
         if getattr(after, name) is not getattr(before, name)
     }
-    _caller.set(current.changed(restored))
+    _caller_storage.set(current.changed(restored))
 
 
 def current_process_id() -> ProcessId | None:
     """The process the current call runs in, which its records name."""
-    process = _caller.get().process
+    process = _caller_storage.get().process
     return process.record.id if process is not None else None
 
 
@@ -357,7 +359,7 @@ def set_traits(traits: ProcessTraits) -> CallerToken:
     Args:
         traits (ProcessTraits): the traits.
     """
-    return _bind(traits=traits)
+    return _bind_changes(traits=traits)
 
 
 async def run_as_process(
@@ -372,8 +374,8 @@ async def run_as_process(
         run (Callable[[], Awaitable[T]]): what runs in it.
         process (ProcessHandle): the managed runner it is.
     """
-    traits = _caller.get().traits
-    token = _bind(
+    traits = _caller_storage.get().traits
+    token = _bind_changes(
         process=process,
         traits=(
             dataclasses.replace(traits, leads=False)
@@ -398,12 +400,12 @@ def calls_as(caller: Caller, fn: Callable[..., T]) -> Callable[..., T]:
     """
 
     def call(*args: Any, **kwargs: Any) -> T:
-        before = _caller.get()
-        _caller.set(caller)
+        before = _caller_storage.get()
+        _caller_storage.set(caller)
         try:
             return fn(*args, **kwargs)
         finally:
-            _caller.set(before)
+            _caller_storage.set(before)
 
     return call
 
@@ -419,12 +421,12 @@ def awaits_as(
     """
 
     async def call(*args: Any, **kwargs: Any) -> T:
-        before = _caller.get()
-        _caller.set(caller)
+        before = _caller_storage.get()
+        _caller_storage.set(caller)
         try:
             return await fn(*args, **kwargs)
         finally:
-            _caller.set(before)
+            _caller_storage.set(before)
 
     return call
 
@@ -476,25 +478,25 @@ async def with_caller(
     own = caller
     try:
         while True:
-            before = _caller.get()
-            _caller.set(own)
+            before = _caller_storage.get()
+            _caller_storage.set(own)
             try:
                 item = await iterator.__anext__()
             except StopAsyncIteration:
                 return
             finally:
-                own = _caller.get()
-                _caller.set(before)
+                own = _caller_storage.get()
+                _caller_storage.set(before)
             yield item
     finally:
         close = getattr(iterator, "aclose", None)
         if close is not None:
-            before = _caller.get()
-            _caller.set(own)
+            before = _caller_storage.get()
+            _caller_storage.set(own)
             try:
                 await close()
             finally:
-                _caller.set(before)
+                _caller_storage.set(before)
 
 
 def set_current_session(
@@ -515,17 +517,17 @@ def set_current_session(
             on the session. None keeps the one already bound when it
             runs on this same session; another session's is dropped.
     """
-    current = _caller.get()
+    current = _caller_storage.get()
     if owner is None:
         owner = current.owner
     if evaluation is None and current.session is session:
         evaluation = current.evaluation
-    return _bind(session=session, owner=owner, evaluation=evaluation)
+    return _bind_changes(session=session, owner=owner, evaluation=evaluation)
 
 
 def get_current_session() -> SessionState | None:
     """Return the session bound to the current async context, if any."""
-    return _caller.get().session
+    return _caller_storage.get().session
 
 
 def set_current_evaluation(
@@ -544,7 +546,7 @@ def set_current_evaluation(
 
 def get_current_evaluation() -> EvaluationContext | None:
     """Return the evaluation bound with the current session, if any."""
-    return _caller.get().evaluation
+    return _caller_storage.get().evaluation
 
 
 def get_current_session_for(owner: SessionOwner) -> SessionState | None:
@@ -557,7 +559,7 @@ def get_current_session_for(owner: SessionOwner) -> SessionState | None:
     Args:
         owner (SessionOwner): the asking workspace's session manager.
     """
-    caller = _caller.get()
+    caller = _caller_storage.get()
     if caller.owner is not owner:
         return None
     return caller.session
@@ -580,7 +582,7 @@ def get_current_session_unless_foreign(
     Args:
         owner (SessionOwner): the asking workspace's session manager.
     """
-    caller = _caller.get()
+    caller = _caller_storage.get()
     if caller.owner is not None and caller.owner is not owner:
         return None
     return caller.session
@@ -599,7 +601,12 @@ def _session_mode(mount_prefix: str) -> MountMode:
     Args:
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
     """
-    sess = get_current_session()
+    return _session_mode_of(get_current_session(), mount_prefix)
+
+
+def _session_mode_of(
+    sess: SessionState | SessionAccess | None, mount_prefix: str
+) -> MountMode:
     if sess is None or sess.mount_modes is None:
         return MountMode.EXEC
     return sess.mount_modes.get(norm(mount_prefix), MountMode.EXEC)
@@ -758,14 +765,14 @@ def set_admission(gate: EntryGate) -> CallerToken:
     Args:
         gate (EntryGate): the admitted command's gate.
     """
-    return _bind(gate=gate)
+    return _bind_changes(gate=gate)
 
 
 def get_admission() -> EntryGate | None:
     """The entry gate of the command running in this context, None
     when no admitted command is bound (a command constructed outside
     the dispatcher, or a line no gate judged)."""
-    return _caller.get().gate
+    return _caller_storage.get().gate
 
 
 def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
@@ -779,7 +786,7 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
         prefix (str): the mount's prefix.
         mode (MountMode): the mount's configured mode.
     """
-    return _bind(mount=(prefix, mode))
+    return _bind_changes(mount=(prefix, mode))
 
 
 def set_decision_sink(sink: DecisionSink) -> CallerToken:
@@ -795,14 +802,14 @@ def set_decision_sink(sink: DecisionSink) -> CallerToken:
     Args:
         sink (DecisionSink): takes each record as an entry point raises it.
     """
-    return _bind(refusals=sink)
+    return _bind_changes(refusals=sink)
 
 
 def line_running() -> bool:
     """Whether a typed line is running in this context: the entry point it
     reaches is inside a command, not a file tool's or the host's own
     call."""
-    return _caller.get().refusals is not None
+    return _caller_storage.get().refusals is not None
 
 
 def set_explaining(
@@ -818,13 +825,13 @@ def set_explaining(
             its answers, DECIDING for a deciding policy's ops, None to
             run.
     """
-    return _bind(explaining=trace)
+    return _bind_changes(explaining=trace)
 
 
 def explaining() -> list[VfsExplanation] | DryRun | None:
     """The dry run's trace when the calls in this context only explain,
     DECIDING while its policies decide, None when they run."""
-    return _caller.get().explaining
+    return _caller_storage.get().explaining
 
 
 def note_decision(decision: PolicyDecision) -> None:
@@ -835,15 +842,21 @@ def note_decision(decision: PolicyDecision) -> None:
     Args:
         decision (PolicyDecision): the policy's record.
     """
-    sink = _caller.get().refusals
+    sink = _caller_storage.get().refusals
     if sink is not None:
         sink(decision)
 
 
-def get_walk_probe() -> WalkProbe | None:
-    """The walk probe bound to the running command, None outside a
-    mount's command (a generic invoked directly in a test)."""
-    return _caller.get().walk_probe
+def walk_probe_for(virtual: str) -> WalkProbe | None:
+    """The current mount's walk probe when it owns the operand.
+
+    Args:
+        virtual (str): the operand's virtual path.
+    """
+    bound = _caller_storage.get().walk_probe
+    if bound is None or owner_prefix((bound[0],), virtual) is None:
+        return None
+    return bound[1]
 
 
 def set_redirect_paths(
@@ -872,7 +885,7 @@ def set_redirect_paths(
         runner (RedirectRunner | None): runs the command under its redirects.
         syntax (tuple[Redirect, ...]): pending redirects to carry through a rewrite.
     """
-    return _bind(redirects=(node_id, paths, runner, syntax))
+    return _bind_changes(redirects=(node_id, paths, runner, syntax))
 
 
 def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
@@ -882,7 +895,7 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     Args:
         node_id (int): the command node about to be admitted.
     """
-    bound = _caller.get().redirects
+    bound = _caller_storage.get().redirects
     if bound is None or bound[0] != node_id:
         return ()
     return bound[1]
@@ -894,7 +907,7 @@ def redirect_syntax_for(node_id: int) -> tuple[Redirect, ...]:
     Args:
         node_id (int): the command or rewritten program holding the redirects.
     """
-    bound = _caller.get().redirects
+    bound = _caller_storage.get().redirects
     return bound[3] if bound is not None and bound[0] == node_id else ()
 
 
@@ -905,7 +918,7 @@ def redirect_runner_for(node_id: int) -> RedirectRunner | None:
     Args:
         node_id (int): the command node just admitted.
     """
-    bound = _caller.get().redirects
+    bound = _caller_storage.get().redirects
     if bound is None or bound[0] != node_id:
         return None
     return bound[2]
@@ -924,14 +937,14 @@ def set_program_invocation(session: SessionState) -> CallerToken:
     Args:
         session (SessionState): the session the program line runs in.
     """
-    return _bind(program=session)
+    return _bind_changes(program=session)
 
 
 def clear_program_invocation() -> CallerToken:
     """Mark the line about to run as a shell's own again: a nested shell
     (``-exec sh -c ...``) is a program, and the builtins it runs are its
     builtins, ``printf -v`` included."""
-    return _bind(program=None)
+    return _bind_changes(program=None)
 
 
 def is_program_invocation(session: SessionState) -> bool:
@@ -940,7 +953,7 @@ def is_program_invocation(session: SessionState) -> bool:
     Args:
         session (SessionState): the session a builtin is answering in.
     """
-    caller = _caller.get()
+    caller = _caller_storage.get()
     marked = caller.program
     if marked is None:
         return False
@@ -973,12 +986,14 @@ def redirect_target_judged(virtual: str) -> bool:
     Args:
         virtual (str): absolute virtual path of the op.
     """
-    bound = _caller.get().redirects
+    bound = _caller_storage.get().redirects
     return bound is not None and any(p.virtual == virtual for p in bound[1])
 
 
 def effective_mount_mode(
-    mount_prefix: str, mount_mode: MountMode
+    mount_prefix: str,
+    mount_mode: MountMode,
+    access: SessionAccess | None = None,
 ) -> MountMode:
     """The mount mode after narrowing by the current session's cap.
 
@@ -990,7 +1005,12 @@ def effective_mount_mode(
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
         mount_mode (MountMode): the mount's configured mode.
     """
-    return weaker_mode(mount_mode, _session_mode(mount_prefix))
+    cap = (
+        _session_mode(mount_prefix)
+        if access is None
+        else _session_mode_of(access, mount_prefix)
+    )
+    return weaker_mode(mount_mode, cap)
 
 
 def effective_path_mode(

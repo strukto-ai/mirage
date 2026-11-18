@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -56,7 +57,7 @@ from mirage.utils.upload import upload_stat
 
 
 async def replace_file(
-    accessor: BoxAccessor, dst: PathSpec, existing: dict[str, Any] | None
+    accessor: BoxAccessor, dst: PathSpec, existing: Mapping[str, Any] | None
 ) -> WriteCondition | None:
     """Clear the file a copy or move lands on, held to the version read.
 
@@ -122,10 +123,10 @@ async def _landed(
 
 async def _copy_into(
     accessor: BoxAccessor,
-    item: dict[str, Any],
+    item: Mapping[str, Any],
     dst: PathSpec,
     folder_id: str,
-    existing: dict[str, Any] | None,
+    existing: Mapping[str, Any] | None,
 ) -> FileStat | None:
     """Copy ``item`` to ``dst``, merging a folder into a folder.
 

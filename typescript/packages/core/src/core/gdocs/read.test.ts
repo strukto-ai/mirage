@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -124,7 +124,7 @@ describe('gdocs read token', () => {
         directory: target,
         vfsPath: mountKey(target, '/gdocs'),
       })
-      const [data, records] = await runWithRecording(() => read(accessor, path))
+      const [data, records] = await recordingScope(() => read(accessor, path))
       const info = (await ws.dispatch('stat', target)) as FileStat
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
         ['read', target, 'gdocs', data.byteLength, token],

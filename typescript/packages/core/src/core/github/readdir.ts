@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ensureRef } from './repo.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
 import { DirListing, FileType, type FileStat, type PathSpec } from '../../types.ts'
@@ -50,13 +51,14 @@ export async function readdir(
   }
   if (rel !== '' && (entry === undefined || entry === null)) throw enoent(path.virtual)
   if (entry != null && entry.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
-  const expression = rel === '' ? accessor.ref : `${accessor.ref}:${rel}`
+  const ref = await ensureRef(accessor)
+  const expression = rel === '' ? ref : `${ref}:${rel}`
   let rows: Awaited<ReturnType<typeof fetchDirTree>>
   try {
     rows = await fetchDirTree(accessor.account.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
     if (rel === '' || !(err instanceof GitHubApiError) || !DEFER_STATUSES.has(err.status)) throw err
-    await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, accessor.ref)
+    await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, ref)
     throw enoent(path.virtual)
   }
   return new DirListing({ entries: rows.map((row) => rowOf(row, row.path)) })

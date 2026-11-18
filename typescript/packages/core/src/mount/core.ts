@@ -47,7 +47,7 @@ import {
   mtimeMs,
   posixMode,
 } from '../utils/stat_view.ts'
-import { callsAs, currentCaller, runWithSession } from '../context/session_context.ts'
+import { callsAs, currentCaller, setCurrentSession } from '../context/session_context.ts'
 import { skippedAtDispatch } from '../policy/match/rule.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { ebadf, eexist, einval, eisdir, enoent, enotdir, isMissingOp } from '../errors/fs.ts'
@@ -150,7 +150,7 @@ export class MountCore {
    * SFTP mount to it. Unbound, an op runs as whatever session is current.
    */
   private op<T>(fn: () => Promise<T>): Promise<T> {
-    return this.session === null ? fn() : runWithSession(this.session, fn)
+    return this.session === null ? fn() : setCurrentSession(this.session, fn)
   }
 
   /** Judge retained metadata through the stat policy boundary. */

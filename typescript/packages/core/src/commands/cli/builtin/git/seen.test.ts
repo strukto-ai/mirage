@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 import { describe, expect, it } from 'vitest'
 
-import { runWithAdmission } from '../../../../context/session_context.ts'
+import { setAdmission } from '../../../../context/session_context.ts'
 import { SessionProfile } from '../../../../policy/profile.ts'
 import type { CommandRule, EntryGate } from '../../../../policy/types.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -409,7 +409,7 @@ describe('what a session is shown of history', () => {
     const [, copied] = await shell(ws, 'git rev-parse HEAD:copy.txt')
     const copy = copied.trim()
     const repo = await guardedRepo(ws)
-    await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
+    await setAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
       expect(await located(repo, { oid: copy, type: 'blob' })).not.toBeNull()
       expect(repo.places.get(copy)).toBe('secret.txt')
       shownEntries(
@@ -440,7 +440,7 @@ describe('what a session is shown of history', () => {
   it('reads a commit without walking history', async () => {
     const ws = await history()
     const repo = await guardedRepo(ws)
-    await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
+    await setAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
       const raw = await typedBytes(repo, 'HEAD', 'commit')
       expect(DEC.decode(raw ?? new Uint8Array()).startsWith('tree ')).toBe(true)
       expect(repo.sightings).toBeNull()
@@ -452,7 +452,7 @@ describe('what a session is shown of history', () => {
     const [, head] = await shell(ws, 'git rev-parse HEAD')
     const [, ok] = await shell(ws, 'git rev-parse HEAD:ok.txt')
     const repo = await guardedRepo(ws)
-    await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
+    await setAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
       // A commit stands at no place, so this walks all of history.
       await placeOf(repo, head.trim())
       expect(repo.seen.get(ok.trim())).toEqual(['ok.txt'])

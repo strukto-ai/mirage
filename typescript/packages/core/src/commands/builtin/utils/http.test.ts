@@ -17,7 +17,7 @@ import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { materialize } from '../../../io/types.ts'
 import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
 import { CookieJar } from './cookie.ts'
-import { runWithEvaluation } from '../../../context/session_context.ts'
+import { setCurrentEvaluation } from '../../../context/session_context.ts'
 import { EvaluationContext } from '../../../workspace/evaluation.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 
@@ -337,7 +337,7 @@ describe("httpRequest and the call's signal", () => {
           )
         }),
     )
-    const pending = runWithEvaluation(evaluation, () =>
+    const pending = setCurrentEvaluation(evaluation, () =>
       httpRequest('http://127.0.0.1:9/repo.git/info/refs', { timeoutMs: null }),
     )
     await new Promise((resolve) => setTimeout(resolve, 10))

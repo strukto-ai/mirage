@@ -28,6 +28,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_umask
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -414,6 +415,7 @@ async def tar(
     relay: bool = False,
     chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
     zone: tzinfo = timezone.utc,
+    umask: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Plan what the host decides and run mirage-rs's tar over it: ``-c``,
     ``-r`` and ``-u`` walk their operands and check every ``-C`` here,
@@ -439,8 +441,12 @@ async def tar(
         mounts (MountView | None): where the mount boundaries are.
         relay (bool): the reads route by full virtual path.
         chmod (Callable[[PathSpec, int], Awaitable[None]] | None): sets
-            the mode ``-p`` restores.
+            the mode ``-p`` restores, or ``-x`` gives under ``umask``.
         zone (tzinfo): the zone ``--mtime`` is read in.
+        umask (int | None): the session's file creation mask: without
+            ``-p`` an extracted entry takes its member's permission bits
+            under it, as an ordinary user's tar sets them; None leaves it
+            the mode it was made with.
     """
     # With no -f the archive is standard input or output, which is GNU
     # tar's compiled-in default (no TAPE in the environment).
@@ -601,6 +607,7 @@ async def tar(
             "wildcards": flags.wildcards,
             "unanchored": flags.unanchored,
             "preserve": flags.preserve,
+            "umask": umask if chmod is not None else None,
             "to_stdout": flags.to_stdout,
             "base": byte_view(extract_dest(dest, cwd).rstrip("/")),
             "refusal": [byte_view(line) for line in refusal],
@@ -657,6 +664,9 @@ async def tar_generic(
         relay=relay,
         chmod=chmod,
         zone=zone_from_env(ctx.env),
+        umask=session_umask(
+            ctx.session.access() if ctx.session is not None else None
+        ),
     )
 
 

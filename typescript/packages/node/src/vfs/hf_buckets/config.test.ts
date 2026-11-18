@@ -30,7 +30,7 @@ describe('normalizeHfBucketsConfig', () => {
       timeout: 30,
     })
     expect(config.bucket).toBe('ns/data')
-    expect(config.keyPrefix).toBe('sub/dir')
+    expect(config.keyPrefix).toBe('sub/dir/')
     expect(config.timeout).toBe(30)
   })
 

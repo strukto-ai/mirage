@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { KeyLock } from '../../cache/lock.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { setCurrentSession } from '../../context/session_context.ts'
 import type { Files } from '../files.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec, WritePolicy } from '../../types.ts'
@@ -77,7 +77,7 @@ export class Documents {
       session = new SessionState({ sessionId: '' })
       applyProfile(session, this.profile(profile))
     } else session = sessionId === undefined ? this.session(null) : this.manager.get(sessionId)
-    return runWithSession(
+    return setCurrentSession(
       session,
       async () => {
         if (path !== undefined) {
@@ -115,7 +115,7 @@ export class Documents {
     if (view === undefined) {
       // Collision checks are host-side: a hidden backend entry must not be
       // overwritten by a new view either.
-      await runWithSession(
+      await setCurrentSession(
         new SessionState({ sessionId: '' }),
         async () => {
           try {

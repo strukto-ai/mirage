@@ -161,6 +161,7 @@ from mirage.shell.literal import literal_tree
 from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
 from mirage.types import (
+    DEFAULT_READ_SPEC,
     KERNEL_BACKENDS,
     Ceilings,
     DriftPolicy,
@@ -589,7 +590,7 @@ class Workspace:
             session_id_explicit,
         )
         # The workspace-level default a mount overrides, as `mode` is.
-        self._read_default = read if read is not None else ReadSpec()
+        self._read_default = read if read is not None else DEFAULT_READ_SPEC
         self._registry.set_default_read(self._read_default)
         self._write_default = coerce_write_policy(write)
         self._registry.set_default_write(self._write_default)
@@ -879,7 +880,7 @@ class Workspace:
             HISTORY_PREFIX,
             HistoryViewVFS(self.observer),
             MountMode.READ,
-            ReadSpec(),
+            DEFAULT_READ_SPEC,
             write=WritePolicy.UNCONDITIONAL,
             store=NULL_INDEX,
         )
@@ -895,7 +896,7 @@ class Workspace:
                 ),
             ),
             MountMode.READ,
-            ReadSpec(),
+            DEFAULT_READ_SPEC,
             write=WritePolicy.UNCONDITIONAL,
             store=NULL_INDEX,
         )

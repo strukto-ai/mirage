@@ -16,11 +16,18 @@ import threading
 from collections.abc import Iterable, Iterator, MutableMapping
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypeVar, overload
+from typing import Protocol, TypedDict, TypeVar, overload
 
 from mirage.vfs.capacity import StorageUsage
 
 _T = TypeVar("_T")
+
+
+class RAMAttrs(TypedDict, total=False):
+    mode: int
+    uid: int | str
+    gid: int | str
+    atime: str
 
 
 class _FileStore(Protocol):
@@ -170,7 +177,7 @@ class RAMStore:
     modified: dict[str, str] = field(default_factory=dict)
     # Per-path metadata set via setattr (mode/uid/gid/atime); stored, not
     # enforced: mount mode does real access control.
-    attrs: dict[str, dict[str, Any]] = field(default_factory=dict[str, Any])
+    attrs: dict[str, RAMAttrs] = field(default_factory=dict)
     # The store's capacity and counted bytes, None when uncapped.
     usage: StorageUsage | None = None
 

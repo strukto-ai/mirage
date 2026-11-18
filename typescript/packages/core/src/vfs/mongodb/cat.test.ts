@@ -20,7 +20,7 @@ import * as statModule from '../../core/mongodb/stat.ts'
 import { onMount, vfsOver } from '../../test-utils.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { resolveMongoDBConfig } from './config.ts'
+import { MongoDBConfig } from './config.ts'
 import { MongoDBVFS } from './mongodb.ts'
 
 vi.mock('../../core/mongodb/stat.ts', () => ({
@@ -30,7 +30,7 @@ vi.mock('../../core/mongodb/stat.ts', () => ({
 const STUB_DRIVER = stubMongoDriver()
 
 function makeAccessor(): MongoDBAccessor {
-  return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+  return new MongoDBAccessor(STUB_DRIVER, MongoDBConfig.parse({ uri: 'mongodb://h' }))
 }
 
 function mk(name: string): PathSpec {

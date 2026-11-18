@@ -16,17 +16,15 @@ import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { soleCommandStarted } from '../../cache/index/scope.ts'
 import { afterIdPages } from './paginate.ts'
 import { jsonlBytes } from '../render/json.ts'
+import type { DiscordMessage } from './types.ts'
+
+export type { DiscordMessage } from './types.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
 /** The lowest snowflake Discord mints at `seconds` of Unix time. */
 export function snowflakeAt(seconds: number): bigint {
   return (BigInt(Math.round(seconds * 1000)) - DISCORD_EPOCH) << 22n
-}
-
-export interface DiscordMessage extends Record<string, unknown> {
-  id: string
-  attachments?: { id: string; [key: string]: unknown }[]
 }
 
 /**
@@ -95,10 +93,7 @@ async function keptDay(
   const fetch = () => listMessagesForDay(accessor, channelId, dateStr)
   const started = soleCommandStarted()
   if (started === null) return fetch()
-  return (await accessor.listedDay.get(
-    `${String(started)}/${channelId}/${dateStr}`,
-    fetch,
-  )) as DiscordMessage[]
+  return accessor.listedDay.get(`${String(started)}/${channelId}/${dateStr}`, fetch)
 }
 
 /**

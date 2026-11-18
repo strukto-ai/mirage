@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { read } from './read.ts'
 
@@ -120,7 +120,7 @@ describe('a recorded OneDrive read', () => {
       [DOWNLOAD]: bytes(1, 2, 3),
     })
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const [data, records] = await runWithRecording(() => read(accessor, spec))
+    const [data, records] = await recordingScope(() => read(accessor, spec))
     expect([...data]).toEqual([1, 2, 3])
     expect(records).toMatchObject([
       { op: 'read', path: '/m/m/k.txt', source: 'onedrive', fingerprint: 'ctag-1', revision: 'v1' },
