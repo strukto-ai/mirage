@@ -1536,6 +1536,19 @@
         "stdout": "[\"message/rfc822\",28]\n\n┌────┬──────────┬────────────────┬──────┐\n│ ID ┆ FILENAME ┆ TYPE           ┆ SIZE │\n╞════╪══════════╪════════════════╪══════╡\n│ 2  ┆          ┆ message/rfc822 ┆ 28 B │\n└────┴──────────┴────────────────┴──────┘\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hm_read_json_names_known_headers",
+      "seq": 9940140,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "printf 'From: integ@example.com\\r\\nTo: integ@example.com\\r\\nSubject: Signed probe\\r\\nDKIM-Signature: v=1; d=example.com\\r\\nAuthentication-Results: mx.example.com; dkim=pass\\r\\nX-Probe: 1\\r\\n\\r\\nsigned body\\r\\n' | himalaya message send > /dev/null && U=$(himalaya --json envelope search subject Signed | jq -r '.envelopes[0].id') && himalaya --json message read $U | jq -c '[.parts[0].headers[].name | select(. == \"dkim_signature\" or . == \"authentication_results\" or . == {\"other\": \"X-Probe\"})]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"dkim_signature\",\"authentication_results\",{\"other\":\"X-Probe\"}]\n",
+        "stderr": ""
+      }
     }
   ]
 }
