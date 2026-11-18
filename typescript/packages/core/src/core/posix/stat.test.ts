@@ -69,19 +69,19 @@ describe('parseTree', () => {
     ['1.', 1000],
     ['-1.5000000000', -1500],
   ])('keeps %s to the millisecond', (stamp, want) => {
-    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} a b x\0`))
+    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} 0 0 x\0`))
     expect(rows?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
   })
 
   // The whole seconds stay those SFTP reports, never rounded across a second
   // as the milliseconds are.
   it("keeps SFTP's whole seconds", () => {
-    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 a b x\0'))
+    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 0 0 x\0'))
     expect(rows?.map((r) => [r.mtime, r.mtimeMs])).toEqual([[1700000000, 1700000001000]])
   })
 
   it('refuses a cut record', () => {
-    expect(parseTree(ENC.encode('f 644 3 1 2 a b x'))).toBeNull()
+    expect(parseTree(ENC.encode('f 644 3 1 2 0 0 x'))).toBeNull()
     expect(parseTree(ENC.encode('f 64z 3 1 2 0 0 x\0'))).toBeNull()
     expect(parseTree(ENC.encode('f 644 3 1 2 root root x\0'))).toBeNull()
   })
