@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
-import { stripCustomSections } from '../../core/scripts/strip-custom-sections.mjs'
+import { optimizeWasm } from './optimize-wasm.mjs'
 
 // 1Password's SDK core as a Worker can load it. The published core is
 // wasm-bindgen's node build: its glue reads core_bg.wasm off disk and
@@ -44,7 +44,4 @@ wasm.__wbindgen_start()
 export const { init_client, init_client_oidc, invoke, invoke_sync, release_client } = module.exports
 `,
 )
-writeFileSync(
-  new URL('onepassword_core.wasm', output),
-  stripCustomSections(readFileSync(`${core}/core_bg.wasm`)),
-)
+writeFileSync(new URL('onepassword_core.wasm', output), optimizeWasm(`${core}/core_bg.wasm`))

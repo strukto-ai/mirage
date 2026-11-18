@@ -85,6 +85,7 @@ it('loads the Rust modules as .wasm files, with no base64 copy in the script', (
   for (const module of [
     'mirage_rs.wasm',
     'mirage_shell.wasm',
+    'mirage_ast_grep.wasm',
     'mirage_gh.wasm',
     'mirage_pdf.wasm',
   ]) {

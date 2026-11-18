@@ -1,6 +1,7 @@
 import { build } from 'esbuild'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { optimizeWasm } from './optimize-wasm.mjs'
 
 const monty = fileURLToPath(new URL('../node_modules/@pydantic/monty/', import.meta.url))
 const output = new URL('../src/generated/', import.meta.url)
@@ -51,5 +52,7 @@ writeFileSync(
 )
 for (const part of ['core', 'core2', 'core3', 'core4']) {
   const name = `monty.component.${part}.wasm`
-  copyFileSync(`${monty}dist/worker/component/${name}`, new URL(name, output))
+  const source = `${monty}dist/worker/component/${name}`
+  if (part === 'core') writeFileSync(new URL(name, output), optimizeWasm(source))
+  else copyFileSync(source, new URL(name, output))
 }

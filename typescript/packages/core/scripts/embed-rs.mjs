@@ -45,6 +45,9 @@ function compile(crate, build, small) {
         `target.${target}.rustflags=[${JSON.stringify(`--remap-path-prefix=${registry}=`)}]`,
         ...small.flatMap((name) => ['--config', `profile.release.package."${name}".opt-level="s"`]),
         ...build,
+        ...(build.includes('--') ? [] : ['--']),
+        '-C',
+        'link-arg=--compress-relocations',
       ],
       {
         cwd: workspace,

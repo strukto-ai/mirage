@@ -75,6 +75,8 @@ def main() -> None:
             "link-arg=--import-memory",
             "-C",
             "link-arg=--initial-memory=6291456",
+            "-C",
+            "link-arg=--compress-relocations",
         ],
         cwd=CRATE,
         env=env,
