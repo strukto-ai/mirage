@@ -948,6 +948,36 @@ async def test_a_slow_reader_gets_all_a_run_wrote_after_its_exit_line():
         await ws.close()
 
 
+class LogsOnBox(RecordingMachine):
+    """A program that has exited, its exit line out, while what it left
+    running writes a line to the exec's output every 0.1 s."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"3\n")
+        while True:
+            await output(b"log\n")
+            await asyncio.sleep(0.1)
+
+
+# What the program left running writing now and then does not hold the
+# run: the pauses between its lines add up to the drain time.
+@pytest.mark.asyncio
+async def test_a_run_ends_while_what_it_left_running_keeps_writing():
+    box = LogsOnBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(5):
+            io = await ws.shell("train")
+        assert io.exit_code == 3
+        assert (await materialize(io.stdout)).startswith(b"log\n")
+    finally:
+        await ws.close()
+
+
 class SlowStopBox(RecordingMachine):
     started = False
 

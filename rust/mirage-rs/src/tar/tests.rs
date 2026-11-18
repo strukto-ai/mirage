@@ -595,3 +595,20 @@ fn a_later_member_of_a_name_sets_back_the_mode_an_earlier_one_gave() {
     assert_eq!((status, err.as_str()), (0, ""));
     assert_eq!(host.modes.get("/out/a.txt"), Some(&0o644));
 }
+
+#[test]
+fn a_child_directory_takes_its_mode_before_its_parent() {
+    let mut host = Host::default();
+    let mut child = json!({"name": "p/c/", "kind": "dir"});
+    child["mode"] = json!(0o700);
+    let mut parent = json!({"name": "p/", "kind": "dir"});
+    parent["mode"] = json!(0o600);
+    packed(&mut host, json!([child, parent]));
+    let tar = host.files["a.tar"].clone();
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "umask": 0o022}));
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(
+        (host.modes.get("/out/p"), host.modes.get("/out/p/c")),
+        (Some(&0o600), Some(&0o700))
+    );
+}

@@ -325,6 +325,10 @@ impl Host {
                 if !self.files.contains_key(&path) && !self.directories.contains(&path) {
                     return (failure("ENOENT", "No such file or directory"), Vec::new());
                 }
+                let parent = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+                if self.modes.get(parent).is_some_and(|mode| mode & 0o100 == 0) {
+                    return (failure("EACCES", "Permission denied"), Vec::new());
+                }
                 let mode = request["mode"].as_u64().unwrap_or_default() as u32;
                 self.modes.insert(path, mode);
                 (json!({}), Vec::new())
