@@ -58,6 +58,8 @@ export const MICROS = 1_000_000
  */
 export function frame(session: SessionState, callStack: CallStack | null = null): void {
   const calls = callStack !== null && callStack.depth > 1 ? [callStack.getAllPositional()] : []
+  const now = Math.trunc(systemNow() * MICROS)
+  if (session.shellStartedUs === 0) session.shellStartedUs = now
   const limit = envLimit()
   const outside = limit === null ? 0 : outsideBytes(session)
   session.vars.shell.frame({
@@ -81,7 +83,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     bashPid: session.bashPid,
     voice: sessionVoice(session),
     errTrap: session.errTrap !== null && session.errTrap !== '',
-    clock: Math.trunc(systemNow() * MICROS),
+    clock: now,
     started: session.shellStartedUs,
   })
 }
@@ -587,14 +589,15 @@ export function seedParent(session: SessionState, pid: number): void {
 }
 
 /**
- * Start what a bash shell sets of itself as it starts: when it started, which
- * `$SECONDS` counts from, its version (`BASH_VERSION` and the readonly
- * `BASH_VERSINFO`), and `SHLVL`, exported: one deeper than the one it was
- * handed for a nested shell (`bash script.sh`), and 1 for a top one handed
- * none. A name made readonly stays as it is. Mirrors Python's `seed_shell`.
+ * Start what a bash shell sets of itself as it starts: the count `$SECONDS`
+ * reads, from its first frame, on the clock the line reads (`frame`), its
+ * version (`BASH_VERSION` and the readonly `BASH_VERSINFO`), and `SHLVL`,
+ * exported: one deeper than the one it was handed for a nested shell
+ * (`bash script.sh`), and 1 for a top one handed none. A name made readonly
+ * stays as it is. Mirrors Python's `seed_shell`.
  */
 export function seedShell(session: SessionState, nested = false): void {
-  session.shellStartedUs = Math.trunc(systemNow() * MICROS)
+  session.shellStartedUs = 0
   if (!envIsReadonly(session, BASH_VERSINFO)) {
     seedVar(session, BASH_VERSION, VERSION_TEXT)
     seedVar(session, BASH_VERSINFO, new ShellArray(VERSION_PARTS.map((part, i) => [i, part])))

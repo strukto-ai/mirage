@@ -1723,10 +1723,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cat /dev/fd/0 <<< hi; cat < /dev/fd/0 <<< there",
+      "command": "cat /dev/fd/0 <<< hi; cat < /dev/fd/0 <<< there; cat <<< kept < /dev/fd/0; cat <<< kept2 < /dev/stdin",
       "expect": {
         "exit": 0,
-        "stdout": "hi\nthere\n",
+        "stdout": "hi\nthere\nkept\nkept2\n",
         "stderr": ""
       }
     },

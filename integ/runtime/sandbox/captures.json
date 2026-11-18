@@ -248,7 +248,7 @@
     },
     {
       "id": "a_program_the_machine_lacks_is_reported_in_bash_s_words",
-      "note": "A captured program the machine has no file for is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, and under `timeout` GNU timeout's own words.",
+      "note": "A captured program the machine cannot run is reported as bash reports it, not in the words of the machine's sh, which runs it: the shell's voice and `command not found` (127), the line it stands on, a file PATH holds that cannot run named by its path with `Permission denied` (126), and under `timeout` GNU timeout's own words. The wrapper that reports it leaves the program's environment as it was.",
       "runtimes": [
         "docker",
         "ssh",
@@ -286,6 +286,46 @@
             "exit": 127,
             "stdout": "",
             "stderr": "timeout: failed to run command 'mirage-no-such-program': No such file or directory\n"
+          }
+        },
+        {
+          "command": "p=keep-p w=keep-w dash -c 'echo \"$p $w\"'",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep-p keep-w\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p /tmp/mirage-np && printf \"echo x\\\\n\" > /tmp/mirage-np/mirage-np-prog'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "PATH=/tmp/mirage-np:$PATH mirage-np-prog",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "bash: line 1: /tmp/mirage-np/mirage-np-prog: Permission denied\n"
+          }
+        },
+        {
+          "command": "PATH=/tmp/mirage-np:$PATH timeout 5 mirage-np-prog",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "timeout: failed to run command 'mirage-np-prog': Permission denied\n"
+          }
+        },
+        {
+          "command": "dash -c 'rm -r /tmp/mirage-np'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
           }
         }
       ]

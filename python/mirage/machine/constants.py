@@ -155,38 +155,46 @@ PIPE_SERVER_HINT = (
 # prelude is still found on it.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
-# How a wrapper hands over to the program, its last step: a program the
-# machine cannot run is reported in the words ``$p`` leads with (``bash:
-# line 3: x: ``) and, for a name no folder on PATH holds, ``$w`` gives the
-# reason for (``command not found``), as bash words it rather than the
-# machine's sh, whose exec would; a path names its own reason. Only sh's
-# builtins, so a PATH with no tools still runs it.
-EXEC_REPORTED = (
-    'case $1 in */*) if [ -d "$1" ]; then '
-    "printf '%sIs a directory\\n' \"$p\" >&2; exit 126; "
-    'elif [ ! -e "$1" ]; then '
-    "printf '%sNo such file or directory\\n' \"$p\" >&2; exit 127; "
-    'elif [ ! -x "$1" ]; then '
-    "printf '%sPermission denied\\n' \"$p\" >&2; exit 126; fi;; "
-    '*) command -v "$1" >/dev/null 2>&1 || '
-    '{ printf \'%s%s\\n\' "$p" "$w" >&2; exit 127; };; esac; '
-    'exec "$@"'
+# What a wrapper checks before it hands over to the program, so a program
+# the machine cannot run is reported in bash's words rather than in those
+# of the machine's sh, whose exec would: ``$1`` leads the line (``bash:
+# line 3: x: ``), ``$2`` is the reason for a name no folder on PATH holds
+# (``command not found``), ``$3`` leads a file PATH holds that cannot run,
+# named by its path as bash names it (``bash: line 3: ``; empty to lead
+# with ``$1``), and ``$4`` is the program. It runs in a subshell of its
+# own, so none of its names reaches the program's environment, and needs
+# only sh's builtins, so a PATH with no tools still runs it.
+PROGRAM_CHECK = (
+    "set -f; "
+    'case $4 in */*) if [ -d "$4" ]; then '
+    "printf '%sIs a directory\\n' \"$1\" >&2; exit 126; "
+    'elif [ ! -e "$4" ]; then '
+    "printf '%sNo such file or directory\\n' \"$1\" >&2; exit 127; "
+    'elif [ ! -x "$4" ]; then '
+    "printf '%sPermission denied\\n' \"$1\" >&2; exit 126; fi;; "
+    "*) f=; IFS=:; for d in $PATH; do d=${d:-.}; "
+    'if [ -f "$d/$4" ] && [ -x "$d/$4" ]; then exit 0; fi; '
+    'if [ -z "$f" ] && [ -e "$d/$4" ] && [ ! -d "$d/$4" ]; then f=$d/$4; fi; '
+    "done; "
+    'if [ -z "$f" ]; then printf \'%s%s\\n\' "$1" "$2" >&2; exit 127; fi; '
+    'if [ -n "$3" ]; then printf \'%s%s: Permission denied\\n\' "$3" "$f" >&2; '
+    "else printf '%sPermission denied\\n' \"$1\" >&2; fi; exit 126;; esac"
 )
 
 # A line in a machine holding mounts runs under this guard, inside its own
 # exec, so it checks the boot the program runs in: a machine that
 # restarted after the line was admitted has lost its mounts, and a program
 # run over the bare directories would write to the machine's own disk.
-# $1 and $2 are the words a program it cannot run is reported in
-# (``EXEC_REPORTED``), $3 the mount table, then four words per mount
+# $1 to $3 are the words a program it cannot run is reported in
+# (``PROGRAM_CHECK``), $4 the mount table, then four words per mount
 # (mountpoint and source as the table escapes them, type, the message),
-# then `--` and the argv.
-# Each mount must be the top entry at its mountpoint, or the guard prints
-# its message and exits 126 with nothing run. The check runs in a subshell,
-# so its names never reach the program's environment, and needs only sh's
+# then `--` and the argv. Each mount must be the top entry at its
+# mountpoint, or the guard prints its message and exits 126 with nothing
+# run; then the program is checked. Both checks run in subshells, so their
+# names never reach the program's environment, and need only sh's
 # builtins, so a PATH with no tools still runs it.
 MOUNT_GUARD = (
-    "p=$1; w=$2; shift 2; ( t=$1; shift; "
+    "( t=$4; shift 4; "
     '[ -r "$t" ] || { printf \'%s\\n\' "$4" >&2; exit 126; }; '
     'while [ "$1" != -- ]; do f=; '
     'while read -r s m k o; do [ "$m" = "$1" ] || continue; '
@@ -194,7 +202,9 @@ MOUNT_GUARD = (
     'done < "$t"; '
     '[ -n "$f" ] || { printf \'%s\\n\' "$4" >&2; exit 126; }; '
     "shift 4; done ) || exit 126; "
-    'shift; while [ "$1" != -- ]; do shift 4; done; shift; ' + EXEC_REPORTED
+    '( p=$1; w=$2; v=$3; shift 4; while [ "$1" != -- ]; do shift 4; done; '
+    'set -- "$p" "$w" "$v" "$2"; ' + PROGRAM_CHECK + " ) || exit $?; "
+    'shift 4; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
 )
 
 
@@ -283,38 +293,39 @@ FIFO_NAME = "fd"
 # Every program runs as a child of this wrapper, which outlives it to say
 # how it ended, since an exec holds on while anything the program started
 # keeps its output open (E2B, msb). ``$1`` is the run's own word, which no
-# program's output can know to forge; ``$2`` and ``$3`` the words a program
-# the machine cannot run is reported in, what leads the line (``bash: line
-# 3: x: ``) and why for a name no folder on PATH holds (``command not
-# found``), as bash words it rather than the machine's sh, whose exec would;
-# ``$4`` the tag's assignment, exported for the program alone so the
-# wrapper shows in no scan and takes no signal by tag; then the program.
-# The subshell execs it, so the pid the wrapper writes is the program's,
-# with its start in clock ticks, on stderr behind ``RUN_PID_MARK`` ahead of
-# anything the program writes; once the program exits its status follows
-# behind ``run_exit_mark``, so the exec that runs the program brings both
-# back itself, and stdout ends what the program wrote with the same status
-# behind ``run_done_mark``, so a reader knows when that output has all
-# arrived. A program a signal ended gets no such line: its stdout may have
-# no reader left (head took what it wanted), and a machine that keeps that
-# pipe open past its exec (kubectl) would hold the wrapper on it, its words
-# still in a scan. A shell reports a child a signal ended on its stderr, so
-# the wrapper's goes nowhere and the program gets the real one back. It
-# needs only a POSIX shell at ``/bin/sh``.
+# program's output can know to forge; ``$2`` to ``$4`` the words a program
+# the machine cannot run is reported in (``PROGRAM_CHECK``); ``$5`` the
+# tag's assignment, exported for the program alone so the wrapper shows in
+# no scan and takes no signal by tag; then the program. The wrapper keeps
+# every word positional, so it sets no name the program's environment
+# would carry. The subshell execs the program, so the pid the wrapper
+# writes is the program's, with its start in clock ticks, on stderr
+# behind ``RUN_PID_MARK`` ahead of anything the program writes; once the
+# program exits its status follows behind ``run_exit_mark``, so the exec
+# that runs the program brings both back itself, and stdout ends what the
+# program wrote with the same status behind ``run_done_mark``, so a reader
+# knows when that output has all arrived. A program a signal ended gets no
+# such line: its stdout may have no reader left (head took what it
+# wanted), and a machine that keeps that pipe open past its exec (kubectl)
+# would hold the wrapper on it, its words still in a scan. A shell reports
+# a child a signal ended on its stderr, so the wrapper's goes nowhere and
+# the program gets the real one back. It needs only a POSIX shell at
+# ``/bin/sh``.
 RUN_WRAPPER = (
-    "n=$1; p=$2; w=$3; t=$4; shift 4; "
     "exec 6>&2 2>/dev/null; "
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
     'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
-    'export "$t"; exec 2>&6 6>&-; ' + EXEC_REPORTED + " ); "
-    's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$n" "$s"; '
-    'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+    'export "$5"; exec 2>&6 6>&-; '
+    '( set -- "$2" "$3" "$4" "$6"; ' + PROGRAM_CHECK + " ) || exit $?; "
+    'shift 5; exec "$@" ); '
+    's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$1" "$s"; '
+    'printf "\\036mirage-exit %s %s\\n" "$1" "$s" >&6; exit "$s"'
 )
 
 # Where a run's program starts in what ``run_argv`` builds: past
-# ``/bin/sh -c RUN_WRAPPER sh``, the run's own word, the two words a
+# ``/bin/sh -c RUN_WRAPPER sh``, the run's own word, the three words a
 # program it cannot run is reported in, and the tag's assignment.
-RUN_PROGRAM_AT = 8
+RUN_PROGRAM_AT = 9
 
 # The marks ahead of the pid line and the exit line the wrapper writes on
 # stderr, a record separator first so no program's output starts with it.
@@ -520,7 +531,7 @@ def run_argv(
     tag: str,
     nonce: str,
     argv: Sequence[str],
-    missing: tuple[str, str] = ("", "command not found"),
+    missing: tuple[str, str, str] = ("", "command not found", ""),
 ) -> tuple[str, ...]:
     """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
 
@@ -529,9 +540,8 @@ def run_argv(
         nonce (str): the run's own word, which its exit line carries
             (``run_exit_mark``).
         argv (Sequence[str]): the program and its arguments.
-        missing (tuple[str, str]): what leads the report of a program
-            the machine cannot run, and why for a name no folder on PATH
-            holds (``missing_program``).
+        missing (tuple[str, str, str]): the words a program the machine
+            cannot run is reported in (``PROGRAM_CHECK``).
     """
     return (
         "/bin/sh",

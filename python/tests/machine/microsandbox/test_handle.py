@@ -184,7 +184,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                         "run",
                         "run",
                         words,
-                        (f"bash: {words[0]}: ", "command not found"),
+                        (f"bash: {words[0]}: ", "command not found", "bash: "),
                     )
                 ),
             ],

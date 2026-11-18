@@ -235,6 +235,7 @@ def guarded(table, *entries):
             "sh",
             "",
             "command not found",
+            "",
             str(table),
             *entries,
         ]
@@ -316,6 +317,7 @@ def test_the_mount_guard_hands_the_program_its_environment(tmp_path):
             "sh",
             "",
             "command not found",
+            "",
             str(table),
         ]
         + list(expected("/data", "mirage-x:/data", "fuse.sshfs"))

@@ -165,7 +165,7 @@ async def handle_exec_path(
             if isinstance(exc, FileNotFoundError)
             else CANNOT_EXECUTE_STATUS
         )
-        lead, _ = missing_program(path)
+        lead, _, _ = missing_program(path)
         return script_error(lead, strerror, code, path)
     if is_binary(data):
         return script_error(

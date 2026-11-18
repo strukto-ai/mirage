@@ -254,7 +254,10 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
             "sh",
             "/work",
             *run_argv(
-                "run", "run", argv, (f"bash: {argv[0]}: ", "command not found")
+                "run",
+                "run",
+                argv,
+                (f"bash: {argv[0]}: ", "command not found", "bash: "),
             ),
         ],
         b"input",

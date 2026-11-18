@@ -929,15 +929,6 @@ async function openInput(
   const { dispatch, session, inputs, outputs } = opened
   let source: ByteSource | null
   try {
-    if (
-      r.kind === RedirectKind.STDIN &&
-      descriptorOf(scope.virtual, (fd) => opened.holds(fd)) === FD_STDIN
-    ) {
-      opened.reopen(r.fd)
-      outputs.set(r.fd, CLOSED)
-      inputs.set(r.fd, opened.stdin)
-      return null
-    }
     const read = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
     source = read ?? new Uint8Array()
   } catch (error) {

@@ -122,6 +122,11 @@ export interface IdSource {
    * next word follows the last one taken.
    */
   randomWords(count: number): Uint8Array
+  /**
+   * `count` bytes no one can predict, as `/dev/urandom` reads them; a seeded
+   * source answers its own sequence, so a test reads the same bytes again.
+   */
+  secureBytes(count: number): Uint8Array
 }
 
 /** The last id's millisecond and counter, which the next id follows. */
@@ -180,6 +185,16 @@ export class SystemIdSource implements IdSource {
     const bytes = new Uint8Array(count * 4)
     const view = new DataView(bytes.buffer)
     for (let at = 0; at < count; at++) view.setUint32(at * 4, this.randomU32(), true)
+    return bytes
+  }
+
+  /** `count` bytes from the platform's secure generator, filled a quota at a time. */
+  secureBytes(count: number): Uint8Array {
+    const quota = 65536
+    const bytes = new Uint8Array(count)
+    for (let at = 0; at < count; at += quota) {
+      globalThis.crypto.getRandomValues(bytes.subarray(at, Math.min(at + quota, count)))
+    }
     return bytes
   }
 }
@@ -260,6 +275,11 @@ export class SeededIdSource implements IdSource {
     const view = new DataView(bytes.buffer)
     for (let at = 0; at < count; at++) view.setUint32(at * 4, this.randomU32(), true)
     return bytes
+  }
+
+  /** The next `count` bytes of the seeded sequence, a word at a time, so a seeded test reads them again. */
+  secureBytes(count: number): Uint8Array {
+    return this.randomWords(Math.ceil(count / 4)).slice(0, count)
   }
 
   /** The next UUIDv7 of the seeded sequence, stamped from the clock. */

@@ -740,7 +740,13 @@ impl<'a> Writer<'a> {
             .store
             .record(&name)
             .is_some_and(|var| var.attrs & (INTEGER | LOWER | UPPER | NAMEREF) == 0);
-        if append && slot.is_none() && plain && name != PIPESTATUS && name != RANDOM {
+        if append
+            && slot.is_none()
+            && plain
+            && name != PIPESTATUS
+            && name != RANDOM
+            && !self.store.counts_seconds(&name)
+        {
             let held = self.store.record(&name).and_then(|var| var.value.as_ref());
             let before = entry_bytes(&name, held);
             self.check(before, before + value.len())?;
@@ -969,6 +975,33 @@ mod tests {
             .set(SECONDS, scalar("abc"), true, None, None)
             .unwrap();
         assert_eq!(store.dynamic(SECONDS), Some(b"0".to_vec()));
+    }
+
+    #[test]
+    fn a_seconds_append_concatenates_and_restarts_the_count() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar("10"), true, None, None)
+            .unwrap();
+        store.set_clock(11_000_000, 1_000_000);
+        writer(&mut store)
+            .element(SECONDS, None, b"5", true)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"105".to_vec()));
+        store.set_clock(12_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"106".to_vec()));
+    }
+
+    #[test]
+    fn an_arithmetic_seconds_write_counts_for_the_reads_after_it() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        let value = writer(&mut store)
+            .arith(b"SECONDS=10, SECONDS+1", false)
+            .unwrap();
+        assert_eq!(value, 11);
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
     }
 
     #[test]

@@ -566,7 +566,7 @@ def test_a_session_speaks_as_what_it_is_reading():
 
 
 def test_a_missing_program_is_worded_by_whatever_execs_it():
-    assert missing_program("x") == ("bash: x", "command not found")
+    assert missing_program("x") == ("bash: x", "command not found", "bash: ")
     session = SessionState(session_id="s")
     token = set_program_invocation(
         session, "timeout: failed to run command 'x'"
@@ -575,9 +575,14 @@ def test_a_missing_program_is_worded_by_whatever_execs_it():
         assert missing_program("x") == (
             "timeout: failed to run command 'x'",
             "No such file or directory",
+            "",
         )
         inner = clear_program_invocation()
-        assert missing_program("x") == ("bash: x", "command not found")
+        assert missing_program("x") == (
+            "bash: x",
+            "command not found",
+            "bash: ",
+        )
         reset_caller(inner)
     finally:
         reset_caller(token)

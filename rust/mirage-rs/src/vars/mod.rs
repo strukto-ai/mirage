@@ -141,10 +141,11 @@ pub struct Store {
     bash_pid: u32,
     /// The time now and when the running shell started, in epoch
     /// microseconds, 0 from a host that keeps no clock; and the value last
-    /// assigned to `SECONDS`, with when and in which shell.
+    /// assigned to `SECONDS`, with when, which holds across the shells a
+    /// session runs, as the value of any variable it assigned does.
     now_us: i64,
     started_us: i64,
-    seconds: Option<(i64, i64, i64)>,
+    seconds: Option<(i64, i64)>,
     /// `LINENO` and `BASHPID` once unset: ordinary names from then on.
     plain: Vec<String>,
     /// Whether `LINENO` or `BASHPID` was plain where a frame made it
@@ -264,10 +265,7 @@ impl Store {
             LINENO => self.line.to_string(),
             BASHPID => self.bash_pid.to_string(),
             SECONDS => {
-                let (value, at) = match self.seconds {
-                    Some((value, at, started)) if started == self.started_us => (value, at),
-                    _ => (0, self.started_us),
-                };
+                let (value, at) = self.seconds.unwrap_or((0, self.started_us));
                 value
                     .saturating_add((now - at).div_euclid(MICROS))
                     .to_string()
@@ -299,13 +297,13 @@ impl Store {
 
     /// Restart the count at a `SECONDS=` write: `value` now, counting on.
     pub fn set_seconds(&mut self, value: i64) {
-        self.seconds = Some((value, self.now_us, self.started_us));
+        self.seconds = Some((value, self.now_us));
     }
 
-    /// Whether `SECONDS` was assigned in the running shell, which makes it
-    /// an integer in a listing.
+    /// Whether `SECONDS` was assigned, which makes it an integer in a
+    /// listing.
     pub fn seconds_assigned(&self) -> bool {
-        matches!(self.seconds, Some((_, _, started)) if started == self.started_us)
+        self.seconds.is_some()
     }
 
     /// End the special meaning of a name `unset` makes ordinary
@@ -1501,16 +1499,18 @@ mod tests {
     }
 
     #[test]
-    fn seconds_counts_on_from_what_was_assigned_in_the_running_shell() {
+    fn seconds_counts_on_from_what_was_assigned_in_any_shell() {
         let mut store = store();
+        store.set_clock(15_000_000, 14_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"1".to_vec()));
+        assert!(!store.seconds_assigned());
         store.set_clock(10_000_000, 1_000_000);
         store.set_seconds(100);
         store.set_clock(12_500_000, 1_000_000);
         assert_eq!(store.dynamic(SECONDS), Some(b"102".to_vec()));
         assert!(store.seconds_assigned());
         store.set_clock(15_000_000, 14_000_000);
-        assert_eq!(store.dynamic(SECONDS), Some(b"1".to_vec()));
-        assert!(!store.seconds_assigned());
+        assert_eq!(store.dynamic(SECONDS), Some(b"105".to_vec()));
     }
 
     #[test]

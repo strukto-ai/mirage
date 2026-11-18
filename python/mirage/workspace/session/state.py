@@ -76,6 +76,9 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         if call_stack is not None and call_stack.depth > 1
         else []
     )
+    now = int(system_now() * MICROS)
+    if not session.shell_started_us:
+        session.shell_started_us = now
     limit = env_limit()
     outside = 0 if limit is None else outside_bytes(session)
     names = session.function_names
@@ -100,7 +103,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         bash_pid=session.bash_pid,
         voice=session_voice(session),
         err_trap=bool(session.err_trap),
-        clock=int(system_now() * MICROS),
+        clock=now,
         started=session.shell_started_us,
     )
 
@@ -791,17 +794,18 @@ def seed_parent(session: SessionState, pid: int) -> None:
 
 
 def seed_shell(session: SessionState, nested: bool = False) -> None:
-    """Start what a bash shell sets of itself as it starts: when it
-    started, which ``$SECONDS`` counts from, its version
-    (``BASH_VERSION`` and the readonly ``BASH_VERSINFO``), and ``SHLVL``,
-    exported: one deeper than the one it was handed for a nested shell,
-    and 1 for a top one handed none. A name made readonly stays as it is.
+    """Start what a bash shell sets of itself as it starts: the count
+    ``$SECONDS`` reads, from its first frame, on the clock the line
+    reads (``frame``), its version (``BASH_VERSION`` and the readonly
+    ``BASH_VERSINFO``), and ``SHLVL``, exported: one deeper than the one
+    it was handed for a nested shell, and 1 for a top one handed none. A
+    name made readonly stays as it is.
 
     Args:
         session (SessionState): the shell.
         nested (bool): another shell started it (``bash script.sh``).
     """
-    session.shell_started_us = int(system_now() * MICROS)
+    session.shell_started_us = 0
     if not env_is_readonly(session, BASH_VERSINFO):
         seed_var(session, BASH_VERSION, VERSION_TEXT)
         seed_var(

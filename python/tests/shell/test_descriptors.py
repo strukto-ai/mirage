@@ -127,13 +127,10 @@ def test_a_redirect_onto_a_descriptor_s_path_duplicates_it():
         Redirect(fd=0, target="/dev/fd/3", kind=RedirectKind.STDIN),
         lambda n: True,
     ) == (Redirect(fd=0, target=3, kind=RedirectKind.DUP_INPUT),)
-    assert (
-        named_descriptor(
-            Redirect(fd=0, target="/dev/fd/0", kind=RedirectKind.STDIN),
-            lambda n: True,
-        )
-        is None
-    )
+    assert named_descriptor(
+        Redirect(fd=0, target="/dev/fd/0", kind=RedirectKind.STDIN),
+        lambda n: True,
+    ) == (Redirect(fd=0, target=0, kind=RedirectKind.DUP_INPUT),)
     assert (
         named_descriptor(Redirect(fd=1, target="/tmp/f"), lambda n: True)
         is None

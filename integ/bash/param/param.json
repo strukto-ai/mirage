@@ -3213,10 +3213,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo ${#EPOCHSECONDS} ${#EPOCHREALTIME}; [[ $EPOCHREALTIME =~ ^[0-9]+[.][0-9]{6}$ ]] && echo realtime; echo $SECONDS; SECONDS=100; echo $SECONDS; [[ $SRANDOM =~ ^[0-9]+$ ]] && echo srandom",
+      "command": "echo ${#EPOCHSECONDS} ${#EPOCHREALTIME}; [[ $EPOCHREALTIME =~ ^[0-9]+[.][0-9]{6}$ ]] && echo realtime; echo $SECONDS; SECONDS=100; echo $SECONDS; [[ $SRANDOM =~ ^[0-9]+$ ]] && echo srandom; SECONDS=10; SECONDS+=5; echo $SECONDS; echo $((SECONDS=10, SECONDS+1))",
       "expect": {
         "exit": 0,
-        "stdout": "10 17\nrealtime\n0\n100\nsrandom\n",
+        "stdout": "10 17\nrealtime\n0\n100\nsrandom\n105\n11\n",
         "stderr": ""
       }
     },

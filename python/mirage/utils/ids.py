@@ -176,6 +176,16 @@ class IdSource(Protocol):
         """
         ...
 
+    def secure_bytes(self, count: int) -> bytes:
+        """``count`` bytes no one can predict, as ``/dev/urandom`` reads
+        them; a seeded source answers its own sequence, so a test reads
+        the same bytes again.
+
+        Args:
+            count (int): how many bytes.
+        """
+        ...
+
 
 class _Floor:
     """The last id's millisecond and counter, which the next id follows."""
@@ -249,6 +259,14 @@ class SystemIdSource:
         return random.getrandbits(WORD_BITS * words).to_bytes(
             4 * words, "little"
         )
+
+    def secure_bytes(self, count: int) -> bytes:
+        """``count`` bytes from the system's secure generator.
+
+        Args:
+            count (int): how many bytes.
+        """
+        return secrets.token_bytes(count)
 
     def __repr__(self) -> str:
         return f"SystemIdSource(clock={self._clock!r})"
@@ -337,6 +355,15 @@ class SeededIdSource:
         return b"".join(
             self.random_u32().to_bytes(4, "little") for _ in range(count)
         )
+
+    def secure_bytes(self, count: int) -> bytes:
+        """The next ``count`` bytes of the seeded sequence, a word at a
+        time, so a seeded test reads them again.
+
+        Args:
+            count (int): how many bytes.
+        """
+        return self.random_words(-(-count // 4))[:count]
 
     def uuid7(self) -> str:
         """The next UUIDv7 of the seeded sequence, stamped from the clock."""

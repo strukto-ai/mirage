@@ -958,19 +958,22 @@ def clear_program_invocation() -> CallerToken:
     return _bind_changes(program=None, exec_failure=None)
 
 
-def missing_program(name: str) -> tuple[str, str]:
+def missing_program(name: str) -> tuple[str, str, str]:
     """How a program the line cannot run is reported: what leads the line
-    before its colon, and why for a name no folder on PATH holds. The
-    shell's voice and ``command not found``; in a line a program execs
-    (``timeout``), that program's words and execvp's reason.
+    before its colon, why for a name no folder on PATH holds, and what
+    leads a file PATH holds that cannot run, which bash names by its path
+    (empty to lead with the first). The shell's voice and ``command not
+    found``; in a line a program execs (``timeout``), that program's
+    words, which name the word, and execvp's reason.
 
     Args:
         name (str): the program's word.
     """
     failure = current_caller().exec_failure
     if failure is None:
-        return f"{shell_voice()}{name}", "command not found"
-    return failure, "No such file or directory"
+        voice = shell_voice()
+        return f"{voice}{name}", "command not found", voice
+    return failure, "No such file or directory", ""
 
 
 def is_program_invocation(session: SessionState) -> bool:

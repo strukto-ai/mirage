@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.constants import RUN_PROGRAM_AT, is_run
+from mirage.machine.constants import PROGRAM_CHECK, RUN_PROGRAM_AT, is_run
 from mirage.machine.types import PauseAction
 
 MICROSANDBOX_HINT = (
@@ -34,8 +34,11 @@ INSPECT_TIMEOUT_SECONDS = 10
 # msb ends the session of an exec whose client goes, and a run's exec is let
 # go once its program has ended, so a program leads a session of its own:
 # what it left running stays, as on any machine. The run is not a group
-# leader there, so setsid keeps its pid.
+# leader there, so setsid keeps its pid. The run's three report words come
+# first, so a program the machine cannot run is reported in bash's words
+# (``PROGRAM_CHECK``) rather than setsid's.
 OWN_SESSION = (
+    "( " + PROGRAM_CHECK + " ) || exit $?; shift 3; "
     'command -v setsid >/dev/null 2>&1 && exec setsid "$@"; exec "$@"'
 )
 
@@ -55,5 +58,6 @@ def own_session(argv: tuple[str, ...]) -> tuple[str, ...]:
         "-c",
         OWN_SESSION,
         "sh",
+        *argv[RUN_PROGRAM_AT - 4 : RUN_PROGRAM_AT - 1],
         *argv[RUN_PROGRAM_AT:],
     )

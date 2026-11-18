@@ -248,7 +248,10 @@ async def test_process_preserves_argv_and_probes_the_container_once(
             "sh",
             "/work",
             *run_argv(
-                "run", "run", argv, (f"bash: {argv[0]}: ", "command not found")
+                "run",
+                "run",
+                argv,
+                (f"bash: {argv[0]}: ", "command not found", "bash: "),
             ),
         ],
         b"input",

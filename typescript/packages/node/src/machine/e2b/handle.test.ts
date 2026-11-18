@@ -691,7 +691,7 @@ describe('E2BMachine', () => {
               'runid',
               'runid',
               ['/bin/sh', '-c', 'wc -l | cat'],
-              ['bash: /bin/sh: ', 'command not found'],
+              ['bash: /bin/sh: ', 'command not found', 'bash: '],
             ),
             { E: '1' },
             '/workspace',

@@ -591,7 +591,7 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
                         "run",
                         "run",
                         ("/bin/sh", "-c", "wc -l | cat"),
-                        ("bash: /bin/sh: ", "command not found"),
+                        ("bash: /bin/sh: ", "command not found", "bash: "),
                     ),
                     {"E": "1"},
                     "/workspace",

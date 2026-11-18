@@ -43,11 +43,10 @@ export function read(
 }
 
 /**
- * `size` random bytes, as /dev/urandom reads them, drawn from the running
- * session's ids, so a seeded workspace reads the same bytes again. Mirrors
- * Python's `random_bytes`.
+ * `size` random bytes, as /dev/urandom reads them: the session's ids' secure
+ * bytes, which a seeded workspace replays. Mirrors Python's `random_bytes`.
  */
 export function randomBytes(size: number): Uint8Array {
   const ids = getCurrentSession()?.ids ?? new SystemIdSource()
-  return ids.randomWords(Math.ceil(size / 4)).slice(0, size)
+  return ids.secureBytes(size)
 }

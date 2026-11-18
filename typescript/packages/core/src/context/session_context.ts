@@ -950,14 +950,19 @@ export function clearProgramInvocation<T>(fn: () => Promise<T>): Promise<T> {
 
 /**
  * How a program the line cannot run is reported: what leads the line before
- * its colon, and why for a name no folder on PATH holds. The shell's voice
- * and `command not found`; in a line a program execs (`timeout`), that
- * program's words and execvp's reason. Mirrors Python's `missing_program`.
+ * its colon, why for a name no folder on PATH holds, and what leads a file
+ * PATH holds that cannot run, which bash names by its path (empty to lead
+ * with the first). The shell's voice and `command not found`; in a line a
+ * program execs (`timeout`), that program's words, which name the word, and
+ * execvp's reason. Mirrors Python's `missing_program`.
  */
-export function missingProgram(name: string): [string, string] {
+export function missingProgram(name: string): [string, string, string] {
   const failure = currentCaller().execFailure
-  if (failure === null) return [`${shellVoice()}${name}`, 'command not found']
-  return [failure, 'No such file or directory']
+  if (failure === null) {
+    const voice = shellVoice()
+    return [`${voice}${name}`, 'command not found', voice]
+  }
+  return [failure, 'No such file or directory', '']
 }
 
 /** Whether the line running in this session is a program run. */

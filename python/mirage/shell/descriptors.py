@@ -31,7 +31,6 @@ from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
     FD_STDERR,
-    FD_STDIN,
     FD_STDOUT,
 )
 from mirage.shell.types import Redirect, RedirectKind
@@ -95,12 +94,12 @@ def named_descriptor(
 ) -> tuple[Redirect, ...] | None:
     """The duplications a redirect onto a descriptor's path makes, as bash
     opens one on Linux (``> /dev/stderr`` is ``>&2``, ``< /dev/fd/3`` is
-    ``<&3``, ``&> /dev/stdout`` is ``>&1 2>&1``); None for any other
-    target, and for standard input read from its own path, which the
-    caller reads as stdin. Deliberate divergence: Linux reopens a
-    descriptor's file, so ``> /dev/stdout`` on a stdout redirected to a
-    file truncates it there; this duplicates, as bash does where the
-    system has no such paths.
+    ``<&3``, ``&> /dev/stdout`` is ``>&1 2>&1``, ``< /dev/stdin`` keeps
+    the fd 0 the redirects before it left); None for any other target.
+    Deliberate divergence: Linux reopens a descriptor's file, so
+    ``> /dev/stdout`` on a stdout redirected to a file truncates it
+    there; this duplicates, as bash does where the system has no such
+    paths.
 
     Args:
         redirect (Redirect): the expanded redirect.
@@ -124,8 +123,6 @@ def named_descriptor(
     if fd is None:
         return None
     if redirect.kind == RedirectKind.STDIN:
-        if redirect.fd == FD_STDIN == fd:
-            return None
         return (
             Redirect(fd=redirect.fd, target=fd, kind=RedirectKind.DUP_INPUT),
         )

@@ -626,7 +626,8 @@ export class SessionState {
   processId: number | null
   shellPid: number | null
   // When the running shell started, in epoch microseconds, which `$SECONDS`
-  // counts from; 0 before a shell started (`seedShell`).
+  // counts from; 0 until its first frame sets it on the line's clock
+  // (`seedShell`, `frame`).
   shellStartedUs: number
   processDepth: number
   // How deep the shell this session runs is nested: the levels the shells

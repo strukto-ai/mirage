@@ -57,13 +57,13 @@ async def read(
 
 
 def random_bytes(size: int) -> bytes:
-    """``size`` random bytes, as /dev/urandom reads them, drawn from the
-    running session's ids, so a seeded workspace reads the same bytes
-    again. Mirrors TypeScript's ``randomBytes``.
+    """``size`` random bytes, as /dev/urandom reads them: the session's
+    ids' secure bytes, which a seeded workspace replays. Mirrors
+    TypeScript's ``randomBytes``.
 
     Args:
         size (int): how many bytes.
     """
     session = get_current_session()
     ids = session.ids if session is not None else SystemIdSource()
-    return ids.random_words(-(-size // 4))[:size]
+    return ids.secure_bytes(size)

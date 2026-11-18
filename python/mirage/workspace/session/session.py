@@ -425,7 +425,8 @@ class SessionState:
     process_id: int | None = None
     shell_pid: int | None = None
     # When the running shell started, in epoch microseconds, which
-    # `$SECONDS` counts from; 0 before a shell started (``seed_shell``).
+    # `$SECONDS` counts from; 0 until its first frame sets it on the
+    # line's clock (``seed_shell``, ``frame``).
     shell_started_us: int = 0
     process_depth: int = 0
     # How deep the shell this session runs is nested: the levels the shells

@@ -505,8 +505,8 @@ class MachineHandle:
         """
         await self.ensure_connected()
         run = argv
-        lead, reason = missing_program(argv[0])
-        missing = (f"{lead}: ", reason)
+        lead, reason, voice = missing_program(argv[0])
+        missing = (f"{lead}: ", reason, voice)
         if self._mounts is not None:
             refusal = await self._mounts.validate(
                 binding, ctx.cwd.virtual, errors

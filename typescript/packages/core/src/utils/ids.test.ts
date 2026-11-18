@@ -470,3 +470,12 @@ describe('checkName', () => {
     },
   )
 })
+
+describe('secureBytes', () => {
+  it('comes from the platform, or replays a seed', () => {
+    const first = new SystemIdSource().secureBytes(70000)
+    expect(first.length).toBe(70000)
+    expect(first).not.toEqual(new SystemIdSource().secureBytes(70000))
+    expect(new SeededIdSource(7).secureBytes(9)).toEqual(new SeededIdSource(7).secureBytes(9))
+  })
+})

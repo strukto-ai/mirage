@@ -147,6 +147,12 @@ impl Vars for Reading<'_> {
     }
 
     fn wrote(&mut self, name: &str, value: &str) -> Result<(), Halt> {
+        if self.store.counts_seconds(name) {
+            // An assignment restarts the count at once, so a read later in
+            // the expression counts from it (`SECONDS=10, SECONDS+1`).
+            self.store.set_seconds(value.parse::<i64>().unwrap_or(0));
+            return Ok(());
+        }
         if !self.store.random_special(name) {
             return Ok(());
         }

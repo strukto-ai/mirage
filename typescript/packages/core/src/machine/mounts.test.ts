@@ -156,13 +156,13 @@ class FakeMachine extends MachineHandle implements PipeTransport {
 
   /** Run a line's mount guard through /bin/sh over this table. */
   runGuard(argv: readonly string[]): RunAnswer {
-    const entries = argv.slice(7, argv.indexOf('--', 7))
+    const entries = argv.slice(8, argv.indexOf('--', 8))
     this.guards.push(entries)
     const dir = mkdtempSync(join(tmpdir(), 'mirage-guard-'))
     const table = join(dir, 'mounts')
     writeFileSync(table, this.rows())
     try {
-      const done = spawnSync('/bin/sh', [...argv.slice(1, 6), table, ...entries, '--', 'true'])
+      const done = spawnSync('/bin/sh', [...argv.slice(1, 7), table, ...entries, '--', 'true'])
       return {
         stdout: new Uint8Array(done.stdout),
         stderr: new Uint8Array(done.stderr),

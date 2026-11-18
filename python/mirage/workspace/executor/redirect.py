@@ -1199,13 +1199,6 @@ async def _open_input(
     dispatch, session = opened.dispatch, opened.session
     inputs, outputs = opened.inputs, opened.outputs
     try:
-        if (
-            r.kind == RedirectKind.STDIN
-            and descriptor_of(scope.virtual, opened.holds) == FD_STDIN
-        ):
-            opened.reopen(r.fd)
-            inputs[r.fd], outputs[r.fd] = opened.stdin, _CLOSED
-            return None
         data, _ = await dispatch("read", scope, stream=True)
     except FileNotFoundError as exc:
         if r.kind != RedirectKind.READWRITE:

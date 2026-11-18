@@ -544,3 +544,12 @@ def test_check_name_takes_every_id_mirage_and_adapters_mint():
 def test_check_name_refuses_empty_long_or_control_names(name):
     with pytest.raises(ValueError, match="^invalid profile name: must be 1"):
         check_name("profile name", name)
+
+
+def test_secure_bytes_come_from_the_system_or_replay_a_seed():
+    first = SystemIdSource().secure_bytes(37)
+    assert len(first) == 37
+    assert first != SystemIdSource().secure_bytes(37)
+    assert SeededIdSource(7).secure_bytes(9) == SeededIdSource(7).secure_bytes(
+        9
+    )
