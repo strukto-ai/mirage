@@ -201,15 +201,12 @@ export interface CLIContext {
  *
  * Its write verbs then go past the dispatcher's per-path invalidation, so the
  * mounts its client may reach drop their caches after one
- * (`MountRegistry.dropCaches`). Two roots do that: one with a `configModel`
- * (an account CLI, initialized from it) and a script root, whose config is
- * opaque by construction and whose program may reach anything. A root with
- * neither (`git`) has no service to reach; its writes go through the
- * dispatcher, which invalidates as it goes, so a blanket drop would only cost
- * every other mount a reload. Mirrors Python's `reaches_service`.
+ * (`MountRegistry.dropCaches`). Configured VFS-only handlers write through
+ * the dispatcher, which enforces path policy and invalidates the affected
+ * mount itself. Account and script CLIs may also write directly to a service.
  */
 export function reachesService(spec: CLI): boolean {
-  return spec.configModel !== null || spec.script !== null
+  return spec.script !== null || (spec.configModel !== null && !spec.vfsOnly)
 }
 
 /**

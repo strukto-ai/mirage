@@ -3312,6 +3312,31 @@
       }
     },
     {
+      "id": "ast-grep-sql",
+      "max_memory": 104857600,
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "ast-grep"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "vfs": "sql",
+          "backend": "sqlite"
+        }
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/repo": "read"
+          }
+        }
+      }
+    },
+    {
       "id": "git-ram",
       "hosts": [
         "python",

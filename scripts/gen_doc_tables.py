@@ -82,6 +82,12 @@ EXTRA_FEATURES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("Mem0", ("mem0",), "`Mem0VFS`."),
     ("Langfuse", ("langfuse",), "`LangfuseVFS`."),
     (
+        "Code search",
+        ("ast-grep",),
+        "Search, scan and rewrite workspace files with "
+        "[ast-grep](/python/cli/ast-grep).",
+    ),
+    (
         "Runtimes",
         ("monty", "wasi", "quickjs"),
         "The [Monty](/python/runtime/monty), [WASI](/python/runtime/wasi) and "

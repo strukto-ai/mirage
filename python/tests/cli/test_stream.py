@@ -492,3 +492,149 @@ async def test_an_error_status_says_the_daemons_detail(
             assert str(exc.value) == said
     finally:
         await runner.cleanup()
+
+
+def _proxy_env(monkeypatch, http_proxy, no_proxy=None):
+    for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.setenv("HTTP_PROXY", http_proxy)
+    monkeypatch.setenv("HTTPS_PROXY", http_proxy)
+    if no_proxy is not None:
+        monkeypatch.setenv("NO_PROXY", no_proxy)
+
+
+async def _serve(handler):
+    app = web.Application()
+    app.router.add_post("/shell", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 0).start()
+    return runner, runner.addresses[0][1]
+
+
+@pytest.mark.parametrize(
+    ("credentials", "proxy_authorization"),
+    [("u:p@", "Basic dTpw"), ("", None)],
+)
+async def test_the_line_goes_through_the_proxy_the_environment_names(
+    monkeypatch, tmp_path, credentials, proxy_authorization
+):
+    seen = []
+
+    async def proxy(request):
+        seen.append(
+            (str(request.url), request.headers.get("Proxy-Authorization"))
+        )
+        return await _refused_shell(request)
+
+    runner, port = await _serve(proxy)
+    _proxy_env(monkeypatch, f"http://{credentials}127.0.0.1:{port}")
+    try:
+        with (tmp_path / "out").open("w+b") as out:
+            monkeypatch.setattr(
+                stream, "sys", SimpleNamespace(stdout=out, stderr=out)
+            )
+            client = SimpleNamespace(
+                settings=SimpleNamespace(url="http://daemon.invalid:7"),
+                headers=lambda: {"Authorization": "Bearer t"},
+            )
+            assert (
+                await stream.stream_shell(
+                    client, "/shell?stream=true", {"command": "rm x"}, False
+                )
+                == 126
+            )
+        assert seen == [
+            ("http://daemon.invalid:7/shell?stream=true", proxy_authorization)
+        ]
+    finally:
+        await runner.cleanup()
+
+
+async def test_no_proxy_sends_the_line_straight_to_the_daemon(
+    monkeypatch, tmp_path
+):
+    runner, port = await _serve(_refused_shell)
+    _proxy_env(
+        monkeypatch, "http://127.0.0.1:9", no_proxy="localhost,127.0.0.1"
+    )
+    try:
+        with (tmp_path / "out").open("w+b") as out:
+            monkeypatch.setattr(
+                stream, "sys", SimpleNamespace(stdout=out, stderr=out)
+            )
+            client = SimpleNamespace(
+                settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
+                headers=dict,
+            )
+            assert (
+                await stream.stream_shell(
+                    client, "/shell?stream=true", {"command": "rm x"}, False
+                )
+                == 126
+            )
+    finally:
+        await runner.cleanup()
+
+
+async def test_the_proxy_tunnel_never_carries_the_daemon_token(
+    monkeypatch, tmp_path
+):
+    seen = []
+
+    async def connect(reader, writer):
+        seen.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.close()
+
+    server = await asyncio.start_server(connect, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    _proxy_env(monkeypatch, f"http://127.0.0.1:{port}")
+    try:
+        with (tmp_path / "out").open("w+b") as out:
+            monkeypatch.setattr(
+                stream, "sys", SimpleNamespace(stdout=out, stderr=out)
+            )
+            client = SimpleNamespace(
+                settings=SimpleNamespace(url="https://daemon.invalid:7"),
+                headers=lambda: {"Authorization": "Bearer t"},
+            )
+            with pytest.raises(RuntimeError):
+                await stream.stream_shell(
+                    client, "/shell?stream=true", {"command": "x"}, False
+                )
+        assert len(seen) == 1
+        assert seen[0].startswith(b"CONNECT daemon.invalid:7 ")
+        assert b"Bearer" not in seen[0]
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("url", "http_proxy", "no_proxy", "proxy"),
+    [
+        ("http://d:8765", "proxy.corp:3128", None, "http://proxy.corp:3128"),
+        (
+            "http://d:8765",
+            "HTTP://proxy.corp:3128",
+            None,
+            "http://proxy.corp:3128",
+        ),
+        ("http://d:8765", "socks5://proxy.corp:1080", None, None),
+        ("http://127.0.0.1:8765", "http://p:1", "127.0.0.1:8765", None),
+        (
+            "http://127.0.0.1:8765",
+            "http://p:1",
+            "127.0.0.1:9999",
+            "http://p:1",
+        ),
+        ("http://127.0.0.1:8765", "http://p:1", "127.0.0.1", None),
+        ("http://[::1]:8765", "http://p:1", "::1", None),
+    ],
+)
+def test_the_proxy_is_the_one_httpx_picks(
+    monkeypatch, url, http_proxy, no_proxy, proxy
+):
+    _proxy_env(monkeypatch, http_proxy, no_proxy)
+    assert stream.proxy_for(url) == (proxy, None)

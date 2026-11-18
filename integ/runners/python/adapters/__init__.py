@@ -3659,7 +3659,7 @@ async def open_target(
             env=env_block,
             clock=clock,
             system_time=target.get("system_time"),
-            max_memory=None,
+            max_memory=target.get("max_memory"),
             machines=dict(TARGET_MACHINES),
         )
     else:
@@ -3673,7 +3673,7 @@ async def open_target(
             env=env_block,
             clock=clock,
             system_time=target.get("system_time"),
-            max_memory=None,
+            max_memory=target.get("max_memory"),
             machines=dict(TARGET_MACHINES),
         )
     if store is not None:

@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { NOOPAccessor } from '../../../accessor/base.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
+import { AST_GREP } from '../../../commands/cli/builtin/ast_grep/index.ts'
 import { CLI, CLIHandler, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { command, type Context } from '../../../commands/config.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
@@ -890,10 +891,8 @@ describe('cache drop on a thrown leaf', () => {
 })
 
 describe('reachesService', () => {
-  it('is true for a root that reaches a service, false for the git tier', () => {
-    // A script root's config is opaque, so it never carries a config model,
-    // yet its program may reach a service exactly as an account CLI does;
-    // only a root with neither writes through the dispatcher.
+  it('identifies service and script CLIs while allowing configured VFS-only handlers', () => {
+    expect(reachesService(AST_GREP)).toBe(false)
     expect(reachesService(makeInstall().cli)).toBe(true)
     expect(
       reachesService(

@@ -13,6 +13,8 @@ permissions:
       - scripts/gen_unicode_case_fold.py
       - scripts/gen_unicode_blocks.py
       - scripts/gen_rust_notices.py
+      - scripts/gen_ast_grep.py
+      - python/mirage/commands/cli/builtin/ast_grep/engine.wasm.gz
       - scripts/check_mirage_rs_wheel.py
       - scripts/check_release_artifacts.py
       - licenses/third_party/**
@@ -32,6 +34,8 @@ permissions:
       - scripts/gen_unicode_case_fold.py
       - scripts/gen_unicode_blocks.py
       - scripts/gen_rust_notices.py
+      - scripts/gen_ast_grep.py
+      - python/mirage/commands/cli/builtin/ast_grep/engine.wasm.gz
       - licenses/third_party/**
       - python/THIRD_PARTY_NOTICES
       - typescript/packages/core/THIRD_PARTY_NOTICES
@@ -58,6 +62,15 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - name: Format
         run: cargo fmt --all --check
+      - name: Install LLVM tools for the WebAssembly grammars
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm
+      - name: Verify ast-grep builds from its locked source
+        run: |
+          cargo fmt --manifest-path ast-grep/Cargo.toml --check
+          cargo clippy --manifest-path ast-grep/Cargo.toml --locked -- -D warnings
+          CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar python3 ../scripts/gen_ast_grep.py --output "$RUNNER_TEMP/ast-grep.wasm.gz"
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The browser's target. Every TypeScript job also builds the release
@@ -85,6 +98,11 @@ jobs:
         with:
           manifest-path: rust/Cargo.toml
           arguments: --all-features
+          command: check licenses bans sources
+      - name: Ast-grep licenses
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: rust/ast-grep/Cargo.toml
           command: check licenses bans sources
       # The generators still write what is committed: the notices from the
       # locked tree, the width and class tables from the pinned Unicode data.

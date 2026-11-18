@@ -53,6 +53,12 @@ PY_HEAVY = (
     "mcp",
 )
 
+# A verb's own imports, loaded inside the verb, are gated too: `shell`
+# loads the stream on every agent command, and the stream renders a
+# refusal without the policy engine.
+PY_CLI_VERBS = ("mirage.cli.stream",)
+PY_VERB_HEAVY = PY_HEAVY + ("mirage.policy.policies",)
+
 # `.` is the barrel and is *meant* to be heavy; `./bin/daemon` is a program,
 # not a module anyone imports for a symbol. `./api`, `./routes`, `./registry`
 # and `./auth/middleware` are what a host serving the API builds it from
@@ -222,16 +228,19 @@ def check_cli_sources() -> list[str]:
     return problems
 
 
-def heavy_python_modules(statement: str) -> list[str]:
+def heavy_python_modules(
+    statement: str, heavy: tuple[str, ...] = PY_HEAVY
+) -> list[str]:
     """The heavy modules one python statement leaves loaded.
 
     Runs in a fresh interpreter, so nothing this process imported counts.
 
     Args:
         statement (str): Python source to run, e.g. ``import x``.
+        heavy (tuple[str, ...]): the module prefixes that count as heavy.
 
     Returns:
-        list[str]: the loaded module names under a `PY_HEAVY` prefix.
+        list[str]: the loaded module names under a ``heavy`` prefix.
     """
     probe = f"{statement}\nimport sys\nprint('\\n'.join(sys.modules))"
     out = subprocess.run(
@@ -244,20 +253,29 @@ def heavy_python_modules(statement: str) -> list[str]:
     return sorted(
         name
         for name in out
-        if any(name == h or name.startswith(h + ".") for h in PY_HEAVY)
+        if any(name == h or name.startswith(h + ".") for h in heavy)
     )
 
 
 def check_python_cli() -> list[str]:
-    """Fail when importing the python CLI entry loads a heavy module.
+    """Fail when importing the python CLI entry, or a module one of its
+    verbs imports, loads a heavy module.
 
     Returns:
         list[str]: one line per heavy module reached.
     """
-    return [
+    problems = [
         f"python {PY_CLI_ENTRY} loads {name}"
         for name in heavy_python_modules(f"import {PY_CLI_ENTRY}")
     ]
+    for verb in PY_CLI_VERBS:
+        problems += [
+            f"python {verb} loads {name}"
+            for name in heavy_python_modules(
+                f"import {PY_CLI_ENTRY}, {verb}", PY_VERB_HEAVY
+            )
+        ]
+    return problems
 
 
 def barrel_collisions(init: Path) -> list[str]:
@@ -367,6 +385,10 @@ SELFTEST_PYTHON = (
     ("import mirage", False),
     ("import mirage.types", False),
 )
+SELFTEST_PYTHON_VERB = (
+    ("import mirage.policy.policies", True),
+    ("import mirage.policy.errors", False),
+)
 
 
 def selftest(tmp: Path) -> int:
@@ -411,6 +433,11 @@ def selftest(tmp: Path) -> int:
         if got != want:
             failures += 1
             print(f"  python: {statement!r} -> heavy={got}, want {want}")
+    for statement, want in SELFTEST_PYTHON_VERB:
+        got = bool(heavy_python_modules(statement, PY_VERB_HEAVY))
+        if got != want:
+            failures += 1
+            print(f"  python verb: {statement!r} -> heavy={got}, want {want}")
     package = tmp / "pkg"
     package.mkdir()
     (package / "leaf.py").write_text("")
@@ -422,7 +449,11 @@ def selftest(tmp: Path) -> int:
             failures += 1
             print(f"  barrel name {exported!r} -> {shadowed}, want {expected}")
     total = (
-        len(SELFTEST_IMPORTS) + len(SELFTEST_BARREL) + len(SELFTEST_PYTHON) + 3
+        len(SELFTEST_IMPORTS)
+        + len(SELFTEST_BARREL)
+        + len(SELFTEST_PYTHON)
+        + len(SELFTEST_PYTHON_VERB)
+        + 3
     )
     if failures:
         print(
@@ -457,7 +488,7 @@ def main() -> int:
     print(
         f"cli cold start: {len(gated_entries())} entries reach no heavy "
         f"package; no cli source imports the server barrel bare; "
-        f"python {PY_CLI_ENTRY} loads no heavy module; no lazy barrel "
+        f"python {PY_CLI_ENTRY} and its verbs load no heavy module; no lazy barrel "
         f"name is a submodule's"
     )
     return 0

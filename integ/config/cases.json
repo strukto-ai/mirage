@@ -611,6 +611,89 @@
       "expect": {
         "refused": "machine: root"
       }
+    },
+    {
+      "id": "ast_grep_per_install_memory",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {
+          "/s": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "max_memory": "100MB",
+        "clis": {
+          "sg": {
+            "cli": "ast-grep",
+            "machine": "in_process"
+          },
+          "large": {
+            "cli": "ast-grep",
+            "config": {
+              "max_memory": "32MB"
+            },
+            "machine": "in_process"
+          }
+        }
+      },
+      "command": "yes 'export function f(x:number){return x+1}' | head -n 6000 > /s/dense.ts && { sg run -l ts -k function_declaration --files-with-matches /s/dense.ts || large run -l ts -k function_declaration --files-with-matches /s/dense.ts; }",
+      "expect": {
+        "state": {
+          "stdout": "/s/dense.ts\n",
+          "stderr": "ast-grep: parser resource limit exceeded\n",
+          "exit_code": 0
+        }
+      }
+    },
+    {
+      "id": "ast_grep_install_rejects_too_little_memory",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "clis": {
+          "sg": {
+            "cli": "ast-grep",
+            "config": {
+              "max_memory": "5MB"
+            },
+            "machine": "in_process"
+          }
+        }
+      },
+      "expect": {
+        "refused": "CLI 'sg'"
+      }
+    },
+    {
+      "id": "ast_grep_install_respects_workspace_memory",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {
+          "/s": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "max_memory": "12MB",
+        "clis": {
+          "large": {
+            "cli": "ast-grep",
+            "config": {
+              "max_memory": "32MB"
+            },
+            "machine": "in_process"
+          }
+        }
+      },
+      "command": "yes 'export function f(x:number){return x+1}' | head -n 6000 > /s/dense.ts && large run -l ts -k function_declaration --files-with-matches /s/dense.ts",
+      "expect": {
+        "state": {
+          "stdout": "",
+          "stderr": "ast-grep: parser resource limit exceeded\n",
+          "exit_code": 1
+        }
+      }
     }
   ]
 }

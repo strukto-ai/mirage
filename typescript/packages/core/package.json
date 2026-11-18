@@ -55,6 +55,7 @@
     },
     "./mirage_rs.wasm": "./dist/generated/mirage_rs.wasm",
     "./mirage_shell.wasm": "./dist/generated/mirage_shell.wasm",
+    "./mirage_ast_grep.wasm": "./dist/generated/mirage_ast_grep.wasm",
     "./mirage_gh.wasm": "./dist/generated/mirage_gh.wasm",
     "./mirage_pdf.wasm": "./dist/generated/mirage_pdf.wasm",
     "./*": {
@@ -75,6 +76,12 @@
       "workerd": "./dist/generated/mirage_shell.workerd.js",
       "node": "./dist/generated/mirage_shell.node.js",
       "default": "./dist/generated/mirage_shell.js"
+    },
+    "#mirage-ast-grep-wasm": {
+      "types": "./src/generated/mirage_ast_grep.d.ts",
+      "workerd": "./dist/generated/mirage_ast_grep.workerd.js",
+      "node": "./dist/generated/mirage_ast_grep.node.js",
+      "default": "./dist/generated/mirage_ast_grep.js"
     },
     "#mirage-gh-wasm": {
       "types": "./src/generated/mirage_gh.d.ts",

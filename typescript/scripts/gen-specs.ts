@@ -276,6 +276,7 @@ function cliSpecs(module: ModuleBag): Record<string, unknown> {
             ]),
           ),
           config_model: cli.configModel !== null,
+          vfs_only: cli.vfsOnly,
         },
       ]),
   )

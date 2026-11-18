@@ -88,6 +88,17 @@ PDF_OXIDE = Project(
 SERVICE_API = "None; calls the service API"
 BEHAVIOR_ONLY = "GPL, behavior reference only"
 LICENSES = {
+    "ast-grep": Licensing(
+        "MIT",
+        (
+            Project(
+                "[ast-grep](https://github.com/ast-grep/ast-grep) 0.51.3",
+                "Rust search, rule and outline engine",
+                "MIT",
+                "ast-grep",
+            ),
+        ),
+    ),
     "airtable": Licensing(SERVICE_API),
     "discord": Licensing("MIT (OpenClaw)", (OPENCLAW,)),
     "gh": Licensing(
@@ -235,6 +246,7 @@ SUMMARIES = {
         "Query bases and tables; read, create, update and delete records; "
         "add comments"
     ),
+    "ast-grep": "Search and rewrite code, scan YAML rules and outline symbols",
     "discord": (
         "Read and send messages; edit, react, create threads and polls; "
         "inspect guilds"
@@ -283,7 +295,7 @@ SUMMARIES = {
 UNLISTED = frozenset({"search"})
 GROUPS = (
     ("Files", ("office", "pdftotext", "pdfinfo")),
-    ("Developer", ("gh", "git", "hf")),
+    ("Developer", ("ast-grep", "gh", "git", "hf")),
     ("Chat", ("slack", "discord", "himalaya")),
     ("Productivity", ("gws", "ntn", "linear", "trello", "airtable")),
 )
@@ -436,7 +448,9 @@ def exported(source: Path, pattern: str) -> frozenset[str]:
     found = re.findall(pattern, source.read_text(), re.M | re.S)
     names = {word.strip() for group in found for word in group.split(",")}
     return frozenset(
-        name for name in BUILTIN_CLI_SPECS if name.upper() in names
+        name
+        for name in BUILTIN_CLI_SPECS
+        if name.upper().replace("-", "_") in names
     )
 
 

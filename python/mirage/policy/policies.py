@@ -300,20 +300,6 @@ def decision_of(action: Deny | Pending) -> PolicyDecision | None:
     )
 
 
-def describe_decision(decision: PolicyDecision) -> str:
-    """One line saying why, for a surface that hands the agent text
-    rather than a record; the agent adapters append it after stderr.
-
-    Args:
-        decision (PolicyDecision): the record off a refused result.
-    """
-    if decision.kind == "pending":
-        return f"requires approval: {decision.reason} (ask {decision.ask_id})"
-    if decision.kind == "failed":
-        return f"policy {decision.policy} failed"
-    return f"policy denied: {decision.reason}"
-
-
 def policy_denied(
     action: Deny | Pending,
     filename: str,
