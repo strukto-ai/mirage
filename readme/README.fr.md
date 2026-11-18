@@ -56,7 +56,7 @@ Les agents IA travaillent dans un terminal. Mirage est **un terminal virtuel** q
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="Un terminal virtuel sur un système de fichiers virtuel unifié : chaque commande s'exécute sur la machine qui lui convient, passe les règles allow, deny, show et hide de l'agent, et garde ses sessions, ses tâches et ses journaux de commandes sur les backends choisis pour eux" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage sur trois systèmes de fichiers virtuels (S3, Slack, Google Drive), trois CLI virtuelles (gh, linear, deepwiki-mcp) et trois VM (Monty, un sandbox E2B, un GPU EC2) : un grep parcourt les trois systèmes de fichiers, les trois CLI alimentent un seul grep, et un pipeline exécute une étape sur chaque VM" width="100%">
   </picture>
 </p>
 

@@ -56,7 +56,7 @@ KI-Agenten arbeiten in einem Terminal. Mirage ist **ein virtuelles Terminal**, d
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="Ein virtuelles Terminal über einem einheitlichen virtuellen Dateisystem: Jeder Befehl läuft auf der Maschine, die zu ihm passt, durchläuft die allow-, deny-, show- und hide-Regeln des Agenten und legt seine Sitzungen, Jobs und Befehlsprotokolle auf den dafür gewählten Backends ab" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage über drei virtuellen Dateisystemen (S3, Slack, Google Drive), drei virtuellen CLIs (gh, linear, deepwiki-mcp) und drei VMs (Monty, eine E2B-Sandbox, eine EC2-GPU): Ein grep durchsucht alle drei Dateisysteme, die drei CLIs speisen ein grep, und eine Pipeline führt auf jeder VM eine Stufe aus" width="100%">
   </picture>
 </p>
 

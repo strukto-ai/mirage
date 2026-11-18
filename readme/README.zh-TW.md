@@ -56,7 +56,7 @@ AI Agent 在終端機中工作。Mirage 是一個**虛擬終端機**，它把終
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="一個虛擬終端，建立在一個統一的虛擬檔案系統之上：每條命令在適合它的機器上執行，經過 Agent 的 allow、deny、show 和 hide 規則，其工作階段、作業和命令日誌保存在為它們選定的後端上" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage 之上有三個虛擬檔案系統（S3、Slack、Google Drive）、三個虛擬 CLI（gh、linear、deepwiki-mcp）和三台 VM（Monty、E2B 沙箱、EC2 GPU）：一條 grep 同時搜尋三個檔案系統，三個 CLI 的輸出匯入一條 grep，一條管線在每台 VM 上各執行一個階段" width="100%">
   </picture>
 </p>
 
