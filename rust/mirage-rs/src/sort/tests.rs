@@ -12,6 +12,59 @@ fn config(mode: &str, keys: &str, extra: &str) -> String {
 const WHOLE: &str = r#"[{"start_field":1,"start_char":1,"start_skip":false,"end_field":null,"end_char":null,"end_skip":false,"mods":{"numeric":false,"general_numeric":false,"human":false,"version":false,"month":false,"fold":false,"reverse":false,"dictionary":false,"ignore_nonprinting":false,"random":false}}]"#;
 
 #[test]
+fn transformed_keys_and_months_resume_across_filtered_blocks_and_fields() {
+    let blanks = " ".repeat(1800);
+    let prefix = "a-\u{1}".repeat(1800);
+    let records = [
+        format!("{blanks}Jan|{prefix}Ab"),
+        format!("{blanks}FEB|{prefix}aC"),
+        format!("{blanks}jan|{prefix}ab"),
+        format!("{blanks}|{}z", "!".repeat(9000)),
+    ];
+    for mode in ["fold", "dictionary", "ignore_nonprinting", "month"] {
+        for separator in [None, Some(b'|')] {
+            for (start_field, end_field, start_skip, end_char, end_skip) in [
+                (1, None, false, None, false),
+                (1, Some(1), true, Some(3), true),
+                (2, Some(2), false, None, false),
+                (3, Some(1), false, Some(0), false),
+            ] {
+                let mut key = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+                key["start_field"] = json!(start_field);
+                key["end_field"] = json!(end_field);
+                key["start_skip"] = json!(start_skip);
+                key["end_char"] = json!(end_char);
+                key["end_skip"] = json!(end_skip);
+                key["mods"][mode] = json!(true);
+                for reverse in [false, true] {
+                    key["mods"]["reverse"] = json!(reverse);
+                    let compare: super::Compare = serde_json::from_value(json!({
+                        "keys": [key], "field_sep": separator,
+                        "reverse": !reverse, "stable": true, "unique": false,
+                    }))
+                    .unwrap();
+                    for a in &records {
+                        for b in &records {
+                            let (a, b) = (a.as_bytes(), b.as_bytes());
+                            let mut comparison = super::Comparison::default();
+                            let mut calls = 0;
+                            let actual = loop {
+                                calls += 1;
+                                assert!(calls < 500, "comparison failed to advance");
+                                if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1) {
+                                    break order;
+                                }
+                            };
+                            assert_eq!(actual, compare.records(a, b), "{mode}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn numeric_comparisons_resume_without_changing_key_order() {
     let tail = "0".repeat(1600);
     let prefix = "x".repeat(1600);
