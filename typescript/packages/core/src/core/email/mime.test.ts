@@ -10,7 +10,7 @@ test('plain text JSON handles a decoded UTF-8 BOM like the Node parser', () => {
   const result = JSON.parse(decoder.decode(renderMime(raw, 'json'))) as {
     parts: { body: unknown }[]
   }
-  expect(result.parts[0].body).toEqual({ Text: 'body' })
+  expect(result.parts[0]?.body).toEqual({ Text: 'body' })
 })
 
 test('the default view preserves Node whitespace and size formatting', () => {
