@@ -837,7 +837,9 @@ fn columns(pieces: &[Segment], texts: &[String], lines: &[(f32, f32, Vec<usize>)
     for (_, _, items) in lines {
         let mut end = 0usize;
         for (k, &i) in items.iter().enumerate() {
-            let at = ((pieces[i].start - left) / pitch).round().clamp(0.0, FARTHEST) as usize;
+            let at = ((pieces[i].start - left) / pitch)
+                .round()
+                .clamp(0.0, FARTHEST) as usize;
             let gap = if k == 0 { 0 } else { 1 };
             col[i] = at.max(end + gap);
             end = col[i] + texts[i].chars().count();
