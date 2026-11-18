@@ -21,7 +21,7 @@ import {
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
-import type { CLI } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import {
   type Caller,
   currentCaller,
@@ -1485,10 +1485,11 @@ export class Workspace {
   /**
    * The grammar each command name is read by: a command tree's
    * (`cliGrammars`), else the built-in command's spec, as the line reader
-   * picks one.
+   * picks one. `handed` are the trees a mount about to be added will
+   * serve.
    */
-  private grammars(): ReadonlyMap<string, Grammar> {
-    return new Map([...BUILTIN_GRAMMARS, ...this.cliGrammars()])
+  private grammars(handed: readonly CLI[] = []): ReadonlyMap<string, Grammar> {
+    return new Map([...BUILTIN_GRAMMARS, ...this.cliGrammars(handed)])
   }
 
   /**
@@ -1498,12 +1499,14 @@ export class Workspace {
    * since the line's mount picks which one reads it.
    *
    * Read at `createSession` rather than at compile time because a CLI is
-   * registered on the workspace after it is built.
+   * registered on the workspace after it is built. `handed` are the trees
+   * a mount about to be added will serve.
    */
-  private cliGrammars(): ReadonlyMap<string, Grammar> {
+  private cliGrammars(handed: readonly CLI[]): ReadonlyMap<string, Grammar> {
     const served = new Map<string, CLI[]>()
-    for (const mount of this.registry.allMounts()) {
-      for (const [name, cli] of mount.servedTrees()) {
+    const mounted = this.registry.allMounts().map((mount) => mount.servedTrees())
+    for (const trees of [...mounted, new Map(handed.map((cli) => [cli.spec.name, cli]))]) {
+      for (const [name, cli] of trees) {
         const held = served.get(name) ?? []
         if (held.every((other) => other.spec !== cli.spec)) held.push(cli)
         served.set(name, held)
@@ -2046,6 +2049,8 @@ export class Workspace {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
     this.registry.checkVfsAvailable(vfs)
+    const handed = vfs.commands().filter((cmd): cmd is CLI => cmd instanceof CLI)
+    if (handed.length > 0) this.checkTrees(this.grammars(handed))
     const resolvedRead = read ?? this.readDefault
     checkReadCapability(prefix, vfs, resolvedRead, own)
     const resolvedWrite = write == null ? this.writeDefault : coerceWritePolicy(write)
@@ -2071,6 +2076,7 @@ export class Workspace {
     m.treesChanged = () => {
       this.treesChanged()
     }
+    if (handed.length > 0) this.restateTrees(this.grammars())
     return m
   }
 

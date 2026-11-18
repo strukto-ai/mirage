@@ -1415,6 +1415,9 @@ class Workspace:
             self._cache.cache_limit > 0 and vfs.caches_reads,
         )
         self._registry.check_vfs_available(vfs)
+        handed = [cmd for cmd in vfs.commands() if isinstance(cmd, CLI)]
+        if handed:
+            self._check_trees(self._grammars(handed))
         if isinstance(vfs, MachineVFS):
             if self._program_machine is None:
                 raise ValueError(
@@ -1435,6 +1438,8 @@ class Workspace:
         prepare_added_mount(self._registry, entry, previous)
         self._registry.rows_changed()
         entry.trees_changed = self._trees_changed
+        if handed:
+            self._restate_trees(self._grammars())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -2762,14 +2767,18 @@ class Workspace:
             lambda rules: renormalized(rules, grammars)
         )
 
-    def _grammars(self) -> dict[str, Grammar]:
+    def _grammars(self, handed: Sequence[CLI] = ()) -> dict[str, Grammar]:
         """The grammar each command name is read by: a command tree's
         (``_cli_grammars``), else the built-in command's spec, as the
         line reader picks one.
-        """
-        return {**BUILTIN_GRAMMARS, **self._cli_grammars()}
 
-    def _cli_grammars(self) -> dict[str, Grammar]:
+        Args:
+            handed (Sequence[CLI]): the trees a mount about to be added
+                will serve.
+        """
+        return {**BUILTIN_GRAMMARS, **self._cli_grammars(handed)}
+
+    def _cli_grammars(self, handed: Sequence[CLI] = ()) -> dict[str, Grammar]:
         """The grammar of each command tree, keyed by head word: an
         installed CLI's, else the first one a mount serves, as lookup
         resolves the name, holding every other tree a mount serves under
@@ -2778,10 +2787,15 @@ class Workspace:
 
         Read at ``create_session`` rather than at compile time because a
         CLI is registered on the workspace after it is built.
+
+        Args:
+            handed (Sequence[CLI]): the trees a mount about to be added
+                will serve.
         """
         served: dict[str, list[CLI]] = {}
-        for mount in self._registry.mounts():
-            for name, cli in mount.served_trees().items():
+        mounted = [mount.served_trees() for mount in self._registry.mounts()]
+        for trees in (*mounted, {cli.spec.name: cli for cli in handed}):
+            for name, cli in trees.items():
                 held = served.setdefault(name, [])
                 if all(cli.spec is not other.spec for other in held):
                     held.append(cli)
