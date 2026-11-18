@@ -19,7 +19,7 @@ from mirage.core.sql.constants import candidate_files
 from mirage.core.sql.inode import is_dir
 from mirage.core.sql.path import target, walk
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import child_spec
+from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.sql.types import SqlDialect
 
 MAX_CANDIDATES = 512
@@ -74,4 +74,5 @@ async def files_containing(
     )
     if len(rows) > MAX_CANDIDATES:
         return None
-    return [child_spec(path, str(row["rel"])) for row in rows]
+    base = path.mount_path.rstrip("/")
+    return [mounted_path(path, f"{base}/{str(row['rel'])}") for row in rows]

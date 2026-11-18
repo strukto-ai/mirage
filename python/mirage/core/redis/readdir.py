@@ -67,12 +67,24 @@ async def tree(
     if not await store.has_dir(p):
         return None
     base = p.rstrip("/") + "/"
-    dirs = await store.list_dirs()
-    keys = [(key, False) for key in await store.list_files(base)]
-    keys += [(key, True) for key in sorted(dirs) if key.startswith(base)]
-    keys = [(key, is_dir) for key, is_dir in keys if key != p]
-    if limit is not None and len(keys) > limit:
-        return None
+    if limit is None:
+        dirs = await store.list_dirs()
+        keys = [(key, False) for key in await store.list_files(base)]
+        keys += [
+            (key, True)
+            for key in sorted(dirs)
+            if key.startswith(base) and key != p
+        ]
+    else:
+        found: dict[str, bool] = {}
+        async for key, is_dir in store.scan_paths(base):
+            if key == p:
+                continue
+            if key not in found and len(found) >= limit:
+                return None
+            found[key] = is_dir
+        keys = sorted(found.items())
+        dirs = {p, *(key for key, is_dir in keys if is_dir)}
     if any((key.rsplit("/", 1)[0] or "/") not in dirs for key, _ in keys):
         return None
     stats = await key_stats(store, keys)

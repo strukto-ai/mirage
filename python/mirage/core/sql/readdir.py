@@ -65,6 +65,9 @@ async def tree(
         )
         if len(rows) > ceiling:
             return None
+    room = memory_room()
+    if room is not None and len(rows) * TREE_ENTRY_BYTES > room:
+        return None
     rows.sort(key=lambda row: str(row["rel"]))
     found: dict[str, FileStat] = {}
     prefix = _under(w.p)

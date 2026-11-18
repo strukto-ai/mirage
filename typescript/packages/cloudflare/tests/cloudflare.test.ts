@@ -266,10 +266,10 @@ describe('mirage in workerd', () => {
       const id = `t-${on}-${crypto.randomUUID()}`
       const base = `/s/${id}`
       const results = await sql(id, [
-        `mkdir -p ${base}/src && printf '%4093sReviewNeedle' '' > ${base}/src/hit && printf other > ${base}/miss`,
-        `grep -rlF ReviewNeedle ${base}`,
-        `rg -lF ReviewNeedle ${base}`,
-        `grep -rilF reviewneedle ${base}`,
+        `mkdir -p ${base}/src && printf '%4093sNeedleFound' '' > ${base}/src/hit && printf other > ${base}/miss`,
+        `grep -rlF NeedleFound ${base}`,
+        `rg -lF NeedleFound ${base}`,
+        `grep -rilF needlefound ${base}`,
       ])
       expect(results.map((r) => [r.exit, r.stdout, r.stderr])).toEqual([
         [0, '', ''],

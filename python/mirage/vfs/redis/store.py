@@ -14,7 +14,7 @@
 
 import asyncio
 import weakref
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable
 from typing import cast
 
 from mirage.vfs.redis.constants import TRUNCATE_SCRIPT
@@ -166,6 +166,21 @@ class RedisStore:
 
     async def has_file(self, path: str) -> bool:
         return bool(await self._client.exists(self._fk(path)))
+
+    async def scan_paths(self, prefix: str) -> AsyncIterator[tuple[str, bool]]:
+        """Yield descendant keys a page at a time, with their directory flag."""
+        head = self._fk("")
+        async for key in self._client.scan_iter(
+            match=escape_glob(head + prefix) + "*"
+        ):
+            yield (
+                (key.decode() if isinstance(key, bytes) else key)[len(head) :],
+                False,
+            )
+        async for key in self._client.sscan_iter(
+            self._dk(), match=escape_glob(prefix) + "*"
+        ):
+            yield key.decode() if isinstance(key, bytes) else key, True
 
     async def list_files(self, prefix: str = "") -> list[str]:
         pattern = f"{escape_glob(f'{self._prefix}file:{prefix}')}*"

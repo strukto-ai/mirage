@@ -59,8 +59,13 @@ interface Exports {
 // with it, and their owners open them again on the next instance. One in the
 // middle of a search (busy) does hold it, so the search keeps its progress.
 // A long-lived Workers isolate shares its heap budget with later requests.
-const userAgent = (globalThis as { navigator?: { userAgent: string } }).navigator?.userAgent
-const RECYCLE_BYTES = (userAgent === 'Cloudflare-Workers' ? 8 : 32) * 1024 * 1024
+const RECYCLE_BYTES =
+  ((globalThis as { navigator?: { userAgent: string } }).navigator?.userAgent ===
+  'Cloudflare-Workers'
+    ? 8
+    : 32) *
+  1024 *
+  1024
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()

@@ -158,6 +158,8 @@ SQL: dict[str, str] = {
       FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)
     SELECT t.id, t.depth, t.rel, {columns("i")}
     FROM tree t JOIN fs_inode i ON i.ino = t.ino""",
+    "chunk_slice": "SELECT substr(data, ?, ?) AS data FROM fs_data"
+    " WHERE ino = ? AND chunk_index = ?",
     "chunks": """SELECT chunk_index, data FROM fs_data
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index""",
     "used_bytes": "SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode"
@@ -202,7 +204,13 @@ def clear_under(ino: int) -> tuple[str, ...]:
 def candidate_files(ignore_case: bool) -> str:
     """SQLite candidate files, including matches split across two storage rows."""
     body = "CAST(lower(b.data) AS BLOB)" if ignore_case else "b.data"
-    binary = "instr(b.data, X'00') > 0 OR " if ignore_case else ""
+    # SQLite folds BLOBs as database-encoded text. Keep every populated
+    # file when that encoding cannot represent ASCII as single bytes.
+    binary = (
+        "CAST('A' AS BLOB) <> X'41' OR instr(b.data, X'00') > 0 OR "
+        if ignore_case
+        else ""
+    )
     return f"""WITH RECURSIVE tree(ino, rel) AS (
       SELECT ino, name FROM fs_dentry WHERE parent_ino = ?
       UNION ALL

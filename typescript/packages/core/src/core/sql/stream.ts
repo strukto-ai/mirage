@@ -32,8 +32,12 @@ export async function* readStream(
   const rec = recordStream('read', path.virtual, VFSName.SQL)
   const room = memoryRoom()
   const window = room !== null && room <= 32 * FLUSH_BYTES ? READ_BYTES : FLUSH_BYTES
-  for (let offset = 0; offset < node.size; offset += window) {
-    const data = await readBytes(accessor, node, offset, window)
+  const cs = await accessor.chunkSize()
+  let offset = 0
+  while (offset < node.size) {
+    const length = cs > window ? Math.min(window, cs - (offset % cs)) : window
+    const data = await readBytes(accessor, node, offset, length)
+    offset += data.byteLength
     if (rec !== null) rec.bytes += data.byteLength
     yield data
   }

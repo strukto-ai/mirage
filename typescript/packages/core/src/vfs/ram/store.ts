@@ -12,7 +12,56 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
+
+class KeyIndex {
+  ordered: string[] | null = null;
+
+  public *under(keys: Iterable<string>, prefix: string): IterableIterator<string> {
+    if (prefix === '/') {
+      yield* keys
+      return
+    }
+    const ordered = (this.ordered ??= [...keys].sort(compareCodePoints))
+    let lo = 0
+    let hi = ordered.length
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2)
+      if (compareCodePoints(ordered[mid] ?? '', prefix) < 0) lo = mid + 1
+      else hi = mid
+    }
+    for (let i = lo; i < ordered.length; i++) {
+      const key = ordered[i]
+      if (!key?.startsWith(prefix)) break
+      yield key
+    }
+  }
+}
+
+export class RAMDirs extends Set<string> {
+  readonly index = new KeyIndex()
+
+  constructor(keys: Iterable<string> = ['/']) {
+    super()
+    for (const key of keys) super.add(key)
+  }
+
+  override add(key: string): this {
+    if (!this.has(key)) this.index.ordered = null
+    return super.add(key)
+  }
+
+  override delete(key: string): boolean {
+    if (this.has(key)) this.index.ordered = null
+    return super.delete(key)
+  }
+
+  override clear(): void {
+    this.index.ordered = null
+    super.clear()
+  }
+}
 
 export interface RAMAttrs {
   mode?: number
@@ -34,6 +83,7 @@ export interface RAMAttrs {
  * `RAMFiles`.
  */
 export class RAMFiles extends Map<string, Uint8Array> {
+  readonly index = new KeyIndex()
   /** The bytes the table holds, which the workspace's `max_memory` sums. */
   held = 0
   /** The buffer each key `splice` grew, whose prefix the key's view is. */
@@ -50,18 +100,21 @@ export class RAMFiles extends Map<string, Uint8Array> {
   }
 
   override set(key: string, value: Uint8Array): this {
+    if (!this.has(key)) this.index.ordered = null
     this.count(value.byteLength - (this.get(key)?.byteLength ?? 0))
     this.grown.delete(key)
     return super.set(key, value)
   }
 
   override delete(key: string): boolean {
+    if (this.has(key)) this.index.ordered = null
     this.count(-(this.get(key)?.byteLength ?? 0))
     this.grown.delete(key)
     return super.delete(key)
   }
 
   override clear(): void {
+    this.index.ordered = null
     super.clear()
     this.grown.clear()
     this.held = 0
@@ -96,7 +149,7 @@ export class RAMFiles extends Map<string, Uint8Array> {
 
 export class RAMStore {
   readonly files: Map<string, Uint8Array> & Pick<RAMFiles, 'splice'>
-  readonly dirs = new Set<string>(['/'])
+  readonly dirs: Set<string> = new RAMDirs()
   readonly modified = new Map<string, string>()
   readonly attrs = new Map<string, RAMAttrs>()
 

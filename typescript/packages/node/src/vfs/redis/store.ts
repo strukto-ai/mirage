@@ -175,6 +175,17 @@ export class RedisStore implements RedisStoreLike {
     return (await c.exists(this.fk(path))) > 0
   }
 
+  async *scanPaths(prefix: string): AsyncIterable<[string, boolean]> {
+    const client = await this.client()
+    const head = this.fk('')
+    for await (const page of client.scanIterator({ MATCH: escapeGlob(head + prefix) + '*' })) {
+      for (const key of page) yield [key.slice(head.length), false]
+    }
+    for await (const page of client.sScanIterator(this.dk(), { MATCH: escapeGlob(prefix) + '*' })) {
+      for (const key of page) yield [key, true]
+    }
+  }
+
   async listFiles(prefix = ''): Promise<string[]> {
     const c = await this.client()
     const pattern = `${escapeGlob(`${this.keyPrefix}file:${prefix}`)}*`

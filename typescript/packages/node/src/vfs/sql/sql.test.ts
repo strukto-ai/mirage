@@ -309,6 +309,42 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
   })
 }
 
+it('walks after one declined candidate query and short-circuits a short quiet search', async () => {
+  const vfs = new SqlVFS()
+  const ws = new Workspace({ '/work': vfs }, { mode: MountMode.WRITE })
+  try {
+    await ops(vfs).write(at('/file'), enc.encode('needle\n'))
+    const candidates = vi.spyOn(vfs, 'filesContaining').mockResolvedValue(null)
+    const result = await ws.shell('grep -rlF needle /work')
+    expect([result.stdoutText, result.exitCode]).toEqual(['/work/file\n', 0])
+    expect(candidates).toHaveBeenCalledTimes(1)
+    candidates.mockClear()
+    expect((await ws.shell('grep -rqF n /work')).exitCode).toBe(0)
+    expect(candidates).not.toHaveBeenCalled()
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each(['UTF-16le', 'UTF-16be'])('keeps folded candidates in a %s database', async (encoding) => {
+  const driver = new SqliteDriver()
+  try {
+    await driver.query(`PRAGMA encoding = '${encoding}'`)
+    const vfs = new SqlVFS({ driver })
+    await ops(vfs).mkdir(at('/sub'))
+    await ops(vfs).write(at('/sub/file'), enc.encode('NEEDLE!'))
+    const hits = await vfs.filesContaining(at('/'), 'needle', {
+      wholeWord: false,
+      ignoreCase: true,
+    })
+    expect(hits?.map((p) => [p.virtual, p.directory])).toEqual([
+      ['/sub/file', at('/sub/file').directory],
+    ])
+  } finally {
+    await driver.close()
+  }
+})
+
 describe('SqlVFS over SQLite', () => {
   behaves(() => {
     const driver = new SqliteDriver()

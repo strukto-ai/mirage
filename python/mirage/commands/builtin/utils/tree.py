@@ -380,6 +380,7 @@ def tree_walk(
                 found = dict(found)
                 roots[virtual] = (found, _listings(found))
                 hit = virtual, ""
+            del found
         if hit is not None:
             root, rel = hit
             listing = roots[root][1].get(rel)

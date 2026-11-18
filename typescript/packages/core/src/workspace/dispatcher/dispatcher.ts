@@ -1251,6 +1251,7 @@ export class Dispatcher {
       return [cached, new IOResult()]
     }
     const result = await this.perform(name, call, mount, vfs, scope, mode, boundary, mark)
+    if (prune && result === null) throw walkDeclined(vfs.name, name, call.path)
     return [result, new IOResult()]
   }
 

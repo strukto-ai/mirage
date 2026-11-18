@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAMDirs, RAMFiles, type RAMStore } from '../../vfs/ram/store.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
@@ -19,6 +20,17 @@ import { keyStat } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+
+function* keysUnder(store: RAMStore, prefix: string): IterableIterator<string> {
+  for (const table of [store.files, store.dirs]) {
+    if (table instanceof RAMDirs || table instanceof RAMFiles) {
+      yield* table.index.under(table.keys(), prefix)
+    } else {
+      for (const key of table instanceof Set ? table : table.keys())
+        if (key.startsWith(prefix)) yield key
+    }
+  }
+}
 
 /** The keys of a directory's children, sorted. Mirrors Python's `child_keys`. */
 export async function childKeys(accessor: RAMAccessor, path: PathSpec): Promise<string[]> {
@@ -38,13 +50,10 @@ export async function childKeys(accessor: RAMAccessor, path: PathSpec): Promise<
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
   const seen = new Set<string>()
-  for (const keys of [accessor.store.files.keys(), accessor.store.dirs]) {
-    for (const key of keys) {
-      if (key === p || !key.startsWith(dirPrefix)) continue
-      const slash = key.indexOf('/', dirPrefix.length)
-      if (key.length > dirPrefix.length && slash !== dirPrefix.length) {
-        seen.add(slash === -1 ? key : key.slice(0, slash))
-      }
+  for (const key of keysUnder(accessor.store, dirPrefix)) {
+    const slash = key.indexOf('/', dirPrefix.length)
+    if (key.length > dirPrefix.length && slash !== dirPrefix.length) {
+      seen.add(slash === -1 ? key : key.slice(0, slash))
     }
   }
   return [...seen].sort(compareCodePoints)
@@ -75,17 +84,15 @@ export function tree(
   if (!store.dirs.has(p)) return Promise.resolve(null)
   const base = rstripSlash(p) + '/'
   const found = new Map<string, FileStat>()
-  for (const keys of [store.files.keys(), store.dirs.values()]) {
-    for (const key of keys) {
-      if (key === p || !key.startsWith(base)) continue
-      if (
-        (limit !== undefined && found.size >= limit) ||
-        !store.dirs.has(key.slice(0, key.lastIndexOf('/')) || '/')
-      )
-        return Promise.resolve(null)
-      const entry = keyStat(store, key)
-      if (entry !== null) found.set(key.slice(base.length), entry)
-    }
+  for (const key of keysUnder(store, base)) {
+    if (key === p) continue
+    if (
+      (limit !== undefined && found.size >= limit) ||
+      !store.dirs.has(key.slice(0, key.lastIndexOf('/')) || '/')
+    )
+      return Promise.resolve(null)
+    const entry = keyStat(store, key)
+    if (entry !== null) found.set(key.slice(base.length), entry)
   }
   return Promise.resolve(found)
 }

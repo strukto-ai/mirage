@@ -41,8 +41,12 @@ async def read_stream(
         if room is not None and room <= 32 * FLUSH_BYTES
         else FLUSH_BYTES
     )
-    for offset in range(0, node.size, window):
-        data = await read_bytes(accessor, node, offset, window)
+    cs = await accessor.chunk_size()
+    offset = 0
+    while offset < node.size:
+        length = min(window, cs - offset % cs) if cs > window else window
+        data = await read_bytes(accessor, node, offset, length)
+        offset += len(data)
         if rec is not None:
             rec.bytes += len(data)
         yield data

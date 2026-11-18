@@ -42,6 +42,13 @@ async def read_bytes(
     if stop <= offset:
         return b""
     cs = await accessor.chunk_size()
+    if stop - offset < cs and offset // cs == (stop - 1) // cs:
+        rows = await accessor.query(
+            SQL["chunk_slice"],
+            (offset % cs + 1, stop - offset, node.ino, offset // cs),
+        )
+        data = _bytes_of(rows[0]["data"]) if rows else b""
+        return data.ljust(stop - offset, b"\x00")
     rows = await accessor.query(
         SQL["chunks"], (node.ino, offset // cs, (stop - 1) // cs)
     )

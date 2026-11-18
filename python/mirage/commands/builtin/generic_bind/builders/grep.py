@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.search import (
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.memory import memory_room
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -39,16 +40,23 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths) if paths else []
-    matches = await matching_tree(files, resolved, texts, ctx)
+    query_files = True
+    try:
+        matches = await matching_tree(files, resolved, texts, ctx)
+    except WalkDeclinedError:
+        matches = None
+        query_files = False
     if matches is None:
-        read = await search_reads(files, "grep", resolved, texts, ctx)
+        read = await search_reads(
+            files, "grep", resolved, texts, ctx, query_files=query_files
+        )
         room = memory_room()
         readdir, stat = tree_walk(
             files.read_tree,
             files.readdir,
             files.stat,
             files.answers("read_tree"),
-            subtree_limit=256
+            subtree_limit=max(1, min(1024, room // 4096))
             if room is not None and room <= 32 * 1024 * 1024
             else None,
         )

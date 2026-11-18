@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { memoryRoom } from '../../../../io/memory.ts'
 import { matchingTree, cappedReads, searchReads } from '../search.ts'
 import { mountsOf } from '../../utils/links.ts'
@@ -27,7 +28,15 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const matches = await matchingTree(files, resolved, texts, ctx)
+  let matches: Map<string, string[]> | null
+  let queryFiles = true
+  try {
+    matches = await matchingTree(files, resolved, texts, ctx)
+  } catch (err) {
+    if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+    matches = null
+    queryFiles = false
+  }
   const room = memoryRoom()
   const [readdir, stat] =
     matches !== null
@@ -38,7 +47,9 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
           files.stat,
           files.answers('read_tree'),
           files.signal,
-          room !== null && room <= 32 * 1024 * 1024 ? 256 : undefined,
+          room !== null && room <= 32 * 1024 * 1024
+            ? Math.max(1, Math.min(1024, Math.floor(room / 4096)))
+            : undefined,
         )
   return grepGeneric(
     'grep',
@@ -48,7 +59,7 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
     stat,
     readdir,
     matches === null
-      ? await searchReads(files, 'grep', resolved, texts, ctx)
+      ? await searchReads(files, 'grep', resolved, texts, ctx, queryFiles)
       : cappedReads(files.read, resolved, mountsOf(ctx))[0],
   )
 }

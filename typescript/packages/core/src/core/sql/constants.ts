@@ -152,6 +152,7 @@ export const SQL = {
       FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)
     SELECT t.id, t.depth, t.rel, ${columns('i')}
     FROM tree t JOIN fs_inode i ON i.ino = t.ino`,
+  chunkSlice: 'SELECT substr(data, ?, ?) AS data FROM fs_data WHERE ino = ? AND chunk_index = ?',
   chunks: `SELECT chunk_index, data FROM fs_data
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index`,
   usedBytes: `SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE mode = ${String(FILE)}`,
@@ -194,7 +195,8 @@ export function clearUnder(ino: number): string[] {
 /** SQLite candidate files, including matches split across two storage rows. */
 export function candidateFiles(ignoreCase: boolean): string {
   const body = ignoreCase ? 'CAST(lower(b.data) AS BLOB)' : 'b.data'
-  const binary = ignoreCase ? "instr(b.data, X'00') > 0 OR " : ''
+  // SQLite interprets the BLOB as database-encoded text before folding case.
+  const binary = ignoreCase ? "CAST('A' AS BLOB) <> X'41' OR instr(b.data, X'00') > 0 OR " : ''
   return `WITH RECURSIVE tree(ino, rel) AS (
       SELECT ino, name FROM fs_dentry WHERE parent_ino = ?
       UNION ALL

@@ -198,6 +198,12 @@ async def test_tree_answers_each_entry_as_stat_does(accessor):
     found = await tree(accessor, PathSpec.from_str_path("/sub"))
     assert found is not None
     assert sorted(found) == ["c.txt", "d.txt", "deep", "deep/e.txt"]
+    assert (
+        await tree(accessor, PathSpec.from_str_path("/sub"), limit=3) is None
+    )
+    assert (
+        await tree(accessor, PathSpec.from_str_path("/sub"), limit=4) == found
+    )
     for rel, st in found.items():
         assert st == await stat(
             accessor, PathSpec.from_str_path("/sub/" + rel)

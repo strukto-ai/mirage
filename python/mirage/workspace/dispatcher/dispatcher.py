@@ -1579,6 +1579,8 @@ class Dispatcher:
         result = await self._perform(
             name, kwargs, caller, call, mount, boundary, mark
         )
+        if prune and result is None:
+            raise walk_declined(str(mount.vfs.name), name, call.path)
         return result, IOResult()
 
     async def _perform(

@@ -418,7 +418,7 @@ async def matching_tree(
         ):
             return None
         text = pattern_arg(texts, fl)
-        if not flags.fixed_string:
+        if not flags.fixed_string or flags.quiet:
             terms = grep_terms(flags, fl, texts, utf8_locale(ctx.env))
             text = (
                 terms.texts[0]
@@ -468,6 +468,8 @@ async def search_reads(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
+    *,
+    query_files: bool = True,
 ) -> ReadStreamFn:
     """grep's or rg's read, narrowed by the mount's search where it can.
 
@@ -495,7 +497,9 @@ async def search_reads(
         texts (list[str]): pattern arguments.
         ctx (Context): parsed invocation context.
     """
-    fl = FlagView(ctx.flags, spec=SPECS[name])
+    fl = FlagView(
+        ctx.flags, spec=SPECS["rg"] if name == "rg" else SPECS["grep"]
+    )
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):
@@ -511,7 +515,9 @@ async def search_reads(
     mounts = mounts_of(ctx)
     read, charge = capped_reads(files.read, paths if walked else [], mounts)
     containing = (
-        files.files_containing if files.answers("files_containing") else None
+        files.files_containing
+        if query_files and files.answers("files_containing")
+        else None
     )
     lines = (
         files.lines_containing if files.answers("lines_containing") else None

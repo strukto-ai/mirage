@@ -17,6 +17,7 @@ import contextlib
 import errno
 import sqlite3
 from collections.abc import AsyncIterator, Sequence
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -186,6 +187,46 @@ async def test_search_keeps_chunk_edge_matches_and_bom_files(vfs: SqlVFS):
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["UTF-16le", "UTF-16be"])
+async def test_case_insensitive_candidates_in_a_utf16_database(encoding):
+    driver = SqliteDriver()
+    try:
+        driver.query(f"PRAGMA encoding = '{encoding}'")
+        vfs = SqlVFS(driver=driver)
+        await vfs.mkdir(at("/sub"))
+        await vfs.write(at("/sub/file"), b"NEEDLE!")
+        hits = await vfs.files_containing(
+            at("/"), "needle", whole_word=False, ignore_case=True
+        )
+        assert [(hit.virtual, hit.directory) for hit in hits or []] == [
+            ("/sub/file", at("/sub/file").directory)
+        ]
+    finally:
+        driver.close()
+
+
+@pytest.mark.asyncio
+async def test_recursive_grep_walks_after_one_declined_candidate_query(
+    monkeypatch,
+):
+    vfs = SqlVFS(":memory:")
+    ws = Workspace({"/work": vfs}, mode=MountMode.WRITE)
+    try:
+        await vfs.write(at("/file"), b"needle\n")
+        candidates = AsyncMock(return_value=None)
+        monkeypatch.setattr(vfs, "files_containing", candidates)
+        result = await ws.shell("grep -rlF needle /work")
+        assert (result.stdout, result.exit_code) == (b"/work/file\n", 0)
+        candidates.assert_awaited_once()
+        candidates.reset_mock()
+        quiet = await ws.shell("grep -rqF n /work")
+        assert quiet.exit_code == 0
+        candidates.assert_not_awaited()
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

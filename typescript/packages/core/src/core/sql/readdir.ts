@@ -60,7 +60,9 @@ export async function tree(
   const rows = Number.isFinite(ceiling)
     ? await accessor.query(SQL.subtree + ' LIMIT ?', [node.ino, ceiling + 1])
     : await accessor.query(SQL.subtree, [node.ino])
-  if (rows.length > ceiling) return null
+  const remaining = memoryRoom()
+  if (rows.length > ceiling || (remaining !== null && rows.length * TREE_ENTRY_BYTES > remaining))
+    return null
   rows.sort((a, b) => compareCodePoints(String(a.rel), String(b.rel)))
   const found = new Map<string, FileStat>()
   const prefix = under(w.p)

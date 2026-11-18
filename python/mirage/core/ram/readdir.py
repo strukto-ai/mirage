@@ -12,13 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from itertools import chain
+from collections.abc import Iterator
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import norm
+from mirage.vfs.ram.store import RAMDirs, RAMFiles, RAMStore
+
+
+def keys_under(store: RAMStore, prefix: str) -> Iterator[str]:
+    for table in (store.files, store.dirs):
+        if isinstance(table, (RAMFiles, RAMDirs)):
+            yield from table.index.under(table, prefix)
+        else:
+            yield from (key for key in table if key.startswith(prefix))
 
 
 async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
@@ -42,14 +51,10 @@ async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
         raise await readdir_error(path, p, is_file, is_dir)
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
-    for key in chain(store.files, store.dirs):
-        if key == p:
-            continue
-        if key.startswith(dir_prefix):
-            remainder = key[len(dir_prefix) :]
-            child = remainder.split("/")[0]
-            if child:
-                seen.add(dir_prefix + child)
+    for key in keys_under(store, dir_prefix):
+        child = key[len(dir_prefix) :].partition("/")[0]
+        if child:
+            seen.add(dir_prefix + child)
     return sorted(seen)
 
 
@@ -80,8 +85,8 @@ async def tree(
         return None
     base = p.rstrip("/") + "/"
     found: dict[str, FileStat] = {}
-    for key in chain(store.files, store.dirs):
-        if key == p or not key.startswith(base):
+    for key in keys_under(store, base):
+        if key == p:
             continue
         if limit is not None and len(found) >= limit:
             return None

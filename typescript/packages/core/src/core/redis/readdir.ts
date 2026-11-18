@@ -72,13 +72,28 @@ export async function tree(
   const p = norm(path.mountPath)
   if (!(await store.hasDir(p))) return null
   const base = rstripSlash(p) + '/'
-  const dirs = [...(await store.listDirs())].sort(compareCodePoints)
-  const keys: [string, boolean][] = [
-    ...(await store.listFiles(base)).map((key): [string, boolean] => [key, false]),
-    ...dirs.filter((key) => key.startsWith(base)).map((key): [string, boolean] => [key, true]),
-  ].filter(([key]) => key !== p)
-  if (limit !== undefined && keys.length > limit) return null
-  const known = new Set(dirs)
+  let keys: [string, boolean][]
+  let known: Set<string>
+  if (limit === undefined) {
+    known = await store.listDirs()
+    keys = [
+      ...(await store.listFiles(base)).map((key): [string, boolean] => [key, false]),
+      ...[...known]
+        .sort(compareCodePoints)
+        .filter((key) => key.startsWith(base) && key !== p)
+        .map((key): [string, boolean] => [key, true]),
+    ]
+  } else {
+    if (store.scanPaths === undefined) return null
+    const found = new Map<string, boolean>()
+    for await (const [key, isDir] of store.scanPaths(base)) {
+      if (key === p) continue
+      if (!found.has(key) && found.size >= limit) return null
+      found.set(key, isDir)
+    }
+    keys = [...found].sort(([a], [b]) => compareCodePoints(a, b))
+    known = new Set([p, ...keys.filter(([, isDir]) => isDir).map(([key]) => key)])
+  }
   if (keys.some(([key]) => !known.has(key.slice(0, key.lastIndexOf('/')) || '/'))) return null
   const stats = await keyStats(store, keys)
   const found = new Map<string, FileStat>()

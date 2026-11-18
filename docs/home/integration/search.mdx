@@ -23,7 +23,7 @@ each line itself, so the output is the same as reading every file.
 | `rg -i`, or `rg -S` with a lowercase pattern, when the text has a `k`, an `s` or a non-ASCII letter | Asks once per way to write its case, since `rg` also matches `k` to the Kelvin sign `K` and `s` to `ſ`. `rg -i café` asks for `café`, `CAFÉ` and 14 other spellings. Reads every file when there are more than 16. |
 | `grep -i` when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k` or `s` | Usually reads every file. If a recursive fixed-string pattern is printable ASCII, SQLite can use a substring that folds safely to rule out files. |
 | `-v` or `-f FILE` | Reads every file. |
-| A pattern with no plain text of 3 or more characters, other than a `-w` or `-x` word | Usually reads every file. SQLite can also check short fixed strings for recursive `grep`. `grep 'refund.*2026'` asks the service because every match contains `refund`. |
+| A pattern with no plain text of 3 or more characters, other than a `-w` or `-x` word | Usually reads every file. SQLite can also check short fixed strings for recursive `grep`. On a mount that supports literal search, `grep -r 'refund.*2026' /work/reports` can ask the service for files in the reports directory that contain `refund`. |
 | `rg` with `--passthru`, `--files-without-match`, `--json`, `--stats`, `-z`, `-L`, `--pre COMMAND`, `-E ENCODING`, or `-c` or `--count-matches` with `--include-zero` | Reads every file. |
 
 ## Built-in VFSs
@@ -87,8 +87,9 @@ command_limits:
 
 Each recursive directory operand has a budget of 100 files. Files named
 explicitly are exempt. The 64 KiB cap applies to printed output. A large input
-can still use more memory. When the walk limit is reached, retry on a narrower
-directory to complete the search.
+can still use more memory. When the walk limit is reached, search smaller subdirectories when available.
+For a flat directory, pass explicit file paths in batches or raise the command's
+`walk_limit` and rerun the search.
 
 Each command does this past the limit:
 
