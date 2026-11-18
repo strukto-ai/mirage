@@ -271,7 +271,10 @@ FIFO_NAME = "fd"
 # exits its status follows behind ``run_exit_mark``, so the exec that runs
 # the program brings both back itself, and stdout ends what the program
 # wrote with the same status behind ``run_done_mark``, so a reader knows
-# when that output has all arrived. A shell reports
+# when that output has all arrived. A program a signal ended gets no such
+# line: its stdout may have no reader left (head took what it wanted), and
+# a machine that keeps that pipe open past its exec (kubectl) would hold the
+# wrapper on it, its words still in a scan. A shell reports
 # a child a signal ended on its stderr, so the wrapper's goes nowhere and
 # the program gets the real one back. It needs only a POSIX shell at
 # ``/bin/sh``.
@@ -281,7 +284,7 @@ RUN_WRAPPER = (
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
     'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
-    's=$?; printf "\\036mirage-done %s %s\\n" "$n" "$s"; '
+    's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$n" "$s"; '
     'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 )
 
