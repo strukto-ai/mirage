@@ -280,7 +280,7 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         )
         assert await line("sh -c 'rm /data/x'; sh -c 'sort'") == (
             126,
-            "sort: Permission denied\npolicy denied: denied by policy\n",
+            "sort: Permission denied\npolicy denied: sort is not allowed\n",
         )
     finally:
         await ws.close()
@@ -615,7 +615,7 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
             ]
         }
     )
-    (ask,) = [r for r in rule_table(rules) if r.reason == "nod"]
+    (ask,) = (r for r in rule_table(rules) if r.reason == "nod")
     gate = Admitted(
         rules=rules,
         ctx=_gate_ctx(("grep", "-r", "x", "/data")),

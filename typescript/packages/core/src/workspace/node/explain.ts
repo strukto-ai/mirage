@@ -346,7 +346,7 @@ async function explained(
     outcome:
       document === null ? Outcome.ALLOW : document.kind === 'deny' ? Outcome.DENY : Outcome.ASK,
     rule,
-    reason: rule?.reason ?? '',
+    reason: document?.reason ?? '',
     source: rule !== null ? sourceOf(rule) : document !== null ? 'commands' : '',
     matchedPath: document?.kind === 'deny' ? (document.path ?? null) : null,
     paths: ctx.paths.map((p) => p.virtual),

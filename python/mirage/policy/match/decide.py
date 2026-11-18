@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.rule import command_facts
+from mirage.policy.match.rule import command_facts, reason_of
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
@@ -59,24 +59,27 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     """
     if rules is None:
         return Ruling(Outcome.ALLOW)
-    result = admission_matcher(rules).ask(
-        "decide", facts=command_facts(ctx)
-    )
+    result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
     table = rule_table(rules)
     rule = None if result["rule"] is None else table[result["rule"]]
-    matched = result["matched_path"]
+    path = result["matched_path"]
+    fired = result["matched"]
+    matched = (
+        None
+        if fired is None
+        else Matched(
+            command=tuple(from_units(v) for v in fired["command"]),
+            flags=tuple(from_units(v) for v in fired["flags"]),
+        )
+    )
     return Ruling(
         outcome=Outcome(result["outcome"]),
         rule=rule,
-        matched_path=None if matched is None else from_units(matched),
+        matched_path=None if path is None else from_units(path),
         source="" if rule is None else source_of(rule),
         asks=tuple(table[index] for index in result["asks"]),
-        matched=None
-        if result["matched"] is None
-        else Matched(
-            command=tuple(from_units(v) for v in result["matched"]["command"]),
-            flags=tuple(from_units(v) for v in result["matched"]["flags"]),
-        ),
+        matched=matched,
+        reason="" if rule is None else reason_of(rule, matched),
     )
 
 

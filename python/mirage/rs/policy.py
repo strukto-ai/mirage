@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping
 from functools import lru_cache
 from typing import Any, TypeAlias, assert_never
 
-from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
+from mirage.policy.constants import DEFAULT_ASK_REASON
 from mirage.policy.types import (
     AdmissionRules,
     CommandNode,
@@ -200,8 +200,9 @@ def rules_wire(rules: AdmissionRules) -> Wire:
 @lru_cache(maxsize=CACHE_SIZE)
 def rule_table(rules: AdmissionRules) -> tuple[CommandRule, ...]:
     """Every leaf of a session's trees as the rule a ruling names, in
-    the order the stream numbers them; an empty reason reads as the
-    default one for the leaf's decision.
+    the order the stream numbers them. An ask with no reason reads as
+    the default one; a deny's stays empty, since what its refusal names
+    depends on the line (``reason_of``).
 
     Args:
         rules (AdmissionRules): the trees.
@@ -209,11 +210,9 @@ def rule_table(rules: AdmissionRules) -> tuple[CommandRule, ...]:
     out: list[CommandRule] = []
     for row in admission_matcher(rules).ask("rules"):
         decision = Outcome(row["decision"])
-        reason = from_units(row["reason"]) or (
-            DEFAULT_ASK_REASON
-            if decision is Outcome.ASK
-            else DEFAULT_DENY_REASON
-        )
+        reason = from_units(row["reason"])
+        if not reason and decision is Outcome.ASK:
+            reason = DEFAULT_ASK_REASON
         out.append(
             CommandRule(
                 reason=reason,

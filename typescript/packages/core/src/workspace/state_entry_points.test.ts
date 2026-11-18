@@ -1234,7 +1234,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'sort /repo/d/x')).toEqual([
       126,
       '',
-      'sort: Permission denied\npolicy denied: denied by policy\n',
+      'sort: Permission denied\npolicy denied: sort is not allowed\n',
     ])
     expect(await line(ws, 'type sort; echo $?')).toEqual([0, 'sort is /usr/bin/sort\n0\n', ''])
     expect(await line(ws, 'command -v sort; echo $?')).toEqual([0, '/usr/bin/sort\n0\n', ''])
@@ -1252,12 +1252,12 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'pwd')).toEqual([
       126,
       '',
-      'pwd: Permission denied\npolicy denied: denied by policy\n',
+      'pwd: Permission denied\npolicy denied: pwd is not allowed\n',
     ])
     expect(await line(ws, 'history')).toEqual([
       126,
       '',
-      'history: Permission denied\npolicy denied: denied by policy\n',
+      'history: Permission denied\npolicy denied: history is not allowed\n',
     ])
   })
 
@@ -1267,25 +1267,25 @@ describe('command permissions end to end', () => {
     await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     // The reviewer profile lists `cat` and not python3, whatever the
     // default profile lists; it lists `git log`, so a `git commit` line is
-    // covered by nothing (a refusal that names the program).
+    // covered by nothing (a refusal that names the line).
     expect((await line(ws, 'cat /repo/d/x', 'rev'))[0]).toBe(0)
     expect(await line(ws, 'python3 -c 1', 'rev')).toEqual([
       126,
       '',
-      'python3: Permission denied\npolicy denied: denied by policy\n',
+      'python3: Permission denied\npolicy denied: python3 is not allowed\n',
     ])
     expect((await line(ws, 'type git', 'rev'))[0]).toBe(0)
     expect(await line(ws, 'git commit -m x', 'rev')).toEqual([
       126,
       '',
-      'git: Permission denied\npolicy denied: denied by policy\n',
+      'git: Permission denied\npolicy denied: git commit is not allowed\n',
     ])
     // The verb walk normalizes the line: options before the verb are
     // not the verb, so `git -C /repo status` is `git status`.
     expect((await line(ws, 'git -C /repo status', 'rev'))[2]).not.toContain('not allowed')
     // Nested runners re-enter the chokepoint: the unlisted `rm` is
     // refused inside xargs, eval and a function body.
-    const refused = 'rm: Permission denied\npolicy denied: denied by policy\n'
+    const refused = 'rm: Permission denied\npolicy denied: rm is not allowed\n'
     expect(await line(ws, 'echo /repo/d/x | xargs rm', 'rev')).toEqual([123, '', refused])
     expect(await line(ws, "eval 'rm /repo/d/x'", 'rev')).toEqual([126, '', refused])
     expect(await line(ws, 'f() { rm /repo/d/x; }; f', 'rev')).toEqual([126, '', refused])
@@ -1627,7 +1627,7 @@ describe('command permissions end to end', () => {
     )
     open.push(ws)
     ws.registerCli('git', cliSpecFor('git'))
-    const refused = 'sort: Permission denied\npolicy denied: denied by policy\n'
+    const refused = 'sort: Permission denied\npolicy denied: sort is not allowed\n'
     expect(await line(ws, 'sort /repo/x')).toEqual([126, '', refused])
     expect(await line(ws, 'cat /repo/a | sort')).toEqual([126, '', refused])
     expect(await line(ws, 'rm /repo/x')).toEqual([
@@ -1646,7 +1646,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'git add x', 'rev')).toEqual([
       126,
       '',
-      'git: Permission denied\npolicy denied: denied by policy\n',
+      'git: Permission denied\npolicy denied: git add is not allowed\n',
     ])
     expect((await line(ws, 'git status', 'rev'))[0]).toBe(0)
     expect(box.lines).toEqual(['cat /repo/a | wc -l', 'git status'])

@@ -72,7 +72,7 @@ async def test_a_closed_root_refuses_every_command_it_names_no_allow_for():
     deny = await _judge(policy, "rm", "/x", session="rev")
     assert isinstance(deny, Deny)
     assert deny.rule is not None and deny.rule.at == "/*"
-    assert deny.reason == "denied by policy"
+    assert deny.reason == "rm is not allowed"
     assert await _judge(policy, "cd", "/x", session="rev", tool=False) is None
 
 

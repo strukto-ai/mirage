@@ -21,7 +21,7 @@ import {
   type CommandRule,
   type Ruling,
 } from '../types.ts'
-import { commandFacts } from './rule.ts'
+import { commandFacts, reasonOf } from './rule.ts'
 
 /**
  * Where in the document a leaf was written, as a host reads it: the
@@ -65,6 +65,7 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       source: '',
       asks: [],
       matched: null,
+      reason: '',
     }
   const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as {
     readonly outcome: Outcome
@@ -80,18 +81,20 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
     return rule
   }
   const rule = answer.rule === null ? null : ruleAt(answer.rule)
+  const matched =
+    answer.matched === null
+      ? null
+      : {
+          command: answer.matched.command.map(fromUnits),
+          flags: answer.matched.flags.map(fromUnits),
+        }
   return {
     outcome: answer.outcome,
     rule,
     matchedPath: answer.matched_path === null ? null : fromUnits(answer.matched_path),
     source: rule === null ? '' : sourceOf(rule),
     asks: answer.asks.map(ruleAt),
-    matched:
-      answer.matched === null
-        ? null
-        : {
-            command: answer.matched.command.map(fromUnits),
-            flags: answer.matched.flags.map(fromUnits),
-          },
+    matched,
+    reason: rule === null ? '' : reasonOf(rule, matched),
   }
 }

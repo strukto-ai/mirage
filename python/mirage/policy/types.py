@@ -145,7 +145,8 @@ class CommandRule:
     host it asked about, in ``commands`` or ``paths``.
 
     Args:
-        reason (str): why, carried on the refusal or the ask.
+        reason (str): why, carried on the refusal or the ask; empty on
+            a deny leaf that wrote none, whose refusal names what fired.
         decision (Outcome): what the leaf decides; ASK for a coded Ask's
             rule.
         at (str): the leaf's place, a JSON Pointer over the canonical
@@ -211,6 +212,10 @@ class Ruling:
             the ask written for it. One entry is the ordinary case.
         matched (Matched | None): the subcommand path and options that
             fired; None on ALLOW.
+        reason (str): why the line is refused or asked, as the refusal
+            carries it: the leaf's reason, else for a deny the words
+            that fired (``rm --recursive is not allowed``). Empty on
+            ALLOW.
     """
 
     outcome: Outcome
@@ -219,6 +224,7 @@ class Ruling:
     source: str = ""
     asks: tuple[CommandRule, ...] = ()
     matched: Matched | None = None
+    reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)

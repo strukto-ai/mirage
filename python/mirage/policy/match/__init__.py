@@ -25,7 +25,9 @@ from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
     naming_rules,
+    not_allowed,
     operand_paths,
+    reason_of,
     skipped_at_dispatch,
 )
 from mirage.policy.types import Outcome, Ruling
@@ -41,7 +43,9 @@ __all__ = [
     "io_refusal",
     "line_tokens",
     "naming_rules",
+    "not_allowed",
     "operand_paths",
+    "reason_of",
     "runs",
     "reads_args",
     "scopes_paths",

@@ -279,7 +279,7 @@ async def _explained(
             else Outcome.ALLOW
         ),
         rule=rule,
-        reason=rule.reason if rule is not None else "",
+        reason=document.reason if document is not None else "",
         source=(
             source_of(rule)
             if rule is not None

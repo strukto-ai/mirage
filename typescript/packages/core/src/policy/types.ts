@@ -117,7 +117,9 @@ export interface Route {
  * longer holds. A coded Ask's rule names the program, path, line or host
  * it asked about, in `commands` or `paths`. `decision` absent reads as
  * ASK, `at` and `mount` absent as empty: a profile's top-level tree and
- * inline permissions carry no mount. Mirrors the Python `CommandRule`.
+ * inline permissions carry no mount. `reason` is empty on a deny leaf
+ * that wrote none, whose refusal names what fired. Mirrors the Python
+ * `CommandRule`.
  */
 export interface CommandRule {
   reason: string
@@ -170,6 +172,12 @@ export interface Ruling {
   readonly asks: readonly CommandRule[]
   /** The subcommand path and options that fired; null on ALLOW. */
   readonly matched: Matched | null
+  /**
+   * Why the line is refused or asked, as the refusal carries it: the
+   * leaf's reason, else for a deny the words that fired
+   * (`rm --recursive is not allowed`). Empty on ALLOW.
+   */
+  readonly reason: string
 }
 
 /**

@@ -37,7 +37,7 @@ import {
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
-import { ioReach, ioRefusal, namingRules } from '../../policy/match/rule.ts'
+import { ioReach, ioRefusal, namingRules, notAllowed } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import { type CommandNode, CommandWord, type EntryGate } from '../../policy/types.ts'
 import type { Encoded } from '../../rs/policy.ts'
@@ -531,7 +531,7 @@ export async function gate(
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
-      reason: `${reading.program.join(' ')} is not allowed`,
+      reason: notAllowed(reading.program),
       policy: PermissionsPolicy.name,
     })
   }

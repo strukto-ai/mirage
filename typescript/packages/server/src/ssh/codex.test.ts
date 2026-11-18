@@ -738,7 +738,7 @@ describe('codex-exec', () => {
     const [, err, code] = await client.run('q', 'cat /etc')
     expect(allowed).toEqual(['hi\n', '', 0])
     expect(code).not.toBe(0)
-    expect(err.endsWith('policy denied: denied by policy\n')).toBe(true)
+    expect(err.endsWith('policy denied: cat is not allowed\n')).toBe(true)
   })
 
   it('closes its session when the channel ends', async () => {

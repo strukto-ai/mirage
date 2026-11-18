@@ -56,9 +56,9 @@ class PermissionsPolicy(Policy):
         rule = decision.rule
         assert rule is not None
         if decision.outcome is Outcome.ASK:
-            return Ask(rule.reason, rule, decision.asks)
+            return Ask(decision.reason, rule, decision.asks)
         return Deny(
-            rule.reason,
+            decision.reason,
             path=decision.matched_path,
             rule=rule,
             matched=decision.matched,

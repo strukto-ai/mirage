@@ -809,7 +809,7 @@ async def test_a_command_the_key_profile_allows_runs(tmp_path):
         await stop_harness(harness)
     assert allowed == (b"hi\n", b"", 0)
     assert code != 0
-    assert err.endswith(b"policy denied: denied by policy\n")
+    assert err.endswith(b"policy denied: cat is not allowed\n")
 
 
 @pytest.mark.asyncio

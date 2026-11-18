@@ -67,7 +67,7 @@ describe('PermissionsPolicy', () => {
     const deny = judge(p, ['rm', '/x'], { session: 'rev' })
     expect(deny?.kind).toBe('deny')
     expect(deny?.kind === 'deny' ? deny.rule?.at : null).toBe('/*')
-    expect(deny?.reason).toBe('denied by policy')
+    expect(deny?.reason).toBe('rm is not allowed')
     expect(judge(p, ['cd', '/x'], { session: 'rev', tool: false })).toBeNull()
   })
 

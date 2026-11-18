@@ -244,7 +244,7 @@ describe('admission', () => {
     ])
     expect(await line("sh -c 'rm /data/x'; sh -c 'sort'")).toEqual([
       126,
-      'sort: Permission denied\npolicy denied: denied by policy\n',
+      'sort: Permission denied\npolicy denied: sort is not allowed\n',
     ])
   })
 

@@ -13,20 +13,55 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from mirage.commands.spec.types import WordKind
+from mirage.policy.constants import DEFAULT_DENY_REASON
 from mirage.policy.match.allow import line_tokens
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRead,
     CommandRule,
+    Outcome,
 )
 from mirage.rs.document import units
 from mirage.rs.policy import Encoded, admission_matcher, rule_table
-from mirage.types import PathSpec
+from mirage.types import Matched, PathSpec
+
+
+def not_allowed(words: Sequence[str]) -> str:
+    """The reason a refusal gives when nothing wrote one: the words
+    that fired, ``rm --recursive is not allowed``.
+
+    Args:
+        words (Sequence[str]): the command path and options that fired.
+    """
+    return f"{' '.join(words)} is not allowed"
+
+
+def reason_of(rule: CommandRule, matched: Matched | None) -> str:
+    """Why a leaf refuses or asks: the reason written on it, else, for
+    a deny that covers every path, the command path and options that
+    fired (``rm --recursive is not allowed``), else the default.
+
+    A deny scoped to paths keeps the default: the line's own error
+    names the path it refused.
+
+    Args:
+        rule (CommandRule): the leaf that spoke.
+        matched (Matched | None): what fired; None when unknown.
+    """
+    if rule.reason:
+        return rule.reason
+    if (
+        rule.decision is Outcome.DENY
+        and not rule.paths
+        and matched is not None
+    ):
+        return not_allowed((*matched.command, *matched.flags))
+    return DEFAULT_DENY_REASON
 
 
 def operand_paths(ctx: CommandContext) -> list[PathSpec]:
@@ -184,7 +219,7 @@ def io_refusal(
         path=units(virtual),
         granted=[i for i, rule in enumerate(table) if rule in granted],
     )
-    return None if result is None else table[result].reason
+    return None if result is None else reason_of(table[result], None)
 
 
 def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:

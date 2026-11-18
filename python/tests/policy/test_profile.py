@@ -875,7 +875,7 @@ async def test_allow_list_refuses_unlisted_tools_and_hides_nothing():
         assert await _line(ws, "sort /repo/d/x") == (
             126,
             "",
-            "sort: Permission denied\npolicy denied: denied by policy\n",
+            "sort: Permission denied\npolicy denied: sort is not allowed\n",
         )
         assert await _line(ws, "type sort; echo $?") == (
             0,
@@ -906,12 +906,12 @@ async def test_allow_list_refuses_unlisted_tools_and_hides_nothing():
         assert await _line(ws, "pwd") == (
             126,
             "",
-            "pwd: Permission denied\npolicy denied: denied by policy\n",
+            "pwd: Permission denied\npolicy denied: pwd is not allowed\n",
         )
         assert await _line(ws, "history") == (
             126,
             "",
-            "history: Permission denied\npolicy denied: denied by policy\n",
+            "history: Permission denied\npolicy denied: history is not allowed\n",
         )
     finally:
         await ws.close()
@@ -925,18 +925,18 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
         await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
         # The reviewer profile lists `cat` and not python3, whatever the
         # default profile lists; it lists `git log`, so a `git commit`
-        # line is covered by nothing (a refusal that names the program).
+        # line is covered by nothing (a refusal that names the line).
         assert (await _line(ws, "cat /repo/d/x", "rev"))[0] == 0
         assert await _line(ws, "python3 -c 1", "rev") == (
             126,
             "",
-            "python3: Permission denied\npolicy denied: denied by policy\n",
+            "python3: Permission denied\npolicy denied: python3 is not allowed\n",
         )
         assert (await _line(ws, "type git", "rev"))[0] == 0
         assert await _line(ws, "git commit -m x", "rev") == (
             126,
             "",
-            "git: Permission denied\npolicy denied: denied by policy\n",
+            "git: Permission denied\npolicy denied: git commit is not allowed\n",
         )
         # The verb walk normalizes the line: options before the verb are
         # not the verb, so `git -C /repo status` is `git status`.
@@ -944,7 +944,7 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
         assert "not allowed" not in err
         # Nested runners re-enter the chokepoint: the unlisted `rm` is
         # refused inside xargs, eval and a function body.
-        refused = "rm: Permission denied\npolicy denied: denied by policy\n"
+        refused = "rm: Permission denied\npolicy denied: rm is not allowed\n"
         assert await _line(ws, "echo /repo/d/x | xargs rm", "rev") == (
             123,
             "",
@@ -1414,7 +1414,9 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
     )
     ws.register_cli("git", cli_spec_for("git"))
     try:
-        refused = "sort: Permission denied\npolicy denied: denied by policy\n"
+        refused = (
+            "sort: Permission denied\npolicy denied: sort is not allowed\n"
+        )
         assert await _line(ws, "sort /repo/x") == (126, "", refused)
         assert await _line(ws, "cat /repo/a | sort") == (126, "", refused)
         assert await _line(ws, "rm /repo/x") == (
@@ -1439,7 +1441,7 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         assert await _line(ws, "git add x", "rev") == (
             126,
             "",
-            "git: Permission denied\npolicy denied: denied by policy\n",
+            "git: Permission denied\npolicy denied: git add is not allowed\n",
         )
         assert (await _line(ws, "git status", "rev"))[0] == 0
         assert box.lines == ["cat /repo/a | wc -l", "git status"]

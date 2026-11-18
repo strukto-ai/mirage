@@ -16,10 +16,40 @@ import type { util } from 'zod'
 import { WordKind } from '../../commands/spec/types.ts'
 import { units } from '../../rs/document.ts'
 import { admissionMatcher, Encoded, ruleTable } from '../../rs/policy.ts'
-import type { PathSpec } from '../../types.ts'
+import type { Matched, PathSpec } from '../../types.ts'
+import { DEFAULT_DENY_REASON } from '../constants.ts'
 import { sameRule } from '../decisions.ts'
-import type { AdmissionRules, CommandContext, CommandRead, CommandRule } from '../types.ts'
+import {
+  Outcome,
+  type AdmissionRules,
+  type CommandContext,
+  type CommandRead,
+  type CommandRule,
+} from '../types.ts'
 import { lineTokens } from './allow.ts'
+
+/**
+ * The reason a refusal gives when nothing wrote one: the words that
+ * fired, `rm --recursive is not allowed`.
+ */
+export function notAllowed(words: readonly string[]): string {
+  return `${words.join(' ')} is not allowed`
+}
+
+/**
+ * Why a leaf refuses or asks: the reason written on it, else, for a deny
+ * that covers every path, the command path and options that fired
+ * (`rm --recursive is not allowed`), else the default. A deny scoped to
+ * paths keeps the default: the line's own error names the path it
+ * refused. `matched` is null when what fired is unknown.
+ */
+export function reasonOf(rule: CommandRule, matched: Matched | null): string {
+  if (rule.reason !== '') return rule.reason
+  if (rule.decision === Outcome.DENY && (rule.paths ?? []).length === 0 && matched !== null) {
+    return notAllowed([...matched.command, ...matched.flags])
+  }
+  return DEFAULT_DENY_REASON
+}
 
 /**
  * The paths a command's operands name, in order: what `rm -r` removes or
@@ -145,7 +175,7 @@ export function ioRefusal(
   if (id === null) return null
   const rule = table[id]
   if (rule === undefined) throw new Error('Invalid policy rule reply')
-  return rule.reason
+  return reasonOf(rule, null)
 }
 
 /**

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from '../policy/constants.ts'
+import { DEFAULT_ASK_REASON } from '../policy/constants.ts'
 import {
   type AdmissionRules,
   type CommandNode,
@@ -142,8 +142,9 @@ const tables = new WeakMap<AdmissionRules, readonly CommandRule[]>()
 
 /**
  * Every leaf of a session's trees as the rule a ruling names, in the
- * order the stream numbers them; an empty reason reads as the default one
- * for the leaf's decision. Mirrors Python's rule_table.
+ * order the stream numbers them. An ask with no reason reads as the
+ * default one; a deny's stays empty, since what its refusal names depends
+ * on the line (`reasonOf`). Mirrors Python's rule_table.
  */
 export function ruleTable(rules: AdmissionRules): readonly CommandRule[] {
   const held = tables.get(rules)
@@ -153,12 +154,7 @@ export function ruleTable(rules: AdmissionRules): readonly CommandRule[] {
     rows.map((row): CommandRule => {
       const reason = fromUnits(row.reason)
       return {
-        reason:
-          reason !== ''
-            ? reason
-            : row.decision === Outcome.ASK
-              ? DEFAULT_ASK_REASON
-              : DEFAULT_DENY_REASON,
+        reason: reason === '' && row.decision === Outcome.ASK ? DEFAULT_ASK_REASON : reason,
         decision: row.decision,
         at: fromUnits(row.at),
         paths: row.paths.map(fromUnits),

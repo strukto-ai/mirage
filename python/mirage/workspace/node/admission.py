@@ -47,6 +47,7 @@ from mirage.policy.match import (
     io_reach,
     io_refusal,
     naming_rules,
+    not_allowed,
 )
 from mirage.policy.policies import command_route, settled
 from mirage.policy.types import CommandNode
@@ -622,7 +623,7 @@ async def gate(
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(
-            f"{' '.join(reading.program)} is not allowed",
+            not_allowed(reading.program),
             policy=PermissionsPolicy.__name__,
         )
         answers = (refused, *answers)

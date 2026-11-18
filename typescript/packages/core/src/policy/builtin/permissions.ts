@@ -46,10 +46,10 @@ export class PermissionsPolicy implements Policy {
     const rule = decision.rule
     if (rule === null) throw new Error('a tree refused a line with no leaf')
     if (decision.outcome === Outcome.ASK) {
-      return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
+      return { kind: 'ask', reason: decision.reason, rule, rules: decision.asks }
     }
     const path = decision.matchedPath === null ? {} : { path: decision.matchedPath }
     const matched = decision.matched === null ? {} : { matched: decision.matched }
-    return { kind: 'deny', reason: rule.reason, ...path, rule, ...matched }
+    return { kind: 'deny', reason: decision.reason, ...path, rule, ...matched }
   }
 }
