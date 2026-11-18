@@ -159,31 +159,32 @@ export class WalkBudget {
 // root ('' for the root itself). A directory a deeper key implies is added to
 // `found` as a bare one. Mirrors Python's `_listings`.
 function listings(found: Map<string, FileStat>): Map<string, string[]> {
-  const children = new Map<string, Set<string>>([['', new Set()]])
+  const children = new Map<string, string[]>([['', []]])
   for (const [key, st] of found) {
-    const parts = key.split('/')
-    for (let depth = 1; depth <= parts.length; depth++) {
-      const parent = parts.slice(0, depth - 1).join('/')
-      const rel = parts.slice(0, depth).join('/')
-      let set = children.get(parent)
-      if (set === undefined) {
-        set = new Set()
-        children.set(parent, set)
+    if (children.has(key)) continue
+    if (st.type === FileType.DIRECTORY) children.set(key, [])
+    let rel = key
+    for (;;) {
+      const parent = rel.slice(0, Math.max(0, rel.lastIndexOf('/')))
+      const siblings = children.get(parent)
+      if (siblings !== undefined) {
+        siblings.push(rel)
+        break
       }
-      set.add(rel)
-    }
-    if (st.type === FileType.DIRECTORY && !children.has(key)) children.set(key, new Set())
-  }
-  for (const rel of children.keys()) {
-    if (rel !== '' && !found.has(rel)) {
-      found.set(rel, new FileStat({ name: rel.split('/').pop() ?? rel, type: FileType.DIRECTORY }))
+      children.set(parent, [rel])
+      rel = parent
     }
   }
-  const out = new Map<string, string[]>()
   for (const [rel, names] of children) {
-    out.set(rel, [...names].sort(compareCodePoints))
+    names.sort(compareCodePoints)
+    if (rel !== '' && !found.has(rel)) {
+      found.set(
+        rel,
+        new FileStat({ name: rel.slice(rel.lastIndexOf('/') + 1), type: FileType.DIRECTORY }),
+      )
+    }
   }
-  return out
+  return children
 }
 
 /**
@@ -248,7 +249,8 @@ async function level(
  * call, so a walk the mount reads no subtree for, or one a depth bounds,
  * stats no child on its own either. A listing a limit cuts is read again
  * under the next one, as `readdir` would be. `whole` false reads levels only,
- * for a walk a depth bounds or a single listing. Mirrors Python's
+ * for a walk a depth bounds or a single listing. A serial depth-first walk
+ * with a subtree limit keeps only complete, bounded batches and their ancestors. Mirrors Python's
  * `tree_walk`.
  *
  * An answer from the tree resolves in a microtask, so the walk spends a
@@ -261,12 +263,14 @@ export function treeWalk<D, S>(
   stat: WalkCall<S>,
   whole = true,
   signal?: AbortSignal,
+  subtreeLimit?: number,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
   const budget = new YieldBudget(signal)
   const roots = new Map<string, [Map<string, FileStat>, Map<string, string[]>]>()
   const levels = new Map<string, [Map<string, FileStat>, string[]] | null>()
   const asked = new Set<string>()
+  const ancestors: string[] = []
   const covering = (virtual: string): [string, string] | null => {
     for (const root of roots.keys()) {
       if (virtual === root) return [root, '']
@@ -278,17 +282,35 @@ export function treeWalk<D, S>(
   const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
     await budget.run()
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
+    if (subtreeLimit !== undefined) {
+      let last = ancestors.at(-1)
+      while (
+        last !== undefined &&
+        last !== virtual &&
+        !virtual.startsWith(last === '/' ? '/' : last + '/')
+      ) {
+        ancestors.pop()
+        levels.delete(last)
+        roots.delete(last)
+        asked.delete(last)
+        last = ancestors.at(-1)
+      }
+      if (last !== virtual) ancestors.push(virtual)
+    }
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && whole && !asked.has(virtual) && path.pattern === null) {
       asked.add(virtual)
       let found: Map<string, FileStat> | null
       try {
-        found = await readTree(path, limit)
+        found = await readTree(
+          path,
+          limit === undefined ? subtreeLimit : Math.min(limit, subtreeLimit ?? limit),
+        )
       } catch (err) {
         if ((err as Partial<WalkDeclinedError>).declined !== true && !isEnotdir(err)) throw err
         found = null
       }
-      if (found !== null) {
+      if (found !== null && (subtreeLimit === undefined || found.size <= subtreeLimit)) {
         const copy = new Map(found)
         roots.set(virtual, [copy, listings(copy)])
         hit = [virtual, '']

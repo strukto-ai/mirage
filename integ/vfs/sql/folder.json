@@ -13,6 +13,13 @@
       "targets": ["sql-folder"],
       "command": "printf k > /db/keep && printf w > /work/w && mkdir -p /db/work/sub && ls -F /work && ls -F /db",
       "expect": { "exit": 0, "stdout": "a.txt\nb.txt\nsub/\nw\nkeep\nwork/\n", "stderr": "" }
+    },
+    {
+      "id": "sql_recursive_grep_finds_a_folded_literal_only_in_its_folder",
+      "seq": 3,
+      "targets": ["sql-folder"],
+      "command": "mkdir -p /work/review/sub && echo Needle > /db/outside && echo other > /work/review/a && printf 'first\nNeedle\n' > /work/review/sub/b && grep -rinF needle /work/review",
+      "expect": { "exit": 0, "stdout": "/work/review/sub/b:2:Needle\n", "stderr": "" }
     }
   ]
 }

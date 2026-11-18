@@ -12,11 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import norm
+from mirage.vfs.ram.store import RAMDirs, RAMFiles, RAMStore
+
+
+def keys_under(
+    store: RAMStore, prefix: str, limit: int | None = None
+) -> Iterator[str]:
+    for table in (store.files, store.dirs):
+        if isinstance(table, (RAMFiles, RAMDirs)):
+            yield from table.index.under(table, prefix, limit)
+        else:
+            yield from (key for key in table if key.startswith(prefix))
 
 
 async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
@@ -40,14 +53,10 @@ async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
         raise await readdir_error(path, p, is_file, is_dir)
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
-    for key in list(store.files) + list(store.dirs):
-        if key == p:
-            continue
-        if key.startswith(dir_prefix):
-            remainder = key[len(dir_prefix) :]
-            child = remainder.split("/")[0]
-            if child:
-                seen.add(dir_prefix + child)
+    for key in keys_under(store, dir_prefix):
+        child = key[len(dir_prefix) :].partition("/")[0]
+        if child:
+            seen.add(dir_prefix + child)
     return sorted(seen)
 
 
@@ -61,7 +70,7 @@ async def readdir(accessor: RAMAccessor, path: PathSpec) -> list[FileStat]:
 
 
 async def tree(
-    accessor: RAMAccessor, path: PathSpec
+    accessor: RAMAccessor, path: PathSpec, limit: int | None = None
 ) -> dict[str, FileStat] | None:
     """Every key under a directory, each as ``stat`` answers it; None
     when ``path`` is no directory, or when a key's parent is none (a
@@ -77,15 +86,14 @@ async def tree(
     if p not in store.dirs:
         return None
     base = p.rstrip("/") + "/"
-    keys = [
-        key
-        for key in [*store.files, *store.dirs]
-        if key.startswith(base) and key != p
-    ]
-    if any((key.rsplit("/", 1)[0] or "/") not in store.dirs for key in keys):
-        return None
     found: dict[str, FileStat] = {}
-    for key in keys:
+    for key in keys_under(store, base, limit):
+        if key == p:
+            continue
+        if limit is not None and len(found) >= limit:
+            return None
+        if (key.rsplit("/", 1)[0] or "/") not in store.dirs:
+            return None
         entry = key_stat(store, key)
         if entry is not None:
             found[key[len(base) :]] = entry

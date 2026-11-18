@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import threading
-from collections.abc import Iterable, Iterator, MutableMapping
+from collections.abc import Iterable, Iterator, MutableMapping, MutableSet
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import Protocol, TypedDict, TypeVar, overload
 
+from mirage.utils.key_prefix import sorted_prefix
 from mirage.vfs.capacity import StorageUsage
 
 _T = TypeVar("_T")
@@ -60,6 +62,61 @@ class _FileStore(Protocol):
     def pop(self, key: str, default: _T, /) -> bytes | _T: ...
 
 
+class _KeyIndex:
+    """A sorted view of the key table, rebuilt only after membership changes."""
+
+    def __init__(self) -> None:
+        self.ordered: list[str] | None = None
+        self.lock = threading.Lock()
+
+    def under(
+        self, keys: Iterable[str], prefix: str, limit: int | None
+    ) -> Iterator[str]:
+        if prefix == "/":
+            with self.lock:
+                snapshot = list(
+                    keys if limit is None else islice(keys, max(0, limit) + 2)
+                )
+            yield from snapshot
+            return
+        with self.lock:
+            if self.ordered is None:
+                self.ordered = sorted(keys)
+            ordered = self.ordered
+        yield from sorted_prefix(ordered, prefix)
+
+
+class RAMDirs(MutableSet[str]):
+    def __init__(self, keys: Iterable[str] = ("/",)) -> None:
+        self._keys = set(keys)
+        self.index = _KeyIndex()
+
+    def __contains__(self, key: _T) -> bool:
+        return key in self._keys
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._keys)
+
+    def add(self, key: str) -> None:
+        with self.index.lock:
+            if key not in self._keys:
+                self.index.ordered = None
+                self._keys.add(key)
+
+    def discard(self, key: str) -> None:
+        with self.index.lock:
+            if key in self._keys:
+                self.index.ordered = None
+                self._keys.discard(key)
+
+    def update(self, keys: Iterable[str]) -> None:
+        for key in keys:
+            self.add(key)
+
+
 class RAMFiles(MutableMapping[str, bytes]):
     """A RAM store's file table, keeping ``held`` equal to the bytes it
     holds, and ``usage.used`` too when a capacity caps the store.
@@ -80,7 +137,8 @@ class RAMFiles(MutableMapping[str, bytes]):
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
         self._data: dict[str, bytes | bytearray] = {}
-        self._lock = threading.Lock()
+        self.index = _KeyIndex()
+        self._lock = self.index.lock
         self.usage = usage
         self.held = 0
 
@@ -102,6 +160,8 @@ class RAMFiles(MutableMapping[str, bytes]):
     def __setitem__(self, key: str, value: bytes) -> None:
         with self._lock:
             delta = len(value) - self.size(key)
+            if key not in self._data:
+                self.index.ordered = None
             self._data[key] = bytes(value)
         self._count(delta)
 
@@ -139,6 +199,8 @@ class RAMFiles(MutableMapping[str, bytes]):
             data (bytes): the bytes to write.
         """
         with self._lock:
+            if key not in self._data:
+                self.index.ordered = None
             buffer = self._data.setdefault(key, b"")
             if not data:
                 return
@@ -153,6 +215,7 @@ class RAMFiles(MutableMapping[str, bytes]):
     def __delitem__(self, key: str) -> None:
         with self._lock:
             delta = -len(self._data.pop(key))
+            self.index.ordered = None
         self._count(delta)
 
     def __iter__(self) -> Iterator[str]:
@@ -165,6 +228,7 @@ class RAMFiles(MutableMapping[str, bytes]):
         usage = self.usage
         with usage.lock if usage is not None else nullcontext(), self._lock:
             self._data.clear()
+            self.index.ordered = None
             self.held = 0
             if usage is not None:
                 usage.used = 0
@@ -173,7 +237,7 @@ class RAMFiles(MutableMapping[str, bytes]):
 @dataclass
 class RAMStore:
     files: _FileStore = field(default_factory=RAMFiles)
-    dirs: set[str] = field(default_factory=lambda: {"/"})
+    dirs: set[str] | RAMDirs = field(default_factory=RAMDirs)
     modified: dict[str, str] = field(default_factory=dict)
     # Per-path metadata set via setattr (mode/uid/gid/atime); stored, not
     # enforced: mount mode does real access control.

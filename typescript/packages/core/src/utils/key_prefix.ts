@@ -15,6 +15,23 @@
 import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
 import { PathSpec } from '../types.ts'
 import { QUOTED_CHARS } from './fnmatch.ts'
+import { compareCodePoints } from './sort.ts'
+
+/** Iterate a prefix range in already sorted keys. */
+export function* sortedPrefix(keys: readonly string[], prefix: string): IterableIterator<string> {
+  let lo = 0
+  let hi = keys.length
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (compareCodePoints(keys[mid] ?? '', prefix) < 0) lo = mid + 1
+    else hi = mid
+  }
+  for (let i = lo; i < keys.length; i++) {
+    const key = keys[i]
+    if (!key?.startsWith(prefix)) break
+    yield key
+  }
+}
 
 /**
  * Normalize a key prefix, the one rule every object-key backend applies on

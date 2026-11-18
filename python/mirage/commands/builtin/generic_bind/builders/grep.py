@@ -18,9 +18,15 @@ from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import facts, grep_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
-from mirage.commands.builtin.generic_bind.search import search_reads
+from mirage.commands.builtin.generic_bind.search import (
+    capped_reads,
+    matching_tree,
+    search_reads,
+)
+from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
+from mirage.io.memory import memory_room
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,13 +39,26 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths) if paths else []
-    read = await search_reads(files, "grep", resolved, texts, ctx)
-    readdir, stat = tree_walk(
-        files.read_tree,
-        files.readdir,
-        files.stat,
-        files.answers("read_tree"),
-    )
+    matches = await matching_tree(files, resolved, texts, ctx)
+    if matches is None:
+        read = await search_reads(files, "grep", resolved, texts, ctx)
+        room = memory_room()
+        readdir, stat = tree_walk(
+            files.read_tree,
+            files.readdir,
+            files.stat,
+            files.answers("read_tree"),
+            subtree_limit=max(1, min(1024, room // 4096))
+            if room is not None and room <= 32 * 1024 * 1024
+            else None,
+        )
+    else:
+
+        async def listing(path: PathSpec) -> list[str]:
+            return matches.get(path.virtual, [])
+
+        readdir, stat = listing, files.stat
+        read, _ = capped_reads(files.read, resolved, mounts_of(ctx))
     return await grep_generic(
         resolved,
         texts,

@@ -21,9 +21,9 @@ each line itself, so the output is the same as reading every file.
 | `grep` or `rg` on one file, alone or with `-c`, `-l`, `-q`, `-o`, `-m N`, `-i`, `-w`, `-x`, `-F`, `-r` or `grep -L` | Asks the service for the lines that may hold the text and matches only those. The file is never read. |
 | `grep` or `rg` on one file with `-n`, `-b`, `-A N`, `-B N`, `-C N`, more than one pattern (`-e a -e b`, `'a\|b'`), `grep -z`, `rg --null-data`, `rg --column`, `rg --vimgrep` or `rg -U` | Asks for the lines, and reads the file only when they hold a match. |
 | `rg -i`, or `rg -S` with a lowercase pattern, when the text has a `k`, an `s` or a non-ASCII letter | Asks once per way to write its case, since `rg` also matches `k` to the Kelvin sign `K` and `s` to `ſ`. `rg -i café` asks for `café`, `CAFÉ` and 14 other spellings. Reads every file when there are more than 16. |
-| `grep -i` when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k` or `s` | Reads every file. |
+| `grep -i` when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k` or `s` | Usually reads every file. If a recursive fixed-string pattern is printable ASCII, SQLite can use a substring that folds safely to rule out files. |
 | `-v` or `-f FILE` | Reads every file. |
-| A pattern with no plain text of 3 or more characters, other than a `-w` or `-x` word | Reads every file. `grep 'refund.*2026'` asks, since every match contains `refund`. |
+| A pattern with no plain text of 3 or more characters, other than a `-w` or `-x` word | Usually reads every file. SQLite can also check short fixed strings for recursive `grep`. On a mount that supports literal search, `grep -r 'refund.*2026' /work/reports` can ask the service for files in the reports directory that contain `refund`. |
 | `rg` with `--passthru`, `--files-without-match`, `--json`, `--stats`, `-z`, `-L`, `--pre COMMAND`, `-E ENCODING`, or `-c` or `--count-matches` with `--include-zero` | Reads every file. |
 
 ## Built-in VFSs
@@ -32,6 +32,7 @@ These VFSs answer `grep -r` and `rg` with their service's search.
 
 | VFS | Searches | Can miss a match |
 | --- | --- | --- |
+| [SQL with SQLite](/python/vfs/sql) | Printable ASCII literals. Mirage checks candidate files with its usual matcher and falls back to a walk when the query returns more than 512 candidates. | No |
 | <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/python/vfs/gdrive#integration) | Whole words (`-w`, `-x`) | Docs, Sheets and Slides JSON, office files, PDFs, archives, the end of large files, recent writes |
 | <img noZoom src="/images/gdocs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Docs](/python/vfs/gdocs#integration), <img noZoom src="/images/gsheets-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Sheets](/python/vfs/gsheets#integration), <img noZoom src="/images/gslides-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slides](/python/vfs/gslides#integration) | Whole words | Words only in non-text values (fonts, links, formulas) or split by styling |
 | <img noZoom src="/images/gcal-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Calendar](/python/vfs/gcal#integration) | Whole words | No |
@@ -74,6 +75,21 @@ command, such as `find`, changes only how far that command walks.
 It is 1000 unless the VFS starts at another value or a `command_limits` entry
 sets it. Built-in VFSs start at 1000, or 5000 on GitHub, where each file is one
 request, and 10000 on disk, RAM and OPFS.
+
+A review workspace can allow repo-wide searches while limiting file reads and
+output per search with this configuration.
+
+```yaml
+command_limits:
+  grep: {walk_limit: 100, max_bytes: 65536, on_exceed: error}
+  rg: {walk_limit: 100, max_bytes: 65536, on_exceed: error}
+```
+
+Each recursive directory operand has a budget of 100 files. Files named
+explicitly are exempt. The 64 KiB cap applies to printed output. A large input
+can still use more memory. When the walk limit is reached, search smaller subdirectories when available.
+For a flat directory, pass explicit file paths in batches or raise the command's
+`walk_limit` and rerun the search.
 
 Each command does this past the limit:
 

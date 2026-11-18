@@ -23,7 +23,13 @@ import {
 /** What a Durable Object's `ctx.storage` offers the driver: its SQLite and a sync transaction. */
 export interface DurableObjectStorageLike {
   readonly sql: {
-    exec(query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] }
+    exec(
+      query: string,
+      ...bindings: unknown[]
+    ): {
+      toArray(): Record<string, unknown>[]
+      [Symbol.iterator]?(): IterableIterator<Record<string, unknown>>
+    }
   }
   transactionSync<T>(fn: () => T): T
 }
@@ -88,12 +94,11 @@ export class DurableObjectSqlDriver implements SqlDriver {
   ) {}
 
   query(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
-    return Promise.resolve(
-      this.storage.sql
-        .exec(sql, ...params.map(bind))
-        .toArray()
-        .map(row),
-    )
+    const cursor = this.storage.sql.exec(sql, ...params.map(bind))
+    const iterator = cursor[Symbol.iterator]
+    const rows =
+      iterator === undefined ? cursor.toArray() : { [Symbol.iterator]: () => iterator.call(cursor) }
+    return Promise.resolve(Array.from(rows, row))
   }
 
   batch(statements: readonly SqlStatement[]): Promise<void> {

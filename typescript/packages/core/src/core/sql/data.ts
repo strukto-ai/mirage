@@ -35,6 +35,20 @@ export async function readBytes(
   const stop = length === null ? node.size : Math.min(offset + length, node.size)
   if (stop <= offset) return new Uint8Array(0)
   const cs = await accessor.chunkSize()
+  if (stop - offset < cs && Math.floor(offset / cs) === Math.floor((stop - 1) / cs)) {
+    const [row] = await accessor.query(SQL.chunkSlice, [
+      (offset % cs) + 1,
+      stop - offset,
+      node.ino,
+      Math.floor(offset / cs),
+    ])
+    const data = bytesOf(row?.data)
+    if (data.length === stop - offset)
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    const out = new Uint8Array(stop - offset)
+    out.set(data)
+    return out
+  }
   const rows = await accessor.query(SQL.chunks, [
     node.ino,
     Math.floor(offset / cs),

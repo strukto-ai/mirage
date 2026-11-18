@@ -118,17 +118,30 @@ export class RedisStore implements RedisStoreLike {
     return checked(await (await this.ready()).pipeline(commands))
   }
 
-  private async scan(pattern: string): Promise<string[]> {
-    const keys: string[] = []
+  private async *scanKeys(pattern: string, set?: string): AsyncIterable<string> {
+    const command = set === undefined ? ['SCAN'] : ['SSCAN', set]
     let cursor = '0'
     do {
       const [next, batch] = list(
-        await this.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', SCAN_COUNT),
+        await this.call(...command, cursor, 'MATCH', pattern, 'COUNT', SCAN_COUNT),
       )
       cursor = text(next ?? null) ?? '0'
-      for (const key of list(batch ?? null)) keys.push(text(key) ?? '')
+      for (const key of list(batch ?? null)) yield text(key) ?? ''
     } while (cursor !== '0')
+  }
+
+  private async scan(pattern: string): Promise<string[]> {
+    const keys: string[] = []
+    for await (const key of this.scanKeys(pattern)) keys.push(key)
     return keys
+  }
+
+  async *scanPaths(prefix: string): AsyncIterable<[string, boolean]> {
+    const head = this.fk('')
+    for await (const key of this.scanKeys(escapeGlob(head + prefix) + '*')) {
+      yield [key.slice(head.length), false]
+    }
+    for await (const key of this.scanKeys(escapeGlob(prefix) + '*', this.dk())) yield [key, true]
   }
 
   async getFile(path: string): Promise<Uint8Array | null> {

@@ -114,10 +114,9 @@ class RedisVFS(BaseVFS):
         return await _exists(self.accessor, path)
 
     async def read_tree(
-        self,
-        path: PathSpec,
+        self, path: PathSpec, limit: int | None = None
     ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+        return await _tree(self.accessor, path, limit)
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False

@@ -65,6 +65,49 @@ def _walk(mount: _Mount):
 
 
 @pytest.mark.asyncio
+async def test_a_bounded_walk_declines_an_oversized_tree_and_batches_a_child():
+    calls = []
+    row = FileStat(name="leaf", type=FILE, size=2)
+
+    async def read_tree(path, *, limit=None, level=False):
+        calls.append((path.virtual, limit, level))
+        if level:
+            return {"sub": FileStat(name="sub", type=DIR)}
+        if path.virtual == "/m":
+            return {"sub": FileStat(name="sub", type=DIR), "sub/leaf": row}
+        return {"leaf": row}
+
+    mount = _Mount()
+    readdir, stat = tree_walk(
+        read_tree, mount.readdir, mount.stat, subtree_limit=1
+    )
+    assert await readdir(PathSpec.from_str_path("/m")) == ["/m/sub"]
+    assert await readdir(PathSpec.from_str_path("/m/sub")) == ["/m/sub/leaf"]
+    assert (await stat(PathSpec.from_str_path("/m/sub/leaf"))).size == 2
+    assert calls == [
+        ("/m", 1, False),
+        ("/m", None, True),
+        ("/m/sub", 1, False),
+    ]
+    assert not mount.calls
+
+
+@pytest.mark.asyncio
+async def test_a_depth_first_walk_releases_only_completed_directories():
+    mount = _Mount(level={"file": FileStat(name="file", type=FILE, size=2)})
+    readdir, stat = tree_walk(
+        mount.read_tree, mount.readdir, mount.stat, False, subtree_limit=2
+    )
+    for folder in ("/m", "/m/a", "/m/ab"):
+        await readdir(PathSpec.from_str_path(folder))
+    assert (await stat(PathSpec.from_str_path("/m/file"))).size == 2
+    assert (await stat(PathSpec.from_str_path("/m/ab/file"))).size == 2
+    await stat(PathSpec.from_str_path("/m/a/file"))
+    assert mount.calls == ["stat /m/a/file"]
+    assert not mount.asked
+
+
+@pytest.mark.asyncio
 async def test_one_answer_lists_and_stats_the_whole_walk():
     mount = _Mount(_found())
     readdir, stat = _walk(mount)

@@ -25,6 +25,18 @@ from mirage.context.session_context import (
 _sequence = itertools.count(1)
 
 
+class CommandKey:
+    """Identity for scratch data shared only by calls within one command."""
+
+
+_active: dict[int, CommandKey] = {}
+
+
+def command_key() -> CommandKey | None:
+    started = sole_command_started()
+    return _active.get(started) if started is not None else None
+
+
 def tick() -> int:
     """The next point in the one order commands and listing writes share.
 
@@ -58,8 +70,11 @@ async def command_scope() -> AsyncIterator[None]:
     nested command (a ``$(...)``, a function body) gets its own later
     stamp, and the outer one comes back when it ends.
     """
-    token = bind_caller(current_caller().changed({"command_started": tick()}))
+    started = tick()
+    _active[started] = CommandKey()
+    token = bind_caller(current_caller().changed({"command_started": started}))
     try:
         yield
     finally:
         reset_caller(token)
+        del _active[started]

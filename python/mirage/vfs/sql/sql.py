@@ -30,6 +30,7 @@ from mirage.core.sql.readdir import tree as _tree
 from mirage.core.sql.rename import rename as _rename
 from mirage.core.sql.rm import rm_r as _rm_r
 from mirage.core.sql.rmdir import rmdir as _rmdir
+from mirage.core.sql.search import files_containing as _files_containing
 from mirage.core.sql.snapshot import restore, snapshot
 from mirage.core.sql.stat import stat as _stat
 from mirage.core.sql.stream import read_stream as _read_stream
@@ -79,6 +80,7 @@ class SqlVFS(BaseVFS):
     mounts can share one database. Mirrors TypeScript's ``SqlVFS``.
     """
 
+    search_covers_tree = True
     name: str = VFSName.SQL
     accessor: SqlAccessor
     # byte store: stat() sizes every file from metadata
@@ -174,11 +176,15 @@ class SqlVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
+    async def files_containing(
+        self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+    ) -> list[PathSpec] | None:
+        return await _files_containing(self.accessor, path, text, ignore_case)
+
     async def read_tree(
-        self,
-        path: PathSpec,
+        self, path: PathSpec, limit: int | None = None
     ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+        return await _tree(self.accessor, path, limit)
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False

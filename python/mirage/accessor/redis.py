@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from weakref import WeakKeyDictionary
+
 from mirage.accessor.base import Accessor
+from mirage.cache.index.scope import CommandKey
 from mirage.vfs.redis.store import RedisStore
 
 
 class RedisAccessor(Accessor):
     def __init__(self, store: RedisStore) -> None:
         self.store = store
+        self.walks: WeakKeyDictionary[
+            CommandKey, tuple[str, list[str] | None]
+        ] = WeakKeyDictionary()

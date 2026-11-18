@@ -41,6 +41,7 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.context.session_context import current_caller
 from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
@@ -387,6 +388,80 @@ async def _directories(
     return found
 
 
+async def matching_tree(
+    files: CommandFiles, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> dict[str, list[str]] | None:
+    """The directories leading to possible matches for recursive grep. Rust
+    still judges each candidate, in the usual walk order. The dispatcher
+    declines if any omitted file needs an individual access or cache check.
+    """
+    if len(paths) != 1 or not files.answers("files_containing"):
+        return None
+    root = paths[0]
+    if (
+        root.pattern is not None
+        or root.dotted is not None
+        or root.walk_error is not None
+    ):
+        return None
+    fl = FlagView(ctx.flags, spec=SPECS["grep"])
+    if fl.raw("file") is not None or current_caller().output_file is not None:
+        return None
+    try:
+        flags = parse_grep_flags(fl, False)
+        if (
+            not flags.recursive
+            or flags.dereference
+            or flags.count_only
+            or flags.invert
+            or flags.files_without_match
+        ):
+            return None
+        text = pattern_arg(texts, fl)
+        if not flags.fixed_string:
+            terms = grep_terms(flags, fl, texts, utf8_locale(ctx.env))
+            text = (
+                terms.texts[0]
+                if terms is not None and len(terms.texts) == 1
+                else None
+            )
+    except UsageError as exc:
+        logger.debug("grep search left to the scan: %s", exc)
+        return None
+    links = links_of(ctx)
+    if (
+        not text
+        or "\n" in text
+        or _linked(links, root.virtual)
+        or not await _directories(files, paths)
+    ):
+        return None
+    hits = await files.files_containing(
+        root,
+        text,
+        whole_word=False,
+        ignore_case=flags.ignore_case,
+        prune=True,
+    )
+    if hits is None:
+        return None
+    base = root.virtual.rstrip("/") or "/"
+    prefix = base.rstrip("/") + "/"
+    tree: dict[str, set[str]] = {}
+    for hit in hits:
+        child = hit.virtual
+        if not child.startswith(prefix) or _linked(links, child):
+            return None
+        while child != base:
+            parent = child.rpartition("/")[0] or "/"
+            siblings = tree.setdefault(parent, set())
+            if child in siblings:
+                break
+            siblings.add(child)
+            child = parent
+    return {folder: sorted(children) for folder, children in tree.items()}
+
+
 async def search_reads(
     files: CommandFiles,
     name: str,
@@ -420,7 +495,9 @@ async def search_reads(
         texts (list[str]): pattern arguments.
         ctx (Context): parsed invocation context.
     """
-    fl = FlagView(ctx.flags, spec=SPECS[name])
+    fl = FlagView(
+        ctx.flags, spec=SPECS["rg"] if name == "rg" else SPECS["grep"]
+    )
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):

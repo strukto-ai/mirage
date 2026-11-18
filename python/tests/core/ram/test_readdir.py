@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.readdir import readdir, tree
+from mirage.core.ram.readdir import keys_under, readdir, tree
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -181,3 +181,11 @@ async def test_tree_answers_each_key_below_the_directory(accessor):
 async def test_tree_declines_a_file_whose_folder_is_missing(accessor):
     accessor.store.files["/missing/a.txt"] = b"x"
     assert await tree(accessor, PathSpec.from_str_path("/")) is None
+
+
+def test_root_snapshot_survives_a_membership_change(accessor):
+    store = accessor.store
+    keys = keys_under(store, "/", 2)
+    next(keys)
+    store.files["/new"] = b"new"
+    assert "/new" not in list(keys)
