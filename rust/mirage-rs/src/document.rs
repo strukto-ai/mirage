@@ -605,12 +605,12 @@ fn tree(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
     ]))
 }
 
-/// A tree written as JSON, read and flattened the way a host does, for
-/// the matcher's tests.
+/// A tree written as JSON, read the way a host reads it, for the
+/// matcher's tests.
 #[cfg(test)]
-pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::Tree, String> {
+pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::Node, String> {
     use crate::policy::Outcome;
-    use crate::policy::tree::{Leaf, Node, OptionRule, Tree, ValueRule};
+    use crate::policy::tree::{Leaf, Node, OptionRule, ValueRule};
     use serde_json::Value;
 
     fn doc(value: &Value) -> Doc {
@@ -639,7 +639,7 @@ pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::
             _ => &[],
         }
     }
-    fn ids(raw: &Doc, leaves: &mut Vec<Leaf>) -> Vec<usize> {
+    fn leaves(raw: &Doc) -> Vec<Leaf> {
         let Doc::List(items) = raw else {
             return Vec::new();
         };
@@ -658,58 +658,54 @@ pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::
                     Doc::List(paths) => paths.iter().map(text).collect(),
                     _ => Vec::new(),
                 };
-                leaves.push(Leaf {
+                Leaf {
                     decision,
                     reason: text(item.get("reason")),
                     paths,
-                });
-                leaves.len() - 1
+                }
             })
             .collect()
     }
-    fn options(raw: &Doc, leaves: &mut Vec<Leaf>) -> Vec<(Text, OptionRule)> {
+    fn options(raw: &Doc) -> Vec<(Text, OptionRule)> {
         pairs(raw)
             .iter()
-            .map(|(key, value)| (text(key), option(value, leaves)))
+            .map(|(key, value)| (text(key), option(value)))
             .collect()
     }
-    fn option(raw: &Doc, leaves: &mut Vec<Leaf>) -> OptionRule {
+    fn option(raw: &Doc) -> OptionRule {
         OptionRule {
-            decision: ids(raw.get("decision"), leaves),
+            decision: leaves(raw.get("decision")),
             values: pairs(raw.get("values"))
                 .iter()
                 .map(|(key, value)| {
                     (
                         text(key),
                         ValueRule {
-                            decision: ids(value.get("decision"), leaves),
-                            options: options(value.get("options"), leaves),
+                            decision: leaves(value.get("decision")),
+                            options: options(value.get("options")),
                         },
                     )
                 })
                 .collect(),
-            options: options(raw.get("options"), leaves),
+            options: options(raw.get("options")),
         }
     }
-    fn node(raw: &Doc, leaves: &mut Vec<Leaf>) -> Node {
+    fn node(raw: &Doc) -> Node {
         Node {
-            decision: ids(raw.get("decision"), leaves),
+            decision: leaves(raw.get("decision")),
             subcommands: pairs(raw.get("subcommands"))
                 .iter()
-                .map(|(key, value)| (text(key), node(value, leaves)))
+                .map(|(key, value)| (text(key), node(value)))
                 .collect(),
-            options: options(raw.get("options"), leaves),
-            other_options: ids(raw.get("other_options"), leaves),
+            options: options(raw.get("options")),
+            other_options: leaves(raw.get("other_options")),
             operands: pairs(raw.get("operands"))
                 .iter()
-                .map(|(key, value)| (text(key), node(value, leaves)))
+                .map(|(key, value)| (text(key), node(value)))
                 .collect(),
         }
     }
-    let shaped = tree(&doc(value), "commands", Whitespace::Python)?;
-    let mut leaves = Vec::new();
-    let root = node(&shaped, &mut leaves);
-    Ok(Tree { root, leaves })
+    Ok(node(&tree(&doc(value), "commands", Whitespace::Python)?))
 }
 
 fn hide_group(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {

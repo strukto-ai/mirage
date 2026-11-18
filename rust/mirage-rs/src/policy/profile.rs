@@ -4,7 +4,7 @@ use super::{
     classify_paths, classify_vars,
 };
 
-fn anchored(entries: &[Text], root: &[u32]) -> Vec<Text> {
+pub(crate) fn anchored(entries: &[Text], root: &[u32]) -> Vec<Text> {
     entries
         .iter()
         .map(|entry| {

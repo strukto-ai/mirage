@@ -573,7 +573,7 @@ pub fn subjects(facts: &CommandFacts) -> Vec<Subject> {
     subjects
 }
 
-fn under(path: &[u32], root: &[u32]) -> bool {
+pub(crate) fn under(path: &[u32], root: &[u32]) -> bool {
     root == [47] || path == root || (path.starts_with(root) && path.get(root.len()) == Some(&47))
 }
 
@@ -586,7 +586,7 @@ fn basename(path: &[u32]) -> &[u32] {
     value.rsplit(|&unit| unit == 47).next().unwrap_or_default()
 }
 
-fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
+pub(crate) fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
     if under(&facts.cwd, mount) || facts.paths.iter().any(|p| under(&p.virtual_path, mount)) {
         return true;
     }

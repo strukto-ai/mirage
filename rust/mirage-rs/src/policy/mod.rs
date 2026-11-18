@@ -1,8 +1,9 @@
 pub(crate) mod admission;
 mod approvals;
 pub(crate) mod composition;
+pub(crate) mod judge;
 pub(crate) mod pattern;
-mod profile;
+pub(crate) mod profile;
 pub(crate) mod stream;
 pub(crate) mod tree;
 mod types;

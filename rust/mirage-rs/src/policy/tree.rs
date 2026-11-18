@@ -25,7 +25,7 @@ pub type Words<T> = Vec<(Text, T)>;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ValueRule {
-    pub decision: Vec<usize>,
+    pub decision: Vec<Leaf>,
     pub options: Vec<(Text, OptionRule)>,
 }
 
@@ -33,7 +33,7 @@ pub struct ValueRule {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct OptionRule {
-    pub decision: Vec<usize>,
+    pub decision: Vec<Leaf>,
     pub values: Words<ValueRule>,
     pub options: Vec<(Text, OptionRule)>,
 }
@@ -42,33 +42,58 @@ pub struct OptionRule {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Node {
-    pub decision: Vec<usize>,
+    pub decision: Vec<Leaf>,
     pub subcommands: Vec<(Text, Node)>,
     pub options: Vec<(Text, OptionRule)>,
-    pub other_options: Vec<usize>,
+    pub other_options: Vec<Leaf>,
     pub operands: Words<Node>,
 }
 
-/// A profile's command tree with its decisions in one table, which a
-/// ruling names by index.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Tree {
-    pub root: Node,
-    pub leaves: Vec<Leaf>,
+/// A leaf as compiled: the leaf and its place in the commands block, a
+/// JSON Pointer over the canonical tree (`/gh/pr/merge/--admin`, a
+/// node's own decision at `/rm/*`, an index after a list's place).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placed {
+    pub leaf: Leaf,
+    pub at: Text,
 }
 
 /// What the tree reads a line by: its command and canonical subcommand
 /// path, its options by canonical name, and its operands. A command with
 /// no grammar gives its name as the path and every later word as an
-/// operand.
+/// operand. `tool` is false for a function the agent defined, which the
+/// root default does not judge.
 pub struct Line<'a> {
     pub path: &'a [Text],
     pub flags: &'a [FlagFact],
     pub operands: &'a [Text],
+    pub tool: bool,
 }
 
-/// The tree's answer for one line.
+/// Decisions that may speak for a line, before any path is known, with
+/// what fires them. `first` speaks when any of it applies, else `then`:
+/// a value's decisions before its option's own.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Group {
+    pub first: Vec<usize>,
+    pub then: Vec<usize>,
+    pub command: Vec<Text>,
+    pub flags: Vec<Text>,
+}
+
+/// One way the line's words walk the tree: the nodes it reached, the
+/// deepest one with a decision that applies giving the base, and the
+/// option groups that tighten it. Several globs over an operand make
+/// several branches.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Branch {
+    pub steps: Vec<Group>,
+    pub groups: Vec<Group>,
+}
+
+/// The tree's answer for one line, or for one path of it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Verdict {
     pub outcome: Outcome,
@@ -85,6 +110,25 @@ pub fn rank(outcome: Outcome) -> u8 {
     }
 }
 
+fn pointer(segments: &[Text]) -> Text {
+    let mut out = Vec::new();
+    for segment in segments {
+        out.push(u32::from(b'/'));
+        for &unit in segment {
+            match unit {
+                126 => out.extend([126, u32::from(b'0')]),
+                47 => out.extend([126, u32::from(b'1')]),
+                _ => out.push(unit),
+            }
+        }
+    }
+    out
+}
+
+fn word(value: &str) -> Text {
+    value.chars().map(u32::from).collect()
+}
+
 struct WordMap<T> {
     exact: HashMap<Text, usize>,
     globs: Vec<(CompiledGlob, usize)>,
@@ -93,7 +137,7 @@ struct WordMap<T> {
 }
 
 impl<T> WordMap<T> {
-    fn new<W>(words: &[(Text, W)], compile: impl Fn(&W) -> T) -> Option<Self> {
+    fn new<W>(words: &[(Text, W)], mut compile: impl FnMut(&Text, &W) -> T) -> Option<Self> {
         if words.is_empty() {
             return None;
         }
@@ -105,7 +149,7 @@ impl<T> WordMap<T> {
         };
         for (word, target) in words {
             let at = map.targets.len();
-            map.targets.push(compile(target));
+            map.targets.push(compile(word, target));
             if word.as_slice() == [STAR] {
                 map.fallback = Some(at);
                 continue;
@@ -162,46 +206,92 @@ struct CompiledNode {
     operands: Option<WordMap<CompiledNode>>,
 }
 
-fn compile_options(options: &[(Text, OptionRule)]) -> Vec<(Text, CompiledOption)> {
-    options
-        .iter()
-        .map(|(name, rule)| (name.clone(), compile_option(rule)))
-        .collect()
+/// Flattens a tree's leaves into one table, each with its place.
+struct Placing<'t> {
+    table: &'t mut Vec<Placed>,
+    at: Vec<Text>,
 }
 
-fn compile_value(rule: &ValueRule) -> CompiledValue {
-    CompiledValue {
-        decision: rule.decision.clone(),
-        options: compile_options(&rule.options),
+impl Placing<'_> {
+    fn within<T>(&mut self, key: &[u32], inner: impl FnOnce(&mut Self) -> T) -> T {
+        self.at.push(key.to_vec());
+        let out = inner(self);
+        self.at.pop();
+        out
     }
-}
 
-fn compile_option(rule: &OptionRule) -> CompiledOption {
-    CompiledOption {
-        decision: rule.decision.clone(),
-        values: WordMap::new(&rule.values, compile_value),
-        options: compile_options(&rule.options),
+    fn leaves(&mut self, leaves: &[Leaf], key: &str) -> Vec<usize> {
+        self.within(&word(key), |this| {
+            leaves
+                .iter()
+                .enumerate()
+                .map(|(i, leaf)| {
+                    let mut at = this.at.clone();
+                    if leaves.len() > 1 {
+                        at.push(word(&i.to_string()));
+                    }
+                    this.table.push(Placed {
+                        leaf: leaf.clone(),
+                        at: pointer(&at),
+                    });
+                    this.table.len() - 1
+                })
+                .collect()
+        })
     }
-}
 
-fn compile_node(node: &Node) -> CompiledNode {
-    CompiledNode {
-        decision: node.decision.clone(),
-        subcommands: node
+    fn options(&mut self, options: &[(Text, OptionRule)]) -> Vec<(Text, CompiledOption)> {
+        options
+            .iter()
+            .map(|(name, rule)| {
+                let compiled = self.within(name, |this| this.option(rule));
+                (name.clone(), compiled)
+            })
+            .collect()
+    }
+
+    fn option(&mut self, rule: &OptionRule) -> CompiledOption {
+        let decision = self.leaves(&rule.decision, "*");
+        let values = self.within(&word("values"), |this| {
+            WordMap::new(&rule.values, |value, target| {
+                this.within(value, |this| CompiledValue {
+                    decision: this.leaves(&target.decision, "*"),
+                    options: this.options(&target.options),
+                })
+            })
+        });
+        CompiledOption {
+            decision,
+            values,
+            options: self.options(&rule.options),
+        }
+    }
+
+    fn node(&mut self, node: &Node) -> CompiledNode {
+        let decision = self.leaves(&node.decision, "*");
+        let other_options = self.leaves(&node.other_options, "-*");
+        let options = self.options(&node.options);
+        let subcommands = node
             .subcommands
             .iter()
-            .map(|(name, child)| (name.clone(), compile_node(child)))
-            .collect(),
-        options: compile_options(&node.options),
-        other_options: node.other_options.clone(),
-        operands: WordMap::new(&node.operands, compile_node),
+            .map(|(name, child)| {
+                let compiled = self.within(name, |this| this.node(child));
+                (name.clone(), compiled)
+            })
+            .collect();
+        let operands = self.within(&word("operands"), |this| {
+            WordMap::new(&node.operands, |operand, child| {
+                this.within(operand, |this| this.node(child))
+            })
+        });
+        CompiledNode {
+            decision,
+            subcommands,
+            options,
+            other_options,
+            operands,
+        }
     }
-}
-
-/// One decision that speaks for a line, with what fired it.
-struct Voice {
-    leaf: usize,
-    matched: Matched,
 }
 
 /// A node the walk reached and how many path words led to it.
@@ -212,36 +302,43 @@ struct Step<'n> {
 
 pub struct CompiledTree {
     root: CompiledNode,
-    leaves: Vec<Leaf>,
 }
 
 impl CompiledTree {
-    pub fn new(tree: &Tree) -> Self {
+    /// Compile a tree, placing its leaves at the end of `table`, so the
+    /// trees of one profile share one table and a leaf's index names it.
+    pub fn new(root: &Node, table: &mut Vec<Placed>) -> Self {
+        let mut placing = Placing {
+            table,
+            at: Vec::new(),
+        };
         Self {
-            root: compile_node(&tree.root),
-            leaves: tree.leaves.clone(),
+            root: placing.node(root),
         }
     }
 
-    pub fn leaf(&self, id: usize) -> &Leaf {
-        &self.leaves[id]
+    /// The node a command's name reaches, if the tree names it.
+    fn named(&self, name: &[u32]) -> Option<&CompiledNode> {
+        self.root.subcommands.get(name)
     }
 
-    pub fn leaf_count(&self) -> usize {
-        self.leaves.len()
+    /// Whether the tree says anything about a command: it names it, or
+    /// its root default does.
+    pub fn speaks_for(&self, name: &[u32]) -> bool {
+        self.named(name).is_some() || !self.root.decision.is_empty()
     }
 
-    /// Whether the tree names a command, so a line of it is read by its
-    /// node rather than by the root alone.
-    pub fn names(&self, name: &[u32]) -> bool {
-        self.root.subcommands.contains_key(name)
+    /// The leaves that decide for a command's bare line: its node's own,
+    /// else the root default.
+    fn base(&self, name: &[u32]) -> &[usize] {
+        match self.named(name) {
+            Some(node) if !node.decision.is_empty() => &node.decision,
+            _ => &self.root.decision,
+        }
     }
 
-    /// Judge one line: its words pick the node, options only tighten,
-    /// and the strictest decision wins. Where several globs send an
-    /// operand down different branches, each branch is judged and the
-    /// strictest result wins.
-    pub fn judge(&self, line: &Line, applies: &dyn Fn(usize) -> bool) -> Verdict {
+    /// Walk a line through the tree once, before any path is known.
+    pub fn walk(&self, line: &Line) -> Vec<Branch> {
         let mut steps = vec![Step {
             node: &self.root,
             depth: 0,
@@ -257,23 +354,16 @@ impl CompiledTree {
                 depth: at + 1,
             });
         }
-        let mut voices = Vec::new();
+        let mut out = Vec::new();
         if steps.len() - 1 == line.path.len() {
-            self.operands(line, 0, &mut steps, applies, &mut voices);
+            Self::operands(line, 0, &mut steps, &mut out);
         } else {
-            voices.push(self.voices(line, &steps, applies));
+            out.push(Self::branch(line, &steps));
         }
-        self.verdict(voices.into_iter().flatten().collect())
+        out
     }
 
-    fn operands<'n>(
-        &'n self,
-        line: &Line,
-        at: usize,
-        steps: &mut Vec<Step<'n>>,
-        applies: &dyn Fn(usize) -> bool,
-        out: &mut Vec<Vec<Voice>>,
-    ) {
+    fn operands<'n>(line: &Line, at: usize, steps: &mut Vec<Step<'n>>, out: &mut Vec<Branch>) {
         let last = steps.last().expect("the walk holds the root");
         let depth = last.depth;
         let hits = match (&last.node.operands, line.operands.get(at)) {
@@ -281,12 +371,12 @@ impl CompiledTree {
             _ => Vec::new(),
         };
         if hits.is_empty() {
-            out.push(self.voices(line, steps, applies));
+            out.push(Self::branch(line, steps));
             return;
         }
         for hit in hits {
             steps.push(Step { node: hit, depth });
-            self.operands(line, at + 1, steps, applies, out);
+            Self::operands(line, at + 1, steps, out);
             steps.pop();
         }
     }
@@ -299,26 +389,19 @@ impl CompiledTree {
         }
     }
 
-    fn voices(&self, line: &Line, steps: &[Step], applies: &dyn Fn(usize) -> bool) -> Vec<Voice> {
-        let speaking = |ids: &[usize]| -> Vec<usize> {
-            ids.iter().copied().filter(|&id| applies(id)).collect()
-        };
-        let mut voices = Vec::new();
-        if let Some((step, ids)) = steps
-            .iter()
-            .rev()
-            .map(|step| (step, speaking(&step.node.decision)))
-            .find(|(_, ids)| !ids.is_empty())
-        {
-            for leaf in ids {
-                voices.push(Voice {
-                    leaf,
-                    matched: Matched {
-                        command: Self::command(line, step.depth),
-                        flags: Vec::new(),
-                    },
-                });
-            }
+    fn branch(line: &Line, steps: &[Step]) -> Branch {
+        let mut branch = Branch::default();
+        for (i, step) in steps.iter().enumerate() {
+            let exempt = i == 0 && !line.tool;
+            branch.steps.push(Group {
+                first: if exempt {
+                    Vec::new()
+                } else {
+                    step.node.decision.clone()
+                },
+                command: Self::command(line, step.depth),
+                ..Group::default()
+            });
         }
         let mut entries: Vec<(&Text, &CompiledOption, usize)> = Vec::new();
         for step in steps {
@@ -333,14 +416,7 @@ impl CompiledTree {
             }
         }
         for (name, rule, depth) in entries {
-            self.option(
-                line,
-                rule,
-                vec![name.clone()],
-                depth,
-                &speaking,
-                &mut voices,
-            );
+            Self::option(line, rule, vec![name.clone()], depth, &mut branch.groups);
         }
         let named: Vec<&Text> = steps
             .iter()
@@ -359,88 +435,178 @@ impl CompiledTree {
             });
         if !unnamed.is_empty() {
             for step in steps {
-                for leaf in speaking(&step.node.other_options) {
-                    voices.push(Voice {
-                        leaf,
-                        matched: Matched {
-                            command: Self::command(line, step.depth),
-                            flags: unnamed.clone(),
-                        },
+                if !step.node.other_options.is_empty() {
+                    branch.groups.push(Group {
+                        first: step.node.other_options.clone(),
+                        command: Self::command(line, step.depth),
+                        flags: unnamed.clone(),
+                        ..Group::default()
                     });
                 }
             }
         }
-        voices
+        branch
     }
 
     fn option(
-        &self,
         line: &Line,
         rule: &CompiledOption,
         chain: Vec<Text>,
         depth: usize,
-        speaking: &dyn Fn(&[usize]) -> Vec<usize>,
-        voices: &mut Vec<Voice>,
+        groups: &mut Vec<Group>,
     ) {
         let name = chain.last().expect("an option entry names its option");
-        let mut decided = Vec::new();
+        let mut first = Vec::new();
         let mut nested: Vec<(&Text, &CompiledOption)> = Vec::new();
         if let Some(values) = &rule.values {
             for value in values_of(line, name) {
                 for hit in values.find(value) {
-                    decided.extend(speaking(&hit.decision));
+                    first.extend_from_slice(&hit.decision);
                     nested.extend(hit.options.iter().map(|(n, o)| (n, o)));
                 }
             }
         }
-        if decided.is_empty() {
-            decided = speaking(&rule.decision);
-        }
-        for leaf in decided {
-            voices.push(Voice {
-                leaf,
-                matched: Matched {
-                    command: Self::command(line, depth),
-                    flags: chain.clone(),
-                },
-            });
-        }
+        groups.push(Group {
+            first,
+            then: rule.decision.clone(),
+            command: Self::command(line, depth),
+            flags: chain.clone(),
+        });
         nested.extend(rule.options.iter().map(|(n, o)| (n, o)));
         for (inner, rule) in nested {
             if carries(line, inner) {
                 let mut chain = chain.clone();
                 chain.push(inner.clone());
-                self.option(line, rule, chain, depth, speaking, voices);
+                Self::option(line, rule, chain, depth, groups);
             }
         }
     }
 
-    fn verdict(&self, voices: Vec<Voice>) -> Verdict {
-        let mut best: Option<&Voice> = None;
-        for voice in &voices {
-            let outcome = self.leaves[voice.leaf].decision;
-            if best.is_none_or(|b| rank(outcome) > rank(self.leaves[b.leaf].decision)) {
-                best = Some(voice);
+    /// Whether some line of a command may run under this tree: its node,
+    /// or a node below it, holds a decision that is not a deny for every
+    /// path. Options only tighten, so they are not asked.
+    pub fn may_run(&self, name: &[u32], table: &[Placed]) -> bool {
+        fn open(ids: &[usize], table: &[Placed], inherited: bool) -> bool {
+            if ids.is_empty() {
+                return inherited;
+            }
+            !ids.iter().any(|&id| {
+                let leaf = &table[id].leaf;
+                leaf.decision == Outcome::Deny && leaf.paths.is_empty()
+            })
+        }
+        fn below(node: &CompiledNode, table: &[Placed], inherited: bool) -> bool {
+            let here = open(&node.decision, table, inherited);
+            here || node
+                .subcommands
+                .values()
+                .chain(node.operands.iter().flat_map(|map| map.targets.iter()))
+                .any(|child| below(child, table, here))
+        }
+        let root = open(&self.root.decision, table, true);
+        match self.named(name) {
+            Some(node) => below(node, table, root),
+            None => root,
+        }
+    }
+
+    /// Whether the tree reads more of a command's line than its name:
+    /// its node has subcommands, options or operands, or a decision for
+    /// it is scoped to paths.
+    pub fn reads_args(&self, name: &[u32], table: &[Placed]) -> bool {
+        self.named(name).is_some_and(|node| {
+            !node.subcommands.is_empty()
+                || !node.options.is_empty()
+                || !node.other_options.is_empty()
+                || node.operands.is_some()
+        }) || self.scopes_paths(name, table)
+    }
+
+    /// Whether a decision the tree holds for a command is scoped to
+    /// paths, at its node, below it, or in the root default.
+    pub fn scopes_paths(&self, name: &[u32], table: &[Placed]) -> bool {
+        fn scoped(ids: &[usize], table: &[Placed]) -> bool {
+            ids.iter().any(|&id| !table[id].leaf.paths.is_empty())
+        }
+        fn option(rule: &CompiledOption, table: &[Placed]) -> bool {
+            scoped(&rule.decision, table)
+                || rule
+                    .values
+                    .iter()
+                    .flat_map(|map| map.targets.iter())
+                    .any(|value| {
+                        scoped(&value.decision, table)
+                            || value.options.iter().any(|(_, o)| option(o, table))
+                    })
+                || rule.options.iter().any(|(_, o)| option(o, table))
+        }
+        fn subtree(node: &CompiledNode, table: &[Placed]) -> bool {
+            scoped(&node.decision, table)
+                || scoped(&node.other_options, table)
+                || node.options.iter().any(|(_, o)| option(o, table))
+                || node
+                    .subcommands
+                    .values()
+                    .chain(node.operands.iter().flat_map(|map| map.targets.iter()))
+                    .any(|child| subtree(child, table))
+        }
+        scoped(self.base(name), table) || self.named(name).is_some_and(|n| subtree(n, table))
+    }
+}
+
+/// Judge walked branches with the leaves that apply: in each branch the
+/// deepest step holding an applying leaf gives the base, each option
+/// group speaks its applying `first`, else its applying `then`, and the
+/// strictest voice over every branch wins.
+pub fn resolve(branches: &[Branch], table: &[Placed], applies: &dyn Fn(usize) -> bool) -> Verdict {
+    let speaking =
+        |ids: &[usize]| -> Vec<usize> { ids.iter().copied().filter(|&id| applies(id)).collect() };
+    let mut voices: Vec<(usize, &Group)> = Vec::new();
+    for branch in branches {
+        if let Some((step, ids)) = branch
+            .steps
+            .iter()
+            .rev()
+            .map(|step| (step, speaking(&step.first)))
+            .find(|(_, ids)| !ids.is_empty())
+        {
+            voices.extend(ids.into_iter().map(|id| (id, step)));
+        }
+        for group in &branch.groups {
+            let mut ids = speaking(&group.first);
+            if ids.is_empty() {
+                ids = speaking(&group.then);
+            }
+            voices.extend(ids.into_iter().map(|id| (id, group)));
+        }
+    }
+    let decision = |id: usize| table[id].leaf.decision;
+    let mut best: Option<(usize, &Group)> = None;
+    for &(id, group) in &voices {
+        if best.is_none_or(|(b, _)| rank(decision(id)) > rank(decision(b))) {
+            best = Some((id, group));
+        }
+    }
+    let Some((leaf, group)) = best else {
+        return Verdict::default();
+    };
+    let outcome = decision(leaf);
+    let mut asks = Vec::new();
+    if outcome == Outcome::Ask {
+        for &(id, _) in &voices {
+            if decision(id) == Outcome::Ask && !asks.contains(&id) {
+                asks.push(id);
             }
         }
-        let Some(best) = best else {
-            return Verdict::default();
-        };
-        let outcome = self.leaves[best.leaf].decision;
-        let mut asks = Vec::new();
-        if outcome == Outcome::Ask {
-            for voice in &voices {
-                if self.leaves[voice.leaf].decision == Outcome::Ask && !asks.contains(&voice.leaf) {
-                    asks.push(voice.leaf);
-                }
-            }
-        }
-        Verdict {
-            outcome,
-            leaf: Some(best.leaf),
-            asks,
-            matched: (outcome != Outcome::Allow).then(|| best.matched.clone()),
-        }
+    }
+    Verdict {
+        outcome,
+        leaf: Some(leaf),
+        asks,
+        matched: (outcome != Outcome::Allow).then(|| Matched {
+            command: group.command.clone(),
+            flags: group.flags.clone(),
+        }),
     }
 }
 
@@ -492,16 +658,29 @@ mod tests {
     }
 
     fn judge(tree: &serde_json::Value, path: &str, flags: &[&str], operands: &[&str]) -> Verdict {
-        let tree = CompiledTree::new(&crate::document::tree_of(tree).unwrap());
+        judged(tree, path, flags, operands, true).0
+    }
+
+    fn judged(
+        tree: &serde_json::Value,
+        path: &str,
+        flags: &[&str],
+        operands: &[&str],
+        tool: bool,
+    ) -> (Verdict, Vec<Placed>) {
+        let mut table = Vec::new();
+        let tree = CompiledTree::new(&crate::document::tree_of(tree).unwrap(), &mut table);
         let (path, flags, operands) = read(path, flags, operands);
-        tree.judge(
-            &Line {
-                path: &path,
-                flags: &flags,
-                operands: &operands,
-            },
-            &|id| tree.leaf(id).paths.is_empty(),
-        )
+        let line = Line {
+            path: &path,
+            flags: &flags,
+            operands: &operands,
+            tool,
+        };
+        let verdict = resolve(&tree.walk(&line), &table, &|id| {
+            table[id].leaf.paths.is_empty()
+        });
+        (verdict, table)
     }
 
     fn outcome(tree: &serde_json::Value, path: &str, flags: &[&str], operands: &[&str]) -> Outcome {
@@ -714,5 +893,74 @@ mod tests {
             verdict.matched.unwrap().command,
             [text("gh"), text("pr"), text("list")]
         );
+    }
+
+    #[test]
+    fn each_leaf_is_placed_by_its_key_path() {
+        let tree = json!({
+            "*": "allow",
+            "rm": {"*": {"decision": "ask", "reason": "deletes"}, "--recursive": "deny"},
+            "cp": {"*": ["ask", {"decision": "deny", "paths": ["/k/*"]}]},
+            "curl": {"--request": {"values": {"DELETE": "deny"}}},
+            "git": {"checkout": {"operands": {"release/*": "ask"}}},
+        });
+        let (verdict, table) = judged(&tree, "rm", &["--recursive"], &["x"], true);
+        let at = |id: usize| -> String {
+            table[id]
+                .at
+                .iter()
+                .map(|&u| char::from_u32(u).unwrap())
+                .collect()
+        };
+        assert_eq!(at(verdict.leaf.unwrap()), "/rm/--recursive/*");
+        let mut places: Vec<String> = (0..table.len()).map(at).collect();
+        places.sort();
+        assert_eq!(
+            places,
+            [
+                "/*",
+                "/cp/*/0",
+                "/cp/*/1",
+                "/curl/--request/values/DELETE/*",
+                "/git/checkout/operands/release~1*/*",
+                "/rm/*",
+                "/rm/--recursive/*",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_function_call_skips_the_root_default_but_not_its_own_node() {
+        let tree = json!({"*": "deny", "ls": "allow", "cleanup": {"--force": "deny"}});
+        assert_eq!(judged(&tree, "deploy", &[], &[], false).0.outcome, Allow);
+        assert_eq!(judged(&tree, "deploy", &[], &[], true).0.outcome, Deny);
+        assert_eq!(
+            judged(&tree, "cleanup", &["--force"], &[], false).0.outcome,
+            Deny
+        );
+    }
+
+    #[test]
+    fn may_run_scopes_and_reads_answer_by_the_command_node() {
+        let mut table = Vec::new();
+        let tree = CompiledTree::new(
+            &crate::document::tree_of(&json!({
+                "*": "deny",
+                "gh": {"pr": {"view": "allow"}},
+                "ls": "allow",
+                "cp": {"decision": "allow", "paths": ["/tmp/*"]},
+                "rm": {"--force": "ask"},
+            }))
+            .unwrap(),
+            &mut table,
+        );
+        let runs = |name: &str| tree.may_run(&text(name), &table);
+        assert!(runs("gh") && runs("ls") && runs("cp"));
+        assert!(!runs("rm") && !runs("cat"));
+        assert!(tree.scopes_paths(&text("cp"), &table));
+        assert!(!tree.scopes_paths(&text("ls"), &table));
+        assert!(tree.reads_args(&text("rm"), &table));
+        assert!(tree.reads_args(&text("gh"), &table));
+        assert!(!tree.reads_args(&text("ls"), &table));
     }
 }
