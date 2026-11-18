@@ -20,7 +20,9 @@ import pytest
 from mirage import Workspace
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
 from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.io.types import IOResult
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import command_tree, tree_doc
 from mirage.policy.types import Grammar
@@ -277,6 +279,27 @@ async def test_a_mount_added_serving_a_cli_a_profile_names_wrongly_is_refused():
         with pytest.raises(PolicyError, match="no subcommand walk"):
             ws.add_mount("/late", _Serving(_prog()))
         assert (await ws.shell("cd /late")).exit_code == 1
+    finally:
+        await ws.close()
+
+
+async def _answer(accessor, paths, texts, ctx):
+    return b"ran\n", IOResult()
+
+
+@pytest.mark.asyncio
+async def test_a_default_rule_no_grammar_can_read_refuses_its_command():
+    ws = Workspace(
+        {"/a/": RAMVFS()},
+        profiles={"default": {"commands": {"tool": {"go": "deny"}}}},
+    )
+    try:
+        ws.mount("/a").register_commands(
+            [command("tool", vfs=None, spec=CommandSpec())(_answer)]
+        )
+        for line in ("tool go", "tool other"):
+            assert (await ws.shell(f"cd /a && {line}")).exit_code == 126
+        assert (await ws.shell("ls /a")).exit_code == 0
     finally:
         await ws.close()
 

@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { command } from '../../commands/config.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { commandTree, SessionProfile, treeDoc } from '../../policy/profile.ts'
@@ -274,6 +275,29 @@ describe('a workspace checks command trees against its grammars', () => {
     try {
       expect(() => ws.addMount('/late', new Serving(prog()))).toThrow('no subcommand walk')
       expect((await ws.shell('cd /late')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a default rule no grammar can read refuses its command', async () => {
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.mount('/a').registerCommands(
+        command({
+          name: 'tool',
+          vfs: null,
+          spec: new CommandSpec(),
+          fn: () => [new TextEncoder().encode('ran\n'), new IOResult()],
+        }),
+      )
+      for (const line of ['tool go', 'tool other']) {
+        expect((await ws.shell(`cd /a && ${line}`)).exitCode).toBe(126)
+      }
+      expect((await ws.shell('ls /a')).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
