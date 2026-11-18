@@ -25,7 +25,7 @@ import { CommandSpec, type CommandSpecInit, UsageStyle, Argument, WordKind } fro
 import { PathSpec } from '../../types.ts'
 
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
-import { WalkResult, WalkWord, type CLI, type WalkFlagBag } from './types.ts'
+import { DefaultCommandRoot, WalkResult, WalkWord, type CLI, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, POPPLER_EXIT, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
@@ -749,6 +749,18 @@ export function walk(
   const taken: Taken[] = []
   const paths = new Map<number, PathSpec>()
   let i = 0
+  const first = argv[0]
+  if (
+    spec instanceof DefaultCommandRoot &&
+    spec.subcommands[0] !== undefined &&
+    first?.startsWith('-') &&
+    first !== '-h' &&
+    first !== '--help' &&
+    !findChild(spec, first)
+  ) {
+    node = spec.subcommands[0]
+    path = [node.name]
+  }
   for (;;) {
     // A script node terminates the walk exactly like an fn leaf: its
     // remaining argv rides the ordinary spec machinery for validation,
@@ -804,6 +816,7 @@ export function walk(
         node.addHelp &&
         token === '-h' &&
         (style === UsageStyle.ARGPARSE ||
+          style === UsageStyle.CLAP ||
           style === UsageStyle.COBRA ||
           style === UsageStyle.POPPLER) &&
         !cs.dest.has('-h')

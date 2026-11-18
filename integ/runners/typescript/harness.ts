@@ -107,6 +107,7 @@ interface EmitCase {
 }
 
 export interface Target {
+  max_memory?: number
   id: string
   hosts: string[]
   // This target's opener touches process-global state, so it runs alone --

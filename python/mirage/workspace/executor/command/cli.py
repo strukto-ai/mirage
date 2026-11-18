@@ -309,17 +309,17 @@ def reaches_service(spec: CLI) -> bool:
 
     Its write verbs then go past the dispatcher's per-path invalidation,
     so the mounts its client may reach drop their caches after one
-    (``MountRegistry.drop_caches``). Two roots do that: one with a
-    ``config_model`` (an account CLI, initialized from it) and a script
-    root, whose config is opaque by construction and whose program may
-    reach anything. A root with neither (``git``) has no service to
-    reach; its writes go through the dispatcher, which invalidates as it
-    goes, so a blanket drop would only cost every other mount a reload.
+    (``MountRegistry.drop_caches``). A configured CLI can declare that
+    it writes exclusively through the session VFS, where the dispatcher
+    enforces path policy and invalidates the affected mount itself.
+    Account and script CLIs may also write to a service directly.
 
     Args:
         spec (CLI): the installed root.
     """
-    return spec.config_model is not None or spec.script is not None
+    return spec.script is not None or (
+        spec.config_model is not None and not spec.vfs_only
+    )
 
 
 async def handle_cli(

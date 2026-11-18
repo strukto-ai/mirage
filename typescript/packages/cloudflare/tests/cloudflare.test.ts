@@ -266,6 +266,48 @@ describe('mirage in workerd', () => {
       expect(size?.stdout.trim()).toBe('3000000')
     })
 
+    it(`runs ast-grep on SQLite with a 100 MiB workspace on ${on}`, async () => {
+      const id = `ast-${crypto.randomUUID()}`
+      const dir = `/s/${id}`
+      const at = (lines: readonly string[]) => sql(id, lines)
+      const setup = await at([
+        `mkdir -p ${dir} && echo 'console.log(42)' > ${dir}/a.ts && echo 'def main(): pass' > ${dir}/b.py`,
+      ])
+      expect(setup[0]?.exit).toBe(0)
+      expect(
+        await at([
+          `ast-grep -p 'console.log($X)' ${dir}`,
+          `ast-grep -p 'console.log($X)' -r 'emit($X)' -U ${dir}/a.ts`,
+          `ast-grep outline ${dir}/b.py --match main`,
+          `ast-grep scan --inline-rules '{id: emit, language: TypeScript, message: found, rule: {pattern: emit($X)}}' --report-style short ${dir}/a.ts`,
+          `rg -n emit ${dir}/a.ts && cat ${dir}/a.ts`,
+        ]),
+      ).toEqual([
+        {
+          exit: 1,
+          stdout: '',
+          stderr: `ast-grep: ${dir}: stopped after 1 files (walk_limit); narrow the path\n`,
+        },
+        { exit: 0, stdout: '', stderr: 'Applied 1 changes\n' },
+        { exit: 0, stdout: `${dir}/b.py\n1: def main(): pass\n`, stderr: '' },
+        { exit: 0, stdout: `${dir}/a.ts:1:1: help[emit]: found\n`, stderr: '' },
+        { exit: 0, stdout: '1:emit(42)\nemit(42)\n', stderr: '' },
+      ])
+      const source = `${dir}/dense.ts`
+      const search = `run -l ts -k function_declaration --files-with-matches ${source}`
+      expect(
+        await at([
+          `yes 'export function f(x:number){return x+1}' | head -n 6000 > ${source}`,
+          `ast-grep ${search}`,
+          `sg-large ${search}`,
+        ]),
+      ).toEqual([
+        { exit: 0, stdout: '', stderr: '' },
+        { exit: 1, stdout: '', stderr: 'ast-grep: parser resource limit exceeded\n' },
+        { exit: 0, stdout: source + '\n', stderr: '' },
+      ])
+    })
+
     it(`searches a SQLite checkout across chunk boundaries on ${on}`, async () => {
       const id = `t-${on}-${crypto.randomUUID()}`
       const base = `/s/${id}`

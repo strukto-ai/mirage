@@ -38,6 +38,10 @@ from mirage.types import Limit, PathSpec
 WalkFlagBag = FlagBag[FlagValue]
 
 
+class DefaultCommandRoot(CommandSpec):
+    """A CLI whose first subcommand handles options supplied at the root."""
+
+
 @dataclass(frozen=True)
 class CLIHandler:
     """Execution and policy for one command path.
@@ -75,6 +79,8 @@ class CLI:
         handlers (Mapping[str, CLIHandler]): canonical paths below the
             root, separated by spaces; the root leaf uses an empty key.
         config_model (type[BaseModel] | None): installation config schema.
+        vfs_only (bool): configured handlers access files exclusively through
+            the workspace dispatcher.
         accessor (Callable[..., Accessor]): builds the install's
             accessor from its validated config, once per install; a CLI
             that reaches no service keeps ``NOOPAccessor``.
@@ -95,6 +101,7 @@ class CLI:
     machine: str = IN_PROCESS
     runtime: str | None = None
     mcp: MCPSource | None = None
+    vfs_only: bool = False
 
     def __post_init__(self) -> None:
         handlers = dict(self.handlers)

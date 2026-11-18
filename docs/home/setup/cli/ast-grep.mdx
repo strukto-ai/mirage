@@ -1,0 +1,53 @@
+---
+title: ast-grep
+icon: code
+description: Search, scan, outline and rewrite source files on Mirage mounts.
+---
+
+import License from '/snippets/cli/license/ast-grep.mdx'
+
+Mirage runs the [ast-grep 0.51.3 Rust engine](https://github.com/ast-grep/ast-grep/releases/tag/0.51.3) on JavaScript, JSX, TypeScript, TSX and Python. It loads project configuration, rules and source files through the session’s VFS. Rewrites use the same write permissions as other shell commands. Python installations need the `mirage-ai[ast-grep]` extra.
+
+```yaml
+clis:
+  ast-grep:
+    cli: ast-grep
+    machine: in_process
+    config:
+      max_memory: 32MB
+max_memory: 100MB
+command_limits:
+  "@all": {walk_limit: 500}
+  "ast-grep scan": {walk_limit: 200}
+```
+
+The CLI’s `config.max_memory` sets the Rust engine’s WebAssembly memory ceiling for `run`, `scan`, and `outline`. It defaults to 16 MiB. Set it in bytes or with a size such as `32MB`. The engine starts at 6 MiB and grows in 64 KiB pages up to the smaller of the configured ceiling and the available workspace budget. The host runtime, compiled modules, and concurrent requests also use isolate memory.
+
+The setting belongs to each installation. The workspace API accepts the same `clis` block in the `config` object of `POST /v1/workspaces`. To register the CLI in an existing workspace:
+
+```python
+from mirage.commands.cli.builtin.ast_grep import AST_GREP
+
+ws.register_cli("ast-grep", AST_GREP, {"max_memory": "32MB"})
+```
+
+```ts
+import { AST_GREP } from '@struktoai/mirage-core'
+
+ws.registerCli('ast-grep', AST_GREP, { max_memory: '32MB' })
+```
+
+Each recursive operand shares the workspace’s walk policy with other commands. The walk charges directory entries on the mount that listed them.
+
+```bash
+ast-grep -l ts -p 'console.log($ARG)' src
+ast-grep run -l py -k function_definition --files-with-matches src
+ast-grep -l ts -p 'console.log($ARG)' -r 'logger.info($ARG)' src
+ast-grep -l ts -p 'console.log($ARG)' -r 'logger.info($ARG)' -U src
+ast-grep scan -r rules/logging.yml --report-style short src
+ast-grep outline src/bytes.ts --match 'encodeText|decodeText'
+```
+
+The first rewrite previews a diff. The second writes the replacements. Use `scan --inline-rules` for a YAML rule on the command line. A plain `scan` discovers `sgconfig.yml` in the working directory or its ancestors and loads YAML files from its `ruleDirs`. Repeat `--globs` to select paths during a recursive search. The command tree and available flags appear in `ast-grep --help` and each subcommand’s help.
+
+<License />

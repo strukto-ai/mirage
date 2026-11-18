@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { AST_GREP } from '@struktoai/mirage-core'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
@@ -207,6 +208,39 @@ function pdfBattery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  [
+    'ast-grep uses the browser workspace and recovers after a parser refusal',
+    async (ws) => {
+      ws.registerCli('ast-grep', AST_GREP)
+      ws.registerCli('sg-large', AST_GREP, { max_memory: '32MB' })
+      await ws.vfs.write(
+        '/data/functions.ts',
+        new TextEncoder().encode('export function f(x:number){return x+1}\n'.repeat(6000)),
+      )
+      equal(
+        await shell(
+          ws,
+          'sg-large run -k function_declaration --files-with-matches /data/functions.ts',
+        ),
+        [0, '/data/functions.ts\n', ''],
+      )
+      await ws.vfs.write(
+        '/data/example.ts',
+        new TextEncoder().encode('export function f(){foo(1)}\n'),
+      )
+      await ws.vfs.write('/data/dense.ts', new TextEncoder().encode('foo(1);\n'.repeat(100000)))
+      equal(await shell(ws, "ast-grep -p 'foo($X)' /data/dense.ts"), [
+        1,
+        '',
+        'ast-grep: parser resource limit exceeded\n',
+      ])
+      equal(await shell(ws, "ast-grep -p 'foo($X)' /data/example.ts"), [
+        0,
+        '/data/example.ts:1:export function f(){foo(1)}\n',
+        '',
+      ])
+    },
+  ],
   ...POLICY_CHECKS,
   [
     'diff workers are reused, expire while idle and belong to their workspace',

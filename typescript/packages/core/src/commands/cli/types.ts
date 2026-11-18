@@ -35,6 +35,9 @@ export type CLIVerbFn<A extends Accessor = Accessor> = (
 /** The accessor a CLI that reaches no service keeps, one `NOOPAccessor` per install. */
 export const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(config)
 
+/** A CLI whose first subcommand handles options supplied at the root. */
+export class DefaultCommandRoot extends CommandSpec {}
+
 /** Execution and policy for one canonical command path. */
 export class CLIHandler {
   readonly fn: CLIVerbFn | null
@@ -70,6 +73,8 @@ export class CLI {
   readonly spec: CommandSpec
   readonly handlers: Readonly<Record<string, CLIHandler>>
 
+  /** Configured handlers access files through the dispatcher exclusively. */
+  readonly vfsOnly: boolean
   readonly configModel:
     | ZodObject<ZodRawShape>
     | ((input: Record<string, unknown>) => unknown)
@@ -87,6 +92,7 @@ export class CLI {
   constructor(init: {
     spec: CommandSpec
     handlers?: Readonly<Record<string, CLIHandler>>
+    vfsOnly?: boolean
     configModel?: CLI['configModel']
     /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
     accessor?: CLI['accessor']
@@ -100,6 +106,7 @@ export class CLI {
     this.machine = init.machine ?? IN_PROCESS
     this.runtime = init.runtime ?? null
     this.mcp = init.mcp ?? null
+    this.vfsOnly = init.vfsOnly ?? false
     this.configModel = init.configModel ?? null
     this.accessor = init.accessor ?? noopAccessor
     const handlers = { ...init.handlers }

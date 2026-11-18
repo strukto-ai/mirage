@@ -22,6 +22,7 @@ import {
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { Workspace as BrowserWorkspace, OPFSVFS } from '@struktoai/mirage-browser'
+import { AST_GREP } from '@struktoai/mirage-core'
 import { TrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
@@ -301,6 +302,7 @@ function installLocalClis(
   ws: { registerCli: (name: string, spec: unknown) => void },
   target: Target,
 ): void {
+  if (target.clis?.includes('ast-grep') === true) ws.registerCli('ast-grep', AST_GREP)
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
   if (target.clis?.includes('search') === true) ws.registerCli('search', SEARCH)
   if (target.clis?.includes('office') === true) ws.registerCli('office', OFFICE)
@@ -537,7 +539,11 @@ async function openSql(target: Target, options?: OpenOptions): Promise<Open> {
     rmSync(dir, { recursive: true, force: true })
   }
   if (options === undefined) {
-    const ws = new Workspace(build(), { ...WORKSPACE_OPTIONS, ...permissionOptions(target) })
+    const ws = new Workspace(build(), {
+      ...WORKSPACE_OPTIONS,
+      ...permissionOptions(target),
+      maxMemory: target.max_memory ?? null,
+    })
     installLocalClis(ws, target)
     const cleanup = async (): Promise<void> => {
       await ws.close()

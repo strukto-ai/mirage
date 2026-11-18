@@ -284,6 +284,7 @@
                 "group": "Developer",
                 "icon": "code",
                 "pages": [
+                  "home/setup/cli/ast-grep",
                   "home/setup/cli/gh",
                   "home/setup/cli/git",
                   "home/setup/cli/hf"
@@ -625,6 +626,7 @@
                 "group": "Developer",
                 "icon": "code",
                 "pages": [
+                  "python/cli/ast-grep",
                   "python/cli/gh",
                   "python/cli/git",
                   "python/cli/hf"
@@ -895,6 +897,7 @@
                 "group": "Developer",
                 "icon": "code",
                 "pages": [
+                  "typescript/cli/ast-grep",
                   "typescript/cli/gh",
                   "typescript/cli/git",
                   "typescript/cli/hf"

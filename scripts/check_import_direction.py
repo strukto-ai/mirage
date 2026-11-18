@@ -57,6 +57,7 @@ VFS_OBJECTS = (
 CLI_ROOT = "commands/cli/builtin"
 CLI_SERVICES: dict[str, tuple[str, ...]] = {
     "airtable": ("airtable",),
+    "ast_grep": (),
     "discord": ("discord",),
     "gh": ("github",),
     "git": (),

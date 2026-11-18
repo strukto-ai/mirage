@@ -1,6 +1,14 @@
 {
  "baseline": 711,
  "modules": {
+  "commands/cli/builtin/ast_grep/engine": {
+   "typescript_only": {
+    "processor": "A per-command closure reuses the bounded WebAssembly instance. Wasmtime releases its per-file store deterministically."
+   },
+   "python_only": {
+    "process": "The Wasmtime adapter runs one file in its own store. The JavaScript adapter returns a per-command processor."
+   }
+  },
   "secrets/aws": {
    "typescript_only": {
     "REGION": "The signer checks a region before naming an endpoint from it; Python hands the region to boto3, which builds the endpoint.",
