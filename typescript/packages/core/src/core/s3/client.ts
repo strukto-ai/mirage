@@ -45,7 +45,7 @@ export async function loadS3Module(config?: S3Config): Promise<S3Module> {
     missingPeer({
       feature: 'S3VFS',
       packageName: '@aws-sdk/client-s3',
-      docsUrl: 'https://mirage.dev/typescript/install',
+      docsUrl: 'https://docs.mirage.strukto.ai/typescript/install',
     }),
   ) as unknown as Promise<S3Module>
   return cachedModule
