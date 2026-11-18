@@ -259,7 +259,7 @@ async function paginate(
   let token: string | null = null
   let fetched = 0
   let held = 0
-  const followed = new Set<string>()
+  const followed = new Set<string>(query.pageToken ? [query.pageToken] : [])
   let io = new IOResult()
   for (;;) {
     // A fresh object per page: the callers keep the mapping they are handed,
@@ -269,7 +269,7 @@ async function paginate(
     const result = await googleGet(tm, url, params)
     const page = ENC.encode(JSON.stringify(result))
     pages.push(page)
-    held += page.byteLength
+    held += page.byteLength + 1
     checkMemory(held)
     fetched += 1
     if (pageLimit !== null && fetched >= pageLimit) break

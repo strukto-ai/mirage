@@ -296,7 +296,7 @@ async def _paginate(
     token: str | None = None
     fetched = 0
     held = 0
-    followed: set[str] = set()
+    followed = {query["pageToken"]} if query.get("pageToken") else set()
     io = IOResult()
     while True:
         # A fresh dict per page: the callers keep the mapping they are
@@ -310,7 +310,7 @@ async def _paginate(
                 result, ensure_ascii=False, separators=(",", ":")
             ).encode()
         )
-        held += len(pages[-1])
+        held += len(pages[-1]) + 1
         check_memory(held)
         fetched += 1
         if page_limit is not None and fetched >= page_limit:

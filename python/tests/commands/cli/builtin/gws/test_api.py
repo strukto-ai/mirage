@@ -424,3 +424,22 @@ async def test_paging_holds_its_pages_to_the_workspace_budget():
                 run_gws_method(method, GOOGLE, [], [], Context()),
             )
     assert next(calls) < 10
+
+
+@pytest.mark.asyncio
+async def test_paging_stops_on_the_page_token_it_was_given():
+    method = METHODS[("drive", "files", "list")]
+    with patch(
+        "mirage.commands.cli.builtin.gws.api.google_get",
+        new_callable=AsyncMock,
+        return_value={"files": [], "nextPageToken": "t1"},
+    ) as get:
+        _, io = await run_gws_method(
+            method,
+            GOOGLE,
+            [],
+            [],
+            Context(flags={"params": '{"pageToken": "t1"}'}),
+        )
+    assert get.await_count == 1
+    assert (io.exit_code, io.stderr) == (1, b"gws: next page repeats t1\n")

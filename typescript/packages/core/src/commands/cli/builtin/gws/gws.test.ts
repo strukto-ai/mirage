@@ -281,6 +281,23 @@ describe('gws api passthrough', () => {
     expect(n).toBeLessThan(10)
   })
 
+  it('stops paging on the page token it was given', async () => {
+    vi.mocked(client.googleGet).mockReset().mockResolvedValue({ files: [], nextPageToken: 't1' })
+    const result = await runGwsMethod(
+      method('drive.files.list'),
+      ACCESSOR,
+      [],
+      [],
+      context({ flags: { params: '{"pageToken": "t1"}' } }),
+    )
+    if (result === null) throw new Error('expected result')
+    expect(vi.mocked(client.googleGet).mock.calls.length).toBe(1)
+    expect([result[1].exitCode, DEC.decode(await materialize(result[1].stderr))]).toEqual([
+      1,
+      'gws: next page repeats t1\n',
+    ])
+  })
+
   it('multi-page output is newline-terminated NDJSON', async () => {
     vi.mocked(client.googleGet)
       .mockReset()
