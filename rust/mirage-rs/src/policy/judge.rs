@@ -320,9 +320,12 @@ impl AdmissionMatcher {
     }
 
     /// The leaf that refuses a file the line reaches, judged as one more
-    /// path of the line: a deny, or an ask the line was not granted.
+    /// path of the line: a deny, or an ask the line was not granted. Every
+    /// tree's asks count, as in `decide`, so a grant one tree asked for
+    /// never answers another's.
     pub fn io_refusal(&self, walked: &[Walked], path: &[u32], granted: &[usize]) -> Option<usize> {
         let mut best: Option<Verdict> = None;
+        let mut asks: Vec<usize> = Vec::new();
         for w in walked {
             let Some(scoped) = self.trees.get(w.tree) else {
                 continue;
@@ -335,6 +338,11 @@ impl AdmissionMatcher {
                 continue;
             }
             let verdict = resolve(&w.branches, &self.table, &|id| self.covers(id, path));
+            for &id in &verdict.asks {
+                if !asks.contains(&id) {
+                    asks.push(id);
+                }
+            }
             if best
                 .as_ref()
                 .is_none_or(|held| rank(verdict.outcome) > rank(held.outcome))
@@ -345,7 +353,7 @@ impl AdmissionMatcher {
         let verdict = best?;
         match verdict.outcome {
             Outcome::Deny => verdict.leaf,
-            Outcome::Ask => verdict.asks.into_iter().find(|id| !granted.contains(id)),
+            Outcome::Ask => asks.into_iter().find(|id| !granted.contains(id)),
             Outcome::Allow => None,
         }
     }
@@ -678,6 +686,25 @@ mod tests {
         let entry = text("/data/review/x");
         let ask = m.io_refusal(&walked, &entry, &[]).unwrap();
         assert_eq!(m.io_refusal(&walked, &entry, &[ask]), None);
+    }
+
+    #[test]
+    fn a_walked_file_needs_every_trees_grant() {
+        let m = matcher(
+            json!({"grep": "ask"}),
+            &[(
+                "/data",
+                json!({"*": {"decision": "ask", "paths": ["secret"]}}),
+            )],
+        );
+        let line = facts("/", &["grep", "-r", "x", "/data"], &["/data"]);
+        let walked = m.naming(&line.tokens, None, true);
+        let entry = text("/data/secret");
+        let first = m.io_refusal(&walked, &entry, &[]).unwrap();
+        let second = m.io_refusal(&walked, &entry, &[first]).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(m.io_refusal(&walked, &entry, &[first, second]), None);
+        assert_eq!(m.io_refusal(&walked, &text("/data/x"), &[first]), None);
     }
 
     #[test]
