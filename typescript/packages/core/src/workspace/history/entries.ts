@@ -148,14 +148,14 @@ export function historyEntries(root: TSNodeLike): HistoryEntry[] {
     const stop = found < 0 ? source.length : found
     entries.push(...blanks(source.slice(read, start)))
     read = stop + 1
+    if (nodes.some((node) => node.type === NT.ERROR)) {
+      entries.push({ text: source.slice(start, stop), at: typed(first.startIndex ?? 0) })
+      continue
+    }
     const newline = source.indexOf('\n', start)
     if (newline < 0 || newline >= stop) {
       const suffix = folded.some((doc) => (doc.heredoc?.end ?? 0) - 1 === stop) ? '\n' : ''
       entries.push({ text: source.slice(start, stop) + suffix, at: typed(first.startIndex ?? 0) })
-      continue
-    }
-    if (nodes.some((node) => node.type === NT.ERROR)) {
-      entries.push({ text: source.slice(start, stop), at: typed(first.startIndex ?? 0) })
       continue
     }
     const comments = new Set(

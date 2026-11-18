@@ -148,19 +148,19 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
         stop = len(source) if found < 0 else found
         entries.extend(_blanks(source[read:start]))
         read = stop + 1
+        if any(n.type == NT.ERROR for n in nodes):
+            entries.append(
+                HistoryEntry(
+                    decode_text(source[start:stop]), typed(first.start_byte)
+                )
+            )
+            continue
         if (newline := source.find(b"\n", start)) < 0 or newline >= stop:
             text = source[start:stop]
             if any(doc.end - 1 == stop for _, doc in folded):
                 text += b"\n"
             entries.append(
                 HistoryEntry(decode_text(text), typed(first.start_byte))
-            )
-            continue
-        if any(n.type == NT.ERROR for n in nodes):
-            entries.append(
-                HistoryEntry(
-                    decode_text(source[start:stop]), typed(first.start_byte)
-                )
             )
             continue
         comments = {typed(n.start_byte) for n in nodes if n.type == NT.COMMENT}

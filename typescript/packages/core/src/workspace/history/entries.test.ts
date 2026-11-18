@@ -68,6 +68,13 @@ it.each([
       { text: 'cat <<B\nb\nB\n', at: 18 },
     ],
   ],
+  [
+    'echo ok\ncat <<A; (\n',
+    [
+      { text: 'echo ok', at: 0 },
+      { text: 'cat <<A; (', at: 8 },
+    ],
+  ],
   ['if true; then\necho z\n', [{ text: 'if true; then\necho z', at: 0 }]],
 ])('preserves entry positions for %j', (source, expected) => {
   const scope = new ParseScope()

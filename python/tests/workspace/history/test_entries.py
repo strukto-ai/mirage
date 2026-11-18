@@ -74,6 +74,7 @@ def test_history_entries(source: str, expected: list[str]) -> None:
             "X=$(cat <<A\na\nA\n)\ncat <<B\nb\nB\n",
             [("X=$(cat <<A\na\nA\n\n)", 0), ("cat <<B\nb\nB\n", 18)],
         ),
+        ("echo ok\ncat <<A; (\n", [("echo ok", 0), ("cat <<A; (", 8)]),
         ("if true; then\necho z\n", [("if true; then\necho z", 0)]),
     ],
 )
