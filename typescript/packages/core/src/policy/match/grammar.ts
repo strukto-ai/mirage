@@ -66,22 +66,33 @@ export function leafRead(path: readonly string[], parsed: ParsedArgs): CommandRe
 }
 
 /**
+ * Why a command's subtree cannot be read when no grammar reads the
+ * command, which the line reader gives operands only: the first option or
+ * subcommand it names; null when it names operands only. Mirrors Python's
+ * `unread_reason`.
+ */
+export function unreadReason(tree: CommandNode, at: string): string | null {
+  if (tree.options.size > 0 || tree.otherOptions.length > 0)
+    return `${at}: this command has no grammar here to read an option by`
+  const [first] = tree.subcommands.keys()
+  if (first !== undefined)
+    return `${at}: ${first} is no subcommand here; an operand goes under operands`
+  for (const [word, child] of tree.operands) {
+    const reason = unreadReason(child, `${at}.operands.${word}`)
+    if (reason !== null) return reason
+  }
+  return null
+}
+
+/**
  * A command's subtree for a command no grammar reads, which the line
  * reader gives operands only. Throws `PolicyError` when the subtree names
  * an option or a subcommand. Mirrors Python's `no_grammar`.
  */
 export function noGrammar(tree: CommandNode, at: string): CommandNode {
-  if (tree.options.size > 0 || tree.otherOptions.length > 0)
-    throw new PolicyError(`${at}: this command has no grammar here to read an option by`)
-  const [first] = tree.subcommands.keys()
-  if (first !== undefined)
-    throw new PolicyError(`${at}: ${first} is no subcommand here; an operand goes under operands`)
-  return {
-    ...tree,
-    operands: new Map(
-      [...tree.operands].map(([word, child]) => [word, noGrammar(child, `${at}.operands.${word}`)]),
-    ),
-  }
+  const reason = unreadReason(tree, at)
+  if (reason !== null) throw new PolicyError(reason)
+  return tree
 }
 
 /**

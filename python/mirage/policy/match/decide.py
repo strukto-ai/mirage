@@ -14,7 +14,7 @@
 
 from collections.abc import Sequence
 
-from mirage.policy.match.grammar import no_grammar
+from mirage.policy.match.grammar import unread_reason
 from mirage.policy.match.rule import command_facts, reason_of
 from mirage.policy.types import (
     AdmissionRules,
@@ -63,10 +63,9 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     if rules is None:
         return Ruling(Outcome.ALLOW)
     if ctx.command in rules.unread:
-        for scoped in rules.trees:
-            held = scoped.tree.subcommands.get(ctx.command)
-            if held is not None:
-                no_grammar(held, f"commands.{ctx.command}")
+        refused = unread_ruling(ctx.command, rules)
+        if refused is not None:
+            return refused
     result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
     table = rule_table(rules)
     rule = None if result["rule"] is None else table[result["rule"]]
@@ -90,6 +89,40 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         matched=matched,
         reason="" if rule is None else reason_of(rule, matched),
     )
+
+
+def unread_ruling(command: str, rules: AdmissionRules) -> Ruling | None:
+    """The deny for a command whose rule names options or subcommands
+    while no grammar reads it, so the line reader could not tell them
+    apart from operands: the refusal ``create_session`` gives such a
+    tree, as the line's reason; None when no tree names one.
+
+    Args:
+        command (str): the command the line runs.
+        rules (AdmissionRules): the session's command trees.
+    """
+    for scoped in rules.trees:
+        held = scoped.tree.subcommands.get(command)
+        reason = (
+            None
+            if held is None
+            else unread_reason(held, f"commands.{command}")
+        )
+        if reason is not None:
+            rule = CommandRule(
+                reason=reason,
+                decision=Outcome.DENY,
+                at=f"/{command}",
+                mount=scoped.mount,
+            )
+            return Ruling(
+                outcome=Outcome.DENY,
+                rule=rule,
+                source=source_of(rule),
+                matched=Matched(command=(command,), flags=(), keys=()),
+                reason=reason,
+            )
+    return None
 
 
 def redirect_ruling(

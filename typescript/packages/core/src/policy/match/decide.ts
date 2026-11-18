@@ -22,7 +22,7 @@ import {
   type Ruling,
 } from '../types.ts'
 import type { PathSpec } from '../../types.ts'
-import { noGrammar } from './grammar.ts'
+import { unreadReason } from './grammar.ts'
 import { commandFacts, reasonOf } from './rule.ts'
 
 /**
@@ -31,6 +31,37 @@ import { commandFacts, reasonOf } from './rule.ts'
  */
 export function sourceOf(rule: CommandRule): string {
   return rule.mount ? `mounts.${rule.mount}` : 'top'
+}
+
+/**
+ * The deny for a command whose rule names options or subcommands while no
+ * grammar reads it, so the line reader could not tell them apart from
+ * operands: the refusal `createSession` gives such a tree, as the line's
+ * reason; null when no tree names one. Mirrors Python's `unread_ruling`.
+ */
+export function unreadRuling(command: string, rules: AdmissionRules): Ruling | null {
+  for (const scoped of rules.trees) {
+    const held = scoped.tree.subcommands.get(command)
+    const reason = held === undefined ? null : unreadReason(held, `commands.${command}`)
+    if (reason !== null) {
+      const rule: CommandRule = {
+        reason,
+        decision: Outcome.DENY,
+        at: `/${command}`,
+        mount: scoped.mount,
+      }
+      return {
+        outcome: Outcome.DENY,
+        rule,
+        matchedPath: null,
+        source: sourceOf(rule),
+        asks: [],
+        matched: { command: [command], flags: [], keys: [] },
+        reason,
+      }
+    }
+  }
+  return null
 }
 
 /**
@@ -70,10 +101,8 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       reason: '',
     }
   if (rules.unread?.has(ctx.command) === true) {
-    for (const scoped of rules.trees) {
-      const held = scoped.tree.subcommands.get(ctx.command)
-      if (held !== undefined) noGrammar(held, `commands.${ctx.command}`)
-    }
+    const refused = unreadRuling(ctx.command, rules)
+    if (refused !== null) return refused
   }
   const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as {
     readonly outcome: Outcome

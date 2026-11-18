@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable, Mapping
-from dataclasses import replace
 
 from mirage.commands.spec.parser import ParsedArgs
 from mirage.commands.spec.types import FlagValue
@@ -87,6 +86,33 @@ def leaf_read(path: tuple[str, ...], parsed: ParsedArgs) -> CommandRead:
     )
 
 
+def unread_reason(tree: CommandNode, at: str) -> str | None:
+    """Why a command's subtree cannot be read when no grammar reads the
+    command, which the line reader gives operands only: the first option
+    or subcommand it names; None when it names operands only.
+
+    Args:
+        tree (CommandNode): the subtree as written.
+        at (str): where it is written, for the message.
+    """
+    if tree.options or tree.other_options:
+        return f"{at}: this command has no grammar here to read an option by"
+    if tree.subcommands:
+        return (
+            f"{at}: {next(iter(tree.subcommands))} is no subcommand here; "
+            "an operand goes under operands"
+        )
+    return next(
+        (
+            reason
+            for word, node in tree.operands.items()
+            if (reason := unread_reason(node, f"{at}.operands.{word}"))
+            is not None
+        ),
+        None,
+    )
+
+
 def no_grammar(tree: CommandNode, at: str) -> CommandNode:
     """A command's subtree for a command no grammar reads, which the
     line reader gives operands only.
@@ -98,22 +124,10 @@ def no_grammar(tree: CommandNode, at: str) -> CommandNode:
     Raises:
         PolicyError: the subtree names an option or a subcommand.
     """
-    if tree.options or tree.other_options:
-        raise PolicyError(
-            f"{at}: this command has no grammar here to read an option by"
-        )
-    if tree.subcommands:
-        raise PolicyError(
-            f"{at}: {next(iter(tree.subcommands))} is no subcommand here; "
-            "an operand goes under operands"
-        )
-    return replace(
-        tree,
-        operands={
-            word: no_grammar(node, f"{at}.operands.{word}")
-            for word, node in tree.operands.items()
-        },
-    )
+    reason = unread_reason(tree, at)
+    if reason is not None:
+        raise PolicyError(reason)
+    return tree
 
 
 def unread_names(
