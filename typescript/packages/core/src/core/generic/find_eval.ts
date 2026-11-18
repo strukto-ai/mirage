@@ -19,7 +19,7 @@ import { inMtimeWindow, isoTimestamp } from '../../utils/dates.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { DIR_SIZE, TYPE_CHARS, posixMode } from '../../utils/stat_view.ts'
+import { DIR_SIZE, TYPE_CHARS, idNumber, posixMode } from '../../utils/stat_view.ts'
 import type {
   Effects,
   FindEntry,
@@ -73,8 +73,8 @@ const SECONDS_PER_DAY = 86400
 function ownerId(value: number | string | null, group: boolean, ids: Ids): number | null {
   if (value === null) return group ? ids.gid : ids.uid
   if (typeof value === 'number') return value
-  if (/^[0-9]+$/.test(value)) return Number(value)
-  return (group ? ids.groups : ids.users)[value] ?? null
+  const names = group ? ids.groups : ids.users
+  return idNumber(value) ?? (Object.hasOwn(names, value) ? (names[value] ?? null) : null)
 }
 
 function count(st: FileStat, field: 'links' | 'uid' | 'gid' | 'inum', ids: Ids): number | null {
@@ -94,7 +94,7 @@ function owns(node: Owner, st: FileStat): boolean {
 function nameless(node: NoOwner, st: FileStat | null): boolean {
   if (st === null) return false
   const value = node.group ? st.gid : st.uid
-  if (typeof value === 'string' && !/^[0-9]+$/.test(value)) return false
+  if (typeof value === 'string' && idNumber(value) === null) return false
   const id = ownerId(value, node.group, node.ids)
   return id !== null && !Object.values(node.group ? node.ids.groups : node.ids.users).includes(id)
 }

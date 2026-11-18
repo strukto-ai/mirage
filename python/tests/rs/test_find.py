@@ -794,6 +794,15 @@ def test_the_new_tests_bind_to_their_nodes():
     assert expr.actions == []
 
 
+def test_user_reads_a_name_then_a_number_with_an_optional_plus():
+    for text, uid in (("bob", 1000), ("+0", 0), ("4242", 4242)):
+        tree = parse_find(["-user", text]).bind(ids=IDS).tree
+        assert tree == Owner(uid, ids=IDS)
+    for text in ("toString", "++5", "\u00b2"):
+        with pytest.raises(UsageError):
+            parse_find(["-user", text]).bind(ids=IDS)
+
+
 def test_the_new_actions_carry_their_file_and_directory():
     expr = parse_find_expression(
         [

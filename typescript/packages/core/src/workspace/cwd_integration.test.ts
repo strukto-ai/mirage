@@ -89,6 +89,17 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
     await ws.close()
   })
 
+  it('a per-call cwd or env keeps the session user', async () => {
+    const ws = makeWs()
+    const atRam = await ws.shell('echo ~ ~root $UID', { cwd: '/ram' })
+    expect(new TextDecoder().decode(atRam.stdout)).toBe('/root /root 0\n')
+    const imported = await ws.shell('declare -p UID EUID', { env: { UID: '5' } })
+    expect(new TextDecoder().decode(imported.stdout)).toBe(
+      'declare -x UID="5"\ndeclare -ir EUID="0"\n',
+    )
+    await ws.close()
+  })
+
   it('bare cd with $HOME unset → error (HOME not set)', async () => {
     const ws = makeWs()
     const io = await ws.shell('cd /ram/subdir && cd')

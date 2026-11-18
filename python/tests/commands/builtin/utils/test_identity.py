@@ -19,6 +19,7 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
     session_uid,
     user_homes,
+    user_named,
 )
 from mirage.commands.config import Context
 from mirage.io.types import materialize
@@ -68,6 +69,10 @@ def test_lookups_read_root_nobody_and_the_session_user():
     assert find_user(identity, "1000") == own_account(identity)
     assert find_user(Identity(), "1000") is None
     assert find_user(identity, "zz") is None
+    assert find_user(identity, "+0") == ROOT
+    assert find_user(identity, "\u00b2") is None
+    assert user_named(identity, "0") is None
+    assert user_named(identity, "nobody") == NOBODY
     assert group_id_named(identity, "nogroup") == 65534
     assert group_with_id(identity, 4242) is None
     assert user_homes(identity) == {

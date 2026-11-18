@@ -63,6 +63,7 @@ from mirage.types import JsonValue
 from mirage.utils.clock import system_now
 from mirage.utils.dates import parse_date_expr
 from mirage.utils.quote import quote_arg
+from mirage.utils.stat_view import id_number
 from mirage.utils.timezone import zone_from_env
 
 OPERAND = ""
@@ -511,7 +512,7 @@ def _perm_bits(bits: str) -> Literal["exact", "all", "any"]:
 
 def _owner_id(text: str, group: bool, binding: _Binding) -> int:
     """The id ``-user`` or ``-group`` names: a name the user database
-    holds, else a number.
+    holds, else a number (``+`` allowed).
 
     Args:
         text (str): the operand as typed.
@@ -523,10 +524,10 @@ def _owner_id(text: str, group: bool, binding: _Binding) -> int:
     """
     ids = binding.ids
     found = (ids.groups if group else ids.users).get(text)
+    if found is None:
+        found = id_number(text)
     if found is not None:
         return found
-    if text.isdigit():
-        return int(text)
     kind = "group name or GID" if group else "user name or UID"
     test = "-group" if group else "-user"
     raise UsageError(

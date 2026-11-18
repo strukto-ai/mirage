@@ -231,3 +231,17 @@ def size_unknown(st: FileStat) -> bool:
         st (FileStat): the stat to inspect.
     """
     return st.size is None and not is_dir(st) and not is_fifo(st)
+
+
+def id_number(text: str) -> int | None:
+    """The id an owner or group names as a number: ASCII digits after an
+    optional ``+``, the form ``chown``, ``id`` and ``find -user`` read
+    as a number; None for anything else.
+
+    Args:
+        text (str): the owner or group as typed or reported.
+    """
+    digits = text[1:] if text.startswith("+") else text
+    if digits.isascii() and digits.isdigit():
+        return int(digits)
+    return None

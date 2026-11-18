@@ -55,7 +55,13 @@ from mirage.types import (
 from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
-from mirage.utils.stat_view import DIR_SIZE, TYPE_CHARS, PrintfKind, posix_mode
+from mirage.utils.stat_view import (
+    DIR_SIZE,
+    TYPE_CHARS,
+    PrintfKind,
+    id_number,
+    posix_mode,
+)
 
 _ACCESS_BITS = {"r": 0o400, "w": 0o200, "x": 0o100}
 _PERMISSION_BITS = 0o7777
@@ -177,8 +183,9 @@ def _owner_id(value: int | str | None, group: bool, ids: Ids) -> int | None:
         return ids.gid if group else ids.uid
     if isinstance(value, int):
         return value
-    if value.isdigit():
-        return int(value)
+    number = id_number(value)
+    if number is not None:
+        return number
     return (ids.groups if group else ids.users).get(value)
 
 
@@ -203,7 +210,7 @@ def _nameless(node: NoOwner, st: FileStat | None) -> bool:
     if st is None:
         return False
     value = st.gid if node.group else st.uid
-    if isinstance(value, str) and not value.isdigit():
+    if isinstance(value, str) and id_number(value) is None:
         return False
     held = (node.ids.groups if node.group else node.ids.users).values()
     return _owner_id(value, node.group, node.ids) not in held

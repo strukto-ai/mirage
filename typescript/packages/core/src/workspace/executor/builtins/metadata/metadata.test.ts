@@ -36,6 +36,9 @@ describe('parseOwner', () => {
     expect(() => parseOwner('alice:root', root)).toThrow("chown: invalid user: 'alice:root'")
     expect(() => parseOwner('root:staff', root)).toThrow("chown: invalid group: 'root:staff'")
     expect(() => parseOwner('4242:', root)).toThrow("chown: invalid spec: '4242:'")
+    expect(() => parseOwner('0:', root)).toThrow("chown: invalid spec: '0:'")
+    expect(() => parseOwner('++5', root)).toThrow("chown: invalid user: '++5'")
+    expect(parseOwner('+1000:+20', root)).toEqual([1000, 20])
   })
 })
 
@@ -71,6 +74,7 @@ describe('parseGroup', () => {
     const root = { profile: null }
     expect(parseGroup('nogroup', root)).toBe(65534)
     expect(parseGroup('20', root)).toBe(20)
+    expect(parseGroup('+20', root)).toBe(20)
     expect(parseGroup('staff', root)).toBeNull()
     expect(parseGroup('', root)).toBeNull()
   })

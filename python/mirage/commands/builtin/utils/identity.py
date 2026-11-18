@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from mirage.commands.config import Context
 from mirage.core.generic.types import Ids
+from mirage.utils.stat_view import id_number
 from mirage.view.types import SessionView
 
 # What a column prints for a fact nothing reports, such as another
@@ -181,6 +182,19 @@ def user_homes(identity: Identity | None) -> dict[str, str]:
     return {account.name: account.home for account in accounts(identity)}
 
 
+def user_named(identity: Identity | None, name: str) -> Account | None:
+    """The user a name names, as ``groups`` looks one up: by name only.
+
+    Args:
+        identity (Identity | None): who the session is.
+        name (str): the operand as typed.
+    """
+    for account in accounts(identity):
+        if account.name == name:
+            return account
+    return None
+
+
 def find_user(identity: Identity | None, text: str) -> Account | None:
     """The user a name or a number names, as ``id`` and ``chown`` look
     one up: by name first, then by uid when the text is a number.
@@ -189,15 +203,11 @@ def find_user(identity: Identity | None, text: str) -> Account | None:
         identity (Identity | None): who the session is.
         text (str): the operand as typed.
     """
-    held = accounts(identity)
-    for account in held:
-        if account.name == text:
-            return account
-    if text.isdigit():
-        for account in held:
-            if account.uid == int(text):
-                return account
-    return None
+    named = user_named(identity, text)
+    if named is not None:
+        return named
+    number = id_number(text)
+    return None if number is None else user_with_id(identity, number)
 
 
 def user_with_id(identity: Identity | None, uid: int) -> Account | None:
@@ -253,9 +263,10 @@ def owner_id(uid: int | str | None, identity: Identity | None) -> int | str:
         return session_uid(identity)
     if isinstance(uid, int):
         return uid
-    if uid.isdigit():
-        return int(uid)
-    found = find_user(identity, uid)
+    number = id_number(uid)
+    if number is not None:
+        return number
+    found = user_named(identity, uid)
     return uid if found is None else found.uid
 
 
@@ -270,8 +281,9 @@ def group_id(gid: int | str | None, identity: Identity | None) -> int | str:
         return session_gid(identity)
     if isinstance(gid, int):
         return gid
-    if gid.isdigit():
-        return int(gid)
+    number = id_number(gid)
+    if number is not None:
+        return number
     found = group_id_named(identity, gid)
     return gid if found is None else found
 

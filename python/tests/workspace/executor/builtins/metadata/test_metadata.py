@@ -41,11 +41,14 @@ def test_parse_owner_forms():
     assert parse_owner("500:501", root) == (500, 501)
     assert parse_owner("nobody:", root) == (65534, 65534)
     assert parse_owner("agent", Identity(profile="agent")) == (1000, None)
+    assert parse_owner("+1000:+20", root) == (1000, 20)
     for text, message in (
         ("alice", "chown: invalid user: 'alice'"),
         ("alice:root", "chown: invalid user: 'alice:root'"),
         ("root:staff", "chown: invalid group: 'root:staff'"),
         ("4242:", "chown: invalid spec: '4242:'"),
+        ("0:", "chown: invalid spec: '0:'"),
+        ("++5", "chown: invalid user: '++5'"),
     ):
         with pytest.raises(UsageError) as caught:
             parse_owner(text, root)
@@ -56,6 +59,7 @@ def test_parse_group_forms():
     root = Identity()
     assert parse_group("nogroup", root) == 65534
     assert parse_group("20", root) == 20
+    assert parse_group("+20", root) == 20
     assert parse_group("staff", root) is None
     assert parse_group("", root) is None
 

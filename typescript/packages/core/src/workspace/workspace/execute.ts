@@ -12,12 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  homeOf,
-  sessionUid,
-  userHomes,
-  type Identity,
-} from '../../commands/builtin/utils/identity.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
@@ -135,18 +129,11 @@ import type { WorkspaceMeta } from './meta.ts'
 import type { Router } from './routing.ts'
 import type { Runtimes } from './runtimes.ts'
 import { ExecuteResult, type ExecuteOptions } from './types.ts'
-import { commandName, forkForCall } from './utils.ts'
+import { commandName, forkForCall, seedSessionUser } from './utils.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
-import {
-  deciding,
-  envIsReadonly,
-  seedParent,
-  seedShell,
-  seedUser,
-  visibleEnv,
-} from '../session/state.ts'
+import { deciding, envIsReadonly, seedParent, seedShell, visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -388,8 +375,7 @@ async function runLine(
   // A policy deciding reads the session and changes nothing, so a line it
   // runs ends with the copy it ran on.
   if (options.session === undefined && deciding()) targetSession = beside(env, targetSession)
-  const identity: Identity = { profile: targetSession.profile ?? null }
-  seedUser(targetSession, sessionUid(identity), homeOf(identity), userHomes(identity))
+  seedSessionUser(targetSession)
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {

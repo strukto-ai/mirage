@@ -424,7 +424,13 @@ async function checkMetadata(
   if (nativeAttrs) {
     const [lsOut] = await run(ws, `ls -l ${dst}/copied`)
     check(`${label}: ls -l renders overlay bits`, lsOut.includes('-rw-rw-r--'))
-    check(`${label}: ls -l renders overlay owner`, lsOut.includes(' 500 nogroup '))
+    check(
+      `${label}: ls -l renders overlay owner`,
+      lsOut.split('\n').some((line) => {
+        const fields = line.split(/\s+/)
+        return fields[2] === '500' && fields[3] === 'nogroup'
+      }),
+    )
     check(`${label}: ls -l renders touched mtime`, lsOut.includes('Mar  4  2026'))
   }
   await run(ws, `touch -r ${dst}/copied/n.txt /ram/tref.txt`)
@@ -438,9 +444,13 @@ async function checkMetadata(
   const [lsAll] = await run(ws, `ls ${dst}/copied`)
   check(`${label}: touch -c does not create`, code === 0 && !lsAll.includes('absent.txt'))
   await run(ws, `ln -s ${dst}/copied/n.txt /ram/nl.txt`)
-  await run(ws, 'chown -h 501:ops /ram/nl.txt')
+  ;[, , code] = await run(ws, 'chown -h 501:root /ram/nl.txt')
+  const [linkOwner] = await run(ws, "stat -c '%u %g' /ram/nl.txt")
   st = await statOf(ws, `${dst}/copied/n.txt`)
-  check(`${label}: chown -h leaves target owner`, st.uid === 500 && st.gid === 65534)
+  check(
+    `${label}: chown -h leaves target owner`,
+    code === 0 && linkOwner === '501 0\n' && st.uid === 500 && st.gid === 65534,
+  )
   await run(ws, "printf 'x\n' >> /ram/nl.txt")
   st = await statOf(ws, `${dst}/copied/n.txt`)
   check(

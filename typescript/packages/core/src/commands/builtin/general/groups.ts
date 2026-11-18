@@ -18,7 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { quoteText } from '../../quote.ts'
-import { findUser, identityOf, ownAccount, sessionGid } from '../utils/identity.ts'
+import { identityOf, ownAccount, sessionGid, userNamed } from '../utils/identity.ts'
 
 const ENC = new TextEncoder()
 
@@ -47,7 +47,7 @@ function groups(
   const out: string[] = []
   const err: string[] = []
   for (const name of texts) {
-    const found = findUser(identity, name)
+    const found = userNamed(identity, name)
     if (found === null) err.push(`groups: '${quoteText(name)}': no such user\n`)
     else out.push(`${name} : ${found.group}\n`)
   }

@@ -23,6 +23,7 @@ import {
   ownerName,
   sessionUid,
   userHomes,
+  userNamed,
 } from './identity.ts'
 
 const NO_IDENTITY = { profile: null }
@@ -70,6 +71,9 @@ describe('identity', () => {
     expect(findUser(identity, '1000')).toEqual(ownAccount(identity))
     expect(findUser(NO_IDENTITY, '1000')).toBeNull()
     expect(findUser(identity, 'zz')).toBeNull()
+    expect(findUser(identity, '+0')).toBe(ROOT)
+    expect(userNamed(identity, '0')).toBeNull()
+    expect(userNamed(identity, 'nobody')).toBe(NOBODY)
     expect(groupIdNamed(identity, 'nogroup')).toBe(65534)
     expect(groupWithId(identity, 4242)).toBeNull()
     expect(userHomes(identity)).toEqual({

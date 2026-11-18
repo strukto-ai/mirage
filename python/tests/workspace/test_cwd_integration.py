@@ -88,6 +88,15 @@ async def test_cd_tilde_unset_home_goes_to_the_users_home():
 
 
 @pytest.mark.asyncio
+async def test_a_per_call_cwd_or_env_keeps_the_session_user():
+    ws = _make_ws()
+    r = await ws.shell("echo ~ ~root $UID", cwd="/ram")
+    assert await r.stdout_str() == "/root /root 0\n"
+    r = await ws.shell("declare -p UID EUID", env={"UID": "5"})
+    assert await r.stdout_str() == 'declare -x UID="5"\ndeclare -ir EUID="0"\n'
+
+
+@pytest.mark.asyncio
 async def test_cd_no_args_unset_home_errors():
     ws = _make_ws()
     r = await ws.shell("cd /ram/subdir && cd")

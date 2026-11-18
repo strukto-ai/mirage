@@ -25,12 +25,12 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.builtin.utils.identity import (
     Identity,
-    find_user,
     group_id,
     group_id_named,
     group_label,
     owner_id,
     owner_label,
+    user_named,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.builtin.utils.tree import before_full_walk, tree_walk
@@ -46,6 +46,7 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.clock import system_date
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
+from mirage.utils.stat_view import id_number
 from mirage.view.types import MountView, NamespaceLinks
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.shared import expand_operands, result
@@ -61,8 +62,9 @@ def parse_owner(
 ) -> tuple[int | None, int | None]:
     """Parse a chown OWNER[:GROUP] argument against the user database.
 
-    A name the database holds is its id, and any number is an id; a
-    colon with no group after a user names that user's login group.
+    A name the database holds is its id, and any number (``+`` forces
+    one) is an id; a colon with no group after a user name names that
+    user's login group, which a number has none of.
 
     Args:
         text (str): the OWNER[:GROUP] operand as typed.
@@ -84,21 +86,21 @@ def parse_owner(
         parse_owner("nobody:", identity)       -> (65534, 65534)
     """
     owner, sep, group = text.partition(":")
-    found = find_user(identity, owner) if owner else None
+    named = user_named(identity, owner) if owner else None
     uid = None
     if owner:
-        if found is None and not owner.isdigit():
+        uid = named.uid if named is not None else id_number(owner)
+        if uid is None:
             raise UsageError(f"{cmd}: invalid user: '{text}'", 1)
-        uid = int(owner) if found is None else found.uid
     gid = None
     if sep and group:
         gid = parse_group(group, identity)
         if gid is None:
             raise UsageError(f"{cmd}: invalid group: '{text}'", 1)
     elif sep and owner:
-        if found is None:
+        if named is None:
             raise UsageError(f"{cmd}: invalid spec: '{text}'", 1)
-        gid = found.gid
+        gid = named.gid
     return uid, gid
 
 
@@ -122,9 +124,7 @@ def parse_group(text: str, identity: Identity) -> int | None:
     if not text:
         return None
     found = group_id_named(identity, text)
-    if found is not None:
-        return found
-    return int(text) if text.isdigit() else None
+    return found if found is not None else id_number(text)
 
 
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:

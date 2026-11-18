@@ -21,6 +21,7 @@ import { systemNow } from '../utils/clock.ts'
 import { parseDateExpr } from '../utils/dates.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../utils/timezone.ts'
 import { quoteArg } from '../utils/quote.ts'
+import { idNumber } from '../utils/stat_view.ts'
 import { scanned } from './scan.ts'
 
 export const OPERAND = ''
@@ -324,11 +325,12 @@ function permBits(bits: string): 'exact' | 'all' | 'any' {
 }
 
 // The id `-user` or `-group` names: a name the user database holds, else a
-// number. Throws find's UsageError for a name the database lacks.
+// number (`+` allowed). Throws find's UsageError for a name the database
+// lacks.
 function ownerId(text: string, group: boolean, binding: Binding): number {
-  const found = (group ? binding.ids.groups : binding.ids.users)[text]
-  if (found !== undefined) return found
-  if (/^[0-9]+$/.test(text)) return Number(text)
+  const names = group ? binding.ids.groups : binding.ids.users
+  const found = (Object.hasOwn(names, text) ? names[text] : undefined) ?? idNumber(text)
+  if (found !== null) return found
   const kind = group ? 'group name or GID' : 'user name or UID'
   const test = group ? '-group' : '-user'
   throw new UsageError(

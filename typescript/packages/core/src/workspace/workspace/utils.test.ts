@@ -60,6 +60,8 @@ describe('forkForCall', () => {
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
+      UID: '0',
+      EUID: '0',
     })
     expect(session.env).toEqual({
       A: '1',

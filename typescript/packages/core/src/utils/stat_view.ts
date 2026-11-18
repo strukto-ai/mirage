@@ -217,3 +217,12 @@ export function contentSize(st: FileStat): number {
 export function sizeUnknown(st: FileStat): boolean {
   return st.size === null && !isDir(st) && !isFifo(st)
 }
+
+/**
+ * The id an owner or group names as a number: ASCII digits after an optional
+ * `+`, the form `chown`, `id` and `find -user` read as a number; null for
+ * anything else. Mirrors python's id_number.
+ */
+export function idNumber(text: string): number | null {
+  return /^\+?[0-9]+$/.test(text) ? Number(text) : null
+}

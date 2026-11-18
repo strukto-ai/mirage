@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.identity import (
-    find_user,
     identity_of,
     own_account,
     session_gid,
+    user_named,
 )
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
@@ -33,8 +33,9 @@ async def groups(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Print each user's groups, as ``id -Gn`` names them: every user is
-    in its own group alone. With no operand, the session's, by number
-    where the user database holds no name for it.
+    in its own group alone, and an operand is a name, never a uid. With
+    no operand, the session's, by number where the user database holds
+    no name for it.
     """
     identity = identity_of(ctx)
     if not texts:
@@ -49,7 +50,7 @@ async def groups(
     out: list[str] = []
     err: list[str] = []
     for name in texts:
-        found = find_user(identity, name)
+        found = user_named(identity, name)
         if found is None:
             err.append(f"groups: '{quote_text(name)}': no such user\n")
         else:

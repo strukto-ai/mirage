@@ -736,6 +736,20 @@ describe('the tests and actions find gained', () => {
     expect(expr.actions).toEqual([])
   })
 
+  it('reads -user as a name, then a number with an optional plus', () => {
+    for (const [text, uid] of [
+      ['bob', 1000],
+      ['+0', 0],
+      ['4242', 4242],
+    ] as const) {
+      const expr = parseFind(['-user', text]).bind([], undefined, null, IDS)
+      expect(expr.tree).toEqual({ op: 'owner', id: uid, group: false, ids: IDS })
+    }
+    for (const text of ['toString', '__proto__', '++5']) {
+      expect(() => parseFind(['-user', text]).bind([], undefined, null, IDS)).toThrow(UsageError)
+    }
+  })
+
   it('carries the file and directory of an action', () => {
     const expr = parseFindExpression([
       '-execdir',

@@ -15,12 +15,12 @@
 import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
 import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
 import {
-  findUser,
   groupId,
   groupIdNamed,
   groupLabel,
   ownerId,
   ownerLabel,
+  userNamed,
   type Identity,
 } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
@@ -49,6 +49,7 @@ import { systemDate } from '../../../../utils/clock.ts'
 import { ancestors, CycleError } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { idNumber } from '../../../../utils/stat_view.ts'
 import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -57,8 +58,9 @@ import { expandOperands, result } from '../shared.ts'
 
 /**
  * Parse a chown OWNER[:GROUP] argument against the user database. A name the
- * database holds is its id, and any number is an id; a colon with no group
- * after a user names that user's login group. Throws UsageError for an
+ * database holds is its id, and any number (`+` forces one) is an id; a
+ * colon with no group after a user name names that user's login group, which
+ * a number has none of. Throws UsageError for an
  * owner or group the database lacks, or a number with a colon and no group
  * after it, as chown refuses them.
  */
@@ -70,21 +72,19 @@ export function parseOwner(
   const sep = text.indexOf(':')
   const owner = sep >= 0 ? text.slice(0, sep) : text
   const group = sep >= 0 ? text.slice(sep + 1) : ''
-  const found = owner.length > 0 ? findUser(identity, owner) : null
+  const named = owner.length > 0 ? userNamed(identity, owner) : null
   let uid: number | null = null
   if (owner.length > 0) {
-    if (found === null && !/^\d+$/.test(owner)) {
-      throw new UsageError(`${cmd}: invalid user: '${text}'`, 1)
-    }
-    uid = found === null ? parseInt(owner, 10) : found.uid
+    uid = named?.uid ?? idNumber(owner)
+    if (uid === null) throw new UsageError(`${cmd}: invalid user: '${text}'`, 1)
   }
   let gid: number | null = null
   if (sep >= 0 && group.length > 0) {
     gid = parseGroup(group, identity)
     if (gid === null) throw new UsageError(`${cmd}: invalid group: '${text}'`, 1)
   } else if (sep >= 0 && owner.length > 0) {
-    if (found === null) throw new UsageError(`${cmd}: invalid spec: '${text}'`, 1)
-    gid = found.gid
+    if (named === null) throw new UsageError(`${cmd}: invalid spec: '${text}'`, 1)
+    gid = named.gid
   }
   return [uid, gid]
 }
@@ -93,9 +93,7 @@ export function parseOwner(
 // a name the database lacks or an empty text.
 export function parseGroup(text: string, identity: Identity): number | null {
   if (text.length === 0) return null
-  const found = groupIdNamed(identity, text)
-  if (found !== null) return found
-  return /^\d+$/.test(text) ? parseInt(text, 10) : null
+  return groupIdNamed(identity, text) ?? idNumber(text)
 }
 
 // Resolve touch -t/-d into an ISO timestamp. `t` is a POSIX

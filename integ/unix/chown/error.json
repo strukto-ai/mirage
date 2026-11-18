@@ -104,6 +104,41 @@
         "stdout": "changed ownership of '/data/fc0r2.txt' from 4242:4343 to root:root\n0:0 root:root\nchanged group of '/data/fc0r2.txt' from 77 to root\n0 root\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "chown_plus_forces_a_number_and_a_number_has_no_login_group",
+      "seq": 15000025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fcp.txt; chown +65534 /data/fcp.txt; chgrp +20 /data/fcp.txt; stat -c '%u %g' /data/fcp.txt; chown 0: /data/fcp.txt; chown ++5 /data/fcp.txt; find /data -maxdepth 1 -user +65534 -name fcp.txt; groups 0; id -u +0; rm /data/fcp.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "65534 20\n/data/fcp.txt\n0\n",
+        "stderr": "chown: invalid spec: '0:'\nchown: invalid user: '++5'\ngroups: '0': no such user\n"
+      }
     }
   ]
 }

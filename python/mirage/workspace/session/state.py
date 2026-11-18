@@ -834,8 +834,9 @@ def seed_user(
 ) -> None:
     """Give a session the user its profile runs as: ``$UID`` and
     ``$EUID``, readonly integers no line can change, as bash sets them,
-    and the user database ``~`` reads. The variables are seeded again
-    only when the profile moved the session to another uid.
+    and the user database ``~`` reads. A value the environment handed
+    in wins, as bash keeps an imported one; the variables are seeded
+    again only when the profile moved the session to another uid.
 
     Args:
         session (SessionState): the session.
@@ -845,7 +846,10 @@ def seed_user(
     """
     value = str(uid)
     for name in (UID, EUID):
-        if env_is_readonly(session, name) and env_get(session, name) == value:
+        current = env_get(session, name)
+        if current is not None and (
+            current == value or not env_is_readonly(session, name)
+        ):
             continue
         seed_var(session, name, value)
         set_attr(session, name, VarAttr.INTEGER)

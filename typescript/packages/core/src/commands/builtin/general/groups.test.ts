@@ -28,3 +28,10 @@ it('groups', async () => {
     0,
   ])
 })
+
+it('reads an operand as a name, never a uid', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await ws.shell('groups 0 root')
+  await ws.close()
+  expect([io.stdoutText, io.stderrText]).toEqual(['root : root\n', "groups: '0': no such user\n"])
+})

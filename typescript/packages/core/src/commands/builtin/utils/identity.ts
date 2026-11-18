@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import type { Ids } from '../../../core/generic/types.ts'
+import { idNumber } from '../../../utils/stat_view.ts'
 import type { SessionView } from '../../../view/types.ts'
 import type { Context } from '../../config.ts'
 
@@ -133,16 +134,20 @@ export function userHomes(identity: Identity | null): Record<string, string> {
   return Object.fromEntries(accounts(identity).map((account) => [account.name, account.home]))
 }
 
+/** The user a name names, as `groups` looks one up: by name only. */
+export function userNamed(identity: Identity | null, name: string): Account | null {
+  return accounts(identity).find((account) => account.name === name) ?? null
+}
+
 /**
  * The user a name or a number names, as `id` and `chown` look one up: by
  * name first, then by uid when the text is a number.
  */
 export function findUser(identity: Identity | null, text: string): Account | null {
-  const held = accounts(identity)
-  const named = held.find((account) => account.name === text)
-  if (named !== undefined) return named
-  if (/^[0-9]+$/.test(text)) return held.find((account) => account.uid === Number(text)) ?? null
-  return null
+  const named = userNamed(identity, text)
+  if (named !== null) return named
+  const number = idNumber(text)
+  return number === null ? null : userWithId(identity, number)
 }
 
 /** The user a uid belongs to, null for a uid the database lacks. */
@@ -168,16 +173,14 @@ export function groupWithId(identity: Identity | null, gid: number): string | nu
 export function ownerId(uid: number | string | null, identity: Identity | null): number | string {
   if (uid === null) return sessionUid(identity)
   if (typeof uid === 'number') return uid
-  if (/^[0-9]+$/.test(uid)) return Number(uid)
-  return findUser(identity, uid)?.uid ?? uid
+  return idNumber(uid) ?? userNamed(identity, uid)?.uid ?? uid
 }
 
 /** The group's gid, read as `ownerId` reads the owner's. */
 export function groupId(gid: number | string | null, identity: Identity | null): number | string {
   if (gid === null) return sessionGid(identity)
   if (typeof gid === 'number') return gid
-  if (/^[0-9]+$/.test(gid)) return Number(gid)
-  return groupIdNamed(identity, gid) ?? gid
+  return idNumber(gid) ?? groupIdNamed(identity, gid) ?? gid
 }
 
 /** The owner's name, null for a uid the database holds no name for. */

@@ -619,7 +619,8 @@ export function seedShell(session: SessionState, nested = false): void {
 /**
  * Give a session the user its profile runs as: `$UID` and `$EUID`, readonly
  * integers no line can change, as bash sets them, and the user database `~`
- * reads (`home` while `HOME` is unset, `homes` for `~name`). The variables
+ * reads (`home` while `HOME` is unset, `homes` for `~name`). A value the
+ * environment handed in wins, as bash keeps an imported one; the variables
  * are seeded again only when the profile moved the session to another uid.
  * Mirrors Python's seed_user.
  */
@@ -631,7 +632,8 @@ export function seedUser(
 ): void {
   const value = String(uid)
   for (const name of [UID, EUID]) {
-    if (envIsReadonly(session, name) && envGet(session, name) === value) continue
+    const current = envGet(session, name)
+    if (current !== null && (current === value || !envIsReadonly(session, name))) continue
     seedVar(session, name, value)
     setAttr(session, name, VarAttr.Integer)
     setAttr(session, name, VarAttr.Readonly)

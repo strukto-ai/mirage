@@ -28,6 +28,7 @@ from mirage.utils.stat_view import (
     FILE_MODE,
     LINK_MODE,
     content_size,
+    id_number,
     is_dir,
     is_fifo,
     is_link,
@@ -213,3 +214,10 @@ def test_size_unknown_spares_a_directory_and_a_fifo():
     fifo = FileStat(name="63", type=FileType.FIFO)
     assert not size_unknown(fifo)
     assert content_size(fifo) == 0
+
+
+def test_id_number_reads_ascii_digits_after_an_optional_plus():
+    assert id_number("1000") == 1000
+    assert id_number("+0") == 0
+    for text in ("", "+", "++5", "-5", " 5", "root", "\u00b2"):
+        assert id_number(text) is None

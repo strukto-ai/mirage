@@ -63,6 +63,8 @@ def test_env_override_layers_on_top_of_the_session_env():
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
+        "UID": "0",
+        "EUID": "0",
     }
     assert session.env == {
         "A": "1",
