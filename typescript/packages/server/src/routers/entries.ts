@@ -23,6 +23,7 @@ import { checkValues, storesOf } from '../resources/values.ts'
 import { HttpError } from '../errors.ts'
 import type { RouteApp, ServerHost } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
+import { queryFlag } from './vfs.ts'
 
 /** Each kind's route. */
 export const ROUTES = {
@@ -46,6 +47,10 @@ interface ListQuery {
   q?: string
 }
 
+interface DeleteQuery {
+  force?: string
+}
+
 /**
  * An entry as a route answers it. The daemon keeps no id, creator or
  * times, so the id is the name and the rest are null.
@@ -62,6 +67,14 @@ function present(kind: EntryKind, entry: Entry): Record<string, JsonValue> {
     created_at: null,
     updated_at: null,
   }
+}
+
+/**
+ * The refusal a delete answers while kept workspace configs name the
+ * entry: each fills its pointers in again when it starts.
+ */
+function inUse(name: string, ids: readonly string[]): HttpError {
+  return new HttpError('conflict', `${name} is used by workspaces ${ids.join(', ')}`)
 }
 
 function requiredString(body: Record<string, unknown>, key: string): string {
@@ -218,9 +231,13 @@ export function registerEntryRoutes(
     }),
   )
 
-  app.delete<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
+  app.delete<{ Params: RefParams; Querystring: DeleteQuery }>(`${route}/:ref`, (req, reply) =>
     answered(registry, async () => {
       const current = await entryNamed(resources, kind, req.params.ref)
+      if (!queryFlag(req.query, 'force').force) {
+        const ids = await registry.idsNaming(current.name, req.account)
+        if (ids.length > 0) throw inUse(current.name, ids)
+      }
       await resources.deleteEntry(kind, current.name)
       return reply.status(204).send()
     }),

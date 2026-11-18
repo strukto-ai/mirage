@@ -14,6 +14,7 @@
 
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -63,6 +64,20 @@ def present(kind: EntryKind, entry: Entry) -> dict[str, Any]:
     }
     out.update(created_by=None, created_at=None, updated_at=None)
     return out
+
+
+def in_use(name: str, ids: Sequence[str]) -> HttpError:
+    """The refusal a delete answers while kept workspace configs name the
+    entry: each fills its pointers in again when it starts.
+
+    Args:
+        name (str): the entry.
+        ids (Sequence[str]): the workspaces whose configs name it.
+    """
+    return HttpError(
+        ErrorCode.CONFLICT,
+        f"{name} is used by workspaces {', '.join(ids)}",
+    )
 
 
 def required_string(body: dict[str, JsonValue], key: str) -> str:
@@ -257,10 +272,18 @@ def entry_router(kind: EntryKind) -> APIRouter:
         return present(kind, saved)
 
     @router.delete("/{ref}", status_code=204, response_model=None)
-    async def delete_entry(ref: str, request: Request) -> Response:
+    async def delete_entry(
+        ref: str, request: Request, force: bool = False
+    ) -> Response:
         store: ResourceStore = request.app.state.resources
         try:
             current = await entry_named(store, kind, ref)
+            if not force:
+                ids = await request.app.state.registry.ids_naming(
+                    current.name, request.state.account
+                )
+                if ids:
+                    raise in_use(current.name, ids)
             await store.delete_entry(kind, current.name)
         except ResourceError as e:
             raise store_refusal(e) from e

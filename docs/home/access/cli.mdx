@@ -283,7 +283,7 @@ ID is its name.
 | `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name. |
 | `mirage vfs get ID [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
 | `mirage vfs update ID [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
-| `mirage vfs delete ID` | Delete an entry and wipe its secrets. There is no restore. |
+| `mirage vfs delete ID [--force]` | Delete an entry and wipe its secrets. There is no restore. Refused while a workspace uses it, unless `--force`. |
 
 `mirage cli`, `mirage runtime` and `mirage machine` take the same commands.
 
@@ -327,6 +327,20 @@ mirage vfs create -f github.yaml < token.txt
 `update` keeps a secret field you leave out, so `--secret token` rotates a
 token while the entry stays in use. The local daemon keeps entries under
 `~/.mirage/resources`, their secrets in a separate file only you can read.
+
+A workspace reads its saved entries each time it starts, so `delete` refuses
+an entry a workspace's config names:
+
+```bash
+mirage vfs delete github
+```
+
+```text
+error 409: github is used by workspaces demo; pass --force to delete it anyway
+```
+
+With `--force`, a running workspace keeps the values it read, and a stopped
+one starts again once an entry of the same name is saved.
 
 ### Use a saved connection
 

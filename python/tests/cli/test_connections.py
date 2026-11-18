@@ -29,6 +29,7 @@ from mirage.cli import connections
 from mirage.cli.main import app
 from mirage.resources.base import ResourceStore
 from mirage.resources.memory import memory_resource_store
+from mirage.resources.types import EntryInput
 from mirage.server import build_app
 from mirage.server.auth.config import AuthConfig
 
@@ -60,11 +61,12 @@ def store() -> ResourceStore:
 
 
 @pytest.fixture
-def daemon(monkeypatch, store) -> Daemon:
+def daemon(monkeypatch, store, tmp_path) -> Daemon:
     built = build_app(
         idle_grace_seconds=10.0,
         resource_store=store,
         auth_config=AuthConfig(mode="local", local_token="t"),
+        state_root=tmp_path / "state",
     )
     double = Daemon(
         TestClient(
@@ -313,3 +315,27 @@ def test_types_and_delete(daemon, store):
     r = run("vfs", "get", "gh")
     assert r.exit_code == 2
     assert "VFS not found" in r.output
+
+
+def test_delete_refuses_an_entry_a_workspace_uses_unless_forced(
+    daemon, store, tmp_path
+):
+    box = EntryInput(
+        name="box", type="disk", fields={}, sealed={"root": str(tmp_path)}
+    )
+    asyncio.run(store.create_entry("vfs", box))
+    root = {"from": "strukto", "ref": "box", "key": "root"}
+    config = {"mounts": {"/": {"vfs": "disk", "config": {"root": root}}}}
+    made = daemon.client.post(
+        "/v1/workspaces", json={"id": "demo", "config": config}
+    )
+    assert made.status_code == 201, made.text
+    r = run("vfs", "delete", "box")
+    assert r.exit_code == 2
+    assert (
+        "error 409: box is used by workspaces demo; "
+        "pass --force to delete it anyway"
+    ) in r.output
+    r = run("vfs", "delete", "box", "--force")
+    assert (r.exit_code, r.output) == (0, "Deleted VFS box.\n")
+    daemon.client.delete("/v1/workspaces/demo")

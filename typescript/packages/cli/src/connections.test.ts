@@ -31,14 +31,17 @@ let app: MirageApp
 let store: ResourceStore
 let url = ''
 let home = ''
+let state = ''
 
 beforeAll(async () => {
   store = memoryResourceStore()
   const { buildApp } = await import('@struktoai/mirage-server')
+  state = mkdtempSync(join(tmpdir(), 'mirage-connections-state-'))
   app = buildApp({
     idleGraceSeconds: 10,
     resourceStore: store,
     authConfig: { mode: AuthMode.Local, localToken: 'tk' },
+    stateRoot: state,
   })
   await app.listen({ port: 0, host: '127.0.0.1' })
   url = `http://127.0.0.1:${String((app.server.address() as AddressInfo).port)}`
@@ -48,6 +51,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close()
   rmSync(home, { recursive: true, force: true })
+  rmSync(state, { recursive: true, force: true })
 })
 
 function run(args: string[], stdin = ''): Promise<{ code: number; out: string; err: string }> {
@@ -203,5 +207,35 @@ describe('mirage vfs against a daemon', () => {
     const after = await run(['vfs', 'get', 'gone'])
     expect(after.code).toBe(2)
     expect(after.err).toContain('VFS not found')
+  })
+
+  it('refuses an entry a workspace uses unless --force', async () => {
+    await store.createEntry('vfs', {
+      name: 'box',
+      type: 'disk',
+      fields: {},
+      sealed: { root: home },
+    })
+    const root = { from: 'strukto', ref: 'box', key: 'root' }
+    const made = await fetch(`${url}/v1/workspaces`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer tk', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'demo',
+        config: { mounts: { '/': { vfs: 'disk', config: { root } } } },
+      }),
+    })
+    expect(made.status).toBe(201)
+    const refused = await run(['vfs', 'delete', 'box'])
+    expect([refused.code, refused.err]).toEqual([
+      2,
+      'error 409: box is used by workspaces demo; pass --force to delete it anyway\n',
+    ])
+    const forced = await run(['vfs', 'delete', 'box', '--force'])
+    expect([forced.code, forced.out]).toEqual([0, 'Deleted VFS box.\n'])
+    await fetch(`${url}/v1/workspaces/demo`, {
+      method: 'DELETE',
+      headers: { authorization: 'Bearer tk' },
+    })
   })
 })
