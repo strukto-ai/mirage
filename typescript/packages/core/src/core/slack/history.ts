@@ -17,7 +17,7 @@ import { jsonlBytes } from '../render/json.ts'
 import { cursorPages } from './paginate.ts'
 import type { SlackMessage } from './types.ts'
 
-export type { SlackMessage }
+export type { SlackMessage } from './types.ts'
 
 export async function* streamMessagesForDay(
   accessor: SlackAccessor,

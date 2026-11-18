@@ -17,7 +17,7 @@ import { heldPages } from '../hierarchy/readdir.ts'
 import { cursorPages } from './paginate.ts'
 import type { SlackChannel } from './types.ts'
 
-export type { SlackChannel }
+export type { SlackChannel } from './types.ts'
 
 export interface ListChannelsOptions {
   types?: string

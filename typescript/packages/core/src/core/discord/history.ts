@@ -18,7 +18,7 @@ import { afterIdPages } from './paginate.ts'
 import { jsonlBytes } from '../render/json.ts'
 import type { DiscordMessage } from './types.ts'
 
-export type { DiscordMessage }
+export type { DiscordMessage } from './types.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 

@@ -18,7 +18,7 @@ import { cursorPages } from './paginate.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import type { SlackUser } from './types.ts'
 
-export type { SlackUser }
+export type { SlackUser } from './types.ts'
 
 function isRealUser(m: SlackUser): boolean {
   return m.deleted !== true && m.is_bot !== true && m.id !== 'USLACKBOT'
