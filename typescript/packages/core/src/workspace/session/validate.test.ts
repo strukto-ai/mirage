@@ -46,6 +46,29 @@ function prog(): CLI {
   })
 }
 
+function tool(verb: string): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'tool',
+      subcommands: [new CommandSpec({ name: verb, aliases: ['go'] })],
+    }),
+    handlers: { [verb]: new CLIHandler({ fn: noopVerb }) },
+  })
+}
+
+function twoMounts(commands: Record<string, unknown>): Workspace {
+  return new Workspace(
+    { '/a': new RAMVFS(), '/b': new RAMVFS() },
+    { profiles: { default: SessionProfile({ commands }) } },
+  )
+}
+
+async function exits(ws: Workspace, line: string): Promise<number[]> {
+  const out: number[] = []
+  for (const cwd of ['/a', '/b']) out.push((await ws.shell(`cd ${cwd} && ${line}`)).exitCode)
+  return out
+}
+
 function permissions(commands: Record<string, unknown>): { permissions: SessionProfile } {
   return { permissions: SessionProfile({ commands }) }
 }
@@ -159,6 +182,60 @@ describe('a workspace checks command trees against its grammars', () => {
       }).toThrow('no subcommand walk')
       const ran = await ws.shell('cd /data && prog run')
       expect(ran.exitCode).toBe(127)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('two mounts serving one name must read a rule alike', async () => {
+    const ws = twoMounts({ tool: { go: 'deny' } })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      expect(() => {
+        ws.mount('/b').registerCommands([tool('send')])
+      }).toThrow('two mounts serve tool')
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('one CLI on two mounts reads a rule alike', async () => {
+    const shared = tool('send')
+    const ws = twoMounts({ tool: { go: 'deny' } })
+    try {
+      ws.mount('/a').registerCommands([shared])
+      ws.mount('/b').registerCommands([shared])
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a rule on the command alone holds over two trees', async () => {
+    const ws = twoMounts({ tool: 'deny' })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      ws.mount('/b').registerCommands([tool('send')])
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a session naming what two trees read differently is refused', async () => {
+    const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      ws.mount('/b').registerCommands([tool('send')])
+      expect(() =>
+        ws.createSession('go', { profile: SessionProfile({ commands: { tool: { go: 'deny' } } }) }),
+      ).toThrow('two mounts serve tool')
+      expect(() =>
+        ws.createSession('publish', {
+          profile: SessionProfile({ commands: { tool: { publish: 'deny' } } }),
+        }),
+      ).toThrow('no subcommand publish')
     } finally {
       await ws.close()
     }

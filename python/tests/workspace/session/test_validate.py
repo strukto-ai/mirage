@@ -169,6 +169,79 @@ async def test_a_mount_refuses_a_cli_a_profile_names_wrongly():
         await ws.close()
 
 
+def _tool(verb: str) -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="tool",
+            subcommands=(CommandSpec(name=verb, aliases=("go",)),),
+        ),
+        handlers={verb: CLIHandler(fn=_noop)},
+    )
+
+
+async def _exits(ws: Workspace, line: str) -> list[int]:
+    return [
+        (await ws.shell(f"cd {cwd} && {line}")).exit_code
+        for cwd in ("/a", "/b")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_two_mounts_serving_one_name_must_read_a_rule_alike():
+    ws = Workspace(
+        {"/a/": RAMVFS(), "/b/": RAMVFS()},
+        profiles={"default": {"commands": {"tool": {"go": "deny"}}}},
+    )
+    try:
+        ws.mount("/a").register_commands([_tool("publish")])
+        with pytest.raises(PolicyError, match="two mounts serve tool"):
+            ws.mount("/b").register_commands([_tool("send")])
+        assert await _exits(ws, "tool go") == [126, 126]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_one_cli_on_two_mounts_reads_a_rule_alike():
+    shared = _tool("send")
+    ws = Workspace(
+        {"/a/": RAMVFS(), "/b/": RAMVFS()},
+        profiles={"default": {"commands": {"tool": {"go": "deny"}}}},
+    )
+    try:
+        ws.mount("/a").register_commands([shared])
+        ws.mount("/b").register_commands([shared])
+        assert await _exits(ws, "tool go") == [126, 126]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rule_on_the_command_alone_holds_over_two_trees():
+    ws = Workspace(
+        {"/a/": RAMVFS(), "/b/": RAMVFS()},
+        profiles={"default": {"commands": {"tool": "deny"}}},
+    )
+    try:
+        ws.mount("/a").register_commands([_tool("publish")])
+        ws.mount("/b").register_commands([_tool("send")])
+        assert await _exits(ws, "tool go") == [126, 126]
+    finally:
+        await ws.close()
+
+
+def test_a_session_naming_what_two_trees_read_differently_is_refused():
+    ws = Workspace({"/a/": RAMVFS(), "/b/": RAMVFS()})
+    ws.mount("/a").register_commands([_tool("publish")])
+    ws.mount("/b").register_commands([_tool("send")])
+    with pytest.raises(PolicyError, match="two mounts serve tool"):
+        ws.create_session("go", profile={"commands": {"tool": {"go": "deny"}}})
+    with pytest.raises(PolicyError, match="no subcommand publish"):
+        ws.create_session(
+            "publish", profile={"commands": {"tool": {"publish": "deny"}}}
+        )
+
+
 def test_register_cli_refuses_a_cli_a_profile_names_wrongly():
     ws = Workspace(
         {"/data/": RAMVFS()},
