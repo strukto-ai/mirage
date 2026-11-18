@@ -380,6 +380,8 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        *,
+        bounded: bool = False,
     ) -> RunAnswer:
         """Execute one shell line, under a ``PROCESS`` tag of its own
         when the caller gave none: a cancel kills only the shell exec
@@ -390,13 +392,17 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
             stdin (ByteSource | None): bytes piped into the line.
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
+            bounded (bool): hold what it keeps to the workspace's memory
+                room, for a line that reads a file's content.
         """
         if PROCESS in env:
-            return await super().exec_line(line, stdin, env, cwd)
+            return await super().exec_line(
+                line, stdin, env, cwd, bounded=bounded
+            )
         tag = uuid.uuid4().hex
         try:
             return await super().exec_line(
-                line, stdin, {**env, PROCESS: tag}, cwd
+                line, stdin, {**env, PROCESS: tag}, cwd, bounded=bounded
             )
         except asyncio.CancelledError:
             await asyncio.shield(self.stop(tag, 15))

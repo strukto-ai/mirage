@@ -16,6 +16,7 @@ import type { Context } from '../commands/config.ts'
 import type { ProcessTable } from '../execution/process/table.ts'
 import { appendThroughSpool } from '../core/generic/rewrite.ts'
 import { isMissingOp } from '../errors/fs.ts'
+import { checkMemory } from '../io/memory.ts'
 import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { compareCodePoints } from '../utils/sort.ts'
@@ -132,19 +133,31 @@ export async function refusedRun(
 
 /**
  * What one of Mirage's own lines answered, kept whole: a probe's few lines,
- * read once the line ends. A program's run never comes here; it streams.
- * Mirrors Python's `answer_of`.
+ * read once the line ends. A program's run never comes here; it streams. A
+ * line that reads a file's content is `bounded`: what it keeps is checked
+ * against the workspace's memory as it arrives, while a probe's answer is
+ * not, so listing and removing still work at the cap. Mirrors Python's
+ * `answer_of`.
  *
  * @param run runs the line, given where it writes stdout and stderr.
+ * @param bounded hold what it keeps to the workspace's memory room.
  */
 export async function answerOf(
   run: (output: OutputFn, errors: OutputFn) => Promise<RunResult>,
+  bounded = false,
 ): Promise<RunAnswer> {
   const out: Uint8Array[] = []
   const err: Uint8Array[] = []
+  let held = 0
+  const keep = (into: Uint8Array[], data: Uint8Array): Promise<void> => {
+    into.push(data)
+    held += data.byteLength
+    if (bounded) checkMemory(held)
+    return Promise.resolve()
+  }
   const done = await run(
-    (data) => Promise.resolve(void out.push(data)),
-    (data) => Promise.resolve(void err.push(data)),
+    (data) => keep(out, data),
+    (data) => keep(err, data),
   )
   return { exitCode: done.exitCode, stdout: concat(out), stderr: concat(err) }
 }

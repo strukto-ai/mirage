@@ -57,6 +57,8 @@ export async function read(
     machine,
     readCommand(remote(accessor, path), offset, size),
     path,
+    null,
+    true,
   )
   record('read', path.virtual, VFSName.MACHINE, data.byteLength, timer)
   return data
@@ -77,7 +79,7 @@ export function firstLines(
   n: number,
 ): Promise<Uint8Array> {
   const target = singleQuote(remote(accessor, path))
-  return checked(accessor, machine, `head -n ${String(n)} -- ${target}`, path)
+  return checked(accessor, machine, `head -n ${String(n)} -- ${target}`, path, null, true)
 }
 
 /**
@@ -95,7 +97,7 @@ export function lastLines(
   n: number,
 ): Promise<Uint8Array> {
   const target = singleQuote(remote(accessor, path))
-  return checked(accessor, machine, `tail -n ${String(n)} -- ${target}`, path)
+  return checked(accessor, machine, `tail -n ${String(n)} -- ${target}`, path, null, true)
 }
 
 /**

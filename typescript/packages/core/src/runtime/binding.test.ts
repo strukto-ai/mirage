@@ -33,6 +33,8 @@ import {
   bindCaller,
   setCurrentSession,
 } from '../context/session_context.ts'
+import { MemoryExhausted } from '../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../io/memory.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { yieldBytes } from '../io/stream.ts'
 import { enotsup } from '../errors/fs.ts'
@@ -114,6 +116,18 @@ function world(machines?: Runtime[]): Workspace {
 }
 
 describe('answerOf', () => {
+  it('holds a bounded answer to the memory budget', async () => {
+    const run = async (output: OutputFn): Promise<RunResult> => {
+      for (let i = 0; i < 3; i++) await output(enc.encode('abcd'))
+      return { exitCode: 0 }
+    }
+    await expect(
+      runWithMemory(new MemoryBudget(8, () => 0), () => answerOf(run, true)),
+    ).rejects.toThrow(MemoryExhausted)
+    const kept = await runWithMemory(new MemoryBudget(8, () => 0), () => answerOf(run))
+    expect(dec.decode(kept.stdout)).toBe('abcdabcdabcd')
+  })
+
   it('keeps what a run wrote whole', async () => {
     const run = async (output: OutputFn, errors: OutputFn): Promise<RunResult> => {
       await output(enc.encode('one '))

@@ -101,10 +101,18 @@ export class MachineAccessor extends Accessor {
     machine: string,
     command: string,
     stdin: ByteSource | null = null,
+    bounded = false,
   ): Promise<[number | null, Uint8Array, Uint8Array]> {
     const handle = this.handle(machine)
     await handle.ensureConnected()
-    const done = await handle.execLine(command, stdin, { ...handle.config.env }, '/')
+    const done = await handle.execLine(
+      command,
+      stdin,
+      { ...handle.config.env },
+      '/',
+      undefined,
+      bounded,
+    )
     if (handle.joinsStreams && done.exitCode !== 0)
       return [done.exitCode, new Uint8Array(), done.stdout]
     return [done.exitCode, done.stdout, done.stderr]

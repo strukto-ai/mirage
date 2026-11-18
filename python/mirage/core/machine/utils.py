@@ -63,6 +63,8 @@ async def checked(
     command: str,
     path: PathSpec,
     stdin: ByteSource | None = None,
+    *,
+    bounded: bool = False,
 ) -> bytes:
     """Run one line on a machine and return its output; a line that
     fails raises the error its first complaint names.
@@ -73,8 +75,12 @@ async def checked(
         command (str): the line.
         path (PathSpec): the path a failure names.
         stdin (ByteSource | None): the bytes fed to the line.
+        bounded (bool): hold its output to the workspace's memory room,
+            for a line that reads a file's content.
     """
-    status, out, err = await accessor.run(machine, command, stdin)
+    status, out, err = await accessor.run(
+        machine, command, stdin, bounded=bounded
+    )
     if status != 0 or err:
         raise refusal(path, err)
     return out
