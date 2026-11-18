@@ -211,6 +211,18 @@
    ]
   },
   {
+   "id": "a_default_rule_no_grammar_can_read_holds_after_a_load",
+   "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"go": {"decision": "deny", "reason": "no go"}}}}}},
+   "steps": [
+    {"op": "register_command", "path": "/a", "name": "tool", "stdout": "ran\n", "expect": {"value": null}},
+    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
+    {"op": "load"},
+    {"op": "register_command", "path": "/a", "name": "tool", "stdout": "ran\n", "expect": {"value": null}},
+    {"op": "exec", "command": "cd /a && tool go", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tool: Permission denied\n", "decision": "PermissionsPolicy failed"}}},
+    {"op": "exec", "command": "echo still", "expect": {"value": {"exit_code": 0, "stdout": "still\n", "stderr": ""}}}
+   ]
+  },
+  {
    "id": "a_mount_serving_a_cli_a_rule_names_wrongly_is_refused",
    "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}}, "profiles": {"default": {"commands": {"tool": {"walk": "deny"}}}}},
    "steps": [
