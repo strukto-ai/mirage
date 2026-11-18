@@ -798,11 +798,6 @@ function namesProcessSub(word: TSNodeLike): boolean {
   return word.children.some((child) => namesProcessSub(child))
 }
 
-/**
- * Whether a redirected statement's command is a bare `exec`, which installs
- * its redirects on the shell for every later statement; `exec cmd` is a
- * command.
- */
 export async function executeNode(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,

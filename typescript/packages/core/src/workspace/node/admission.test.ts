@@ -974,14 +974,25 @@ describe('a redirect no command owns', () => {
     const w = ws(SEALED)
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const reparse = (text: string) => parse(text)
-    for (const text of ['{ cat; } < /data/secret.txt', '> /data/secret.txt']) {
+    for (const text of [
+      '{ cat; } < /data/secret.txt',
+      '> /data/secret.txt',
+      'exec 3< /data/secret.txt',
+      'exec > /data/secret.txt',
+      'echo a; exec 3< /data/secret.txt',
+    ]) {
       const refused = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
       expect(refused?.exitCode).toBe(1)
       expect(new TextDecoder().decode(refused?.stderr)).toMatch(
         /: \/data\/secret\.txt: Permission denied\n$/,
       )
     }
-    for (const text of ['{ cat; } < /data/other', 'cat < /data/other']) {
+    for (const text of [
+      '{ cat; } < /data/other',
+      'cat < /data/other',
+      'exec 3< /data/other',
+      'exec 3>&1',
+    ]) {
       expect(await admitLine(parse(text), session, w.registry, w.namespace, reparse)).toBeNull()
     }
   })

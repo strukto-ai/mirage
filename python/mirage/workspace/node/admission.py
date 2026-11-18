@@ -1078,8 +1078,8 @@ def _opens_file(r: Redirect) -> bool:
 
 def unowned_redirects(node: Any, home: str | None) -> list[Word]:
     """The literal targets of every redirect in a parsed line that no
-    command owns: a compound statement's, a bare one's, an
-    assignment's. A command's own redirects are its words
+    command owns: a compound statement's, a bare one's, a bare
+    ``exec``'s, an assignment's. A command's own redirects are its words
     (``statement_redirects``); these are read for a line a runtime
     takes whole, where no executor opens them.
 
@@ -1098,7 +1098,11 @@ def unowned_redirects(node: Any, home: str | None) -> list[Word]:
         owner = inner
         while owner is not None and owner.type in REDIRECT_CHAIN:
             owner = owner.named_children[-1] if owner.named_children else None
-        if owner is not None and owner.type in REDIRECT_OWNERS:
+        if (
+            owner is not None
+            and owner.type in REDIRECT_OWNERS
+            and not is_bare_exec(owner)
+        ):
             continue
         out.extend(
             Word(str(r.target), literal_word(r.target_node, home))

@@ -1172,7 +1172,13 @@ async def test_admit_line_judges_a_redirect_no_command_owns():
     try:
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
-        for line in ("{ cat; } < /data/secret.txt", "> /data/secret.txt"):
+        for line in (
+            "{ cat; } < /data/secret.txt",
+            "> /data/secret.txt",
+            "exec 3< /data/secret.txt",
+            "exec > /data/secret.txt",
+            "echo a; exec 3< /data/secret.txt",
+        ):
             refused = await admit_line(
                 parse(line), session, registry, namespace
             )
@@ -1181,7 +1187,12 @@ async def test_admit_line_judges_a_redirect_no_command_owns():
             assert refused.stderr.endswith(
                 b": /data/secret.txt: Permission denied\n"
             )
-        for line in ("{ cat; } < /data/other", "cat < /data/other"):
+        for line in (
+            "{ cat; } < /data/other",
+            "cat < /data/other",
+            "exec 3< /data/other",
+            "exec 3>&1",
+        ):
             assert (
                 await admit_line(parse(line), session, registry, namespace)
                 is None
