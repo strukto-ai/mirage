@@ -706,9 +706,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
         "held" => Item::int(shell.0.held()),
         "use_homes" => {
-            let home = args.string()?;
-            let names = strings(args.list()?)?;
-            let homes = strings(args.list()?)?;
+            let home = args.bytes()?;
+            let names = words(args.list()?)?;
+            let homes = words(args.list()?)?;
             shell
                 .store_mut()?
                 .set_homes(home, names.into_iter().zip(homes));

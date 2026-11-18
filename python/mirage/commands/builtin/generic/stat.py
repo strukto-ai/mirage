@@ -66,7 +66,10 @@ from mirage.utils.stat_view import (
 )
 from mirage.view.types import LinkView, MountView, StatPath
 
-_STR_DIRECTIVES = frozenset("nNF")
+_STR_DIRECTIVES = frozenset("nNFUG")
+# The ids, which a precision pads to that many digits, as printf pads
+# an unsigned integer.
+_ID_DIRECTIVES = frozenset("ug")
 
 # The directives GNU knows (coreutils 9.7). It prints any other as a bare
 # '?', which no width pads; one it knows that a VFS cannot answer is
@@ -413,8 +416,17 @@ def _render_directive(
     value = _directive_value(d.spec, s, name, identity)
     if "#" in d.flags and d.spec == "a" and not value.startswith("0"):
         value = "0" + value
+    flags = d.flags
+    if (
+        d.spec in _ID_DIRECTIVES
+        and d.precision is not None
+        and value.isdigit()
+    ):
+        digits = int(d.precision or "0")
+        value = "" if value == "0" and not digits else value.zfill(digits)
+        flags = flags.replace("0", "")
     return _apply_flags(
-        value, d.flags, d.width, d.precision, d.spec in _STR_DIRECTIVES
+        value, flags, d.width, d.precision, d.spec in _STR_DIRECTIVES
     )
 
 

@@ -49,7 +49,7 @@ import { systemDate } from '../../../../utils/clock.ts'
 import { ancestors, CycleError } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { idNumber } from '../../../../utils/stat_view.ts'
+import { ID_MAX, idNumber } from '../../../../utils/stat_view.ts'
 import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -58,9 +58,10 @@ import { expandOperands, result } from '../shared.ts'
 
 /**
  * Parse a chown OWNER[:GROUP] argument against the user database. A name the
- * database holds is its id, and any number (`+` forces one) is an id; a
- * colon with no group after a user name names that user's login group, which
- * a number has none of. Throws UsageError for an
+ * database holds is its id, and any number is an id; a leading `+` forces a
+ * number, skipping the name lookup. A colon with no group after a user name
+ * names that user's login group, which a number has none of. Throws
+ * UsageError for an
  * owner or group the database lacks, or a number with a colon and no group
  * after it, as chown refuses them.
  */
@@ -72,11 +73,11 @@ export function parseOwner(
   const sep = text.indexOf(':')
   const owner = sep >= 0 ? text.slice(0, sep) : text
   const group = sep >= 0 ? text.slice(sep + 1) : ''
-  const named = owner.length > 0 ? userNamed(identity, owner) : null
+  const named = owner.length > 0 && !owner.startsWith('+') ? userNamed(identity, owner) : null
   let uid: number | null = null
   if (owner.length > 0) {
     uid = named?.uid ?? idNumber(owner)
-    if (uid === null) throw new UsageError(`${cmd}: invalid user: '${text}'`, 1)
+    if (uid === null || uid === ID_MAX) throw new UsageError(`${cmd}: invalid user: '${text}'`, 1)
   }
   let gid: number | null = null
   if (sep >= 0 && group.length > 0) {
@@ -90,10 +91,11 @@ export function parseOwner(
 }
 
 // Parse a chgrp GROUP argument against the user database: the gid, null for
-// a name the database lacks or an empty text.
+// a name the database lacks or an empty text; a leading `+` forces a number.
 export function parseGroup(text: string, identity: Identity): number | null {
   if (text.length === 0) return null
-  return groupIdNamed(identity, text) ?? idNumber(text)
+  const found = (text.startsWith('+') ? null : groupIdNamed(identity, text)) ?? idNumber(text)
+  return found === ID_MAX ? null : found
 }
 
 // Resolve touch -t/-d into an ISO timestamp. `t` is a POSIX

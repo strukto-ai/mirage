@@ -72,6 +72,7 @@ describe('identity', () => {
     expect(findUser(NO_IDENTITY, '1000')).toBeNull()
     expect(findUser(identity, 'zz')).toBeNull()
     expect(findUser(identity, '+0')).toBe(ROOT)
+    expect(findUser({ profile: '+42' }, '+42')).toBeNull()
     expect(userNamed(identity, '0')).toBeNull()
     expect(userNamed(identity, 'nobody')).toBe(NOBODY)
     expect(groupIdNamed(identity, 'nogroup')).toBe(65534)
@@ -138,6 +139,16 @@ describe('identity in a workspace', () => {
     expect((await run(ws, 'stat -c "%G" /data/f.txt'))[1]).toBe('default\n')
     ws.createSession('r1', { profile: 'reviewer' })
     expect((await run(ws, 'stat -c "%G" /data/f.txt', 'r1'))[1]).toBe('reviewer\n')
+    await ws.close()
+  })
+
+  it('keeps the bytes of a profile name past UTF-8 for the home', async () => {
+    const name = 'team\udcff'
+    const ws = makeWs({ profiles: { [name]: SessionProfile({}) }, profile: name })
+    const io = await ws.shell(`echo ~; echo ~${name}`)
+    const home = [...new TextEncoder().encode('/home/team'), 0xff, 0x0a]
+    expect(io.exitCode).toBe(0)
+    expect([...io.stdout]).toEqual([...home, ...home])
     await ws.close()
   })
 })

@@ -49,10 +49,21 @@ def test_parse_owner_forms():
         ("4242:", "chown: invalid spec: '4242:'"),
         ("0:", "chown: invalid spec: '0:'"),
         ("++5", "chown: invalid user: '++5'"),
+        ("4294967295", "chown: invalid user: '4294967295'"),
+        (":4294967295", "chown: invalid group: ':4294967295'"),
     ):
         with pytest.raises(UsageError) as caught:
             parse_owner(text, root)
         assert str(caught.value) == message
+
+
+def test_a_plus_forces_a_number_over_a_name_the_database_holds():
+    plus = Identity(profile="+42")
+    assert parse_owner("+42", plus) == (42, None)
+    assert parse_owner(":+42", plus) == (None, 42)
+    assert parse_group("+42", plus) == 42
+    with pytest.raises(UsageError, match="^chown: invalid spec: '\\+42:'$"):
+        parse_owner("+42:", plus)
 
 
 def test_parse_group_forms():
@@ -60,6 +71,8 @@ def test_parse_group_forms():
     assert parse_group("nogroup", root) == 65534
     assert parse_group("20", root) == 20
     assert parse_group("+20", root) == 20
+    assert parse_group("0" * 20 + "7", root) == 7
+    assert parse_group("4294967295", root) is None
     assert parse_group("staff", root) is None
     assert parse_group("", root) is None
 

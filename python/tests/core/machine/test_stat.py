@@ -30,8 +30,8 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         1700000001,
         1700000000123,
         1700000001000,
-        "app",
-        "staff",
+        1000,
+        50,
         "",
     )
     got = row_stat("x.py", row)
@@ -39,8 +39,8 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         FileType.FILE,
         12,
         0o640,
-        "app",
-        "staff",
+        1000,
+        50,
     )
     assert got.modified == "2023-11-14T22:13:20.123Z"
     assert got.atime == "2023-11-14T22:13:21.000Z"
@@ -57,9 +57,7 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
     ],
 )
 def test_row_stat_maps_each_kind(kind, want, size):
-    got = row_stat(
-        "n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, "root", "root", "")
-    )
+    got = row_stat("n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, 0, 0, ""))
     assert (got.type, got.size) == (want, size)
 
 
@@ -67,10 +65,10 @@ def test_row_stat_maps_each_kind(kind, want, size):
 async def test_stat_finds_the_path_alone():
     box = ScriptedMachine("box", lambda line, data: ok(ROW))
     got = await stat(bound(box), "box", spec("/x.txt"))
-    assert (got.name, got.size, got.uid) == ("x.txt", 3, "root")
+    assert (got.name, got.size, got.uid) == ("x.txt", 3, 0)
     assert box.lines == [
         "env LC_ALL=C find -L '/tmp/x.txt' -maxdepth 0 "
-        "-printf '%y %m %s %T@ %A@ %u %g %P\\0'"
+        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
     ]
 
 
@@ -85,10 +83,10 @@ async def test_stat_of_a_missing_path_is_enoent():
 @pytest.mark.asyncio
 async def test_tree_merges_every_machine_and_leaves_a_failure_to_the_walk():
     a = ScriptedMachine(
-        "a", lambda line, data: ok(DIR + b"f 644 1 0 0 r r x\0")
+        "a", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 x\0")
     )
     b = ScriptedMachine(
-        "b", lambda line, data: ok(DIR + b"f 644 2 0 0 r r y\0")
+        "b", lambda line, data: ok(DIR + b"f 644 2 0 0 0 0 y\0")
     )
     accessor = bound(a, b)
     rows = await tree(accessor, ["a", "b"], spec("/d"))

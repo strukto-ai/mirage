@@ -801,6 +801,10 @@ def test_user_reads_a_name_then_a_number_with_an_optional_plus():
     for text in ("toString", "++5", "\u00b2"):
         with pytest.raises(UsageError):
             parse_find(["-user", text]).bind(ids=IDS)
+    plus = Ids(users={"+42": 1000}, groups={"+42": 1000}, uid=1000, gid=1000)
+    for test in ("-user", "-group"):
+        tree = parse_find([test, "+42"]).bind(ids=plus).tree
+        assert tree == Owner(42, group=test == "-group", ids=plus)
 
 
 def test_the_new_actions_carry_their_file_and_directory():

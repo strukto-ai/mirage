@@ -512,7 +512,7 @@ def _perm_bits(bits: str) -> Literal["exact", "all", "any"]:
 
 def _owner_id(text: str, group: bool, binding: _Binding) -> int:
     """The id ``-user`` or ``-group`` names: a name the user database
-    holds, else a number (``+`` allowed).
+    holds, else a number; a leading ``+`` forces the number.
 
     Args:
         text (str): the operand as typed.
@@ -522,8 +522,8 @@ def _owner_id(text: str, group: bool, binding: _Binding) -> int:
     Raises:
         UsageError: find's refusal for a name the database lacks.
     """
-    ids = binding.ids
-    found = (ids.groups if group else ids.users).get(text)
+    names = binding.ids.groups if group else binding.ids.users
+    found = None if text.startswith("+") else names.get(text)
     if found is None:
         found = id_number(text)
     if found is not None:

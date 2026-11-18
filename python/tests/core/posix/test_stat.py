@@ -21,19 +21,21 @@ from mirage.core.posix.types import TreeRow
 def test_tree_command_quotes_the_scope_and_the_format():
     assert tree_command("data/a b") == (
         "env LC_ALL=C find -L 'data/a b' "
-        "-printf '%y %m %s %T@ %A@ %u %g %P\\0'"
+        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
     )
 
 
 def test_tree_command_bounds_the_depth():
     assert tree_command("/tmp", 1) == (
         "env LC_ALL=C find -L '/tmp' -maxdepth 1 "
-        "-printf '%y %m %s %T@ %A@ %u %g %P\\0'"
+        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
     )
 
 
 def test_parse_tree_reads_each_record():
-    out = b"d 755 4096 1700000000.5 1700000001.0 root root \0f 644 3 1 2 a b x y\0"
+    out = (
+        b"d 755 4096 1700000000.5 1700000001.0 0 0 \0f 644 3 1 2 1000 50 x y\0"
+    )
     assert parse_tree(out) == [
         TreeRow(
             "d",
@@ -43,11 +45,11 @@ def test_parse_tree_reads_each_record():
             1700000001,
             1700000000500,
             1700000001000,
-            "root",
-            "root",
+            0,
+            0,
             "",
         ),
-        TreeRow("f", 0o644, 3, 1, 2, 1000, 2000, "a", "b", "x y"),
+        TreeRow("f", 0o644, 3, 1, 2, 1000, 2000, 1000, 50, "x y"),
     ]
 
 
@@ -77,4 +79,5 @@ def test_parse_tree_keeps_sftp_s_whole_seconds():
 
 def test_parse_tree_refuses_a_cut_record():
     assert parse_tree(b"f 644 3 1 2 a b x") is None
-    assert parse_tree(b"f 64z 3 1 2 a b x\0") is None
+    assert parse_tree(b"f 64z 3 1 2 0 0 x\0") is None
+    assert parse_tree(b"f 644 3 1 2 root root x\0") is None

@@ -75,6 +75,10 @@ BLOCK_UNIT = 512
 # everything but the file type.
 ALL_MODE_BITS = 0o7777
 
+# The largest id a uid_t or gid_t holds. chown and chgrp refuse it, which
+# the kernel reads as "leave it unchanged".
+ID_MAX = 0xFFFFFFFF
+
 # FNV-1a, 64-bit: the same arithmetic on both hosts and in every
 # runtime, so one path reports one inode whoever asks.
 _FNV_OFFSET = 0xCBF29CE484222325
@@ -236,12 +240,17 @@ def size_unknown(st: FileStat) -> bool:
 def id_number(text: str) -> int | None:
     """The id an owner or group names as a number: ASCII digits after an
     optional ``+``, the form ``chown``, ``id`` and ``find -user`` read
-    as a number; None for anything else.
+    as a number, leading zeros and all; None for anything else or an id
+    past :data:`ID_MAX`.
 
     Args:
         text (str): the owner or group as typed or reported.
     """
     digits = text[1:] if text.startswith("+") else text
-    if digits.isascii() and digits.isdigit():
-        return int(digits)
-    return None
+    if not (digits.isascii() and digits.isdigit()):
+        return None
+    digits = digits.lstrip("0")
+    if len(digits) > len(str(ID_MAX)):
+        return None
+    number = int(digits or "0")
+    return number if number <= ID_MAX else None

@@ -24,8 +24,10 @@ from mirage.commands.builtin.utils.identity import (
     Identity,
     group_id,
     group_label,
+    group_name,
     owner_id,
     owner_label,
+    owner_name,
 )
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.types import (
@@ -481,23 +483,23 @@ def format_ls_long(
     width = max((len(size) for size, _ in cells), default=1)
     time_width = max((len(when) for _, when in cells), default=1)
     owners = [
-        UNKNOWN_STAT_FIELD
-        if s.extra.get(STAT_FAILED_KEY)
-        else str(owner_id(s.uid, identity))
-        if columns.numeric
-        else owner_label(s.uid, identity)
+        _id_cell(
+            s,
+            None if columns.numeric else owner_name(s.uid, identity),
+            owner_id(s.uid, identity),
+        )
         for s in stats
     ]
     groups = [
-        UNKNOWN_STAT_FIELD
-        if s.extra.get(STAT_FAILED_KEY)
-        else str(group_id(s.gid, identity))
-        if columns.numeric
-        else group_label(s.gid, identity)
+        _id_cell(
+            s,
+            None if columns.numeric else group_name(s.gid, identity),
+            group_id(s.gid, identity),
+        )
         for s in stats
     ]
-    owner_width = max(map(len, owners), default=1)
-    group_width = max(map(len, groups), default=1)
+    owner_width = max((len(text) for text, _ in owners), default=1)
+    group_width = max((len(text) for text, _ in groups), default=1)
     out: list[str] = []
     for i, (s, (raw_size, when)) in enumerate(zip(stats, cells)):
         failed = bool(s.extra.get(STAT_FAILED_KEY))
@@ -509,11 +511,11 @@ def format_ls_long(
         else:
             fields = [ls_mode_string(s), "1"]
         if columns.owner:
-            fields.append(owners[i].ljust(owner_width))
+            fields.append(_pad_id(owners[i], owner_width))
         if columns.group:
-            fields.append(groups[i].ljust(group_width))
+            fields.append(_pad_id(groups[i], group_width))
         if columns.author:
-            fields.append(owners[i].ljust(owner_width))
+            fields.append(_pad_id(owners[i], owner_width))
         if columns.context:
             fields.append(UNKNOWN_STAT_FIELD)
         fields.append(raw_size.rjust(width))
@@ -522,6 +524,36 @@ def format_ls_long(
         lead = f"{UNKNOWN_STAT_FIELD} " * (columns.inode + columns.blocks)
         out.append(lead + " ".join(fields))
     return out
+
+
+def _id_cell(
+    s: FileStat, name: str | None, number: int | str
+) -> tuple[str, bool]:
+    """An owner or group cell of a long listing and whether it is a
+    number, which GNU aligns right where it aligns a name left.
+
+    Args:
+        s (FileStat): the row.
+        name (str | None): the name the user database holds, None for
+            ``-n`` or an id it holds no name for.
+        number (int | str): the id.
+    """
+    if s.extra.get(STAT_FAILED_KEY):
+        return UNKNOWN_STAT_FIELD, False
+    if name is None:
+        return str(number), isinstance(number, int)
+    return name, False
+
+
+def _pad_id(cell: tuple[str, bool], width: int) -> str:
+    """An owner or group cell padded to its column's width.
+
+    Args:
+        cell (tuple[str, bool]): the text and whether it is a number.
+        width (int): the column's width.
+    """
+    text, number = cell
+    return text.rjust(width) if number else text.ljust(width)
 
 
 def escape_find_name(text: str) -> str:

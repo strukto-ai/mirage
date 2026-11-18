@@ -196,4 +196,11 @@ describe('idNumber', () => {
       expect(idNumber(text)).toBeNull()
     }
   })
+
+  it('reads leading zeros up to the largest id', () => {
+    expect(idNumber(`+${'0'.repeat(5000)}1`)).toBe(1)
+    expect(idNumber('4294967295')).toBe(4294967295)
+    expect(idNumber('4294967296')).toBeNull()
+    expect(idNumber('99999999999')).toBeNull()
+  })
 })

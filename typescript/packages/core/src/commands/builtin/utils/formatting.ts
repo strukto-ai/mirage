@@ -41,8 +41,10 @@ import {
 import {
   groupId,
   groupLabel,
+  groupName,
   ownerId,
   ownerLabel,
+  ownerName,
   UNKNOWN_NAME,
   type Identity,
 } from './identity.ts'
@@ -352,21 +354,13 @@ export function formatLsLong(
   const width = cells.reduce((m, [size]) => Math.max(m, size.length), 1)
   const timeWidth = cells.reduce((m, [, time]) => Math.max(m, time.length), 1)
   const owners = stats.map((s) =>
-    s.extra[STAT_FAILED_KEY] === true
-      ? UNKNOWN_STAT_FIELD
-      : columns.numeric
-        ? String(ownerId(s.uid, identity))
-        : ownerLabel(s.uid, identity),
+    idCell(s, columns.numeric ? null : ownerName(s.uid, identity), ownerId(s.uid, identity)),
   )
   const groups = stats.map((s) =>
-    s.extra[STAT_FAILED_KEY] === true
-      ? UNKNOWN_STAT_FIELD
-      : columns.numeric
-        ? String(groupId(s.gid, identity))
-        : groupLabel(s.gid, identity),
+    idCell(s, columns.numeric ? null : groupName(s.gid, identity), groupId(s.gid, identity)),
   )
-  const ownerWidth = owners.reduce((m, owner) => Math.max(m, owner.length), 1)
-  const groupWidth = groups.reduce((m, group) => Math.max(m, group.length), 1)
+  const ownerWidth = owners.reduce((m, [owner]) => Math.max(m, owner.length), 1)
+  const groupWidth = groups.reduce((m, [group]) => Math.max(m, group.length), 1)
   return stats.map((s, i) => {
     const [rawSize, time] = cells[i] ?? [UNKNOWN_NAME, UNKNOWN_NAME]
     const failed = s.extra[STAT_FAILED_KEY] === true
@@ -376,9 +370,10 @@ export function formatLsLong(
           UNKNOWN_STAT_FIELD,
         ]
       : [lsModeString(s), '1']
-    if (columns.owner) fields.push((owners[i] ?? UNKNOWN_STAT_FIELD).padEnd(ownerWidth))
-    if (columns.group) fields.push((groups[i] ?? UNKNOWN_STAT_FIELD).padEnd(groupWidth))
-    if (columns.author) fields.push((owners[i] ?? UNKNOWN_STAT_FIELD).padEnd(ownerWidth))
+    const owner = owners[i] ?? [UNKNOWN_STAT_FIELD, false]
+    if (columns.owner) fields.push(padId(owner, ownerWidth))
+    if (columns.group) fields.push(padId(groups[i] ?? [UNKNOWN_STAT_FIELD, false], groupWidth))
+    if (columns.author) fields.push(padId(owner, ownerWidth))
     if (columns.context) fields.push(UNKNOWN_STAT_FIELD)
     fields.push(
       rawSize.padStart(width),
@@ -388,6 +383,22 @@ export function formatLsLong(
     const lead = `${UNKNOWN_STAT_FIELD} `.repeat(Number(columns.inode) + Number(columns.blocks))
     return lead + fields.join(' ')
   })
+}
+
+/**
+ * An owner or group cell of a long listing and whether it is a number,
+ * which GNU aligns right where it aligns a name left. `name` is the one the
+ * user database holds, null for `-n` or an id it holds no name for.
+ */
+function idCell(s: FileStat, name: string | null, id: number | string): [string, boolean] {
+  if (s.extra[STAT_FAILED_KEY] === true) return [UNKNOWN_STAT_FIELD, false]
+  if (name === null) return [String(id), typeof id === 'number']
+  return [name, false]
+}
+
+/** An owner or group cell padded to its column's width. */
+function padId([text, number]: [string, boolean], width: number): string {
+  return number ? text.padStart(width) : text.padEnd(width)
 }
 
 /**

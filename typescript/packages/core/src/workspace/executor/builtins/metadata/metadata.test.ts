@@ -38,7 +38,17 @@ describe('parseOwner', () => {
     expect(() => parseOwner('4242:', root)).toThrow("chown: invalid spec: '4242:'")
     expect(() => parseOwner('0:', root)).toThrow("chown: invalid spec: '0:'")
     expect(() => parseOwner('++5', root)).toThrow("chown: invalid user: '++5'")
+    expect(() => parseOwner('4294967295', root)).toThrow("chown: invalid user: '4294967295'")
+    expect(() => parseOwner(':4294967295', root)).toThrow("chown: invalid group: ':4294967295'")
     expect(parseOwner('+1000:+20', root)).toEqual([1000, 20])
+  })
+
+  it('reads a plus as a number over a name the database holds', () => {
+    const plus = { profile: '+42' }
+    expect(parseOwner('+42', plus)).toEqual([42, null])
+    expect(parseOwner(':+42', plus)).toEqual([null, 42])
+    expect(parseGroup('+42', plus)).toBe(42)
+    expect(() => parseOwner('+42:', plus)).toThrow("chown: invalid spec: '+42:'")
   })
 })
 
@@ -75,6 +85,8 @@ describe('parseGroup', () => {
     expect(parseGroup('nogroup', root)).toBe(65534)
     expect(parseGroup('20', root)).toBe(20)
     expect(parseGroup('+20', root)).toBe(20)
+    expect(parseGroup(`${'0'.repeat(20)}7`, root)).toBe(7)
+    expect(parseGroup('4294967295', root)).toBeNull()
     expect(parseGroup('staff', root)).toBeNull()
     expect(parseGroup('', root)).toBeNull()
   })

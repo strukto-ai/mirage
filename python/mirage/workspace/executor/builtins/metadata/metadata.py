@@ -46,7 +46,7 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.clock import system_date
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
-from mirage.utils.stat_view import id_number
+from mirage.utils.stat_view import ID_MAX, id_number
 from mirage.view.types import MountView, NamespaceLinks
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.shared import expand_operands, result
@@ -62,9 +62,10 @@ def parse_owner(
 ) -> tuple[int | None, int | None]:
     """Parse a chown OWNER[:GROUP] argument against the user database.
 
-    A name the database holds is its id, and any number (``+`` forces
-    one) is an id; a colon with no group after a user name names that
-    user's login group, which a number has none of.
+    A name the database holds is its id, and any number is an id; a
+    leading ``+`` forces a number, skipping the name lookup. A colon
+    with no group after a user name names that user's login group,
+    which a number has none of.
 
     Args:
         text (str): the OWNER[:GROUP] operand as typed.
@@ -86,11 +87,13 @@ def parse_owner(
         parse_owner("nobody:", identity)       -> (65534, 65534)
     """
     owner, sep, group = text.partition(":")
-    named = user_named(identity, owner) if owner else None
+    named = None
+    if owner and not owner.startswith("+"):
+        named = user_named(identity, owner)
     uid = None
     if owner:
         uid = named.uid if named is not None else id_number(owner)
-        if uid is None:
+        if uid is None or uid == ID_MAX:
             raise UsageError(f"{cmd}: invalid user: '{text}'", 1)
     gid = None
     if sep and group:
@@ -114,7 +117,7 @@ def parse_group(text: str, identity: Identity) -> int | None:
 
     Returns:
         int | None: the gid, None for a name the database lacks or an
-        empty text.
+        empty text; a leading ``+`` forces a number.
 
     Example::
 
@@ -123,8 +126,10 @@ def parse_group(text: str, identity: Identity) -> int | None:
     """
     if not text:
         return None
-    found = group_id_named(identity, text)
-    return found if found is not None else id_number(text)
+    found = None if text.startswith("+") else group_id_named(identity, text)
+    if found is None:
+        found = id_number(text)
+    return None if found == ID_MAX else found
 
 
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:

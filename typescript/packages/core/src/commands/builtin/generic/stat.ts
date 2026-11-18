@@ -87,7 +87,10 @@ function epoch(iso: string | null): string {
   return Number.isNaN(secs) ? '0' : String(secs)
 }
 
-const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
+const STR_DIRECTIVES = new Set(['n', 'N', 'F', 'U', 'G'])
+// The ids, which a precision pads to that many digits, as printf pads an
+// unsigned integer.
+const ID_DIRECTIVES = new Set(['u', 'g'])
 const FORMAT_FLAGS = new Set(["'", '-', '+', ' ', '#', '0', 'I'])
 const ASCII_DIGITS = new Set('0123456789')
 
@@ -329,7 +332,13 @@ function renderDirective(
   }
   let value = directiveValue(d.spec, s, name, identity)
   if (d.flags.includes('#') && d.spec === 'a' && !value.startsWith('0')) value = '0' + value
-  return applyFlags(value, d.flags, d.width, d.precision, STR_DIRECTIVES.has(d.spec))
+  let flags = d.flags
+  if (ID_DIRECTIVES.has(d.spec) && d.precision !== undefined && /^[0-9]+$/.test(value)) {
+    const digits = Number(d.precision || '0')
+    value = value === '0' && digits === 0 ? '' : value.padStart(digits, '0')
+    flags = flags.replaceAll('0', '')
+  }
+  return applyFlags(value, flags, d.width, d.precision, STR_DIRECTIVES.has(d.spec))
 }
 
 // A byte count as 1K blocks, rounded up like df, or '-' when unknown.

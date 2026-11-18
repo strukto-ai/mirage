@@ -129,6 +129,18 @@ async def test_printf_flags_width_precision():
     assert await _render("%.3F", _fs()) == "reg"
 
 
+@pytest.mark.asyncio
+async def test_precision_pads_an_id_and_cuts_a_name():
+    root = _fs(uid=0, gid=0)
+    assert await _render("[%.5u] [%.5g] [%.2U:%.2G]", root) == (
+        "[00000] [00000] [ro:ro]"
+    )
+    assert await _render("[%.0u] [%08u] [%08.3u]", root) == (
+        "[] [00000000] [     000]"
+    )
+    assert await _render("[%.2U] [%.5u]", _fs(uid=1000)) == "[UN] [01000]"
+
+
 # Pinned against GNU coreutils 9.7 on debian:stable-slim under LC_ALL=C.
 # Single quotes are the rule; a name whose only awkward character is an
 # apostrophe reads better in double quotes and GNU renders that one case

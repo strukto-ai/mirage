@@ -197,13 +197,14 @@ def user_named(identity: Identity | None, name: str) -> Account | None:
 
 def find_user(identity: Identity | None, text: str) -> Account | None:
     """The user a name or a number names, as ``id`` and ``chown`` look
-    one up: by name first, then by uid when the text is a number.
+    one up: by name first, then by uid when the text is a number; a
+    leading ``+`` forces the number.
 
     Args:
         identity (Identity | None): who the session is.
         text (str): the operand as typed.
     """
-    named = user_named(identity, text)
+    named = None if text.startswith("+") else user_named(identity, text)
     if named is not None:
         return named
     number = id_number(text)

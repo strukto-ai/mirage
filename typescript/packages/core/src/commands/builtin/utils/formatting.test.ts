@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../../../types.ts'
-import { fullIsoTime, humanSize, formatLsLong, lsModeString, styledTime } from './formatting.ts'
+import {
+  DEFAULT_COLUMNS,
+  formatLsLong,
+  fullIsoTime,
+  humanSize,
+  lsModeString,
+  styledTime,
+} from './formatting.ts'
 import { resolveTz } from '../../../utils/timezone.ts'
 
 it.each([
@@ -106,6 +113,25 @@ describe('formatLsLong', () => {
     expect(formatLsLong([owned], { identity })[0]).toBe(
       '-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt',
     )
+  })
+
+  it('aligns a number right and a name left', () => {
+    const stat = new FileStat({
+      name: 'f',
+      size: 0,
+      type: FileType.FILE,
+      modified: '2026-01-01T00:00:00Z',
+    })
+    const rows = [stat.with({ uid: 77, gid: 77 }), stat.with({ uid: 0, gid: 0 })]
+    expect(formatLsLong(rows).map((line) => line.slice(0, 22))).toEqual([
+      '-rw-r--r-- 1   77   77',
+      '-rw-r--r-- 1 root root',
+    ])
+    const numeric = formatLsLong(rows, { columns: { ...DEFAULT_COLUMNS, numeric: true } })
+    expect(numeric.map((line) => line.slice(0, 18))).toEqual([
+      '-rw-r--r-- 1 77 77',
+      '-rw-r--r-- 1  0  0',
+    ])
   })
 
   it('keeps the owner columns on a metadata-less row', () => {

@@ -325,11 +325,12 @@ function permBits(bits: string): 'exact' | 'all' | 'any' {
 }
 
 // The id `-user` or `-group` names: a name the user database holds, else a
-// number (`+` allowed). Throws find's UsageError for a name the database
-// lacks.
+// number; a leading `+` forces the number. Throws find's UsageError for a
+// name the database lacks.
 function ownerId(text: string, group: boolean, binding: Binding): number {
   const names = group ? binding.ids.groups : binding.ids.users
-  const found = (Object.hasOwn(names, text) ? names[text] : undefined) ?? idNumber(text)
+  const named = !text.startsWith('+') && Object.hasOwn(names, text) ? names[text] : undefined
+  const found = named ?? idNumber(text)
   if (found !== null) return found
   const kind = group ? 'group name or GID' : 'user name or UID'
   const test = group ? '-group' : '-user'

@@ -141,10 +141,11 @@ export function userNamed(identity: Identity | null, name: string): Account | nu
 
 /**
  * The user a name or a number names, as `id` and `chown` look one up: by
- * name first, then by uid when the text is a number.
+ * name first, then by uid when the text is a number; a leading `+` forces
+ * the number.
  */
 export function findUser(identity: Identity | null, text: string): Account | null {
-  const named = userNamed(identity, text)
+  const named = text.startsWith('+') ? null : userNamed(identity, text)
   if (named !== null) return named
   const number = idNumber(text)
   return number === null ? null : userWithId(identity, number)

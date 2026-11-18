@@ -221,3 +221,10 @@ def test_id_number_reads_ascii_digits_after_an_optional_plus():
     assert id_number("+0") == 0
     for text in ("", "+", "++5", "-5", " 5", "root", "\u00b2"):
         assert id_number(text) is None
+
+
+def test_id_number_reads_leading_zeros_up_to_the_largest_id():
+    assert id_number("+" + "0" * 5000 + "1") == 1
+    assert id_number("4294967295") == 4294967295
+    assert id_number("4294967296") is None
+    assert id_number("99999999999") is None

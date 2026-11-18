@@ -20,20 +20,20 @@ const ENC = new TextEncoder()
 describe('treeCommand', () => {
   it('quotes the scope and the format', () => {
     expect(treeCommand('data/a b')).toBe(
-      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %u %g %P\\0'",
+      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
     )
   })
 
   it('bounds the depth', () => {
     expect(treeCommand('/tmp', 1)).toBe(
-      "env LC_ALL=C find -L '/tmp' -maxdepth 1 -printf '%y %m %s %T@ %A@ %u %g %P\\0'",
+      "env LC_ALL=C find -L '/tmp' -maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
     )
   })
 })
 
 describe('parseTree', () => {
   it('reads each record', () => {
-    const out = ENC.encode('d 755 4096 1700000000.5 1700000001.0 root root \0f 644 3 1 2 a b x y\0')
+    const out = ENC.encode('d 755 4096 1700000000.5 1700000001.0 0 0 \0f 644 3 1 2 1000 50 x y\0')
     expect(parseTree(out)).toEqual([
       {
         kind: 'd',
@@ -43,8 +43,8 @@ describe('parseTree', () => {
         atime: 1700000001,
         mtimeMs: 1700000000500,
         atimeMs: 1700000001000,
-        user: 'root',
-        group: 'root',
+        uid: 0,
+        gid: 0,
         rel: '',
       },
       {
@@ -55,8 +55,8 @@ describe('parseTree', () => {
         atime: 2,
         mtimeMs: 1000,
         atimeMs: 2000,
-        user: 'a',
-        group: 'b',
+        uid: 1000,
+        gid: 50,
         rel: 'x y',
       },
     ])
@@ -82,6 +82,7 @@ describe('parseTree', () => {
 
   it('refuses a cut record', () => {
     expect(parseTree(ENC.encode('f 644 3 1 2 a b x'))).toBeNull()
-    expect(parseTree(ENC.encode('f 64z 3 1 2 a b x\0'))).toBeNull()
+    expect(parseTree(ENC.encode('f 64z 3 1 2 0 0 x\0'))).toBeNull()
+    expect(parseTree(ENC.encode('f 644 3 1 2 root root x\0'))).toBeNull()
   })
 })

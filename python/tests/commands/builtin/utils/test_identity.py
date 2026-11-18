@@ -70,6 +70,7 @@ def test_lookups_read_root_nobody_and_the_session_user():
     assert find_user(Identity(), "1000") is None
     assert find_user(identity, "zz") is None
     assert find_user(identity, "+0") == ROOT
+    assert find_user(Identity(profile="+42"), "+42") is None
     assert find_user(identity, "\u00b2") is None
     assert user_named(identity, "0") is None
     assert user_named(identity, "nobody") == NOBODY
@@ -137,3 +138,12 @@ async def test_a_named_session_reports_its_own_profile():
     ws.create_session("r1", profile="reviewer")
     io = await ws.shell('stat -c "%G" /data/f.txt', session_id="r1")
     assert (await materialize(io.stdout)).decode() == "reviewer\n"
+
+
+@pytest.mark.asyncio
+async def test_a_profile_name_past_utf8_keeps_its_bytes_for_the_home():
+    name = "team\udcff"
+    ws = _ws(profiles={name: SessionProfile()}, profile=name)
+    io = await ws.shell(f"echo ~; echo ~{name}")
+    assert io.exit_code == 0
+    assert await materialize(io.stdout) == b"/home/team\xff\n/home/team\xff\n"

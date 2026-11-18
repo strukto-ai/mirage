@@ -133,11 +133,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf x > /data/fcp.txt; chown +65534 /data/fcp.txt; chgrp +20 /data/fcp.txt; stat -c '%u %g' /data/fcp.txt; chown 0: /data/fcp.txt; chown ++5 /data/fcp.txt; find /data -maxdepth 1 -user +65534 -name fcp.txt; groups 0; id -u +0; rm /data/fcp.txt",
+      "command": "printf x > /data/fcp.txt; chown +65534 /data/fcp.txt; chgrp +20 /data/fcp.txt; stat -c '%u %g' /data/fcp.txt; chown 0: /data/fcp.txt; chown ++5 /data/fcp.txt; find /data -maxdepth 1 -user +65534 -name fcp.txt; groups 0; id -u +0; chown 0000077:00077 /data/fcp.txt; printf y > /data/fcq.txt; ls -l /data/fcp.txt /data/fcq.txt | cut -c1-22; ls -n /data/fcp.txt /data/fcq.txt | cut -c1-18; stat -c '[%.5u] [%.2U:%.2G] [%.0g]' /data/fcq.txt; chown 4294967295 /data/fcp.txt; chgrp 99999999999 /data/fcp.txt; rm /data/fcp.txt /data/fcq.txt",
       "expect": {
         "exit": 0,
-        "stdout": "65534 20\n/data/fcp.txt\n0\n",
-        "stderr": "chown: invalid spec: '0:'\nchown: invalid user: '++5'\ngroups: '0': no such user\n"
+        "stdout": "65534 20\n/data/fcp.txt\n0\n-rw-r--r-- 1   77   77\n-rw-r--r-- 1 root root\n-rw-r--r-- 1 77 77\n-rw-r--r-- 1  0  0\n[00000] [ro:ro] []\n",
+        "stderr": "chown: invalid spec: '0:'\nchown: invalid user: '++5'\ngroups: '0': no such user\nchown: invalid user: '4294967295'\nchgrp: invalid group: '99999999999'\n"
       }
     }
   ]

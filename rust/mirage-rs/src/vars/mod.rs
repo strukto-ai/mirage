@@ -473,12 +473,13 @@ impl Store {
 
     /// Read `~` and `~name` against the session's user database from now
     /// on: `home` while `HOME` is unset, and each user's own.
-    pub fn set_homes(&mut self, home: String, homes: impl IntoIterator<Item = (String, String)>) {
-        self.home = home.into_bytes();
-        self.homes = homes
-            .into_iter()
-            .map(|(user, home)| (user.into_bytes(), home.into_bytes()))
-            .collect();
+    pub fn set_homes(
+        &mut self,
+        home: Vec<u8>,
+        homes: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
+    ) {
+        self.home = home;
+        self.homes = homes.into_iter().collect();
     }
 
     /// The home a bare `~` names while `HOME` is unset.

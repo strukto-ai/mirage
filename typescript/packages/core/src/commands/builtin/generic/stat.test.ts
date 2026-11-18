@@ -166,6 +166,13 @@ describe('stat -c directive formatting', () => {
     expect(await render('%.3F', fs())).toBe('reg')
   })
 
+  it('pads an id to its precision and cuts a name to it', async () => {
+    const root = fs({ uid: 0, gid: 0 })
+    expect(await render('[%.5u] [%.5g] [%.2U:%.2G]', root)).toBe('[00000] [00000] [ro:ro]')
+    expect(await render('[%.0u] [%08u] [%08.3u]', root)).toBe('[] [00000000] [     000]')
+    expect(await render('[%.2U] [%.5u]', fs({ uid: 1000 }))).toBe('[UN] [01000]')
+  })
+
   it.each(GNU_QUOTED)('shell-quotes %N safely: %j', async (name, quoted) => {
     expect(await renderNamed('%N', name)).toBe(quoted + '\n')
   })

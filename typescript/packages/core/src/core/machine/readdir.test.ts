@@ -21,7 +21,7 @@ const MISSING = "find: '/tmp/d': No such file or directory\n"
 const DEC = new TextDecoder()
 
 function listing(...names: string[]): string {
-  return DEC.decode(DIR) + names.map((n) => `f 644 1 0 0 r r ${n}\0`).join('')
+  return DEC.decode(DIR) + names.map((n) => `f 644 1 0 0 0 0 ${n}\0`).join('')
 }
 
 describe('readdir', () => {
@@ -30,7 +30,7 @@ describe('readdir', () => {
     const b = new ScriptedMachine('b', () => ok(listing('out.csv', 'model.bin')))
     const names = (await readdir(bound([a, b]), ['a', 'b'], spec('/d'))).map((s) => s.name)
     expect(names).toEqual(['model.bin', 'out.csv'])
-    expect(a.lines[0]?.endsWith("-maxdepth 1 -printf '%y %m %s %T@ %A@ %u %g %P\\0'")).toBe(true)
+    expect(a.lines[0]?.endsWith("-maxdepth 1 -printf '%y %m %s %T@ %A@ %U %G %P\\0'")).toBe(true)
   })
 
   it('lists a directory only one machine has there', async () => {
@@ -43,7 +43,7 @@ describe('readdir', () => {
   it('is ENOENT with no machine holding it and ENOTDIR for a file', async () => {
     const a = new ScriptedMachine('a', () => failed(MISSING))
     await expect(readdir(bound([a]), ['a'], spec('/d'))).rejects.toMatchObject({ code: 'ENOENT' })
-    const f = new ScriptedMachine('f', () => ok('f 644 1 0 0 r r \0'))
+    const f = new ScriptedMachine('f', () => ok('f 644 1 0 0 0 0 \0'))
     await expect(readdir(bound([a, f]), ['a', 'f'], spec('/d'))).rejects.toMatchObject({
       code: 'ENOTDIR',
     })

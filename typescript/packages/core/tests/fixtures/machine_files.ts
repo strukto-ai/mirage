@@ -21,8 +21,8 @@ import { failed, ok, tableOf, type Answer } from './machine.ts'
 
 const ENC = new TextEncoder()
 
-export const ROW = ENC.encode('f 644 3 1700000000 1700000001 root staff \0')
-export const DIR = ENC.encode('d 755 4096 1700000000 1700000001 root root \0')
+export const ROW = ENC.encode('f 644 3 1700000000 1700000001 0 50 \0')
+export const DIR = ENC.encode('d 755 4096 1700000000 1700000001 0 0 \0')
 
 /**
  * An accessor over `handles`, bound as a workspace binds it, the first the
@@ -105,8 +105,8 @@ export class FakeFiles {
   }
 
   private row(path: string, rel: string): string {
-    if (this.dirs.has(path)) return `d 755 4096 0 0 root root ${rel}\0`
-    return `f 644 ${String(this.files.get(path)?.byteLength ?? 0)} 0 0 root root ${rel}\0`
+    if (this.dirs.has(path)) return `d 755 4096 0 0 0 0 ${rel}\0`
+    return `f 644 ${String(this.files.get(path)?.byteLength ?? 0)} 0 0 0 0 ${rel}\0`
   }
 
   private missing(tool: string, path: string): RunAnswer {
