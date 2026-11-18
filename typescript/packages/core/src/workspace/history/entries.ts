@@ -22,8 +22,9 @@ function descendants(node: TSNodeLike): TSNodeLike[] {
   const pending = [node]
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     nodes.push(current)
-    for (let i = current.children.length - 1; i >= 0; i--) {
-      const child = current.children[i]
+    const children = current.children
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]
       if (child !== undefined) pending.push(child)
     }
   }
