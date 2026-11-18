@@ -144,6 +144,7 @@ async def handle_pipe(
             i < len(stderr_flags) and stderr_flags[i],
             buffer_bytes,
             while_paused,
+            sink,
         )
         for i in range(len(commands))
     ]

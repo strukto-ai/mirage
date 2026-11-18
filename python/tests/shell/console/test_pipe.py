@@ -16,6 +16,9 @@ import asyncio
 
 import pytest
 
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.errors import PipeClosed
@@ -69,3 +72,23 @@ async def test_stderr_is_retained_without_waiting_for_a_stdout_reader():
     pipe = PipeConsole()
     await asyncio.wait_for(pipe.emit(Channel.STDERR, b"warning"), 1)
     assert await pipe.snapshot(Channel.STDERR) == b"warning"
+
+
+@pytest.mark.asyncio
+async def test_stderr_goes_on_to_the_console_it_is_given():
+    errors = JobConsole()
+    pipe = PipeConsole(errors=errors)
+    await pipe.emit(Channel.STDERR, b"e1\n")
+    assert await errors.snapshot(Channel.STDERR) == b"e1\n"
+    assert await pipe.snapshot(Channel.STDERR) == b""
+
+
+@pytest.mark.asyncio
+async def test_stderr_it_keeps_counts_against_the_memory_budget():
+    async def emit() -> None:
+        pipe = PipeConsole()
+        for _ in range(3):
+            await pipe.emit(Channel.STDERR, b"abcd")
+
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(MemoryBudget(8, lambda: 0), emit())

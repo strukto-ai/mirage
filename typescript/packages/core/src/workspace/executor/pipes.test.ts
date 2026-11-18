@@ -387,3 +387,21 @@ it("a stage in a job is stopped with the group's signal", async () => {
     await ws.close()
   }
 })
+
+it("streams a stage's stderr as it is written", async () => {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    const execution = await ws.shell('{ echo e1 >&2; echo o1; } | cat; echo o2', { stream: true })
+    const events: [string, string][] = []
+    for await (const event of execution.events)
+      events.push([event.stream, new TextDecoder().decode(event.data)])
+    await execution.wait()
+    expect(events).toEqual([
+      ['stderr', 'e1\n'],
+      ['stdout', 'o1\n'],
+      ['stdout', 'o2\n'],
+    ])
+  } finally {
+    await ws.close()
+  }
+})

@@ -107,7 +107,7 @@ export async function handlePipe(
   // the caller applies this pipeline's own negation after it finishes.
   session.errexitImmune = false
   const pipes = commands.map(
-    (_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes, whilePaused),
+    (_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes, whilePaused, sink),
   )
   const ios: IOResult[] = commands.map(() => new IOResult())
   // A stage the top shell forks for a simple command is that command's
