@@ -673,7 +673,6 @@
   "context_list": "local *spare",
   "context_once": "0 *local spare",
   "context_delete": "*local",
-  "template_round_trip": "t1:ram t2:ram same config",
   "policy_round_trip": "pass 0",
   "vfs_round_trip": "r2 token 0",
   "entries_refuse_unknown": "cli:002222 machine:002222",

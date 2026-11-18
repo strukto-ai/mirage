@@ -204,14 +204,13 @@ a `workspace_id`.
 | Command | Does |
 | --- | --- |
 | `mirage workspace create CONFIG [-w ID]` | Create a workspace from a YAML or JSON config. `--id` is another name for `-w`. |
-| `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
+| `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved template. Give a config file or `--template`, not both. |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces, running and stopped, with the status of each. |
 | `mirage workspace get ID [--verbose]` | Show its status, mounts and sessions. A stopped workspace shows the mounts its config names and no sessions. |
 | `mirage workspace delete ID` | Delete a workspace, running or stopped, with its state and config. |
 | `mirage workspace stop ID` | Stop a workspace and keep its state and config. A `ram` mount, and the sessions on a `ram` store, come back empty. Stopping a stopped workspace does nothing. |
 | `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
-| `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
 | `mirage workspace logs [-w ID] [-s S] [--limit N] [--after CURSOR] [--jsonl]` | Show completed commands newest first, with cursor pagination. `--jsonl` exports all retained matching commands oldest first. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
 | `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
@@ -220,34 +219,6 @@ a `workspace_id`.
 | `mirage workspace load --key KEY [CONFIG] [--id ID]` | Restore one from the server's snapshot store. |
 | `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the VFS.md, or expose it as a live file at `PATH`. |
 | `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
-
-### From a template
-
-A template is a saved workspace config. `-f` takes a workspace config, or a
-file with `name`, an optional `description`, and `config`, as
-`mirage template get ID -o yaml` prints one:
-
-```bash
-mirage template create ram-only -f workspace.yaml --description "One RAM mount"
-mirage workspace create --template ram-only -w demo
-```
-
-| Command | Does |
-| --- | --- |
-| `mirage template create NAME -f FILE [--description TEXT]` | Save a config as a template. |
-| `mirage template list` | List templates. |
-| `mirage template get ID [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
-| `mirage template delete ID` | Delete one. |
-
-The file is saved as written: `${NAME}` is not read from the environment. The
-server checks the config when it saves the template, as a create would. A
-workspace gets a copy of the template's config, so a later change to the
-template leaves it as it is, and a template's config cannot set
-`workspace_id`: `-w` names the workspace. Give a config file or `--template`,
-not both. The local daemon keeps templates under `~/.mirage/resources`, as
-`resource_store` sets. `get` and `delete` take the template's ID or its
-name: a name is unique, so it works as an ID. On the local daemon a
-template's ID is its name.
 
 ### Saved policies
 
@@ -271,8 +242,7 @@ mirage policy get guard.py -o yaml
 ```
 
 A profile program's `script: guard.py` names the saved policy, on the daemon
-as on the hosted API; `template create` and `workspace create` send the name
-as written. The daemon reads the policy's source when it creates or starts the
+as on the hosted API; `workspace create` sends the name as written. The daemon reads the policy's source when it creates or starts the
 workspace. A path such as `./guard.py` is a file next to the config, and a
 name the daemon has no saved policy for is read as a file too.
 
@@ -310,7 +280,7 @@ ID is its name.
 | --- | --- |
 | `mirage vfs types [TYPE]` | List the types, with their required and secret fields; with `TYPE`, its fields. |
 | `mirage vfs create NAME --type TYPE [--set K=V] [--secret K] [-f FILE]` | Save a new entry. |
-| `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name, with how many saved templates use each. |
+| `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name. |
 | `mirage vfs get ID [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
 | `mirage vfs update ID [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
 | `mirage vfs delete ID` | Delete an entry and wipe its secrets. There is no restore. |
@@ -355,14 +325,12 @@ mirage vfs create -f github.yaml < token.txt
 ```
 
 `update` keeps a secret field you leave out, so `--secret token` rotates a
-token while the entry stays in use. `delete` is refused while a saved template
-uses the entry. The local
-daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
+token while the entry stays in use. The local daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
 file only you can read.
 
 ### Use a saved connection
 
-A workspace config or a template names a saved field with
+A workspace config names a saved field with
 `{from: strukto, ref: NAME, key: FIELD}`, where it would write the value:
 
 ```yaml workspace.yaml

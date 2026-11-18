@@ -536,8 +536,10 @@ paths:
         configuration.
       tags:
         - Workspaces
+      x-hidden: true
       x-hosts:
         - daemon
+      x-excluded: true
   /v1/workspaces/{workspace_id}/clone:
     post:
       summary: Clone a workspace
@@ -714,8 +716,10 @@ paths:
       description: List saved workspace templates by name.
       tags:
         - Templates
+      x-hidden: true
       x-hosts:
         - daemon
+      x-excluded: true
     post:
       summary: Create template
       operationId: create_template_v1_templates_post
@@ -759,8 +763,10 @@ paths:
         environment placeholders as written. Returns `409` if the name already exists.
       tags:
         - Templates
+      x-hidden: true
       x-hosts:
         - daemon
+      x-excluded: true
   /v1/templates/{ref}:
     get:
       summary: Get template
@@ -799,8 +805,10 @@ paths:
           $ref: '#/components/responses/501'
       tags:
         - Templates
+      x-hidden: true
       x-hosts:
         - daemon
+      x-excluded: true
       description: Get a saved workspace template.
     delete:
       summary: Delete template
@@ -828,8 +836,10 @@ paths:
       description: Delete a saved template.
       tags:
         - Templates
+      x-hidden: true
       x-hosts:
         - daemon
+      x-excluded: true
   /v1/workspaces/{workspace_id}/vfs-md:
     get:
       summary: Read VFS.md

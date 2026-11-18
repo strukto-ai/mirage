@@ -68,7 +68,7 @@ Each key's environment variable is `MIRAGE_` and the key in capitals:
 | `forwarded_allow_ips` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | none; see [Server policies](/home/access/http#server-policies) |
-| `resource_store` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates and connections only until the daemon stops, and does not combine with `workers` |
+| `resource_store` | `files`, under `~/.mirage/resources`; `memory` keeps saved connections only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | see [Log in](/home/access/cli#log-in) |
