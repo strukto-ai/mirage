@@ -15,8 +15,8 @@ profiles:
   agent:
     cwd: /data
     commands:
-      deny: [rm]
-      ask: [curl]
+      rm: deny
+      curl: ask
 ```
 
 <CodeGroup>
@@ -62,7 +62,7 @@ a request that also sends stdin, a `cwd` or a `machine` is refused.
 | --- | --- |
 | `outcome` | `allow`, `deny` or `ask` |
 | `reason` | the deciding answer's reason, or empty |
-| `source` | where the profile writes the rule (`top`, `commands.allow`); empty for a coded policy |
+| `source` | where the profile writes the rule, such as `top`; empty for a coded policy |
 | `answers` | every policy that answered, in order |
 | `decision` | the record the agent would get, or `null` |
 | `exit_code`, `stderr` | a line: what the agent would read |
@@ -102,7 +102,7 @@ adapters serve, add one line: `policy denied: <reason>`, or
 ### Which tools the agent gets
 
 `session.tools.names()` lists only the tools the session's profile leaves
-it: `shell` needs a command the allow list allows, `ls` and `grep` those
+it: `shell` needs a command its `commands` lets run, `ls` and `grep` those
 commands, `write` and `edit` a mount the session may write. MCP, RPC and the
 agent adapters offer exactly those, so an agent is never offered a tool every
 call of which would be refused.

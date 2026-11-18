@@ -27,7 +27,7 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_machines
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import AdmissionRules, CommandRule, Policy
+from mirage.policy import AdmissionRules, Policy
 from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.runtime.base import Runtime
@@ -39,6 +39,7 @@ from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup_all
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.session import SessionState
+from tests.fixtures.command_trees import trees
 
 
 async def _request(texts: list[str], ctx: Context) -> SimpleNamespace:
@@ -92,18 +93,32 @@ class InProcessPython(PythonRuntime):
         return RunResult(exit_code=0)
 
 
-class _OneRule:
-    """Every session's compiled profile: one deny rule."""
+class _OneTree:
+    """Every session's compiled profile: one command tree."""
 
-    def __init__(self, rule: CommandRule) -> None:
-        self.rules = AdmissionRules(deny=(rule,))
+    def __init__(self, block: dict) -> None:
+        self.rules = trees(block)
 
     def commands_of(self, session_id: str) -> AdmissionRules:
         return self.rules
 
 
-def _profile_rule(rule: CommandRule) -> PermissionsPolicy:
-    return PermissionsPolicy(_OneRule(rule))
+def _profile_rule(block: dict) -> PermissionsPolicy:
+    return PermissionsPolicy(_OneTree(block))
+
+
+def _protect(*names: str) -> dict:
+    leaf = {
+        "decision": "deny",
+        "reason": "protected",
+        "paths": ["/work/secret.txt"],
+    }
+    return dict.fromkeys(names, leaf)
+
+
+_PROTECT_WORK = {
+    "*": {"decision": "deny", "reason": "protected", "paths": ["/work/*"]}
+}
 
 
 @asynccontextmanager
@@ -394,13 +409,7 @@ async def test_boundary_expansion_preserves_command_tokens(
 )
 async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
     probe = kind(captures=("cat", "grep", "tar"))
-    policy = _profile_rule(
-        CommandRule(
-            reason="protected",
-            commands=("cat", "grep", "tar"),
-            paths=("/work/secret.txt",),
-        )
-    )
+    policy = _profile_rule(_protect("cat", "grep", "tar"))
     async with workspace(
         {"/work": RAMVFS()},
         machines=[probe],
@@ -423,11 +432,7 @@ async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
 @pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
 async def test_external_spec_preserves_text_words_and_shell_globs(kind):
     probe = kind(captures=("grep",))
-    policy = _profile_rule(
-        CommandRule(
-            reason="protected", commands=("grep",), paths=("/work/secret.txt",)
-        )
-    )
+    policy = _profile_rule(_protect("grep"))
     async with workspace(
         {"/work": RAMVFS()},
         machines=[probe],
@@ -514,13 +519,7 @@ async def test_external_text_slot_glob_obeys_failglob(kind):
 @pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
 async def test_external_admission_reads_the_expanded_argv(kind):
     probe = kind(captures=("grep", "python3"))
-    policy = _profile_rule(
-        CommandRule(
-            reason="protected",
-            commands=("grep", "python3"),
-            paths=("/work/secret.txt",),
-        )
-    )
+    policy = _profile_rule(_protect("grep", "python3"))
     async with workspace(
         {"/work": RAMVFS()},
         machines=[probe],
@@ -579,7 +578,7 @@ async def test_interpreter_script_cannot_bypass_path_policy(kind, line):
     # (`python3 steal.py` reads /work/steal.py exactly as `cat steal.py`
     # does), whatever option run precedes it.
     probe = kind(captures=("python", "python3", "js", "node"))
-    policy = _profile_rule(CommandRule(reason="protected", paths=("/work/*",)))
+    policy = _profile_rule(_PROTECT_WORK)
     async with workspace(
         {"/work": RAMVFS()},
         machines=[probe],
@@ -607,7 +606,7 @@ async def test_interpreter_program_operands_are_not_paths(kind):
     # program's argv, as are the words after a script; none is a file
     # the rule reads, and each reaches the runtime as typed.
     probe = kind(captures=("python", "python3", "js", "node"))
-    policy = _profile_rule(CommandRule(reason="protected", paths=("/work/*",)))
+    policy = _profile_rule(_PROTECT_WORK)
     lines = [
         ("python - /work/arg", ("python", "-", "/work/arg")),
         ("python3 -u -- - -c x", ("python3", "-u", "--", "-", "-c", "x")),

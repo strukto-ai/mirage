@@ -21,7 +21,7 @@ import {
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
-import type { CLI } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import {
   type Caller,
   currentCaller,
@@ -62,8 +62,17 @@ import {
   type CompiledProfile,
   type SessionProfile,
 } from '../../policy/profile.ts'
+import { unreadNames } from '../../policy/match/grammar.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
-import { DryRun, Outcome, policyCaller, type ShellExplanation } from '../../policy/types.ts'
+import {
+  type AdmissionRules,
+  DryRun,
+  type Grammar,
+  Outcome,
+  policyCaller,
+  type ShellExplanation,
+} from '../../policy/types.ts'
+import { ownsArgv } from '../../commands/cli/walk.ts'
 import { ChildProcess } from '../../execution/process/child.ts'
 import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
 import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
@@ -177,10 +186,10 @@ import { decodeText } from '../../shell/bytes.ts'
 import { DEFAULT_PROFILE, MAX_ENV } from '../session/constants.ts'
 import { checkEnvFits } from '../session/budget.ts'
 import { SessionManager } from '../session/manager.ts'
-import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
+import { commandRules, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { type SessionState, varsFromEntries, varsFromEnv } from '../session/session.ts'
 import { envSnapshot, sessionView } from '../session/state.ts'
-import { checkCliVerbs } from '../session/validate.ts'
+import { BUILTIN_GRAMMARS, renormalized } from '../session/validate.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
 import { indexConfigDump } from '../snapshot/config.ts'
@@ -231,6 +240,11 @@ export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
 /** A workspace's secret source declarations and its seed variables. Mirrors Python's _declared_sources. */
+/** The grammar a command tree reads a line with. Mirrors Python's `_tree_grammar`. */
+function treeGrammar(cli: CLI): Grammar {
+  return { spec: cli.spec, tree: true, passthrough: ownsArgv(cli) }
+}
+
 function declaredSources(options: WorkspaceOptions) {
   // The env block, translated once: a literal entry becomes an
   // exported var, a managed one becomes a pointer the fill step
@@ -726,6 +740,12 @@ export class Workspace {
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld, this.namespace)
     this.registry.bindClocks()
+    this.treesChanged()
+    for (const mount of this.registry.allMounts())
+      mount.treesChanged = () => {
+        this.treesChanged()
+      }
+    this.sessionManager.rulesRead = (rules) => this.readBack(rules)
     this.machineTable.holdHandles()
   }
 
@@ -1004,7 +1024,12 @@ export class Workspace {
    */
   registerCli(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.registry.clis.install(name, spec, config)
+    const grammars = new Map(this.grammars())
+    grammars.set(name, treeGrammar(spec))
+    this.checkTrees(grammars)
+    const install = this.registry.clis.install(name, spec, config)
+    this.restateTrees(grammars)
+    return install
   }
 
   /** Remove an installed CLI and close its accessor; its head word stops
@@ -1334,14 +1359,25 @@ export class Workspace {
 
   /**
    * A session's profile compiled over the workspace's `processes`, the one
-   * way a profile reaches a session. `profile` is what the caller named,
-   * for the profile's name. Mirrors Python's `_compile`.
+   * way a profile reaches a session. `base` is the resolved profile,
+   * `profile` what the caller named, for the profile's name, and `inline`
+   * the inline document `createSession` adds. `defer` keeps a command no
+   * grammar reads yet as written, where a CLI may still be registered; a
+   * session being created refuses its options and subcommands. Mirrors
+   * Python's `_compile`.
    */
   private compile(
-    effective: SessionProfile | null,
+    base: SessionProfile | null,
     profile: string | SessionProfile | null,
+    inline: SessionProfile | null = null,
+    defer = true,
   ): CompiledProfile {
-    return compileProfile(effective, this.profileName(profile), this.workspaceProcesses)
+    return compileProfile(
+      withInline(base, inline, this.workspaceProcesses),
+      this.profileName(profile),
+      this.workspaceProcesses,
+      commandRules(base, inline, this.grammars(), defer),
+    )
   }
 
   /**
@@ -1372,7 +1408,7 @@ export class Workspace {
    * keeps its own mode, so this narrows and never confines; a profile
    * that must keep a session away from a mount hides it. Throws
    * PolicyError on an unknown profile name, or on an inline document
-   * with an allow list.
+   * that states a script.
    */
   createSession(
     sessionId: string,
@@ -1387,20 +1423,10 @@ export class Workspace {
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
-    const compiled = this.compile(
-      withInline(base, inline, this.workspaceProcesses),
-      options.profile ?? null,
-    )
-    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
+    const compiled = this.compile(base, options.profile ?? null, inline, false)
     return this.sessionManager.create(sessionId, { profile: compiled })
   }
 
-  /**
-   * The verbs each installed CLI declares, keyed by head word.
-   *
-   * Read at `createSession` rather than at compile time because a CLI is
-   * registered on the workspace after it is built.
-   */
   /**
    * One session's two entry points: `shell` and `vfs` bound to it.
    *
@@ -1428,10 +1454,84 @@ export class Workspace {
     return new Session(this, sessionId)
   }
 
-  private cliVerbs(): ReadonlyMap<string, ReadonlySet<string>> {
-    const out = new Map<string, ReadonlySet<string>>()
-    for (const [name, install] of this.registry.clis.items()) {
-      out.set(name, new Set(install.cli.spec.subcommands.map((child) => child.name)))
+  /**
+   * Check every profile's and live session's command trees against the
+   * commands and CLIs the workspace will have, and return those grammars
+   * for `restateTrees`. A command no grammar reads yet is left as written,
+   * for `registerCli` to check when it arrives and for `createSession` to
+   * refuse if it never does. Throws `PolicyError` when a tree names
+   * something a grammar lacks.
+   */
+  private checkTrees(grammars: ReadonlyMap<string, Grammar>): ReadonlyMap<string, Grammar> {
+    for (const doc of Object.values(this.profiles)) commandRules(doc, null, grammars, true)
+    for (const session of this.sessionManager.list()) renormalized(session.commands, grammars)
+    return grammars
+  }
+
+  /**
+   * Check and restate every command tree against the grammars the
+   * workspace has now: at construction, and as a mount serves a command
+   * tree. Mirrors Python's `_trees_changed`.
+   */
+  private treesChanged(): void {
+    this.restateTrees(this.checkTrees(this.grammars()))
+  }
+
+  /**
+   * Rules a session record held, marked again with the commands whose
+   * options or subcommands no grammar here reads, which a record does not
+   * keep. Mirrors Python's `_read_back`.
+   */
+  private readBack(rules: AdmissionRules): AdmissionRules {
+    const unread = unreadNames(rules.trees, this.grammars())
+    const held = rules.unread ?? new Set<string>()
+    const same = unread.size === held.size && [...unread].every((name) => held.has(name))
+    return same ? rules : { ...rules, unread }
+  }
+
+  /**
+   * Hold every live session's command trees by the names the grammars
+   * `checkTrees` passed give them.
+   */
+  private restateTrees(grammars: ReadonlyMap<string, Grammar>): void {
+    this.sessionManager.restateCommands((rules) => renormalized(rules, grammars))
+  }
+
+  /**
+   * The grammar each command name is read by: a command tree's
+   * (`cliGrammars`), else the built-in command's spec, as the line reader
+   * picks one. `handed` are the trees a mount about to be added will
+   * serve.
+   */
+  private grammars(handed: readonly CLI[] = []): ReadonlyMap<string, Grammar> {
+    return new Map([...BUILTIN_GRAMMARS, ...this.cliGrammars(handed)])
+  }
+
+  /**
+   * The grammar of each command tree, keyed by head word: an installed
+   * CLI's, else the first one a mount serves, as lookup resolves the name,
+   * holding every other tree a mount serves under that name in `others`,
+   * since the line's mount picks which one reads it.
+   *
+   * Read at `createSession` rather than at compile time because a CLI is
+   * registered on the workspace after it is built. `handed` are the trees
+   * a mount about to be added will serve.
+   */
+  private cliGrammars(handed: readonly CLI[]): ReadonlyMap<string, Grammar> {
+    const served = new Map<string, CLI[]>()
+    const mounted = this.registry.allMounts().map((mount) => mount.servedTrees())
+    for (const trees of [...mounted, new Map(handed.map((cli) => [cli.spec.name, cli]))]) {
+      for (const [name, cli] of trees) {
+        const held = served.get(name) ?? []
+        if (held.every((other) => other.spec !== cli.spec)) held.push(cli)
+        served.set(name, held)
+      }
+    }
+    for (const [name, install] of this.registry.clis.items()) served.set(name, [install.cli])
+    const out = new Map<string, Grammar>()
+    for (const [name, [first, ...rest]] of served) {
+      if (first !== undefined)
+        out.set(name, { ...treeGrammar(first), others: rest.map(treeGrammar) })
     }
     return out
   }
@@ -1503,7 +1603,7 @@ export class Workspace {
         sourceFor(entry.managed.source)
       }
     }
-    checkCliVerbs(this.compile(profile, name).policies.commands, this.cliVerbs())
+    this.compile(profile, name)
     this.profilesInternal[name] = profile
   }
 
@@ -1519,8 +1619,7 @@ export class Workspace {
     profile: string | SessionProfile | null,
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    const compiled = this.compile(this.baseProfile(profile), profile)
-    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
+    const compiled = this.compile(this.baseProfile(profile), profile, null, false)
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
@@ -1965,6 +2064,8 @@ export class Workspace {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
     this.registry.checkVfsAvailable(vfs)
+    const handed = vfs.commands().filter((cmd): cmd is CLI => cmd instanceof CLI)
+    if (handed.length > 0) this.checkTrees(this.grammars(handed))
     const resolvedRead = read ?? this.readDefault
     checkReadCapability(prefix, vfs, resolvedRead, own)
     const resolvedWrite = write == null ? this.writeDefault : coerceWritePolicy(write)
@@ -1987,6 +2088,10 @@ export class Workspace {
       write: resolvedWrite,
     })
     prepareAddedMount(this.registry, m, previous)
+    m.treesChanged = () => {
+      this.treesChanged()
+    }
+    if (handed.length > 0) this.restateTrees(this.grammars())
     return m
   }
 

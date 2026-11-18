@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { walk } from '../../../commands/cli/walk.ts'
+import { ownsArgv, parseLeaf, walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { type ParsedArgs, parseCommand, wordPaths } from '../../../commands/spec/parser.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
-import { CommandWord } from '../../../policy/types.ts'
+import { flagFacts, leafRead } from '../../../policy/match/grammar.ts'
+import { type CommandRead, CommandWord, type Grammar } from '../../../policy/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import type { NamespaceLinks, SessionAccess } from '../../../view/types.ts'
@@ -24,11 +25,10 @@ import { followPaths } from '../builtins/links/links.ts'
 import { toScope } from '../builtins/scope.ts'
 import { SLASH_KEEPS_LAST } from '../../lookup/index.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import { leafParse } from './cli.ts'
 import { commandTree } from './routing.ts'
 import type { LineReading } from './types.ts'
 
-type Grammar = [WordKind, string | null, PathSpec | null]
+type WordGrammar = [WordKind, string | null, PathSpec | null]
 
 /**
  * Each word as a flat grammar reads it: its kind, the option it carries
@@ -41,10 +41,10 @@ function leafGrammar(
   argv: readonly string[],
   cwd: string,
   operands: boolean,
-): Grammar[] {
+): WordGrammar[] {
   const paths = wordPaths(parsed, argv, cwd, operands)
   const attached = new Map(parsed.attached.map((a) => [a.slot, a.option]))
-  return parsed.wordRoles.map((role, slot): Grammar => [
+  return parsed.wordRoles.map((role, slot): WordGrammar => [
     role ?? WordKind.OPERAND,
     attached.get(slot) ?? null,
     paths[slot] ?? null,
@@ -74,22 +74,17 @@ export function readLine(
   const tree = commandTree(registry, name, cwd, argv, access)
   const result = tree !== null ? walk(name, tree.spec, [...argv], cwd, env ?? null) : null
   const supplied: PathSpec[] = []
-  let grammar: Grammar[]
+  let grammar: WordGrammar[]
   let program: string[]
   let tokens: string[]
+  let read: CommandRead | null = null
+  let spoken: Grammar | null = null
   if (tree !== null && result !== null && result.leaf !== null) {
-    const rules = leafParse(tree, result.leaf, result.path)
-    const leaf = parseCommand(
-      rules.spec,
-      [...result.argv],
-      cwd,
-      name,
-      env,
-      rules.unknownIsOperand,
-      rules.abbreviations,
-    )
+    program = [name, ...result.path]
+    spoken = { spec: tree.spec, tree: true, passthrough: ownsArgv(tree) }
+    const leaf = parseLeaf(tree, result, cwd, program.join(' '), env ?? null)
     grammar = [
-      ...result.words.map((w): Grammar => [w.kind, w.option, w.path]),
+      ...result.words.map((w): WordGrammar => [w.kind, w.option, w.path]),
       ...leafGrammar(leaf, result.argv, cwd, true),
     ]
     const typed = new Set(result.words.flatMap((w) => (w.path !== null ? [w.path.virtual] : [])))
@@ -99,12 +94,16 @@ export function readLine(
       }
     }
     supplied.push(...leaf.suppliedPathValues.map((v) => toScope(v)))
-    program = [name, ...result.path]
     tokens = [...program, ...result.argv]
+    const group = flagFacts(result.groupFlags, result.present)
+    const inner: CommandRead = spoken.passthrough
+      ? { path: program, flags: [], operands: [...result.argv] }
+      : leafRead(program, leaf)
+    read = { path: program, flags: [...group, ...inner.flags], operands: inner.operands }
   } else {
     const spec = SPECS[name]
     if (spec === undefined) {
-      grammar = argv.map((w): Grammar => [
+      grammar = argv.map((w): WordGrammar => [
         w.startsWith('-') && w !== '-' ? WordKind.OPTION : WordKind.OPERAND,
         null,
         null,
@@ -113,6 +112,8 @@ export function readLine(
       const parsed = parseCommand(spec, [...argv], cwd, name)
       grammar = leafGrammar(parsed, argv, cwd, false)
       supplied.push(...parsed.suppliedPathValues.map((v) => toScope(v)))
+      spoken = { spec, tree: false, passthrough: false }
+      read = leafRead([name], parsed)
     }
     program = [name]
     tokens = [name, ...argv]
@@ -126,7 +127,7 @@ export function readLine(
     words.push(new CommandWord(text, kind, kind === WordKind.VALUE ? option : carried, path))
     if (kind === WordKind.OPTION) option = text
   })
-  return { words, supplied, tokens, program }
+  return { words, supplied, tokens, program, read, grammar: read !== null ? spoken : null }
 }
 
 /**

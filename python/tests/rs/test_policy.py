@@ -19,20 +19,21 @@ import pytest
 
 from mirage.commands.spec.types import WordKind
 from mirage.policy.match.decide import decide
-from mirage.policy.match.pattern import (
-    pattern_matches,
-    pattern_reaches,
-    split_pattern,
-)
+from mirage.policy.profile import command_tree
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
-    CommandRule,
     CommandWord,
+    ScopedTree,
 )
 from mirage.rs.document import units
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.policy import admission_matcher, visibility_matcher
+from mirage.rs.policy import (
+    Encoded,
+    admission_matcher,
+    request,
+    visibility_matcher,
+)
 from mirage.rs.stream import open_stream
 from mirage.types import (
     HiddenPaths,
@@ -68,22 +69,8 @@ def _path(value: str) -> PathSpec:
     )
 
 
-def _rule(value) -> CommandRule:
-    return CommandRule(
-        **{k: tuple(v) if isinstance(v, list) else v for k, v in value.items()}
-    )
-
-
 def test_shared_matching_corpus():
     corpus = json.loads(CORPUS.read_text())
-    for case in corpus["patterns"]:
-        assert list(split_pattern(case["pattern"])) == case["split"]
-        assert (
-            pattern_matches(case["pattern"], case["tokens"]) == case["matches"]
-        )
-        assert (
-            pattern_reaches(case["pattern"], case["tokens"]) == case["reaches"]
-        )
     for case in corpus["visibility"]:
         shown = tuple(
             ShowEntry(
@@ -111,15 +98,11 @@ def test_shared_matching_corpus():
         for var in case["variables"]:
             assert var_hidden(vis, var["name"]) == var["hidden"]
     for case in corpus["admissions"]:
-        rule_doc = case["rules"]
-        deny = tuple(_rule(v) for v in rule_doc["deny"])
-        ask = tuple(_rule(v) for v in rule_doc["ask"])
         rules = AdmissionRules(
-            allow=None
-            if rule_doc["allow"] is None
-            else tuple(rule_doc["allow"]),
-            deny=deny,
-            ask=ask,
+            tuple(
+                ScopedTree(command_tree(tree["commands"]), tree["mount"] or "")
+                for tree in case["trees"]
+            )
         )
         facts = case["facts"]
         ctx = CommandContext(
@@ -137,32 +120,15 @@ def test_shared_matching_corpus():
             ),
         )
         result = decide(ctx, rules)
-        listed = (*deny, *ask)
         expected = case["expected"]
-        assert result.outcome.value == expected["outcome"], case["name"]
-        assert (
-            next(
-                (i for i, rule in enumerate(listed) if rule is result.rule),
-                None,
-            )
-            == expected["rule"]
-        )
-        assert result.matched_path == expected["matched_path"]
-        assert result.source == expected["source"]
-        assert [
-            next(i for i, rule in enumerate(listed) if rule is a)
-            for a in result.asks
-        ] == expected["asks"]
-
-
-def test_answers_keep_the_hosts_own_rule_objects():
-    rule = CommandRule(reason="review", paths=("/repo/*",))
-    ctx = CommandContext(
-        command="cat", paths=(_path("/repo/x"),), argv=(), cwd="/"
-    )
-    result = decide(ctx, AdmissionRules(ask=(rule,)))
-    assert result.rule is rule
-    assert result.asks[0] is rule
+        name = case["name"]
+        assert result.outcome.value == expected["outcome"], name
+        assert (None if result.rule is None else result.rule.at) == expected[
+            "at"
+        ], name
+        assert result.matched_path == expected["matched_path"], name
+        assert result.source == expected["source"], name
+        assert [a.at for a in result.asks] == expected["asks"], name
 
 
 def test_restored_visibility_keeps_component_depth_and_surrogate_text():
@@ -202,7 +168,12 @@ def test_a_bad_request_is_a_stream_refusal():
     with pytest.raises(StreamRefusal, match="bad policy request"):
         admission_matcher(None).ask("no_such_op")
     with pytest.raises(StreamRefusal, match="rule index is out of range"):
-        admission_matcher(None).ask("posix_level", rule=0)
+        admission_matcher(None).ask(
+            "io_refusal",
+            walked=[{"tree": 0, "branches": []}],
+            path=units("/x"),
+            granted=[],
+        )
 
 
 def test_shared_composition_transcripts():
@@ -239,3 +210,15 @@ def test_shared_composition_transcripts():
             assert json.loads(output) == case["expected"], case["name"]
         finally:
             stream.cancel()
+
+
+def test_a_request_places_an_encoded_field_as_written():
+    reads = Encoded('[{"pattern": [114], "read": null}]')
+    sent = json.loads(request("decide", {"facts": {"reads": reads}, "n": 1}))
+    assert sent == {
+        "op": "decide",
+        "facts": {"reads": [{"pattern": [114], "read": None}]},
+        "n": 1,
+    }
+    with pytest.raises(TypeError, match="not JSON"):
+        request("decide", {"facts": Path("/x")})

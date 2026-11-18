@@ -1800,7 +1800,7 @@ describe('workspace cancel, kill, stop and start', () => {
       const set = await app.inject({
         method: 'PUT',
         url: route,
-        payload: { commands: { allow: ['whoami'] } },
+        payload: { commands: { '*': 'deny', whoami: 'allow' } },
       })
       expect(set.statusCode).toBe(200)
       expect(set.json()).toEqual({ name: 'reader' })
@@ -1821,7 +1821,7 @@ describe('workspace cancel, kill, stop and start', () => {
       await app.inject({
         method: 'PUT',
         url: route,
-        payload: { commands: { allow: ['whoami', 'echo'] } },
+        payload: { commands: { '*': 'deny', whoami: 'allow', echo: 'allow' } },
       })
       const moved = await app.inject({
         method: 'PATCH',
@@ -1833,11 +1833,12 @@ describe('workspace cancel, kill, stop and start', () => {
       const refused = await app.inject({
         method: 'PUT',
         url: route,
-        payload: {
-          commands: { allow: ['ls'], deny: [{ commands: ['cat *'], reason: 'sealed' }] },
-        },
+        payload: { commands: { '*': 'deny', rm: { '-rf': 'deny' } } },
       })
       expect(refused.statusCode).toBe(400)
+      expect(refused.json<{ error: { message: string } }>().error.message).toContain(
+        'a cluster of options',
+      )
       const unknown = await app.inject({ method: 'PUT', url: `${route}x`, payload: { bogus: 1 } })
       expect(unknown.statusCode).toBe(400)
       mkdirSync(join(root, 'guard.py'))

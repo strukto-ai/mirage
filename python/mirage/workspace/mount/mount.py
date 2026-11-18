@@ -670,6 +670,7 @@ class MountEntry:
         self._general_cmds: dict[str, Command] = {}
         # name -> (the root command registered, the tree it walks)
         self._trees: dict[str, tuple[Command, CLI]] = {}
+        self.trees_changed: Callable[[], None] | None = None
         self._cmd_specs: dict[str, CommandSpec] = {}
         # first token -> descending token counts of multi-word command
         # names (e.g. "gws docs documents get"); backs longest-prefix
@@ -941,6 +942,10 @@ class MountEntry:
         tree as an installed CLI's does and runs the leaf on this mount's
         accessor (``run_leaf``).
 
+        A tree the workspace's command rules name is checked against its
+        grammar as it arrives (``trees_changed``); one a rule no longer
+        fits is refused and not served.
+
         Args:
             fns (iterable): Decorated functions, Command values or CLI
                 trees.
@@ -948,12 +953,29 @@ class MountEntry:
         Raises:
             ValueError: If a command's VFS doesn't match this mount's VFS,
                 or a tree declares an installation's own setting.
+            PolicyError: If a command rule names something a tree's
+                grammar lacks.
         """
         commands, trees = self._accepted(fns)
+        held = (
+            dict(self._cmds),
+            dict(self._cmd_specs),
+            set(self._user_keys),
+            dict(self._trees),
+        )
         for rc in commands:
             self.register(rc)
         for root, cli in trees:
             self._trees[root.name] = (root, cli)
+        if trees and self.trees_changed is not None:
+            try:
+                self.trees_changed()
+            except Exception:
+                self._cmds, self._cmd_specs, self._user_keys, self._trees = (
+                    held
+                )
+                self._prefix_index = None
+                raise
 
     def _accepted(
         self, fns: Iterable[Any]
@@ -1001,6 +1023,15 @@ class MountEntry:
             rc for keep, _attempted in cmd_groups.values() for rc in keep
         ]
         return commands, trees
+
+    def served_trees(self) -> dict[str, CLI]:
+        """Each command tree this mount serves, keyed by its name
+        (``cli_for``)."""
+        return {
+            name: tree
+            for name in self._trees
+            if (tree := self.cli_for(name)) is not None
+        }
 
     def cli_for(self, cmd_name: str) -> CLI | None:
         """The command tree this mount serves under ``cmd_name``, None
@@ -1505,6 +1536,7 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        writes: bool,
     ) -> CommandFnResult:
         """Run one leaf of a command tree this mount serves.
 
@@ -1522,6 +1554,8 @@ class MountEntry:
             paths (list[PathSpec]): the leaf's path operands.
             texts (list[str]): the leaf's text operands.
             ctx (Context): the leaf's context.
+            writes (bool): whether this invocation may change state
+                (``CLIHandler.writes`` over the options the line carries).
         """
         root = self.resolve_command(cli.spec.name)
         fn = handler.fn
@@ -1533,7 +1567,7 @@ class MountEntry:
             vfs=None,
             filetype=None,
             fn=fn,
-            write=handler.writes(ctx.argv),
+            write=writes,
             limit=handler.limit,
         )
         async with self.use():
@@ -1570,8 +1604,7 @@ class MountEntry:
                             cli_voice(prog),
                             drop=(
                                 self.drop_caches
-                                if handler.writes(ctx.argv)
-                                and self._is_user_command(root)
+                                if writes and self._is_user_command(root)
                                 else None
                             ),
                             scope=lambda result: _wrap_mount_streams(

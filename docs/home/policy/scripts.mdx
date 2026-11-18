@@ -220,7 +220,7 @@ Asked before each command or CLI, nested ones included. For `cat notes.txt`:
 | `line` | the line it was parsed from |
 | `words`, `paths`, `walks` | each word with its kind and path, and every path it reaches; see [Command](/home/policy/command#context) |
 | `tokens`, `program` | the words as a profile rule reads them, and the head that names what runs: a CLI's verb path joins its name |
-| `tool` | whether allow lists govern it |
+| `tool` | whether the root `"*"` of a profile's `commands` governs it |
 | `write` | whether the command may change state |
 | `subtree` | whether it moves or removes a whole tree (`rm`, `rmdir`, `mv`) |
 | `move_target` | the directory a `cp -t` or `mv -t` names, or `null` |

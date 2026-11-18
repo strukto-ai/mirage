@@ -15,7 +15,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   Outcome,
-  Scope,
   type CommandContext,
   type Deny,
   type Policy,
@@ -30,10 +29,6 @@ import { Session, Workspace } from './workspace.ts'
 const PROFILE = {
   mounts: { '/data': 'write', '/ro': 'read' },
   paths: { hide: ['/data/vault'] },
-  commands: {
-    deny: [{ reason: 'sealed', paths: ['/data/sec/*'] }],
-    ask: [{ reason: 'nod', paths: ['/data/out/*'] }],
-  },
 }
 
 describe('session.explain.vfs', () => {
@@ -86,15 +81,15 @@ describe('session.explain.vfs', () => {
   })
 
   /**
-   * Deciding a write to `/data/new`, or the line `ls /data/new`, reads an
-   * asked file as the agent and stamps one; `errors` collects the codes.
+   * Deciding a write to `/data/new`, or the line `ls /data/new`, reads a
+   * hidden file as the agent and stamps one; `errors` collects the codes.
    */
   function busy(errors: (string | undefined)[]): Policy {
     const failed = (err: unknown): void => {
       errors.push((err as { code?: string }).code)
     }
     const work = async (): Promise<null> => {
-      await new Session(ws, 'agent').vfs.read('/data/out/q').catch(failed)
+      await new Session(ws, 'agent').vfs.read('/data/vault/v').catch(failed)
       await ws.vfs.write('/data/stamp', 'seen').catch(failed)
       return null
     }
@@ -112,7 +107,7 @@ describe('session.explain.vfs', () => {
     const errors: (string | undefined)[] = []
     ws.policies.add(busy(errors))
     await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
-    expect(errors).toEqual(['EACCES', 'EROFS'])
+    expect(errors).toEqual(['ENOENT', 'EROFS'])
     expect(ws.decisions.pending('agent')).toEqual([])
     expect(await ws.vfs.exists('/data/stamp')).toBe(false)
   })
@@ -121,38 +116,8 @@ describe('session.explain.vfs', () => {
     const errors: (string | undefined)[] = []
     ws.policies.add(busy(errors))
     await new Session(ws, 'agent').explain.shell('ls /data/new')
-    expect(errors).toEqual(['EACCES', 'EROFS'])
+    expect(errors).toEqual(['ENOENT', 'EROFS'])
     expect(ws.decisions.pending('agent')).toEqual([])
     expect(await ws.vfs.exists('/data/stamp')).toBe(false)
-  })
-
-  it('lets a standing approval cover a deciding read', async () => {
-    await ws.vfs.mkdir('/data/out')
-    await ws.vfs.write('/data/out/q', 'q')
-    await expect(new Session(ws, 'agent').vfs.read('/data/out/q')).rejects.toThrow()
-    const [asked] = ws.decisions.pending('agent')
-    await ws.decisions.answer(asked?.id ?? '', Outcome.ALLOW, Scope.SESSION)
-    const errors: (string | undefined)[] = []
-    ws.policies.add(busy(errors))
-    await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
-    expect(errors).toEqual(['EROFS'])
-  })
-
-  it('reads a line’s policy as the running line does', async () => {
-    await ws.vfs.mkdir('/data/out')
-    await ws.vfs.write('/data/out/q', 'q')
-    await expect(new Session(ws, 'agent').vfs.read('/data/out/q')).rejects.toThrow()
-    const [asked] = ws.decisions.pending('agent')
-    await ws.decisions.answer(asked?.id ?? '', Outcome.ALLOW, Scope.SESSION)
-    const errors: (string | undefined)[] = []
-    ws.policies.add(busy(errors))
-    // Inside a line an ask refuses like a deny, approved or not, and a
-    // method writes nothing there either.
-    await new Session(ws, 'agent').shell('ls /data/new')
-    expect(new Set(errors)).toEqual(new Set(['EACCES', 'EROFS']))
-    expect(await ws.vfs.exists('/data/stamp')).toBe(false)
-    errors.length = 0
-    await new Session(ws, 'agent').explain.shell('ls /data/new')
-    expect(errors).toEqual(['EACCES', 'EROFS'])
   })
 })

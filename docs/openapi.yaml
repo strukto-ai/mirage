@@ -502,12 +502,14 @@ paths:
                 /:
                   mode: read
               commands:
-                deny:
-                  - curl
-                ask:
-                  - commands:
-                      - rm
-                    reason: Deletes need sign-off
+                curl: deny
+                rm:
+                  decision: ask
+                  reason: Deletes need sign-off
+                gh:
+                  pr:
+                    merge:
+                      --admin: deny
               vars:
                 hide:
                   - AWS_*
@@ -2240,7 +2242,12 @@ paths:
             "kind": "deny",
             "reason": "rm is not allowed in this workspace",
             "policy": "PermissionsPolicy",
-            "ask_id": null
+            "ask_id": null,
+            "matched": {
+              "command": ["rm"],
+              "flags": [],
+              "keys": []
+            }
           },
           "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38"
         }
@@ -6634,112 +6641,156 @@ components:
       additionalProperties: false
       type: object
       title: CloneWorkspaceRequest
-    CommandRule:
+    CommandDecision:
+      anyOf:
+        - $ref: '#/components/schemas/CommandVerb'
+        - $ref: '#/components/schemas/CommandLeaf'
+        - type: array
+          minItems: 1
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/CommandVerb'
+              - $ref: '#/components/schemas/CommandLeaf'
+          description: Several decisions for one place. Each applies on its own, and the strictest
+            that applies wins.
+      title: CommandDecision
+      description: What a place in a command tree decides. Write `allow`, `ask` or `deny`; an object
+        to add a reason or limit the decision to paths; or a list of those.
+    CommandLeaf:
       properties:
+        decision:
+          $ref: '#/components/schemas/CommandVerb'
         reason:
           type: string
-          title: Reason
-        commands:
-          items:
-            type: string
-          type: array
-          title: Commands
-          default: []
+          description: Why the command is refused or needs approval. A default when omitted.
         paths:
+          type: array
           items:
             type: string
-          type: array
-          title: Paths
-          default: []
-        mount:
-          type: string
-          title: Mount
-          default: ''
+          description: Paths the decision covers. For any other path it says nothing, and the
+            decision from higher in the tree applies. Omit to cover every path.
       additionalProperties: false
       type: object
       required:
-        - reason
-      title: CommandRule
-      description: Require approval or deny commands matching the specified patterns. A pattern such as
-        `git push` matches that command and its arguments. Optional paths restrict the rule to matching
-        files or directories. Rules under a mount apply only within that mount.
+        - decision
+      title: CommandLeaf
+      description: One decision with a reason, limited to paths, or both.
+    CommandTreeNode:
+      anyOf:
+        - $ref: '#/components/schemas/CommandDecision'
+        - type: object
+          properties:
+            '*':
+              $ref: '#/components/schemas/CommandDecision'
+              description: The decision for this command or subcommand itself, and for every
+                subcommand below it that states none.
+            '-*':
+              $ref: '#/components/schemas/CommandDecision'
+              description: The decision for an option on the line that this tree does not name.
+            operands:
+              type: object
+              minProperties: 1
+              additionalProperties:
+                $ref: '#/components/schemas/CommandTreeNode'
+              description: The next operand on the line. Each key is a shell glob compared with
+                the word; `*` matches any word and `[*]` a literal star. Allowed only where the
+                object names no subcommand.
+          patternProperties:
+            '^-(?!\*$)[\s\S]':
+              $ref: '#/components/schemas/CommandTreeOption'
+          additionalProperties:
+            $ref: '#/components/schemas/CommandTreeNode'
+          propertyNames:
+            not:
+              enum:
+                - decision
+                - reason
+                - paths
+                - values
+          if:
+            required:
+              - operands
+          then:
+            propertyNames:
+              anyOf:
+                - enum:
+                    - '*'
+                    - operands
+                - pattern: '^-[\s\S]'
+      title: CommandTreeNode
+      description: One command, subcommand or operand in a command tree. Write a decision alone, or
+        an object. In the object, `*` is the decision here, a key starting with `-` is an option in
+        any spelling the command declares, `-*` is any other option, `operands` maps the next
+        operand, and every other key is a subcommand by its name or an alias.
+    CommandTreeOption:
+      anyOf:
+        - $ref: '#/components/schemas/CommandDecision'
+        - type: object
+          properties:
+            '*':
+              $ref: '#/components/schemas/CommandDecision'
+              description: The decision when the option is on the line, whatever its value.
+            values:
+              type: object
+              minProperties: 1
+              additionalProperties:
+                $ref: '#/components/schemas/CommandTreeValue'
+              description: The option's value. Each key is a shell glob compared with the value
+                the line gives. A matching entry replaces the option's own decision.
+          patternProperties:
+            '^-(?!\*$)[\s\S]':
+              $ref: '#/components/schemas/CommandTreeOption'
+          additionalProperties: false
+      title: CommandTreeOption
+      description: What an option decides when it is on the line. Write a decision alone, or an
+        object that names values, or other options that must also be on the line.
+    CommandTreeValue:
+      anyOf:
+        - $ref: '#/components/schemas/CommandDecision'
+        - type: object
+          properties:
+            '*':
+              $ref: '#/components/schemas/CommandDecision'
+              description: The decision for this value.
+          patternProperties:
+            '^-(?!\*$)[\s\S]':
+              $ref: '#/components/schemas/CommandTreeOption'
+          additionalProperties: false
+      title: CommandTreeValue
+      description: What one value of an option decides. Write a decision alone, or an object that
+        names other options that must also be on the line.
+    CommandVerb:
+      type: string
+      enum:
+        - allow
+        - ask
+        - deny
+      title: CommandVerb
+      description: '`allow` runs the command, `ask` waits for approval, and `deny` refuses it.'
     CommandsBlock:
-      properties:
-        allow:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: 'null'
-          title: Allow
-        ask:
-          items:
-            anyOf:
-              - type: string
-                description: One command pattern, refused or asked with the default reason.
-              - type: object
-                description: A rule as written. Give `commands`, `paths`, or `commands` as a
-                  map from each command pattern to its paths; a list of commands beside a
-                  list of paths is refused.
-                properties:
-                  reason:
-                    type: string
-                    description: Why the rule refuses or asks. A default when omitted.
-                  commands:
-                    anyOf:
-                      - type: array
-                        items:
-                          type: string
-                      - type: object
-                        additionalProperties:
-                          type: array
-                          items:
-                            type: string
-                  paths:
-                    type: array
-                    items:
-                      type: string
-                additionalProperties: false
-          type: array
-          title: Ask
-          default: []
-        deny:
-          items:
-            anyOf:
-              - type: string
-                description: One command pattern, refused or asked with the default reason.
-              - type: object
-                description: A rule as written. Give `commands`, `paths`, or `commands` as a
-                  map from each command pattern to its paths; a list of commands beside a
-                  list of paths is refused.
-                properties:
-                  reason:
-                    type: string
-                    description: Why the rule refuses or asks. A default when omitted.
-                  commands:
-                    anyOf:
-                      - type: array
-                        items:
-                          type: string
-                      - type: object
-                        additionalProperties:
-                          type: array
-                          items:
-                            type: string
-                  paths:
-                    type: array
-                    items:
-                      type: string
-                additionalProperties: false
-          type: array
-          title: Deny
-          default: []
-      additionalProperties: false
       type: object
+      properties:
+        '*':
+          $ref: '#/components/schemas/CommandDecision'
+          description: The decision for every command the block does not decide. `allow` when
+            omitted.
+      additionalProperties:
+        $ref: '#/components/schemas/CommandTreeNode'
+      propertyNames:
+        not:
+          anyOf:
+            - pattern: '^-[\s\S]'
+            - enum:
+                - decision
+                - reason
+                - paths
+                - operands
+                - values
       title: CommandsBlock
-      description: Command access rules. `allow` restricts available commands to matching patterns. `ask`
-        requires approval, and `deny` blocks matching commands with a reason. If `allow` is omitted, it
-        adds no restriction.
+      description: |-
+        Command rules, written as a tree that follows each command's own subcommands and options. Each key is a command name, and `*` is every other command.
+
+        The line's subcommands and operands pick the deepest place that states a decision; nothing stated means `allow`. Options and option values on the line can only tighten that decision: `deny` over `ask` over `allow`. See [command rules](/home/configuration/session#command-rules) for examples.
     CreateSessionRequest:
       properties:
         session_id:
@@ -7042,74 +7093,12 @@ components:
         - vfs
       title: MountBlock
     MountCommandsBlock:
-      properties:
-        ask:
-          items:
-            anyOf:
-              - type: string
-                description: One command pattern, refused or asked with the default reason.
-              - type: object
-                description: A rule as written. Give `commands`, `paths`, or `commands` as a
-                  map from each command pattern to its paths; a list of commands beside a
-                  list of paths is refused.
-                properties:
-                  reason:
-                    type: string
-                    description: Why the rule refuses or asks. A default when omitted.
-                  commands:
-                    anyOf:
-                      - type: array
-                        items:
-                          type: string
-                      - type: object
-                        additionalProperties:
-                          type: array
-                          items:
-                            type: string
-                  paths:
-                    type: array
-                    items:
-                      type: string
-                additionalProperties: false
-          type: array
-          title: Ask
-          default: []
-        deny:
-          items:
-            anyOf:
-              - type: string
-                description: One command pattern, refused or asked with the default reason.
-              - type: object
-                description: A rule as written. Give `commands`, `paths`, or `commands` as a
-                  map from each command pattern to its paths; a list of commands beside a
-                  list of paths is refused.
-                properties:
-                  reason:
-                    type: string
-                    description: Why the rule refuses or asks. A default when omitted.
-                  commands:
-                    anyOf:
-                      - type: array
-                        items:
-                          type: string
-                      - type: object
-                        additionalProperties:
-                          type: array
-                          items:
-                            type: string
-                  paths:
-                    type: array
-                    items:
-                      type: string
-                additionalProperties: false
-          type: array
-          title: Deny
-          default: []
-      additionalProperties: false
-      type: object
+      allOf:
+        - $ref: '#/components/schemas/CommandsBlock'
       title: MountCommandsBlock
-      description: Approval and deny rules for commands working within this mount. Use session-level command
-        rules for an allow list.
+      description: A command tree for lines that work inside this mount, by their working directory
+        or a path they name. It is judged beside the profile's own tree and the stricter result
+        wins, so it can only tighten. Paths in it must lie under the mount.
     MountMode:
       type: string
       enum:
@@ -7652,7 +7641,7 @@ components:
       description: |-
         Permissions and initial settings for a session. Unspecified settings add no restrictions beyond the workspace configuration.
 
-        Use `commands`, `paths`, and `mounts` to control access, and `policy` for custom rules. For command rules without paths, deny takes precedence over approval requests and allow rules. More specific path rules take precedence over broader rules. See [permissions profiles](/home/policy/overview) for rule examples.
+        Use `commands`, `paths`, and `mounts` to control access, and `policy` for custom rules. `commands` is a tree of command names: the most specific entry a line reaches decides it, and an option on the line can only tighten that decision. See [command rules](/home/configuration/session#command-rules) for examples.
     SessionResponse:
       properties:
         session_id:
@@ -8247,11 +8236,46 @@ components:
             - type: string
             - type: 'null'
           description: Approval request ID, for `pending`.
+        matched:
+          anyOf:
+            - $ref: '#/components/schemas/PolicyMatch'
+            - type: 'null'
+          description: What fired in the profile rule that refused, for `deny`. Null for any other
+            refusal.
       required:
         - kind
         - reason
         - policy
         - ask_id
+        - matched
+    PolicyMatch:
+      type: object
+      description: The command path, options and operand or value keys of the tree entry that
+        refused the line, or the line's own command path when the root `"*"` refused it.
+      properties:
+        command:
+          type: array
+          items:
+            type: string
+          description: Command name and its subcommands, by their canonical names.
+        flags:
+          type: array
+          items:
+            type: string
+          description: Options the pattern names, by their canonical spelling. Empty when it names
+            none.
+        keys:
+          type: array
+          items:
+            type: string
+          description: >-
+            The operand and value keys the tree names on the way to the entry that fired, as
+            written, such as `secret*` for `echo secret1` under
+            `{echo: {operands: {"secret*": deny}}}`. Empty when it names none.
+      required:
+        - command
+        - flags
+        - keys
     ShellResult:
       type: object
       description: Returned by default, when the command has ended.
@@ -8350,8 +8374,8 @@ components:
             nothing refuses or asks.
         source:
           type: string
-          description: Where in the profile the deciding rule is written, such as `top`,
-            `mounts./runbook` or `commands.allow`. Empty when no rule decided.
+          description: Where in the profile the deciding tree is written, `top` or a mount
+            section such as `mounts./runbook`. Empty when no tree decided.
         answers:
           type: array
           items:
@@ -9035,6 +9059,7 @@ components:
                     reason: writes under /data are not allowed
                     policy: PermissionsPolicy
                     ask_id: null
+                    matched: null
             storage_full:
               summary: The backend is out of space or quota
               value:

@@ -693,3 +693,14 @@ export const SHELL_NAMES: ReadonlySet<string> = new Set([
   ...Object.values(ShellBuiltin),
   ...UNSUPPORTED_BUILTINS,
 ])
+
+/**
+ * Head words no CLI is installed under (`CLIRegistry.checkName`): a
+ * builtin, a keyword or a namespace command answers first.
+ */
+export const NOT_INSTALLABLE: ReadonlySet<string> = new Set([
+  ...SHELL_NAMES,
+  ...JOB_BUILTINS,
+  ...KEYWORDS,
+  ...NAMESPACE_COMMANDS,
+])

@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from mirage._rs import Shell
@@ -191,6 +192,11 @@ class SessionManager(SessionOwner):
         # The workspace's max_env, which a created session must start
         # within; None for no cap.
         self.max_env: int | None = None
+        # How the workspace reads back the rules a record held, which
+        # keeps only their trees; None keeps them as stored.
+        self.rules_read: Callable[[AdmissionRules], AdmissionRules] | None = (
+            None
+        )
 
     @property
     def loaded(self) -> bool:
@@ -257,6 +263,42 @@ class SessionManager(SessionOwner):
             default = self._sessions[self._default_id]
             apply_profile(default, compiled)
             self._has_managed = self._has_managed or _holds_managed(default)
+
+    def _read_back(
+        self, rules: AdmissionRules | None
+    ) -> AdmissionRules | None:
+        if rules is None or self.rules_read is None:
+            return rules
+        return self.rules_read(rules)
+
+    def restate_commands(
+        self,
+        restate: Callable[[AdmissionRules | None], AdmissionRules | None],
+    ) -> None:
+        """Hold every live session's command trees, and the default
+        profile's, as ``restate`` gives them back: how a CLI registered
+        after the trees were compiled has their names read by its
+        grammar.
+
+        Args:
+            restate (Callable): the trees as they should be held.
+        """
+        restated = {
+            key: restate(session.commands)
+            for key, session in self._sessions.items()
+        }
+        default = self._default_profile
+        if default is not None:
+            policies = default.policies
+            default = replace(
+                default,
+                policies=replace(
+                    policies, commands=restate(policies.commands)
+                ),
+            )
+        for key, rules in restated.items():
+            self._sessions[key].commands = rules
+        self._default_profile = default
 
     def commands_of(self, session_id: str) -> AdmissionRules | None:
         """The admission rules one session runs under
@@ -408,6 +450,7 @@ class SessionManager(SessionOwner):
                 if sid == self._default_id or sid not in self._sessions
             }
             for record in records.values():
+                record.commands = self._read_back(record.commands)
                 check_env_fits(
                     record,
                     self.max_env,
@@ -594,6 +637,7 @@ class SessionManager(SessionOwner):
             for s in (*self._sessions.values(), *sessions)
         }
         for session in sessions:
+            session.commands = self._read_back(session.commands)
             self._has_managed = self._has_managed or _holds_managed(session)
         await self._store.replace_all(
             {sid: fields for sid, (_, fields) in written.items()}

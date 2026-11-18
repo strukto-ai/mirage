@@ -107,8 +107,9 @@ another machine capturing it exits 126.
   session. A `host` machine or a provider is handed the wrapper with the
   program, so it makes the change there.
 - An absolute path Mirage has no file for, such as `/usr/bin/ffmpeg`, goes to
-  the `@external` machine. A profile's `commands.allow` refuses it, since the
-  list can only name what it can read.
+  the `@external` machine. A profile's `commands` judges it by its name, so
+  under `"*": deny` it runs only when the tree names it: `ffmpeg: allow`
+  lets `/usr/bin/ffmpeg` run.
 - On a `host` machine or a provider, a program a captured program
   starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
   launcher on the same machine as the tool. A Pyodide script's `subprocess`
@@ -119,8 +120,8 @@ another machine capturing it exits 126.
   logs a warning.
 - A program no machine takes exits 127, `command not found`.
 - `captures` only places programs. To limit what a session may run at all,
-  use its profile's `commands.allow`; see
-  [Session Profiles](/home/configuration/session).
+  use its profile's `commands`; see
+  [Command rules](/home/configuration/session#command-rules).
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
 - Globs expand against the workspace first (`python3 job.py *.csv` runs

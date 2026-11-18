@@ -44,9 +44,11 @@ async def ws_cpython():
 
 GUARDED = {
     "commands": {
-        "deny": [
-            {"reason": "protected", "commands": {"python3": ["/secret.py"]}}
-        ]
+        "python3": {
+            "decision": "deny",
+            "reason": "protected",
+            "paths": ["/secret.py"],
+        }
     }
 }
 

@@ -10,7 +10,7 @@ export async function benchmark() {
         {
           mode: MountMode.WRITE,
           policies: [policy],
-          profiles: { bench: SessionProfile({ commands: { deny: ['blocked'] } }) },
+          profiles: { bench: SessionProfile({ commands: { blocked: 'deny' } }) },
         },
       ),
   )

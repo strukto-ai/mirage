@@ -50,6 +50,7 @@ import {
   scriptsToDict,
   type DecisionJSON,
   type ScriptJSON,
+  type TreeJSON,
 } from './serialize.ts'
 
 // The file-creation mask a fresh shell starts with, as bash's.
@@ -172,7 +173,7 @@ export interface SessionInit {
   mountModes?: ReadonlyMap<string, MountMode> | null
   /**
    * What exists for this session: the profile's hides, shows, hidden
-   * variables, process scope and allow list, compiled once. The views
+   * variables and process scope, compiled once. The views
    * and the op boundary read it; fork carries it, toJSON serializes.
    * A field left out hides nothing, as `DEFAULT_VISIBILITY` says.
    */
@@ -184,8 +185,8 @@ export interface SessionInit {
    */
   hideReasons?: readonly HideReason[]
   /**
-   * The session's own command tier (`profiles.<n>.commands` tightened
-   * by the inline document): allow patterns, ask and deny rules. A
+   * The profile's command trees, normalised: the top-level tree, each
+   * mount entry's, and inline permissions', each judged on its own. A
    * durable restriction like visibility, so it persists.
    */
   commands?: AdmissionRules | null
@@ -1209,7 +1210,7 @@ export class SessionState {
         patterns: [...(vis.vars.patterns ?? [])],
       }
     }
-    if (this.commands !== null) data.commands = commandsToDict(this.commands)
+    if (this.commands !== null) data.command_trees = commandsToDict(this.commands)
     if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToDict(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
@@ -1236,7 +1237,8 @@ export class SessionState {
     shown_paths?: { entries?: { path: string; mode?: MountMode }[] } | null
     hide_reasons?: { patterns?: string[]; reason?: string }[] | null
     hidden_vars?: { names?: string[]; patterns?: string[] } | null
-    commands?: ReturnType<typeof commandsToDict> | null
+    command_trees?: TreeJSON[] | null
+    commands?: unknown
     scripts?: Record<string, ScriptJSON[]> | null
     profile?: string | null
     command_limits?: unknown
@@ -1258,7 +1260,14 @@ export class SessionState {
     err_trap?: string | null
     return_trap?: string | null
   }): SessionState {
-    const commands = data.commands != null ? commandsFromDict(data.commands) : null
+    const older = data.command_trees == null && data.commands != null
+    const commands = commandsFromDict(data.command_trees ?? undefined, data.commands ?? undefined)
+    if (older) {
+      console.warn(
+        `session ${data.session_id}: its command rules were saved in an older format, so it is ` +
+          "closed and its approvals are dropped; recreate it to run its profile's rules",
+      )
+    }
     const processes = layerProcesses([data.processes])
     const vars =
       data.env !== undefined || data.var_attrs !== undefined || data.managed != null
@@ -1317,7 +1326,7 @@ export class SessionState {
       commandLimits: parseCommandLimits(data.command_limits),
       network: data.network ?? null,
       processes,
-      decisions: data.decisions != null ? data.decisions.map(decisionFromDict) : [],
+      decisions: !older && data.decisions != null ? data.decisions.map(decisionFromDict) : [],
     })
     // A recorded session comes back as it was written, so a startup
     // variable it had unset stays unset rather than being seeded again; a

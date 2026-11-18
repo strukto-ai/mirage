@@ -12,418 +12,159 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import WordKind
 from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
-    op_ruling,
+    naming_rules,
     skipped_at_dispatch,
 )
-from mirage.policy.types import (
-    AdmissionRules,
-    CommandContext,
-    CommandRule,
-    CommandWord,
-    Outcome,
-    VfsContext,
-)
-from mirage.types import PathSpec
-from mirage.vfs.types import Effect, Target, VfsCall
-from mirage.workspace.dispatcher.constants import CALLS
-from mirage.workspace.lookup import line_facts
-
-
-def _path(virtual: str, raw: str = "") -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0] or "/",
-        vfs_path=virtual,
-        resolved=True,
-        raw_path=raw,
-    )
-
-
-def _ctx(
-    command: str,
-    paths: tuple[PathSpec, ...] = (),
-    cwd: str = "/",
-    tokens: tuple[str, ...] = (),
-    walks: bool = False,
-) -> CommandContext:
-    return CommandContext(
-        command=command,
-        paths=paths,
-        argv=(),
-        cwd=cwd,
-        tokens=tokens,
-        walks=walks,
-    )
+from mirage.policy.types import AdmissionRules, CommandContext, Outcome
+from tests.fixtures.command_trees import line, trees
 
 
 def _verdict(
-    rule: CommandRule, ctx: CommandContext
+    rules: AdmissionRules, ctx: CommandContext
 ) -> tuple[Outcome, str | None]:
-    """How a profile holding this one deny rule answers a line: refused
-    or not, and the operand the refusal names (None for the whole line)."""
-    ruling = decide(ctx, AdmissionRules(deny=(rule,)))
+    ruling = decide(ctx, rules)
     return ruling.outcome, ruling.matched_path
 
 
-def _refuses_op(rule: CommandRule, op: VfsContext) -> bool:
-    """Whether a profile holding this one deny rule refuses an op."""
-    return op_ruling(AdmissionRules(deny=(rule,)), op, ()) is not None
+def _refusal(
+    rules: AdmissionRules | None, ctx: CommandContext, virtual: str, granted=()
+) -> str | None:
+    return io_refusal(rules, naming_rules(rules, ctx), virtual, granted)
 
 
-DENY_LINE = (Outcome.DENY, None)
-ALLOW = (Outcome.ALLOW, None)
+def _reach(
+    rules: AdmissionRules | None, ctx: CommandContext, virtual: str
+) -> bool:
+    return io_reach(rules, naming_rules(rules, ctx), virtual)
 
 
-def test_a_rule_reaches_a_line_by_command_pattern_operand_and_mount():
-    whole = CommandRule(reason="no", commands=("git push",))
-    assert (
-        _verdict(whole, _ctx("git", tokens=("git", "push", "origin")))
-        == DENY_LINE
-    )
-    assert _verdict(whole, _ctx("git", tokens=("git", "pull"))) == ALLOW
-    scoped = CommandRule(reason="no", commands=("rm",), paths=("/repo/*",))
-    assert _verdict(
-        scoped, _ctx("rm", paths=(_path("/repo/x", raw="x"),), cwd="/repo")
-    ) == (Outcome.DENY, "x")
-    assert _verdict(scoped, _ctx("rm", paths=(_path("/scratch/x"),))) == ALLOW
-    # A mount-tier rule applies to a line whose cwd or paths lie under
-    # the mount, and to nothing else.
-    mount = CommandRule(reason="ro", commands=("git push",), mount="/repo")
-    push = ("git", "push")
-    assert _verdict(mount, _ctx("git", tokens=push, cwd="/repo/sub")) == (
-        DENY_LINE
-    )
-    assert (
-        _verdict(
-            mount,
-            _ctx("git", tokens=push, cwd="/scratch", paths=(_path("/repo"),)),
-        )
-        == DENY_LINE
-    )
-    assert _verdict(mount, _ctx("git", tokens=push, cwd="/scratch")) == ALLOW
-    assert _verdict(mount, _ctx("git", tokens=push, cwd="/repository")) == (
-        ALLOW
-    )
-    # An every-command rule (no patterns) matches whatever line.
-    assert _verdict(CommandRule(reason="locked"), _ctx("ls")) == DENY_LINE
-
-
-def test_a_rules_paths_read_the_one_path_grammar():
-    # A plain entry is an exact path and its subtree, so `/data/prod`
-    # covers `/data/prod/x` but not `/data/production`; a slashless glob
-    # matches any name component; `?` and a class are patterns too.
-    prod = CommandRule(reason="prod", commands=("rm",), paths=("/data/prod",))
-    for virtual in ("/data/prod", "/data/prod/x"):
-        assert _verdict(prod, _ctx("rm", paths=(_path(virtual),))) == (
-            Outcome.DENY,
-            virtual,
-        )
-    production = (_path("/data/production"),)
-    assert _verdict(prod, _ctx("rm", paths=production)) == ALLOW
-    keys = CommandRule(reason="keys", paths=("*.key",))
-    assert _verdict(keys, _ctx("cat", paths=(_path("/a/b.key/c"),))) == (
-        Outcome.DENY,
-        "/a/b.key/c",
-    )
-    assert _verdict(keys, _ctx("cat", paths=(_path("/a/b.keyx"),))) == ALLOW
-    one = CommandRule(reason="one", paths=("/data/?.txt",))
-    assert _verdict(one, _ctx("cat", paths=(_path("/data/a.txt"),)))[0] is (
+def test_a_mount_tree_reaches_a_line_by_its_cwd_or_its_paths():
+    rules = trees(mounts={"/repo": {"rm": {"--force": "deny"}}})
+    assert _verdict(rules, line("rm", "-f", "x", cwd="/repo/sub"))[0] is (
         Outcome.DENY
     )
-    assert _verdict(one, _ctx("cat", paths=(_path("/data/ab.txt"),))) == ALLOW
-    cls = CommandRule(reason="cls", paths=("/data/[ab].txt",))
-    assert _verdict(cls, _ctx("cat", paths=(_path("/data/b.txt"),)))[0] is (
+    assert _verdict(rules, line("rm", "-f", "/repo/x", cwd="/s"))[0] is (
         Outcome.DENY
     )
-    assert _verdict(cls, _ctx("cat", paths=(_path("/data/c.txt"),))) == ALLOW
+    assert _verdict(rules, line("rm", "-f", "x", cwd="/s"))[0] is (
+        Outcome.ALLOW
+    )
+    assert _verdict(rules, line("rm", "-f", "x", cwd="/repository"))[0] is (
+        Outcome.ALLOW
+    )
 
 
 def test_a_walking_command_touches_the_mounts_under_its_operands():
-    # `grep -r x /scratch` enters `/scratch/child`: the fan-out reruns
-    # the traversal inside each descendant mount and no admission fires
-    # again there, so the ancestor operand is where the mount's rule
-    # speaks. A command that does not walk, or an operand that is not
-    # above the root, stays untouched.
-    mount = CommandRule(reason="boxed", mount="/scratch/child")
-    above = (_path("/scratch"),)
-    assert _verdict(mount, _ctx("grep", paths=above, walks=True)) == DENY_LINE
-    assert _verdict(mount, _ctx("grep", paths=above)) == ALLOW
-    beside = (_path("/scratch/file.txt"),)
-    assert _verdict(mount, _ctx("grep", paths=beside, walks=True)) == ALLOW
+    rules = trees(mounts={"/scratch/child": {"grep": "deny"}})
+    assert _verdict(rules, line("grep", "-r", "x", "/scratch"))[0] is (
+        Outcome.DENY
+    )
+    assert _verdict(rules, line("grep", "x", "/scratch"))[0] is Outcome.ALLOW
+    assert _verdict(rules, line("grep", "-r", "x", "/scratch/f"))[0] is (
+        Outcome.ALLOW
+    )
 
 
-def test_an_op_meets_pure_path_rules_only():
-    rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    op = VfsContext(
-        call=CALLS["write"],
-        path=_path("/data/locked/a"),
-        write=True,
-        prefix="/data/",
+def test_a_leafs_paths_read_the_one_path_grammar():
+    prod = trees({"rm": {"decision": "deny", "paths": ["/data/prod"]}})
+    for virtual in ("/data/prod", "/data/prod/x"):
+        assert _verdict(prod, line("rm", virtual)) == (Outcome.DENY, virtual)
+    assert _verdict(prod, line("rm", "/data/production"))[0] is Outcome.ALLOW
+    keys = trees({"*": {"decision": "deny", "paths": ["*.key"]}})
+    assert _verdict(keys, line("cat", "/a/b.key/c"))[0] is Outcome.DENY
+    assert _verdict(keys, line("cat", "/a/b.keyx"))[0] is Outcome.ALLOW
+    one = trees(
+        {"*": {"decision": "deny", "paths": ["/d/?.txt", "/d/[ab].c"]}}
     )
-    assert _refuses_op(rule, op)
-    assert not _refuses_op(
-        rule,
-        VfsContext(
-            call=CALLS["write"],
-            path=_path("/data/open/a"),
-            write=True,
-            prefix="/data/",
-        ),
-    )
-    named = CommandRule(reason="x", commands=("rm",), paths=("/data/*",))
-    assert not _refuses_op(named, op)
-    assert not _refuses_op(CommandRule(reason="x", commands=("rm",)), op)
-
-
-def test_op_ruling_reads_depth_before_verb_and_honours_a_grant():
-    broad = CommandRule(reason="repo is sealed", paths=("/repo/*",))
-    carve = CommandRule(reason="outbox nod", paths=("/repo/outbox/*",))
-    rules = AdmissionRules(deny=(broad,), ask=(carve,))
-    inside = VfsContext(
-        call=CALLS["write"],
-        path=_path("/repo/outbox/a"),
-        write=True,
-        prefix="/repo/",
-    )
-    # The deeper ask wins where both reach, exactly as command admission
-    # ranks them, so a broad deny cannot overrule an approved carve-out.
-    assert op_ruling(rules, inside, ()) == (carve, True)
-    assert op_ruling(rules, inside, (carve,)) is None
-    # Outside the carve-out the deny is what is left, and a grant for
-    # the ask says nothing about it.
-    outside = VfsContext(
-        call=CALLS["write"],
-        path=_path("/repo/sealed/a"),
-        write=True,
-        prefix="/repo/",
-    )
-    assert op_ruling(rules, outside, (carve,)) == (broad, False)
-    # A metadata op is reached by neither: deny is present and refused.
-    stat = VfsContext(
-        call=CALLS["stat"],
-        path=_path("/repo/outbox/a"),
-        write=False,
-        prefix="/repo/",
-    )
-    assert op_ruling(rules, stat, ()) is None
-    # No rules at all, and a rule naming a command, are both silent.
-    assert op_ruling(None, inside, ()) is None
-    named = AdmissionRules(
-        deny=(CommandRule(reason="x", commands=("rm",), paths=("/repo/*",)),)
-    )
-    assert op_ruling(named, inside, ()) is None
-
-
-def _subtree_ctx(command: str, *operands: str) -> CommandContext:
-    paths = tuple(_path(o, raw=o) for o in operands)
-    return CommandContext(
-        command=command,
-        paths=paths,
-        words=(
-            CommandWord(command, WordKind.NAME),
-            *(
-                CommandWord(p.raw_path, WordKind.OPERAND, path=p)
-                for p in paths
-            ),
-        ),
-        argv=operands,
-        cwd="/",
-        tokens=(command, *operands),
-        subtree=line_facts(command, [command, *operands], "/").subtree,
-    )
+    assert _verdict(one, line("cat", "/d/a.txt"))[0] is Outcome.DENY
+    assert _verdict(one, line("cat", "/d/ab.txt"))[0] is Outcome.ALLOW
+    assert _verdict(one, line("cat", "/d/b.c"))[0] is Outcome.DENY
+    assert _verdict(one, line("cat", "/d/c.c"))[0] is Outcome.ALLOW
 
 
 def test_a_subtree_command_on_the_directory_holding_the_scope_matches():
-    # `/x/locked/*` protects the children; `rm -r /x/locked`, `rm -r /x`
-    # and `mv /x/locked elsewhere` take them along, so for rm, rmdir and
-    # mv the operand at or above the holding directory matches.
-    rule = CommandRule(reason="frozen", paths=("/x/locked/*",))
-    for command in ("rm", "rmdir"):
-        for operand in ("/x/locked", "/x", "/"):
-            assert _verdict(rule, _subtree_ctx(command, operand)) == (
+    rules = trees({"*": {"decision": "deny", "paths": ["/x/locked/*"]}})
+    for words in (("rm", "-r"), ("rmdir",)):
+        for operand in ("/x/locked", "/x"):
+            assert _verdict(rules, line(*words, operand)) == (
                 Outcome.DENY,
                 operand,
             )
-        assert _verdict(rule, _subtree_ctx(command, "/x/other")) == ALLOW
-    assert _verdict(rule, _subtree_ctx("mv", "/x/locked", "/y")) == (
+        assert _verdict(rules, line(*words, "/x/other"))[0] is Outcome.ALLOW
+    assert _verdict(rules, line("mv", "/x", "/y")) == (Outcome.DENY, "/x")
+    assert _verdict(rules, line("mv", "/z", "/x/locked")) == (
         Outcome.DENY,
         "/x/locked",
     )
-    assert _verdict(rule, _subtree_ctx("mv", "/x", "/y")) == (
-        Outcome.DENY,
-        "/x",
-    )
-    # mv's destination matches only as the holding directory itself:
-    # moving into it lands in the scope, moving into an ancestor does not.
-    assert _verdict(rule, _subtree_ctx("mv", "/z", "/x/locked")) == (
-        Outcome.DENY,
-        "/x/locked",
-    )
-    assert _verdict(rule, _subtree_ctx("mv", "/z", "/x")) == ALLOW
-    # A reader given the same operand is not a whole-line refusal: its
-    # I/O under the scope is the command tier's to refuse, file by file.
-    assert _verdict(rule, _subtree_ctx("cat", "/x/locked")) == ALLOW
-    assert _verdict(rule, _subtree_ctx("cp", "/x", "/y")) == ALLOW
-    # A command-scoped rule judges its own command the same way.
-    named = CommandRule(
-        reason="locked", commands=("rm",), paths=("/x/locked/*",)
-    )
-    assert _verdict(named, _subtree_ctx("rm", "/x")) == (Outcome.DENY, "/x")
-    assert _verdict(named, _subtree_ctx("mv", "/x", "/y")) == ALLOW
+    assert _verdict(rules, line("mv", "/z", "/x"))[0] is Outcome.ALLOW
+    assert _verdict(rules, line("cat", "/x/locked"))[0] is Outcome.ALLOW
+    assert _verdict(rules, line("cp", "-r", "/x", "/y"))[0] is Outcome.ALLOW
 
 
-def test_a_subtree_op_on_the_directory_holding_the_scope_is_refused():
-    rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    for op, virtual in (
-        ("rename", "/data/locked"),
-        ("rename", "/data"),
-        ("rmdir", "/data/locked"),
-        ("rm_r", "/data"),
-    ):
-        assert _refuses_op(
-            rule,
-            VfsContext(
-                call=CALLS[op],
-                path=_path(virtual),
-                write=True,
-                prefix="/data/",
-            ),
-        )
-    # A read or write of the directory itself is not in the scope, and a
-    # subtree op beside the scope is not either.
-    assert not _refuses_op(
-        rule,
-        VfsContext(
-            call=CALLS["readdir"],
-            path=_path("/data/locked"),
-            write=False,
-            prefix="/data/",
-        ),
+def test_io_refusal_judges_a_reached_file_as_one_more_path():
+    rules = trees(
+        {
+            "rm": [
+                {"decision": "deny", "reason": "keys", "paths": ["*.key"]},
+                {"decision": "ask", "reason": "nod", "paths": ["/d/*"]},
+            ]
+        }
     )
-    assert not _refuses_op(
-        rule,
-        VfsContext(
-            call=CALLS["rename"],
-            path=_path("/data/other"),
-            write=True,
-            prefix="/data/",
-        ),
-    )
-
-
-def test_a_metadata_op_is_let_through():
-    # Deny is present and refused: the entry stats, the read is refused.
-    rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    exists = VfsCall("exists", Effect.METADATA, Target.ANY, False)
-    for call in (CALLS["stat"], exists):
-        assert not _refuses_op(
-            rule,
-            VfsContext(
-                call=call,
-                path=_path("/data/locked/a"),
-                write=False,
-                prefix="/data/",
-            ),
-        )
-    assert _refuses_op(
-        rule,
-        VfsContext(
-            call=CALLS["read"],
-            path=_path("/data/locked/a"),
-            write=False,
-            prefix="/data/",
-        ),
-    )
-
-
-def test_io_refusal_applies_the_gate_precedence_to_an_entry():
-    deny = CommandRule(
-        reason="locked", commands=("rm",), paths=("/data/both/locked/*",)
-    )
-    ask = CommandRule(
-        reason="needs a nod", commands=("rm",), paths=("/data/both/*",)
-    )
-    later = CommandRule(
-        reason="a later nod", commands=("rm",), paths=("/data/both/*",)
-    )
-    rules = AdmissionRules(ask=(ask, later), deny=(deny,))
-    tokens = ("rm", "-r", "/data/both")
-    # deny > ask, wherever either was written.
-    assert io_refusal(rules, tokens, "/data/both/locked/y", (ask,)) == "locked"
-    # The first matching ask rule speaks: refused without a grant under
-    # it, passed with one, and the later rule never gets a say.
-    assert io_refusal(rules, tokens, "/data/both/a", ()) == "needs a nod"
-    assert io_refusal(rules, tokens, "/data/both/a", (ask,)) is None
-    # A grant is the rule's value: the same rule compiled again still holds it.
-    again = CommandRule(
-        reason="needs a nod", commands=("rm",), paths=("/data/both/*",)
-    )
-    assert io_refusal(rules, tokens, "/data/both/a", (again,)) is None
-    assert io_refusal(rules, tokens, "/data/both/a", (later,)) == "needs a nod"
-    # An entry no rule holds passes; so does one a whole-line rule names.
-    assert io_refusal(rules, tokens, "/data/open/a", ()) is None
-    whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
-    assert io_refusal(whole, tokens, "/data/x", ()) is None
-    assert io_refusal(None, tokens, "/data/x", ()) is None
-
-
-def test_io_refusal_orders_by_anchor_depth_like_the_admission_gate():
-    # A broad deny with an approved ask carved out of it. The gate
-    # admits `rm -r /repo` under the deeper ask, so the entry gate has
-    # to read the same way: taking every deny before any ask would
-    # refuse every entry the carve-out was written for, leaving a line
-    # that was admitted unable to touch anything.
-    deny = CommandRule(reason="ro repo", commands=("rm",), paths=("/repo/*",))
-    ask = CommandRule(
-        reason="sealed", commands=("rm",), paths=("/repo/sealed/*",)
-    )
-    rules = AdmissionRules(ask=(ask,), deny=(deny,))
-    tokens = ("rm", "-r", "/repo")
-    assert io_refusal(rules, tokens, "/repo/sealed/secret", (ask,)) is None
-    # Without the grant the deeper ask still wins, and asks.
-    assert io_refusal(rules, tokens, "/repo/sealed/secret", ()) == "sealed"
-    # Outside the carve-out the broad deny is what is left.
-    assert io_refusal(rules, tokens, "/repo/other/x", (ask,)) == "ro repo"
+    ctx = line("rm", "-r", "/d")
+    nod = decide(ctx, rules).asks
+    assert [a.reason for a in nod] == ["nod"]
+    assert _refusal(rules, ctx, "/d/x.key", nod) == "keys"
+    assert _refusal(rules, ctx, "/d/a") == "nod"
+    assert _refusal(rules, ctx, "/d/a", nod) is None
+    assert _refusal(rules, ctx, "/open/a") is None
+    whole = trees({"rm": {"--recursive": "deny"}})
+    assert _refusal(whole, line("rm", "/x"), "/x/y") is None
+    assert _refusal(None, ctx, "/d/a") is None
 
 
 def test_io_reach_reads_each_start_point_on_its_own():
-    # A native walk asks per operand whether a rule could reach anything
-    # under it: a rule on /repo/.env holds the walk of /repo, and leaves
-    # the walk of /s3 its native op.
-    env = CommandRule(reason="secrets", paths=("/repo/.env",))
-    rm_only = CommandRule(
-        reason="no deletes", commands=("rm",), paths=("/data/*",)
+    rules = trees(
+        {
+            "*": {"decision": "deny", "paths": ["/repo/.env"]},
+            "rm": {"decision": "ask", "paths": ["/data/*"]},
+        }
     )
-    rules = AdmissionRules(deny=(env,), ask=(rm_only,))
-    find = ("find", "/repo", "/s3", "/data")
-    assert io_reach(rules, find, "/repo")
-    assert io_reach(rules, find, "/repo/.env")
-    assert not io_reach(rules, find, "/s3")
-    # A rule naming another command does not reach this line's walk.
-    assert not io_reach(rules, find, "/data")
-    assert io_reach(rules, ("rm", "-r", "/data"), "/data")
-    # A whole-line rule has no paths to reach an entry with.
-    whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
-    assert not io_reach(whole, ("rm", "-r", "/data"), "/data")
-    assert not io_reach(None, find, "/repo")
+    find = line("find", "/repo", "/s3", "/data")
+    assert _reach(rules, find, "/repo")
+    assert _reach(rules, find, "/repo/.env")
+    assert not _reach(rules, find, "/s3")
+    assert not _reach(rules, find, "/data")
+    assert _reach(rules, line("rm", "-r", "/data"), "/data")
+    whole = trees({"rm": "deny"})
+    assert not _reach(whole, line("rm", "-r", "/data"), "/data")
+    assert not _reach(None, find, "/repo")
 
 
-def test_skipped_at_dispatcher_names_the_command_level_rules():
-    keys = CommandRule(reason="keys", paths=("/k/*",))
-    rules = AdmissionRules(
-        allow=("ls",),
-        deny=(keys, CommandRule(reason="no rm", commands=("rm",))),
-        ask=(CommandRule(reason="nod", commands=("cp",), paths=("/x/*",)),),
+def test_a_mount_trees_leaf_with_no_paths_reaches_its_mount():
+    rules = trees(
+        {"grep": "ask"},
+        mounts={
+            "/repo/private": {
+                "git": {"decision": "deny", "reason": "private"}
+            },
+            "/repo/open": {"git": "allow"},
+        },
     )
-    assert skipped_at_dispatch(rules) == (
-        "commands.allow",
-        "commands.deny: no rm",
-        "commands.ask: nod",
-    )
-    assert skipped_at_dispatch(AdmissionRules(deny=(keys,))) == ()
+    git = line("git", "cat-file", "-p", "x", cwd="/repo")
+    assert _reach(rules, git, "/repo")
+    assert _reach(rules, git, "/repo/private/s.txt")
+    assert not _reach(rules, git, "/repo/open")
+    assert not _reach(rules, git, "/other")
+    assert _refusal(rules, git, "/repo/private/s.txt") == "private"
+    assert _refusal(rules, git, "/repo/pub.txt") is None
+    assert not _reach(rules, line("grep", "-r", "x", "/repo"), "/repo")
+
+
+def test_skipped_at_dispatch_names_every_tree():
+    rules = trees({"rm": "deny"}, mounts={"/a": {"cp": "deny"}})
+    assert skipped_at_dispatch(rules) == ("commands", "mounts./a.commands")
     assert skipped_at_dispatch(None) == ()

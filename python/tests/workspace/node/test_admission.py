@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 
 import pytest
@@ -21,9 +22,20 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
-from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.machine.handle import MachineHandle
+from mirage.policy import (
+    Action,
+    Decision,
+    Deny,
+    Outcome,
+    Policy,
+    PolicyDenied,
+    Scope,
+)
 from mirage.policy.profile import PathsBlock, SessionProfile
-from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
+from mirage.policy.types import CommandContext
+from mirage.rs.policy import rule_table
+from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -35,36 +47,53 @@ from mirage.workspace.node.admission import (
 )
 from mirage.workspace.node.explain import admit_line
 from mirage.workspace.tools.io_text import with_decision
+from tests.fixtures.command_trees import trees
 
 DOC = {
     "commands": {
-        "allow": [
-            "cat",
-            "rm",
-            "ls",
-            "ln",
-            "echo",
-            "head",
-            "grep",
-            "rg",
-            "cd",
-            "xargs",
-            "sh",
-            "mkdir",
-            "eval",
-            "source",
-        ],
-        "deny": [
-            {"reason": "sealed", "commands": {"cat": ["/data/secret*"]}},
+        "*": "deny",
+        "cat": [
+            "allow",
             {
-                "reason": "private",
-                "commands": {
-                    "ls": ["/data/private"],
-                    "grep": ["/data/private"],
-                    "rg": ["/data/private"],
-                },
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret*"],
             },
         ],
+        "rm": "allow",
+        "ls": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/data/private"],
+            },
+        ],
+        "ln": "allow",
+        "echo": "allow",
+        "head": "allow",
+        "grep": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/data/private"],
+            },
+        ],
+        "rg": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/data/private"],
+            },
+        ],
+        "cd": "allow",
+        "xargs": "allow",
+        "sh": "allow",
+        "mkdir": "allow",
+        "eval": "allow",
+        "source": "allow",
     }
 }
 
@@ -307,7 +336,11 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [{"reason": "sealed", "paths": ["/data/secret*"]}]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data/secret*"],
+                    }
                 }
             }
         },
@@ -577,11 +610,23 @@ def _gate_ctx(tokens: tuple[str, ...]) -> CommandContext:
 
 
 def test_the_admitted_gate_judges_what_the_line_did_not_name():
-    deny = CommandRule(reason="sealed", paths=("/data/sealed",))
-    ask = CommandRule(
-        reason="nod", commands=("grep",), paths=("/data/asked/*",)
+    rules = trees(
+        {
+            "grep": [
+                {
+                    "decision": "deny",
+                    "reason": "sealed",
+                    "paths": ["/data/sealed"],
+                },
+                {
+                    "decision": "ask",
+                    "reason": "nod",
+                    "paths": ["/data/asked/*"],
+                },
+            ]
+        }
     )
-    rules = AdmissionRules(ask=(ask,), deny=(deny,))
+    (ask,) = (r for r in rule_table(rules) if r.reason == "nod")
     gate = Admitted(
         rules=rules,
         ctx=_gate_ctx(("grep", "-r", "x", "/data")),
@@ -622,8 +667,14 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
 def test_the_admitted_gate_scopes_each_start_point_on_its_own():
     # A walk keeps its native op where no rule could reach: the gate of
     # `find /data /other` sets aside only the walk of /data.
-    rules = AdmissionRules(
-        deny=(CommandRule(reason="sealed", paths=("/data/sealed",)),)
+    rules = trees(
+        {
+            "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/sealed"],
+            }
+        }
     )
     gate = Admitted(
         rules=rules,
@@ -806,7 +857,7 @@ async def test_fallback_tree_policy_matches_the_verb_after_group_options(
     ws = Workspace(
         {"/reader": RAMVFS(), "/write": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {decision: ["remote send"]}}},
+        profiles={"default": {"commands": {"remote": {"send": decision}}}},
     )
     try:
         ws.mount("/reader").register_commands([reader])
@@ -950,7 +1001,13 @@ async def test_a_command_reads_as_writing_when_its_handler_says_so():
 # is: a path rule reads a file operand however it is spelled, and an
 # allow list answers each name for itself.
 DENY_SECRET = {
-    "commands": {"deny": [{"reason": "secret", "paths": ["/data/secret.txt"]}]}
+    "commands": {
+        "*": {
+            "decision": "deny",
+            "reason": "secret",
+            "paths": ["/data/secret.txt"],
+        }
+    }
 }
 
 
@@ -1021,11 +1078,226 @@ async def test_a_shell_test_is_answered_by_its_own_name_in_an_allow_list(
     name,
 ):
     line = "cd /data && " + _spell(name, "-e a.txt")
-    without = {"commands": {"allow": ["echo", "cd"]}}
+    without = {"commands": {"*": "deny", "echo": "allow", "cd": "allow"}}
     assert await _tested(without, line) == (
         0,
         "126\n",
         f"{name}: Permission denied\n",
     )
-    listed = {"commands": {"allow": ["echo", "cd", name]}}
+    listed = {
+        "commands": {
+            "*": "deny",
+            "echo": "allow",
+            "cd": "allow",
+            name: "allow",
+        }
+    }
     assert await _tested(listed, line) == (0, "0\n", "")
+
+
+SEALED = {
+    "commands": {
+        "*": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret.txt"],
+            },
+        ]
+    }
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "{ cat; } < /data/secret.txt",
+        'while read -r l; do echo "$l"; done < /data/secret.txt',
+        "(cat) < /data/secret.txt",
+        "if true; then cat; fi < /data/secret.txt",
+        "> /data/secret.txt",
+        "x=1 > /data/secret.txt",
+        "exec > /data/secret.txt",
+        "{ cat; } < /data/link",
+    ],
+)
+async def test_a_redirect_no_command_owns_meets_the_root_path_leaf(line):
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"sealed": SEALED},
+    )
+    try:
+        await ws.shell(
+            "echo top > /data/secret.txt; ln -s /data/secret.txt /data/link"
+        )
+        ws.create_session("s", profile="sealed")
+        io = await ws.shell(line, session_id="s")
+        named = "/data/link" if "link" in line else "/data/secret.txt"
+        assert (io.exit_code, await io.materialize_stdout()) == (1, b"")
+        assert await io.materialize_stderr() == (
+            f"bash: line 1: {named}: Permission denied\n".encode()
+        )
+        assert io.decision is not None
+        assert (io.decision.kind, io.decision.reason) == ("deny", "sealed")
+        kept = await ws.shell("cat /data/secret.txt")
+        assert await kept.materialize_stdout() == b"top\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_no_command_owns_meets_no_leaf_about_commands():
+    closed = {"commands": {"*": "deny", "ls": "allow", "cat": "allow"}}
+    named = {
+        "commands": {
+            "cat": {"decision": "deny", "paths": ["/data/secret.txt"]}
+        }
+    }
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"closed": closed, "named": named},
+    )
+    try:
+        await ws.shell("echo top > /data/secret.txt")
+        ws.create_session("closed", profile="closed")
+        ws.create_session("named", profile="named")
+        io = await ws.shell("{ ls /data; } > /data/out", session_id="closed")
+        assert io.exit_code == 0
+        io = await ws.shell("{ cat; } < /data/secret.txt", session_id="named")
+        assert (io.exit_code, await io.materialize_stdout()) == (0, b"top\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_admit_line_judges_a_redirect_no_command_owns():
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": SEALED},
+    )
+    try:
+        session = ws._session_mgr.get(ws._session_mgr.default_id)
+        registry, namespace = ws._registry, ws._namespace
+        for line in (
+            "{ cat; } < /data/secret.txt",
+            "> /data/secret.txt",
+            "exec 3< /data/secret.txt",
+            "exec > /data/secret.txt",
+            "echo a; exec 3< /data/secret.txt",
+        ):
+            refused = await admit_line(
+                parse(line), session, registry, namespace
+            )
+            assert refused is not None
+            assert refused.exit_code == 1
+            assert refused.stderr.endswith(
+                b": /data/secret.txt: Permission denied\n"
+            )
+        for line in (
+            "{ cat; } < /data/other",
+            "cat < /data/other",
+            "exec 3< /data/other",
+            "exec 3>&1",
+        ):
+            assert (
+                await admit_line(parse(line), session, registry, namespace)
+                is None
+            )
+    finally:
+        await ws.close()
+
+
+ASKS = {
+    "commands": {
+        "*": [
+            "allow",
+            {"decision": "ask", "reason": "nod", "paths": ["/data/f"]},
+        ]
+    }
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "{ cat; } < /data/f; > /data/f",
+        "{ cat; } < /data/f > /data/f",
+        "eval '> /data/f'; eval '> /data/f'",
+        "sh -c '> /data/f'; sh -c '> /data/f'",
+        ": $(> /data/f) $(> /data/f)",
+        "for i in 1 2; do > /data/f; done; > /data/f",
+    ],
+)
+async def test_each_redirect_no_command_owns_needs_a_nod_of_its_own(line):
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(
+            record, outcome=Outcome.ALLOW, scope=Scope.ONCE
+        )
+
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"asks": ASKS},
+        on_ask=allows_once,
+    )
+    try:
+        await ws.shell("echo top > /data/f")
+        ws.create_session("s", profile="asks")
+        io = await ws.shell(line, session_id="s")
+        assert io.exit_code == 0
+        assert len(asked) == 2
+        kept = await ws.shell("cat /data/f")
+        assert await kept.materialize_stdout() == b""
+    finally:
+        await ws.close()
+
+
+class _LineBox(MachineHandle):
+    provider = "box"
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        await output(b"ran\n")
+        return RunResult(exit_code=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["{ cat; } < /data/f; > /data/f", "{ cat; } < /data/f > /data/f"],
+)
+async def test_a_line_run_whole_asks_each_redirect_no_command_owns(line):
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(
+            record, outcome=Outcome.ALLOW, scope=Scope.ONCE
+        )
+
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.EXEC,
+        machines={"box": _LineBox("box", {"captures": ["@line"]})},
+        profiles={"asks": ASKS},
+        on_ask=allows_once,
+    )
+    try:
+        ws.create_session("s", profile="asks")
+        io = await ws.shell(line, session_id="s")
+        assert io.exit_code == 0
+        assert await io.materialize_stdout() == b"ran\n"
+        assert len(asked) == 2
+    finally:
+        await ws.close()

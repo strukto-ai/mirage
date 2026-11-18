@@ -12,198 +12,506 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
+import { cliSpecFor } from '../../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
+import { command } from '../../commands/config.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { SessionProfile } from '../../policy/profile.ts'
-import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
+import { commandTree, SessionProfile, treeDoc } from '../../policy/profile.ts'
+import type { Grammar } from '../../policy/types.ts'
+import { trees } from '../../test-utils.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { checkCliVerbs, checkRules } from './validate.ts'
+import { BUILTIN_GRAMMARS, normalizeTree, renormalized } from './validate.ts'
 
-function rules(over: Partial<AdmissionRules> = {}): AdmissionRules {
-  return { allow: null, ask: [], deny: [], ...over }
-}
-
-function rule(over: Partial<CommandRule> & { reason: string }): CommandRule {
-  return { commands: [], paths: [], mount: '', ...over }
-}
-
-describe('checkRules', () => {
-  it('refuses a rule on a builtin the allow list omits', () => {
-    // The whole point of the check: `rm` reads as guarded in the
-    // document and is not guarded at all, because it was never
-    // installed, so nothing ever reaches the rule.
-    expect(() => {
-      checkRules(rules({ allow: ['ls', 'cat'], deny: [rule({ reason: 'no', commands: ['rm'] })] }))
-    }).toThrow(/never allows/)
-    expect(() => {
-      checkRules(rules({ allow: ['ls'], ask: [rule({ reason: 'sign-off', commands: ['rm'] })] }))
-    }).toThrow(/never allows/)
-  })
-
-  it('passes a rule on an installed builtin', () => {
-    checkRules(rules({ allow: ['ls', 'rm'], deny: [rule({ reason: 'no', commands: ['rm'] })] }))
-    // No allow list installs everything, so nothing is dead.
-    checkRules(rules({ deny: [rule({ reason: 'no', commands: ['rm'] })] }))
-  })
-
-  it('leaves a word that is not a builtin alone', () => {
-    // It may be a CLI the host registers after the workspace is built,
-    // which is what checkCliVerbs covers at createSession.
-    checkRules(rules({ allow: ['ls'], deny: [rule({ reason: 'no', commands: ['mycli run'] })] }))
-  })
-
-  it('refuses an ask an outranking deny covers', () => {
-    expect(() => {
-      checkRules(
-        rules({
-          ask: [rule({ reason: 'sign-off', commands: ['rm'] })],
-          deny: [rule({ reason: 'no', commands: ['rm'] })],
-        }),
-      )
-    }).toThrow(/can never fire/)
-    // A shorter deny pattern covers a longer ask.
-    expect(() => {
-      checkRules(
-        rules({
-          ask: [rule({ reason: 'sign-off', commands: ['git push'] })],
-          deny: [rule({ reason: 'no', commands: ['git'] })],
-        }),
-      )
-    }).toThrow(/can never fire/)
-    // A deny naming no commands refuses everything.
-    expect(() => {
-      checkRules(
-        rules({
-          ask: [rule({ reason: 'sign-off', commands: ['rm'] })],
-          deny: [rule({ reason: 'no' })],
-        }),
-      )
-    }).toThrow(/can never fire/)
-  })
-
-  it('allows a deny that leaves the ask work', () => {
-    // Path-scoped: the ask still fires on every operand the deny does
-    // not name.
-    checkRules(
-      rules({
-        ask: [rule({ reason: 'sign-off', commands: ['rm'] })],
-        deny: [rule({ reason: 'no', commands: ['rm'], paths: ['/prod/*'] })],
-      }),
-    )
-    // A longer deny does not cover a shorter ask.
-    checkRules(
-      rules({
-        ask: [rule({ reason: 'sign-off', commands: ['git'] })],
-        deny: [rule({ reason: 'no', commands: ['git push'] })],
-      }),
-    )
-    // An ask naming two commands the deny only half covers.
-    checkRules(
-      rules({
-        ask: [rule({ reason: 'sign-off', commands: ['rm', 'mv'] })],
-        deny: [rule({ reason: 'no', commands: ['rm'] })],
-      }),
-    )
-  })
-
-  it('does not let a mount-scoped deny kill a rule outside it', () => {
-    checkRules(
-      rules({
-        ask: [rule({ reason: 'sign-off', commands: ['rm'] })],
-        deny: [rule({ reason: 'no', commands: ['rm'], mount: '/repo' })],
-      }),
-    )
-    expect(() => {
-      checkRules(
-        rules({
-          ask: [rule({ reason: 'sign-off', commands: ['rm'], mount: '/repo' })],
-          deny: [rule({ reason: 'no', commands: ['rm'], mount: '/repo' })],
-        }),
-      )
-    }).toThrow(/can never fire/)
-  })
-
-  it('leaves a deny at a different anchor to the run', () => {
-    // A top-level deny does shadow a mount-scoped ask on the same
-    // command, but across anchors the deeper rule leads and which one
-    // that is depends on the line, so this reports nothing rather than
-    // guess. `conflict_a_later_tiers_deny_outranks_an_earlier_tiers_ask`
-    // in integ/session/commands/conflicts.json is exactly that document.
-    checkRules(
-      rules({
-        ask: [rule({ reason: 'log it', commands: ['git branch'], mount: '/repo' })],
-        deny: [rule({ reason: 'no branches', commands: ['git branch'] })],
-      }),
-    )
-  })
-
-  it('reads a wildcard token in a deny as covering whatever the ask names', () => {
-    expect(() => {
-      checkRules(
-        rules({
-          ask: [rule({ reason: 'sign-off', commands: ['git push'] })],
-          deny: [rule({ reason: 'no', commands: ['git *'] })],
-        }),
-      )
-    }).toThrow(/can never fire/)
-  })
-
-  it('passes when there is nothing to check', () => {
-    checkRules(null)
-    checkRules(rules())
-  })
-})
-
-describe('checkCliVerbs', () => {
-  const verbs = new Map<string, ReadonlySet<string>>([['git', new Set(['status', 'push'])]])
-
-  it('refuses a rule naming a verb its CLI does not have', () => {
-    expect(() => {
-      checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git shove'] })] }), verbs)
-    }).toThrow(/no verb for/)
-  })
-
-  it('passes a known verb, a wildcard, an unclaimed head word and a bare name', () => {
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git push'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git *'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['slack send'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git'] })] }), verbs)
-    checkCliVerbs(null, verbs)
-  })
-})
+// Mirrors python/tests/workspace/session/test_validate.py.
 
 function noopVerb(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-describe('createSession reads the verbs of an installed CLI', () => {
-  it('refuses a rule naming a verb the CLI does not declare', () => {
-    // Reached through the workspace, not the helper, because the wiring
-    // is the part that broke: this read the registry with
-    // Object.entries over a Map and silently saw no CLIs at all, so the
-    // check passed everything.
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    ws.registerCli(
-      'prog',
-      new CLI({
-        spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
-        handlers: { run: new CLIHandler({ fn: noopVerb }) },
-      }),
-    )
-    expect(() =>
-      ws.createSession('bad', {
-        permissions: SessionProfile({
-          commands: { deny: [{ reason: 'no', commands: ['prog walk'] }] },
+function prog(): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'prog',
+      subcommands: [
+        new CommandSpec({
+          name: 'run',
+          aliases: ['go'],
+          arguments: [new Argument(['-v', '--verbose'], { action: 'store_true' })],
         }),
+      ],
+    }),
+    handlers: { run: new CLIHandler({ fn: noopVerb }) },
+  })
+}
+
+class Serving extends RAMVFS {
+  constructor(private readonly cli: CLI) {
+    super()
+  }
+
+  override commands(): readonly CLI[] {
+    return [this.cli]
+  }
+}
+
+function tool(verb: string): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'tool',
+      subcommands: [new CommandSpec({ name: verb, aliases: ['go'] })],
+    }),
+    handlers: { [verb]: new CLIHandler({ fn: noopVerb }) },
+  })
+}
+
+function answering(): ReturnType<typeof command> {
+  return command({
+    name: 'tool',
+    vfs: null,
+    spec: new CommandSpec(),
+    fn: () => [new TextEncoder().encode('ran\n'), new IOResult()],
+  })
+}
+
+function twoMounts(commands: Record<string, unknown>): Workspace {
+  return new Workspace(
+    { '/a': new RAMVFS(), '/b': new RAMVFS() },
+    { profiles: { default: SessionProfile({ commands }) } },
+  )
+}
+
+async function exits(ws: Workspace, line: string): Promise<number[]> {
+  const out: number[] = []
+  for (const cwd of ['/a', '/b']) out.push((await ws.shell(`cd ${cwd} && ${line}`)).exitCode)
+  return out
+}
+
+function permissions(commands: Record<string, unknown>): { permissions: SessionProfile } {
+  return { permissions: SessionProfile({ commands }) }
+}
+
+describe('a workspace checks command trees against its grammars', () => {
+  it('createSession reads the verbs of an installed CLI', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    ws.registerCli('prog', prog())
+    expect(() => ws.createSession('bad', permissions({ prog: { walk: 'deny' } }))).toThrow(
+      'no subcommand walk',
+    )
+    const good = ws.createSession('good', permissions({ prog: { go: { '-v': 'deny' } } }))
+    const held = good.commands?.trees[0]
+    expect(held === undefined ? null : treeDoc(held.tree)).toEqual({
+      prog: { run: { '--verbose': 'deny' } },
+    })
+  })
+
+  it('createSession reads the verbs of a tree a mount serves', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    ws.mount('/data').registerCommands([
+      new CLI({
+        spec: new CommandSpec({
+          name: 'tool',
+          subcommands: [
+            new CommandSpec({
+              name: 'peek',
+              arguments: [new Argument(['--all'], { action: 'store_true' })],
+            }),
+          ],
+        }),
+        handlers: { peek: new CLIHandler({ fn: noopVerb }) },
       }),
-    ).toThrow(/no verb for/)
-    ws.createSession('good', {
-      permissions: SessionProfile({
-        commands: { deny: [{ reason: 'no', commands: ['prog run'] }] },
+    ])
+    expect(() => ws.createSession('bad', permissions({ tool: { poke: 'deny' } }))).toThrow(
+      'no subcommand poke',
+    )
+    ws.createSession('good', permissions({ tool: { peek: { '--all': 'deny' } } }))
+  })
+
+  it('createSession refuses options on a command with no grammar', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    expect(() => ws.createSession('bad', permissions({ prog: { '--verbose': 'deny' } }))).toThrow(
+      'no grammar here',
+    )
+    ws.createSession('good', permissions({ prog: { operands: { x: 'deny' } } }))
+  })
+
+  it('checks every profile when the workspace is created', () => {
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new RAMVFS() },
+          { profiles: { unused: SessionProfile({ commands: { rm: { '--amdin': 'deny' } } }) } },
+        ),
+    ).toThrow('no option --amdin')
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new RAMVFS() },
+          {
+            clis: { prog: [prog(), null] },
+            profiles: { unused: SessionProfile({ commands: { prog: { walk: 'deny' } } }) },
+          },
+        ),
+    ).toThrow('no subcommand walk')
+  })
+
+  it('a profile naming a CLI registered later waits for it', () => {
+    const doc = SessionProfile({ commands: { prog: { go: 'deny' } } })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { profiles: { default: doc } })
+    expect(() => ws.createSession('early', { profile: 'default' })).toThrow(
+      'go is no subcommand here',
+    )
+    ws.registerCli('prog', prog())
+    const held = ws.getSession(ws.defaultSessionId).commands?.trees[0]
+    expect(held === undefined ? null : treeDoc(held.tree)).toEqual({ prog: { run: 'deny' } })
+    ws.createSession('late', { profile: 'default' })
+  })
+
+  it('a mount serving a CLI later renames the rules naming it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { default: SessionProfile({ commands: { prog: { go: 'deny' } } }) },
+      },
+    )
+    try {
+      ws.mount('/data').registerCommands([prog()])
+      for (const verb of ['go', 'run']) {
+        const ran = await ws.shell(`cd /data && prog ${verb}`)
+        expect(ran.exitCode).toBe(126)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount refuses a CLI a profile names wrongly', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { p: SessionProfile({ commands: { prog: { walk: 'deny' } } }) },
+      },
+    )
+    try {
+      expect(() => {
+        ws.mount('/data').registerCommands([prog()])
+      }).toThrow('no subcommand walk')
+      const ran = await ws.shell('cd /data && prog run')
+      expect(ran.exitCode).toBe(127)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('two mounts serving one name must read a rule alike', async () => {
+    const ws = twoMounts({ tool: { go: 'deny' } })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      expect(() => {
+        ws.mount('/b').registerCommands([tool('send')])
+      }).toThrow('two mounts serve tool')
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('one CLI on two mounts reads a rule alike', async () => {
+    const shared = tool('send')
+    const ws = twoMounts({ tool: { go: 'deny' } })
+    try {
+      ws.mount('/a').registerCommands([shared])
+      ws.mount('/b').registerCommands([shared])
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a rule on the command alone holds over two trees', async () => {
+    const ws = twoMounts({ tool: 'deny' })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      ws.mount('/b').registerCommands([tool('send')])
+      expect(await exits(ws, 'tool go')).toEqual([126, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a session naming what two trees read differently is refused', async () => {
+    const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() })
+    try {
+      ws.mount('/a').registerCommands([tool('publish')])
+      ws.mount('/b').registerCommands([tool('send')])
+      expect(() =>
+        ws.createSession('go', { profile: SessionProfile({ commands: { tool: { go: 'deny' } } }) }),
+      ).toThrow('two mounts serve tool')
+      expect(() =>
+        ws.createSession('publish', {
+          profile: SessionProfile({ commands: { tool: { publish: 'deny' } } }),
+        }),
+      ).toThrow('no subcommand publish')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount added serving a CLI meets the rules naming it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { prog: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.addMount('/late', new Serving(prog()))
+      for (const verb of ['go', 'run']) {
+        expect((await ws.shell(`cd /late && prog ${verb}`)).exitCode).toBe(126)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount added serving a CLI a profile names wrongly is refused', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { p: SessionProfile({ commands: { prog: { walk: 'deny' } } }) } },
+    )
+    try {
+      expect(() => ws.addMount('/late', new Serving(prog()))).toThrow('no subcommand walk')
+      expect((await ws.shell('cd /late')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a default rule no grammar can read refuses its command', async () => {
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.mount('/a').registerCommands(
+        command({
+          name: 'tool',
+          vfs: null,
+          spec: new CommandSpec(),
+          fn: () => [new TextEncoder().encode('ran\n'), new IOResult()],
+        }),
+      )
+      for (const line of ['tool go', 'tool other']) {
+        expect((await ws.shell(`cd /a && ${line}`)).exitCode).toBe(126)
+      }
+      expect((await ws.shell('ls /a')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a default rule no grammar can read says why to run and explain', async () => {
+    const why = 'commands.tool: go is no subcommand here; an operand goes under operands'
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    try {
+      ws.mount('/a').registerCommands(answering())
+      const ran = await ws.shell('cd /a && tool go')
+      expect(ran.exitCode).toBe(126)
+      expect(ran.decision?.reason).toBe(why)
+      const said = await ws.explain('cd /a && tool go')
+      expect([said.outcome, said.exitCode, said.reason]).toEqual(['deny', 126, why])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a default rule no grammar can read holds after a snapshot', async () => {
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) } },
+    )
+    let tar: Uint8Array
+    try {
+      ws.mount('/a').registerCommands(answering())
+      expect((await ws.shell('cd /a && tool go')).exitCode).toBe(126)
+      tar = await ws.snapshot()
+    } finally {
+      await ws.close()
+    }
+    const back = await Workspace.load(tar, {})
+    try {
+      back.mount('/a').registerCommands(answering())
+      expect((await back.shell('cd /a && tool go')).exitCode).toBe(126)
+      expect((await back.shell('ls /a')).exitCode).toBe(0)
+    } finally {
+      await back.close()
+    }
+  })
+
+  it('a default rule no grammar can read holds in a stored session', async () => {
+    const store = new RAMNamespaceStore()
+    const first = new Workspace(
+      { '/a': new RAMVFS() },
+      {
+        profiles: { default: SessionProfile({ commands: { tool: { go: 'deny' } } }) },
+        sessionStore: store,
+      },
+    )
+    const second = new Workspace({ '/a': new RAMVFS() }, { sessionStore: store })
+    try {
+      first.mount('/a').registerCommands(answering())
+      second.mount('/a').registerCommands(answering())
+      expect((await first.shell('cd /a && tool go')).exitCode).toBe(126)
+      await first.flushSessions()
+      const held = await second.shell('cd /a && tool go', { sessionId: first.defaultSessionId })
+      expect(held.exitCode).toBe(126)
+    } finally {
+      await first.close()
+      await second.close()
+    }
+  })
+
+  it('a rule on a subcommand meets an option its parent reads', async () => {
+    const rooted = new CLI({
+      spec: new CommandSpec({
+        name: 'prog',
+        arguments: [new Argument(['-C'], { type: 'path' })],
+        subcommands: [new CommandSpec({ name: 'run' }), new CommandSpec({ name: 'list' })],
       }),
+      handlers: {
+        run: new CLIHandler({ fn: noopVerb }),
+        list: new CLIHandler({ fn: noopVerb }),
+      },
+    })
+    const rule = { decision: 'deny', reason: 'no -C on run' }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { default: SessionProfile({ commands: { prog: { run: { '-C': rule } } } }) } },
+    )
+    try {
+      ws.registerCli('prog', rooted)
+      const refused = await ws.shell('prog -C /data run')
+      expect(refused.exitCode).toBe(126)
+      expect(refused.decision?.reason).toBe('no -C on run')
+      expect((await ws.shell('prog run')).exitCode).toBe(0)
+      expect((await ws.shell('prog -C /data list')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('registerCli refuses a CLI a profile names wrongly', () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { profiles: { p: SessionProfile({ commands: { prog: { walk: 'deny' } } }) } },
+    )
+    expect(() => ws.registerCli('prog', prog())).toThrow('no subcommand walk')
+    expect(ws.clis().has('prog')).toBe(false)
+  })
+
+  it('renormalized holds a deferred tree by the grammar it has now', () => {
+    const held = trees({ prog: { go: { '-v': 'deny' } } }, {}, { rm: 'deny' })
+    const now = new Map(BUILTIN_GRAMMARS)
+    now.set('prog', { spec: prog().spec, tree: true, passthrough: false })
+    const again = renormalized(held, now)
+    const first = again?.trees[0]
+    expect(first === undefined ? null : treeDoc(first.tree)).toEqual({
+      prog: { run: { '--verbose': 'deny' } },
+    })
+    expect(again?.trees[1]?.inline).toBe(true)
+    expect(renormalized(null, now)).toBeNull()
+  })
+})
+
+const grammars = (): Map<string, Grammar> => {
+  const out = new Map(BUILTIN_GRAMMARS)
+  for (const name of ['gh', 'git'])
+    out.set(name, { spec: cliSpecFor(name).spec, tree: true, passthrough: false })
+  return out
+}
+
+const normalized = (doc: unknown, defer = false): Record<string, unknown> =>
+  treeDoc(normalizeTree(commandTree(doc), grammars(), 'commands', defer))
+
+describe('normalizeTree', () => {
+  it('holds each name by its canonical spelling', () => {
+    const written = {
+      rm: { '-r': 'ask', '-f': 'deny', '-i': 'allow' },
+      gh: { pr: { ls: 'deny', merge: { '-R': 'ask' } } },
+      git: { '-C': 'deny', checkout: { operands: { main: 'deny' } } },
+      head: { '-n': { values: { '-5': 'deny' } } },
+    }
+    expect(normalized(written)).toEqual({
+      rm: { '--recursive': 'ask', '--force': 'deny', '-i': 'allow' },
+      gh: { pr: { list: 'deny', merge: { '--repo': 'ask' } } },
+      git: { '-C': 'deny', checkout: { operands: { main: 'deny' } } },
+      head: { '--lines': { values: { '-5': 'deny' } } },
+    })
+  })
+
+  it.each([
+    [{ gh: { pr: { mrge: 'deny' } } }, 'no subcommand mrge'],
+    [{ gh: { pr: { merge: { '--amdin': 'deny' } } } }, 'no option --amdin'],
+    [
+      { gh: { pr: { merge: { admin: 'deny' } } } },
+      'admin is no subcommand here; an operand goes under operands',
+    ],
+    [{ gh: { operands: { x: 'deny' } } }, 'takes a subcommand'],
+    [{ kubectl: { '--namespace': 'deny' } }, 'no grammar here'],
+    [{ kubectl: { get: 'deny' } }, 'get is no subcommand here'],
+    [{ rm: { '-r': 'ask', '--recursive': 'deny' } }, 'same option'],
+    [{ gh: { pr: { ls: 'deny', list: 'allow' } } }, 'same subcommand'],
+    [{ rm: { '-rf': 'deny' } }, 'cluster of options; write -r and -f'],
+    [{ git: { '-f': 'deny' } }, '-f names different options below'],
+    [{ rm: { '--force': { values: { x: 'deny' } } } }, 'takes no value'],
+    [{ git: { status: { '-u': { values: { some: 'deny' } } } } }, "takes none of 'some'"],
+  ])('refuses a name its grammar lacks or reads two ways %#', (doc, says) => {
+    expect(() => normalizeTree(commandTree(doc), grammars())).toThrow(says)
+  })
+
+  it('names an option a parent declares under its subcommand', () => {
+    const written = { git: { status: { '-C': { values: { '/repo': 'deny' } } } } }
+    expect(normalized(written)).toEqual(written)
+  })
+
+  it("checks a subcommand's option by its own values", () => {
+    const spec = new CommandSpec({
+      name: 'prog',
+      arguments: [new Argument(['--level'], { choices: ['a', 'b'] })],
+      subcommands: [
+        new CommandSpec({
+          name: 'run',
+          arguments: [new Argument(['--level'], { action: 'store_true' })],
+        }),
+      ],
+    })
+    const withProg = new Map(BUILTIN_GRAMMARS)
+    withProg.set('prog', { spec, tree: true, passthrough: false })
+    const written = { prog: { run: { '--level': { values: { a: 'deny' } } } } }
+    expect(() => normalizeTree(commandTree(written), withProg)).toThrow('--level takes no value')
+  })
+
+  it('keeps operands on a command with no grammar, and can wait for one', () => {
+    expect(normalized({ kubectl: { operands: { get: 'deny' } } })).toEqual({
+      kubectl: { operands: { get: 'deny' } },
+    })
+    expect(normalized({ kubectl: { '--namespace': 'deny' } }, true)).toEqual({
+      kubectl: { '--namespace': 'deny' },
+    })
+  })
+
+  it('waits for no grammar on a shell builtin', () => {
+    expect(() => normalized({ printenv: { GATED: 'deny' } }, true)).toThrow(
+      'commands.printenv: GATED is no subcommand here; an operand goes under operands',
+    )
+    expect(normalized({ printenv: { operands: { GATED: 'deny' } } }, true)).toEqual({
+      printenv: { operands: { GATED: 'deny' } },
     })
   })
 })

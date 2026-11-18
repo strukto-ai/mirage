@@ -501,7 +501,13 @@ async def test_du_listed_name_a_profile_hides_and_denies_stays_missing():
             "agent",
             profile={
                 "paths": {"hide": ["/d/s"]},
-                "commands": {"deny": [{"reason": "no", "paths": ["/d/s"]}]},
+                "commands": {
+                    "*": {
+                        "decision": "deny",
+                        "reason": "no",
+                        "paths": ["/d/s"],
+                    }
+                },
             },
         )
         io = await ws.shell("du --files0-from=/d/l", session_id="agent")

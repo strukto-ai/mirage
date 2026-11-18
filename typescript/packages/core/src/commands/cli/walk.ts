@@ -14,6 +14,7 @@
 import { flagOccurrences } from '../spec/flag_view.ts'
 import { HELP_OPTION, FLOAT_VALUE, INT_VALUE, NEGATIVE_NUMBER } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
+import { type ParsedArgs, parseCommand } from '../spec/parser.ts'
 import {
   argparseHelp,
   clapGroupRefusal,
@@ -25,11 +26,37 @@ import { CommandSpec, type CommandSpecInit, UsageStyle, Argument, WordKind } fro
 import { PathSpec } from '../../types.ts'
 
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
-import { DefaultCommandRoot, WalkResult, WalkWord, type CLI, type WalkFlagBag } from './types.ts'
+import {
+  DefaultCommandRoot,
+  WalkResult,
+  WalkWord,
+  type CLI,
+  type LeafParse,
+  type WalkFlagBag,
+} from './types.ts'
 
-import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, POPPLER_EXIT, USAGE_EXIT } from './constants.ts'
+import {
+  CLAP_EXIT,
+  GIT_LONG_OPTIONS,
+  GIT_SYNOPSES,
+  HELP_EXIT,
+  POPPLER_EXIT,
+  USAGE_EXIT,
+} from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 import { encodeText } from '../../shell/bytes.ts'
+
+// A textual rest operand is a CLI node's pass-through form: parsed under
+// unknownIsOperand, it takes the undeclared dashed tokens the node does not
+// refuse, which is what a program parsing its own argv needs. 'str', not
+// 'path', so nothing is cwd-resolved or routed. Only that parse reads the
+// rest kind this way: a GNU command's textual rest is a list of operands,
+// which is why basename has one and still refuses an option it does not know.
+const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
+
+// Each leaf's parse grammar, kept so every parse of the leaf reuses one
+// spec object and hits the parse cache, as compileSpec keeps its tables.
+const GRAMMARS = new WeakMap<CommandSpec, Map<string, [CommandSpec, boolean]>>()
 
 /** A subcommand's row label: `name (alias, ...)` like argparse. */
 function verbDisplay(child: CommandSpec): string {
@@ -261,6 +288,119 @@ export function findNode(
  */
 export function ownsArgv(cli: CLI): boolean {
   return cli.script !== null && cli.spec.arguments.length === 0
+}
+
+/**
+ * The spec a leaf's argv parses against, and who answers `--help`.
+ *
+ * Usually mirage: a leaf declares its grammar, the parser enforces it,
+ * and `--help` is injected the way argparse's add_help does. Two nodes
+ * answer for themselves instead. A leaf that declares `--help` asked for
+ * the flag, so it is delivered rather than intercepted. And a script root
+ * that declares no grammar (ownsArgv) has the whole line forwarded:
+ * refusing `--width` on behalf of a program that accepts it would make
+ * the tier unusable, since a YAML `clis:` entry cannot declare options at
+ * all. Returns the spec to parse with and whether the injected `--help`
+ * is mirage's to answer. CLI init accepts instance fields, so each
+ * spread is a plain init bag (the withHelpSupport pattern). The grammar is
+ * kept per leaf, so each parse of the leaf reuses one spec object.
+ */
+function parseSpecFor(
+  leaf: CommandSpec,
+  style: UsageStyle = UsageStyle.ARGPARSE,
+  passthrough = false,
+): [CommandSpec, boolean] {
+  let kept = GRAMMARS.get(leaf)
+  if (kept === undefined) {
+    kept = new Map()
+    GRAMMARS.set(leaf, kept)
+  }
+  const key = `${style}:${String(passthrough)}`
+  const cached = kept.get(key)
+  if (cached !== undefined) return cached
+  let found: [CommandSpec, boolean]
+  if (passthrough) {
+    const spec: CommandSpecInit = leaf
+    found = [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+  } else {
+    const grammar =
+      style === UsageStyle.COBRA
+        ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
+        : leaf
+    found =
+      !grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help'))
+        ? [grammar, false]
+        : [listedNode(grammar, style), true]
+  }
+  kept.set(key, found)
+  return found
+}
+
+/**
+ * How the run parses a CLI leaf's words, which a policy's reading of the
+ * line parses with too, so both see the same options.
+ *
+ * The dialect is the root's: under cobra an undeclared dashed word is an
+ * error and no long option abbreviates. git resolves an abbreviated long
+ * option against the verb's own full table (parse-options), and its
+ * revision walkers take whole words only. `root` is the tree's root, whose
+ * dialect every level speaks; `passthrough` says a script owns the leaf's
+ * raw argv (ownsArgv).
+ */
+export function leafParse(
+  root: CommandSpec,
+  leaf: CommandSpec,
+  path: readonly string[],
+  passthrough = false,
+): LeafParse {
+  const [spec, mirageHelp] = parseSpecFor(leaf, root.usageStyle, passthrough)
+  return {
+    spec,
+    mirageHelp,
+    unknownIsOperand: root.usageStyle !== UsageStyle.COBRA,
+    abbreviations: root.name === 'git' ? (GIT_LONG_OPTIONS.get(path.join(' ')) ?? []) : undefined,
+  }
+}
+
+/**
+ * A walked line's leaf words, parsed as its run parses them (leafParse).
+ * `prog` is the head and the verb path.
+ */
+export function parseLeaf(
+  cli: CLI,
+  result: WalkResult,
+  cwd: string,
+  prog: string,
+  env: Readonly<Record<string, string>> | null = null,
+): ParsedArgs {
+  if (result.leaf === null) throw new Error(`${prog}: the walk reached no leaf`)
+  const rules = leafParse(cli.spec, result.leaf, result.path, ownsArgv(cli))
+  return parseCommand(
+    rules.spec,
+    [...result.argv],
+    cwd,
+    prog,
+    env ?? undefined,
+    rules.unknownIsOperand,
+    rules.abbreviations,
+  )
+}
+
+/**
+ * The options a walked line carries at every level, by canonical
+ * spelling: typed, or filled from the environment, never a declared
+ * default. What a leaf's `writeWhen` is read against, so an abbreviation
+ * the parser accepts counts as the option it names.
+ */
+export function leafOptions(
+  cli: CLI,
+  result: WalkResult,
+  cwd: string,
+  env: Readonly<Record<string, string>> | null = null,
+): string[] {
+  const prog = [cli.spec.name, ...result.path].join(' ')
+  const parsed = parseLeaf(cli, result, cwd, prog, env)
+  return [...result.present, ...parsed.typedDests, ...parsed.envDests]
 }
 
 /**
@@ -617,24 +757,37 @@ function resolveGroupPaths(
       base = scope
     }
   }
-  const seen = new Map<string, number>()
+  const resolved = new Map<string, (PathSpec | string)[]>()
   for (const [name, word, slot] of typed) {
     if (name === cs.baseDest || cs.kindByDest.get(name) !== 'path') continue
-    const index = seen.get(name) ?? 0
-    seen.set(name, index + 1)
+    const done = resolved.get(name) ?? []
+    resolved.set(name, done)
     const kinds = cs.valueTypesByDest.get(name) ?? ['path']
-    if (!paths.has(slot) && kinds[index % kinds.length] === 'path')
-      paths.set(slot, PathSpec.fromStrPath(word, undefined, base))
+    if (kinds[done.length % kinds.length] !== 'path') {
+      done.push(word)
+      continue
+    }
+    const path = paths.get(slot) ?? PathSpec.fromStrPath(word, undefined, base)
+    paths.set(slot, path)
+    done.push(path)
   }
   for (const [dest, kind] of cs.kindByDest) {
     if (kind !== 'path' || !(dest in flags) || dest === cs.baseDest) continue
     const value = flags[dest]
+    const done = resolved.get(dest)
+    const last = done?.at(-1)
     if (Array.isArray(value)) {
       const kinds = cs.valueTypesByDest.get(dest) ?? ['path']
-      flags[dest] = value.map((part, index) =>
-        kinds[index % kinds.length] === 'path' ? PathSpec.fromStrPath(part, undefined, base) : part,
-      )
-    } else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
+      flags[dest] =
+        done?.length === value.length
+          ? done
+          : value.map((part, index) =>
+              kinds[index % kinds.length] === 'path' && typeof part === 'string'
+                ? PathSpec.fromStrPath(part, undefined, base)
+                : part,
+            )
+    } else if (last !== undefined) flags[dest] = last
+    else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
   }
 }
 
@@ -657,13 +810,19 @@ function finishNode(
   bases: PathSpec[],
   taken: readonly Taken[],
   paths: Map<number, PathSpec>,
+  present: string[],
   env: Readonly<Record<string, string>> | null,
   deferEnv: boolean,
 ): WalkResult | null {
+  const own = new Set(cs.dest.values())
+  for (const dest of Object.keys(flags)) {
+    if (own.has(dest) && !present.includes(dest)) present.push(dest)
+  }
   for (const [dest, variable] of cs.envByDest) {
     if (dest in flags) continue
     const supplied = env?.[variable]
     if (supplied === undefined || supplied === '') continue
+    present.push(dest)
     flags[dest] = cs.multipleDests.has(dest) ? [supplied] : supplied
   }
   for (const [dest, value] of cs.defaults) {
@@ -748,6 +907,7 @@ export function walk(
   const bases: PathSpec[] = []
   const taken: Taken[] = []
   const paths = new Map<number, PathSpec>()
+  const present: string[] = []
   let i = 0
   const first = argv[0]
   if (
@@ -774,6 +934,7 @@ export function walk(
         path,
         words: leadWords(argv.slice(0, i), positions, taken, paths),
         groupFlags: flags,
+        present,
         operandBases: bases,
         argv: argv.slice(i),
       })
@@ -800,6 +961,7 @@ export function walk(
           bases,
           taken,
           paths,
+          present,
           env,
           deferEnv,
         )
@@ -987,6 +1149,7 @@ export function walk(
         bases,
         taken,
         paths,
+        present,
         env,
         deferEnv,
       )
@@ -1023,6 +1186,7 @@ export function walk(
       bases,
       taken,
       paths,
+      present,
       env,
       deferEnv,
     )

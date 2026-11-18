@@ -132,12 +132,11 @@ async def vault_workspace() -> Workspace:
         profiles={
             "guarded": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "the vault is sealed",
-                            "paths": ["/vault/*"],
-                        }
-                    ]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "the vault is sealed",
+                        "paths": ["/vault/*"],
+                    }
                 }
             }
         },

@@ -15,25 +15,15 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { z, type util } from 'zod'
-import { decide } from '../policy/match/decide.ts'
-import { CommandWord, Outcome, type AdmissionRules, type CommandRule } from '../policy/types.ts'
-import { PathSpec, type Visibility } from '../types.ts'
-import { WordKind } from '../commands/spec/types.ts'
+import type { AdmissionRules, ScopedTree } from '../policy/types.ts'
+import { tree } from '../test-utils.ts'
+import type { Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { StreamRefusal } from './errors.ts'
 import { units } from './document.ts'
-import { admissionMatcher, visibilityMatcher } from './policy.ts'
+import { admissionMatcher, Encoded, request, visibilityMatcher } from './policy.ts'
 import { PosixRegex } from './regex.ts'
 import { openStream, openStreamSync } from './stream.ts'
-
-function path(virtual: string): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    vfsPath: virtual,
-    rawPath: virtual,
-  })
-}
 
 function hidden(paths: string[]): Visibility {
   return { paths: { paths, patterns: [] }, shown: null, vars: null, processes: 'session' }
@@ -102,36 +92,17 @@ describe('policy stream', () => {
       }
     }
   })
-  it("answers with the host's own rule objects", () => {
-    const rule: CommandRule = { reason: 'review', paths: ['/repo/*'] }
-    const rules: AdmissionRules = { allow: null, deny: [], ask: [rule] }
-    const target = path('/repo/x')
-    const ruling = decide(
-      {
-        command: 'cat',
-        argv: ['/repo/x'],
-        cwd: '/',
-        paths: [target],
-        words: [new CommandWord('/repo/x', WordKind.OPERAND, null, target)],
-      },
-      rules,
-    )
-    expect(ruling.outcome).toBe(Outcome.ASK)
-    expect(ruling.rule).toBe(rule)
-    expect(ruling.asks[0]).toBe(rule)
-  })
-
   it('shares one compiled matcher between equal visibilities', () => {
     expect(visibilityMatcher(hidden(['/secret']))).toBe(visibilityMatcher(hidden(['/secret'])))
     expect(visibilityMatcher(hidden(['/secret']))).not.toBe(visibilityMatcher(hidden(['/other'])))
   })
 
   it('answers for a rule set as it reads now', () => {
-    const deny: CommandRule[] = []
-    const rules: AdmissionRules = { allow: null, ask: [], deny }
-    expect(admissionMatcher(rules).ask('has_rules')).toBe(false)
-    deny.push({ reason: 'no', commands: ['rm'] })
-    expect(admissionMatcher(rules).ask('has_rules')).toBe(true)
+    const held: ScopedTree[] = []
+    const rules: AdmissionRules = { trees: held }
+    expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(true)
+    held.push({ tree: tree({ rm: 'deny' }), mount: '', inline: false })
+    expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(false)
   })
 
   it('keeps component depth and surrogate text', () => {
@@ -166,9 +137,13 @@ describe('policy stream', () => {
 
   it('refuses a bad request as a stream refusal', () => {
     expect(() => admissionMatcher(null).ask('no_such_op')).toThrow(StreamRefusal)
-    expect(() => admissionMatcher(null).ask('posix_level', { rule: 0 })).toThrow(
-      'policy rule index is out of range',
-    )
+    expect(() =>
+      admissionMatcher(null).ask('io_refusal', {
+        walked: [{ tree: 0, branches: [] }],
+        path: units('/x'),
+        granted: [],
+      }),
+    ).toThrow('rule index is out of range')
   })
 
   it('opens its stream again after the shared instance retires', async () => {
@@ -181,5 +156,16 @@ describe('policy stream', () => {
     stream.close()
     expect(matcher.ask('path_visible', { path: units('/secret/key') })).toBe(false)
     expect(matcher.ask('path_visible', { path: units('/public') })).toBe(true)
+  })
+})
+
+describe('request', () => {
+  it('places an encoded field as written', () => {
+    const reads = new Encoded('[{"pattern":[114],"read":null}]')
+    expect(JSON.parse(request('decide', { facts: { reads }, n: 1 }))).toEqual({
+      op: 'decide',
+      facts: { reads: [{ pattern: [114], read: null }] },
+      n: 1,
+    })
   })
 })

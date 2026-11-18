@@ -116,7 +116,7 @@ Every tool answers text, with `isError` set when it fails.
 | [`glob`](#glob) | Find paths by pattern. | yes |
 
 A session sees only the tools its [session profile](/home/policy/explain#which-tools-the-agent-gets)
-allows: `shell` needs a command the allow list allows, `ls` and `grep` need
+allows: `shell` needs a command its `commands` lets run, `ls` and `grep` need
 those commands, and `write` and `edit` need a mount the session may write. A
 tool it does not see answers `not found`.
 

@@ -739,7 +739,7 @@ const CHECKS: [string, Check][] = [
       })
       const seal = ws.createSession('seal', {
         profile: SessionProfile({
-          commands: { deny: [{ reason: 'sealed', paths: ['/data/secret.txt'] }] },
+          commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] } },
         }),
       })
       equal(

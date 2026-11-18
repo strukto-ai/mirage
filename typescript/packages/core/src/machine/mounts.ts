@@ -25,6 +25,7 @@ import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
 import { SERVED_BY } from '../mount/changes.ts'
+import { ruleTable } from '../rs/policy.ts'
 import { FileType } from '../types.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
 import type { MountRow } from '../workspace/types.ts'
@@ -405,9 +406,7 @@ export class MachineMounts {
     const rules = current?.commands
     if (
       rules != null &&
-      [...rules.ask, ...rules.deny].some(
-        (rule) => (rule.commands?.length ?? 0) > 0 && ((rule.paths?.length ?? 0) > 0 || rule.mount),
-      )
+      ruleTable(rules).some((rule) => (rule.paths?.length ?? 0) > 0 || rule.mount)
     )
       return refusedRun(
         this.provider,

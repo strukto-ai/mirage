@@ -27,6 +27,7 @@ from mirage.commands.cli.builtin.git.add import (
     staged_entry,
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack
+from mirage.policy import Deny, Policy, VfsContext
 from mirage.types import LINK_TARGET_KEY, ContentType, FileStat, FileType
 
 
@@ -350,6 +351,15 @@ async def test_verbose_names_nothing_restaged_unchanged(
     assert await run(git_rw, "add --verbose a.txt") == (0, b"", b"")
 
 
+class _Sealed(Policy):
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
+        sealed = ctx.call.name == "read" and ctx.path.virtual == self.path
+        return Deny("sealed") if sealed else None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "name, verb", [("a.txt", "updating"), ("fresh.txt", "adding")]
@@ -358,14 +368,7 @@ async def test_an_unreadable_file_is_refused_in_git_words(
     git_rw, repo_path: Path, name: str, verb: str
 ):
     (repo_path / name).write_text("new\n", encoding="utf-8")
-    await git_rw.set_session_profile(
-        git_rw.default_session_id,
-        {
-            "commands": {
-                "deny": [{"reason": "sealed", "paths": [f"/repo/{name}"]}]
-            }
-        },
-    )
+    git_rw._registry.policies.add(_Sealed(f"/repo/{name}"))
     assert await run(git_rw, f"add {name}") == (
         128,
         b"",

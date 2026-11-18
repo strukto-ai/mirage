@@ -342,12 +342,14 @@ describe('git add', () => {
   })
 })
 
-/** Deny every op on one path for the harness's session, as a profile path rule does. */
-async function seal(h: Harness, path: string): Promise<void> {
-  await h.ws.setSessionProfile(
-    h.ws.defaultSessionId,
-    SessionProfile({ commands: { deny: [{ reason: 'sealed', paths: [path] }] } }, 'seal'),
-  )
+/** Deny every read of one path, as a coded policy does. */
+function seal(h: Harness, path: string): void {
+  h.ws.policies.add({
+    preVfs: (ctx) =>
+      ctx.call.name === 'read' && ctx.path.virtual === path
+        ? { kind: 'deny', reason: 'sealed' }
+        : null,
+  })
 }
 
 describe('an unreadable file', () => {
@@ -357,7 +359,7 @@ describe('an unreadable file', () => {
   ])('refuses add %s in git words', async (name, verb) => {
     const h = await harness()
     await write(h, name, 'new\n')
-    await seal(h, `/repo/${name}`)
+    seal(h, `/repo/${name}`)
     expect(await h.run(`add ${name}`)).toEqual([
       128,
       '',
@@ -370,7 +372,7 @@ describe('an unreadable file', () => {
   it('refuses commit -a in git words', async () => {
     const h = await harness()
     await write(h, 'letters.txt', 'new\n')
-    await seal(h, '/repo/letters.txt')
+    seal(h, '/repo/letters.txt')
     expect(await h.run('commit -a -m x')).toEqual([
       128,
       '',
@@ -383,7 +385,7 @@ describe('an unreadable file', () => {
   it('refuses diff in git words', async () => {
     const h = await harness()
     await write(h, 'letters.txt', 'new\n')
-    await seal(h, '/repo/letters.txt')
+    seal(h, '/repo/letters.txt')
     const [code, , err] = await h.run('diff')
     expect(code).toBe(128)
     expect(err).toBe(

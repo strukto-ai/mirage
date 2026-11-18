@@ -12,31 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.context.session_context import (
-    get_admission,
-    line_running,
-    redirect_target_judged,
-)
 from mirage.policy.base import Policy
-from mirage.policy.match import Outcome, decide, op_ruling, posix_level
-from mirage.policy.mixin import SessionScopedMixin
+from mirage.policy.match import Outcome, decide
 from mirage.policy.types import (
     Action,
     Ask,
     CommandContext,
     Deny,
     SessionCommandsQuery,
-    VfsContext,
 )
 
 
-class PermissionsPolicy(Policy, SessionScopedMixin):
-    """The profile's ``commands`` rules, enforced.
+class PermissionsPolicy(Policy):
+    """The profile's command trees, enforced.
 
     Seeded by the workspace after ``MountRootPolicy`` (POSIX messages
     still win) and before user policies, so a document rule speaks
     before a coded one when both match. It reads the session's
-    compiled rules through the narrow ``SessionCommandsQuery`` by the
+    compiled trees through the narrow ``SessionCommandsQuery`` by the
     session id the entry point put in the context, never through ambient
     state: an explicit fact survives the thread hop that drops a
     contextvar. Verdicts render through the one outcome table
@@ -44,17 +37,9 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     coded one.
 
     ``pre_command`` renders one ``decide`` call, which is where the
-    law lives: the allow list first (a line it does not cover is
-    refused whole, though its head was visible), then the winning rule,
-    refused whole or per operand by whether it names paths, or taken to
-    the approval ledger when it asks. ``pre_vfs`` reads the rules that
-    are pure paths, deny and ask alike (``op_ruling``), so FUSE,
-    programmatic ops and the warm cache cannot bypass a path the profile
-    protects. A path rule that asks is
-    a question only where no line is running (a file tool, the host's
-    facade), which the entry point puts to the approval ledger keyed by rule
-    and path; inside a line it refuses, since the line was admitted
-    without it.
+    law lives: the leaf that decided refuses the line, or takes it to
+    the approval ledger when it asks. A tree judges lines only; what
+    every entry point must keep from a path is a hide.
 
     Args:
         sessions (SessionCommandsQuery): the session manager, answering
@@ -69,46 +54,12 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         if decision.outcome is Outcome.ALLOW:
             return None
         rule = decision.rule
-        if rule is None:
-            program = " ".join(ctx.program or (ctx.command,))
-            return Deny(f"{program} is not allowed")
+        assert rule is not None
         if decision.outcome is Outcome.ASK:
-            return Ask(rule.reason, rule, decision.asks)
-        if decision.matched_path is None:
-            return Deny(rule.reason, rule=rule)
-        return Deny(rule.reason, path=decision.matched_path, rule=rule)
-
-    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
-        if redirect_target_judged(ctx.path.virtual):
-            return None
-        # The grants belong to the line, not the session: a once grant
-        # is spent as the command is admitted, so by the time its own
-        # walk reaches the dispatcher the session holds nothing and only the
-        # bound gate still remembers the nod.
-        gate = get_admission()
-        granted = gate.granted if gate is not None else ()
-        ruled = op_ruling(
-            self._sessions.commands_of(ctx.session_id), ctx, granted
+            return Ask(decision.reason, rule, decision.asks)
+        return Deny(
+            decision.reason,
+            path=decision.matched_path,
+            rule=rule,
+            matched=decision.matched,
         )
-        if ruled is None:
-            return None
-        rule, asks = ruled
-        if asks and gate is None and not line_running():
-            return Ask(rule.reason, rule)
-        return Deny(rule.reason, rule=rule)
-
-    async def wants_for(self, method: str, session_id: str) -> bool:
-        """Whether this session's rules speak at ``method``: always at the
-        command admission, and at the dispatcher only through a pure path
-        rule, the one kind an op can meet (``op_ruling``).
-
-        Args:
-            method (str): the method in python spelling.
-            session_id (str): the session the dispatcher serves.
-        """
-        if method != "pre_vfs":
-            return True
-        rules = self._sessions.commands_of(session_id)
-        if rules is None:
-            return False
-        return any(posix_level(rule) for rule in (*rules.deny, *rules.ask))

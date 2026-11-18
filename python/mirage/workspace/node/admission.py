@@ -15,12 +15,13 @@
 import asyncio
 import dataclasses
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.types import CLI
+from mirage.commands.cli.walk import leaf_options, walk
 from mirage.commands.spec.types import ValueType
-from mirage.context.session_context import session_access
+from mirage.context.session_context import current_caller, session_access
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
@@ -32,6 +33,7 @@ from mirage.policy import (
     CommandRule,
     CommandWord,
     Deny,
+    Occurrence,
     Pending,
     Route,
     Scope,
@@ -41,21 +43,28 @@ from mirage.policy import (
     render_command_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
+from mirage.policy.decisions import call_of
 from mirage.policy.match import (
     Outcome,
     io_reach,
     io_refusal,
-    line_tokens,
-    pattern_matches,
-    split_pattern,
+    naming_rules,
+    not_allowed,
+    redirect_ruling,
 )
 from mirage.policy.policies import command_route, settled
+from mirage.policy.types import CommandNode
+from mirage.rs.policy import Encoded
+from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
+    get_parts,
     get_redirects,
+    get_text,
     literal_word,
 )
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import Follow, LineFacts, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
@@ -81,6 +90,7 @@ from mirage.workspace.executor.command.routing import (
     routable_scopes,
     routed_operands,
 )
+from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.spec_hints import (
@@ -107,12 +117,19 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (
     Word,
 )
+from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import SessionState, env_snapshot
 
 # The nodes a redirected statement may wrap whose last command is the
 # one the redirect binds to. A `!` wraps one command, so it is its own
 # last one: `! cat < f` parses as redirected(negated(cat), < f).
 REDIRECT_CHAIN = frozenset({NT.LIST, NT.PIPELINE, NT.NEGATED_COMMAND})
+
+# The nodes a redirect binds to as their own, judged with them: the
+# chain's last command, or the shell's test. Any other statement under a
+# redirect (a group, a loop, a subshell, an ``if``, an assignment, or
+# none) leaves its redirect to ``admit_redirect``.
+REDIRECT_OWNERS = frozenset({NT.COMMAND, NT.TEST_COMMAND})
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +186,17 @@ class Admitted:
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
     route: Route | None = None
+    _named: list[Encoded | None] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
+
+    def named(self) -> Encoded | None:
+        """The command's walk through the trees (``naming_rules``),
+        asked on the first entry it reaches and kept for the rest of its
+        run."""
+        if not self._named:
+            self._named.append(naming_rules(self.rules, self.ctx))
+        return self._named[0]
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
@@ -178,7 +206,9 @@ class Admitted:
         Args:
             virtual (str): absolute virtual path of a walk's start point.
         """
-        return io_reach(self.rules, self.ctx.tokens, virtual)
+        return self.rules is not None and io_reach(
+            self.rules, self.named(), virtual
+        )
 
     def check(self, virtual: str) -> None:
         """Raise ``PolicyDenied`` when a rule in force refuses this entry
@@ -202,7 +232,9 @@ class Admitted:
         """
         if _norm(virtual) in self.judged:
             return None
-        return io_refusal(self.rules, self.ctx.tokens, virtual, self.granted)
+        if self.rules is None:
+            return None
+        return io_refusal(self.rules, self.named(), virtual, self.granted)
 
 
 def _seen(
@@ -265,12 +297,15 @@ def _seen_words(
 def unlisted_service(
     ctx: CommandContext, registry: MountRegistry, session: SessionState
 ) -> bool:
-    """Whether the allow list refuses a CLI that reaches a service.
+    """Whether the profile leaves out a CLI that reaches a service.
 
     Such a CLI (an account or script CLI) reaches its service by id, past
-    every hide, so under a profile that hides paths it runs only where a
-    pattern starting with its own name matches the line. ``*`` and a
-    pattern for another of its verbs do not count.
+    every hide, so under a profile that hides paths it runs only where
+    the profile's top-level tree names it at its root with an allow
+    somewhere in that node. ``*`` does not count, and neither does
+    inline permissions' tree, which only tightens. What the node says of
+    the line is the tree's to judge, so what is left here is whether the
+    profile names the command at all.
 
     Args:
         ctx (CommandContext): the classified command.
@@ -285,18 +320,61 @@ def unlisted_service(
         or session.visibility.paths is None
     ):
         return False
-    tokens = line_tokens(ctx)
     rules = session.commands
-    return not any(
-        split_pattern(p)[:1] == (ctx.command,) and pattern_matches(p, tokens)
-        for p in (rules.allow if rules is not None else None) or ()
+    return rules is None or not any(
+        _yields_allow(scoped.tree.subcommands[ctx.command])
+        for scoped in rules.trees
+        if not scoped.mount
+        and not scoped.inline
+        and ctx.command in scoped.tree.subcommands
     )
+
+
+def _yields_allow(node: CommandNode) -> bool:
+    return (
+        any(leaf.decision is Outcome.ALLOW for leaf in node.decision)
+        or any(map(_yields_allow, node.subcommands.values()))
+        or any(map(_yields_allow, node.operands.values()))
+    )
+
+
+def _tree_writes(
+    name: str,
+    tree: CLI,
+    args: list[str],
+    reading: LineReading,
+    session: SessionState,
+) -> bool:
+    """Whether a command tree's leaf the line reaches may change state,
+    read off the line's own reading when that reading is this tree's,
+    else off a walk under the session environment.
+
+    Args:
+        name (str): command name, expanded.
+        tree (CLI): the command tree.
+        args (list[str]): the words after the name.
+        reading (LineReading): the line read once.
+        session (SessionState): the session running the line.
+    """
+    if reading.read is not None and (
+        reading.grammar is not None and reading.grammar.spec is tree.spec
+    ):
+        handler = tree.handlers.get(" ".join(reading.program[1:]))
+        return handler is not None and handler.writes(
+            [flag.name for flag in reading.read.flags]
+        )
+    env = env_snapshot(session)
+    result = walk(name, tree.spec, args, session.cwd, env)
+    return result.leaf is not None and tree.handlers[
+        " ".join(result.path)
+    ].writes(leaf_options(tree, result, session.cwd, env))
 
 
 def _writes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
+    reading: LineReading,
     facts: LineFacts,
     session: SessionState,
     registry: MountRegistry,
@@ -327,6 +405,8 @@ def _writes(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
+        reading (LineReading): the line read once; a tree it read is
+            not walked again.
         facts (LineFacts): what the line does, read off its words.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the mounts and the
@@ -358,19 +438,9 @@ def _writes(
                     trees.append(candidate_tree)
                 elif mount.may_write(name):
                     return True
-        for candidate_tree in trees:
-            result = walk(
-                name,
-                candidate_tree.spec,
-                args,
-                session.cwd,
-                env_snapshot(session),
-            )
-            if result.leaf is not None and candidate_tree.handlers[
-                " ".join(result.path)
-            ].writes(args):
-                return True
-        return False
+        return any(
+            _tree_writes(name, t, args, reading, session) for t in trees
+        )
     runs = runs_as(name, registry)
     # The words that route the run, picked as execution picks them: a
     # stdin `-` and an assignment route nowhere, and a path-valued option,
@@ -420,16 +490,7 @@ def _writes(
     for mount in reached:
         candidate_tree = mount.cli_for(runs)
         if candidate_tree is not None:
-            result = walk(
-                runs,
-                candidate_tree.spec,
-                args,
-                session.cwd,
-                env_snapshot(session),
-            )
-            if result.leaf is not None and candidate_tree.handlers[
-                " ".join(result.path)
-            ].writes(args):
+            if _tree_writes(runs, candidate_tree, args, reading, session):
                 return True
         elif any(
             mount.may_write(runs, extension, facts.writes)
@@ -539,7 +600,15 @@ async def gate(
     )
     await budget.run()
     write = _writes(
-        name, args, operands, facts, session, registry, namespace, implied
+        name,
+        args,
+        operands,
+        reading,
+        facts,
+        session,
+        registry,
+        namespace,
+        implied,
     )
     await budget.run()
     ctx = CommandContext(
@@ -552,6 +621,7 @@ async def gate(
         session_id=session.session_id,
         tokens=reading.tokens,
         program=reading.program,
+        read=reading.read,
         tool=tool,
         walks=facts.walks,
         write=write,
@@ -567,7 +637,7 @@ async def gate(
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(
-            f"{' '.join(reading.program)} is not allowed",
+            not_allowed(reading.program),
             policy=PermissionsPolicy.__name__,
         )
         answers = (refused, *answers)
@@ -628,8 +698,8 @@ async def admit(
     The one gate every command class passes through, in the tree
     (``_run_argv``, once the words are expanded) and for a line a
     runtime takes whole (``admit_line``, per parsed command). A word
-    the session's allow list leaves out is the profile's Deny, like any
-    other rule's; a path the session cannot see is dropped before any
+    a closed tree names nothing for is the profile's Deny, like any
+    other leaf's; a path the session cannot see is dropped before any
     method, so a rule never names it and the dispatcher answers ENOENT; a Deny
     renders in the outcome table's voice; an Ask is answered by the
     entry point from the session's grants or the host. A command that gets
@@ -653,7 +723,7 @@ async def admit(
             that raised it. Nothing else here waits on anything outside
             mirage.
         intrinsic (bool): the shell provides the operation directly, so
-            a function of the same name cannot bypass its tool allow list.
+            a function of the same name cannot bypass a tree's root.
         claimant (Claimant | None): the command and its line, None
             outside a line. On a line, every grant behind the command
             is claimed on the line's hand-off for that occurrence,
@@ -704,6 +774,105 @@ async def admit(
     return Refused(err, code, decision_of(action))
 
 
+async def admit_redirect(
+    targets: Sequence[PathSpec],
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    at: TSNodeLike | None = None,
+) -> Refused | None:
+    """The gate of the files a redirect opens that no command owns: a
+    compound statement's (``{ cat; } < f``, a loop, a subshell, an
+    ``if``) or a bare one (``> f``, ``exec 3< f``). A command's own
+    redirects are judged with the command; these have no command, so
+    the session's trees alone are asked, and only a root leaf scoped to
+    a path the redirect opens speaks (``redirect_ruling``). A coded
+    policy is not asked: it judges the open itself, at the dispatcher.
+
+    A hidden target is dropped first, so the open answers ENOENT; links
+    are followed as a command's redirect targets are. A deny, or an ask
+    the host did not grant, refuses in bash's voice for a redirect it
+    could not open (``bash: line 1: f: Permission denied``, exit 1),
+    with the decision on the result. An ask is claimed for the place
+    the redirect stands on its line (``at``), so each open is a nod of
+    its own, as each command is.
+
+    Args:
+        targets (Sequence[PathSpec]): the redirect's targets so far,
+            expanded.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the decision ledger.
+        namespace (Namespace | None): the link table.
+        at (TSNodeLike | None): the target word of the redirect that
+            opens them, None for targets no one redirect opens (a line
+            judged whole).
+    """
+    rules = session.commands
+    if rules is None or not targets:
+        return None
+    links = (
+        namespace.session_links(session)
+        if namespace is not None and namespace.nodes
+        else None
+    )
+    paths = list(targets)
+    if links is not None:
+        paths.extend(
+            p
+            for p in follow_paths(links, list(targets), True)
+            if isinstance(p, PathSpec)
+        )
+    seen = _seen(session, paths)
+    ruling = redirect_ruling(seen, rules)
+    if ruling.outcome is Outcome.ALLOW:
+        return None
+    rule = ruling.rule
+    assert rule is not None
+    named = ruling.matched_path or seen[0].virtual
+    question = CommandContext(
+        command="",
+        paths=seen,
+        argv=tuple(p.virtual for p in seen),
+        cwd=session.cwd,
+        session_id=session.session_id,
+    )
+    action: Deny | Pending | None
+    if ruling.outcome is Outcome.ASK:
+        caller = current_caller()
+        call = call_of(caller, registry.decisions, session.session_id)
+        claimant = (
+            None
+            if call is None
+            else Claimant(
+                call,
+                Occurrence(None, named, 0, 0)
+                if at is None
+                else occurrence_of(at, call),
+            )
+        )
+        asked = Ask(
+            ruling.reason,
+            rule,
+            ruling.asks,
+            policy=PermissionsPolicy.__name__,
+        )
+        action = await resolved(
+            question, asked, registry, caller.stop, claimant
+        )
+        if action is None:
+            return None
+    else:
+        action = Deny(
+            ruling.reason,
+            path=named,
+            policy=PermissionsPolicy.__name__,
+            rule=rule,
+        )
+    shown = next((p for p in targets if p.virtual == named), targets[0])
+    err = encode_text(f"{shell_voice()}{shown.raw_path}: Permission denied\n")
+    return Refused(err, 1, decision_of(action))
+
+
 async def admit_test(
     name: str,
     words: list[str],
@@ -715,7 +884,7 @@ async def admit_test(
 ) -> Admitted:
     """Admit a ``[ ]`` test, or one ``[[ ]]`` leaf, as the command it
     is: the shell evaluates it itself, so no command gate saw its words,
-    and a rule, an allow list or a policy answers it by its own name as
+    and a tree or a policy answers it by its own name as
     it answers ``test`` on the same words.
 
     Args:
@@ -850,12 +1019,35 @@ def redirect_paths(
     return tuple(p for p in targets if isinstance(p, PathSpec))
 
 
+def is_bare_exec(command: TSNodeLike | None) -> bool:
+    """Whether a redirected statement's command is a bare `exec`, which
+    installs its redirects on the shell for every later statement;
+    `exec cmd` is a command.
+
+    Args:
+        command (TSNodeLike | None): the command node under the
+            redirect, or None for a command-less redirect (`> file`).
+    """
+    if command is None or command.type != NT.COMMAND:
+        return False
+    named = get_parts(command)
+    return (
+        len(named) == 1
+        and named[0].type == NT.COMMAND_NAME
+        and get_text(named[0]) == "exec"
+    )
+
+
 def statement_redirects_raw(node: Any) -> list[Redirect]:
     """Find redirects bound to this command along the last-command chain.
+    A bare ``exec`` (``exec 3< f``) has none: it installs them on the
+    shell, and ``admit_redirect`` judges each as it opens.
 
     Args:
         node (Any): the command's parsed node.
     """
+    if is_bare_exec(node):
+        return []
     owner = node
     parent = owner.parent
     while parent is not None and parent.type in REDIRECT_CHAIN:
@@ -875,6 +1067,67 @@ def statement_redirects_raw(node: Any) -> list[Redirect]:
         return []
     _, redirects = get_redirects(parent)
     return redirects
+
+
+def _opens_file(r: Redirect) -> bool:
+    """Whether a redirect names a file to open, not a body or a
+    descriptor.
+
+    Args:
+        r (Redirect): the parsed redirect.
+    """
+    return (
+        r.kind
+        not in (
+            RedirectKind.HEREDOC,
+            RedirectKind.HERESTRING,
+            RedirectKind.AMBIGUOUS,
+        )
+        and not isinstance(r.target, int)
+        and r.target_node is not None
+    )
+
+
+def unowned_redirects(
+    node: Any, homes: Mapping[str, str] | None
+) -> list[tuple[Word, TSNodeLike]]:
+    """The literal target of every redirect in a parsed line that no
+    command owns, with the target's node: a compound statement's, a bare
+    one's, a bare ``exec``'s, an assignment's. A command's own redirects
+    are its words (``statement_redirects``); these are read for a line a
+    runtime takes whole, where no executor opens them.
+
+    Args:
+        node (Any): the parsed line, or any node in it.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
+    """
+    out: list[tuple[Word, TSNodeLike]] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        stack.extend(reversed(current.named_children))
+        if current.type != NT.REDIRECTED_STATEMENT:
+            continue
+        inner, redirects = get_redirects(current)
+        owner = inner
+        while owner is not None and owner.type in REDIRECT_CHAIN:
+            owner = owner.named_children[-1] if owner.named_children else None
+        if (
+            owner is not None
+            and owner.type in REDIRECT_OWNERS
+            and not is_bare_exec(owner)
+        ):
+            continue
+        out.extend(
+            (
+                Word(str(r.target), literal_word(r.target_node, homes)),
+                r.target_node,
+            )
+            for r in redirects
+            if _opens_file(r)
+        )
+    return out
 
 
 def statement_stdin(node: Any) -> bytes | None:
@@ -906,7 +1159,9 @@ def statement_redirects(
     The walk climbs the last-command chain instead, which is bash's own
     rule for a list, a pipeline and a ``!``. A compound (``{ }``, a loop, a
     subshell) redirects every command inside it, which is not a chain,
-    so none is claimed here and the dispatcher judges the write.
+    so none is claimed here: ``admit_redirect`` judges it as the shell
+    opens it, and ``unowned_redirects`` reads it for a line a runtime
+    takes whole.
 
     Args:
         node (Any): the command's parsed node.
@@ -916,12 +1171,5 @@ def statement_redirects(
     return tuple(
         Word(str(r.target), literal_word(r.target_node, homes))
         for r in statement_redirects_raw(node)
-        if r.kind
-        not in (
-            RedirectKind.HEREDOC,
-            RedirectKind.HERESTRING,
-            RedirectKind.AMBIGUOUS,
-        )
-        and not isinstance(r.target, int)
-        and r.target_node is not None
+        if _opens_file(r)
     )

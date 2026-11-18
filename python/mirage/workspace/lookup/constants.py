@@ -126,6 +126,10 @@ MACHINE_VIEW = "lscpu"
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
 
+# Head words no CLI is installed under (``CLIRegistry.check_name``): a
+# builtin, a keyword or a namespace command answers first.
+NOT_INSTALLABLE = SHELL_NAMES | JOB_BUILTINS | KEYWORDS | NAMESPACE_COMMANDS
+
 # bash 5.2's own builtins (`compgen -b` on debian:stable-slim). `type`
 # calls one of these a shell builtin and `command -v` prints it bare,
 # even where a program of the same name is on PATH too (echo, test,

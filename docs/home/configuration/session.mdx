@@ -21,22 +21,26 @@ profiles:
     paths:
       hide: [/data/private]
     commands:
-      allow: [ls, cat, grep, find, stat, pwd]
+      "*": deny
+      ls: allow
+      cat: allow
+      grep: allow
+      find: allow
+      stat: allow
+      pwd: allow
 
 profile: researcher
 ```
 
 A session under `researcher` reads `/data`, never sees `/data/private`, and
-gets `Permission denied` for any command off the list, builtins such as `cd`
-included.
+gets `Permission denied` for any command `commands` does not name, builtins
+such as `cd` included.
 
 ## What a profile controls
 
 | Key | Sets |
 | --- | --- |
-| `commands.allow` | The only commands the session can run. |
-| `commands.ask` | Commands that need approval. |
-| `commands.deny` | Commands that are refused. |
+| `commands` | What the session can run: each command, subcommand or option allowed, refused or sent for approval. See [Command rules](#command-rules). |
 | `paths.hide` | Files and folders the session cannot see. |
 | `paths.show` | A path to reopen inside a hidden folder. |
 | `mounts` | A mount's access: `read`, `write` or `exec`. |
@@ -81,39 +85,402 @@ no limits.
 
 No command inside a session can change its own profile.
 
-## Rule matching
+## Command rules
 
-### Commands
-
-| Pattern | Matches |
-| --- | --- |
-| `git push` | `git push origin main`: a pattern matches the leading words. |
-| `rm -rf` | Not `rm -r -f`: spelling and order count. |
-| `git * main` | Any one word in place of `*`. |
-
-- `allow: []` allows no command. No `allow` key means no allow list.
-- `[` and `[[` are commands too, and an allow list must name them.
-- Shell functions are exempt; each line inside one is checked.
-- `commands.allow` does not cover executed paths, direct VFS calls or MCP file
-  tools. Limit file access with `mounts` and `paths`.
-
-### Ask and deny
+`commands` is a tree that follows each command's own subcommands and
+options. Each entry decides `allow`, `ask` or `deny`.
 
 ```yaml
 commands:
-  allow: [rm]
-  ask:
-    - {commands: {rm: ["/data/review/*"]}, reason: deletes need review}
-  deny:
-    - {commands: {rm: ["/data/*"]}, reason: data is retained}
+  "*": allow
+  rm: {decision: ask, reason: Deletes need sign-off}
+  gh:
+    "*": deny
+    pr:
+      view: allow
+      merge: {"*": allow, --admin: deny}
+  curl:
+    --request: {values: {DELETE: deny}}
+  git:
+    --force: deny
+    checkout: {operands: {main: deny}}
 ```
 
-- The rule with the deeper path wins; at equal depth, deny wins. So
-  `rm /data/review/note.txt` asks, and `rm /data/other.txt` is denied.
-- A command with several paths must pass for each one.
+| Line | Result |
+| --- | --- |
+| `ls /data` | Runs. `"*"` allows every command the tree does not name. |
+| `rm notes.txt` | Waits for approval, with the reason. |
+| `gh pr view 5` | Runs. |
+| `gh pr list` | Refused. `gh` denies whatever it does not name. |
+| `gh pr merge 5` | Runs. |
+| `gh pr merge 5 --admin` | Refused. |
+| `curl -X DELETE https://example.com` | Refused. `curl -X PUT https://example.com` runs. |
+| `git add -f notes.txt` | Refused, as any `git` subcommand with `--force` is. |
+| `git checkout main` | Refused. `git checkout dev` runs. |
+
+A refused line prints `rm: Permission denied` and exits 126. A line that
+waits for approval reads the same until a host
+[approves it](/home/policy/policies#asks). A path refused by
+[`paths`](#paths) fails as the command's own error instead, such as
+`rm: cannot remove '/data/keep/2024.csv': Permission denied`, exit 1.
+
+### Keys
+
+| Key | Means |
+| --- | --- |
+| `"*"` | The decision at this level: at the root, every command the tree does not name; under a command, that command and every subcommand below that states none. |
+| A name, such as `rm` or `pr` | A command at the root, a subcommand under a command. |
+| A key starting with `-`, such as `--admin` | An option. `"-*"` is any option the tree does not name. |
+| `operands` | The next operand on the line. Each key under it is a word. |
+| `values`, under an option | The option's value. Each key under it is a word. |
+
+An entry's value is `allow`, `ask` or `deny`. Write
+`{decision, reason, paths}` to add a reason or to limit the decision to
+paths, or a list of those to give several decisions for one place.
+
+### How a line is judged
+
+1. Mirage reads the line with the command's own grammar, so `rm -rf`,
+   `rm -fr` and `rm --recursive --force` are the same line.
+2. The line's words pick the entry: its subcommands, then its operands, as
+   far as the tree names them. The deepest entry that states a decision
+   gives the result. With no decision anywhere, the line runs.
+3. The options on the line, and their values, can only tighten that result:
+   `deny` beats `ask`, and `ask` beats `allow`.
+
+So a deeper name can reopen what its parent refuses, as `gh pr view` does
+above. An option never can.
+
+### Run only the commands you name
+
+```yaml
+commands:
+  "*": deny
+  ls: allow
+  cat: allow
+  grep: allow
+```
+
+| Line | Result |
+| --- | --- |
+| `cat notes.txt` | Runs. |
+| `rm notes.txt` | Refused. |
+| `cd /data` | Refused. Builtins are commands too. |
+
+- `[` and `[[` are commands too. Name them if the session runs tests.
+- A call to a shell function the agent defined is not judged by the root
+  `"*"`. Each command in its body is judged when it runs.
+- `commands` does not cover executed paths, direct VFS calls or MCP file
+  tools. Limit file access with `mounts` and `paths`.
+
+### A subcommand
+
+```yaml
+commands:
+  gh:
+    "*": deny
+    pr: {view: allow, diff: allow}
+  git:
+    status: deny
+```
+
+| Line | Result |
+| --- | --- |
+| `gh pr view 5` | Runs. |
+| `gh pr merge 5`, `gh issue list`, `gh` | Refused. |
+| `git status` | Refused. |
+| `git -C /data status` | Refused. An option before the subcommand does not hide it. |
+| `git log` | Runs. |
+
+Without `"*": deny`, only the subcommands you deny are refused:
+`gh: {repo: {delete: deny}}` refuses `gh repo delete` and nothing else.
+
+### An option
+
+```yaml
+commands:
+  gh:
+    pr:
+      merge: {--admin: deny}
+  git:
+    --force: deny
+    add: {--force: allow}
+```
+
+| Line | Result |
+| --- | --- |
+| `gh pr merge 5 --admin` | Refused. |
+| `gh pr merge 5` | Runs. |
+| `git rm -f notes.txt` | Refused. An option entry applies to its command and every subcommand below. |
+| `git add -f notes.txt` | Runs. A deeper entry for the same option replaces the one above it. |
+
+### Options together
+
+An option under an option applies when both are on the line.
+
+```yaml
+commands:
+  rm:
+    --recursive: {--force: deny}
+```
+
+| Line | Result |
+| --- | --- |
+| `rm -rf build` | Refused. |
+| `rm -r build` | Runs. |
+| `rm -f notes.txt` | Runs. |
+
+### Only these options
+
+`"-*"` decides for every option the tree does not name.
+
+```yaml
+commands:
+  rm: {"-*": deny, --force: allow, --verbose: allow}
+```
+
+| Line | Result |
+| --- | --- |
+| `rm -fv notes.txt` | Runs. |
+| `rm -rf build` | Refused. `--recursive` is not named. |
+| `rm notes.txt` | Runs. |
+
+### An option's value
+
+```yaml
+commands:
+  curl:
+    --request:
+      values: {DELETE: deny, "*": ask}
+```
+
+| Line | Result |
+| --- | --- |
+| `curl -X DELETE https://example.com` | Refused. |
+| `curl -X PUT https://example.com` | Waits for approval. |
+| `curl https://example.com` | Runs. The option is not on the line. |
+
+A value can also name options that must be on the line with it. With
+`--request: {values: {POST: {--insecure: deny}}}`, `curl -X POST -k` is
+refused and `curl -X POST` runs.
+
+### An operand
+
+```yaml
+commands:
+  git:
+    checkout:
+      operands: {main: deny, "release/*": ask}
+```
+
+| Line | Result |
+| --- | --- |
+| `git checkout main` | Refused. |
+| `git checkout release/2.1` | Waits for approval. |
+| `git checkout dev` | Runs. |
+
+- An operand can reopen a denied command. With
+  `checkout: {"*": deny, operands: {main: allow}}`, `git checkout main` runs
+  and `git checkout dev` is refused.
+- An operand entry can hold options and a further `operands` for the next
+  word. With `merge: {operands: {"5": {--admin: deny}}}`,
+  `gh pr merge 5 --admin` is refused and `gh pr merge 6 --admin` runs.
+- `operands` goes on a command that has no subcommands.
+
+Keys under `operands` and `values` are shell globs. When several keys match
+one word, an exact key wins. Otherwise the strictest matching glob wins, and
+`"*"` answers only for a word no other key matches.
+
+| `operands` of `git checkout` | Line | Result |
+| --- | --- | --- |
+| `{"release/*": allow, "*": deny}` | `git checkout release/2.1` | Runs. |
+| | `git checkout dev` | Refused. |
+| `{main: allow, "release/*": ask, "rel*": deny}` | `git checkout main` | Runs. |
+| | `git checkout release/2.1` | Refused. Two globs match. |
+
+Write `"[*]"` for a literal star. A word that starts with `-` is an operand
+only after `--` on the line: `rm: {operands: {"-rf": deny}}` refuses
+`rm -- -rf` and leaves `rm -rf build` alone.
+
+### A command without a grammar
+
+Mirage reads a program it has no grammar for, such as one a
+[machine](/home/setup/machine/overview) runs, as a name and its operands.
+
+```yaml
+commands:
+  kubectl:
+    operands:
+      delete: {operands: {namespace: deny}}
+```
+
+| Line | Result |
+| --- | --- |
+| `kubectl delete namespace prod` | Refused. |
+| `kubectl delete pod web-1` | Runs. |
+
+An option key under such a command is refused when the profile loads. To
+write rules on its options, [register it as a CLI](/home/setup/cli/new).
+
+### Paths
+
+A decision with `paths` speaks only for the paths it covers. For any other
+path, the decision above it applies.
+
+```yaml
+commands:
+  "*": deny
+  rm: {decision: allow, paths: ["/data/tmp/*"]}
+```
+
+| Line | Result |
+| --- | --- |
+| `rm /data/tmp/a.log` | Runs. |
+| `rm /etc/hosts` | Refused. |
+| `rm /data/tmp/a.log /etc/hosts` | Refused. Each path is judged, and the strictest result wins. |
+
+A list gives one place several decisions. Each applies on its own:
+
+```yaml
+commands:
+  rm:
+    - ask
+    - {decision: deny, paths: ["/data/keep/*"], reason: Kept for audit}
+```
+
+| Line | Result |
+| --- | --- |
+| `rm /data/notes.txt` | Waits for approval. |
+| `rm /data/keep/2024.csv` | Refused. |
+
+- A recursive command is judged for each file it reaches. With
+  `cp: {decision: deny, paths: ["/data/src/secret/*"]}`,
+  `cp -r /data/src /data/out` is refused when it reaches
+  `/data/src/secret/key.pem`.
 - Ask and deny leave the paths visible.
 
-### Hide and show
+### Lines, not file calls
+
+A tree judges the lines a session runs. A file call outside a line, such
+as the agent's `read` tool or `session.vfs.read`, is not
+judged by any tree. To close a path to every entry point, hide it.
+
+```yaml
+profiles:
+  sealed:
+    commands:
+      "*": {decision: deny, paths: [/vault/*], reason: sealed}
+  hidden:
+    commands:
+      "*": {decision: deny, paths: [/vault/*], reason: sealed}
+    paths:
+      hide: [/vault/*]
+```
+
+| Call | Under `sealed` | Under `hidden` |
+| --- | --- | --- |
+| `cat /vault/secret` | `cat: /vault/secret: Permission denied`, exit 1 | `cat: /vault/secret: No such file or directory`, exit 1 |
+| `sh -c 'cat /vault/secret'` | `cat: /vault/secret: Permission denied`, exit 1 | `cat: /vault/secret: No such file or directory`, exit 1 |
+| `session.vfs.read("/vault/secret")` | Returns the file. | Fails with `ENOENT`: `FileNotFoundError` in Python, an `Error` whose `code` is `ENOENT` in TypeScript. |
+| The `read` tool on `/vault/secret` | Returns the file. | `Error: file '/vault/secret' not found` |
+
+### A CLI that reaches a service
+
+A hide stops file paths, and a CLI such as `gh` reaches its service
+without a path. So under a profile that hides any path, such a CLI stays
+off until the tree names it with an allow. `"*": allow` alone does not
+turn it on.
+
+| Profile | `gh pr view 5` |
+| --- | --- |
+| `commands: {"*": allow}` | Runs. |
+| `paths: {hide: [/data/.env]}`, `commands: {"*": allow}` | `gh: Permission denied`, exit 126. |
+| The same, with `gh: allow` | Runs. |
+| The same, with `gh: {pr: {view: allow}}` | Runs. An allow anywhere under `gh` turns it on, so `gh pr list` runs too. |
+| The same, with `gh: {pr: {merge: {--admin: deny}}}` | `gh: Permission denied`, exit 126. The tree names `gh` but allows nothing. |
+
+### Ask with a reason
+
+```yaml
+commands:
+  rm:
+    "*": {decision: ask, reason: Deletes need sign-off}
+    --recursive: {decision: ask, reason: Recursive deletes need sign-off}
+```
+
+| Step | Line | Result |
+| --- | --- | --- |
+| 1 | `rm a.log` | Waits for approval: `Deletes need sign-off`. |
+| 2 | | A host approves it for the session. |
+| 3 | `rm b.log` | Runs. The approval covers that entry. |
+| 4 | `rm -r build` | Waits for approval again. `--recursive` is another entry. |
+
+Changing an entry's decision, reason or paths makes its lines ask again.
+
+### In one mount
+
+A mount can carry its own tree. It applies to a line that works inside the
+mount: its working directory or a path it names is under the mount.
+
+```yaml
+profiles:
+  agent:
+    commands:
+      "*": allow
+      gh: deny
+    mounts:
+      /data:
+        commands:
+          rm: ask
+          gh:
+            pr: {view: allow}
+```
+
+| Working directory | Line | Result |
+| --- | --- | --- |
+| `/` | `rm /data/report.md` | Waits for approval. |
+| `/data` | `rm report.md` | Waits for approval. |
+| `/` | `rm /tmp/scratch.md` | Runs. |
+| `/data` | `gh pr view 5` | Refused. |
+
+Mirage judges the profile's tree and the mount's tree separately, and the
+strictest result wins. A mount's tree can only tighten.
+
+### Names
+
+- Write an option in any spelling the command declares: `-r`, `-R` or
+  `--recursive` for `rm`. A subcommand takes its aliases too, such as `ls`
+  for `gh pr list`.
+- Write each option as its own key. `-rf` is refused; write `-r` and `-f`.
+- Quote a key that YAML would not read as a string: `"*"`, `"5"`, `"true"`.
+
+Mirage checks every name when it loads the profile, and refuses a tree it
+cannot read one way:
+
+| Written | Refused because |
+| --- | --- |
+| `gh: {pr: {mrge: deny}}` | `gh pr` has no subcommand `mrge`. |
+| `gh: {pr: {merge: {--amdin: deny}}}` | `gh pr merge` has no option `--amdin`. |
+| `gh: {pr: {merge: {admin: deny}}}` | `admin` is no subcommand. An operand goes under `operands`. |
+| `curl: {--request: {DELETE: deny}}` | A value goes under `values`. |
+| `gh: {operands: {x: deny}}` | `gh` takes a subcommand, so operands go under one. |
+| `rm: {-r: ask, --recursive: deny}` | `-r` and `--recursive` are the same option. |
+| `git: {-f: deny}` | `-f` is a different option in different `git` subcommands. Write `--force`, or put the entry under its subcommand. |
+| `allow: [ls, cat]` | `allow`, `ask` and `deny` lists of patterns are the old format. Write a tree. |
+
+A misspelt operand is not caught. `operands: {mian: deny}` loads and never
+matches.
+
+### What a tree cannot say
+
+- **Allow a command only with an option.** Options only tighten, so
+  `git: {rm: {"*": deny, --cached: allow}}` still refuses
+  `git rm --cached notes.txt`. Deny the options you do not want instead, as
+  in [Only these options](#only-these-options).
+- **Keep a path from file calls.** A tree judges lines only. Use
+  `paths.hide`, as in [Lines, not file calls](#lines-not-file-calls).
+
+## Hide and show
 
 - `paths.hide` makes a path look absent. `paths.show` reopens a deeper path.
 - `paths.hide` takes absolute paths or name patterns such as `*.pem`;

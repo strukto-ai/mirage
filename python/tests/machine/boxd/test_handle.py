@@ -590,7 +590,6 @@ def test_mount_type_is_refused():
     "profile",
     [
         {"paths": {"hide": ["/data/secret"]}},
-        {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "x"}]}},
         {"mounts": {"/data": "r"}},
     ],
 )

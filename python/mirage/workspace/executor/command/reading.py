@@ -15,28 +15,28 @@
 
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.walk import owns_argv, parse_leaf, walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.parser import ParsedArgs, word_paths
 from mirage.commands.spec.types import WordKind
-from mirage.policy.types import CommandWord
+from mirage.policy.match.grammar import flag_facts, leaf_read
+from mirage.policy.types import CommandRead, CommandWord, Grammar
 from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.executor.command.cli import leaf_parse
 from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.lookup import SLASH_KEEPS_LAST
 from mirage.workspace.mount import MountRegistry
 
-Grammar = tuple[WordKind, str | None, PathSpec | None]
+WordGrammar = tuple[WordKind, str | None, PathSpec | None]
 
 
 def _leaf_grammar(
     parsed: ParsedArgs, argv: Sequence[str], cwd: str, operands: bool
-) -> list[Grammar]:
+) -> list[WordGrammar]:
     """Each word as a flat grammar reads it: its kind, the option it
     carries attached and the path the grammar gives it.
 
@@ -95,18 +95,13 @@ def read_line(
         else None
     )
     supplied: list[PathSpec] = []
-    grammar: list[Grammar]
+    grammar: list[WordGrammar]
+    read: CommandRead | None = None
+    spoken: Grammar | None = None
     if tree is not None and result is not None and result.leaf is not None:
-        rules = leaf_parse(tree, result.leaf, result.path)
-        leaf = parse_command(
-            rules.spec,
-            list(result.argv),
-            cwd,
-            name,
-            env,
-            unknown_is_operand=rules.unknown_is_operand,
-            abbreviations=rules.abbreviations,
-        )
+        program = (name, *result.path)
+        spoken = Grammar(tree.spec, tree=True, passthrough=owns_argv(tree))
+        leaf = parse_leaf(tree, result, cwd, " ".join(program), env)
         grammar = [
             *((w.kind, w.option, w.path) for w in result.words),
             *_leaf_grammar(leaf, result.argv, cwd, operands=True),
@@ -120,8 +115,14 @@ def read_line(
                 if isinstance(item, PathSpec) and item.virtual not in typed
             ]
         supplied += [_to_scope(v) for v in leaf.supplied_path_values]
-        program = (name, *result.path)
         tokens = (*program, *result.argv)
+        group = flag_facts(result.group_flags, result.present)
+        inner = (
+            CommandRead(program, operands=result.argv)
+            if spoken.passthrough
+            else leaf_read(program, leaf)
+        )
+        read = CommandRead(program, (*group, *inner.flags), inner.operands)
     else:
         spec = SPECS.get(name)
         if spec is None:
@@ -139,6 +140,8 @@ def read_line(
             parsed = parse_command(spec, list(argv), cwd, name)
             grammar = _leaf_grammar(parsed, argv, cwd, operands=False)
             supplied += [_to_scope(v) for v in parsed.supplied_path_values]
+            spoken = Grammar(spec)
+            read = leaf_read((name,), parsed)
         program = (name,)
         tokens = (name, *argv)
     words: list[CommandWord] = []
@@ -151,7 +154,14 @@ def read_line(
         words.append(CommandWord(text, kind, owner, path))
         if kind is WordKind.OPTION:
             option = text
-    return LineReading(tuple(words), tuple(supplied), tokens, program)
+    return LineReading(
+        tuple(words),
+        tuple(supplied),
+        tokens,
+        program,
+        read,
+        spoken if read is not None else None,
+    )
 
 
 def context_words(

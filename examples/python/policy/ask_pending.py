@@ -17,17 +17,22 @@ import asyncio
 from mirage import MountMode, Outcome, Scope, Workspace
 from mirage.vfs.ram import RAMVFS
 
-# Two rules that ask: one about a path, one about a whole command.
+# Two places that ask: `cat` on one path, and `rm` whatever it names.
+# A list holds several decisions for one place, and the strictest that
+# applies wins, so `cat` runs everywhere but asks for the secret.
 ROLE = {
     "commands": {
-        "allow": ["ls", "cat", "rm"],
-        "ask": [
+        "*": "deny",
+        "ls": "allow",
+        "cat": [
+            "allow",
             {
+                "decision": "ask",
                 "reason": "secrets are reviewed",
-                "commands": {"cat": ["/data/secret.txt"]},
+                "paths": ["/data/secret.txt"],
             },
-            {"reason": "deletes are reviewed", "commands": ["rm"]},
         ],
+        "rm": {"decision": "ask", "reason": "deletes are reviewed"},
     },
 }
 
@@ -53,7 +58,7 @@ async def main() -> None:
         await run(ws, "rm /data/a.txt")
         # The host reads the queue, one record per question and oldest
         # first, and answers each by id. ONCE passes one retry of that
-        # line; SESSION passes every line the rule covers from now on.
+        # line; SESSION passes every line that entry asks about from now on.
         for waiting in ws.decisions.pending("agent"):
             scope = Scope.ONCE if waiting.command == "cat" else Scope.SESSION
             words = " ".join(waiting.argv)

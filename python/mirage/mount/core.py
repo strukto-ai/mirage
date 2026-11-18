@@ -113,11 +113,11 @@ class MountCore:
         )
         if session is not None and skipped:
             # This entry point sees ops, never a line, so the profile's
-            # command-level rules have nothing here to judge.
+            # command trees have nothing here to judge.
             logger.warning(
                 "session %s: an entry point that sees only ops (a kernel "
                 "mount, SFTP, codex-exec's file calls) cannot apply %s; "
-                "path rules, hides and modes still hold",
+                "hides and modes still hold",
                 session.session_id,
                 "; ".join(skipped),
             )

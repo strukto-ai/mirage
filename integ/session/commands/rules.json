@@ -40,7 +40,7 @@
       }
     },
     {
-      "id": "cmd_bound_path_rule_at_the_dispatcher_speaks_eacces",
+      "id": "cmd_a_root_path_rule_refuses_a_bare_redirect",
       "seq": 923020,
       "targets": [
         "ram-commands"
@@ -462,18 +462,18 @@
       "session_profiles": {
         "redirects": {
           "commands": {
-            "deny": [
-              {
-                "commands": {
-                  "cat": [
-                    "/scratch/redirect-private"
-                  ],
-                  "rg": [
-                    "/scratch/redirect-private"
-                  ]
-                }
-              }
-            ]
+            "cat": {
+              "decision": "deny",
+              "paths": [
+                "/scratch/redirect-private"
+              ]
+            },
+            "rg": {
+              "decision": "deny",
+              "paths": [
+                "/scratch/redirect-private"
+              ]
+            }
           }
         }
       }

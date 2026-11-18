@@ -43,7 +43,7 @@ export class CLIHandler {
   readonly fn: CLIVerbFn | null
   readonly write: boolean
   readonly limit: Limit | null
-  /** Option spellings that make a read-only leaf a writer on that line. */
+  /** Options, by canonical spelling, that make a read-only leaf a writer on the line that carries them. */
   readonly writeWhen: readonly string[]
 
   constructor(
@@ -62,9 +62,12 @@ export class CLIHandler {
     Object.freeze(this)
   }
 
-  /** Whether this invocation may mutate state. */
-  writes(argv: readonly string[]): boolean {
-    return this.write || argv.some((word) => this.writeWhen.includes(word))
+  /**
+   * Whether this invocation may mutate state, given the options the line
+   * carries by canonical spelling (`leafOptions`).
+   */
+  writes(options: readonly string[]): boolean {
+    return this.write || this.writeWhen.some((option) => options.includes(option))
   }
 }
 
@@ -256,6 +259,8 @@ export class WalkResult {
   readonly words: readonly WalkWord[]
   readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag
+  /** The group flags the line carries, typed or filled from the environment, never a declared default. */
+  readonly present: readonly string[]
   readonly argv: readonly string[]
   readonly output: Uint8Array
   readonly stream: 'stdout' | 'stderr'
@@ -270,6 +275,7 @@ export class WalkResult {
         | 'words'
         | 'operandBases'
         | 'groupFlags'
+        | 'present'
         | 'argv'
         | 'output'
         | 'stream'
@@ -281,6 +287,7 @@ export class WalkResult {
     this.path = Object.freeze([...(init.path ?? [])])
     this.words = Object.freeze([...(init.words ?? [])])
     this.groupFlags = init.groupFlags ?? {}
+    this.present = Object.freeze([...(init.present ?? [])])
     this.operandBases = init.operandBases ?? []
     this.argv = Object.freeze([...(init.argv ?? [])])
     this.output = init.output ?? new Uint8Array(0)
@@ -288,4 +295,22 @@ export class WalkResult {
     this.exitCode = init.exitCode ?? 0
     Object.freeze(this)
   }
+}
+
+/**
+ * How a CLI leaf's words are parsed, the one setting the run and a
+ * policy's reading of the line share.
+ *
+ * spec: the grammar to parse with: the leaf, with the injected `--help`
+ * or a script's pass-through rest. mirageHelp: whether the injected
+ * `--help` is mirage's to answer. unknownIsOperand: whether an undeclared
+ * dashed word is an operand; under the cobra dialect it is an error.
+ * abbreviations: git's full long-option table for the verb, which
+ * resolves an abbreviated long option; undefined for any other program.
+ */
+export interface LeafParse {
+  readonly spec: CommandSpec
+  readonly mirageHelp: boolean
+  readonly unknownIsOperand: boolean
+  readonly abbreviations: readonly string[] | undefined
 }

@@ -24,6 +24,7 @@ from mirage.commands.cli.cobra import (
 )
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
+    GIT_LONG_OPTIONS,
     GIT_SYNOPSES,
     HELP_EXIT,
     POPPLER_EXIT,
@@ -33,6 +34,7 @@ from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
 from mirage.commands.cli.types import (
     CLI,
     DefaultCommandRoot,
+    LeafParse,
     WalkFlagBag,
     WalkResult,
     WalkWord,
@@ -55,6 +57,7 @@ from mirage.commands.spec.help import (
     render_help,
     usage_line,
 )
+from mirage.commands.spec.parser import ParsedArgs, parse_command
 from mirage.commands.spec.types import (
     Argument,
     CommandSpec,
@@ -63,6 +66,15 @@ from mirage.commands.spec.types import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
+
+# A textual rest operand is a CLI node's pass-through form: parsed under
+# unknown_is_operand, it takes the undeclared dashed tokens the node does
+# not refuse, which is what a program parsing its own argv needs. "str",
+# not "path", so nothing is cwd-resolved or routed. Only that parse
+# reads the rest kind this way: a GNU command's textual rest is a list
+# of operands, which is why basename has one and still refuses an option
+# it does not know.
+PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
 
 
 def _verb_display(child: CommandSpec) -> str:
@@ -301,6 +313,136 @@ def supplied_env_names(
         carriers.append(cs.env_by_dest)
         i += 1
     return _claimed(carriers, supplied)
+
+
+def parse_spec_for(
+    leaf: CommandSpec,
+    style: UsageStyle = UsageStyle.ARGPARSE,
+    passthrough: bool = False,
+) -> tuple[CommandSpec, bool]:
+    """Add help or the script's pass-through grammar before parsing.
+
+    The grammar rides on the leaf, as its compiled tables do, so each
+    parse of the leaf reuses one spec object and hits the parse cache.
+
+    Args:
+        leaf (CommandSpec): selected grammar.
+        style (UsageStyle): root help dialect.
+        passthrough (bool): whether a script owns raw argv.
+    """
+    stored = leaf.__dict__.get("_parse_specs")
+    kept: dict[tuple[UsageStyle, bool], tuple[CommandSpec, bool]] = (
+        stored if isinstance(stored, dict) else {}
+    )
+    if kept is not stored:
+        object.__setattr__(leaf, "_parse_specs", kept)
+    found = kept.get((style, passthrough))
+    if found is not None:
+        return found
+    grammar = leaf
+    if passthrough:
+        found = (
+            replace(leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)),
+            False,
+        )
+    else:
+        if style is UsageStyle.COBRA:
+            grammar = replace(leaf, allow_abbrev=False)
+        found = (
+            (grammar, False)
+            if not grammar.add_help
+            or any("--help" in arg.names for arg in grammar.arguments)
+            else (listed_node(grammar, style), True)
+        )
+    kept[(style, passthrough)] = found
+    return found
+
+
+def leaf_parse(
+    root: CommandSpec,
+    leaf: CommandSpec,
+    path: Sequence[str],
+    passthrough: bool = False,
+) -> LeafParse:
+    """How the run parses a CLI leaf's words, which a policy's reading
+    of the line parses with too, so both see the same options.
+
+    The dialect is the root's: under cobra an undeclared dashed word is
+    an error and no long option abbreviates. git resolves an abbreviated
+    long option against the verb's own full table (parse-options), and
+    its revision walkers take whole words only.
+
+    Args:
+        root (CommandSpec): the tree's root, whose dialect every level
+            speaks.
+        leaf (CommandSpec): the leaf its walk resolved.
+        path (Sequence[str]): the canonical verb path to the leaf.
+        passthrough (bool): whether a script owns the leaf's raw argv
+            (``owns_argv``).
+    """
+    spec, mirage_help = parse_spec_for(leaf, root.usage_style, passthrough)
+    return LeafParse(
+        spec,
+        mirage_help,
+        root.usage_style is not UsageStyle.COBRA,
+        (
+            GIT_LONG_OPTIONS.get(" ".join(path), ())
+            if root.name == "git"
+            else None
+        ),
+    )
+
+
+def parse_leaf(
+    cli: CLI,
+    result: WalkResult,
+    cwd: str,
+    prog: str,
+    env: Mapping[str, str] | None = None,
+) -> ParsedArgs:
+    """A walked line's leaf words, parsed as its run parses them
+    (``leaf_parse``).
+
+    Args:
+        cli (CLI): the installed CLI.
+        result (WalkResult): the walk that reached a leaf.
+        cwd (str): working directory the line was typed under.
+        prog (str): the head and the verb path.
+        env (Mapping[str, str] | None): session environment.
+    """
+    assert result.leaf is not None
+    rules = leaf_parse(cli.spec, result.leaf, result.path, owns_argv(cli))
+    return parse_command(
+        rules.spec,
+        list(result.argv),
+        cwd,
+        prog,
+        env,
+        unknown_is_operand=rules.unknown_is_operand,
+        abbreviations=rules.abbreviations,
+    )
+
+
+def leaf_options(
+    cli: CLI,
+    result: WalkResult,
+    cwd: str,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """The options a walked line carries at every level, by canonical
+    spelling: typed, or filled from the environment, never a declared
+    default. What a leaf's ``write_when`` is read against, so an
+    abbreviation the parser accepts counts as the option it names.
+
+    Args:
+        cli (CLI): the installed CLI.
+        result (WalkResult): the walk that reached a leaf.
+        cwd (str): working directory the line was typed under.
+        env (Mapping[str, str] | None): session environment.
+    """
+    prog = " ".join((cli.spec.name, *result.path))
+    parsed = parse_leaf(cli, result, cwd, prog, env)
+    return (*result.present, *parsed.typed_dests, *parsed.env_dests)
 
 
 def owns_argv(cli: CLI) -> bool:
@@ -744,30 +886,38 @@ def _resolve_group_paths(
                     paths[slot] = scope
             flags[cs.base_dest] = scope
             base = scope
-    seen: dict[str, int] = {}
+    resolved: dict[str, list[PathSpec | str]] = {}
     for name, word, slot in typed:
         if name == cs.base_dest or cs.kind_by_dest.get(name) != "path":
             continue
-        index = seen.get(name, 0)
-        seen[name] = index + 1
+        done = resolved.setdefault(name, [])
         value_types = cs.value_types_by_dest.get(name, ("path",))
-        if (
-            slot not in paths
-            and value_types[index % len(value_types)] == "path"
-        ):
+        if value_types[len(done) % len(value_types)] != "path":
+            done.append(word)
+            continue
+        if slot not in paths:
             paths[slot] = PathSpec.from_str_path(word, cwd=base)
+        done.append(paths[slot])
     for dest, kind in cs.kind_by_dest.items():
         if kind != "path" or dest not in flags or dest == cs.base_dest:
             continue
         value = flags[dest]
+        kept = resolved.get(dest)
         if isinstance(value, list):
             value_types = cs.value_types_by_dest.get(dest, ("path",))
-            flags[dest] = [
-                PathSpec.from_str_path(part, cwd=base)
-                if value_types[index % len(value_types)] == "path"
-                else part
-                for index, part in enumerate(value)
-            ]
+            flags[dest] = (
+                kept
+                if kept is not None and len(kept) == len(value)
+                else [
+                    PathSpec.from_str_path(part, cwd=base)
+                    if value_types[index % len(value_types)] == "path"
+                    and isinstance(part, str)
+                    else part
+                    for index, part in enumerate(value)
+                ]
+            )
+        elif kept:
+            flags[dest] = kept[-1]
         elif isinstance(value, str):
             flags[dest] = PathSpec.from_str_path(value, cwd=base)
 
@@ -782,6 +932,7 @@ def _finish_node(
     bases: list[PathSpec],
     taken: Sequence[_Taken],
     paths: dict[int, PathSpec],
+    present: list[str],
     env: Mapping[str, str] | None = None,
     defer_env: bool = False,
 ) -> WalkResult | None:
@@ -806,17 +957,22 @@ def _finish_node(
         taken (Sequence[_Taken]): every value taken so far, in order.
         paths (dict[int, PathSpec]): each typed PATH value's path by its
             position, updated in place.
+        present (list[str]): the group dests the line carries, typed or
+            filled from the environment, appended to in place.
         env (Mapping[str, str] | None): session environment for
             ``Argument.env`` fallbacks, None outside a session.
         defer_env (bool): leave absent env-backed requirements for the
             selected invocation's normal validation.
     """
+    own = set(cs.dest.values())
+    present.extend(d for d in flags if d in own and d not in present)
     for dest, variable in cs.env_by_dest.items():
         if dest in flags:
             continue
         supplied = env.get(variable) if env else None
         if not supplied:
             continue
+        present.append(dest)
         if dest in cs.multiple_dests:
             flags[dest] = [supplied]
         else:
@@ -916,6 +1072,7 @@ def walk(
     bases: list[PathSpec] = []
     taken: list[_Taken] = []
     paths: dict[int, PathSpec] = {}
+    present: list[str] = []
     i = 0
 
     if (
@@ -940,6 +1097,7 @@ def walk(
                 path=path,
                 words=_lead_words(argv[:i], positions, taken, paths),
                 group_flags=flags,
+                present=tuple(present),
                 operand_bases=tuple(bases),
                 argv=tuple(argv[i:]),
             )
@@ -970,6 +1128,7 @@ def walk(
                     bases,
                     taken,
                     paths,
+                    present,
                     env,
                     defer_env,
                 )
@@ -1219,6 +1378,7 @@ def walk(
                 bases,
                 taken,
                 paths,
+                present,
                 env,
                 defer_env,
             )
@@ -1257,6 +1417,7 @@ def walk(
             bases,
             taken,
             paths,
+            present,
             env,
             defer_env,
         )

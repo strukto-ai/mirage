@@ -780,14 +780,16 @@ async def test_codex_runs_under_the_key_profile(tmp_path):
                 "fs/readFile", {"path": "file:///vault/secret"}
             )
         async with codex(harness, key=guarded) as client:
-            refused = await client.error(
+            read = await client.result(
                 "fs/readFile", {"path": "file:///vault/secret"}
             )
             _, err, code = await client.run("p", "cat /vault/secret")
     finally:
         await stop_harness(harness)
     assert base64.b64decode(opened["dataBase64"]) == b"token\n"
-    assert refused["code"] == RPC_INTERNAL_ERROR
+    # A command tree judges lines; codex's own file calls are ops, which
+    # only a hide or a mode refuses.
+    assert base64.b64decode(read["dataBase64"]) == b"token\n"
     assert code != 0
     assert err.endswith(b"policy denied: the vault is sealed\n")
 
@@ -796,7 +798,7 @@ async def test_codex_runs_under_the_key_profile(tmp_path):
 async def test_a_command_the_key_profile_allows_runs(tmp_path):
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"narrow": {"commands": {"allow": ["echo"]}}},
+        profiles={"narrow": {"commands": {"*": "deny", "echo": "allow"}}},
     )
     harness = await start_harness(tmp_path, ws)
     narrow = bind_key(harness, 'mirage-profile="narrow"')

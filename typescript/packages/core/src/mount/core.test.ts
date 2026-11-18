@@ -37,6 +37,7 @@ import { LISTING_CONCURRENCY } from './constants.ts'
 import { MountCore } from './core.ts'
 import type { MountAttrs } from './types.ts'
 import type { Files } from '../workspace/files.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 /** The core's workspace with the test shell parser, as node's carries its own. */
 class Workspace extends CoreWorkspace {
@@ -169,7 +170,7 @@ describe('MountCore', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'token' > /data/secret.txt")
     const sess = ws.createSession('agent', {
-      profile: { commands: { deny: [{ reason: 'sealed', paths: ['/data/secret.txt'] }] } },
+      profile: SessionProfile({ paths: { hide: ['/data/secret.txt'] } }),
     })
     const readAll = async (core: MountCore): Promise<string> => {
       const fd = await core.open('/data/secret.txt')
@@ -177,7 +178,7 @@ describe('MountCore', () => {
     }
     expect(await readAll(new MountCore(ws.vfs))).toBe('token\n')
     await expect(readAll(new MountCore(ws.vfs, { session: sess }))).rejects.toMatchObject({
-      code: 'EACCES',
+      code: 'ENOENT',
     })
   })
 
@@ -1000,22 +1001,26 @@ describe('MountCore chunks', () => {
     await core.release(fd)
   })
 
-  it('tells a session the command rules FUSE skips', () => {
+  it('tells a session the command trees FUSE skips', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
-      const keys = { reason: 'keys', paths: ['/data/*.key'] }
       const ruled = ws.createSession('agent', {
-        profile: { commands: { deny: [{ reason: 'no rm', commands: ['rm'] }, keys] } },
+        profile: SessionProfile({
+          commands: { rm: 'deny' },
+          mounts: { '/data': { commands: { cp: 'deny' } } },
+        }),
       })
       expect(new MountCore(ws.vfs, { session: ruled })).toBeInstanceOf(MountCore)
       expect(warn).toHaveBeenCalledTimes(1)
-      const said = String(warn.mock.calls[0]?.[0])
-      expect(said).toContain('commands.deny: no rm')
-      expect(said).not.toContain('keys')
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        'cannot apply commands; mounts./data.commands',
+      )
       warn.mockClear()
-      const pathed = ws.createSession('pathed', { profile: { commands: { deny: [keys] } } })
-      expect(new MountCore(ws.vfs, { session: pathed })).toBeInstanceOf(MountCore)
+      const hidden = ws.createSession('hidden', {
+        profile: SessionProfile({ paths: { hide: ['/data/*.key'] } }),
+      })
+      expect(new MountCore(ws.vfs, { session: hidden })).toBeInstanceOf(MountCore)
       expect(warn).not.toHaveBeenCalled()
     } finally {
       warn.mockRestore()
@@ -1416,42 +1421,31 @@ it('makes a flush onto a name a rename replaces wait for it', async () => {
 })
 
 describe('MountCore cached chunks and session revocation', () => {
-  it.each(['hide', 'deny'] as const)(
-    'rechecks %s before serving a warmed chunk',
-    async (restriction) => {
-      const path = '/data/chunked.bin'
-      const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-      await ws.vfs.write(path, new Uint8Array(READ_CHUNK + 17).fill(23))
-      const session = ws.createSession('chunk-reader')
-      const core = new MountCore(ws.vfs, { session })
-      const read = vi.spyOn(ws.vfs, 'read')
-      const fd = await core.open(path)
-      try {
-        expect(await core.read(path, fd, 0, 8)).toEqual(new Uint8Array(8).fill(23))
-        const calls = read.mock.calls.length
-        expect(calls).toBe(1)
-        await ws.setSessionProfile(
-          'chunk-reader',
-          restriction === 'hide'
-            ? { paths: { hide: [path] } }
-            : { commands: { deny: [{ reason: 'sealed', paths: [path] }] } },
-        )
-        await expect(core.read(path, fd, 1, 8)).rejects.toMatchObject({
-          code: restriction === 'hide' ? 'ENOENT' : 'EACCES',
-        })
-        if (restriction === 'hide')
-          await expect(core.fgetattr(path, fd)).rejects.toMatchObject({ code: 'ENOENT' })
-        expect(read).toHaveBeenCalledTimes(calls)
-        await ws.setSessionProfile('chunk-reader', {})
-        expect(await core.read(path, fd, 1, 8)).toEqual(new Uint8Array(8).fill(23))
-        expect(read).toHaveBeenCalledTimes(calls)
-      } finally {
-        await core.release(fd)
-        expect(core.handles.has(fd)).toBe(false)
-        await ws.close()
-      }
-    },
-  )
+  it('rechecks a hide before serving a warmed chunk', async () => {
+    const path = '/data/chunked.bin'
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write(path, new Uint8Array(READ_CHUNK + 17).fill(23))
+    const session = ws.createSession('chunk-reader')
+    const core = new MountCore(ws.vfs, { session })
+    const read = vi.spyOn(ws.vfs, 'read')
+    const fd = await core.open(path)
+    try {
+      expect(await core.read(path, fd, 0, 8)).toEqual(new Uint8Array(8).fill(23))
+      const calls = read.mock.calls.length
+      expect(calls).toBe(1)
+      await ws.setSessionProfile('chunk-reader', { paths: { hide: [path] } })
+      await expect(core.read(path, fd, 1, 8)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(core.fgetattr(path, fd)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(read).toHaveBeenCalledTimes(calls)
+      await ws.setSessionProfile('chunk-reader', {})
+      expect(await core.read(path, fd, 1, 8)).toEqual(new Uint8Array(8).fill(23))
+      expect(read).toHaveBeenCalledTimes(calls)
+    } finally {
+      await core.release(fd)
+      expect(core.handles.has(fd)).toBe(false)
+      await ws.close()
+    }
+  })
 })
 
 it('does not replace a hidden mount root with synthetic attributes', async () => {

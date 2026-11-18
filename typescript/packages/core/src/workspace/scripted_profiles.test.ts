@@ -6,6 +6,7 @@ import { MISSING_PACKAGE_HINT } from '../runtime/python/monty/constants.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { commandTree } from '../policy/profile.ts'
 
 // Mirrors the profile policy cases in
 // python/tests/workspace/workspace/test_policies.py.
@@ -139,11 +140,14 @@ describe('profile policies', () => {
   }, 120000)
 
   it('a document may ride beside the policy', async () => {
-    // Optional, not required: a profile stating both keeps the allow
-    // list, and the program adds its verdicts beside it.
+    // Optional, not required: a profile stating both keeps its closed
+    // tree, and the program adds its verdicts beside it.
     const profiles = scripted()
     const ws = build({
-      release: { ...profiles.release, commands: { allow: ['ls', 'cat', 'echo'] } },
+      release: {
+        ...profiles.release,
+        commands: commandTree({ '*': 'deny', ls: 'allow', cat: 'allow', echo: 'allow' }),
+      },
     })
     try {
       ws.createSession('s', { profile: 'release' })

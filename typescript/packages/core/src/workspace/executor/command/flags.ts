@@ -212,6 +212,7 @@ export function parseFlags(
       missingRequiredOperands: parsed.missingRequiredOperands,
       typedDests: parsed.typedDests,
       builtin: parsed.builtin,
+      envDests: parsed.envDests,
     }
   }
 
@@ -239,6 +240,7 @@ export function parseFlags(
     missingRequiredOperands: [],
     typedDests: [],
     builtin: false,
+    envDests: [],
   }
 }
 

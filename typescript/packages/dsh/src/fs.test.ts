@@ -1092,13 +1092,14 @@ describe('a policy refusal at the dispatcher', () => {
     const ws = new Workspace(
       { '/data': [ram, MountMode.WRITE] },
       {
-        profiles: {
-          agent: SessionProfile(
-            { commands: { deny: [{ reason: 'keep.txt is frozen', paths: ['/data/keep.txt'] }] } },
-            'profile agent',
-          ),
-        },
-        profile: 'agent',
+        policies: [
+          {
+            preVfs: (call) =>
+              call.call.name === 'write' && call.path.virtual === '/data/keep.txt'
+                ? { kind: 'deny', reason: 'keep.txt is frozen' }
+                : null,
+          },
+        ],
       },
     )
     workspaces.push(ws)

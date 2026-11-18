@@ -12,67 +12,67 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match import has_rules, reads_args, scopes_paths
-from mirage.policy.types import AdmissionRules, CommandRule
+from mirage.policy.match import (
+    closed,
+    closed_by_default,
+    has_rules,
+    reads_args,
+    scopes_paths,
+)
+from mirage.policy.types import AdmissionRules
+from tests.fixtures.command_trees import trees
 
 
-def test_has_rules_is_a_role_stating_anything():
+def test_has_rules_is_a_profile_stating_a_tree():
     assert not has_rules(None)
     assert not has_rules(AdmissionRules())
-    assert has_rules(AdmissionRules(allow=()))
-    assert has_rules(AdmissionRules(ask=(CommandRule("r"),)))
-    assert has_rules(AdmissionRules(deny=(CommandRule("r"),)))
+    assert has_rules(trees({"rm": "deny"}))
 
 
-def test_reads_args_only_for_a_rule_that_reads_past_the_name():
-    rules = AdmissionRules(
-        allow=("cat", "git status", "*"),
-        deny=(
-            CommandRule("no rm", commands=("rm",)),
-            CommandRule("sealed", commands=("cat",), paths=("/secret*",)),
-            CommandRule("no force", commands=("git push -f",)),
-            CommandRule("repo", commands=("ls",), mount="/repo"),
-        ),
-        ask=(CommandRule("frozen", paths=("/locked/*",)),),
+def test_reads_args_only_where_a_node_reads_past_the_name():
+    rules = trees(
+        {
+            "*": "allow",
+            "rm": "deny",
+            "cat": {"decision": "deny", "paths": ["/secret*"]},
+            "git": {"push": {"--force": "deny"}},
+        },
+        mounts={"/repo": {"ls": "deny"}},
     )
-    # A token after the name, a path or a mount reads the arguments.
     assert reads_args(rules, "git")
     assert reads_args(rules, "cat")
     assert reads_args(rules, "ls")
-    # The command-less frozen rule reads every command's paths.
-    assert reads_args(rules, "echo")
-    # With no such rule for it, a command's arguments are unread: the
-    # wildcard allow and the bare `rm` deny decide on the name alone.
-    assert not reads_args(
-        AdmissionRules(
-            allow=("*", "rm"), deny=(CommandRule("no rm", commands=("rm",)),)
-        ),
-        "rm",
-    )
+    assert not reads_args(rules, "rm")
+    assert not reads_args(rules, "echo")
     assert not reads_args(None, "rm")
 
 
-def test_scopes_paths_is_a_path_rule_that_applies_to_this_command():
-    named = AdmissionRules(
-        deny=(
-            CommandRule("no rm", commands=("rm",)),
-            CommandRule("sealed", commands=("cat",), paths=("/secret*",)),
-            CommandRule("repo", commands=("ls",), mount="/repo"),
-        )
+def test_a_leaf_with_paths_on_the_root_reads_every_commands_args():
+    rules = trees({"*": {"decision": "ask", "paths": ["/locked/*"]}})
+    assert reads_args(rules, "echo")
+    assert scopes_paths(rules, "echo")
+
+
+def test_scopes_paths_is_a_leaf_with_paths_that_applies_to_the_command():
+    rules = trees(
+        {"rm": "deny", "cat": {"decision": "deny", "paths": ["/secret*"]}},
+        mounts={"/repo": {"ls": "deny"}},
     )
-    # A glob operand of cat or ls must be expanded before the gate reads
-    # it: a rule names the command and reads its paths (or its mount).
-    assert scopes_paths(named, "cat")
-    assert scopes_paths(named, "ls")
-    # The bare rm deny and an allow list read the name alone.
-    assert not scopes_paths(
-        AdmissionRules(allow=("rm", "*"), deny=named.deny), "rm"
-    )
-    assert not scopes_paths(named, "echo")
+    assert scopes_paths(rules, "cat")
+    assert scopes_paths(rules, "ls")
+    assert not scopes_paths(rules, "rm")
+    assert not scopes_paths(rules, "echo")
     assert not scopes_paths(None, "cat")
-    # A pure path rule applies to every command, so every command's globs
-    # expand: a pattern that only later matches under the scope would
-    # otherwise reach the command unjudged.
-    frozen = CommandRule("frozen", paths=("/locked/*",))
-    assert scopes_paths(AdmissionRules(deny=named.deny, ask=(frozen,)), "rm")
-    assert scopes_paths(AdmissionRules(ask=(frozen,)), "echo")
+
+
+def test_closed_is_a_top_level_root_that_denies_and_names_nothing():
+    assert closed(trees({"*": "deny"}))
+    assert closed_by_default(trees({"*": "deny"}))
+    listed = trees({"*": "deny", "ls": "allow"})
+    assert not closed(listed)
+    assert closed_by_default(listed)
+    assert not closed_by_default(
+        trees({"*": {"decision": "deny", "paths": ["/x"]}})
+    )
+    assert not closed_by_default(trees(mounts={"/a": {"*": "deny"}}))
+    assert not closed(None)

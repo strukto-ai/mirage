@@ -17,14 +17,15 @@
       "session_profiles": {
         "docs-cli": {
           "commands": {
-            "allow": [
-              "git status",
-              "grep",
-              "cat",
-              "man",
-              "which",
-              "type"
-            ]
+            "*": "deny",
+            "git": {
+              "status": "allow"
+            },
+            "grep": "allow",
+            "cat": "allow",
+            "man": "allow",
+            "which": "allow",
+            "type": "allow"
           }
         }
       },

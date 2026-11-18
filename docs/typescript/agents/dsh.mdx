@@ -118,10 +118,9 @@ The bundle mounts one RAM disk at `/tmp`. Set your own mounts, [Python](/typescr
     profiles:
       agent:
         commands:
-          ask:
-            - { commands: [rm], reason: deletes are reviewed }
-          deny:
-            - { commands: [git push], reason: no publishing }
+          rm:
+            "*": { decision: ask, reason: deletes are reviewed }
+            --recursive: { decision: deny, reason: no recursive deletes }
     profile: agent
 ```
 

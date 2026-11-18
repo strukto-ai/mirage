@@ -523,7 +523,6 @@ async def _fake_connect(**kwargs):
     "profile",
     [
         {"paths": {"hide": ["/data/secret"]}},
-        {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "x"}]}},
         {"mounts": {"/data": "r"}},
     ],
 )

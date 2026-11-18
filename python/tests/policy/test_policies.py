@@ -296,8 +296,8 @@ async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
         mode=MountMode.WRITE,
         policies=[RefusesTargetStat()],
     )
-    rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
-    ws.create_session("agent", profile={"commands": {"deny": [rule]}})
+    rule = {"decision": "deny", "reason": "sealed", "paths": ["/data/sec/*"]}
+    ws.create_session("agent", profile={"commands": {"*": rule}})
     try:
         await ws.shell(
             "mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; "
@@ -340,8 +340,8 @@ async def test_a_cancel_stops_a_refused_cp_whose_operand_stat_stalls():
     # one still waiting there, and no other operand is read.
     ram = StallingStat()
     ws = Workspace({"/data/": ram}, mode=MountMode.WRITE)
-    rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
-    ws.create_session("agent", profile={"commands": {"deny": [rule]}})
+    rule = {"decision": "deny", "reason": "sealed", "paths": ["/data/sec/*"]}
+    ws.create_session("agent", profile={"commands": {"*": rule}})
     try:
         await ws.shell(
             "mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b"

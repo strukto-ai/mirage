@@ -287,7 +287,7 @@ it('streams a start point whose mtime is known before listing it', async () => {
 describe('a link onto a directory a rule refuses to list', () => {
   const SEALED_DOC = SessionProfile({
     commands: {
-      deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
+      '*': { decision: 'deny', reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] },
     },
   })
   const SEALED_SEED =

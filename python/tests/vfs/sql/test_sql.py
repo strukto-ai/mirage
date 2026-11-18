@@ -273,7 +273,14 @@ async def test_recursive_grep_keeps_file_diagnostics_and_zero_counts():
             "agent",
             profile={
                 "commands": {
-                    "deny": [{"reason": "sealed", "paths": ["/work/d/a"]}]
+                    "*": [
+                        "allow",
+                        {
+                            "decision": "deny",
+                            "reason": "sealed",
+                            "paths": ["/work/d/a"],
+                        },
+                    ]
                 }
             },
         )

@@ -95,44 +95,47 @@ async def _dead_fetch(config: _FakeConfig, ref: str) -> ResolvedSecret:
 
 PROFILE = {
     "commands": {
-        "allow": [
-            "ls",
-            "cat",
-            "git",
-            "rm",
-            "mkdir",
-            "cd",
-            "echo",
-            "sleep",
-            "wait",
-            "eval",
-            "command",
-            "xargs",
-            "touch",
-            "printf",
-            "mapfile",
-            "alias",
-            "shopt",
-        ],
-        "deny": [
+        "*": "deny",
+        "ls": "allow",
+        "cat": [
+            "allow",
             {
-                "reason": "production data is protected",
-                "commands": {"rm": ["/data/prod/*"]},
-            }
-        ],
-        "ask": [
-            {"reason": "pushes need sign-off", "commands": ["git push"]},
-            {
+                "decision": "ask",
                 "reason": "secrets need sign-off",
-                "commands": {
-                    "cat": [
-                        "/data/secret.txt",
-                        "/data/secret file",
-                        "/data/secrét",
-                    ]
-                },
+                "paths": [
+                    "/data/secret.txt",
+                    "/data/secret file",
+                    "/data/secr\u00e9t",
+                ],
             },
         ],
+        "git": {
+            "*": "allow",
+            "operands": {
+                "push": {"decision": "ask", "reason": "pushes need sign-off"}
+            },
+        },
+        "rm": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "production data is protected",
+                "paths": ["/data/prod/*"],
+            },
+        ],
+        "mkdir": "allow",
+        "cd": "allow",
+        "echo": "allow",
+        "sleep": "allow",
+        "wait": "allow",
+        "eval": "allow",
+        "command": "allow",
+        "xargs": "allow",
+        "touch": "allow",
+        "printf": "allow",
+        "mapfile": "allow",
+        "alias": "allow",
+        "shopt": "allow",
     },
 }
 
@@ -141,15 +144,15 @@ PROFILE = {
 # about.
 ASK_CAT = {
     "commands": {
-        "allow": PROFILE["commands"]["allow"],
-        "ask": [{"reason": "reads need sign-off", "commands": ["cat"]}],
+        **PROFILE["commands"],
+        "cat": {"decision": "ask", "reason": "reads need sign-off"},
     },
 }
 
 DENY_CAT = {
     "commands": {
-        "allow": PROFILE["commands"]["allow"],
-        "deny": [{"reason": "reads are refused", "commands": ["cat"]}],
+        **PROFILE["commands"],
+        "cat": {"decision": "deny", "reason": "reads are refused"},
     },
 }
 
@@ -189,13 +192,13 @@ async def test_explain_answers_each_verb_and_names_the_rule(ws):
 
 
 @pytest.mark.asyncio
-async def test_a_word_the_allow_list_leaves_out_is_a_deny_at_126(ws):
-    # The allow list is the profile's policy: a word it leaves out is a
-    # DENY with no rule, refused in bash's words like any other.
+async def test_a_word_the_tree_names_nothing_for_is_a_deny_at_126(ws):
+    # The root's own decision speaks for a word the tree names nothing
+    # for: a DENY refused in bash's words like any other.
     (missing,) = await _judged(ws, "gerp x", "s")
     assert missing.outcome is Outcome.DENY
-    assert missing.rule is None
-    assert missing.source == "commands.allow"
+    assert missing.rule is not None and missing.rule.at == "/*"
+    assert missing.source == "top"
     assert missing.exit_code == 126
     assert missing.stderr == "gerp: Permission denied\n"
 
@@ -204,7 +207,7 @@ async def test_a_word_the_allow_list_leaves_out_is_a_deny_at_126(ws):
 @pytest.mark.parametrize(
     "line", ["timeout 5 sort /data/a.txt", "eval sort /data/a.txt"]
 )
-async def test_a_word_the_allow_list_leaves_out_is_refused_where_it_runs(
+async def test_a_word_the_tree_closes_is_refused_where_it_runs(
     line,
 ):
     # A builtin that runs a word hands it to the gate, which refuses it
@@ -212,7 +215,11 @@ async def test_a_word_the_allow_list_leaves_out_is_refused_where_it_runs(
     workspace = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"r": {"commands": {"allow": ["timeout", "eval"]}}},
+        profiles={
+            "r": {
+                "commands": {"*": "deny", "timeout": "allow", "eval": "allow"}
+            }
+        },
     )
     await workspace.vfs.write("/data/a.txt", b"a\n")
     workspace.create_session("s", profile="r")
@@ -224,7 +231,7 @@ async def test_a_word_the_allow_list_leaves_out_is_refused_where_it_runs(
     said = "sort: Permission denied\n"
     assert (ran.exit_code, ran.stderr) == (126, said.encode())
     assert (missing.exit_code, missing.stderr) == (126, said)
-    assert (missing.command, missing.source) == ("sort", "commands.allow")
+    assert (missing.command, missing.source) == ("sort", "top")
 
 
 @pytest.mark.asyncio
@@ -256,7 +263,7 @@ async def test_explain_says_exactly_what_the_run_would_say(ws):
 
 @pytest.mark.asyncio
 async def test_only_a_verdict_refuses_the_whole_line(ws):
-    # A word the allow list leaves out fails where it stands and the
+    # A word the closed root refuses fails where it stands and the
     # rest of the line runs; a rule's refusal holds the whole line,
     # whatever failed before it.
     said = await ws.explain("gerp x; echo ok", "s")
@@ -272,7 +279,7 @@ async def test_only_a_verdict_refuses_the_whole_line(ws):
         Outcome.DENY,
         126,
         "gerp: Permission denied\n",
-        "commands.allow",
+        "top",
     )
     line = "gerp x; rm /data/prod/x.txt"
     said = await ws.explain(line, "s")
@@ -325,7 +332,7 @@ async def test_a_denied_command_stops_the_whole_line(ws):
 
 @pytest.mark.asyncio
 async def test_a_word_the_allow_list_leaves_out_leaves_the_line_alone(ws):
-    # The allow list refuses a word where it stands, not the line: the
+    # The closed root refuses a word where it stands, not the line: the
     # stage fails and the rest of the line does what bash does. A typo
     # must not cost an agent the work the line already did.
     ran = await ws.shell("rm /data/a.txt && gerp x", session_id="s")
@@ -372,7 +379,11 @@ async def test_an_asked_test_runs_once_on_its_one_nod(test, status):
         "s",
         profile={
             "commands": {
-                "ask": [{"reason": "nod", "paths": ["/data/secret.txt"]}]
+                "*": {
+                    "decision": "ask",
+                    "reason": "nod",
+                    "paths": ["/data/secret.txt"],
+                }
             }
         },
     )
@@ -399,7 +410,11 @@ async def test_a_question_the_gate_asks_where_it_runs_holds_no_line():
         "s",
         profile={
             "commands": {
-                "ask": [{"reason": "nod", "paths": ["/data/secret.txt"]}]
+                "*": {
+                    "decision": "ask",
+                    "reason": "nod",
+                    "paths": ["/data/secret.txt"],
+                }
             }
         },
     )
@@ -482,15 +497,19 @@ async def test_a_grant_the_session_holds_shows_the_line_running(ws):
     )
 
 
+_SEALED_PROD = {
+    "decision": "deny",
+    "reason": "sealed until review",
+    "paths": ["/data/prod/*"],
+}
+
 SEALED = {
     "commands": {
-        "allow": ["ls", "cat", "rm", "mkdir", "echo"],
-        "deny": [
-            {
-                "reason": "sealed until review",
-                "paths": ["/data/prod/*"],
-            }
-        ],
+        "*": "deny",
+        **{
+            name: ["allow", _SEALED_PROD]
+            for name in ("ls", "cat", "rm", "mkdir", "echo")
+        },
     },
 }
 
@@ -1056,7 +1075,16 @@ async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
-        profiles={"r": {"commands": {"allow": ["bash", "source", "rm"]}}},
+        profiles={
+            "r": {
+                "commands": {
+                    "*": "deny",
+                    "bash": "allow",
+                    "source": "allow",
+                    "rm": "allow",
+                }
+            }
+        },
         machines=[_LineBox()],
     )
     try:
@@ -1198,7 +1226,7 @@ async def test_a_rule_refuses_a_command_name_the_runtime_globs():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
-        profiles={"r": {"commands": {"deny": ["hostname"]}}},
+        profiles={"r": {"commands": {"hostname": "deny"}}},
         machines=[box],
     )
     try:
@@ -1213,15 +1241,23 @@ async def test_a_rule_refuses_a_command_name_the_runtime_globs():
 
 SEALED_READS = {
     "commands": {
-        "allow": ["cat", "cd", "grep"],
-        "deny": [
+        "*": "deny",
+        "cat": [
+            "allow",
             {
+                "decision": "deny",
                 "reason": "sealed",
-                "commands": {
-                    "cat": ["/data/secret*"],
-                    "grep": ["/data/secret*"],
-                },
-            }
+                "paths": ["/data/secret*"],
+            },
+        ],
+        "cd": "allow",
+        "grep": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret*"],
+            },
         ],
     }
 }
@@ -1276,8 +1312,9 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
         profiles={
             "r": {
                 "commands": {
-                    "allow": ["cat", "cd", "false", "grep", "true"],
-                    "deny": SEALED_READS["commands"]["deny"],
+                    **SEALED_READS["commands"],
+                    "false": "allow",
+                    "true": "allow",
                 }
             }
         },
@@ -1374,9 +1411,14 @@ async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
         profiles={
             "r": {
                 "commands": {
-                    "allow": ["grep"],
-                    "ask": [
-                        {"reason": "nod", "commands": {"grep": ["/data"]}}
+                    "*": "deny",
+                    "grep": [
+                        "allow",
+                        {
+                            "decision": "ask",
+                            "reason": "nod",
+                            "paths": ["/data"],
+                        },
                     ],
                 }
             }
@@ -1475,9 +1517,11 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
     # a grep pattern spelling that cwd names no path.
     sealed = {
         "commands": {
-            "deny": [
-                {"reason": "sealed", "commands": {"grep": ["/data/prod"]}}
-            ]
+            "grep": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/prod"],
+            }
         }
     }
     ws = Workspace(
@@ -2160,9 +2204,7 @@ async def test_explain_refuses_a_usr_bin_path_as_its_program(line):
         machines={"m": {"provider": "in_process", "runtime": "monty"}},
         profiles={
             "default": {
-                "commands": {
-                    "deny": [{"reason": "no", "commands": ["python3"]}]
-                }
+                "commands": {"python3": {"decision": "deny", "reason": "no"}}
             }
         },
     )
@@ -2217,7 +2259,7 @@ async def test_a_link_loop_command_names_no_program(line):
 @pytest.mark.asyncio
 async def test_a_usr_bin_path_is_judged_past_a_function_of_its_name():
     # The path runs the program, never a function of the same name, so an
-    # allow list holds over it on a line the box runs whole.
+    # closed root holds over it on a line the box runs whole.
     box = _LineBox()
     ws = Workspace(
         {"/data/": RAMVFS()},
@@ -2226,7 +2268,9 @@ async def test_a_usr_bin_path_is_judged_past_a_function_of_its_name():
         route_policy=lambda ctx: "workspace" if "grep()" in ctx.line else None,
     )
     try:
-        ws.create_session("s", profile={"commands": {"allow": ["echo"]}})
+        ws.create_session(
+            "s", profile={"commands": {"*": "deny", "echo": "allow"}}
+        )
         await ws.shell("grep() { echo hi; }", session_id="s")
         r = await ws.shell("/usr/bin/grep x /data", session_id="s")
         assert (r.exit_code, r.stderr) == (126, b"grep: Permission denied\n")
@@ -2244,7 +2288,11 @@ async def test_a_usr_bin_path_keeps_the_operands_xargs_appends_unread():
             "s",
             profile={
                 "commands": {
-                    "deny": [{"reason": "no", "commands": ["echo forbidden"]}]
+                    "echo": {
+                        "operands": {
+                            "forbidden": {"decision": "deny", "reason": "no"}
+                        }
+                    }
                 }
             },
         )
@@ -2270,9 +2318,7 @@ async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
         ws.create_session(
             "s",
             profile={
-                "commands": {
-                    "deny": [{"reason": "no", "commands": ["python3"]}]
-                }
+                "commands": {"python3": {"decision": "deny", "reason": "no"}}
             },
         )
         await ws.shell(
@@ -2292,12 +2338,15 @@ async def test_a_tilde_names_the_users_home_when_the_line_is_judged(operand):
     # the run expands it; the whole-line check reads the same path.
     agent = {
         "commands": {
-            "allow": ["cat", "echo"],
-            "deny": [
+            "*": "deny",
+            "echo": "allow",
+            "cat": [
+                "allow",
                 {
+                    "decision": "deny",
                     "reason": "the secret is refused",
-                    "commands": {"cat": ["/home/agent/secret"]},
-                }
+                    "paths": ["/home/agent/secret"],
+                },
             ],
         },
     }

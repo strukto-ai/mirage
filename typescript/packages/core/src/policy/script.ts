@@ -66,7 +66,7 @@ const ENCODER = new TextEncoder()
 // The live handles every context carries, which a program reads as data
 // instead: the session as its cwd, env and profile, the files as the mounts
 // they show and through the program's own open().
-const LIVE = new Set(['session', 'vfs'])
+const LIVE = new Set(['session', 'vfs', 'read', 'grammar'])
 
 /**
  * A context's caller as a program reads it: the facts a policy reads of

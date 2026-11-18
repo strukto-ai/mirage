@@ -77,8 +77,10 @@ logger = logging.getLogger(__name__)
 
 # The live handles every context carries, which a program reads as
 # data instead: the session as its cwd, env and profile, the files as
-# the mounts they show and through the program's own open().
-_LIVE = frozenset({"session", "vfs"})
+# the mounts they show and through the program's own open(). A command's
+# grammar and its read of the line are the profile rules' own and are
+# left out.
+_LIVE = frozenset({"session", "vfs", "read", "grammar"})
 
 
 def _caller_data(caller: PolicyCaller | None) -> JsonValue:

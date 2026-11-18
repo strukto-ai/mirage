@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
@@ -34,18 +34,20 @@ from mirage.policy.builtin.output_cap import (
 )
 from mirage.policy.constants import (
     CTX_ENV,
-    DEFAULT_ASK_REASON,
-    DEFAULT_DENY_REASON,
     METHODS,
     PROGRAM_RUNTIME,
 )
 from mirage.policy.types import (
     AdmissionRules,
-    CommandRule,
+    CommandNode,
     HideReason,
+    OptionRule,
+    Outcome,
     ProfileScript,
     ProfileScripts,
+    RuleLeaf,
     ScriptMethod,
+    ValueRule,
 )
 from mirage.rs.document import validate_document
 from mirage.runtime.types import ScriptSource
@@ -62,28 +64,6 @@ from mirage.types import (
 from mirage.utils.path import norm
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
-
-
-def _string_list(
-    value: Any, where: str, names: str | None = None
-) -> tuple[str, ...]:
-    """A document list field, refused unless every item is a string.
-
-    A scalar ``commands: rm`` would otherwise ``tuple()`` into
-    ``('r', 'm')`` and the command it meant to refuse stay allowed, so
-    the document fails to load instead, as it does in TypeScript. An
-    entry that names something must also hold a token: a blank command
-    pattern is a prefix of every line, so a stray ``""`` would allow,
-    ask about or deny every command, and a blank path entry is the
-    root, so it would hide or deny the whole tree.
-
-    Args:
-        value (Any): the field as written, None when absent.
-        where (str): the field's name, for the message.
-        names (str | None): what a non-blank entry names (``a
-            command``, ``a path``); None accepts blank entries.
-    """
-    return tuple(validate_document("strings", value, where, names=names))
 
 
 def _absolute_paths(entries: tuple[str, ...], where: str) -> None:
@@ -128,51 +108,168 @@ def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
     validate_document("under", entries, where, root=root)
 
 
-def _rules(v: Any, where: str) -> Any:
-    """Coerce a ``deny`` or ``ask`` list to its CommandRules.
+def _read_leaves(raw: list[Any]) -> tuple[RuleLeaf, ...]:
+    return tuple(
+        RuleLeaf(
+            decision=Outcome(item["decision"]),
+            reason=item["reason"],
+            paths=tuple(item["paths"]),
+        )
+        for item in raw
+    )
 
-    A bare string is one command pattern over the whole line, with the
-    verb's default reason. A mapping carries ``reason`` (defaulting) and
-    exactly one of: ``commands`` as a list, a whole-line rule on each
-    pattern; ``commands`` as a mapping, each command pattern on its own
-    paths (one rule per command); ``paths`` alone, a path rule on every
-    command. A list of commands beside a list of paths is refused,
-    because it does not say which command the paths belong to, and a
-    rule naming neither is refused rather than read as "every command".
+
+def _read_option(raw: Mapping[str, Any]) -> OptionRule:
+    return OptionRule(
+        decision=_read_leaves(raw["decision"]),
+        values={
+            word: ValueRule(
+                decision=_read_leaves(rule["decision"]),
+                options={
+                    name: _read_option(option)
+                    for name, option in rule["options"].items()
+                },
+            )
+            for word, rule in raw["values"].items()
+        },
+        options={
+            name: _read_option(option)
+            for name, option in raw["options"].items()
+        },
+    )
+
+
+def _read_node(raw: Mapping[str, Any]) -> CommandNode:
+    return CommandNode(
+        decision=_read_leaves(raw["decision"]),
+        subcommands={
+            name: _read_node(node) for name, node in raw["subcommands"].items()
+        },
+        options={
+            name: _read_option(option)
+            for name, option in raw["options"].items()
+        },
+        other_options=_read_leaves(raw["other_options"]),
+        operands={
+            word: _read_node(node) for word, node in raw["operands"].items()
+        },
+    )
+
+
+def command_tree(raw: Any, where: str = "commands") -> CommandNode:
+    """A ``commands`` block read into its tree, by mirage-rs's shape
+    check.
+
+    Names are taken as written; checking them against the commands'
+    grammars needs the workspace. A block in the old flat format (allow,
+    ask and deny lists) is refused with a message naming the new one.
 
     Args:
-        v (Any): the list as written, or compiled rules, which the
-            resolver rebuilds blocks from.
-        where (str): ``deny`` or ``ask``.
+        raw (Any): the block as written, or a tree already read.
+        where (str): the block's name, for the messages.
+
+    Raises:
+        ValueError: the block is not a command tree.
     """
-    at = f"commands.{where}"
-    if v is None:
-        return ()
-    if not isinstance(v, (list, tuple)):
-        raise ValueError(f"{at} must be a list of rules")
-    reason = DEFAULT_ASK_REASON if where == "ask" else DEFAULT_DENY_REASON
-    rules: list[CommandRule] = []
-    for i, entry in enumerate(v):
-        if isinstance(entry, CommandRule):
-            rules.append(entry)
-            continue
-        rules.extend(
-            CommandRule(
-                reason=row["reason"],
-                commands=tuple(row.get("commands", ())),
-                paths=tuple(row.get("paths", ())),
-            )
-            for row in validate_document(
-                "rule", entry, f"{at}[{i}]", reason=reason
-            )
-        )
-    return tuple(rules)
+    if isinstance(raw, CommandNode):
+        return raw
+    return _read_node(validate_document("tree", raw, where))
 
 
-def _parse_allow(v: Any) -> Any:
-    if v is None:
-        return None
-    return _string_list(v, "commands.allow", names="a command")
+def _option_paths(rule: OptionRule) -> Iterator[str]:
+    for leaf in rule.decision:
+        yield from leaf.paths
+    for value in rule.values.values():
+        for leaf in value.decision:
+            yield from leaf.paths
+        for inner in value.options.values():
+            yield from _option_paths(inner)
+    for inner in rule.options.values():
+        yield from _option_paths(inner)
+
+
+def _leaf_paths(node: CommandNode) -> Iterator[str]:
+    for leaf in (*node.decision, *node.other_options):
+        yield from leaf.paths
+    for rule in node.options.values():
+        yield from _option_paths(rule)
+    for child in (*node.subcommands.values(), *node.operands.values()):
+        yield from _leaf_paths(child)
+
+
+def _leaves_doc(leaves: tuple[RuleLeaf, ...]) -> Any:
+    docs = [
+        leaf.decision.value
+        if not leaf.reason and not leaf.paths
+        else {
+            "decision": leaf.decision.value,
+            **({"reason": leaf.reason} if leaf.reason else {}),
+            **({"paths": list(leaf.paths)} if leaf.paths else {}),
+        }
+        for leaf in leaves
+    ]
+    return docs[0] if len(docs) == 1 else docs
+
+
+def _value_doc(rule: ValueRule) -> Any:
+    if rule.decision and not rule.options:
+        return _leaves_doc(rule.decision)
+    doc: dict[str, Any] = {}
+    if rule.decision:
+        doc["*"] = _leaves_doc(rule.decision)
+    doc.update(
+        {name: _option_doc(option) for name, option in rule.options.items()}
+    )
+    return doc
+
+
+def _option_doc(rule: OptionRule) -> Any:
+    if rule.decision and not rule.values and not rule.options:
+        return _leaves_doc(rule.decision)
+    doc: dict[str, Any] = {}
+    if rule.decision:
+        doc["*"] = _leaves_doc(rule.decision)
+    if rule.values:
+        doc["values"] = {
+            word: _value_doc(value) for word, value in rule.values.items()
+        }
+    doc.update(
+        {name: _option_doc(option) for name, option in rule.options.items()}
+    )
+    return doc
+
+
+def _node_doc(node: CommandNode) -> Any:
+    if node.decision and not (
+        node.subcommands or node.options or node.other_options or node.operands
+    ):
+        return _leaves_doc(node.decision)
+    return tree_doc(node)
+
+
+def tree_doc(tree: CommandNode) -> dict[str, Any]:
+    """A command tree as the ``commands`` block that reads back to it,
+    each place in its shortest spelling.
+
+    Args:
+        tree (CommandNode): the tree, or one node of it.
+    """
+    doc: dict[str, Any] = {}
+    if tree.decision:
+        doc["*"] = _leaves_doc(tree.decision)
+    if tree.other_options:
+        doc["-*"] = _leaves_doc(tree.other_options)
+    doc.update(
+        {name: _option_doc(option) for name, option in tree.options.items()}
+    )
+    doc.update(
+        {name: _node_doc(node) for name, node in tree.subcommands.items()}
+    )
+    if tree.operands:
+        doc["operands"] = {
+            word: _node_doc(node) for word, node in tree.operands.items()
+        }
+    return doc
 
 
 def _paths(raw: Any, where: str) -> dict[str, Any]:
@@ -288,87 +385,6 @@ class VarsBlock(BaseModel):
     hide: tuple[str, ...] = ()
 
 
-class CommandsBlock(BaseModel):
-    """``commands:`` at the top level of a profile.
-
-    ``allow`` lists the command patterns the profile allows; a line no
-    pattern covers is refused, ``<cmd>: Permission denied`` at 126, like
-    any other rule's Deny. Shell builtins are subjects like everything
-    else: a list stating only ``cat`` refuses ``echo`` and ``cd``. The agent's
-    own functions are the one exemption, safe because every line of a
-    body passes the gate itself. ``ask`` rules are admitted only with a
-    host approval; ``deny`` rules refuse with a reason. A bare string in
-    either is one command pattern with the default reason.
-
-    Args:
-        allow (tuple[str, ...] | None): the profile's allow patterns;
-            None (unstated) allows everything.
-        ask (tuple[CommandRule, ...]): what needs sign-off, in order.
-        deny (tuple[CommandRule, ...]): the profile's refusals, in order.
-    """
-
-    model_config = _DOC
-
-    allow: tuple[str, ...] | None = None
-    ask: tuple[CommandRule, ...] = ()
-    deny: tuple[CommandRule, ...] = ()
-
-    @field_validator("allow", mode="before")
-    @classmethod
-    def _v_allow(cls, v: Any) -> Any:
-        return _parse_allow(v)
-
-    @field_validator("ask", mode="before")
-    @classmethod
-    def _v_ask(cls, v: Any) -> Any:
-        return _rules(v, "ask")
-
-    @field_validator("deny", mode="before")
-    @classmethod
-    def _v_deny(cls, v: Any) -> Any:
-        return _rules(v, "deny")
-
-    @model_validator(mode="after")
-    def _v_absolute(self) -> "CommandsBlock":
-        # This block is the profile's own, never a mount section's, so a
-        # rule's paths are virtual paths: absolute, or name patterns.
-        for verb, rules in (("ask", self.ask), ("deny", self.deny)):
-            for rule in rules:
-                _absolute_paths(rule.paths, f"{verb} rule paths")
-        return self
-
-
-class MountCommandsBlock(BaseModel):
-    """``commands:`` of one mount section: ``ask`` and ``deny`` only.
-
-    A mount rule applies to a line that works inside the mount (its cwd
-    or one of its paths lies under the root); its ``paths`` are
-    absolute, like every other path in the document, and must name
-    something under that root. There is no ``allow`` here: what a
-    session can see is a property of the session, and an operand cannot
-    make a command "not found".
-
-    Args:
-        ask (tuple[CommandRule, ...]): what needs sign-off here.
-        deny (tuple[CommandRule, ...]): what is refused here.
-    """
-
-    model_config = _DOC
-
-    ask: tuple[CommandRule, ...] = ()
-    deny: tuple[CommandRule, ...] = ()
-
-    @field_validator("ask", mode="before")
-    @classmethod
-    def _v_ask(cls, v: Any) -> Any:
-        return _rules(v, "ask")
-
-    @field_validator("deny", mode="before")
-    @classmethod
-    def _v_deny(cls, v: Any) -> Any:
-        return _rules(v, "deny")
-
-
 class ProfileMount(BaseModel):
     """One mount's entry in a profile: what this profile may do there.
 
@@ -379,26 +395,30 @@ class ProfileMount(BaseModel):
     reads as nonexistent rather than as a permission error naming
     something the profile cannot see.
 
-    ``commands`` here carries ask and deny only: an allow list installs
-    a command for the whole session, and visibility is answered before
-    any operand exists, so it cannot be per mount. Rules written here
-    apply to a line that works inside this mount, by cwd or by operand,
-    which is what a path-scoped rule cannot express (``cd /repo && git
-    commit`` names no path).
+    ``commands`` here is a command tree of its own. It applies to a line
+    that works inside this mount, by cwd or by a path it names, which a
+    path-scoped leaf cannot express (``cd /repo && git commit`` names no
+    path). It is judged beside the top-level tree and the strictest
+    result wins, so it only tightens.
 
     Args:
         mode (MountMode | None): this profile's mode for the mount; None
             keeps the mount's own.
-        commands (MountCommandsBlock | None): ask and deny rules for
-            lines working inside it.
+        commands (CommandNode | None): the tree for lines working
+            inside it.
         paths (PathsBlock | None): hides under it.
     """
 
     model_config = _DOC
 
     mode: MountMode | None = None
-    commands: MountCommandsBlock | None = None
+    commands: CommandNode | None = None
     paths: PathsBlock | None = None
+
+    @field_validator("commands", mode="before")
+    @classmethod
+    def _v_commands(cls, v: Any) -> Any:
+        return None if v is None else command_tree(v)
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -583,13 +603,13 @@ class SessionProfile(BaseModel):
             ``from:`` entry a managed pointer, so a credential is
             named here and fetched, never written as its value.
         mounts (dict[str, ProfileMount] | None): per-mount settings,
-            keyed by prefix: a mode, ask and deny rules for lines
-            working inside the mount, and hides under it. A mount the
-            mapping omits keeps its own mode and gains no rules.
+            keyed by prefix: a mode, a command tree for lines working
+            inside the mount, and hides under it. A mount the mapping
+            omits keeps its own mode and gains no rules.
         paths (PathsBlock | None): the profile's hides, absolute.
         vars (VarsBlock | None): the profile's hidden variables.
-        commands (CommandsBlock | None): the profile's allow list and its
-            ask / deny rules, absolute paths.
+        commands (CommandNode | None): the profile's command tree, its
+            paths absolute.
         policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the
             profile's policy: each ``pre_`` method's programs, asked in
             order.
@@ -606,7 +626,7 @@ class SessionProfile(BaseModel):
     mounts: dict[str, ProfileMount] | None = None
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
-    commands: CommandsBlock | None = None
+    commands: CommandNode | None = None
     policy: ProfilePrograms | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
@@ -641,12 +661,21 @@ class SessionProfile(BaseModel):
 
     _v_policy = field_validator("policy", mode="before")(parse_profile_policy)
 
+    @field_validator("commands", mode="before")
+    @classmethod
+    def _v_commands(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        tree = command_tree(v)
+        _absolute_paths(tuple(_leaf_paths(tree)), "commands paths")
+        return tree
+
     _v_mounts = field_validator("mounts", mode="before")(parse_profile_mounts)
 
     @model_validator(mode="after")
     def _v_absolute(self) -> "SessionProfile":
-        # `commands` checks its own rule paths (CommandsBlock) and `paths`
-        # its own entries, so only the mount boundaries are left to this one.
+        # `commands` and `paths` check their own entries, so only the
+        # mount boundaries are left to this one.
         for prefix, entry in (self.mounts or {}).items():
             where = f"mounts[{prefix}]"
             if entry.paths is not None:
@@ -657,15 +686,9 @@ class SessionProfile(BaseModel):
                     f"{where}.paths.show",
                 )
             if entry.commands is not None:
-                for verb, rules in (
-                    ("ask", entry.commands.ask),
-                    ("deny", entry.commands.deny),
-                ):
-                    for rule in rules:
-                        _absolute_paths(rule.paths, f"{where}.commands.{verb}")
-                        _under_mount(
-                            rule.paths, prefix, f"{where}.commands.{verb}"
-                        )
+                paths = tuple(_leaf_paths(entry.commands))
+                _absolute_paths(paths, f"{where}.commands paths")
+                _under_mount(paths, prefix, f"{where}.commands paths")
         return self
 
 
@@ -675,8 +698,8 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
 
     ``model_dump`` writes that document except in three blocks: a show
     entry dumps as a row rather than a path mapped to its mode, and a
-    rule dumps its compiled ``mount`` and, when it names commands and
-    paths, a pair the document refuses. Those blocks are spelled here,
+    command tree dumps as its typed nodes (``tree_doc`` writes it back).
+    Those blocks are spelled here,
     the limits and process scopes keep their unset fields, as the
     session record writes them on both hosts, and an env entry is
     written with the fields its author set, a managed one as its
@@ -740,7 +763,7 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     if profile.paths is not None:
         doc["paths"] = _paths_doc(profile.paths)
     if profile.commands is not None:
-        doc["commands"] = _commands_doc(profile.commands)
+        doc["commands"] = tree_doc(profile.commands)
     return doc
 
 
@@ -760,7 +783,7 @@ def _mount_doc(entry: ProfileMount) -> dict[str, Any]:
     if entry.paths is not None:
         doc["paths"] = _paths_doc(entry.paths)
     if entry.commands is not None:
-        doc["commands"] = _commands_doc(entry.commands)
+        doc["commands"] = tree_doc(entry.commands)
     return doc
 
 
@@ -789,30 +812,6 @@ def _paths_doc(block: PathsBlock) -> dict[str, Any]:
             for g in block.reasons
         ],
     }
-
-
-def _commands_doc(block: CommandsBlock | MountCommandsBlock) -> dict[str, Any]:
-    doc: dict[str, Any] = {
-        "ask": [_rule_doc(rule) for rule in block.ask],
-        "deny": [_rule_doc(rule) for rule in block.deny],
-    }
-    if isinstance(block, CommandsBlock) and block.allow is not None:
-        doc["allow"] = list(block.allow)
-    return doc
-
-
-def _rule_doc(rule: CommandRule) -> dict[str, Any]:
-    # A rule naming commands and paths is the mapping form, each
-    # command on the rule's paths; it reads back as one rule per
-    # command, which admits exactly what the one rule did.
-    if rule.commands and rule.paths:
-        return {
-            "reason": rule.reason,
-            "commands": {c: list(rule.paths) for c in rule.commands},
-        }
-    if rule.paths:
-        return {"reason": rule.reason, "paths": list(rule.paths)}
-    return {"reason": rule.reason, "commands": list(rule.commands)}
 
 
 @dataclass(frozen=True, slots=True)

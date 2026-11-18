@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type AdmissionRules, Outcome } from '../../policy/types.ts'
 import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 
 /**
@@ -19,6 +20,33 @@ import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
  * workspace defines one of this name.
  */
 export const DEFAULT_PROFILE = 'default'
+
+/**
+ * What a session record written before command trees comes back with: its
+ * flat rules have no tree to become, so every line is denied until the
+ * session is recreated.
+ */
+export const OLDER_FORMAT: AdmissionRules = {
+  trees: [
+    {
+      tree: {
+        decision: [
+          {
+            decision: Outcome.DENY,
+            reason: 'rules saved in an older format; recreate the session',
+            paths: [],
+          },
+        ],
+        subcommands: new Map(),
+        options: new Map(),
+        otherOptions: [],
+        operands: new Map(),
+      },
+      mount: '',
+      inline: false,
+    },
+  ],
+}
 
 /**
  * What bash starts these at whatever its environment holds (OPTIND an

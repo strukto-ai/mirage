@@ -17,20 +17,15 @@ import pytest
 from mirage.policy import (
     AdmissionRules,
     Ask,
-    CommandContext,
-    CommandRule,
     Deny,
+    Outcome,
     PermissionsPolicy,
     Policies,
-    VfsContext,
 )
-from mirage.types import PathSpec
-from mirage.workspace.dispatcher.constants import CALLS
+from tests.fixtures.command_trees import line, trees
 
 
 class _Sessions:
-    """A SessionCommandsQuery: one compiled document per session id."""
-
     def __init__(self, rules: dict[str, AdmissionRules]) -> None:
         self.rules = rules
 
@@ -38,343 +33,72 @@ class _Sessions:
         return self.rules.get(session_id)
 
 
-def _path(virtual: str, raw: str = "") -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0] or "/",
-        vfs_path=virtual,
-        resolved=True,
-        raw_path=raw,
-    )
-
-
-def _ctx(
-    command: str,
-    *args: str,
-    paths: tuple[PathSpec, ...] = (),
-    cwd: str = "/",
-    session_id: str = "s",
-    program: tuple[str, ...] = (),
-    tool: bool = True,
-) -> CommandContext:
-    return CommandContext(
-        command=command,
-        paths=paths,
-        argv=tuple(args),
-        cwd=cwd,
-        session_id=session_id,
-        tokens=(command, *args),
-        program=program or (command,),
-        tool=tool,
-    )
-
-
-# One profile, compiled: its own rules plus the ones its `mounts./repo`
-# section carries, which the compiler stamped with that root.
-MOUNT_DENY = CommandRule(
-    reason="history is read-only here", commands=("git push",), mount="/repo"
+FULL = trees(
+    {
+        "rm": {
+            "decision": "deny",
+            "reason": "no repo deletes",
+            "paths": ["/repo/*"],
+        },
+        "cp": {"decision": "ask", "reason": "sign-off"},
+    },
+    mounts={"/repo": {"cp": {"decision": "deny", "reason": "read-only"}}},
 )
-ASK_PUSH = CommandRule(reason="sign-off", commands=("git push",))
-FULL = AdmissionRules(
-    allow=("ls", "cat", "rm", "git", "python3"),
-    deny=(
-        MOUNT_DENY,
-        CommandRule(
-            reason="no deletes in the repo",
-            commands=("rm",),
-            paths=("/repo/*",),
-        ),
-        CommandRule(reason="frozen", paths=("/repo/locked/*",)),
-    ),
-    ask=(ASK_PUSH,),
-)
-REVIEWER = AdmissionRules(allow=("ls", "cat", "git log", "git status"))
+REVIEWER = trees({"*": "deny", "ls": "allow", "cat": "allow"})
 
 
 def _policy() -> PermissionsPolicy:
     return PermissionsPolicy(_Sessions({"s": FULL, "rev": REVIEWER}))
 
 
+async def _judge(
+    policy: PermissionsPolicy, *words: str, session: str = "s", **kw
+) -> Deny | Ask | None:
+    answer = await policy.pre_command(line(*words, session_id=session, **kw))
+    assert answer is None or isinstance(answer, (Deny, Ask))
+    return answer
+
+
 @pytest.mark.asyncio
-async def test_no_rules_means_no_opinion():
+async def test_no_tree_means_no_opinion():
     policy = PermissionsPolicy(_Sessions({}))
-    assert await policy.pre_command(_ctx("rm", "-rf", "/")) is None
-    assert (
-        await policy.pre_vfs(
-            VfsContext(
-                call=CALLS["unlink"], path=_path("/x"), write=True, prefix="/"
-            )
-        )
-        is None
-    )
+    assert await _judge(policy, "rm", "-rf", "/") is None
 
 
 @pytest.mark.asyncio
-async def test_the_allow_list_refuses_a_visible_head_it_does_not_cover():
+async def test_a_closed_root_refuses_every_command_it_names_no_allow_for():
     policy = _policy()
-    assert (
-        await policy.pre_command(_ctx("ls", "-la", session_id="rev")) is None
-    )
-    assert (
-        await policy.pre_command(
-            _ctx("git", "log", "-1", session_id="rev", program=("git", "log"))
-        )
-        is None
-    )
-    # `git` is visible in the reviewer session (some git lines are
-    # allowed) but `git push` matches nothing there: a whole-command
-    # refusal naming the program, not "command not found".
-    deny = await policy.pre_command(
-        _ctx("git", "push", session_id="rev", program=("git", "push"))
-    )
-    assert deny == Deny("git push is not allowed")
-    # A word that is not a tool is never refused by an allow list.
-    assert (
-        await policy.pre_command(
-            _ctx("cd", "/x", session_id="rev", tool=False)
-        )
-        is None
-    )
-    assert await policy.pre_command(_ctx("python3", "-c", "1")) is None
+    assert await _judge(policy, "ls", "-la", session="rev") is None
+    deny = await _judge(policy, "rm", "/x", session="rev")
+    assert isinstance(deny, Deny)
+    assert deny.rule is not None and deny.rule.at == "/*"
+    assert deny.reason == "rm is not allowed"
+    assert await _judge(policy, "cd", "/x", session="rev", tool=False) is None
 
 
 @pytest.mark.asyncio
-async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
+async def test_a_leaf_speaks_by_its_paths_and_by_where_it_was_written():
     policy = _policy()
-    # Whole-command rule: reason only, the command plane renders `git: policy
-    # denied: ...` at 126. A mount section's rule applies when the line
-    # works inside that mount (here by cwd).
-    assert await policy.pre_command(
-        _ctx("git", "push", cwd="/repo/sub", program=("git", "push"))
-    ) == Deny("history is read-only here", rule=MOUNT_DENY)
-    # Off the mount, the same line falls through to the ask rule: the
-    # deny rules ran first and had no opinion.
-    assert await policy.pre_command(
-        _ctx("git", "push", cwd="/scratch", program=("git", "push"))
-    ) == Ask("sign-off", ASK_PUSH, (ASK_PUSH,))
-    # A rule with paths: the path as typed, in the GNU voice.
-    assert await policy.pre_command(
-        _ctx("rm", "x", paths=(_path("/repo/x", raw="x"),), cwd="/repo")
-    ) == Deny("no deletes in the repo", path="x", rule=FULL.deny[1])
-    assert (
-        await policy.pre_command(
-            _ctx("rm", "/scratch/x", paths=(_path("/scratch/x"),))
-        )
-        is None
-    )
-    # A pure path rule refuses any command that names the path.
-    assert await policy.pre_command(
-        _ctx("cat", "/repo/locked/a", paths=(_path("/repo/locked/a"),))
-    ) == Deny("frozen", path="/repo/locked/a", rule=FULL.deny[2])
-
-
-@pytest.mark.asyncio
-async def test_the_deeper_anchor_wins_and_deny_breaks_a_tie():
-    # The path axis: two rules matching one operand are ordered by how
-    # many literal components each anchors, deepest first, and only a
-    # tie is broken by the verb.
-    deep = CommandRule(
-        reason="sealed", commands=("rm",), paths=("/repo/sealed/*",)
-    )
-    shallow = CommandRule(
-        reason="needs a nod", commands=("rm",), paths=("/repo/*",)
-    )
-    policy = PermissionsPolicy(
-        _Sessions({"s": AdmissionRules(ask=(shallow,), deny=(deep,))})
-    )
-    assert await policy.pre_command(
-        _ctx("rm", "/repo/sealed/y", paths=(_path("/repo/sealed/y"),))
-    ) == Deny("sealed", path="/repo/sealed/y", rule=deep)
-    # Outside the deeper rule's anchor the shallow one is what is left.
-    assert await policy.pre_command(
-        _ctx("rm", "/repo/x", paths=(_path("/repo/x"),))
-    ) == Ask("needs a nod", shallow, (shallow,))
-    # The other way round: an ask anchored deeper than a deny wins, so a
-    # profile can carve an exception out of a broad refusal.
-    flipped = PermissionsPolicy(
-        _Sessions(
-            {
-                "s": AdmissionRules(
-                    ask=(
-                        CommandRule(
-                            reason="nod here",
-                            commands=("rm",),
-                            paths=("/repo/sealed/*",),
-                        ),
-                    ),
-                    deny=(
-                        CommandRule(
-                            reason="no deletes",
-                            commands=("rm",),
-                            paths=("/repo/*",),
-                        ),
-                    ),
-                )
-            }
-        )
-    )
-    answer = await flipped.pre_command(
-        _ctx("rm", "/repo/sealed/y", paths=(_path("/repo/sealed/y"),))
-    )
-    assert isinstance(answer, Ask) and answer.reason == "nod here"
-
-
-@pytest.mark.asyncio
-async def test_an_unrelated_entry_does_not_lend_a_rule_its_depth():
-    # The rule is scored by the entry that covered this operand, not by
-    # its deepest entry. Scoring the deepest would let `/else/very/deep/*`
-    # -- which says nothing about /repo -- carry the ask past a deny
-    # anchored right at /repo/private, and an approval would then reopen
-    # exactly what the deny sealed.
-    ask = CommandRule(
-        reason="review",
-        commands=("cat",),
-        paths=("/repo/*", "/else/very/deep/*"),
-    )
-    deny = CommandRule(
-        reason="private", commands=("cat",), paths=("/repo/private/*",)
-    )
-    policy = PermissionsPolicy(
-        _Sessions({"s": AdmissionRules(ask=(ask,), deny=(deny,))})
-    )
-    assert await policy.pre_command(
-        _ctx("cat", "/repo/private/x", paths=(_path("/repo/private/x"),))
-    ) == Deny("private", path="/repo/private/x", rule=deny)
-    # The unrelated entry still speaks where it does anchor.
-    answer = await policy.pre_command(
-        _ctx("cat", "/else/very/deep/x", paths=(_path("/else/very/deep/x"),))
-    )
-    assert isinstance(answer, Ask) and answer.reason == "review"
-
-
-@pytest.mark.asyncio
-async def test_a_pathless_rule_is_read_by_verb_wherever_it_is_written():
-    # The command axis, and the one thing it deliberately cannot say.
-    # A rule naming no path scores nothing on the path axis even when a
-    # mount section holds it, so "denied generally, asked inside one
-    # mount" is inexpressible for a pathless rule: the deny wins. That
-    # is correct for what such a rule covers in practice, an account CLI
-    # that reaches a service and touches no mount at all.
-    deny = CommandRule(reason="no branches", commands=("git branch",))
-    ask = CommandRule(
-        reason="branches need a nod", commands=("git branch",), mount="/repo"
-    )
-    policy = PermissionsPolicy(
-        _Sessions({"s": AdmissionRules(ask=(ask,), deny=(deny,))})
-    )
-    assert await policy.pre_command(
-        _ctx("git", "branch", cwd="/repo", program=("git", "branch"))
-    ) == Deny("no branches", rule=deny)
-    # Give the mount rule a path and it is on the other axis, where
-    # being deeper is what lets it carve out the exception.
-    scoped = CommandRule(
-        reason="branches need a nod",
-        commands=("git branch",),
-        paths=("/repo/wip/*",),
-        mount="/repo",
-    )
-    carved = PermissionsPolicy(
-        _Sessions({"s": AdmissionRules(ask=(scoped,), deny=(deny,))})
-    )
-    answer = await carved.pre_command(
-        _ctx(
-            "git",
-            "branch",
-            "/repo/wip/x",
-            paths=(_path("/repo/wip/x"),),
-            cwd="/repo",
-            program=("git", "branch"),
-        )
-    )
-    assert isinstance(answer, Ask) and answer.reason == "branches need a nod"
-
-
-@pytest.mark.asyncio
-async def test_an_ask_rule_speaks_after_every_deny():
-    policy = _policy()
-    # A line an ask rule covers, refused by nothing: the Ask names the
-    # rule so the entry point can key a session grant on it.
-    assert await policy.pre_command(
-        _ctx(
-            "git",
-            "push",
-            "origin",
-            "main",
-            cwd="/scratch",
-            program=("git", "push"),
-        )
-    ) == Ask("sign-off", ASK_PUSH, (ASK_PUSH,))
-    # Deny runs first: on the mount the same line is refused, and a
-    # grant could never re-open it because no Ask is raised.
-    assert await policy.pre_command(
-        _ctx("git", "push", cwd="/repo", program=("git", "push"))
-    ) == Deny("history is read-only here", rule=MOUNT_DENY)
-    # An operand-scoped ask rule asks only when the line names the path.
-    shared = AdmissionRules(
-        ask=(
-            CommandRule(
-                reason="shared", commands=("rm",), paths=("/repo/shared/*",)
-            ),
-        )
-    )
-    perms = PermissionsPolicy(_Sessions({"s": shared}))
-    assert await perms.pre_command(
-        _ctx("rm", "/repo/shared/a", paths=(_path("/repo/shared/a"),))
-    ) == Ask("shared", shared.ask[0], (shared.ask[0],))
-    assert (
-        await perms.pre_command(
-            _ctx("rm", "/repo/b", paths=(_path("/repo/b"),))
-        )
-        is None
-    )
-
-
-@pytest.mark.asyncio
-async def test_pre_vfs_holds_the_pure_path_rules():
-    policy = _policy()
-    locked = VfsContext(
-        call=CALLS["write"],
-        path=_path("/repo/locked/a"),
-        write=True,
-        prefix="/repo/",
-        session_id="s",
-    )
-    assert await policy.pre_vfs(locked) == Deny("frozen", rule=FULL.deny[2])
-    # Command-scoped rules do not reach the dispatcher: an op does not
-    # know which command issued it.
-    assert (
-        await policy.pre_vfs(
-            VfsContext(
-                call=CALLS["unlink"],
-                path=_path("/repo/x"),
-                write=True,
-                prefix="/repo/",
-                session_id="s",
-            )
-        )
-        is None
-    )
+    deny = await _judge(policy, "cp", "a", "b", cwd="/repo/sub")
+    assert isinstance(deny, Deny) and deny.reason == "read-only"
+    assert deny.rule is not None and deny.rule.mount == "/repo"
+    ask = await _judge(policy, "cp", "a", "b", cwd="/scratch")
+    assert isinstance(ask, Ask) and ask.reason == "sign-off"
+    assert ask.rules == (ask.rule,)
+    refused = await _judge(policy, "rm", "/repo/x")
+    assert isinstance(refused, Deny)
+    assert refused.path == "/repo/x"
+    assert refused.rule is not None and refused.rule.decision is Outcome.DENY
+    assert await _judge(policy, "rm", "/scratch/x") is None
 
 
 @pytest.mark.asyncio
 async def test_seeded_in_a_policies_chain_after_the_builtins():
     policies = Policies([_policy()])
     deny = await policies.pre_command(
-        _ctx("git", "push", cwd="/repo", program=("git", "push"))
+        line("cp", "a", "b", cwd="/repo", session_id="s")
     )
-    assert deny == Deny(
-        "history is read-only here",
-        policy="PermissionsPolicy",
-        rule=MOUNT_DENY,
-    )
-    assert policies.wants("pre_vfs")
-
-
-@pytest.mark.asyncio
-async def test_speaks_at_the_dispatcher_only_through_a_pure_path_rule():
-    p = _policy()
-    assert await p.wants_for("pre_vfs", "s")
-    assert not await p.wants_for("pre_vfs", "rev")
-    assert not await p.wants_for("pre_vfs", "nobody")
-    assert await p.wants_for("pre_command", "rev")
-    assert not await Policies([p]).wants_for("pre_vfs", "rev")
+    assert isinstance(deny, Deny)
+    assert deny.reason == "read-only"
+    assert deny.policy == "PermissionsPolicy"
+    assert not policies.wants("pre_vfs")

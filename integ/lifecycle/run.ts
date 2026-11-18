@@ -25,7 +25,7 @@ import {
   buildVfs as buildBrowserVfs,
   registerVfs as registerBrowserVfs,
 } from '@struktoai/mirage-browser'
-import { Limit, MountMode, type PathSpec } from '@struktoai/mirage-core/types'
+import { Limit, MountMode, type PathSpec, type PolicyDecision } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -65,10 +65,11 @@ import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { command, type Context } from '@struktoai/mirage-core/commands/config'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import { type ByteSource, IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import { sleep } from '@struktoai/mirage-core/utils/abort'
+import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { setCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
@@ -88,7 +89,7 @@ interface Case {
     profiles?: Record<string, unknown>
     processes?: WorkspaceOptions['processes']
     machines?: Record<string, Record<string, unknown>>
-    clis?: Record<string, { cli: string }>
+    clis?: Record<string, { cli: string; config?: Record<string, unknown> }>
   }
   steps: Step[]
 }
@@ -128,7 +129,14 @@ type Step = (
       runtime?: string
       config?: Record<string, unknown>
     }
-  | { op: 'register_command'; path: string; name: string; write?: boolean; stdout?: string }
+  | {
+      op: 'register_command'
+      path: string
+      name: string
+      write?: boolean
+      stdout?: string
+      verbs?: { name: string; aliases?: string[] }[]
+    }
   | { op: 'unregister_cli' | 'remove_machine' | 'stream_cli_stats'; name: string }
   | { op: 'add_machine'; name: string; machine: Record<string, unknown> }
   | {
@@ -466,12 +474,21 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
  * An explanation as a case pins it: a VFS call's verdict, or a line's with
  * its commands in the order the line reads them.
  */
+/** What fired in the profile rule that refused, as a case pins it. */
+function matchedOf(decision: PolicyDecision | null): Record<string, string[]> | null {
+  const matched = decision?.matched ?? null
+  return matched === null
+    ? null
+    : { command: [...matched.command], flags: [...matched.flags], keys: [...matched.keys] }
+}
+
 function explained(expl: ShellExplanation | VfsExplanation): Record<string, unknown> {
   const verdict = {
     outcome: expl.outcome,
     reason: expl.reason,
     answers: answered(expl.answers),
     decision: expl.decision?.kind ?? null,
+    matched: matchedOf(expl.decision),
   }
   if ('call' in expl) return { call: expl.call, ...verdict, error: expl.error }
   return {
@@ -594,6 +611,30 @@ async function action(
       break
     case 'register_command': {
       const out = new TextEncoder().encode(step.stdout ?? '')
+      if (step.verbs !== undefined) {
+        ws.mount(step.path).registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: step.name,
+              subcommands: step.verbs.map(
+                (verb) =>
+                  new CommandSpec({
+                    name: verb.name,
+                    aliases: verb.aliases ?? [],
+                    arguments: [new Argument('words', { nargs: '*' })],
+                  }),
+              ),
+            }),
+            handlers: Object.fromEntries(
+              step.verbs.map((verb) => [
+                verb.name,
+                new CLIHandler({ fn: () => [out, new IOResult()] }),
+              ]),
+            ),
+          }),
+        ])
+        break
+      }
       ws.mount(step.path).registerCommands(
         command({
           name: step.name,
@@ -691,6 +732,7 @@ async function action(
             stdout: outcome.result.stdoutText,
             stderr: outcome.result.stderrText,
             decision: outcome.result.decision?.reason ?? null,
+            matched: matchedOf(outcome.result.decision),
           }
         }
       } finally {
@@ -759,6 +801,7 @@ async function action(
         stdout: result.stdoutText,
         stderr: result.stderrText,
         decision: result.decision?.reason ?? null,
+        matched: matchedOf(result.decision),
         ...(sink === undefined
           ? {}
           : { streamed: DEC.decode(await sink.snapshot(Channel.STDOUT)) }),
@@ -854,7 +897,8 @@ async function run(host: Host, testCase: Case): Promise<number> {
     ...(testCase.settings.machines !== undefined ? { machines: testCase.settings.machines } : {}),
   })
   for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {
-    ws.registerCli(name, cliSpecFor(block.cli))
+    const config = block.config === undefined ? null : normalizeFields(block.config)
+    ws.registerCli(name, cliSpecFor(block.cli), config)
   }
   const policies = new Map<string, Policy>()
   const held: Held = {}

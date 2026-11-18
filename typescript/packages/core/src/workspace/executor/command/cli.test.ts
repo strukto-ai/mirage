@@ -17,10 +17,7 @@ import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { AST_GREP } from '../../../commands/cli/builtin/ast_grep/index.ts'
 import { CLI, CLIHandler, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { command, type Context } from '../../../commands/config.ts'
-import { cliSpecFor } from '../../../commands/cli/specs.ts'
-import { walk } from '../../../commands/cli/walk.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
-import { parseCommand } from '../../../commands/spec/parser.ts'
 import { Argument, CommandSpec, UsageStyle } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
@@ -43,7 +40,7 @@ import { MountEntry } from '../../mount/mount.ts'
 import { SessionState } from '../../session/session.ts'
 import type { ExecutionNode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { handleCli, leafParse, reachesService } from './cli.ts'
+import { handleCli, reachesService } from './cli.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
@@ -1305,7 +1302,7 @@ describe('a command tree a mount serves', () => {
       ws.createSession('hidden', { profile: { paths: { hide: ['/n/x'] } } })
       ws.createSession('ruled', {
         profile: SessionProfile({
-          commands: { deny: [{ reason: 'no tagging', commands: ['notes add'] }] },
+          commands: { notes: { add: { decision: 'deny', reason: 'no tagging' } } },
         }),
       })
       for (const [line, sessionId, code] of [
@@ -1323,24 +1320,5 @@ describe('a command tree a mount serves', () => {
     } finally {
       await ws.close()
     }
-  })
-})
-
-describe('leafParse', () => {
-  it('refuses an abbreviation under cobra', () => {
-    const gh = cliSpecFor('gh')
-    const result = walk('gh', gh.spec, ['auth', 'token', '--ho', 'x'], '/', null)
-    if (result.leaf === null) throw new Error('no leaf')
-    const rules = leafParse(gh, result.leaf, result.path)
-    const parsed = parseCommand(
-      rules.spec,
-      [...result.argv],
-      '/',
-      'gh',
-      undefined,
-      rules.unknownIsOperand,
-      rules.abbreviations,
-    )
-    expect(parsed.invalidOptions).toEqual(['--ho'])
   })
 })

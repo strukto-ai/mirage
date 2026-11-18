@@ -389,7 +389,7 @@ def test_rm_spec_combined_flags():
 def test_cp_spec():
     spec = SPECS["cp"]
     parsed = parse_command(spec, ["-r", "src/", "dst/"], cwd="/data")
-    assert parsed.flags["-r"] is True
+    assert parsed.flags["--recursive"] is True
     assert parsed.paths() == ["/data/src", "/data/dst"]
 
 

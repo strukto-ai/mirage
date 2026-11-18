@@ -211,15 +211,6 @@ async def run(case):
                     await ws.set_session_profile(
                         "reader", {"paths": {"hide": [FILE]}}
                     )
-                elif restriction == "deny":
-                    await ws.set_session_profile(
-                        "reader",
-                        {
-                            "commands": {
-                                "deny": [{"paths": [FILE], "reason": "sealed"}]
-                            }
-                        },
-                    )
                 else:
                     policy.stage = restriction
                 await refused(driver.read(fh), case["expected_errno"])

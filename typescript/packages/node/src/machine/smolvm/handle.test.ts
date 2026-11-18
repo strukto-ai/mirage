@@ -252,7 +252,6 @@ it('refuses empty argv and a stopped VM before executing', async () => {
 
 const RESTRICTIONS: SessionProfile[] = [
   { paths: { hide: ['/data/secret'] } },
-  { commands: { deny: [{ paths: ['/data/secret'], reason: 'x' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
 

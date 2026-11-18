@@ -45,23 +45,6 @@ pub enum Mode {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
-pub struct Rule {
-    pub reason: Text,
-    pub commands: Vec<Text>,
-    pub paths: Vec<Text>,
-    pub mount: Option<Text>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Rules {
-    pub allow: Option<Vec<Text>>,
-    pub deny: Vec<Rule>,
-    pub ask: Vec<Rule>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
 pub struct PathScope {
     pub paths: Vec<Text>,
     pub patterns: Vec<Text>,
@@ -108,14 +91,12 @@ pub struct HideReason {
 pub struct Mount {
     pub prefix: Text,
     pub mode: Option<Mode>,
-    pub commands: Option<Rules>,
     pub paths: Option<Paths>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Profile {
-    pub commands: Option<Rules>,
     pub paths: Option<Paths>,
     pub vars: Option<Vec<Text>>,
     pub mounts: Option<Vec<Mount>>,
@@ -123,7 +104,6 @@ pub struct Profile {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RestrictionPlan {
-    pub commands: Option<Rules>,
     pub visibility: Visibility,
     pub mount_modes: Vec<(Text, Mode)>,
     pub hide_reasons: Vec<HideReason>,
@@ -135,9 +115,29 @@ pub struct PathFact {
     pub display_path: Text,
 }
 
+/// One option a line or a pattern carries, by its canonical spelling.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct FlagFact {
+    pub name: Text,
+    #[serde(default)]
+    pub values: Vec<Text>,
+}
+
+/// A line or a pattern as its command's grammar reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Reading {
+    pub path: Vec<Text>,
+    #[serde(default)]
+    pub flags: Vec<FlagFact>,
+    #[serde(default)]
+    pub operands: Vec<Text>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct CommandFacts {
     pub tokens: Vec<Text>,
+    #[serde(default)]
+    pub line: Option<Reading>,
     pub tool: bool,
     pub cwd: Text,
     pub paths: Vec<PathFact>,
@@ -152,6 +152,7 @@ impl Default for CommandFacts {
     fn default() -> Self {
         Self {
             tokens: Vec::new(),
+            line: None,
             tool: true,
             cwd: vec![47],
             paths: Vec::new(),
@@ -181,7 +182,7 @@ impl Default for Subject {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[repr(u32)]
 pub enum Outcome {
@@ -191,11 +192,12 @@ pub enum Outcome {
     Ask = 2,
 }
 
+/// What fired: the subcommand path the deciding entry sits at, the
+/// options that fired it, and the operand and value keys on the way to
+/// its leaf, as the tree spells them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Ruling {
-    pub outcome: Outcome,
-    pub rule: Option<usize>,
-    pub matched_path: Option<Text>,
-    pub allow_list: bool,
-    pub asks: Vec<usize>,
+pub struct Matched {
+    pub command: Vec<Text>,
+    pub flags: Vec<Text>,
+    pub keys: Vec<Text>,
 }

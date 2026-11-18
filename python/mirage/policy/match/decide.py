@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.rule import command_facts
+from collections.abc import Sequence
+
+from mirage.policy.match.grammar import unread_reason
+from mirage.policy.match.rule import command_facts, reason_of
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
@@ -20,48 +23,34 @@ from mirage.policy.types import (
     Outcome,
     Ruling,
 )
-from mirage.rs.document import from_units
-from mirage.rs.policy import admission_matcher
+from mirage.rs.document import from_units, units
+from mirage.rs.policy import admission_matcher, rule_table
+from mirage.types import Matched, PathSpec
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     """The profile's answer about one line: the whole law, in one place.
 
-    Two rules, because a command name and a path are not the same kind
-    of thing. A rule naming no path is read by verb, deny before ask,
-    wherever it was written: it is off the path axis entirely, so one
-    in a mount section scores 0 exactly as a top-level one does.
-    Writing it under ``mounts./repo`` scopes it to lines working inside
-    that mount (the rule reads ``rule.mount``); it does not
-    make it more specific than a rule about the whole session. That is
-    what keeps "denied generally, asked inside one mount" inexpressible
-    for a pathless rule, which in practice means an account CLI: such a
-    CLI reaches a service and touches no mount, so scoping it to one
-    was never meaningful.
-
-    A rule carrying paths is read by anchor depth, the deeper entry
-    winning, ties broken by verb. The depth is the matched entry's, not
-    the rule's deepest, so an entry that says nothing about this
-    operand cannot lend it specificity. The allow list is asked first,
-    since a line no list covers never reaches a rule.
+    Each tree that applies to the line is walked once: the words pick
+    the deepest node with a decision, its options and operands only
+    tighten it, and the strictest decision wins, deny over ask over
+    allow. A mount's tree applies to a line working inside that mount;
+    the top-level tree to every line. Every tree speaks, and the
+    strictest answer is the line's.
 
     All of which is settled *per subject*, and only then across them,
-    because a line names more than one path and a
-    carve-out written for one of them must not answer for the rest:
-    with ``deny cp /protected/*`` and a deeper ``ask cp /review/deep/*``,
-    ``cp /protected/secret /review/deep/out`` is the source's deny, and
-    reading one best match for the whole line answered it with the
-    destination's ask instead, so a nod meant for the destination
-    carried the protected file out.
+    because a line names more than one path and a leaf written for one
+    of them must not answer for the rest: with ``cp: {decision: deny,
+    paths: [/protected/*]}`` and ``cp: {decision: ask, paths:
+    [/review/*]}``, ``cp /protected/secret /review/out`` is the source's
+    deny. A line naming no path is judged once, and a leaf with paths
+    says nothing for it.
 
     Ranking across subjects is the whole answer for a deny, which
     refuses the line, and only half of it for an ask, which is a
-    question the host still has to answer. So every ask that won a
-    subject of its own is reported (``Ruling.asks``) and the entry point
-    requires all of them: with ``ask cp /a/*`` and a deeper
-    ``ask cp /deep/b/*``, ``cp /a/x /deep/b/y`` used to present the
-    deeper one alone, and a nod for the destination ran the line
-    without the source ever being asked about.
+    question the host still has to answer. So every ask that spoke for
+    a subject is reported (``Ruling.asks``) and the entry point requires
+    all of them.
 
     ``PermissionsPolicy`` renders this into the outcome table and
     ``explain`` reports it, so the two cannot disagree about what a
@@ -69,32 +58,111 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
 
     Args:
         ctx (CommandContext): the classified command.
-        rules (AdmissionRules | None): the session's admission rules.
+        rules (AdmissionRules | None): the session's command trees.
     """
     if rules is None:
         return Ruling(Outcome.ALLOW)
+    if ctx.command in rules.unread:
+        refused = unread_ruling(ctx.command, rules)
+        if refused is not None:
+            return refused
     result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
-    listed = (*rules.deny, *rules.ask)
-    rule = None if result["rule"] is None else listed[result["rule"]]
-    matched = result["matched_path"]
+    table = rule_table(rules)
+    rule = None if result["rule"] is None else table[result["rule"]]
+    path = result["matched_path"]
+    fired = result["matched"]
+    matched = (
+        None
+        if fired is None
+        else Matched(
+            command=tuple(from_units(v) for v in fired["command"]),
+            flags=tuple(from_units(v) for v in fired["flags"]),
+            keys=tuple(from_units(v) for v in fired["keys"]),
+        )
+    )
     return Ruling(
         outcome=Outcome(result["outcome"]),
         rule=rule,
-        matched_path=None if matched is None else from_units(matched),
-        source="commands.allow"
-        if result["allow_list"]
-        else source_of(rule)
-        if rule is not None
-        else "",
-        asks=tuple(listed[index] for index in result["asks"]),
+        matched_path=None if path is None else from_units(path),
+        source="" if rule is None else source_of(rule),
+        asks=tuple(table[index] for index in result["asks"]),
+        matched=matched,
+        reason="" if rule is None else reason_of(rule, matched),
+    )
+
+
+def unread_ruling(command: str, rules: AdmissionRules) -> Ruling | None:
+    """The deny for a command whose rule names options or subcommands
+    while no grammar reads it, so the line reader could not tell them
+    apart from operands: the refusal ``create_session`` gives such a
+    tree, as the line's reason; None when no tree names one.
+
+    Args:
+        command (str): the command the line runs.
+        rules (AdmissionRules): the session's command trees.
+    """
+    for scoped in rules.trees:
+        held = scoped.tree.subcommands.get(command)
+        reason = (
+            None
+            if held is None
+            else unread_reason(held, f"commands.{command}")
+        )
+        if reason is not None:
+            rule = CommandRule(
+                reason=reason,
+                decision=Outcome.DENY,
+                at=f"/{command}",
+                mount=scoped.mount,
+            )
+            return Ruling(
+                outcome=Outcome.DENY,
+                rule=rule,
+                source=source_of(rule),
+                matched=Matched(command=(command,), flags=(), keys=()),
+                reason=reason,
+            )
+    return None
+
+
+def redirect_ruling(
+    paths: Sequence[PathSpec], rules: AdmissionRules | None
+) -> Ruling:
+    """The profile's answer about the files a redirect opens that no
+    command owns: a compound statement's (``{ cat; } < f``, a loop, a
+    subshell) or a bare one (``> f``). Only a root leaf scoped to a path
+    the redirect opens speaks; a leaf with no paths is about commands,
+    so under ``{"*": deny, ls: allow}`` the group ``{ ls; } > out``
+    meets the same answer as ``ls > out``.
+
+    Args:
+        paths (Sequence[PathSpec]): the redirect's targets, links
+            followed.
+        rules (AdmissionRules | None): the session's command trees.
+    """
+    if rules is None or not paths:
+        return Ruling(Outcome.ALLOW)
+    result = admission_matcher(rules).ask(
+        "redirect", paths=[units(p.virtual) for p in paths]
+    )
+    table = rule_table(rules)
+    rule = None if result["rule"] is None else table[result["rule"]]
+    path = result["matched_path"]
+    return Ruling(
+        outcome=Outcome(result["outcome"]),
+        rule=rule,
+        matched_path=None if path is None else from_units(path),
+        source="" if rule is None else source_of(rule),
+        asks=tuple(table[index] for index in result["asks"]),
+        reason="" if rule is None else reason_of(rule, None),
     )
 
 
 def source_of(rule: CommandRule) -> str:
-    """Where in the document a rule was written, as a host reads it:
+    """Where in the document a leaf was written, as a host reads it:
     the mount section it belongs to, or the top level.
 
     Args:
-        rule (CommandRule): the rule that spoke.
+        rule (CommandRule): the leaf that spoke.
     """
     return f"mounts.{rule.mount}" if rule.mount else "top"

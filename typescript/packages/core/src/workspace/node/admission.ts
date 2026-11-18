@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { walk } from '../../commands/cli/walk.ts'
+import { leafOptions, walk } from '../../commands/cli/walk.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
-import { callerSignal, sessionAccess } from '../../context/session_context.ts'
+import { callerSignal, currentCaller, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type {
@@ -36,14 +37,17 @@ import {
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
-import { lineTokens } from '../../policy/match/allow.ts'
-import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
-import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
+import { callOf } from '../../policy/decisions.ts'
+import { redirectRuling } from '../../policy/match/decide.ts'
+import { ioReach, ioRefusal, namingRules, notAllowed } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
-import { CommandWord, type EntryGate } from '../../policy/types.ts'
-import { getRedirects, literalWord } from '../../shell/helpers.ts'
+import { type CommandNode, CommandWord, type EntryGate } from '../../policy/types.ts'
+import type { Encoded } from '../../rs/policy.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { getParts, getRedirects, getText, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
+import { shellVoice } from '../../shell/voice.ts'
 import { Follow, PathSpec, type LineFacts, type PolicyDecision } from '../../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { getExtension } from '../../utils/filetype.ts'
@@ -54,6 +58,7 @@ import { fileOperands, TEST_NAMES } from '../executor/builtins/condition/operand
 import { followPaths } from '../executor/builtins/links/links.ts'
 import { contextWords, linePaths, readLine } from '../executor/command/reading.ts'
 import { reachesService } from '../executor/command/cli.ts'
+import type { LineReading } from '../executor/command/types.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
@@ -81,6 +86,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { wordValue, type Word } from './inner_lines.ts'
+import { occurrenceOf } from './occurrence.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 126 for
@@ -111,6 +117,25 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * The nodes a redirect binds to as their own, judged with them: the
+ * chain's last command, or the shell's test. Any other statement under a
+ * redirect (a group, a loop, a subshell, an `if`, an assignment, or none)
+ * leaves its redirect to `admitRedirect`.
+ */
+const REDIRECT_OWNERS: ReadonlySet<string> = new Set([NodeType.COMMAND, NodeType.TEST_COMMAND])
+
+/** Whether a redirect names a file to open, not a body or a descriptor. */
+function opensFile(r: Redirect): boolean {
+  return (
+    r.kind !== RedirectKind.HEREDOC &&
+    r.kind !== RedirectKind.HERESTRING &&
+    r.kind !== RedirectKind.AMBIGUOUS &&
+    typeof r.target !== 'number' &&
+    r.targetNode !== null
+  )
+}
+
+/**
  * A command the gate let through, and what its own I/O may touch.
  *
  * The gate judged the paths the line names; a walk below them reaches
@@ -134,6 +159,7 @@ export class Admitted implements EntryGate {
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
   readonly route: Route | null
+  private namedRules: Encoded | null | undefined = undefined
 
   constructor(init: {
     rules: AdmissionRules | null
@@ -162,14 +188,22 @@ export class Admitted implements EntryGate {
   // running command: a rule in force at any path its scope could cover.
   // The dispatcher checks coded file policies separately.
   scopes(virtual: string): boolean {
-    return ioReach(this.rules, this.ctx.tokens ?? [], virtual)
+    return this.rules !== null && ioReach(this.rules, this.named(), virtual)
+  }
+
+  // The command's walk through the trees (`namingRules`), asked on the
+  // first entry it reaches and kept for the rest of its run.
+  named(): Encoded | null {
+    if (this.namedRules === undefined) this.namedRules = namingRules(this.rules, this.ctx)
+    return this.namedRules
   }
 
   // The reason a rule in force refuses this entry, null when the line was
   // admitted on it or nothing refuses it.
   refusal(virtual: string): string | null {
     if (this.judged.has(norm(virtual))) return null
-    return ioRefusal(this.rules, this.ctx.tokens ?? [], virtual, this.granted)
+    if (this.rules === null) return null
+    return ioRefusal(this.rules, this.named(), virtual, this.granted)
   }
 }
 
@@ -218,9 +252,9 @@ function seenWords(
  * The command plane's admission of one command: the policy chain, then
  * the approval ledger. The one gate every command class passes through,
  * in the tree (`runArgv`, once the words are expanded) and for a line a
- * runtime takes whole (`admitLine`, per parsed command). A word the
- * session's allow list leaves out is the profile's Deny, like any other
- * rule's; a path the session cannot see is
+ * runtime takes whole (`admitLine`, per parsed command). A word a
+ * closed tree names nothing for is the profile's Deny, like any other
+ * leaf's; a path the session cannot see is
  * dropped before any method, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
  * is answered by the entry point from the session's grants or the host.
@@ -269,7 +303,7 @@ export function redirectPaths(
  * reaches the host, which is what makes it safe for `explain`;
  * `admit` adds exactly those and renders.
  *
- * `intrinsic` keeps shell-provided operations subject to tool allow lists
+ * `intrinsic` keeps shell-provided operations subject to a tree's root
  * even when a function shadows their policy name. `unread` holds the
  * virtual paths a reader of the line's text cannot vouch for: what a word
  * only the runtime expands names, or a relative word after a `cd` it
@@ -282,11 +316,14 @@ export function redirectPaths(
  * empty outside a line.
  */
 /**
- * Whether the allow list refuses a CLI that reaches a service. Such a CLI
+ * Whether the profile leaves out a CLI that reaches a service. Such a CLI
  * (an account or script CLI) reaches its service by id, past every hide, so
- * under a profile that hides paths it runs only where a pattern starting
- * with its own name matches the line. `*` and a pattern for another of its
- * verbs do not count. Mirrors the Python `unlisted_service`.
+ * under a profile that hides paths it runs only where the profile's
+ * top-level tree names it at its root with an allow somewhere in that
+ * node. `*` does not count, and neither does inline permissions' tree,
+ * which only tightens. What the node says of the line is the tree's to
+ * judge, so what is left here is whether the profile names the command at
+ * all. Mirrors the Python `unlisted_service`.
  */
 export function unlistedService(
   ctx: CommandContext,
@@ -302,9 +339,44 @@ export function unlistedService(
   ) {
     return false
   }
-  const tokens = lineTokens(ctx)
-  return !(session.commands?.allow ?? []).some(
-    (p) => splitPattern(p)[0] === ctx.command && patternMatches(p, tokens),
+  const rules = session.commands
+  return !rules?.trees.some((scoped) => {
+    const node =
+      scoped.mount || scoped.inline ? undefined : scoped.tree.subcommands.get(ctx.command)
+    return node !== undefined && yieldsAllow(node)
+  })
+}
+
+function yieldsAllow(node: CommandNode): boolean {
+  return (
+    node.decision.some((leaf) => leaf.decision === Outcome.ALLOW) ||
+    [...node.subcommands.values()].some(yieldsAllow) ||
+    [...node.operands.values()].some(yieldsAllow)
+  )
+}
+
+/**
+ * Whether a command tree's leaf the line reaches may change state, read off
+ * the line's own reading when that reading is this tree's, else off a walk
+ * under the session environment. Mirrors the tree branch of Python's
+ * `_writes`.
+ */
+function treeWrites(
+  name: string,
+  cli: CLI,
+  args: readonly string[],
+  reading: LineReading,
+  session: SessionState,
+): boolean {
+  if (reading.read !== null && reading.grammar?.spec === cli.spec) {
+    const options = reading.read.flags.map((flag) => flag.name)
+    return cli.handlers[reading.program.slice(1).join(' ')]?.writes(options) === true
+  }
+  const env = envSnapshot(session)
+  const result = walk(name, cli.spec, [...args], session.cwd, env)
+  return (
+    result.leaf !== null &&
+    cli.handlers[result.path.join(' ')]?.writes(leafOptions(cli, result, session.cwd, env)) === true
   )
 }
 
@@ -330,6 +402,7 @@ function writes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
+  reading: LineReading,
   facts: LineFacts,
   session: SessionState,
   registry: MountRegistry,
@@ -344,10 +417,7 @@ function writes(
     return true
   if (consumer !== Consumer.CLI && consumer !== Consumer.MOUNT) return false
   const tree = registry.clis.get(name)?.cli ?? null
-  if (tree !== null) {
-    const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
-    return result.leaf !== null && tree.handlers[result.path.join(' ')]?.writes(args) === true
-  }
+  if (tree !== null) return treeWrites(name, tree, args, reading, session)
   const candidates = registry.invocationCandidates(
     name,
     [],
@@ -359,8 +429,7 @@ function writes(
     return candidates.some((mount) => {
       const cli = mount.cliFor(name)
       if (cli === null) return mount.mayWrite(name)
-      const result = walk(name, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
+      return treeWrites(name, cli, args, reading, session)
     })
   }
   const runs = runsAs(name, registry)
@@ -411,10 +480,7 @@ function writes(
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
   return reached.some((mount) => {
     const cli = mount.cliFor(runs)
-    if (cli !== null) {
-      const result = walk(runs, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
-    }
+    if (cli !== null) return treeWrites(runs, cli, args, reading, session)
     return [...extensions].some((extension) => mount.mayWrite(runs, extension, facts.writes))
   })
 }
@@ -463,7 +529,7 @@ export async function gate(
   )
   const words = seenWords(session, contextWords(name, reading, redirects), unread)
   await budget.run()
-  const write = writes(name, args, operands, facts, session, registry, namespace, implied)
+  const write = writes(name, args, operands, reading, facts, session, registry, namespace, implied)
   await budget.run()
   const ctx: CommandContext = {
     line,
@@ -475,6 +541,7 @@ export async function gate(
     sessionId: session.sessionId,
     tokens: [...reading.tokens],
     program: [...reading.program],
+    read: reading.read,
     tool,
     walks: facts.walks,
     write,
@@ -488,7 +555,7 @@ export async function gate(
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
-      reason: `${reading.program.join(' ')} is not allowed`,
+      reason: notAllowed(reading.program),
       policy: PermissionsPolicy.name,
     })
   }
@@ -583,9 +650,9 @@ export async function admit(
 
 /**
  * Admit a `[ ]` test, or one `[[ ]]` leaf, as the command it is: the shell
- * evaluates it itself, so no command gate saw its words, and a rule, an allow
- * list or a policy answers it by its own name as it answers `test` on the
- * same words. `name` is `[` or `[[`; `words` what it tests, expanded,
+ * evaluates it itself, so no command gate saw its words, and a tree or a
+ * policy answers it by its own name as it answers `test` on the same
+ * words. `name` is `[` or `[[`; `words` what it tests, expanded,
  * operators included; `signal` the run's abort signal; `claimant` the test
  * and its line, null outside a line. Throws `CondRefused` where the gate
  * refused it. Mirrors Python's admit_test.
@@ -683,6 +750,19 @@ function wordHints(
 }
 
 /**
+ * Whether a redirected statement's command is a bare `exec`, which installs
+ * its redirects on the shell for every later statement; `exec cmd` is a
+ * command. Mirrors Python's is_bare_exec.
+ */
+export function isBareExec(command: TSNodeLike | null): boolean {
+  if (command?.type !== NodeType.COMMAND) return false
+  const named = getParts(command)
+  return (
+    named.length === 1 && named[0]?.type === NodeType.COMMAND_NAME && getText(named[0]) === 'exec'
+  )
+}
+
+/**
  * The redirect targets of the statement holding a command, as the gate
  * reads its words: the raw text and the literal it names, null when
  * only the runtime can expand it (refused wherever a rule reads the
@@ -698,9 +778,13 @@ function wordHints(
  * the last-command chain instead, which is bash's own rule for a list,
  * a pipeline and a `!`. A compound (`{ }`, a loop, a subshell) redirects
  * every command inside it, which is not a chain, so none is claimed
- * here and the dispatcher judges the write.
+ * here: `admitRedirect` judges it as the shell opens it, and
+ * `unownedRedirects` reads it for a line a runtime takes whole. A bare
+ * `exec` (`exec 3< f`) has none: it installs them on the shell, and
+ * `admitRedirect` judges each as it opens.
  */
 function statementRedirectsRaw(node: TSNodeLike): Redirect[] {
+  if (isBareExec(node)) return []
   let owner = node
   let parent = owner.parent
   while (parent !== undefined && parent !== null && REDIRECT_CHAIN.has(parent.type)) {
@@ -726,17 +810,123 @@ export function statementRedirects(
   node: TSNodeLike,
   homes: Readonly<Record<string, string>> | null,
 ): Word[] {
-  const words: Word[] = []
-  for (const r of statementRedirectsRaw(node)) {
-    if (
-      r.kind === RedirectKind.HEREDOC ||
-      r.kind === RedirectKind.HERESTRING ||
-      r.kind === RedirectKind.AMBIGUOUS
-    )
-      continue
-    if (typeof r.target === 'number' || r.targetNode === null) continue
-    const target = r.targetNode as TSNodeLike
-    words.push({ raw: String(r.target), text: literalWord(target, homes) })
+  return statementRedirectsRaw(node)
+    .filter(opensFile)
+    .map((r) => ({ raw: String(r.target), text: literalWord(r.targetNode as TSNodeLike, homes) }))
+}
+
+/**
+ * The literal target of every redirect in a parsed line that no command
+ * owns, with the target's node: a compound statement's, a bare one's, a
+ * bare `exec`'s, an assignment's. A command's own redirects are its words
+ * (`statementRedirects`); these are read for a line a runtime takes whole,
+ * where no executor opens them. Mirrors Python's unowned_redirects.
+ */
+export function unownedRedirects(
+  node: TSNodeLike,
+  homes: Readonly<Record<string, string>> | null,
+): [Word, TSNodeLike][] {
+  const out: [Word, TSNodeLike][] = []
+  const stack: TSNodeLike[] = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    stack.push(...[...current.namedChildren].reverse())
+    if (current.type !== NodeType.REDIRECTED_STATEMENT) continue
+    const [inner, redirects] = getRedirects(current)
+    let owner: TSNodeLike | null = inner
+    while (owner !== null && REDIRECT_CHAIN.has(owner.type)) {
+      owner = owner.namedChildren[owner.namedChildren.length - 1] ?? null
+    }
+    if (owner !== null && REDIRECT_OWNERS.has(owner.type) && !isBareExec(owner)) continue
+    for (const r of redirects.filter(opensFile)) {
+      const at = r.targetNode as TSNodeLike
+      out.push([{ raw: String(r.target), text: literalWord(at, homes) }, at])
+    }
   }
-  return words
+  return out
+}
+
+/**
+ * The gate of the files a redirect opens that no command owns: a
+ * compound statement's (`{ cat; } < f`, a loop, a subshell, an `if`) or
+ * a bare one (`> f`, `exec 3< f`). A command's own redirects are judged
+ * with the command; these have no command, so the session's trees alone
+ * are asked, and only a root leaf scoped to a path the redirect opens
+ * speaks (`redirectRuling`). A coded policy is not asked: it judges the
+ * open itself, at the dispatcher. A hidden target is dropped first, so
+ * the open answers ENOENT; links are followed as a command's redirect
+ * targets are. A deny, or an ask the host did not grant, refuses in
+ * bash's voice for a redirect it could not open (`bash: line 1: f:
+ * Permission denied`, exit 1), with the decision on the result. An ask is
+ * claimed for the place the redirect stands on its line (`at`, the target
+ * word of the redirect that opens them; null for targets no one redirect
+ * opens, a line judged whole), so each open is a nod of its own, as each
+ * command is. Mirrors Python's admit_redirect.
+ */
+export async function admitRedirect(
+  targets: readonly PathSpec[],
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  at: TSNodeLike | null = null,
+): Promise<Refused | null> {
+  const rules = session.commands
+  if (rules === null || targets.length === 0) return null
+  const links =
+    namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null
+  const paths = [...targets]
+  if (links !== null) {
+    for (const p of followPaths(links, [...targets], true)) if (p instanceof PathSpec) paths.push(p)
+  }
+  const shown = seen(session, paths)
+  const ruling = redirectRuling(shown, rules)
+  if (ruling.outcome === Outcome.ALLOW) return null
+  const rule = ruling.rule
+  if (rule === null) throw new Error('a tree refused a redirect with no leaf')
+  const named = ruling.matchedPath ?? shown[0]?.virtual ?? ''
+  const question: CommandContext = {
+    command: '',
+    paths: shown,
+    argv: shown.map((p) => p.virtual),
+    cwd: session.cwd,
+    sessionId: session.sessionId,
+  }
+  let action: Deny | Pending | null
+  if (ruling.outcome === Outcome.ASK) {
+    const caller = currentCaller()
+    const call = callOf(caller, registry.decisions, session.sessionId)
+    const claimant: Claimant | null =
+      call === null
+        ? null
+        : {
+            line: call,
+            occurrence:
+              at === null
+                ? { parent: null, source: named, start: 0, end: 0 }
+                : occurrenceOf(at, call),
+          }
+    const asked: Ask = {
+      kind: 'ask',
+      reason: ruling.reason,
+      rule,
+      rules: ruling.asks,
+      policy: PermissionsPolicy.name,
+    }
+    action = await resolved(question, asked, registry, callerSignal(), claimant)
+    if (action === null) return null
+  } else {
+    action = {
+      kind: 'deny',
+      reason: ruling.reason,
+      path: named,
+      policy: PermissionsPolicy.name,
+      rule,
+    }
+  }
+  const target = targets.find((p) => p.virtual === named) ?? targets[0]
+  const raw = target?.rawPath ?? named
+  return {
+    stderr: encodeText(`${shellVoice()}${raw}: Permission denied\n`),
+    exitCode: 1,
+    decision: decisionOf(action),
+  }
 }

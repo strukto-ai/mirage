@@ -396,7 +396,7 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
     ``find -exec``). A
     whole-line runtime is a real shell, so anything else that can run a
     command (an interpreter's ``-c``, ``make``, ``git`` hooks) is the
-    runtime's own world: the allow list is the closed form there.
+    runtime's own world: a closed tree is the closed form there.
 
     Args:
         head (str): the command name, as the gate reads it.

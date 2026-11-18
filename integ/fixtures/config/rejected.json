@@ -568,69 +568,6 @@
       }
     },
     {
-      "name": "deny rule: path for paths",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "no",
-                  "path": [
-                    "/x"
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "deny rule: commands is a list, not a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "no",
-                  "commands": "rm"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "commands: deny is a list, not a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": "rm"
-            }
-          }
-        }
-      }
-    },
-    {
       "name": "profile: mounts is a mapping, never a bare list",
       "config": {
         "mounts": {
@@ -683,129 +620,6 @@
               "paths": [
                 "/x"
               ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "profile: commands block takes no hide arm",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "a": {
-            "commands": {
-              "hide": [
-                "rm"
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "commands: allow is a list, not a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "allow": "ls"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "commands: a blank allow pattern would install every command",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "allow": [
-                "ls",
-                " "
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "ask rule: a blank pattern would ask about every command",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "ask": [
-                ""
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "ask rule: mount is the compiler's field, never typed",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "ask": [
-                {
-                  "reason": "x",
-                  "commands": [
-                    "rm"
-                  ],
-                  "mount": "/d"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "mount section: no allow list, visibility is not per mount",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "mounts": {
-              "/d": {
-                "commands": {
-                  "allow": [
-                    "ls"
-                  ]
-                }
-              }
             }
           }
         }
@@ -925,244 +739,6 @@
       }
     },
     {
-      "name": "command rule lists commands beside paths",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": [
-                    "rm",
-                    "mv"
-                  ],
-                  "paths": [
-                    "/d/a"
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule maps commands and also lists paths",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": {
-                    "rm": [
-                      "/d/a"
-                    ]
-                  },
-                  "paths": [
-                    "/d/b"
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule names no command and no path",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule maps a command to no path",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": {
-                    "rm": []
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule maps a command to a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": {
-                    "rm": "/d/a"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "commands: ask is a list, not a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "ask": "git push"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule: a blank mapping key names no command",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": {
-                    " ": [
-                      "/d/a"
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule: a number is neither a pattern nor a mapping",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                7
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule: reason is a string",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": 1,
-                  "commands": [
-                    "rm"
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "command rule: a blank path entry",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "x",
-                  "commands": {
-                    "rm": [
-                      " "
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
       "name": "top level: there is no workspace permissions block",
       "config": {
         "mounts": {
@@ -1191,61 +767,6 @@
           },
           "b": {
             "extends": "a"
-          }
-        }
-      }
-    },
-    {
-      "name": "profile: an ask rule follows the same grammar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "ask": [
-                {
-                  "reason": "x",
-                  "commands": [
-                    "rm"
-                  ],
-                  "paths": [
-                    "/d/a"
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "mount section: a rule there follows the same grammar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "mounts": {
-              "/d": {
-                "commands": {
-                  "deny": [
-                    {
-                      "reason": "x",
-                      "commands": {
-                        "rm": []
-                      }
-                    }
-                  ]
-                }
-              }
-            }
           }
         }
       }
@@ -1282,34 +803,6 @@
                 "paths": {
                   "hide": [
                     "/other/x"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "profile: a rule path in a mount section must be under it",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "mounts": {
-              "/d": {
-                "commands": {
-                  "deny": [
-                    {
-                      "reason": "x",
-                      "paths": [
-                        "/other/x"
-                      ]
-                    }
                   ]
                 }
               }
@@ -1453,6 +946,456 @@
         "route_policy": {
           "script": "route.py",
           "runtime": null
+        }
+      }
+    },
+    {
+      "name": "commands: the old flat format is named",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "deny": [
+                "rm -rf"
+              ]
+            }
+          }
+        }
+      },
+      "error": "old flat format"
+    },
+    {
+      "name": "commands: an old allow list is named",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "allow": [
+                "ls",
+                "cat"
+              ]
+            }
+          }
+        }
+      },
+      "error": "old flat format"
+    },
+    {
+      "name": "commands: an old rule mapping is named",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "ask": [
+                {
+                  "reason": "x",
+                  "commands": [
+                    "rm"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "old flat format"
+    },
+    {
+      "name": "commands: an old path-only rule points to paths.hide",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "x",
+                  "paths": [
+                    "/d/a"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "paths.hide"
+    },
+    {
+      "name": "mount section: the old flat format is named",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "mounts": {
+              "/d": {
+                "commands": {
+                  "deny": [
+                    {
+                      "reason": "x",
+                      "command": "rm",
+                      "paths": [
+                        "/d/a"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "error": "old flat format"
+    },
+    {
+      "name": "commands: a value goes under values",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "curl": {
+                "--request": {
+                  "DELETE": "deny"
+                }
+              }
+            }
+          }
+        }
+      },
+      "error": "a value goes under values"
+    },
+    {
+      "name": "commands: values belong under an option",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "curl": {
+                "values": {
+                  "x": "deny"
+                }
+              }
+            }
+          }
+        }
+      },
+      "error": "values belong under an option"
+    },
+    {
+      "name": "commands: an option needs a command",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "--force": "deny"
+            }
+          }
+        }
+      },
+      "error": "needs a command"
+    },
+    {
+      "name": "commands: a leaf needs a command",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "decision": "deny"
+            }
+          }
+        }
+      },
+      "error": "needs a command"
+    },
+    {
+      "name": "commands: operands sit beside no subcommand",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "git": {
+                "add": "deny",
+                "operands": {
+                  "x": "deny"
+                }
+              }
+            }
+          }
+        }
+      },
+      "error": "without subcommands"
+    },
+    {
+      "name": "commands: a word that is no decision",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": "never"
+            }
+          }
+        }
+      },
+      "error": "no decision"
+    },
+    {
+      "name": "commands: an empty leaf list",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": []
+            }
+          }
+        }
+      },
+      "error": "lists no decision"
+    },
+    {
+      "name": "commands: a leaf object needs its decision",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "reason": "x"
+              }
+            }
+          }
+        }
+      },
+      "error": "decision must be allow, ask or deny"
+    },
+    {
+      "name": "commands: a leaf object has no other field",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "pr": "allow"
+              }
+            }
+          }
+        }
+      },
+      "error": "unknown field"
+    },
+    {
+      "name": "commands: reason is a string",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "reason": 1
+              }
+            }
+          }
+        }
+      },
+      "error": "reason must be a string"
+    },
+    {
+      "name": "commands: reason is not null",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "reason": null
+              }
+            }
+          }
+        }
+      },
+      "error": "reason must be a string"
+    },
+    {
+      "name": "commands: paths is a list, not a scalar",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "paths": "/d/a"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "commands: a blank path entry",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "paths": [
+                  " "
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "commands: a relative path entry",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "paths": [
+                  "d/a"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "commands: the block is a mapping",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": [
+              "rm"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "mount section: a leaf path must be under the mount",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "mounts": {
+              "/d": {
+                "commands": {
+                  "rm": {
+                    "decision": "deny",
+                    "paths": [
+                      "/other/x"
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

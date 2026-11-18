@@ -16,7 +16,7 @@ import { caseHead, loopHead } from '../../shell/printer.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { traceLine } from '../../shell/xtrace.ts'
 import { commandScope } from '../../cache/index/scope.ts'
-import type { RedirectResult } from '../../context/session_context.ts'
+import type { RedirectGuard, RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
   isProgramInvocation,
@@ -54,7 +54,6 @@ import {
   getIfBranches,
   getListParts,
   getNegatedCommand,
-  getParts,
   getPipelineStages,
   getRedirects,
   getText,
@@ -111,7 +110,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry, type SessionState } from '../session/session.ts'
 import { bindLastWord, positionalParams, sessionArith } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { type Admitted, admitTest } from './admission.ts'
+import { type Admitted, admitRedirect, admitTest, isBareExec } from './admission.ts'
 import { executeAssignment } from './assignment.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { executeDeclaration } from './declaration.ts'
@@ -586,7 +585,14 @@ async function runRedirected(
         new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
       ]
     }
-    return await installExecRedirects(dispatch, session, redirects, stdin, expand)
+    return await installExecRedirects(
+      dispatch,
+      session,
+      redirects,
+      stdin,
+      expand,
+      redirectGate(context, registry, namespace),
+    )
   }
   // A heredoc's operator line reads the routed stdout, so then it is
   // returned rather than written. A simple command expands its words
@@ -655,7 +661,7 @@ async function runRedirected(
         false,
         sink,
         expand,
-        undefined,
+        redirectGate(context, registry, namespace),
         '',
         [],
         forked,
@@ -676,6 +682,45 @@ async function runRedirected(
     context.frame.diagnostics = outer
   }
   return [stdout, io, execNode]
+}
+
+/**
+ * The gate of a redirect no command owns (a compound's, a bare one,
+ * `exec`'s): the session's trees judge each target before it opens
+ * (`admitRedirect`), and a refusal replaces the statement's run as a
+ * failed open does. The opener passes every target so far; only the last
+ * is new, and one already judged is not asked again. Each target is
+ * judged at the redirect that opens it, so two opens on one line each need
+ * a nod of their own. Mirrors Python's _redirect_gate.
+ */
+function redirectGate(
+  context: EvaluationContext,
+  registry: MountRegistry,
+  namespace: Namespace,
+): RedirectGuard {
+  return async (paths, _stdin, opening) => {
+    const refused = await admitRedirect(
+      paths.slice(-1),
+      context.session,
+      registry,
+      namespace,
+      (opening?.targetNode ?? null) as TSNodeLike | null,
+    )
+    if (refused === null) return null
+    const io = new IOResult({
+      exitCode: refused.exitCode,
+      stderr: refused.stderr,
+      decision: refused.decision,
+    })
+    const node = new ExecutionNode({
+      command: 'redirect',
+      exitCode: refused.exitCode,
+      stderr: refused.stderr,
+      refused: true,
+      unopened: true,
+    })
+    return [null, io, node]
+  }
 }
 
 async function recursePipeStderr(
@@ -758,17 +803,6 @@ function namesProcessSub(word: TSNodeLike): boolean {
   if (word.type === NT.PROCESS_SUBSTITUTION) return true
   if (word.type === NT.COMMAND_SUBSTITUTION) return false
   return word.children.some((child) => namesProcessSub(child))
-}
-
-/**
- * Whether a redirected statement's command is a bare `exec`, which installs
- * its redirects on the shell for every later statement; `exec cmd` is a
- * command.
- */
-function isBareExec(command: TSNodeLike | null): boolean {
-  if (command?.type !== NT.COMMAND) return false
-  const named = getParts(command)
-  return named.length === 1 && named[0]?.type === NT.COMMAND_NAME && getText(named[0]) === 'exec'
 }
 
 export async function executeNode(

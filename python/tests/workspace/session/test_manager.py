@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -23,7 +24,6 @@ from mirage.policy.profile import (
     ProfileSetup,
 )
 from mirage.policy.types import (
-    AdmissionRules,
     CommandRule,
     Decision,
     HideReason,
@@ -46,8 +46,10 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.session import SessionManager
+from mirage.workspace.session.constants import OLDER_FORMAT
 from mirage.workspace.session.session import vars_from_entries
 from mirage.workspace.session.state import seed_var
+from tests.fixtures.command_trees import trees
 
 
 def _run(coro):
@@ -607,7 +609,7 @@ def test_hydrated_sessions_start_clean():
 def test_commands_of_answers_the_sessions_own_rules():
     mgr = SessionManager("default")
     early = mgr.create("early")
-    own = AdmissionRules(allow=("ls",))
+    own = trees({"*": "deny", "ls": "allow"})
     late = mgr.create("late")
     late.commands = own
     assert mgr.commands_of("late") is own
@@ -621,20 +623,18 @@ def test_commands_of_answers_the_sessions_own_rules():
     # With a default profile compiled in, an unknown id answers its rules
     # rather than nothing, so an unbound entry point still fails toward
     # refusal.
+    cat = trees({"*": "deny", "cat": "allow"})
     mgr.default_profile = CompiledProfile(
-        policies=ProfilePolicies(commands=AdmissionRules(allow=("cat",)))
+        policies=ProfilePolicies(commands=cat)
     )
-    assert mgr.commands_of("nobody") == AdmissionRules(allow=("cat",))
-    assert mgr.commands_of("") == AdmissionRules(allow=("cat",))
+    assert mgr.commands_of("nobody") == cat
+    assert mgr.commands_of("") == cat
 
 
 @pytest.mark.asyncio
-async def test_manager_admission_rules_ride_the_session_record():
+async def test_manager_command_trees_ride_the_session_record():
     store = RAMNamespaceStore()
-    own = AdmissionRules(
-        allow=("ls", "git log"),
-        deny=(CommandRule(reason="no", commands=("rm",)),),
-    )
+    own = trees({"*": "deny", "ls": "allow"}, mounts={"/w": {"rm": "deny"}})
     await store.set(
         "restored",
         {
@@ -642,21 +642,10 @@ async def test_manager_admission_rules_ride_the_session_record():
             "cwd": "/w",
             "env": {},
             "created_at": 1.0,
-            "commands": {
-                "allow": ["ls", "git log"],
-                "ask": [],
-                "deny": [{"reason": "no", "commands": ["rm"], "paths": []}],
-            },
-        },
-    )
-    await store.set(
-        "default",
-        {
-            "session_id": "default",
-            "cwd": "/w",
-            "env": {},
-            "created_at": 1.0,
-            "commands": {"allow": ["cat"], "ask": [], "deny": []},
+            "command_trees": [
+                {"mount": "", "commands": {"*": "deny", "ls": "allow"}},
+                {"mount": "/w", "commands": {"rm": "deny"}},
+            ],
         },
     )
     mgr = SessionManager("default", store=store)
@@ -664,12 +653,39 @@ async def test_manager_admission_rules_ride_the_session_record():
     restored = mgr.get("restored")
     assert restored.commands == own
     assert mgr.commands_of("restored") is restored.commands
-    # The default session adopts its stored rules like its hidden paths.
-    assert mgr.get("default").commands == AdmissionRules(allow=("cat",))
     await mgr.flush()
     stored = await store.load()
-    assert stored["restored"]["commands"]["allow"] == ["ls", "git log"]
-    assert stored["restored"]["commands"]["deny"][0]["reason"] == "no"
+    assert stored["restored"]["command_trees"] == [
+        {"mount": "", "commands": {"*": "deny", "ls": "allow"}},
+        {"mount": "/w", "commands": {"rm": "deny"}},
+    ]
+    assert "commands" not in stored["restored"]
+
+
+@pytest.mark.asyncio
+async def test_a_record_with_flat_rules_loads_closed_and_drops_approvals(
+    caplog,
+):
+    store = RAMNamespaceStore()
+    await store.set(
+        "old",
+        {
+            "session_id": "old",
+            "cwd": "/w",
+            "env": {},
+            "created_at": 1.0,
+            "commands": {"*": "deny", "ls": "allow"},
+            "decisions": [],
+        },
+    )
+    mgr = SessionManager("default", store=store)
+    with caplog.at_level(logging.WARNING):
+        await mgr.ensure_loaded()
+    old = mgr.get("old")
+    assert old.commands == OLDER_FORMAT
+    assert old.decisions == ()
+    assert "session old" in caplog.text
+    assert caplog.text.count("older format") == 1
 
 
 @pytest.mark.asyncio
@@ -823,7 +839,7 @@ async def test_profile_changes_publish_only_after_persistence(
         ),
         policies=ProfilePolicies(
             mount_modes={"/data": MountMode.READ},
-            commands=AdmissionRules(allow=("cat",)),
+            commands=trees({"*": "deny", "cat": "allow"}),
             scripts={
                 "pre_command": (
                     ProfileScript(

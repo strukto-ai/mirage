@@ -15,16 +15,21 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
-import { command, type CommandFn } from '../../commands/config.ts'
+import { command, type CommandFn, type Context } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Action } from '../../policy/index.ts'
-import { PolicyDenied } from '../../policy/index.ts'
+import type { Action, AskHandler } from '../../policy/index.ts'
+import { Outcome, PolicyDenied, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
-import type { AdmissionRules, CommandContext, CommandRule } from '../../policy/types.ts'
+import type { CommandContext } from '../../policy/types.ts'
+import { ruleTable } from '../../rs/policy.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
+import { trees } from '../../test-utils.ts'
 import { parse } from '../../shell/parse/parse.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -45,29 +50,21 @@ function gateCtx(tokens: string[]): CommandContext {
 
 const DOC = SessionProfile({
   commands: {
-    allow: [
-      'cat',
-      'rm',
-      'ls',
-      'ln',
-      'echo',
-      'head',
-      'grep',
-      'rg',
-      'cd',
-      'xargs',
-      'sh',
-      'mkdir',
-      'eval',
-      'source',
-    ],
-    deny: [
-      { reason: 'sealed', commands: { cat: ['/data/secret*'] } },
-      {
-        reason: 'private',
-        commands: { ls: ['/data/private'], grep: ['/data/private'], rg: ['/data/private'] },
-      },
-    ],
+    '*': 'deny',
+    cat: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+    rm: 'allow',
+    ls: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    ln: 'allow',
+    echo: 'allow',
+    head: 'allow',
+    grep: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    rg: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    cd: 'allow',
+    xargs: 'allow',
+    sh: 'allow',
+    mkdir: 'allow',
+    eval: 'allow',
+    source: 'allow',
   },
 })
 
@@ -102,7 +99,7 @@ describe('admission', () => {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: { deny: [{ reason: 'elsewhere', paths: ['/secret'] }] },
+            commands: { '*': { decision: 'deny', reason: 'elsewhere', paths: ['/secret'] } },
           }),
         },
       },
@@ -315,7 +312,7 @@ describe('admission', () => {
     // names the program no operand is a path.
     const w = ws(
       SessionProfile({
-        commands: { deny: [{ reason: 'sealed', paths: ['/data/secret*'] }] },
+        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] } },
       }),
     )
     await w.shell('cd /data')
@@ -437,9 +434,14 @@ describe('admission', () => {
     expect(io.decision?.reason).toBe('sealed')
   })
   it('the admitted gate judges what the line did not name', () => {
-    const deny: CommandRule = { reason: 'sealed', paths: ['/data/sealed'] }
-    const ask: CommandRule = { reason: 'nod', commands: ['grep'], paths: ['/data/asked/*'] }
-    const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
+    const rules = trees({
+      grep: [
+        { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] },
+        { decision: 'ask', reason: 'nod', paths: ['/data/asked/*'] },
+      ],
+    })
+    const ask = ruleTable(rules).find((r) => r.reason === 'nod')
+    if (ask === undefined) throw new Error('no ask leaf')
     const gate = new Admitted({
       rules,
       ctx: gateCtx(['grep', '-r', 'x', '/data']),
@@ -487,11 +489,7 @@ describe('admission', () => {
   it('the admitted gate scopes each start point on its own', () => {
     // A walk keeps its native op where no rule could reach: the gate of
     // `find /data /other` sets aside only the walk of /data.
-    const rules: AdmissionRules = {
-      allow: null,
-      ask: [],
-      deny: [{ reason: 'sealed', paths: ['/data/sealed'] }],
-    }
+    const rules = trees({ '*': { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] } })
     const gate = new Admitted({
       rules,
       ctx: gateCtx(['find', '/data', '/other']),
@@ -762,7 +760,7 @@ describe('what the handler a command resolves to declares', () => {
         { '/reader': new RAMVFS(), '/write': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          profiles: { default: SessionProfile({ commands: { [decision]: ['remote send'] } }) },
+          profiles: { default: SessionProfile({ commands: { remote: { send: decision } } }) },
         },
       )
       open.push(w)
@@ -855,9 +853,9 @@ async function tested(profile: SessionProfile, name: string, prefix: string, exp
 // rule reads a file operand however it is spelled, and an allow list answers
 // each name for itself.
 describe("the shell's own tests", () => {
-  const DENY: SessionProfile = {
-    commands: { deny: [{ reason: 'secret', paths: ['/data/secret.txt'] }] },
-  }
+  const DENY: SessionProfile = SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'secret', paths: ['/data/secret.txt'] } },
+  })
 
   it.each(['test', '[', '[['])('%s reads a file operand as a path rule does', async (name) => {
     expect(await tested(DENY, name, 'cd /data && ', '-e secret.txt')).toEqual([
@@ -906,14 +904,180 @@ describe("the shell's own tests", () => {
     ])
   })
 
-  it.each(['test', '[', '[['])('%s is answered by its own name in an allow list', async (name) => {
-    const without = { commands: { allow: ['echo', 'cd'] } }
+  it.each(['test', '[', '[['])('%s is answered by its own name in a closed tree', async (name) => {
+    const without = SessionProfile({ commands: { '*': 'deny', echo: 'allow', cd: 'allow' } })
     expect(await tested(without, name, 'cd /data && ', '-e a.txt')).toEqual([
       0,
       '126\n',
       `${name}: Permission denied\n`,
     ])
-    const listed = { commands: { allow: ['echo', 'cd', name] } }
+    const listed = SessionProfile({
+      commands: { '*': 'deny', echo: 'allow', cd: 'allow', [name]: 'allow' },
+    })
     expect(await tested(listed, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
   })
+})
+
+const SEALED = SessionProfile({
+  commands: {
+    '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] }],
+  },
+})
+
+describe('a redirect no command owns', () => {
+  it.each([
+    '{ cat; } < /data/secret.txt',
+    'while read -r l; do echo "$l"; done < /data/secret.txt',
+    '(cat) < /data/secret.txt',
+    'if true; then cat; fi < /data/secret.txt',
+    '> /data/secret.txt',
+    'x=1 > /data/secret.txt',
+    'exec > /data/secret.txt',
+    '{ cat; } < /data/link',
+  ])('meets the root path leaf: %s', async (line) => {
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { sealed: SEALED } },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/secret.txt; ln -s /data/secret.txt /data/link')
+    w.createSession('s', { profile: 'sealed' })
+    const io = await w.shell(line, { sessionId: 's' })
+    const named = line.includes('link') ? '/data/link' : '/data/secret.txt'
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([1, ''])
+    expect(io.stderrText).toBe(`bash: line 1: ${named}: Permission denied\n`)
+    expect([io.decision?.kind, io.decision?.reason]).toEqual(['deny', 'sealed'])
+    const kept = await w.shell('cat /data/secret.txt')
+    expect(new TextDecoder().decode(kept.stdout)).toBe('top\n')
+  })
+
+  it('meets no leaf about commands', async () => {
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          closed: SessionProfile({ commands: { '*': 'deny', ls: 'allow', cat: 'allow' } }),
+          named: SessionProfile({
+            commands: { cat: { decision: 'deny', paths: ['/data/secret.txt'] } },
+          }),
+        },
+      },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/secret.txt')
+    w.createSession('closed', { profile: 'closed' })
+    w.createSession('named', { profile: 'named' })
+    expect((await w.shell('{ ls /data; } > /data/out', { sessionId: 'closed' })).exitCode).toBe(0)
+    const io = await w.shell('{ cat; } < /data/secret.txt', { sessionId: 'named' })
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'top\n'])
+  })
+
+  it('is judged by admitLine', async () => {
+    const w = ws(SEALED)
+    const session = w.sessionManager.get(w.sessionManager.defaultId)
+    const reparse = (text: string) => parse(text)
+    for (const text of [
+      '{ cat; } < /data/secret.txt',
+      '> /data/secret.txt',
+      'exec 3< /data/secret.txt',
+      'exec > /data/secret.txt',
+      'echo a; exec 3< /data/secret.txt',
+    ]) {
+      const refused = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
+      expect(refused?.exitCode).toBe(1)
+      expect(new TextDecoder().decode(refused?.stderr)).toMatch(
+        /: \/data\/secret\.txt: Permission denied\n$/,
+      )
+    }
+    for (const text of [
+      '{ cat; } < /data/other',
+      'cat < /data/other',
+      'exec 3< /data/other',
+      'exec 3>&1',
+    ]) {
+      expect(await admitLine(parse(text), session, w.registry, w.namespace, reparse)).toBeNull()
+    }
+  })
+})
+
+const ASKS = SessionProfile({
+  commands: {
+    '*': ['allow', { decision: 'ask', reason: 'nod', paths: ['/data/f'] }],
+  },
+})
+
+class LineBox extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  readonly name = 'box'
+
+  constructor() {
+    super({ captures: ['@line'] })
+  }
+
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    _ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode('ran\n'))
+    return { exitCode: 0 }
+  }
+}
+
+describe('each redirect no command owns', () => {
+  it.each([
+    '{ cat; } < /data/f; > /data/f',
+    '{ cat; } < /data/f > /data/f',
+    "eval '> /data/f'; eval '> /data/f'",
+    "sh -c '> /data/f'; sh -c '> /data/f'",
+    ': $(> /data/f) $(> /data/f)',
+    'for i in 1 2; do > /data/f; done; > /data/f',
+  ])('needs a nod of its own: %s', async (line) => {
+    const asked: string[] = []
+    const allowsOnce: AskHandler = (record) => {
+      asked.push(record.id)
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { asks: ASKS }, onAsk: allowsOnce },
+    )
+    open.push(w)
+    await w.shell('echo top > /data/f')
+    w.createSession('s', { profile: 'asks' })
+    const io = await w.shell(line, { sessionId: 's' })
+    expect(io.exitCode).toBe(0)
+    expect(asked).toHaveLength(2)
+    const kept = await w.shell('cat /data/f')
+    expect(new TextDecoder().decode(kept.stdout)).toBe('')
+  })
+
+  it.each(['{ cat; } < /data/f; > /data/f', '{ cat; } < /data/f > /data/f'])(
+    'needs a nod of its own on a line run whole: %s',
+    async (line) => {
+      const asked: string[] = []
+      const allowsOnce: AskHandler = (record) => {
+        asked.push(record.id)
+        return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+      }
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          machines: [new LineBox()],
+          profiles: { asks: ASKS },
+          onAsk: allowsOnce,
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'asks' })
+      const io = await w.shell(line, { sessionId: 's' })
+      expect(io.exitCode).toBe(0)
+      expect(new TextDecoder().decode(io.stdout)).toBe('ran\n')
+      expect(asked).toHaveLength(2)
+    },
+  )
 })

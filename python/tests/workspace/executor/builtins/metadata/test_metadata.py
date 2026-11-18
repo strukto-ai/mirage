@@ -144,16 +144,15 @@ async def _sealed_ws(mounted: bool = False) -> Workspace:
         profiles={
             "guarded": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "sealed",
-                            "paths": [
-                                "/data/t/secret.txt",
-                                "/data/t/sealed",
-                                "/data/t/sealed/*",
-                            ],
-                        }
-                    ]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": [
+                            "/data/t/secret.txt",
+                            "/data/t/sealed",
+                            "/data/t/sealed/*",
+                        ],
+                    }
                 }
             }
         },

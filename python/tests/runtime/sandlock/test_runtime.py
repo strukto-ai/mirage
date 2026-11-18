@@ -186,7 +186,6 @@ async def test_a_run_still_finding_sandlock_at_close_never_starts(cli):
     "profile",
     [
         {"paths": {"hide": ["/data/secret"]}},
-        {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "x"}]}},
         {"mounts": {"/data": "r"}},
     ],
 )

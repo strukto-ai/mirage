@@ -138,7 +138,7 @@ Expand one for its signature and an example.
     ws.session(sessionId, { profile?, mounts?, permissions? }): Promise<Session>
     ```
 
-    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.createSession` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
+    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: a command tree, hides and weaker mount modes. Its tree is judged beside the profile's and the stricter result wins, so it cannot allow what the profile refuses. It cannot add a policy. `ws.createSession` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
 
     ```ts
     const session = await ws.session('agent')
@@ -153,7 +153,10 @@ Expand one for its signature and an example.
     Change the rules after the workspace is built. `setProfile` defines a profile name or replaces what it means; a document no session could run under throws `PolicyError` and leaves the table as it was. A live session keeps its rules until `setSessionProfile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `null` picks the workspace default, and a document passed directly runs without a name. The name is the user the session runs as: `whoami` prints it with uid 1000, a session with no profile is `root`, and one under a document without a name is uid 1000 with no name.
 
     ```ts
-    ws.setProfile('user', { commands: { allow: ['ls', 'cat'] }, paths: { hide: ['/data/secret'] } })
+    ws.setProfile('user', {
+      commands: { '*': 'deny', ls: 'allow', cat: 'allow' },
+      paths: { hide: ['/data/secret'] },
+    })
     await ws.setSessionProfile('agent', 'user')
     ```
   </Accordion>
@@ -462,7 +465,7 @@ session.tools.call(name, args, signal?): Promise<ToolResult>
 session.tools.names(): readonly string[]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list allows, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

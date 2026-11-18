@@ -19,13 +19,7 @@ import { type JsonValue, MountMode } from '../types.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { Policy } from './base.ts'
-import {
-  Outcome,
-  type Action,
-  type CommandContext,
-  type Decision,
-  type VfsContext,
-} from './types.ts'
+import { type Action, type CommandContext, type VfsContext } from './types.ts'
 import { currentCaller, bindCaller } from '../context/session_context.ts'
 import { scriptContext } from './script.ts'
 
@@ -136,103 +130,6 @@ describe('a method without task isolation', () => {
     }
   }, 30_000)
 
-  it("keeps one session's file nod off another session's call", async () => {
-    // A's read waits on the host while B's is approved: B's nod is spent
-    // with B's call, not claimed on A's.
-    let entered!: () => void
-    let release!: () => void
-    const reached = new Promise<void>((resolve) => (entered = resolve))
-    const held = new Promise<void>((resolve) => (release = resolve))
-    const askedB: string[] = []
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        onAsk: async (record: Decision) => {
-          if (record.sessionId === 'a') {
-            entered()
-            await held
-          } else {
-            askedB.push(record.sessionId)
-          }
-          return { ...record, outcome: Outcome.ALLOW }
-        },
-      },
-    )
-    const profile = {
-      commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] },
-    }
-    ws.createSession('a', { profile })
-    ws.createSession('b', { profile })
-    await ws.shell('mkdir -p /data/out && echo x > /data/out/f.txt')
-    try {
-      const a = new Session(ws, 'a').tools.read('/data/out/f.txt')
-      await reached
-      const b = new Session(ws, 'b').tools
-      expect((await b.read('/data/out/f.txt')).isError).toBeUndefined()
-      expect((await b.read('/data/out/f.txt')).isError).toBeUndefined()
-      expect(askedB).toEqual(['b', 'b'])
-      release()
-      expect((await a).isError).toBeUndefined()
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it("finds a session's own call under another session's", async () => {
-    // B's call stays open on the host while A's write runs: A's ops find
-    // A's call, so its read-back rides the nod its write was given.
-    let release!: () => void
-    const held = new Promise<void>((resolve) => (release = resolve))
-    const askedA: string[] = []
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        onAsk: async (record: Decision) => {
-          if (record.sessionId === 'b') await held
-          else askedA.push(record.sessionId)
-          return { ...record, outcome: Outcome.ALLOW }
-        },
-      },
-    )
-    const profile = {
-      commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] },
-    }
-    ws.createSession('a', { profile })
-    ws.createSession('b', { profile })
-    await ws.shell('mkdir -p /data/out && echo x > /data/out/f.txt')
-    try {
-      const a = new Session(ws, 'a').tools.write('/data/out/a.txt', 'hi')
-      const b = new Session(ws, 'b').tools.read('/data/out/f.txt')
-      expect((await a).isError).toBeUndefined()
-      expect(askedA).toEqual(['a'])
-      release()
-      expect((await b).isError).toBeUndefined()
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it("covers a file tool's own reads with one nod", async () => {
-    // A write tool reads the file back to stamp its version: the nod for
-    // the call covers that read too, and is spent with the call.
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    ws.createSession('agent', {
-      profile: { commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] } },
-    })
-    const tools = new Session(ws, 'agent').tools
-    try {
-      expect((await tools.write('/data/out/a.txt', 'hi')).isError).toBe(true)
-      const [record] = ws.decisions.pending('agent')
-      await ws.decisions.answer(record?.id ?? '', Outcome.ALLOW)
-      expect((await tools.write('/data/out/a.txt', 'hi')).isError).toBeUndefined()
-      expect((await tools.write('/data/out/a.txt', 'again')).isError).toBe(true)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it("asks a file tool's ops of the methods even when a line's caller is in reach", async () => {
     // Without task isolation the newest caller may be another task's line,
     // whose I/O skips the methods: a tool call copying it would write
@@ -267,24 +164,25 @@ describe('a method without task isolation', () => {
     let release!: () => void
     const reached = new Promise<void>((resolve) => (entered = resolve))
     const held = new Promise<void>((resolve) => (release = resolve))
+    const holds: Policy = {
+      preVfs: async (ctx: VfsContext) => {
+        if (holding && ctx.sessionId === 'admin' && ctx.path.virtual === '/data/hold.txt') {
+          entered()
+          await held
+        }
+        return null
+      },
+    }
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         profiles: { narrow: { paths: { hide: ['/data/secret'] } } },
         profile: 'narrow',
-        onAsk: async (record: Decision) => {
-          if (holding) {
-            entered()
-            await held
-          }
-          return { ...record, outcome: Outcome.ALLOW }
-        },
+        policies: [holds],
       },
     )
-    ws.createSession('admin', {
-      profile: { commands: { ask: [{ reason: 'held', paths: ['/data/hold.txt'] }] } },
-    })
+    ws.createSession('admin', { profile: {} })
     await ws.shell(
       'mkdir -p /data/secret && echo s > /data/secret/x.txt && echo h > /data/hold.txt',
       {
@@ -298,52 +196,6 @@ describe('a method without task isolation', () => {
       expect((await ws.tools.read('/data/secret/x.txt')).isError).toBe(true)
       release()
       expect((await wide).isError).toBeUndefined()
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it("keeps one call's nod off the same session's next calls", async () => {
-    // A read waits on the host while the same session's write is answered
-    // once: the nod covers that write, not the read and write after it.
-    let entered!: () => void
-    let release!: () => void
-    const reached = new Promise<void>((resolve) => (entered = resolve))
-    const held = new Promise<void>((resolve) => (release = resolve))
-    const asked: string[] = []
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        onAsk: async (record: Decision) => {
-          asked.push(record.argv.join(' '))
-          if (asked.length === 1) {
-            entered()
-            await held
-          }
-          return { ...record, outcome: Outcome.ALLOW }
-        },
-      },
-    )
-    ws.createSession('agent', {
-      profile: { commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] } },
-    })
-    await ws.shell('mkdir -p /data/out && echo x > /data/out/f.txt')
-    const tools = new Session(ws, 'agent').tools
-    try {
-      const slow = tools.read('/data/out/f.txt')
-      await reached
-      expect((await tools.write('/data/out/a.txt', 'one')).isError).toBeUndefined()
-      expect((await tools.read('/data/out/a.txt')).isError).toBeUndefined()
-      expect((await tools.write('/data/out/a.txt', 'two')).isError).toBeUndefined()
-      expect(asked).toEqual([
-        '/data/out/f.txt',
-        '/data/out/a.txt',
-        '/data/out/a.txt',
-        '/data/out/a.txt',
-      ])
-      release()
-      expect((await slow).isError).toBeUndefined()
     } finally {
       await ws.close()
     }

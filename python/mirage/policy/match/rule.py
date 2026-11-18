@@ -12,21 +12,57 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import Collection, Sequence
 from typing import Any
 
 from mirage.commands.spec.types import WordKind
-from mirage.policy.constants import METADATA_OPS, SUBTREE_OPS
+from mirage.policy.constants import DEFAULT_DENY_REASON
 from mirage.policy.match.allow import line_tokens
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
+    CommandRead,
     CommandRule,
-    VfsContext,
+    Outcome,
 )
 from mirage.rs.document import units
-from mirage.rs.policy import admission_matcher
-from mirage.types import PathSpec
+from mirage.rs.policy import Encoded, admission_matcher, rule_table
+from mirage.types import Matched, PathSpec
+
+
+def not_allowed(words: Sequence[str]) -> str:
+    """The reason a refusal gives when nothing wrote one: the words
+    that fired, ``rm --recursive is not allowed``.
+
+    Args:
+        words (Sequence[str]): the command path and options that fired.
+    """
+    return f"{' '.join(words)} is not allowed"
+
+
+def reason_of(rule: CommandRule, matched: Matched | None) -> str:
+    """Why a leaf refuses or asks: the reason written on it, else, for
+    a deny that covers every path, the command path, options and keys
+    that fired (``rm --recursive is not allowed``, ``echo secret* is not
+    allowed``), else the default.
+
+    A deny scoped to paths keeps the default: the line's own error
+    names the path it refused.
+
+    Args:
+        rule (CommandRule): the leaf that spoke.
+        matched (Matched | None): what fired; None when unknown.
+    """
+    if rule.reason:
+        return rule.reason
+    if (
+        rule.decision is Outcome.DENY
+        and not rule.paths
+        and matched is not None
+    ):
+        return not_allowed((*matched.command, *matched.flags, *matched.keys))
+    return DEFAULT_DENY_REASON
 
 
 def operand_paths(ctx: CommandContext) -> list[PathSpec]:
@@ -51,11 +87,46 @@ def _path_fact(path: PathSpec) -> dict[str, list[int]]:
     }
 
 
+def read_wire(read: CommandRead) -> dict[str, Any]:
+    """A line's read in the stream's wire shape.
+
+    Args:
+        read (CommandRead): the line's read.
+    """
+    return {
+        "path": [units(v) for v in read.path],
+        "flags": [
+            {"name": units(f.name), "values": [units(v) for v in f.values]}
+            for f in read.flags
+        ],
+        "operands": [units(v) for v in read.operands],
+    }
+
+
+def line_words(ctx: CommandContext) -> dict[str, Any]:
+    """What a tree walks, in the stream's wire shape: the line's read
+    when its grammar read it, else its tokens, and whether a tool runs it
+    (a shell function is no tool). A read already holds every word, so
+    the tokens are not sent beside it.
+
+    Args:
+        ctx (CommandContext): the classified command.
+    """
+    return {
+        "tokens": (
+            [units(v) for v in line_tokens(ctx)] if ctx.read is None else []
+        ),
+        "line": None if ctx.read is None else read_wire(ctx.read),
+        "tool": ctx.tool,
+    }
+
+
 def command_facts(ctx: CommandContext) -> dict[str, Any]:
-    """What a line's rules are read against, in the stream's wire shape:
-    its tokens and paths, and the host's word on its command: whether it
-    moves or removes whole subtrees (``CommandContext.subtree``) and
-    whether it is a move whose last operand is the destination.
+    """What a line's trees are judged on, in the stream's wire shape:
+    its words (``line_words``) and paths, and the host's word on its
+    command: whether it moves or removes whole subtrees
+    (``CommandContext.subtree``) and whether it is a move whose last
+    operand is the destination.
 
     Args:
         ctx (CommandContext): the classified command.
@@ -63,8 +134,7 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
     moves = ctx.command == "mv"
     target = ctx.move_target if moves and ctx.paths else None
     return {
-        "tokens": [units(v) for v in line_tokens(ctx)],
-        "tool": ctx.tool,
+        **line_words(ctx),
         "cwd": units(ctx.cwd),
         "paths": [_path_fact(path) for path in ctx.paths],
         "operands": [_path_fact(path) for path in operand_paths(ctx)],
@@ -75,167 +145,98 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
     }
 
 
+def naming_rules(
+    rules: AdmissionRules | None, ctx: CommandContext
+) -> Encoded | None:
+    """The running line's walk through every tree, which each entry its
+    command reaches is judged under; None when no leaf speaks for the
+    line. Asked once per line, since an entry changes the path and
+    never the line.
+
+    Args:
+        rules (AdmissionRules | None): the session's command trees.
+        ctx (CommandContext): the running command.
+    """
+    if rules is None:
+        return None
+    walked = admission_matcher(rules).ask("naming_rules", **line_words(ctx))
+    if not any(w["branches"] for w in walked):
+        return None
+    return Encoded(json.dumps(walked))
+
+
 def io_reach(
-    rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
+    rules: AdmissionRules | None, named: Encoded | None, virtual: str
 ) -> bool:
-    """Whether a rule in force could reach an entry at or under this
-    path for the running line: the rule names the line and its paths,
-    or a mount rule's mount, could cover something in the subtree.
+    """Whether a leaf the running line walked could refuse an entry at
+    or under this path: its paths could cover something in the subtree.
 
     What a native walk asks before it trusts the raw tree, per operand
-    the way a hide is: a rule on ``/repo/.env`` leaves ``find /s3`` its
+    the way a hide is: a leaf on ``/repo/.env`` leaves ``find /s3`` its
     native op.
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line as an admission pattern reads
-            it, command name first.
+        rules (AdmissionRules | None): the session's command trees.
+        named (Encoded | None): the line's walk (``naming_rules``).
         virtual (str): absolute virtual path of the walk's start point.
     """
     return (
         rules is not None
+        and named is not None
         and admission_matcher(rules).ask(
-            "io_reach",
-            tokens=[units(v) for v in tokens],
-            path=units(virtual),
+            "io_reach", walked=named, path=units(virtual)
         )
         is True
     )
 
 
-def _grant_indices(
-    rules: AdmissionRules, granted: Collection[CommandRule]
-) -> list[int]:
-    if not granted:
-        return []
-    return [
-        index
-        for index, rule in enumerate((*rules.deny, *rules.ask))
-        if rule in granted
-    ]
-
-
-def _rule_at(rules: AdmissionRules, index: int) -> CommandRule:
-    return (*rules.deny, *rules.ask)[index]
-
-
 def io_refusal(
     rules: AdmissionRules | None,
-    tokens: Sequence[str],
+    named: Encoded | None,
     virtual: str,
     granted: Collection[CommandRule],
 ) -> str | None:
     """The reason a command may not touch an entry it reached on its
     own, None when it may.
 
-    The same law the admission gate applies to a line, and literally
-    the same loop: anchor depth first,
-    deny before ask at equal depth. Reading every deny before any ask
-    instead would let a broad deny on ``/repo/*`` overrule an approved
-    ask on ``/repo/sealed/*`` that the gate had just admitted the line
-    under, so the carve-out would survive admission and then refuse
-    every entry it was written for.
-
-    The winning rule then answers: a deny refuses, an ask refuses
-    unless the line holds a grant under it (the nod the gate took for
-    ``rm -r /x`` covers the entries under ``/x``; a walk that wanders
-    into an asked scope from outside gets no nod mid-command, so it is
-    refused and the agent names the path to be asked).
+    The entry is judged as one more path of the line, by the walk the
+    gate judged the line on: the strictest leaf over every tree whose
+    mount holds it. A deny refuses; an ask refuses unless the line holds
+    a grant under it (the nod the gate took for ``rm -r /x`` covers the
+    entries under ``/x``; a walk that wanders into an asked scope from
+    outside gets no nod mid-command, so it is refused and the agent
+    names the path to be asked).
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line's tokens, command name first.
+        rules (AdmissionRules | None): the session's command trees.
+        named (Encoded | None): the line's walk (``naming_rules``).
         virtual (str): absolute virtual path of the entry.
-        granted (Collection[CommandRule]): the ask rules the line runs
-            under a grant for.
+        granted (Collection[CommandRule]): the asks the line runs under
+            a grant for.
     """
-    if rules is None:
+    if rules is None or named is None:
         return None
+    table = rule_table(rules)
     result = admission_matcher(rules).ask(
         "io_refusal",
-        tokens=[units(v) for v in tokens],
+        walked=named,
         path=units(virtual),
-        granted=_grant_indices(rules, granted),
+        granted=[i for i, rule in enumerate(table) if rule in granted],
     )
-    return None if result is None else _rule_at(rules, result).reason
-
-
-def posix_level(rule: CommandRule) -> bool:
-    """Whether a rule holds at a dispatcher too: a pure path rule, which
-    names no command and has paths to match, the one kind an op can meet.
-
-    The sort of a profile's rules: a POSIX-level rule holds at every
-    entry point, a command-level one (it names a command, or no path) only
-    where a line is judged.
-
-    Args:
-        rule (CommandRule): the rule.
-    """
-    return (
-        admission_matcher(AdmissionRules(deny=(rule,))).ask(
-            "posix_level", rule=0
-        )
-        is True
-    )
+    return None if result is None else reason_of(table[result], None)
 
 
 def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
-    """The command-level parts of a profile's rules, which an entry point that
-    sees only ops (a kernel mount, SFTP, codex-exec's file calls) cannot
-    apply, each described for the operator's warning: the allow list and
-    every rule that is not POSIX level.
+    """The command trees an entry point that sees only ops (a kernel
+    mount, SFTP, codex-exec's file calls) cannot apply, each named for
+    the operator's warning: every tree, since a tree judges lines.
 
     Args:
-        rules (AdmissionRules | None): the session's admission rules.
+        rules (AdmissionRules | None): the session's command trees.
     """
     if rules is None:
         return ()
-    skipped = ["commands.allow"] if rules.allow is not None else []
-    for verb, listed in (("deny", rules.deny), ("ask", rules.ask)):
-        skipped.extend(
-            f"commands.{verb}: {rule.reason}"
-            for rule in listed
-            if not posix_level(rule)
-        )
-    return tuple(skipped)
-
-
-def op_ruling(
-    rules: AdmissionRules | None,
-    ctx: VfsContext,
-    granted: Collection[CommandRule],
-) -> tuple[CommandRule, bool] | None:
-    """The rule an op meets and whether it asks, None when the op may
-    run.
-
-    The dispatcher twin of :func:`io_refusal`, and the same law: anchor
-    depth first, deny before ask at equal depth, and an ask satisfied
-    by a grant the line already holds. Reading every deny before any
-    ask instead let a broad deny on ``/repo/*`` overrule an approved
-    ask on ``/repo/outbox/*``, so the carve-out command admission had
-    just admitted the line under could not authorize the redirect it
-    was written for: the write reached the dispatcher and was refused there.
-
-    What an ask means is the entry point's to say: inside a running line it
-    refuses like a deny, since the line was admitted without it, and
-    outside one (a file tool, the host's facade) it goes to the
-    approval ledger, keyed by rule and path.
-
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        ctx (VfsContext): the op about to run.
-        granted (Collection[CommandRule]): the ask rules the running
-            line holds a grant under, empty when no command is bound.
-    """
-    if rules is None or ctx.call.name in METADATA_OPS:
-        return None
-    result = admission_matcher(rules).ask(
-        "op_ruling",
-        subtree=ctx.call.name in SUBTREE_OPS,
-        path=units(ctx.path.virtual),
-        granted=_grant_indices(rules, granted),
+    return tuple(
+        f"mounts.{scoped.mount}.commands" if scoped.mount else "commands"
+        for scoped in rules.trees
     )
-    if result is None:
-        return None
-    index, asks = result
-    return _rule_at(rules, index), asks

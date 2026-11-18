@@ -53,7 +53,7 @@ export function validateDocument(
   op: string,
   raw: unknown,
   where: string,
-  options: { names?: string; root?: string; reason?: string } = {},
+  options: { names?: string; root?: string } = {},
 ): unknown {
   const stream = openStreamSync('document', {
     op,
@@ -62,7 +62,6 @@ export function validateDocument(
     dialect: 'ecmascript',
     ...(options.names === undefined ? {} : { names: options.names }),
     root: units(options.root ?? ''),
-    reason: units(options.reason ?? ''),
   })
   try {
     const answer = JSON.parse(decoder.decode(stream.finish())) as {

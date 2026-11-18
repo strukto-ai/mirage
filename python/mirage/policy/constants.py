@@ -16,18 +16,10 @@ from typing import get_args
 
 from mirage.policy.types import ScriptMethod
 
-# The reason a bare command pattern under ``commands.deny`` carries, and
-# the one a bare pattern under ``commands.ask`` carries.
+# The reason a deny leaf written without one carries, and the one an ask
+# leaf written without one carries.
 DEFAULT_DENY_REASON = "denied by policy"
 DEFAULT_ASK_REASON = "no standing approval"
-
-# Ops that act on a whole subtree at once, so a pure path rule refuses
-# them on the directory that holds its scope or on any ancestor: moving
-# or removing ``/x`` takes ``/x/locked/*`` along. ``rmdir`` removes the
-# scope's own directory; ``rm_r`` removes a tree in one call. They are
-# pinned to what the functions declare by tests/policy/test_constants.py:
-# policy sits below vfs, so it cannot read the declarations itself.
-SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 
 # Ops that read an entry's metadata and nothing of its content, which a
 # deny rule lets through at the dispatcher: deny means present and
@@ -35,8 +27,9 @@ SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 # and the read of it is what fails, as GNU reports an unreadable file.
 # The command tier's guard leaves its ``stat`` slot unwrapped for the
 # same reason; a hidden path is the hide arm's, and stays ENOENT.
-# ``exists`` is the command tier's probe; ``stat`` is pinned like
-# SUBTREE_OPS's VFS ops.
+# ``exists`` is the command tier's probe; ``stat`` is pinned to what the
+# functions declare by tests/policy/test_constants.py: policy sits below
+# vfs, so it cannot read the declarations itself.
 METADATA_OPS = frozenset({"stat", "exists"})
 
 # The methods a profile's policy names programs for: the pre_ five,

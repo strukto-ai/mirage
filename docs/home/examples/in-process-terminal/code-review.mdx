@@ -105,7 +105,26 @@ the repository and comment on its pull requests.
           /repo:
             mode: read
         commands:
-          allow: [cd, pwd, echo, ls, cat, head, tail, grep, sed, awk, wc, sort, uniq, find, jq, git, gh pr view, gh pr diff, gh pr checks, gh issue view, gh pr comment]
+          "*": deny
+          cd: allow
+          pwd: allow
+          echo: allow
+          ls: allow
+          cat: allow
+          head: allow
+          tail: allow
+          grep: allow
+          sed: allow
+          awk: allow
+          wc: allow
+          sort: allow
+          uniq: allow
+          find: allow
+          jq: allow
+          git: allow
+          gh:
+            pr: {view: allow, diff: allow, checks: allow, comment: allow}
+            issue: {view: allow}
         policy:
           pre_command:
             - {script: ./guard.py}
@@ -113,13 +132,13 @@ the repository and comment on its pull requests.
 
     - `mounts` in the profile makes `/repo` read-only for the agent. The clone
       below runs in the default session, which has no profile.
-    - `commands.allow` is the whole list of what the agent can run. `rm`, `mv`
-      and `curl` are not on it. Of `gh`, it has the four commands that read a
+    - `commands` starts with `"*": deny`, so it names everything the agent can
+      run. `rm`, `mv` and `curl` are not in it. Of `gh`, it has the four commands that read a
       pull request, its issue and CI, and `gh pr comment` to post the review.
       `gh pr merge`, `gh pr edit` and `gh api` are refused.
   </Accordion>
   <Accordion title="guard.py">
-    An allow rule matches the start of a command, so `gh pr comment` alone
+    Allowing `gh pr comment` allows it with any option, so the tree alone
     would also let the agent pick another repository with `-R` or delete a
     comment with `--delete-last`. `guard.py` sees the command after the shell
     has expanded it, and accepts a comment only in one form:

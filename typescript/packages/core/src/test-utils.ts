@@ -36,6 +36,12 @@ import { IOResult, type ByteSource } from './io/types.ts'
 import type { DispatchFn } from './runtime/types.ts'
 import type { RAMAccessor } from './accessor/ram.ts'
 import type { StorageUsage } from './vfs/capacity.ts'
+import { commandTree } from './policy/profile.ts'
+import type { AdmissionRules, CommandContext, CommandNode, ScopedTree } from './policy/types.ts'
+import { readLine } from './workspace/executor/command/reading.ts'
+import { lineFacts } from './workspace/lookup/constants.ts'
+import { MountRegistry } from './workspace/mount/registry.ts'
+import { BUILTIN_GRAMMARS, normalizeTree } from './workspace/session/validate.ts'
 
 /** Every value an async iterable yields, in order. */
 export async function collected<T>(values: AsyncIterable<T>): Promise<T[]> {
@@ -367,5 +373,79 @@ export class BatchedRAM extends RAMVFS {
         ]),
       ),
     )
+  }
+}
+
+/**
+ * A `commands` block read and held by the built-in grammars' canonical
+ * names, as a session holds it.
+ */
+export function tree(block: Record<string, unknown>): CommandNode {
+  return normalizeTree(commandTree(block), BUILTIN_GRAMMARS, 'commands', true)
+}
+
+/**
+ * A session's command trees from blocks as a profile writes them: the
+ * top-level block, each mount's block by prefix, and inline permissions'.
+ */
+export function trees(
+  commands: Record<string, unknown> | null = null,
+  mounts: Record<string, Record<string, unknown>> = {},
+  inline: Record<string, unknown> | null = null,
+): AdmissionRules {
+  const out: ScopedTree[] =
+    commands === null ? [] : [{ tree: tree(commands), mount: '', inline: false }]
+  for (const [prefix, block] of Object.entries(mounts))
+    out.push({ tree: tree(block), mount: prefix, inline: false })
+  if (inline !== null) out.push({ tree: tree(inline), mount: '', inline: true })
+  return { trees: out }
+}
+
+/** A resolved path as the classifier gives one. */
+export function resolvedPath(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+    vfsPath: virtual,
+    resolved: true,
+    rawPath: virtual,
+  })
+}
+
+/**
+ * A line's context as admission builds it: read once by its command's
+ * grammar, every word starting with `/` a path. `registry` holds the mounts
+ * and CLIs whose trees read the line; the built-in commands only when
+ * absent. `tool` is false for a shell function's call.
+ */
+export function line(
+  words: readonly string[],
+  options: { cwd?: string; registry?: MountRegistry; tool?: boolean; sessionId?: string } = {},
+): CommandContext {
+  const [name = '', ...argv] = words
+  const cwd = options.cwd ?? '/'
+  const classified = argv.map((w) => (w.startsWith('/') ? resolvedPath(w) : w))
+  const reading = readLine(
+    options.registry ?? new MountRegistry({}, MountMode.WRITE),
+    name,
+    argv,
+    classified,
+    cwd,
+  )
+  const facts = lineFacts(name, [name, ...classified], cwd)
+  return {
+    command: name,
+    paths: reading.words.flatMap((w) => (w.path === null ? [] : [w.path])),
+    words: reading.words,
+    argv,
+    cwd,
+    sessionId: options.sessionId ?? '',
+    tokens: reading.tokens,
+    program: reading.program,
+    read: reading.read,
+    tool: options.tool ?? true,
+    walks: facts.walks,
+    subtree: facts.subtree,
+    moveTarget: facts.moveTarget,
   }
 }

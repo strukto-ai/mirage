@@ -20,6 +20,7 @@ from operator import itemgetter
 from typing import Any
 
 from mirage.context import reset_caller, set_program_invocation
+from mirage.context.session_context import RedirectGuard, RedirectResult
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import PipeInput, SharedInput, share
@@ -66,6 +67,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
     EXEC_STREAM_FIELDS,
     OPEN_FOR_READ_WRITE,
     OPEN_FOR_READING,
+    OPENS_NO_FILE,
     TO_STDERR,
     TO_STDIN,
     TO_STDOUT,
@@ -188,6 +190,7 @@ async def install_exec_redirects(
     redirects: list[Redirect],
     stdin: ByteSource | None = None,
     expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
+    guard: RedirectGuard | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Point the shell's own streams at files for the rest of the shell.
 
@@ -211,6 +214,9 @@ async def install_exec_redirects(
         redirects (list[Redirect]): the redirects in source order.
         stdin (ByteSource | None): current input for duplication.
         expand (Callable | None): expand each target immediately before opening.
+        guard (RedirectGuard | None): admit each file target before it
+            opens; a refusal rolls back as a failed open does, its
+            decision kept on the result.
     """
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
@@ -221,7 +227,7 @@ async def install_exec_redirects(
     saved["descriptors"] = dict(session.descriptors)
     try:
         err = await _install(
-            owned, dispatch, session, redirects, stdin, expand
+            owned, dispatch, session, redirects, stdin, expand, guard
         )
     except BaseException:
         for name, value in saved.items():
@@ -233,7 +239,14 @@ async def install_exec_redirects(
         _settle_holds(session)
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     try:
-        return await _roll_back(dispatch, session, saved, err)
+        if isinstance(err, bytes):
+            return await _roll_back(dispatch, session, saved, err)
+        refused = err[1]
+        rolled = await _roll_back(
+            dispatch, session, saved, await materialize(refused.stderr)
+        )
+        rolled[1].decision = refused.decision
+        return rolled
     finally:
         await session.release_inputs(before + owned)
 
@@ -245,10 +258,10 @@ async def _install(
     redirects: list[Redirect],
     stdin: ByteSource | None,
     expand: Callable[[Redirect], Awaitable[Redirect]] | None,
-) -> bytes | None:
-    for redirect in redirects:
-        if expand is not None:
-            redirect = await expand(redirect)
+    guard: RedirectGuard | None,
+) -> bytes | RedirectResult | None:
+    for raw in redirects:
+        redirect = raw if expand is None else await expand(raw)
         named = named_descriptor(
             redirect, lambda fd: fd in session.descriptors
         )
@@ -265,6 +278,17 @@ async def _install(
                 errno.ENOENT, "No such file or directory"
             )
             return _error_line(label, missing)
+        target = redirect.target
+        if (
+            named is None
+            and guard is not None
+            and isinstance(target, (str, PathSpec))
+            and redirect.kind not in OPENS_NO_FILE
+        ):
+            scope = _to_scope(target) if isinstance(target, str) else target
+            refused = await guard((scope,), stdin, raw)
+            if refused is not None:
+                return refused
         for operation in named or redirect_operations(redirect):
             error = await _install_descriptor(
                 owned, dispatch, session, operation, stdin

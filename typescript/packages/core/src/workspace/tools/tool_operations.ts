@@ -24,6 +24,7 @@ import { gnuDirname } from '../../utils/path.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { runs } from '../../policy/match/allow.ts'
+import { closed } from '../../policy/match/reads.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
@@ -201,8 +202,8 @@ export class MirageToolOperations {
   /**
    * The tools this session can use, in the order the entry points list them.
    * Read off the session's profile, so no entry point offers a tool every call
-   * of which would be refused: `shell` needs a command the allow list
-   * installs, `ls` and `grep` run those commands and need them, and
+   * of which would be refused: `shell` needs a command no top-level tree
+   * closes (`closed`), `ls` and `grep` run those commands and need them, and
    * `write` and `edit` need somewhere the session may write. `read` and
    * `glob` are always offered; what they cannot reach answers as the
    * error it is. A session not loaded yet (a stored one before its first
@@ -218,10 +219,9 @@ export class MirageToolOperations {
       if (err instanceof Error && err.message.startsWith('unknown session:')) return TOOL_NAMES
       throw err
     }
-    const allow = session.commands?.allow ?? null
     const writable = writes(session, this.session.mounts())
     const offered: Record<string, boolean> = {
-      shell: allow === null || allow.length > 0,
+      shell: !closed(session.commands),
       read: true,
       write: writable,
       edit: writable,

@@ -86,10 +86,10 @@ def path_program(
 def is_tool(
     name: str, session: SessionState, registry: "MountRegistry"
 ) -> bool:
-    """Whether a command word is a tool the allow lists govern.
+    """Whether a command word is a tool a tree's root decision governs.
 
-    Every named command is a subject, shell builtins included: an allow
-    list stating ``cat`` leaves no ``echo`` and no ``cd``. Two kinds of
+    Every named command is a subject, shell builtins included: a closed
+    tree naming ``cat`` leaves no ``echo`` and no ``cd``. Two kinds of
     word are not, because neither is a name the list could hold: a path
     being executed (its lines are each checked as they run), and the
     agent's own function where the function is what runs, which is any
@@ -358,8 +358,8 @@ def _layers(
     yield and ``lookup_all`` reads all of them. Lazy on purpose, so the
     winner costs exactly what it did before the split (a name an
     installed CLI answers never reaches the mount lookup). A profile's
-    allow list does not narrow it: a word the list leaves out is found,
-    and the policy gate refuses it.
+    command trees do not narrow it: a word a closed tree names nothing
+    for is found, and the policy gate refuses it.
 
     Args:
         name (str): expanded command name.

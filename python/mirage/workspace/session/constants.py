@@ -12,11 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.policy.types import (
+    AdmissionRules,
+    CommandNode,
+    Outcome,
+    RuleLeaf,
+    ScopedTree,
+)
 from mirage.shell.variable import ShellVar, VarAttr
 
 # The profile a session is created from when none is named and the
 # workspace defines one of this name.
 DEFAULT_PROFILE = "default"
+
+# What a session record written before command trees comes back with:
+# its flat rules have no tree to become, so every line is denied until
+# the session is recreated.
+OLDER_FORMAT = AdmissionRules(
+    (
+        ScopedTree(
+            CommandNode(
+                decision=(
+                    RuleLeaf(
+                        Outcome.DENY,
+                        "rules saved in an older format; recreate the session",
+                    ),
+                )
+            )
+        ),
+    )
+)
 
 # What a fork of a session carries over. Written down once because
 # `SessionState.fork` builds a copy from it and

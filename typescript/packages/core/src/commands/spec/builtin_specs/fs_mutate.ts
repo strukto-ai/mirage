@@ -74,8 +74,7 @@ export const SPECS: Record<string, CommandSpec> = {
   cp: new CommandSpec({
     arguments: [
       new Argument('--debug', { action: 'store_true' }),
-      new Argument('-r', { action: 'store_true' }),
-      new Argument(['-R', '--recursive'], { action: 'store_true' }),
+      new Argument(['-r', '-R', '--recursive'], { action: 'store_true' }),
       new Argument(['-a', '--archive'], { action: 'store_true' }),
       new Argument(['-L', '--dereference'], { action: 'store_true' }),
       new Argument(['-P', '--no-dereference'], { action: 'store_true' }),

@@ -136,7 +136,7 @@ Expand one for its signature and an example.
     ) -> Session
     ```
 
-    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.create_session` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
+    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: a command tree, hides and weaker mount modes. Its tree is judged beside the profile's and the stricter result wins, so it cannot allow what the profile refuses. It cannot add a policy. `ws.create_session` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
 
     ```python
     session = await ws.session("agent")
@@ -153,7 +153,10 @@ Expand one for its signature and an example.
     ```python
     ws.set_profile(
         "user",
-        {"commands": {"allow": ["ls", "cat"]}, "paths": {"hide": ["/data/secret"]}},
+        {
+            "commands": {"*": "deny", "ls": "allow", "cat": "allow"},
+            "paths": {"hide": ["/data/secret"]},
+        },
     )
     await ws.set_session_profile("agent", "user")
     ```
@@ -450,7 +453,7 @@ await session.tools.call(name, arguments) -> ToolResult
 session.tools.names() -> tuple[str, ...]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list allows, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

@@ -15,22 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../vfs/base.ts'
 import { callNames, declaredCalls } from '../vfs/call.ts'
-import { Effect, Target } from '../vfs/types.ts'
-import { METADATA_OPS, SUBTREE_OPS } from './constants.ts'
+import { Effect } from '../vfs/types.ts'
+import { METADATA_OPS } from './constants.ts'
 
 const CALLS = declaredCalls(BaseVFS)
 const sorted = (names: Iterable<string>): string[] => [...names].sort()
 
 describe('policy op tables', () => {
-  it('holds the subtree ops the functions declare', () => {
-    // A rename and a directory removal take everything under them along.
-    const declared = [
-      ...callNames(CALLS, { effects: [Effect.RENAME] }),
-      ...callNames(CALLS, { effects: [Effect.REMOVE], targets: [Target.DIR] }),
-    ]
-    expect(sorted(SUBTREE_OPS)).toEqual(sorted(declared))
-  })
-
   it('holds the metadata ops the functions declare', () => {
     const declared = callNames(CALLS, { effects: [Effect.METADATA] })
     expect(sorted(METADATA_OPS)).toEqual(sorted([...declared, 'exists']))

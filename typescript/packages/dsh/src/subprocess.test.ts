@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { SubprocessError, SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
 import { describe, expect, it } from 'vitest'
-import { Workspace } from '@struktoai/mirage-node'
+import { SessionProfile, Workspace } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
 import { MirageSubprocess } from './subprocess.ts'
 
@@ -17,7 +17,7 @@ describe('workspace subprocess', () => {
   it('uses the configured session profile for child admission', async () => {
     const ws = new Workspace({}, { machines: [] })
     ws.createSession('limited', {
-      profile: { commands: { deny: [{ commands: ['printf'], reason: 'restricted' }] } },
+      profile: SessionProfile({ commands: { printf: { decision: 'deny', reason: 'restricted' } } }),
     })
     const ctx = new Context()
     await ctx.plugin(MirageService, { workspace: ws }).await()

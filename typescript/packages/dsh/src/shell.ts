@@ -749,8 +749,8 @@ export class MirageShellExecutor extends ShellExecutor {
    * unanswered ask and a policy that raised all leave `decision` on the
    * `ExecuteResult`, whatever the line did with its streams (`2>&1`, a
    * trailing command that owns the status). That record is read for
-   * every call, because a role's `commands.deny` and `commands.ask`
-   * rules bind under `workspace-write` and `danger-full-access` alike:
+   * every call, because a role's `commands` tree denies and asks
+   * bind under `workspace-write` and `danger-full-access` alike:
    * a mode says what the mounts allow, and says nothing about whether a
    * rule forbids the line. The narrowing has no record, since it is
    * EROFS/EACCES from the mounts, so its signatures are still read off

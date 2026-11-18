@@ -230,38 +230,26 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
     },
   )
 
-  it.each(['hide', 'deny'] as const)(
-    'rechecks a warmed handle after session %s and restores it',
-    async (restriction) => {
-      const fixture = world(kind)
-      const { driver, http, ws } = fixture
-      try {
-        await listDay(ws, http)
-        const fd = await driver.open()
-        expect((await driver.read(fd)).value).toEqual(BYTES)
-        const calls = http.fetch.mock.calls.length
-        await ws.setSessionProfile(
-          'reader',
-          restriction === 'hide'
-            ? { paths: { hide: [FILE] } }
-            : { commands: { deny: [{ reason: 'sealed', paths: [FILE] }] } },
-        )
-        const expected =
-          restriction === 'hide' ? -osConstants.errno.ENOENT : -osConstants.errno.EACCES
-        expect((await driver.read(fd)).code).toBe(expected)
-        if (restriction === 'hide') {
-          expect((await driver.getattr(fd)).code).toBe(-osConstants.errno.ENOENT)
-          expect((await driver.getattr()).code).toBe(-osConstants.errno.ENOENT)
-        }
-        expect(http.fetch.mock.calls).toHaveLength(calls)
-        await ws.setSessionProfile('reader', {})
-        expect((await driver.read(fd)).value).toEqual(BYTES)
-        expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
-        expect(http.fetch.mock.calls).toHaveLength(calls)
-        await driver.release(fd)
-      } finally {
-        await fixture.close()
-      }
-    },
-  )
+  it('rechecks a warmed handle after a session hide and restores it', async () => {
+    const fixture = world(kind)
+    const { driver, http, ws } = fixture
+    try {
+      await listDay(ws, http)
+      const fd = await driver.open()
+      expect((await driver.read(fd)).value).toEqual(BYTES)
+      const calls = http.fetch.mock.calls.length
+      await ws.setSessionProfile('reader', { paths: { hide: [FILE] } })
+      expect((await driver.read(fd)).code).toBe(-osConstants.errno.ENOENT)
+      expect((await driver.getattr(fd)).code).toBe(-osConstants.errno.ENOENT)
+      expect((await driver.getattr()).code).toBe(-osConstants.errno.ENOENT)
+      expect(http.fetch.mock.calls).toHaveLength(calls)
+      await ws.setSessionProfile('reader', {})
+      expect((await driver.read(fd)).value).toEqual(BYTES)
+      expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
+      expect(http.fetch.mock.calls).toHaveLength(calls)
+      await driver.release(fd)
+    } finally {
+      await fixture.close()
+    }
+  })
 })

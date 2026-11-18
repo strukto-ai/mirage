@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RedirectKind } from '../../../../shell/types.ts'
+
 // What `exec >&-` leaves a stream pointing at: a closed descriptor whose
 // writes drop. bash fails them with `Bad file descriptor`; mirage has no
 // descriptor to fail, a documented divergence.
@@ -59,3 +61,15 @@ export const EXEC_STREAM_UNBOUND = {
   1: { execStdout: null, execStdoutAppend: false, execStdoutInput: null },
   2: { execStderr: null, execStderrAppend: false, execStderrInput: null },
 } as const
+
+/**
+ * The redirects that name no file to open: a body the shell feeds
+ * (heredoc, herestring), a word that did not expand to one target, or one
+ * only the runtime could expand. The redirect gate is not asked.
+ */
+export const OPENS_NO_FILE: ReadonlySet<RedirectKind> = new Set([
+  RedirectKind.HEREDOC,
+  RedirectKind.HERESTRING,
+  RedirectKind.AMBIGUOUS,
+  RedirectKind.UNEXPANDED,
+])

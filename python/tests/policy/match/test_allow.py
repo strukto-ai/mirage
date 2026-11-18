@@ -12,40 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.allow import (
-    head_allowed,
-    line_tokens,
-)
-from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
+from mirage.policy.match.allow import line_tokens, runs
+from mirage.policy.types import CommandContext
+from tests.fixtures.command_trees import trees
 
 
-def _ctx(
-    command: str,
-    argv: tuple[str, ...] = (),
-    tokens: tuple[str, ...] = (),
-    tool: bool = True,
-) -> CommandContext:
-    return CommandContext(
-        command=command,
-        paths=(),
-        argv=argv,
-        cwd="/",
-        tokens=tokens,
-        tool=tool,
-    )
-
-
-def test_head_allowed_answers_the_roles_one_allow_list():
-    rules = AdmissionRules(allow=("ls", "git log"))
-    # A name is allowed when it starts a pattern of the list.
-    assert head_allowed("ls", rules)
-    assert head_allowed("git", rules)
-    assert not head_allowed("cat", rules)
-    assert not head_allowed("rm", rules)
-    # A profile without a list allows everything, and so does no profile.
-    assert head_allowed("rm", AdmissionRules(deny=(CommandRule("x"),)))
-    assert head_allowed("rm", None)
+def test_runs_unless_a_tree_that_holds_everywhere_denies_every_line():
+    assert runs("rm", None)
+    rules = trees({"*": "deny", "ls": "allow", "git": {"push": "deny"}})
+    assert runs("ls", rules)
+    assert not runs("git", rules)
+    assert not runs("rm", rules)
+    assert runs("git", trees({"git": {"push": "deny"}}))
+    assert not runs("cat", trees({"cat": "deny"}))
+    assert runs("cat", trees(mounts={"/a": {"cat": "deny"}}))
 
 
 def test_line_tokens_read_the_raw_argv_without_the_entry_point():
-    assert line_tokens(_ctx("git", ("push",))) == ("git", "push")
+    ctx = CommandContext(command="git", paths=(), argv=("push",), cwd="/")
+    assert line_tokens(ctx) == ("git", "push")

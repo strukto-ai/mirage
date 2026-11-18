@@ -37,7 +37,7 @@ async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<v
       config: {
         mounts: { '/': { vfs: 'ram', mode: 'write' } },
         profiles: {
-          guarded: { commands: { ask: [{ commands: ['rm'], reason: ASK_REASON }] } },
+          guarded: { commands: { rm: { decision: 'ask', reason: ASK_REASON } } },
         },
       },
     },

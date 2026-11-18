@@ -15,13 +15,16 @@
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
     AdmissionRules,
+    CommandNode,
     CommandRule,
     Decision,
     ProfileScript,
     Scope,
+    ScopedTree,
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
+from mirage.workspace.session.constants import OLDER_FORMAT
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -32,34 +35,65 @@ from mirage.workspace.session.serialize import (
     script_from_dict,
     script_to_dict,
 )
+from tests.fixtures.command_trees import trees
 
 
-def test_rule_round_trips_and_writes_mount_only_when_set():
-    bare = CommandRule(reason="no", commands=("rm",))
-    data = rule_to_dict(bare)
-    assert data == {"reason": "no", "commands": ["rm"], "paths": []}
-    assert rule_from_dict(data) == bare
-    scoped = CommandRule(
-        reason="ro", commands=("git push",), paths=("/repo/*",), mount="/repo"
+def test_rule_round_trips_and_writes_optional_fields_only_when_set():
+    leaf = CommandRule(
+        reason="ro",
+        decision=Outcome.DENY,
+        at="/git/push/*",
+        paths=("/repo/*",),
+        mount="/repo",
     )
-    assert rule_to_dict(scoped)["mount"] == "/repo"
-    assert rule_from_dict(rule_to_dict(scoped)) == scoped
-    # A record written before a field existed reads with the default.
+    data = rule_to_dict(leaf)
+    assert data == {
+        "reason": "ro",
+        "decision": "deny",
+        "paths": ["/repo/*"],
+        "at": "/git/push/*",
+        "mount": "/repo",
+    }
+    assert rule_from_dict(data) == leaf
+    coded = CommandRule(reason="no", commands=("rm",))
+    assert rule_to_dict(coded) == {
+        "reason": "no",
+        "paths": [],
+        "commands": ["rm"],
+    }
+    assert rule_from_dict(rule_to_dict(coded)) == coded
     assert rule_from_dict({"reason": "x"}) == CommandRule(reason="x")
 
 
-def test_commands_round_trips_and_keeps_an_absent_allow_list():
-    spec = AdmissionRules(
-        allow=("ls", "git log"),
-        ask=(CommandRule(reason="sign-off", commands=("git push",)),),
-        deny=(CommandRule(reason="no", commands=("rm",)),),
+def test_command_trees_round_trip_with_their_mounts():
+    spec = trees(
+        {"*": "deny", "ls": "allow", "rm": {"-r": "ask"}},
+        mounts={"/repo": {"git": {"push": "deny"}}},
+        inline={"cp": "deny"},
     )
-    assert commands_from_dict(commands_to_dict(spec)) == spec
-    unlisted = AdmissionRules(deny=(CommandRule(reason="x"),))
-    data = commands_to_dict(unlisted)
-    assert data["allow"] is None
-    assert commands_from_dict(data) == unlisted
-    assert commands_from_dict({}) == AdmissionRules()
+    data = commands_to_dict(spec)
+    assert data == [
+        {
+            "mount": "",
+            "commands": {
+                "*": "deny",
+                "ls": "allow",
+                "rm": {"--recursive": "ask"},
+            },
+        },
+        {"mount": "/repo", "commands": {"git": {"push": "deny"}}},
+        {"mount": "", "commands": {"cp": "deny"}, "inline": True},
+    ]
+    assert commands_from_dict(data) == spec
+    assert commands_from_dict(None) is None
+
+
+def test_flat_rules_read_back_as_the_closed_tree():
+    flat = {"allow": ["ls"], "ask": [], "deny": []}
+    assert commands_from_dict(None, flat) == OLDER_FORMAT
+    assert commands_from_dict(commands_to_dict(trees({})), flat) == (
+        AdmissionRules((ScopedTree(CommandNode()),))
+    )
 
 
 def test_script_round_trips_with_its_runtime_and_settings():

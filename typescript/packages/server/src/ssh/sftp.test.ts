@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-node'
+import { SessionProfile, Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
@@ -90,7 +90,11 @@ async function vaultWorkspace(): Promise<Workspace> {
     {
       mode: MountMode.WRITE,
       profiles: {
-        guarded: { commands: { deny: [{ reason: 'the vault is sealed', paths: ['/vault/*'] }] } },
+        guarded: SessionProfile({
+          commands: {
+            '*': { decision: 'deny', reason: 'the vault is sealed', paths: ['/vault/*'] },
+          },
+        }),
       },
     },
   )
@@ -564,11 +568,12 @@ it('serves a key bound to a profile under it', async () => {
   })
   expect(content.toString()).toBe('token\n')
   const sealed = await sftpOf(await connect(h, 'demo', guarded))
-  await expect(
-    call<Buffer>((cb) => {
-      sealed.readFile('/vault/secret', cb)
-    }),
-  ).rejects.toMatchObject({ code: STATUS.PERMISSION_DENIED })
+  const guardedContent = await call<Buffer>((cb) => {
+    sealed.readFile('/vault/secret', cb)
+  })
+  // A command tree judges lines; SFTP's file calls are ops, which only a
+  // hide or a mode refuses.
+  expect(guardedContent.toString()).toBe('token\n')
 })
 
 it('does not follow a hidden link on a stat', async () => {

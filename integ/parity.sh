@@ -61,9 +61,9 @@ mounts:
 profiles:
   default:
     commands:
-      ask:
-        - reason: removal needs sign-off
-          commands: [rm]
+      rm:
+        decision: ask
+        reason: removal needs sign-off
 YML
 
 # The workspace default stays WRITE so the implicit scratch root (always

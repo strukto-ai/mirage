@@ -45,21 +45,32 @@ const SCRIPT_STEM = SCRIPT_NAME.slice(0, SCRIPT_NAME.lastIndexOf('.'))
 const SCRIPT_EXT = SCRIPT_NAME.slice(SCRIPT_NAME.lastIndexOf('.'))
 const RECENT_DAYS = 5
 
-// The permission document this run works under: every tool the demo uses
-// is admitted and recursive removes are refused outright, while a plain
-// remove needs a human — but only inside /tmp, which is what the `mounts`
-// section scopes it to, so the run's own /redis cleanup is not caught by
-// it. Nothing here composes an approval channel, so an asked line has
+// The permission document this run works under: the root `*` refuses
+// every command the tree does not name, the tools the demo uses are
+// named, and `rm` with its recursive option is refused outright. A plain
+// remove needs a human, but only inside /tmp: the `mounts` section gives
+// /tmp a tree of its own, so the run's own /redis cleanup is not caught
+// by it. Nothing here composes an approval channel, so an asked line has
 // nobody to reach and waits in the ledger instead.
 const ROLE = SessionProfile(
   {
     commands: {
-      allow: ['cat', 'ls', 'grep', 'head', 'rm', 'echo', 'python', 'python3'],
-      deny: [{ commands: ['rm -rf'], reason: 'no recursive deletes' }],
+      '*': 'deny',
+      cat: 'allow',
+      ls: 'allow',
+      grep: 'allow',
+      head: 'allow',
+      echo: 'allow',
+      python: 'allow',
+      python3: 'allow',
+      rm: {
+        '*': 'allow',
+        '--recursive': { decision: 'deny', reason: 'no recursive deletes' },
+      },
     },
     mounts: {
       '/tmp': {
-        commands: { ask: [{ commands: ['rm'], reason: 'deletes are reviewed' }] },
+        commands: { rm: { decision: 'ask', reason: 'deletes are reviewed' } },
       },
     },
   },

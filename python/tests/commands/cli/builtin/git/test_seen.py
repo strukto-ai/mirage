@@ -56,17 +56,31 @@ PROFILES = {
     "boxed": {"paths": {"hide": ["/repo/box/secret.txt"]}},
     "sealed": {
         "commands": {
-            "deny": [{"reason": "sealed", "paths": ["/repo/secret.txt"]}]
+            "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/repo/secret.txt"],
+            }
         }
     },
     "half": {"paths": {"hide": ["/repo/a/secret.txt"]}},
     "cellared": {"paths": {"hide": ["/repo/cellar"]}},
     "fresh": {
-        "commands": {"deny": [{"reason": "fresh", "paths": ["/repo/new.txt"]}]}
+        "commands": {
+            "*": {
+                "decision": "deny",
+                "reason": "fresh",
+                "paths": ["/repo/new.txt"],
+            }
+        }
     },
     "walled": {
         "commands": {
-            "deny": [{"reason": "walled", "paths": ["/repo/boxf/secret.txt"]}]
+            "*": {
+                "decision": "deny",
+                "reason": "walled",
+                "paths": ["/repo/boxf/secret.txt"],
+            }
         }
     },
 }

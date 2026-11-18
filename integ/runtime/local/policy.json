@@ -43,8 +43,8 @@
       ]
     },
     {
-      "id": "native_run_refused_under_path_rules",
-      "note": "Native execution is refused when its file access cannot enforce the session path rules.",
+      "id": "native_run_refused_under_file_restrictions",
+      "note": "Native execution is refused when its file access cannot enforce the session's file restrictions.",
       "world": {
         "machines": {
           "local": {
@@ -58,14 +58,9 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/ram/*"
-                  ]
-                }
+            "paths": {
+              "hide": [
+                "/ram/sealed"
               ]
             }
           }

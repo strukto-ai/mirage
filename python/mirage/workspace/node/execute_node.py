@@ -69,7 +69,6 @@ from mirage.shell.helpers import (
     get_if_branches,
     get_list_parts,
     get_negated_command,
-    get_parts,
     get_pipeline_stages,
     get_redirects,
     get_text,
@@ -142,7 +141,11 @@ from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.admission import admit_test
+from mirage.workspace.node.admission import (
+    admit_redirect,
+    admit_test,
+    is_bare_exec,
+)
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
@@ -692,7 +695,7 @@ async def _run_redirected(
         forked=forked,
         links=namespace.session_links(context.session),
     )
-    if _is_bare_exec(command):
+    if is_bare_exec(command):
         if any(
             r.target_node is not None and _names_process_sub(r.target_node)
             for r in redirects
@@ -709,7 +712,12 @@ async def _run_redirected(
                 ExecutionNode(command="exec", exit_code=2, stderr=err),
             )
         return await install_exec_redirects(
-            dispatch, session, redirects, stdin, expand=expand
+            dispatch,
+            session,
+            redirects,
+            stdin,
+            expand=expand,
+            guard=_redirect_gate(context, registry, namespace),
         )
     # A heredoc's operator line reads the routed stdout, so then it is
     # returned rather than written. A simple command expands its words
@@ -790,6 +798,7 @@ async def _run_redirected(
                 call_stack,
                 sink=sink,
                 expand=expand,
+                guard=_redirect_gate(context, registry, namespace),
                 forked=forked,
                 follow=namespace.session_links(context.session).follow,
             )
@@ -806,23 +815,52 @@ async def _run_redirected(
     return stdout, io, exec_node
 
 
-def _is_bare_exec(command: TSNodeLike | None) -> bool:
-    """Whether a redirected statement's command is a bare `exec`, which
-    installs its redirects on the shell for every later statement;
-    `exec cmd` is a command.
+def _redirect_gate(
+    context: EvaluationContext, registry: MountRegistry, namespace: Namespace
+) -> RedirectGuard:
+    """The gate of a redirect no command owns (a compound's, a bare
+    one, ``exec``'s): the session's trees judge each target before it
+    opens (``admit_redirect``), and a refusal replaces the statement's
+    run as a failed open does. The opener passes every target so far;
+    only the last is new, and one already judged is not asked again.
+    Each target is judged at the redirect that opens it, so two opens
+    on one line each need a nod of their own.
 
     Args:
-        command (Any): the command node under the redirect,
-            or None for a command-less redirect (`> file`).
+        context (EvaluationContext): the evaluation's session.
+        registry (MountRegistry): registry holding the decision ledger.
+        namespace (Namespace): the link table.
     """
-    if command is None or command.type != NT.COMMAND:
-        return False
-    named = get_parts(command)
-    return (
-        len(named) == 1
-        and named[0].type == NT.COMMAND_NAME
-        and get_text(named[0]) == "exec"
-    )
+
+    async def gate(
+        paths: tuple[PathSpec, ...],
+        given: ByteSource | None,
+        opening: Redirect | None,
+    ) -> RedirectResult | None:
+        refused = await admit_redirect(
+            paths[-1:],
+            context.session,
+            registry,
+            namespace,
+            None if opening is None else opening.target_node,
+        )
+        if refused is None:
+            return None
+        io = IOResult(
+            exit_code=refused.exit_code,
+            stderr=refused.stderr,
+            decision=refused.decision,
+        )
+        node = ExecutionNode(
+            command="redirect",
+            exit_code=refused.exit_code,
+            stderr=refused.stderr,
+            refused=True,
+        )
+        node.unopened = True
+        return None, io, node
+
+    return gate
 
 
 async def execute_node(

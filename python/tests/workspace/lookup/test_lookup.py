@@ -21,8 +21,8 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_caller, set_program_invocation
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
-from mirage.policy.match.allow import head_allowed
-from mirage.policy.types import AdmissionRules, CommandExplanation
+from mirage.policy.match.allow import runs
+from mirage.policy.types import CommandExplanation
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -49,6 +49,7 @@ from mirage.workspace.lookup.lookup import (
     runs_wrapper,
 )
 from mirage.workspace.session import SessionState
+from tests.fixtures.command_trees import trees
 
 
 class _Sandbox(Runtime, ProcessExecutorMixin):
@@ -247,12 +248,12 @@ def test_route_agrees_with_the_first_layer_route_all_reports():
         assert lookup(name, session, ws._registry) is winner
 
 
-def test_an_allow_list_does_not_narrow_lookup():
-    # The allow list is a policy: a word it leaves out is still found in
-    # its layer, and the gate refuses it when it runs.
+def test_a_closed_tree_does_not_narrow_lookup():
+    # A closed tree is a policy: a word it names nothing for is still
+    # found in its layer, and the gate refuses it when it runs.
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
-    session.commands = AdmissionRules(allow=("cat",))
+    session.commands = trees({"*": "deny", "cat": "allow"})
     reg = ws._registry
     assert lookup("cat", session, reg) is Consumer.MOUNT
     assert lookup("prog", session, reg) is Consumer.CLI
@@ -312,13 +313,13 @@ def test_programs_lists_every_program_the_session_can_run():
 def test_programs_lists_every_program_whatever_the_allow_list():
     session, ws = _fixture()
     narrow = SessionState(
-        session_id="n", commands=AdmissionRules(allow=("cat",))
+        session_id="n", commands=trees({"*": "deny", "cat": "allow"})
     )
     assert programs(narrow, ws._registry) == programs(session, ws._registry)
 
 
 # Debian's egrep is `exec grep -E "$@"`, so it is a program wherever grep
-# is one, and an allow list naming only grep refuses it when it runs.
+# is one, and a closed tree naming only grep refuses it when it runs.
 def test_a_wrapper_is_a_program_where_what_it_runs_is():
     session, ws = _fixture()
     registry = ws._registry
@@ -329,10 +330,10 @@ def test_a_wrapper_is_a_program_where_what_it_runs_is():
         "egrep is built into mirage. Help: egrep --help"
     )
     narrow = SessionState(
-        session_id="n", commands=AdmissionRules(allow=("grep",))
+        session_id="n", commands=trees({"*": "deny", "grep": "allow"})
     )
     assert lookup("egrep", narrow, registry) is Consumer.MOUNT
-    assert not head_allowed("egrep", narrow.commands)
+    assert not runs("egrep", narrow.commands)
 
 
 # An interpreter is a program only where a language runtime runs it; a
@@ -606,7 +607,11 @@ def _mirage_workspace(*entries) -> Workspace:
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines=[*entries],
-        profiles={"tight": {"commands": {"allow": ["cd", "grep"]}}},
+        profiles={
+            "tight": {
+                "commands": {"*": "deny", "cd": "allow", "grep": "allow"}
+            }
+        },
     )
 
 

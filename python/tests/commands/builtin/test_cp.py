@@ -47,7 +47,7 @@ def test_cp_recursive(backend):
                 PathSpec.from_str_path("/tmp/src/"),
                 PathSpec.from_str_path("/tmp/dst/"),
             ],
-            flags={"r": True},
+            flags={"recursive": True},
         )
     )
     assert (

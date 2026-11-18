@@ -23,7 +23,14 @@
             "vfs": "ram",
             "mode": "read"
           }
-        }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": "/data/sealed/f.txt",
+            "allow_metadata": true
+          }
+        ]
       },
       "steps": [
         {
@@ -31,16 +38,6 @@
             "paths": {
               "hide": [
                 "/data/secret.txt"
-              ]
-            },
-            "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "paths": [
-                    "/data/sealed/*"
-                  ]
-                }
               ]
             }
           }
@@ -155,19 +152,20 @@
         {
           "profile": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "sealed",
-                  "commands": {
-                    "python3": [
-                      "/data/sealed/*"
-                    ],
-                    "node": [
-                      "/data/sealed/*"
-                    ]
-                  }
-                }
-              ]
+              "python3": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/data/sealed/*"
+                ]
+              },
+              "node": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": [
+                  "/data/sealed/*"
+                ]
+              }
             }
           }
         },
@@ -390,19 +388,20 @@
         {
           "profile": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "blocked alias",
-                  "commands": {
-                    "python3": [
-                      "/data/blocked/*"
-                    ],
-                    "node": [
-                      "/data/blocked/*"
-                    ]
-                  }
-                }
-              ]
+              "python3": {
+                "decision": "deny",
+                "reason": "blocked alias",
+                "paths": [
+                  "/data/blocked/*"
+                ]
+              },
+              "node": {
+                "decision": "deny",
+                "reason": "blocked alias",
+                "paths": [
+                  "/data/blocked/*"
+                ]
+              }
             }
           }
         },
@@ -449,19 +448,20 @@
         {
           "profile": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "private target",
-                  "commands": {
-                    "python3": [
-                      "/data/private/*"
-                    ],
-                    "node": [
-                      "/data/private/*"
-                    ]
-                  }
-                }
-              ]
+              "python3": {
+                "decision": "deny",
+                "reason": "private target",
+                "paths": [
+                  "/data/private/*"
+                ]
+              },
+              "node": {
+                "decision": "deny",
+                "reason": "private target",
+                "paths": [
+                  "/data/private/*"
+                ]
+              }
             }
           }
         },

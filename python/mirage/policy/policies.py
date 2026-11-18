@@ -214,9 +214,7 @@ async def transfer_lines(
         return f"{goal.rstrip('/')}/{name.rstrip('/').rsplit('/', 1)[-1]}"
 
     recursive = subject == "cp" and (
-        flags.as_bool("r")
-        or flags.as_bool("recursive")
-        or flags.as_bool("archive")
+        flags.as_bool("recursive") or flags.as_bool("archive")
     )
     typed = (
         flags.typed_order("dereference", "no_dereference", "H", "d", "archive")
@@ -298,6 +296,7 @@ def decision_of(action: Deny | Pending) -> PolicyDecision | None:
         kind="failed" if action.failed else "deny",
         reason=action.reason,
         policy=action.policy,
+        matched=action.matched,
     )
 
 
@@ -844,7 +843,7 @@ class Policies:
         """Register a policy after the existing ones.
 
         Code only: a declarative rule belongs in the permissions
-        document (``commands.deny``), which the workspace compiles.
+        document (a ``commands`` tree), which the workspace compiles.
 
         Args:
             policy (Policy): the policy to consult after the rest.

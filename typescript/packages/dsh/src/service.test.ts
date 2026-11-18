@@ -232,8 +232,10 @@ describe('MirageService', () => {
       profiles: {
         agent: {
           commands: {
-            allow: ['cat', 'echo', 'rm'],
-            deny: [{ reason: 'no removes', commands: ['rm'] }],
+            '*': 'deny',
+            cat: 'allow',
+            echo: 'allow',
+            rm: ['allow', { decision: 'deny', reason: 'no removes' }],
           },
         },
       },
@@ -307,8 +309,9 @@ describe('MirageService', () => {
       profiles: {
         agent: {
           commands: {
-            allow: ['cat', 'rm'],
-            ask: [{ reason: 'deletes are reviewed', commands: ['rm'] }],
+            '*': 'deny',
+            cat: 'allow',
+            rm: ['allow', { decision: 'ask', reason: 'deletes are reviewed' }],
           },
         },
       },

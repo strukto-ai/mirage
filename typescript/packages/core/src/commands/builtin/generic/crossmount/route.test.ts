@@ -101,7 +101,7 @@ describe('handleCrossMount — cp / mv', () => {
       'cp',
       paths,
       [],
-      { r: true },
+      { recursive: true },
       dispatch,
       runSingleNoop,
       null,

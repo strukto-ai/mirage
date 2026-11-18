@@ -47,6 +47,7 @@ import { Effect } from '../vfs/types.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
 import { Mount } from './mount/spec.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 class MockVFS extends BaseVFS {
   override readonly name = 'mock'
@@ -1131,9 +1132,9 @@ it('updates default-profile policy for unbound ops without replacing the session
   try {
     const session = ws.getSession(ws.defaultSessionId)
     await ws.vfs.write('/data/file', new TextEncoder().encode('kept'))
-    const profile = { commands: { deny: [{ paths: ['/data/file'], reason: 'sealed' }] } }
+    const profile = SessionProfile({ paths: { hide: ['/data/file'] } })
     expect(await ws.setSessionProfile(ws.defaultSessionId, profile)).toBe(session)
-    await expect(ws.vfs.read('/data/file')).rejects.toThrow()
+    await expect(ws.vfs.read('/data/file')).rejects.toMatchObject({ code: 'ENOENT' })
     await ws.setSessionProfile(ws.defaultSessionId, {})
     expect(ws.getSession(ws.defaultSessionId)).toBe(session)
     expect(new TextDecoder().decode(await ws.vfs.read('/data/file'))).toBe('kept')
@@ -1147,17 +1148,20 @@ it('setProfile redefines a name the next setSessionProfile applies', async () =>
     { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      profiles: { user: { commands: { allow: ['whoami'] } } },
+      profiles: { user: SessionProfile({ commands: { '*': 'deny', whoami: 'allow' } }) },
     },
   )
   try {
     await ws.vfs.write('/data/file', new TextEncoder().encode('kept'))
     ws.createSession('a', { profile: 'user' })
     expect((await ws.shell('cat /data/file', { sessionId: 'a' })).exitCode).not.toBe(0)
-    ws.setProfile('user', {
-      commands: { allow: ['whoami', 'cat'] },
-      paths: { hide: ['/data/secret'] },
-    })
+    ws.setProfile(
+      'user',
+      SessionProfile({
+        commands: { '*': 'deny', whoami: 'allow', cat: 'allow' },
+        paths: { hide: ['/data/secret'] },
+      }),
+    )
     expect((await ws.shell('cat /data/file', { sessionId: 'a' })).exitCode).not.toBe(0)
     await ws.setSessionProfile('a', 'user')
     const moved = await ws.shell('cat /data/file; whoami', { sessionId: 'a' })
@@ -1176,9 +1180,7 @@ it('setProfile refuses before the table changes', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { profiles: { user: {} } })
   try {
     expect(() => {
-      ws.setProfile('user', {
-        commands: { allow: ['ls'], deny: [{ commands: ['cat *'], reason: 'sealed' }] },
-      })
+      ws.setProfile('user', SessionProfile({ commands: { rm: { '-rf': 'deny' } } }))
     }).toThrow(PolicyError)
     expect(ws.profiles.user).toEqual({})
   } finally {

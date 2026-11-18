@@ -12,16 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.allow import head_allowed, line_tokens, runs
-from mirage.policy.match.decide import decide
-from mirage.policy.match.pattern import pattern_matches, split_pattern
-from mirage.policy.match.reads import has_rules, reads_args, scopes_paths
+from mirage.policy.match.allow import line_tokens, runs
+from mirage.policy.match.decide import decide, redirect_ruling
+from mirage.policy.match.reads import (
+    closed,
+    closed_by_default,
+    has_rules,
+    reads_args,
+    scopes_paths,
+)
 from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
-    op_ruling,
+    naming_rules,
+    not_allowed,
     operand_paths,
-    posix_level,
+    reason_of,
     skipped_at_dispatch,
 )
 from mirage.policy.types import Outcome, Ruling
@@ -29,19 +35,20 @@ from mirage.policy.types import Outcome, Ruling
 __all__ = [
     "Outcome",
     "Ruling",
+    "closed",
+    "closed_by_default",
     "decide",
+    "redirect_ruling",
     "has_rules",
-    "head_allowed",
     "io_reach",
     "io_refusal",
     "line_tokens",
-    "op_ruling",
+    "naming_rules",
+    "not_allowed",
     "operand_paths",
-    "pattern_matches",
-    "posix_level",
+    "reason_of",
     "runs",
     "reads_args",
     "scopes_paths",
     "skipped_at_dispatch",
-    "split_pattern",
 ]

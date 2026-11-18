@@ -58,19 +58,20 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "protected",
-                  "commands": {
-                    "cat": [
-                      "/ram/secret.txt"
-                    ],
-                    "grep": [
-                      "/ram/secret.txt"
-                    ]
-                  }
-                }
-              ]
+              "cat": {
+                "decision": "deny",
+                "reason": "protected",
+                "paths": [
+                  "/ram/secret.txt"
+                ]
+              },
+              "grep": {
+                "decision": "deny",
+                "reason": "protected",
+                "paths": [
+                  "/ram/secret.txt"
+                ]
+              }
             }
           }
         }
@@ -122,13 +123,12 @@
         "profiles": {
           "default": {
             "commands": {
-              "allow": [
-                "nohup",
-                "nice",
-                "ionice",
-                "time",
-                "echo"
-              ]
+              "*": "deny",
+              "nohup": "allow",
+              "nice": "allow",
+              "ionice": "allow",
+              "time": "allow",
+              "echo": "allow"
             }
           }
         }
@@ -230,16 +230,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "protected",
-                  "commands": {
-                    "grep": [
-                      "/ram/secret.txt"
-                    ]
-                  }
-                }
-              ]
+              "grep": {
+                "decision": "deny",
+                "reason": "protected",
+                "paths": [
+                  "/ram/secret.txt"
+                ]
+              }
             }
           }
         }
@@ -323,14 +320,13 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "credentials are never read by hand",
-                  "paths": [
-                    "/vault/*"
-                  ]
-                }
-              ]
+              "*": {
+                "decision": "deny",
+                "reason": "credentials are never read by hand",
+                "paths": [
+                  "/vault/*"
+                ]
+              }
             }
           }
         }
@@ -608,14 +604,10 @@
         "profiles": {
           "default": {
             "commands": {
-              "deny": [
-                {
-                  "reason": "no compilers",
-                  "commands": [
-                    "gcc"
-                  ]
-                }
-              ]
+              "gcc": {
+                "decision": "deny",
+                "reason": "no compilers"
+              }
             }
           }
         }

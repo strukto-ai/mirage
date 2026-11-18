@@ -12,178 +12,327 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Collection, Iterable, Iterator, Mapping
+from dataclasses import replace
+from types import MappingProxyType
+
+from mirage.commands.cli.walk import find_child
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import argument_dest, compile_spec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.errors import PolicyError
-from mirage.policy.match import head_allowed, split_pattern
-from mirage.policy.types import AdmissionRules, CommandRule
+from mirage.policy.match.grammar import no_grammar, unread_names
+from mirage.policy.types import (
+    AdmissionRules,
+    CommandNode,
+    Grammar,
+    OptionRule,
+    ScopedTree,
+    ValueRule,
+)
+from mirage.workspace.lookup.constants import NOT_INSTALLABLE
+
+BUILTIN_GRAMMARS: Mapping[str, Grammar] = MappingProxyType(
+    {name: Grammar(spec) for name, spec in SPECS.items()}
+)
+
+RESERVED_WORDS = frozenset(
+    {"decision", "reason", "paths", "operands", "values"}
+)
+VALUELESS_ACTIONS = frozenset({"store_true", "count"})
+GLOB_CHARS = frozenset("*?[")
 
 
-def _head(pattern: str) -> str:
-    """The command name a pattern starts with, empty for a bare
-    wildcard.
-
-    Args:
-        pattern (str): the command pattern as written.
-    """
-    tokens = split_pattern(pattern)
-    head = tokens[0] if tokens else ""
-    return "" if head == "*" else head
+def _at_or_below(node: CommandSpec) -> Iterator[CommandSpec]:
+    yield node
+    for child in node.subcommands:
+        yield from _at_or_below(child)
 
 
-def _covers_pattern(deny: str, ask: str) -> bool:
-    """Whether a deny pattern matches every line an ask pattern does.
-
-    A pattern is a token prefix, so a shorter deny covers a longer ask
-    (``git`` covers ``git push``) and a ``*`` token in the deny covers
-    whatever the ask names there. The reverse never holds.
-
-    Args:
-        deny (str): the deny rule's command pattern.
-        ask (str): the ask rule's command pattern.
-    """
-    want = split_pattern(deny)
-    have = split_pattern(ask)
-    if len(want) > len(have):
+def _cluster(key: str, node: CommandSpec) -> bool:
+    if key.startswith("--") or len(key) < 3:
         return False
-    return all(w == "*" or w == h for w, h in zip(want, have))
+    shorts = {
+        spelling
+        for spec in _at_or_below(node)
+        for spelling in compile_spec(spec).dest
+    }
+    return all(f"-{letter}" in shorts for letter in key[1:])
 
 
-def _shadowed(ask: CommandRule, deny: CommandRule) -> bool:
-    """Whether a deny rule refuses every line an ask rule asks about.
+def _option_name(
+    key: str, node: CommandSpec, above: tuple[CommandSpec, ...], at: str
+) -> str:
+    own = compile_spec(node).dest.get(key)
+    if own is not None:
+        return own
+    meanings = sorted(
+        {
+            dest
+            for spec in _at_or_below(node)
+            if (dest := compile_spec(spec).dest.get(key)) is not None
+        }
+    )
+    if len(meanings) == 1:
+        return meanings[0]
+    if meanings:
+        raise PolicyError(
+            f"{at}: {key} names different options below "
+            f"({', '.join(meanings)}); write the long name you mean, or "
+            "put the entry under its subcommand"
+        )
+    inherited = next(
+        (
+            dest
+            for spec in reversed(above)
+            if (dest := compile_spec(spec).dest.get(key)) is not None
+        ),
+        None,
+    )
+    if inherited is not None:
+        return inherited
+    if _cluster(key, node):
+        keys = " and ".join(f"-{letter}" for letter in key[1:])
+        raise PolicyError(
+            f"{at}: {key} is a cluster of options; write {keys} as "
+            "separate keys"
+        )
+    raise PolicyError(f"{at}: no option {key} at or below this command")
 
-    Three things have to hold, and each is the reason for one arm. The
-    deny must name no paths, or the ask still fires on the operands the
-    deny leaves alone. It must be written at the same anchor, which is
-    where deny beats ask unconditionally; across anchors the deeper rule
-    leads and which one that is depends on the line, so this reports
-    nothing rather than guess (a top-level deny does shadow a
-    mount-scoped ask on the same command, and is deliberately left to
-    the run). And every command the ask names must be covered by one of
-    its patterns, since an ask naming a command the deny misses still
-    has work to do.
 
-    Args:
-        ask (CommandRule): the ask rule.
-        deny (CommandRule): the deny rule to test against it.
-    """
-    if deny.paths:
-        return False
-    if deny.mount != ask.mount:
-        return False
-    if not deny.commands:
-        return True
-    if not ask.commands:
-        return False
-    return all(
-        any(_covers_pattern(d, a) for d in deny.commands) for a in ask.commands
+def _declaring(name: str, specs: Iterable[CommandSpec]) -> list[Argument]:
+    return [
+        argument
+        for spec in specs
+        for argument in spec.arguments
+        if argument.names[0].startswith("-")
+        and argument_dest(argument) == name
+    ]
+
+
+def _check_values(
+    name: str,
+    words: Collection[str],
+    node: CommandSpec,
+    above: tuple[CommandSpec, ...],
+    at: str,
+) -> None:
+    arguments = _declaring(name, _at_or_below(node)) or _declaring(
+        name, reversed(above)
+    )
+    if all(
+        argument.action in VALUELESS_ACTIONS or argument.nargs == 0
+        for argument in arguments
+    ):
+        raise PolicyError(f"{at}: {name} takes no value")
+    choices = {choice for argument in arguments for choice in argument.choices}
+    if not choices or any(not argument.choices for argument in arguments):
+        return
+    for word in words:
+        if not GLOB_CHARS & set(word) and word not in choices:
+            raise PolicyError(
+                f"{at}: {name} takes none of {word!r}; its values are "
+                f"{', '.join(sorted(choices))}"
+            )
+
+
+def _options(
+    options: Mapping[str, OptionRule],
+    node: CommandSpec,
+    above: tuple[CommandSpec, ...],
+    at: str,
+    passthrough: bool,
+) -> dict[str, OptionRule]:
+    out: dict[str, OptionRule] = {}
+    written: dict[str, str] = {}
+    for key, rule in options.items():
+        here = f"{at}.{key}"
+        if passthrough:
+            raise PolicyError(
+                f"{here}: this command's script reads its own words, so "
+                "it has no option to name"
+            )
+        name = _option_name(key, node, above, here)
+        if name in written:
+            raise PolicyError(
+                f"{at}: {written[name]} and {key} are the same option"
+            )
+        written[name] = key
+        if rule.values:
+            _check_values(name, rule.values, node, above, here)
+        out[name] = OptionRule(
+            decision=rule.decision,
+            values={
+                word: ValueRule(
+                    decision=value.decision,
+                    options=_options(
+                        value.options,
+                        node,
+                        above,
+                        f"{here}.values.{word}",
+                        False,
+                    ),
+                )
+                for word, value in rule.values.items()
+            },
+            options=_options(rule.options, node, above, here, False),
+        )
+    return out
+
+
+def _reserved(node: CommandSpec) -> str | None:
+    return next(
+        (
+            word
+            for child in node.subcommands
+            for word in (child.name, *child.aliases)
+            if word in RESERVED_WORDS
+        ),
+        None,
     )
 
 
-def _uninstalled(rules: AdmissionRules) -> str | None:
-    """The first rule naming a builtin the allow list never allows.
+def _plain(tree: CommandNode) -> bool:
+    bare = not (
+        tree.subcommands or tree.options or tree.other_options or tree.operands
+    )
+    return bare and all(
+        not leaf.reason and not leaf.paths for leaf in tree.decision
+    )
 
-    A rule on a command the allow list leaves out reads as a guard and
-    is not one: the allow list refuses the command first, so nothing
-    reaches the rule and the operator is protected only in the document. Only a
-    name this repo ships a spec for is judged, because any other word
-    may be a CLI the host registers after the workspace is built, which
-    ``unknown_cli_verbs`` checks at ``create_session`` instead.
+
+def _node(
+    tree: CommandNode,
+    node: CommandSpec,
+    at: str,
+    passthrough: bool,
+    above: tuple[CommandSpec, ...] = (),
+) -> CommandNode:
+    reserved = _reserved(node)
+    if reserved is not None and not _plain(tree):
+        raise PolicyError(
+            f"{at}: this command has a subcommand named {reserved}, which "
+            "a commands block reserves; write it a plain allow, ask or "
+            "deny"
+        )
+    subcommands: dict[str, CommandNode] = {}
+    written: dict[str, str] = {}
+    for key, child in tree.subcommands.items():
+        found = find_child(node, key)
+        if found is None and not node.subcommands:
+            raise PolicyError(
+                f"{at}: {key} is no subcommand here; an operand goes under "
+                "operands"
+            )
+        if found is None:
+            raise PolicyError(f"{at}: no subcommand {key}")
+        if found.name in written:
+            raise PolicyError(
+                f"{at}: {written[found.name]} and {key} are the same "
+                "subcommand"
+            )
+        written[found.name] = key
+        subcommands[found.name] = _node(
+            child, found, f"{at}.{found.name}", passthrough, (*above, node)
+        )
+    if tree.operands and node.subcommands:
+        raise PolicyError(
+            f"{at}: this command takes a subcommand, so its operands go "
+            "under one"
+        )
+    if tree.other_options and passthrough:
+        raise PolicyError(
+            f"{at}.-*: this command's script reads its own words, so it "
+            "has no option to name"
+        )
+    return CommandNode(
+        decision=tree.decision,
+        subcommands=subcommands,
+        options=_options(tree.options, node, above, at, passthrough),
+        other_options=tree.other_options,
+        operands={
+            word: _node(
+                child, node, f"{at}.operands.{word}", passthrough, above
+            )
+            for word, child in tree.operands.items()
+        },
+    )
+
+
+def normalize_tree(
+    tree: CommandNode,
+    grammars: Mapping[str, Grammar],
+    where: str = "commands",
+    defer: bool = False,
+) -> CommandNode:
+    """A command tree with every name checked against its command's
+    grammar and held by its canonical name, the one the line reader
+    reports.
+
+    A subcommand is held by its spec name, an option by its first long
+    name or its short name when it has none. Refused: a name the grammar
+    lacks; two keys for one option or one subcommand; a cluster of
+    short options; a short option meaning different options in the
+    subcommands below; operands on a command that takes a subcommand;
+    a value under an option that takes none, or outside its choices;
+    options or subcommands on a command with no grammar, since the line
+    reader gives it only operands; and a tree that the trees two mounts
+    serve under one name read differently, since either may read a line.
 
     Args:
-        rules (AdmissionRules): the compiled document.
-    """
-    if rules.allow is None:
-        return None
-    for verb, entries in (("deny", rules.deny), ("ask", rules.ask)):
-        for rule in entries:
-            for pattern in rule.commands:
-                head = _head(pattern)
-                if not head or head not in SPECS:
-                    continue
-                if not head_allowed(head, rules):
-                    return (
-                        f"{verb} rule names {head}, which the allow list "
-                        "never allows, so the rule can never fire"
-                    )
-    return None
-
-
-def _dead_ask(rules: AdmissionRules) -> str | None:
-    """The first ask an outranking deny already refuses.
-
-    Deny is read before ask at the same anchor, so an ask a deny covers
-    can never be reached: the line is refused before anyone is asked,
-    and the sign-off the operator wrote is never requested.
-
-    Args:
-        rules (AdmissionRules): the compiled document.
-    """
-    for ask in rules.ask:
-        for deny in rules.deny:
-            if _shadowed(ask, deny):
-                a = ", ".join(ask.commands) or "*"
-                d = ", ".join(deny.commands) or "*"
-                return (
-                    f"ask rule {a} can never fire: the deny rule {d} "
-                    "refuses the same commands and outranks it"
-                )
-    return None
-
-
-def check_rules(rules: AdmissionRules | None) -> None:
-    """Refuse a document whose rules cannot behave as written.
-
-    Both checks name a rule that is dead on arrival, which is worse
-    than a missing rule because it reads as a guard. Raised where the
-    document is compiled, so a deployment learns at startup rather than
-    the first time an agent types the line the operator thought was
-    covered.
-
-    Args:
-        rules (AdmissionRules | None): the compiled document, None for
-            an unrestricted session.
+        tree (CommandNode): the tree as written.
+        grammars (Mapping[str, Grammar]): each command's grammar by
+            name.
+        where (str): the block's name, for the messages.
+        defer (bool): keep a command with no grammar as written rather
+            than refuse its names, for a check made before every CLI is
+            registered. A name no CLI can be installed under (a shell
+            builtin, a keyword) is checked all the same.
 
     Raises:
-        PolicyError: a rule can never fire.
+        PolicyError: a name does not fit its command's grammar.
     """
-    if rules is None:
-        return
-    for problem in (_uninstalled(rules), _dead_ask(rules)):
-        if problem is not None:
-            raise PolicyError(problem)
-
-
-def check_cli_verbs(
-    rules: AdmissionRules | None, verbs: dict[str, frozenset[str]]
-) -> None:
-    """Refuse a rule naming a verb the CLI it names does not have.
-
-    Deferred to ``create_session`` rather than done beside the other
-    two, because a CLI is registered on the workspace after it is
-    built: at compile time ``git push`` is just two words, and only
-    once ``git`` is installed is there a program tree to check the verb
-    against. A head word no installed CLI claims is left alone, since
-    it may be a command, a function, or a CLI registered later.
-
-    Args:
-        rules (AdmissionRules | None): the compiled document.
-        verbs (dict[str, frozenset[str]]): the verbs each installed CLI
-            declares, keyed by head word.
-
-    Raises:
-        PolicyError: a rule names a verb its CLI does not declare.
-    """
-    if rules is None:
-        return
-    for verb, entries in (("deny", rules.deny), ("ask", rules.ask)):
-        for rule in entries:
-            for pattern in rule.commands:
-                tokens = split_pattern(pattern)
-                if len(tokens) < 2 or tokens[0] not in verbs:
-                    continue
-                if tokens[1] == "*" or tokens[1] in verbs[tokens[0]]:
-                    continue
+    commands: dict[str, CommandNode] = {}
+    for name, node in tree.subcommands.items():
+        grammar = grammars.get(name)
+        at = f"{where}.{name}"
+        if grammar is None:
+            later = defer and name not in NOT_INSTALLABLE
+            commands[name] = node if later else no_grammar(node, at)
+            continue
+        held = _node(node, grammar.spec, at, grammar.passthrough)
+        for other in grammar.others:
+            if _node(node, other.spec, at, other.passthrough) != held:
                 raise PolicyError(
-                    f"{verb} rule names {pattern}, which the {tokens[0]} CLI "
-                    "has no verb for, so the rule can never fire"
+                    f"{at}: two mounts serve {name} with trees that read "
+                    "these names differently; name only what both read alike"
                 )
+        commands[name] = held
+    return replace(tree, subcommands=commands)
+
+
+def renormalized(
+    rules: AdmissionRules | None, grammars: Mapping[str, Grammar]
+) -> AdmissionRules | None:
+    """A session's command trees held again by the canonical names of
+    the grammars the workspace has now, for a command that had none
+    when the trees were compiled and has since been registered.
+
+    Args:
+        rules (AdmissionRules | None): the session's trees.
+        grammars (Mapping[str, Grammar]): each command's grammar by name.
+
+    Raises:
+        PolicyError: a name does not fit the grammar its command has now.
+    """
+    if rules is None:
+        return None
+    trees = tuple(
+        ScopedTree(
+            normalize_tree(scoped.tree, grammars, defer=True),
+            scoped.mount,
+            scoped.inline,
+        )
+        for scoped in rules.trees
+    )
+    return AdmissionRules(trees, unread_names(trees, grammars))

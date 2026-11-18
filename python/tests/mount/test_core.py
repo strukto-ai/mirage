@@ -641,10 +641,7 @@ async def test_a_large_file_reads_a_chunk_at_a_time():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kind,code", [("hide", errno.ENOENT), ("deny", errno.EACCES)]
-)
-async def test_a_warm_chunk_obeys_session_revocation(kind, code, monkeypatch):
+async def test_a_warm_chunk_obeys_session_revocation(monkeypatch):
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.vfs.write("/big.bin", b"x" * (2 * READ_CHUNK))
     core = MountCore(ws.vfs, session=ws.create_session("reader"))
@@ -654,19 +651,12 @@ async def test_a_warm_chunk_obeys_session_revocation(kind, code, monkeypatch):
         before = len(ws.vfs.records)
         fetch = AsyncMock(side_effect=AssertionError("unexpected fetch"))
         monkeypatch.setattr(ws.vfs, "read", fetch)
-        profile = (
-            {"paths": {"hide": ["/big.bin"]}}
-            if kind == "hide"
-            else {
-                "commands": {
-                    "deny": [{"paths": ["/big.bin"], "reason": "sealed"}]
-                }
-            }
+        await ws.set_session_profile(
+            "reader", {"paths": {"hide": ["/big.bin"]}}
         )
-        await ws.set_session_profile("reader", profile)
         with pytest.raises(OSError) as failure:
             await core.read("/big.bin", 8, 1, fh)
-        assert failure.value.errno == code
+        assert failure.value.errno == errno.ENOENT
         await ws.set_session_profile("reader", {})
         assert await core.read("/big.bin", 8, 1, fh) == b"x" * 8
         fetch.assert_not_called()
@@ -754,29 +744,26 @@ async def test_removing_a_link_leaves_its_targets_handles_alone():
 
 
 @pytest.mark.asyncio
-async def test_a_session_is_told_the_command_rules_fuse_skips(
+async def test_a_session_is_told_the_command_trees_fuse_skips(
     caplog,
 ):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    keys = {"reason": "keys", "paths": ["/data/*.key"]}
     ruled = ws.create_session(
         "agent",
         profile={
-            "commands": {
-                "deny": [{"reason": "no rm", "commands": ["rm"]}, keys]
-            }
+            "commands": {"rm": "deny"},
+            "mounts": {"/data": {"commands": {"cp": "deny"}}},
         },
     )
     with caplog.at_level(logging.WARNING, logger="mirage.mount.core"):
         MountCore(ws.vfs, session=ruled)
-    assert "commands.deny: no rm" in caplog.text
-    assert "keys" not in caplog.text
+    assert "cannot apply commands; mounts./data.commands" in caplog.text
     caplog.clear()
-    pathed = ws.create_session(
-        "pathed", profile={"commands": {"deny": [keys]}}
+    hidden = ws.create_session(
+        "hidden", profile={"paths": {"hide": ["/data/*.key"]}}
     )
     with caplog.at_level(logging.WARNING, logger="mirage.mount.core"):
-        MountCore(ws.vfs, session=pathed)
+        MountCore(ws.vfs, session=hidden)
     assert caplog.text == ""
 
 

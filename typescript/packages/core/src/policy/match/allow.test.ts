@@ -14,8 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { CommandContext, AdmissionRules } from '../types.ts'
-import { headAllowed, lineTokens } from './allow.ts'
+import { trees } from '../../test-utils.ts'
+import type { CommandContext } from '../types.ts'
+import { lineTokens, runs } from './allow.ts'
 
 function ctx(
   command: string,
@@ -24,17 +25,16 @@ function ctx(
   return { command, paths: [], argv: [], cwd: '/', ...extra }
 }
 
-describe('allow lists', () => {
-  it("headAllowed answers the profile's one allow list", () => {
-    const rules: AdmissionRules = { allow: ['ls', 'git log'], ask: [], deny: [] }
-    // A name is allowed when it starts a pattern of the list.
-    expect(headAllowed('ls', rules)).toBe(true)
-    expect(headAllowed('git', rules)).toBe(true)
-    expect(headAllowed('cat', rules)).toBe(false)
-    expect(headAllowed('rm', rules)).toBe(false)
-    // A profile without a list allows everything, and so does no profile.
-    expect(headAllowed('rm', { allow: null, ask: [], deny: [{ reason: 'x' }] })).toBe(true)
-    expect(headAllowed('rm', null)).toBe(true)
+describe('runs', () => {
+  it('runs unless a tree that holds everywhere denies every line', () => {
+    expect(runs('rm', null)).toBe(true)
+    const rules = trees({ '*': 'deny', ls: 'allow', git: { push: 'deny' } })
+    expect(runs('ls', rules)).toBe(true)
+    expect(runs('git', rules)).toBe(false)
+    expect(runs('rm', rules)).toBe(false)
+    expect(runs('git', trees({ git: { push: 'deny' } }))).toBe(true)
+    expect(runs('cat', trees({ cat: 'deny' }))).toBe(false)
+    expect(runs('cat', trees(null, { '/a': { cat: 'deny' } }))).toBe(true)
   })
 
   it('lineTokens reads the raw argv without the entry point', () => {

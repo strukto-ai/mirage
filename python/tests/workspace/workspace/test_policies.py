@@ -22,7 +22,6 @@ from mirage.observe import context as observe_context
 from mirage.policy import (
     Ask,
     CommandResultContext,
-    CommandRule,
     ExecuteResultContext,
     Outcome,
     PolicyDenied,
@@ -31,10 +30,10 @@ from mirage.policy import (
     VfsResultContext,
 )
 from mirage.policy.profile import (
-    CommandsBlock,
     PathsBlock,
     ProfilePolicy,
     SessionProfile,
+    command_tree,
 )
 from mirage.policy.script import script_context
 from mirage.policy.types import RouteContext
@@ -42,7 +41,14 @@ from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.monty import loader as monty_loader
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
-from mirage.types import Limit, MountMode, OnExceed, PathSpec, PolicyDecision
+from mirage.types import (
+    Limit,
+    Matched,
+    MountMode,
+    OnExceed,
+    PathSpec,
+    PolicyDecision,
+)
 from mirage.utils.path import norm
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -72,14 +78,14 @@ async def test_workspace_guards_refuse_before_backend_io():
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
         profiles=_profile(
-            commands=CommandsBlock(
-                deny=(
-                    CommandRule(
-                        reason="production data is protected",
-                        commands=("rm",),
-                        paths=("/data/prod/*",),
-                    ),
-                )
+            commands=command_tree(
+                {
+                    "rm": {
+                        "decision": "deny",
+                        "reason": "production data is protected",
+                        "paths": ["/data/prod/*"],
+                    }
+                }
             )
         ),
     )
@@ -148,15 +154,15 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
         profiles=_profile(
-            commands=CommandsBlock(
-                deny=(
-                    CommandRule(reason="disabled", commands=("source",)),
-                    CommandRule(
-                        reason="frozen",
-                        commands=("touch",),
-                        paths=("/data/prod/*",),
-                    ),
-                )
+            commands=command_tree(
+                {
+                    "source": {"decision": "deny", "reason": "disabled"},
+                    "touch": {
+                        "decision": "deny",
+                        "reason": "frozen",
+                        "paths": ["/data/prod/*"],
+                    },
+                }
             )
         ),
     )
@@ -165,7 +171,10 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         assert result.exit_code == 126
         assert result.stderr == b"source: Permission denied\n"
         assert result.decision == PolicyDecision(
-            kind="deny", reason="disabled", policy="PermissionsPolicy"
+            kind="deny",
+            reason="disabled",
+            policy="PermissionsPolicy",
+            matched=Matched(command=("source",), flags=()),
         )
         result = await ws.shell("touch /data/prod/x")
         assert result.exit_code == 1
@@ -184,14 +193,14 @@ async def test_guards_cover_path_valued_flags():
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
         profiles=_profile(
-            commands=CommandsBlock(
-                deny=(
-                    CommandRule(
-                        reason="prod is protected",
-                        commands=("shuf",),
-                        paths=("/data/prod/*",),
-                    ),
-                )
+            commands=command_tree(
+                {
+                    "shuf": {
+                        "decision": "deny",
+                        "reason": "prod is protected",
+                        "paths": ["/data/prod/*"],
+                    }
+                }
             )
         ),
     )
@@ -204,37 +213,6 @@ async def test_guards_cover_path_valued_flags():
         )
         listing = await ws.shell("ls /data/prod")
         assert b"out" not in listing.stdout
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_path_guards_hold_at_the_programmatic_entry_point():
-    # ws.vfs is the same seam FUSE comes through; a path-only guard
-    # must refuse it, not just shell commands (#675).
-    ws = Workspace(
-        {"/data/": RAMVFS()},
-        mode=MountMode.WRITE,
-        profiles=_profile(
-            commands=CommandsBlock(
-                deny=(
-                    CommandRule(
-                        reason="prod is protected", paths=("/data/prod/*",)
-                    ),
-                )
-            )
-        ),
-    )
-    try:
-        await ws.shell("mkdir -p /data/other")
-        await ws.vfs.write("/data/other/ok.txt", b"fine\n")
-        with pytest.raises(PermissionError) as excinfo:
-            await ws.vfs.write("/data/prod/x.txt", b"nope\n")
-        assert excinfo.value.errno == errno.EACCES
-        assert excinfo.value.decision is not None
-        assert "prod is protected" in excinfo.value.decision.reason
-        with pytest.raises(PermissionError):
-            await ws.vfs.read("/data/prod/x.txt")
     finally:
         await ws.close()
 
@@ -490,10 +468,14 @@ async def test_path_rules_hold_walks_and_lazy_readers():
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
         profiles=_profile(
-            commands=CommandsBlock(
-                deny=(
-                    CommandRule(reason="sealed", paths=("/data/secret.txt",)),
-                )
+            commands=command_tree(
+                {
+                    "*": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data/secret.txt"],
+                    }
+                }
             )
         ),
     )
@@ -525,8 +507,14 @@ async def test_path_rules_hold_walks_and_lazy_readers():
 
 
 SEALED_SECRET = SessionProfile(
-    commands=CommandsBlock(
-        deny=(CommandRule(reason="sealed", paths=("/data/secret.txt",)),)
+    commands=command_tree(
+        {
+            "*": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret.txt"],
+            }
+        }
     )
 )
 
@@ -867,13 +855,13 @@ async def test_a_mount_sections_hides_are_written_in_full():
 
 
 @pytest.mark.asyncio
-async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
-    # The document's deny rules compile at construction; a bare string
-    # is one command name with the default reason.
+async def test_a_bare_deny_refuses_with_the_default_reason():
+    # A bare decision on a command name refuses it with the default
+    # reason.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_profile(commands=CommandsBlock(deny=("shred",))),
+        profiles=_profile(commands=command_tree({"shred": "deny"})),
     )
     try:
         result = await ws.shell("shred /data/x")
@@ -1011,7 +999,7 @@ async def test_the_script_reads_resolved_paths_not_typed_words():
 
 @pytest.mark.asyncio
 async def test_a_script_only_profile_installs_everything():
-    # No allow list, so nothing is hidden: a command no document names
+    # No commands tree, so nothing is closed: a command no document names
     # runs whenever the script stays silent on it.
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted()
@@ -1026,10 +1014,15 @@ async def test_a_script_only_profile_installs_everything():
 
 @pytest.mark.asyncio
 async def test_a_document_may_ride_beside_the_script():
-    # Optional, not required: a profile stating both keeps the allow
-    # list, and the script adds its verdicts beside it.
+    # Optional, not required: a profile stating both keeps its closed
+    # tree, and the script adds its verdicts beside it.
     profiles = _scripted()
-    profiles["release"]["commands"] = {"allow": ["ls", "cat", "echo"]}
+    profiles["release"]["commands"] = {
+        "*": "deny",
+        "ls": "allow",
+        "cat": "allow",
+        "echo": "allow",
+    }
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=profiles
     )
@@ -1335,12 +1328,14 @@ async def test_recursive_commands_enforce_admitted_path_rules(
         ws.create_session(
             "restricted",
             profile=SessionProfile(
-                commands=CommandsBlock(
-                    deny=(
-                        CommandRule(
-                            reason="sealed", paths=("/data/src/cache",)
-                        ),
-                    )
+                commands=command_tree(
+                    {
+                        "*": {
+                            "decision": "deny",
+                            "reason": "sealed",
+                            "paths": ["/data/src/cache"],
+                        }
+                    }
                 )
             ),
         )
@@ -1628,7 +1623,7 @@ async def test_a_once_nod_lasts_while_the_line_streams_and_no_longer():
         ws.create_session(
             "agent",
             profile={
-                "commands": {"ask": [{"commands": {"cat": ["/data/b"]}}]}
+                "commands": {"cat": {"decision": "ask", "paths": ["/data/b"]}}
             },
         )
         line = "cat /data/a /data/b | tail -c 4"

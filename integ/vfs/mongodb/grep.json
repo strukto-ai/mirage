@@ -208,14 +208,13 @@
       "session_profiles": {
         "mongodb-deny": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/mongodb/mirage_integ/collections/books/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/mongodb/mirage_integ/collections/books/*"
+              ]
+            }
           }
         }
       }

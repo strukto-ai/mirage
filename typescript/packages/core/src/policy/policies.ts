@@ -187,8 +187,7 @@ async function transferLines(
     const base = rstripSlash(name)
     return `${rstripSlash(goal)}/${base.slice(base.lastIndexOf('/') + 1)}`
   }
-  const recursive =
-    subject === 'cp' && (flags.asBool('r') || flags.asBool('recursive') || flags.asBool('archive'))
+  const recursive = subject === 'cp' && (flags.asBool('recursive') || flags.asBool('archive'))
   const typed =
     subject === 'cp' ? flags.typedOrder('dereference', 'no_dereference', 'H', 'd', 'archive') : []
   const last = typed[typed.length - 1]
@@ -258,6 +257,7 @@ export function decisionOf(action: Deny | Pending): PolicyDecision | null {
     reason: action.reason,
     policy: action.policy ?? '',
     askId: null,
+    ...(action.matched === undefined ? {} : { matched: action.matched }),
   }
 }
 
@@ -733,7 +733,7 @@ export class Policies {
   /**
    * Register a policy after the existing ones. Code only: a
    * declarative rule belongs in the permissions document
-   * (`commands.deny`), which the workspace compiles.
+   * (a `commands` tree), which the workspace compiles.
    */
   add(entry: Policy): void {
     this.policies.push(entry)

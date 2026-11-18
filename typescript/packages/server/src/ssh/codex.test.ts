@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-node'
+import { SessionProfile, Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type ClientChannel } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
@@ -100,7 +100,11 @@ async function vaultWorkspace(): Promise<Workspace> {
     {
       mode: MountMode.WRITE,
       profiles: {
-        guarded: { commands: { deny: [{ reason: 'the vault is sealed', paths: ['/vault/*'] }] } },
+        guarded: SessionProfile({
+          commands: {
+            '*': { decision: 'deny', reason: 'the vault is sealed', paths: ['/vault/*'] },
+          },
+        }),
       },
     },
   )
@@ -711,10 +715,12 @@ describe('codex-exec', () => {
     const guarded = bindKey(h, 'mirage-profile="guarded"')
     const opened = await (await codex(h)).result('fs/readFile', { path: 'file:///vault/secret' })
     const client = await codex(h, guarded)
-    const refused = await client.error('fs/readFile', { path: 'file:///vault/secret' })
+    const read = await client.result('fs/readFile', { path: 'file:///vault/secret' })
     const [, err, code] = await client.run('p', 'cat /vault/secret')
     expect(unb64(opened.dataBase64)).toBe('token\n')
-    expect(refused.code).toBe(RPC_INTERNAL_ERROR)
+    // A command tree judges lines; codex's own file calls are ops, which
+    // only a hide or a mode refuses.
+    expect(unb64(read.dataBase64)).toBe('token\n')
     expect(code).not.toBe(0)
     expect(err.endsWith('policy denied: the vault is sealed\n')).toBe(true)
   })
@@ -722,7 +728,10 @@ describe('codex-exec', () => {
   it('runs a command the key profile allows', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.WRITE, profiles: { narrow: { commands: { allow: ['echo'] } } } },
+      {
+        mode: MountMode.WRITE,
+        profiles: { narrow: SessionProfile({ commands: { '*': 'deny', echo: 'allow' } }) },
+      },
     )
     const h = await startHarness(MountMode.WRITE, ws)
     const client = await codex(h, bindKey(h, 'mirage-profile="narrow"'))

@@ -16,7 +16,7 @@ import dataclasses
 import json
 
 from mirage.policy.match import Outcome
-from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
+from mirage.policy.types import CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import array_set, make_array
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
@@ -30,6 +30,7 @@ from mirage.workspace.session.session import (
     vars_to_fields,
 )
 from mirage.workspace.session.state import seed_var, set_attr
+from tests.fixtures.command_trees import trees
 
 # State that belongs to the line being executed, not to the shell, so a
 # fork starts it fresh: the errexit marker and the trap bookkeeping.
@@ -401,43 +402,17 @@ def test_a_payload_with_no_attributes_is_read_as_a_process_environment():
     assert back.vars["A"] == ShellVar("1", frozenset({VarAttr.EXPORT}))
 
 
-def test_session_command_tier_round_trips_through_the_record():
-    own = AdmissionRules(
-        allow=("ls", "git log"),
-        ask=(
-            CommandRule(
-                reason="sign-off",
-                commands=("git push",),
-                paths=("/repo/*",),
-                mount="/repo",
-            ),
-        ),
-        deny=(CommandRule(reason="no", commands=("rm",)),),
-    )
+def test_session_command_trees_round_trip_through_the_record():
+    own = trees({"rm": "deny"}, mounts={"/repo": {"git": {"push": "ask"}}})
     s = SessionState(session_id="s1", commands=own)
     d = s.to_dict()
-    assert d["commands"] == {
-        "allow": ["ls", "git log"],
-        "ask": [
-            {
-                "reason": "sign-off",
-                "commands": ["git push"],
-                "paths": ["/repo/*"],
-                "mount": "/repo",
-            }
-        ],
-        "deny": [{"reason": "no", "commands": ["rm"], "paths": []}],
-    }
+    assert d["command_trees"] == [
+        {"mount": "", "commands": {"rm": "deny"}},
+        {"mount": "/repo", "commands": {"git": {"push": "ask"}}},
+    ]
+    assert "commands" not in d
     assert SessionState.from_dict(d).commands == own
-    # None means unstated and is not written; a tier without an allow
-    # list writes allow as null, distinct from an empty list.
-    assert "commands" not in SessionState(session_id="s2").to_dict()
-    bare = SessionState(
-        session_id="s3",
-        commands=AdmissionRules(deny=(CommandRule(reason="x"),)),
-    )
-    assert bare.to_dict()["commands"]["allow"] is None
-    assert SessionState.from_dict(bare.to_dict()).commands == bare.commands
+    assert "command_trees" not in SessionState(session_id="s2").to_dict()
 
 
 def test_session_decisions_round_trip_through_the_record():

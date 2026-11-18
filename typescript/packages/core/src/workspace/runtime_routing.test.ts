@@ -34,6 +34,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { buildRuntime } from '../runtime/table.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -513,7 +514,7 @@ describe('the placement stage', () => {
     })
     try {
       ws.createSession('agent', {
-        profile: { commands: { deny: [{ reason: 'no deletes', commands: ['rm'] }] } },
+        profile: SessionProfile({ commands: { rm: { decision: 'deny', reason: 'no deletes' } } }),
       })
       const rm = await ws.shell('rm /x', { sessionId: 'agent' })
       expect([rm.exitCode, DEC.decode(rm.stderr)]).toEqual([126, 'rm: Permission denied\n'])
@@ -544,7 +545,9 @@ describe('the workspace itself', () => {
       {
         mode: MountMode.EXEC,
         machines: [new NamedFakeRuntime('alpha')],
-        profiles: { narrow: { commands: { allow: ['echo', 'python3'] } } },
+        profiles: {
+          narrow: SessionProfile({ commands: { '*': 'deny', echo: 'allow', python3: 'allow' } }),
+        },
         profile: 'narrow',
       },
     )

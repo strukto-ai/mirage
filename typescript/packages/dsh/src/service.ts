@@ -80,9 +80,8 @@ export interface MirageConfig {
   machines?: Record<string, Record<string, unknown>>
   /**
    * The roles (`profiles:` in mirage config), each a whole permission
-   * document: its `commands.allow` list, its `commands.ask` and
-   * `commands.deny` rules, the mount sections carrying rules of their
-   * own, and the paths and vars it hides. The YAML-friendly twin of
+   * document: its `commands` tree, the mount sections carrying trees of
+   * their own, and the paths and vars it hides. The YAML-friendly twin of
    * `workspaceOptions.profiles`; pass one or the other, not both.
    *
    * Written as the document, not as an already-parsed profile: every

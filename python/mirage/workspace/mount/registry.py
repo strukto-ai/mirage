@@ -29,7 +29,7 @@ from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.walk import leaf_options, walk
 from mirage.commands.spec import parse_command
 from mirage.context import (
     effective_path_mode,
@@ -958,7 +958,9 @@ class MountRegistry:
                 result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
                 if result.leaf is None:
                     continue
-                writes = tree.handlers[" ".join(result.path)].writes(argv)
+                writes = tree.handlers[" ".join(result.path)].writes(
+                    leaf_options(tree, result, cwd)
+                )
                 if result.path:
                     named_trees.add(mount)
             else:

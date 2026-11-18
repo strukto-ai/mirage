@@ -286,7 +286,6 @@ async def test_process_refuses_a_stopped_vm_and_empty_argv():
     "profile",
     [
         {"paths": {"hide": ["/data/secret"]}},
-        {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "x"}]}},
         {"mounts": {"/data": "r"}},
     ],
 )

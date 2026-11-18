@@ -3065,16 +3065,12 @@ async def test_live_default_profile_updates_unbound_policy():
     try:
         session = ws.get_session(ws.default_session_id)
         await ws.vfs.write("/data/file", b"kept")
-        profile = {
-            "commands": {
-                "deny": [{"paths": ["/data/file"], "reason": "sealed"}]
-            }
-        }
+        profile = {"paths": {"hide": ["/data/file"]}}
         assert (
             await ws.set_session_profile(ws.default_session_id, profile)
             is session
         )
-        with pytest.raises(PermissionError):
+        with pytest.raises(FileNotFoundError):
             await ws.vfs.read("/data/file")
         await ws.set_session_profile(ws.default_session_id, {})
         assert ws.get_session(ws.default_session_id) is session
@@ -3088,7 +3084,7 @@ async def test_set_profile_redefines_a_name():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"user": {"commands": {"allow": ["whoami"]}}},
+        profiles={"user": {"commands": {"*": "deny", "whoami": "allow"}}},
     )
     try:
         await ws.vfs.write("/data/file", b"kept")
@@ -3097,7 +3093,7 @@ async def test_set_profile_redefines_a_name():
         ws.set_profile(
             "user",
             {
-                "commands": {"allow": ["whoami", "cat"]},
+                "commands": {"*": "deny", "whoami": "allow", "cat": "allow"},
                 "paths": {"hide": ["/data/secret"]},
             },
         )
@@ -3118,15 +3114,7 @@ async def test_set_profile_refuses_before_the_table_changes():
     ws = Workspace({"/data": RAMVFS()}, profiles={"user": {}})
     try:
         with pytest.raises(PolicyError):
-            ws.set_profile(
-                "user",
-                {
-                    "commands": {
-                        "allow": ["ls"],
-                        "deny": [{"commands": ["cat *"], "reason": "sealed"}],
-                    }
-                },
-            )
+            ws.set_profile("user", {"commands": {"rm": {"-rf": "deny"}}})
         assert ws.profiles["user"] == SessionProfile()
     finally:
         await ws.close()

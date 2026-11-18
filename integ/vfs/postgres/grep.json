@@ -208,14 +208,13 @@
       "session_profiles": {
         "postgres-deny": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/pg/public/tables/books/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/pg/public/tables/books/*"
+              ]
+            }
           }
         }
       }

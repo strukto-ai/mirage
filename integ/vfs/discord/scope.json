@@ -222,14 +222,13 @@
       "session_profiles": {
         "discord-deny": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/*"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/*"
+              ]
+            }
           }
         }
       }

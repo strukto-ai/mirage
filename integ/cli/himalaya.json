@@ -1081,7 +1081,7 @@
         "cli-himalaya"
       ],
       "session": "crew",
-      "command": "h2 message send --to x@example.com hi",
+      "command": "h2 message send hi",
       "conformance_skip": "refused by a mirage policy before the program runs",
       "expect": {
         "exit": 126,
@@ -1096,12 +1096,27 @@
         "cli-himalaya"
       ],
       "session": "crew",
-      "command": "h1 message send --to x@example.com hi",
+      "command": "h1 message send hi",
       "conformance_skip": "refused by a mirage policy before the program runs",
       "expect": {
         "exit": 126,
         "stdout": "",
         "stderr": "h1: Permission denied\n"
+      }
+    },
+    {
+      "id": "hm_duo_a_line_its_grammar_refuses_meets_the_deny_under_its_subcommand",
+      "seq": 562132,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "session": "crew",
+      "command": "h2 message send --bogus",
+      "conformance_skip": "refused by a mirage policy before the program runs",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "h2: Permission denied\n"
       }
     },
     {

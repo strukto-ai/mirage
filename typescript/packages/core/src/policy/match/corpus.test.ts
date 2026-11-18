@@ -25,28 +25,13 @@ import {
   pathVisible,
   varHidden,
 } from '../../utils/hidden.ts'
+import { commandTree } from '../profile.ts'
 import { CommandWord } from '../types.ts'
 import { decide } from './decide.ts'
-import { patternMatches, patternReaches, splitPattern } from './pattern.ts'
 
-const rule = z.object({
-  reason: z.string(),
-  commands: z.array(z.string()).default([]),
-  paths: z.array(z.string()).default([]),
-  mount: z.string().default(''),
-})
 const mode = z.enum([MountMode.READ, MountMode.WRITE, MountMode.EXEC])
 const corpus = z
   .object({
-    patterns: z.array(
-      z.object({
-        pattern: z.string(),
-        tokens: z.array(z.string()),
-        split: z.array(z.string()),
-        matches: z.boolean(),
-        reaches: z.boolean(),
-      }),
-    ),
     visibility: z.array(
       z.object({
         hide: z.array(z.string()),
@@ -66,11 +51,9 @@ const corpus = z
     admissions: z.array(
       z.object({
         name: z.string(),
-        rules: z.object({
-          allow: z.array(z.string()).nullable(),
-          deny: z.array(rule),
-          ask: z.array(rule),
-        }),
+        trees: z.array(
+          z.object({ mount: z.string().nullable(), commands: z.record(z.string(), z.unknown()) }),
+        ),
         facts: z.object({
           command: z.string(),
           tokens: z.array(z.string()),
@@ -83,10 +66,10 @@ const corpus = z
         }),
         expected: z.object({
           outcome: z.string(),
-          rule: z.number().nullable(),
+          at: z.string().nullable(),
           matched_path: z.string().nullable(),
           source: z.string(),
-          asks: z.array(z.number()),
+          asks: z.array(z.string()),
         }),
       }),
     ),
@@ -110,11 +93,6 @@ function path(virtual: string): PathSpec {
 }
 
 describe('shared policy compatibility cases', () => {
-  it.each(corpus.patterns)('preserves prefix pattern $pattern for $tokens', (row) => {
-    expect(splitPattern(row.pattern)).toEqual(row.split)
-    expect(patternMatches(row.pattern, row.tokens)).toBe(row.matches)
-    expect(patternReaches(row.pattern, row.tokens)).toBe(row.reaches)
-  })
   it.each(corpus.visibility)('preserves visibility for $hide', (row) => {
     const visibility: Visibility = {
       paths: classifyPaths(row.hide),
@@ -134,7 +112,7 @@ describe('shared policy compatibility cases', () => {
     for (const variable of row.variables)
       expect(varHidden(visibility, variable.name)).toBe(variable.hidden)
   })
-  it.each(corpus.admissions)('preserves $name and winning original rule objects', (row) => {
+  it.each(corpus.admissions)('preserves $name and the leaf that decides', (row) => {
     const facts = row.facts,
       paths = facts.paths.map(path),
       operands = facts.operands.map(path)
@@ -150,16 +128,18 @@ describe('shared policy compatibility cases', () => {
         subtree: facts.subtree,
         words: operands.map((p) => new CommandWord(p.virtual, WordKind.OPERAND, null, p)),
       },
-      row.rules,
+      {
+        trees: row.trees.map((tree) => ({
+          tree: commandTree(tree.commands),
+          mount: tree.mount ?? '',
+          inline: false,
+        })),
+      },
     )
-    const rules = [...row.rules.deny, ...row.rules.ask]
     expect(ruling.outcome).toBe(row.expected.outcome)
-    expect(ruling.rule).toBe(row.expected.rule === null ? null : rules[row.expected.rule])
+    expect(ruling.rule?.at ?? null).toBe(row.expected.at)
     expect(ruling.matchedPath).toBe(row.expected.matched_path)
     expect(ruling.source).toBe(row.expected.source)
-    expect(ruling.asks).toEqual(row.expected.asks.map((id) => rules[id]))
-    row.expected.asks.forEach((id, index) => {
-      expect(ruling.asks[index]).toBe(rules[id])
-    })
+    expect(ruling.asks.map((a) => a.at)).toEqual(row.expected.asks)
   })
 })

@@ -445,14 +445,15 @@ export class MountEntry {
   cacheManager: CacheManager | null = null
   private writeContextFor: { manager: CacheManager; context: WriteContext } | null = null
 
-  private readonly cmds = new Map<CmdKey, Command>()
+  private cmds = new Map<CmdKey, Command>()
   // The keys of `cmds` a user registered (`registerCommands`), not mirage.
-  private readonly userKeys = new Set<CmdKey>()
+  private userKeys = new Set<CmdKey>()
   private readonly generalCmds = new Map<string, Command>()
   // name -> the root command registered and the tree it walks
-  private readonly trees = new Map<string, [Command, CLI]>()
-  private readonly cmdSpecs = new Map<string, CommandSpec>()
+  private trees = new Map<string, [Command, CLI]>()
+  private cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
+  treesChanged: (() => void) | null = null
 
   /**
    * The functions the VFS answers itself, read when it is mounted and again
@@ -792,11 +793,31 @@ export class MountEntry {
    * mount, under its root's name: a line naming it walks the tree as an
    * installed CLI's does and runs the leaf on this mount's accessor
    * (`runLeaf`); a tree that declares an installation's own setting throws.
+   * A tree the workspace's command rules name is checked against its
+   * grammar as it arrives (`treesChanged`); one a rule no longer fits
+   * throws `PolicyError` and is not served.
    */
   registerCommands(items: readonly (Command | CLI)[]): void {
     const [commands, trees] = this.ownCommands(items)
+    const held = {
+      cmds: new Map(this.cmds),
+      cmdSpecs: new Map(this.cmdSpecs),
+      userKeys: new Set(this.userKeys),
+      trees: new Map(this.trees),
+    }
     for (const cmd of commands) this.register(cmd)
     for (const [root, cli] of trees) this.trees.set(root.name, [root, cli])
+    if (trees.length === 0 || this.treesChanged === null) return
+    try {
+      this.treesChanged()
+    } catch (err) {
+      this.cmds = held.cmds
+      this.cmdSpecs = held.cmdSpecs
+      this.userKeys = held.userKeys
+      this.trees = held.trees
+      this.prefixIndex = null
+      throw err
+    }
   }
 
   /**
@@ -852,6 +873,19 @@ export class MountEntry {
       }
     }
     return [[...groups.values()].flatMap((g) => g.toRegister), trees]
+  }
+
+  /**
+   * Each command tree this mount serves, keyed by its name (`cliFor`).
+   * Mirrors Python's `MountEntry.served_trees`.
+   */
+  servedTrees(): Map<string, CLI> {
+    const out = new Map<string, CLI>()
+    for (const name of this.trees.keys()) {
+      const tree = this.cliFor(name)
+      if (tree !== null) out.set(name, tree)
+    }
+    return out
   }
 
   /**
@@ -2161,8 +2195,9 @@ export class MountEntry {
    * installed CLI's; the leaf runs here as a command does: on this mount's
    * accessor, in its scope, under the read-only refusal for its own `write`
    * and, being a user command that holds the raw handle, the refusal a
-   * restricting session gets. Its failures speak in a CLI's voice. Mirrors
-   * Python's `MountEntry.run_leaf`.
+   * restricting session gets. Its failures speak in a CLI's voice. `writes`
+   * says whether this invocation may change state (`CLIHandler.writes` over
+   * the options the line carries). Mirrors Python's `MountEntry.run_leaf`.
    */
   async runLeaf(
     prog: string,
@@ -2171,6 +2206,7 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
+    writes: boolean,
   ): Promise<CommandFnResult> {
     const root = this.resolveCommand(cli.spec.name)
     const fn = handler.fn
@@ -2181,7 +2217,7 @@ export class MountEntry {
       vfs: null,
       filetype: null,
       fn,
-      write: handler.writes(ctx.argv ?? []),
+      write: writes,
       limit: handler.limit,
     })
     return this.use(async (): Promise<CommandFnResult> => {
@@ -2200,7 +2236,7 @@ export class MountEntry {
           runCtx,
           cliVoice(prog),
           { command: prog, prefixes: [this.prefix], declared: handler.limit },
-          handler.writes(ctx.argv ?? []) && this.isUserCommand(root),
+          writes && this.isUserCommand(root),
           (leafCtx) =>
             answered(Promise.resolve().then(() => fn(accessor, keyedPaths, texts, leafCtx))),
         )

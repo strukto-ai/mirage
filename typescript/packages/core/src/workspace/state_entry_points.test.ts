@@ -440,9 +440,11 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
   return ws
 }
 
-// The profile rule that refuses every op on the one sealed file, at the
-// dispatcher too.
-const SEALED_SECRET = { commands: { deny: [{ reason: 'sealed', paths: ['/a/secret.txt'] }] } }
+// The profile's root leaf that refuses every line reading the one sealed
+// file.
+const SEALED_SECRET = {
+  commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/a/secret.txt'] } },
+}
 
 describe('file policies judge every file entry point', () => {
   it('preVfs judges file calls, commands, and redirects', async () => {
@@ -479,7 +481,7 @@ describe('file policies judge every file entry point', () => {
     // the output pipeline drains after dispatch (head binds a lazy
     // stream) is refused as it is admitted.
     const ws = await makeSealedWs([])
-    ws.createSession('sealed', { profile: SEALED_SECRET })
+    ws.createSession('sealed', { profile: SessionProfile(SEALED_SECRET) })
     const walked = await ws.shell('grep -r sealed /a', { sessionId: 'sealed' })
     expect(walked.exitCode).toBe(2)
     expect(stdoutStr(walked)).toContain('/a/ok.txt:has sealed word')
@@ -501,7 +503,7 @@ describe('file policies judge every file entry point', () => {
     // shape): a read-denied entry lists and stats, the read of it is
     // what fails.
     const ws = await makeSealedWs([])
-    ws.createSession('sealed', { profile: SEALED_SECRET })
+    ws.createSession('sealed', { profile: SessionProfile(SEALED_SECRET) })
     const listing = await ws.shell('ls -l /a', { sessionId: 'sealed' })
     expect(listing.exitCode).toBe(0)
     expect(stdoutStr(listing)).toContain('secret.txt')
@@ -522,7 +524,7 @@ describe('file policies judge every file entry point', () => {
     open.push(ws)
     for (const line of ['cat /a/secret.txt', 'cat /a/ok.txt'])
       expect((await ws.shell(line)).exitCode).toBe(0)
-    ws.createSession('sealed', { profile: SEALED_SECRET })
+    ws.createSession('sealed', { profile: SessionProfile(SEALED_SECRET) })
     for (const line of [
       'grep sealed /a/secret.txt',
       'rg sealed /a/secret.txt',
@@ -999,7 +1001,8 @@ describe('session profiles', () => {
     expect(dflt.cwd).toBe('/b')
     expect(() => ws.createSession('x', { profile: 'nope' })).toThrow('unknown profile "nope"')
     // An inline document adds to the named profile: the weaker mode wins,
-    // hides union, and an allow list there is refused outright.
+    // hides union, and its tree is judged beside the profile's, the
+    // strictest winning, so an allow there opens nothing.
     const inline = ws.createSession('i', {
       profile: 'reviewer',
       permissions: SessionProfile({
@@ -1012,12 +1015,11 @@ describe('session profiles', () => {
     expect(inline.mountModes?.get('/a')).toBe(MountMode.READ)
     expect(inline.mountModes?.get('/b')).toBe(MountMode.EXEC)
     expect(inline.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: ['*.key'] })
-    expect(() =>
-      ws.createSession('wide', {
-        profile: 'reviewer',
-        permissions: SessionProfile({ commands: { allow: ['ls'] } }),
-      }),
-    ).toThrow('not an allow list')
+    const wide = ws.createSession('wide', {
+      profile: 'reviewer',
+      permissions: SessionProfile({ commands: { cat: 'allow' } }),
+    })
+    expect(wide.commands?.trees.map((t) => [t.mount, t.inline])).toEqual([['', true]])
     expect(inline.visibility.vars).toEqual({ names: [], patterns: ['AWS_*'] })
     expect(inline.cwd).toBe('/a')
     const pwd = await ws.shell('pwd', { sessionId: 'r' })
@@ -1156,50 +1158,50 @@ describe('command permissions end to end', () => {
   // here reach a line that works inside /repo, by cwd or by operand,
   // which is what a path-scoped rule cannot express (`cd /repo && git
   // commit` names no path).
-  const REPO_SECTION = {
-    commands: {
-      deny: [{ reason: 'history is read-only here', commands: ['git commit', 'git reset --hard'] }],
-    },
-  }
+  const READ_ONLY = { decision: 'deny', reason: 'history is read-only here' }
+  const REPO_SECTION = { commands: { git: { commit: READ_ONLY, reset: READ_ONLY } } }
+  const FROZEN = { decision: 'deny', reason: 'frozen', paths: ['/repo/locked/*'] }
   const COMMANDS_DOC = SessionProfile({
     commands: {
-      allow: [
-        'ls',
-        'cat',
-        'echo',
-        'rm',
-        'git',
-        'python3',
-        'mkdir',
-        'touch',
-        'head',
-        'xargs',
-        'wc',
-        'man',
-        'find',
-        'type',
-        'command',
-        'which',
-        'cd',
-        '[',
-      ],
-      deny: [
-        { reason: 'no deletes in the repo', commands: { rm: ['/repo/*'] } },
-        { reason: 'frozen', paths: ['/repo/locked/*'] },
-      ],
+      '*': 'deny',
+      ...Object.fromEntries(
+        [
+          'ls',
+          'echo',
+          'git',
+          'python3',
+          'mkdir',
+          'touch',
+          'head',
+          'xargs',
+          'wc',
+          'man',
+          'type',
+          'command',
+          'which',
+          'cd',
+          '[',
+        ].map((name) => [name, 'allow']),
+      ),
+      cat: ['allow', FROZEN],
+      find: ['allow', FROZEN],
+      rm: ['allow', { decision: 'deny', reason: 'no deletes in the repo', paths: ['/repo/*'] }],
     },
     mounts: { '/repo': REPO_SECTION },
   })
   const REVIEWER: SessionProfile = SessionProfile({
     commands: {
-      allow: ['ls', 'cat', 'echo', 'git log', 'git status', 'xargs', 'type', 'eval'],
+      '*': 'deny',
+      ...Object.fromEntries(
+        ['ls', 'cat', 'echo', 'xargs', 'type', 'eval'].map((name) => [name, 'allow']),
+      ),
+      git: { log: 'allow', status: 'allow' },
     },
     mounts: { '/repo': REPO_SECTION },
   })
 
   function commandsWs(): Workspace {
-    // The frozen subtree is seeded on the VFS: the pure path rule
-    // holds at every entry point, the host's `ws.vfs` included.
+    // The frozen subtree is seeded on the VFS, past every line.
     const repo = new RAMVFS()
     repo.store.dirs.add('/locked')
     repo.store.files.set('/locked/y', ENC.encode('y\n'))
@@ -1265,7 +1267,7 @@ describe('command permissions end to end', () => {
     await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     // The reviewer profile lists `cat` and not python3, whatever the
     // default profile lists; it lists `git log`, so a `git commit` line is
-    // covered by nothing (a refusal that names the program).
+    // covered by nothing (a refusal that names the line).
     expect((await line(ws, 'cat /repo/d/x', 'rev'))[0]).toBe(0)
     expect(await line(ws, 'python3 -c 1', 'rev')).toEqual([
       126,
@@ -1287,22 +1289,19 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'echo /repo/d/x | xargs rm', 'rev')).toEqual([123, '', refused])
     expect(await line(ws, "eval 'rm /repo/d/x'", 'rev')).toEqual([126, '', refused])
     expect(await line(ws, 'f() { rm /repo/d/x; }; f', 'rev')).toEqual([126, '', refused])
-    // An inline document may add rules, never an allow list.
-    expect(() =>
-      ws.createSession('tight', {
-        profile: 'reviewer',
-        permissions: SessionProfile({ commands: { allow: ['cat', 'git'] } }),
-      }),
-    ).toThrow('not an allow list')
+    // An inline document restricts what is left: its own deny speaks
+    // beside the profile's tree.
     ws.createSession('tight', {
       profile: 'reviewer',
-      permissions: SessionProfile({ commands: { deny: ['ls'] } }),
+      permissions: SessionProfile({
+        commands: { echo: { decision: 'deny', reason: 'read-only session' } },
+      }),
     })
     expect((await line(ws, 'cat /repo/d/x', 'tight'))[0]).toBe(0)
-    expect(await line(ws, 'ls /repo', 'tight')).toEqual([
+    expect(await line(ws, 'echo hi', 'tight')).toEqual([
       126,
       '',
-      'ls: Permission denied\npolicy denied: denied by policy\n',
+      'echo: Permission denied\npolicy denied: read-only session\n',
     ])
     expect((await line(ws, 'git log', 'tight'))[2]).not.toContain('not allowed')
   })
@@ -1317,37 +1316,36 @@ describe('command permissions end to end', () => {
       "rm: cannot remove 'x': Permission denied\npolicy denied: no deletes in the repo\n",
     ])
     expect((await line(ws, 'rm /scratch/z'))[0]).toBe(0)
-    // A pure path rule holds at the command plane for any command and
-    // at the dispatcher for every op, whatever entry point.
+    // A leaf with paths refuses its command on a path it covers. A tree
+    // judges lines, so the host's own entry point is not one.
     expect(await line(ws, 'cat /repo/locked/y')).toEqual([
       1,
       '',
       'cat: /repo/locked/y: Permission denied\npolicy denied: frozen\n',
     ])
-    await expect(ws.vfs.write('/repo/locked/y', 'changed')).rejects.toThrow()
-    await expect(ws.vfs.read('/repo/locked/y')).rejects.toThrow()
-    // A mount section's rule applies when the line works inside the
+    expect(DEC.decode(await ws.vfs.read('/repo/locked/y'))).toBe('y\n')
+    // A mount section's tree applies when the line works inside the
     // mount (cwd under it, or a path under it), whole command; the verb
-    // walk reads `-C /repo reset --hard` as `git reset --hard`.
+    // walk reads `-C /repo reset` as `git reset`.
     expect(await line(ws, 'cd /repo && git commit -m x')).toEqual([
       126,
       '',
       'git: Permission denied\npolicy denied: history is read-only here\n',
     ])
-    expect(await line(ws, 'cd /scratch && git -C /repo reset --hard')).toEqual([
+    expect(await line(ws, 'cd /scratch && git -C /repo reset')).toEqual([
       126,
       '',
       'git: Permission denied\npolicy denied: history is read-only here\n',
     ])
     expect((await line(ws, 'cd /scratch && git commit -m x'))[2]).not.toContain('read-only')
-    expect((await line(ws, 'cd /repo && git reset --soft HEAD'))[2]).not.toContain('read-only')
+    expect((await line(ws, 'cd /repo && git log'))[2]).not.toContain('read-only')
   })
 
-  it('find -delete is gated at the dispatcher, not by a named rule', async () => {
+  it("find -delete is judged by find's own leaf, not by rm's", async () => {
     // mirage's find has no -exec; -delete is find's own action, not an
-    // `rm` line, so a rule naming `rm` does not cover it (the same
-    // honest limit as a guest's os.remove), while a pure path rule does,
-    // at the dispatcher the removal clears.
+    // `rm` line, so a leaf on `rm` does not cover it (the same honest
+    // limit as a guest's os.remove), while find's own leaf does, on each
+    // entry its walk reaches.
     const ws = commandsWs()
     await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     await ws.shell('find /repo/d -name x -delete')
@@ -1372,10 +1370,9 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [
-                { reason: 'sealed', commands: { cat: ['/data/secret*'], head: ['/data/secret*'] } },
-                { reason: 'keep the link', commands: { rm: ['/data/link'] } },
-              ],
+              cat: { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] },
+              head: { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] },
+              rm: { decision: 'deny', reason: 'keep the link', paths: ['/data/link'] },
             },
           }),
         },
@@ -1424,10 +1421,12 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [
-                { reason: 'sealed', commands: { cat: ['/data/secret*'] } },
-                { reason: 'audit is append-only', commands: { echo: ['/data/audit.log'] } },
-              ],
+              cat: { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] },
+              echo: {
+                decision: 'deny',
+                reason: 'audit is append-only',
+                paths: ['/data/audit.log'],
+              },
             },
           }),
         },
@@ -1469,7 +1468,7 @@ describe('command permissions end to end', () => {
           default: SessionProfile({
             mounts: {
               '/scratch/child': {
-                commands: { deny: [{ reason: 'boxed', commands: ['grep'] }] },
+                commands: { grep: { decision: 'deny', reason: 'boxed' } },
               },
             },
           }),
@@ -1529,7 +1528,10 @@ describe('command permissions end to end', () => {
             mounts: {
               '/a/b/c': {
                 commands: {
-                  deny: [{ reason: 'boxed', commands: ['cp', 'chmod', 'mv', 'du'] }],
+                  cp: { decision: 'deny', reason: 'boxed' },
+                  chmod: { decision: 'deny', reason: 'boxed' },
+                  mv: { decision: 'deny', reason: 'boxed' },
+                  du: { decision: 'deny', reason: 'boxed' },
                 },
               },
             },
@@ -1583,12 +1585,8 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [
-                {
-                  reason: 'sealed',
-                  commands: { chmod: ['/a/b/secret'], chown: ['/a/b/secret'] },
-                },
-              ],
+              chmod: { decision: 'deny', reason: 'sealed', paths: ['/a/b/secret'] },
+              chown: { decision: 'deny', reason: 'sealed', paths: ['/a/b/secret'] },
             },
           }),
         },
@@ -1713,11 +1711,9 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [
-                { reason: 'no deletes', commands: ['rm'] },
-                { reason: 'sealed', commands: { cat: ['/repo/secret*'] } },
-                { reason: 'no pushes', commands: ['git push'] },
-              ],
+              rm: { decision: 'deny', reason: 'no deletes' },
+              cat: { decision: 'deny', reason: 'sealed', paths: ['/repo/secret*'] },
+              git: { fetch: { decision: 'deny', reason: 'no fetches' } },
             },
           }),
         },
@@ -1795,16 +1791,9 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [
-                {
-                  reason: 'sealed',
-                  commands: {
-                    ls: ['/repo/sealed'],
-                    find: ['/repo/sealed'],
-                    grep: ['/repo/sealed'],
-                  },
-                },
-              ],
+              ls: { decision: 'deny', reason: 'sealed', paths: ['/repo/sealed'] },
+              find: { decision: 'deny', reason: 'sealed', paths: ['/repo/sealed'] },
+              grep: { decision: 'deny', reason: 'sealed', paths: ['/repo/sealed'] },
             },
           }),
         },
@@ -1851,13 +1840,18 @@ describe('command permissions end to end', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              allow: ['mkdir', 'echo', 'touch', 'cat', 'rm', 'ls', 'head'],
-              ask: [{ reason: 'sign-off', commands: { rm: ['/repo/shared/*'] } }],
-              deny: [
-                { reason: 'private', commands: { cat: ['/repo/private'] } },
-                { reason: 'sealed', paths: ['/repo/sealed/*'] },
-                { reason: 'no heads', commands: ['head'] },
+              '*': 'deny',
+              mkdir: 'allow',
+              echo: 'allow',
+              touch: 'allow',
+              cat: [
+                'allow',
+                { decision: 'deny', reason: 'private', paths: ['/repo/private'] },
+                { decision: 'deny', reason: 'sealed', paths: ['/repo/sealed/*'] },
               ],
+              rm: ['allow', { decision: 'ask', reason: 'sign-off', paths: ['/repo/shared/*'] }],
+              ls: 'allow',
+              head: ['allow', { decision: 'deny', reason: 'no heads' }],
             },
           }),
         },
@@ -1954,8 +1948,11 @@ describe('ask end to end', () => {
   // string under `ask` is one pattern with the default reason.
   const ASK_DOC = SessionProfile({
     commands: {
-      ask: [{ reason: 'sign-off', commands: ['rm'] }, 'head'],
-      deny: [{ reason: 'no deletes in the repo', commands: { rm: ['/repo/*'] } }],
+      rm: [
+        { decision: 'deny', reason: 'no deletes in the repo', paths: ['/repo/*'] },
+        { decision: 'ask', reason: 'sign-off' },
+      ],
+      head: 'ask',
     },
   })
 
@@ -2138,29 +2135,25 @@ describe('ask end to end', () => {
 })
 
 describe('a walk below the operand meets the rule guard', () => {
+  const SEALED = { decision: 'deny', reason: 'sealed', paths: ['/data/t/sealed'] }
+  const FROZEN_T = { decision: 'deny', reason: 'frozen', paths: ['/data/t/locked/*'] }
+  const PRIVATE = { decision: 'deny', reason: 'private', paths: ['/data/t/private'] }
   const WALK_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/t/ghost'] },
     commands: {
-      allow: [
-        'mkdir',
-        'echo',
-        'ls',
-        'cat',
-        'grep',
-        'find',
-        'du',
-        'cp',
-        'tar',
-        'tree',
-        'stat',
-        'rm',
-        'test',
-      ],
-      ask: [{ reason: 'nod', commands: { grep: ['/data/t/asked/*'] } }],
-      deny: [
-        { reason: 'private', commands: { grep: ['/data/t/private'], ls: ['/data/t/private'] } },
-        { reason: 'sealed', paths: ['/data/t/sealed'] },
-        { reason: 'frozen', paths: ['/data/t/locked/*'] },
+      '*': 'deny',
+      ...Object.fromEntries(
+        ['mkdir', 'echo', 'cat', 'find', 'du', 'cp', 'tar', 'tree', 'stat', 'rm', 'test'].map(
+          (name) => [name, ['allow', SEALED, FROZEN_T]],
+        ),
+      ),
+      ls: ['allow', SEALED, FROZEN_T, PRIVATE],
+      grep: [
+        'allow',
+        SEALED,
+        FROZEN_T,
+        PRIVATE,
+        { decision: 'ask', reason: 'nod', paths: ['/data/t/asked/*'] },
       ],
     },
   })
@@ -2278,39 +2271,23 @@ describe('a walk below the operand meets the rule guard', () => {
     await ws.decisions.answer(second.id, Outcome.ALLOW, Scope.SESSION)
     expect(await line(ws, 'grep -r a /data/t/asked')).toEqual([0, '/data/t/asked/a:a\n', ''])
   })
-
-  it('the dispatcher stats a refused entry and withholds its content', async () => {
-    const ws = await walkWs()
-    const sess = ws.getSession('g')
-    await setCurrentSession(sess, async () => {
-      const st = (await ws.dispatch('stat', '/data/t/locked/y')) as { size?: number }
-      expect(st.size).toBe(2)
-      await expect(ws.dispatch('read', '/data/t/locked/y')).rejects.toMatchObject({
-        code: 'EACCES',
-      })
-      await expect(ws.dispatch('stat', '/data/t/ghost/g')).rejects.toThrow()
-    })
-  })
 })
 
 describe('a relayed walk meets the command rules', () => {
   const RELAY_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/r/ghost'] },
     commands: {
-      deny: [
-        {
-          reason: 'cut',
-          commands: {
-            split: ['/data/out/xab'],
-            csplit: ['/data/out/xx01'],
-            awk: ['/data/out/locked'],
-            mktemp: ['/data/tmpd/*'],
-            unzip: ['/data/uz/*'],
-          },
-        },
-        { reason: 'tarred', commands: { tar: ['/data/r/sec', '/data/r/ghost'] } },
-        { reason: 'copied', commands: { cp: ['/data/r/sec', '/data/dst/sec', '/data/r/ghost'] } },
-      ],
+      split: { decision: 'deny', reason: 'cut', paths: ['/data/out/xab'] },
+      csplit: { decision: 'deny', reason: 'cut', paths: ['/data/out/xx01'] },
+      awk: { decision: 'deny', reason: 'cut', paths: ['/data/out/locked'] },
+      mktemp: { decision: 'deny', reason: 'cut', paths: ['/data/tmpd/*'] },
+      unzip: { decision: 'deny', reason: 'cut', paths: ['/data/uz/*'] },
+      tar: { decision: 'deny', reason: 'tarred', paths: ['/data/r/sec', '/data/r/ghost'] },
+      cp: {
+        decision: 'deny',
+        reason: 'copied',
+        paths: ['/data/r/sec', '/data/dst/sec', '/data/r/ghost'],
+      },
     },
   })
   const TAR_SEC_REFUSED =
@@ -2428,18 +2405,17 @@ describe('a relayed walk meets the command rules', () => {
 })
 
 describe('a warm walk is refused as the cold walk is', () => {
+  const WALLED = { decision: 'deny', reason: 'walled', paths: ['/data/w/p.txt'] }
   const WARM_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/w/h.txt'] },
     commands: {
-      deny: [
-        {
-          reason: 'sealed',
-          commands: Object.fromEntries(
-            ['grep', 'rg', 'cat', 'cp', 'tar'].map((name) => [name, ['/data/w/a.txt']]),
-          ),
-        },
-        { reason: 'walled', paths: ['/data/w/p.txt'] },
-      ],
+      '*': WALLED,
+      ...Object.fromEntries(
+        ['grep', 'rg', 'cat', 'cp', 'tar'].map((name) => [
+          name,
+          [{ decision: 'deny', reason: 'sealed', paths: ['/data/w/a.txt'] }, WALLED],
+        ]),
+      ),
     },
   })
   const WARM_LINES = [
@@ -2516,7 +2492,8 @@ describe('a warm walk is refused as the cold walk is', () => {
 describe('a dispatched read through a link meets the target rule', () => {
   const LINKED_DOC: SessionProfile = SessionProfile({
     commands: {
-      deny: [{ reason: 'sealed', commands: { awk: ['/data/secret'], sed: ['/data/secret'] } }],
+      awk: { decision: 'deny', reason: 'sealed', paths: ['/data/secret'] },
+      sed: { decision: 'deny', reason: 'sealed', paths: ['/data/secret'] },
     },
   })
 
@@ -2599,9 +2576,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   // itself (unlink, rename) as for one that follows it.
   it('holds the rule through a linked parent', async () => {
     const doc = SessionProfile({
-      commands: {
-        deny: [{ reason: 'sealed', commands: { zap: ['/data/real/secret'] } }],
-      },
+      commands: { zap: { decision: 'deny', reason: 'sealed', paths: ['/data/real/secret'] } },
     })
     for (const op of ['unlink', 'rename']) {
       const ws = new Workspace(
@@ -2630,12 +2605,8 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   it('binds a rule spelled through a linked parent', async () => {
     const doc = SessionProfile({
       commands: {
-        deny: [
-          {
-            reason: 'sealed',
-            commands: { sed: ['/data/dalias/secret'], cat: ['/data/dalias/secret'] },
-          },
-        ],
+        sed: { decision: 'deny', reason: 'sealed', paths: ['/data/dalias/secret'] },
+        cat: { decision: 'deny', reason: 'sealed', paths: ['/data/dalias/secret'] },
       },
     })
     const ws = new Workspace(
@@ -2664,12 +2635,9 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
 describe('a walk the executor fans out meets the command rules', () => {
   const FANOUT_DOC: SessionProfile = SessionProfile({
     commands: {
-      deny: [
-        {
-          reason: 'sealed',
-          commands: { rg: ['/data/w/a.txt'], find: ['/data/w/a.txt'], tree: ['/data/sub/x'] },
-        },
-      ],
+      rg: { decision: 'deny', reason: 'sealed', paths: ['/data/w/a.txt'] },
+      find: { decision: 'deny', reason: 'sealed', paths: ['/data/w/a.txt'] },
+      tree: { decision: 'deny', reason: 'sealed', paths: ['/data/sub/x'] },
     },
   })
 
@@ -2735,9 +2703,7 @@ describe('a walk the executor fans out meets the command rules', () => {
 
 describe('a dispatched op is judged by the gate of the command that issued it', () => {
   const SEALED_DOC = SessionProfile({
-    commands: {
-      deny: [{ reason: 'sealed', commands: { sed: ['/data/real/secret'] } }],
-    },
+    commands: { sed: { decision: 'deny', reason: 'sealed', paths: ['/data/real/secret'] } },
   })
   const OPEN_DOC = SessionProfile({})
 
@@ -2794,6 +2760,9 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
   // The command rules bind what a command does; the session's raw entry point
   // (ws.vfs, the agent's file tool) is held to paths rules only, as before.
   it('leaves the raw vfs route to its own policy scope', async () => {
+    // A command tree binds lines; the session's raw entry point (ws.vfs,
+    // the agent's file tool) is held to hides and modes, which a path
+    // every command must keep away from belongs in.
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -2801,10 +2770,8 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
         profiles: {
           mixed: SessionProfile({
             commands: {
-              deny: [
-                { reason: 'sealed', commands: { cat: ['/data/real/secret'] } },
-                { reason: 'walled', paths: ['/data/real/walled'] },
-              ],
+              cat: { decision: 'deny', reason: 'sealed', paths: ['/data/real/secret'] },
+              '*': { decision: 'deny', reason: 'walled', paths: ['/data/real/walled'] },
             },
           }),
         },
@@ -2816,7 +2783,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
     )
     const handle = await ws.session('g', { profile: 'mixed' })
     expect(DEC.decode(await handle.vfs.read('/data/real/secret'))).toBe('s\n')
-    await expect(handle.vfs.read('/data/real/walled')).rejects.toThrow()
+    expect(DEC.decode(await handle.vfs.read('/data/real/walled'))).toBe('w\n')
     expect((await handle.shell('cat /data/real/secret')).exitCode).toBe(1)
   })
 })
@@ -2853,7 +2820,9 @@ describe('admitted path rules on recursive commands', () => {
     await ws.vfs.write('/data/src/cache/private.txt', ENC.encode('PRIVATE_SENTINEL\n'))
     await ws.vfs.write('/data/src/public.txt', ENC.encode('public\n'))
     ws.createSession('restricted', {
-      profile: { commands: { deny: [{ paths: ['/data/src/cache'], reason: 'sealed' }] } },
+      profile: SessionProfile({
+        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/src/cache'] } },
+      }),
     })
 
     const result = await ws.shell(command, { sessionId: 'restricted' })

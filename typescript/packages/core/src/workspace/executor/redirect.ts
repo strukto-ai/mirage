@@ -1208,7 +1208,7 @@ async function runRedirects(
     const scope = ensureScope(r.target)
     targets.push(scope)
     if (guard !== undefined) {
-      const denied = await guard(targets, admissionStdin)
+      const denied = await guard(targets, admissionStdin, raw)
       if (denied !== null) return denied
     }
     const refusal = await openRefusal(dispatch, context, [r])

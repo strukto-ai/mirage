@@ -252,6 +252,14 @@ export function fsError(err: unknown): HttpError {
               reason: decision.reason,
               policy: decision.policy,
               ask_id: decision.askId,
+              matched:
+                decision.matched == null
+                  ? null
+                  : {
+                      command: [...decision.matched.command],
+                      flags: [...decision.matched.flags],
+                      keys: [...decision.matched.keys],
+                    },
             },
     })
   }

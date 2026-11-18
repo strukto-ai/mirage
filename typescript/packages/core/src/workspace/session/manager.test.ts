@@ -14,7 +14,7 @@
 
 import { seedVar } from './state.ts'
 import { describe, expect, it, vi } from 'vitest'
-import type { AdmissionRules, Decision } from '../../policy/types.ts'
+import type { Decision } from '../../policy/types.ts'
 import type { CompiledProfile, ProfilePolicies, ProfileSetup } from '../../policy/profile.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
@@ -27,6 +27,8 @@ import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
 import type { RecordFields } from '../record/types.ts'
 import { VarAttr, withValue, type ShellVar } from '../../shell/variable.ts'
+import { trees } from '../../test-utils.ts'
+import { OLDER_FORMAT } from './constants.ts'
 
 /** An empty compiled profile with the given parts filled in. */
 function compiled(
@@ -475,7 +477,8 @@ describe('SessionManager admission rules', () => {
   it("commandsOf answers the session's own rules", () => {
     const m = new SessionManager('def')
     const early = m.create('early')
-    const own: AdmissionRules = { allow: ['ls'], ask: [], deny: [] }
+    const own = trees({ '*': 'deny', ls: 'allow' })
+    const cat = trees({ '*': 'deny', cat: 'allow' })
     const late = m.create('late')
     late.commands = own
     expect(m.commandsOf('late')).toBe(own)
@@ -488,54 +491,71 @@ describe('SessionManager admission rules', () => {
     expect(early.commands).toBeNull()
     // With a default profile compiled in, an unknown id answers its rules
     // rather than nothing, so an unbound entry point still fails toward refusal.
-    m.defaultProfile = compiled({ commands: { allow: ['cat'], ask: [], deny: [] } })
-    expect(m.commandsOf('nobody')).toEqual({ allow: ['cat'], ask: [], deny: [] })
-    expect(m.commandsOf('')).toEqual({ allow: ['cat'], ask: [], deny: [] })
+    m.defaultProfile = compiled({ commands: cat })
+    expect(m.commandsOf('nobody')).toEqual(cat)
+    expect(m.commandsOf('')).toEqual(cat)
   })
 
-  it('the rules ride the session record', async () => {
+  it('the command trees ride the session record', async () => {
     const store = new RAMNamespaceStore()
+    const own = trees({ '*': 'deny', ls: 'allow' }, { '/w': { rm: 'deny' } })
+    const saved = [
+      { mount: '', commands: { '*': 'deny', ls: 'allow' } },
+      { mount: '/w', commands: { rm: 'deny' } },
+    ]
     await store.set('restored', {
       session_id: 'restored',
       cwd: '/w',
       env: {},
       created_at: 1.0,
-      commands: {
-        allow: ['ls', 'git log'],
-        ask: [],
-        deny: [{ reason: 'no', commands: ['rm'], paths: [] }],
-      },
-    })
-    await store.set('def', {
-      session_id: 'def',
-      cwd: '/w',
-      env: {},
-      created_at: 1.0,
-      commands: { allow: ['cat'], ask: [], deny: [] },
+      command_trees: saved,
     })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const restored = m.get('restored')
-    expect(restored.commands).toEqual({
-      allow: ['ls', 'git log'],
-      ask: [],
-      deny: [{ reason: 'no', commands: ['rm'], paths: [], mount: '' }],
-    })
+    expect(restored.commands).toEqual(own)
     expect(m.commandsOf('restored')).toBe(restored.commands)
-    // The default session adopts its stored rules like its hidden paths.
-    expect(m.get('def').commands).toEqual({ allow: ['cat'], ask: [], deny: [] })
     await m.flush()
-    const stored = await store.load()
-    const record = stored.get('restored') as {
-      commands: { allow: string[]; deny: { reason: string }[] }
+    const stored = (await store.load()).get('restored') as Record<string, unknown>
+    expect(stored.command_trees).toEqual(saved)
+    expect('commands' in stored).toBe(false)
+  })
+
+  it('a record with flat rules loads closed and drops its approvals', async () => {
+    const store = new RAMNamespaceStore()
+    await store.set('old', {
+      session_id: 'old',
+      cwd: '/w',
+      env: {},
+      created_at: 1.0,
+      commands: { '*': 'deny', ls: 'allow' },
+      decisions: [],
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const m = new SessionManager('def', store)
+      await m.ensureLoaded()
+      const old = m.get('old')
+      expect(old.commands).toEqual(OLDER_FORMAT)
+      expect(old.decisions).toEqual([])
+      const said = warn.mock.calls.map((call) => String(call[0]))
+      expect(said.filter((text) => text.includes('older format'))).toHaveLength(1)
+      expect(said.join('\n')).toContain('session old')
+    } finally {
+      warn.mockRestore()
     }
-    expect(record.commands.allow).toEqual(['ls', 'git log'])
-    expect(record.commands.deny[0]?.reason).toBe('no')
   })
 })
 
 describe('SessionManager decision ledger', () => {
-  const RULE = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
+  const RULE = {
+    reason: 'sign-off',
+    decision: Outcome.ASK,
+    at: '',
+    commands: ['git push'],
+    paths: [],
+    mount: '',
+  }
 
   function record(id: string, sessionId: string): Decision {
     return {
@@ -722,7 +742,7 @@ it.each([false, true])(
     const original = compiled(
       {
         mountModes: new Map([['/data', MountMode.READ]]),
-        commands: { allow: ['cat'], ask: [], deny: [] },
+        commands: trees({ '*': 'deny', cat: 'allow' }),
         scripts: {
           preCommand: [
             {

@@ -27,12 +27,7 @@ def _guarded_config() -> dict:
             "profiles": {
                 "guarded": {
                     "commands": {
-                        "ask": [
-                            {
-                                "commands": ["rm"],
-                                "reason": ASK_REASON,
-                            }
-                        ],
+                        "rm": {"decision": "ask", "reason": ASK_REASON},
                     },
                 },
             },

@@ -15,24 +15,29 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, NotRequired, TypedDict
 
-from mirage.policy.match import Outcome
+from mirage.policy.profile import command_tree, tree_doc
 from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
     Decision,
+    Outcome,
     ProfileScript,
     ProfileScripts,
     Scope,
+    ScopedTree,
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
+from mirage.workspace.session.constants import OLDER_FORMAT
 
 
 class RuleJSON(TypedDict):
     reason: str
-    commands: NotRequired[list[str]]
-    paths: NotRequired[list[str]]
+    decision: NotRequired[str]
+    paths: list[str]
+    at: NotRequired[str]
     mount: NotRequired[str]
+    commands: NotRequired[list[str]]
 
 
 class ScriptJSON(TypedDict):
@@ -59,59 +64,86 @@ class DecisionJSON(TypedDict):
 
 
 def rule_to_dict(rule: CommandRule) -> RuleJSON:
-    """One admission rule as the session record stores it.
+    """The rule an approval is keyed on, as the session record stores
+    it.
 
     Args:
         rule (CommandRule): the rule.
     """
-    data: RuleJSON = {
-        "reason": rule.reason,
-        "commands": list(rule.commands),
-        "paths": list(rule.paths),
-    }
+    data: RuleJSON = {"reason": rule.reason, "paths": list(rule.paths)}
+    if rule.decision is not Outcome.ASK:
+        data["decision"] = rule.decision.value
+    if rule.at:
+        data["at"] = rule.at
     if rule.mount:
         data["mount"] = rule.mount
+    if rule.commands:
+        data["commands"] = list(rule.commands)
     return data
 
 
 def rule_from_dict(data: Mapping[str, Any]) -> CommandRule:
-    """One admission rule read back from a session record.
+    """The rule an approval is keyed on, read back from a session
+    record.
 
     Args:
         data (Mapping[str, Any]): what ``rule_to_dict`` wrote.
     """
     return CommandRule(
         reason=data["reason"],
-        commands=tuple(data.get("commands", ())),
+        decision=Outcome(data.get("decision", Outcome.ASK.value)),
+        at=data.get("at", ""),
         paths=tuple(data.get("paths", ())),
         mount=data.get("mount", ""),
+        commands=tuple(data.get("commands", ())),
     )
 
 
-def commands_to_dict(rules: AdmissionRules) -> dict[str, Any]:
-    """A session's compiled admission rules as the record stores them.
+def commands_to_dict(rules: AdmissionRules) -> list[dict[str, Any]]:
+    """A session's command trees as the record stores them, each with
+    the mount it belongs to, under the ``command_trees`` field.
 
     Args:
-        rules (AdmissionRules): the compiled rules.
+        rules (AdmissionRules): the trees.
     """
-    return {
-        "allow": list(rules.allow) if rules.allow is not None else None,
-        "ask": [rule_to_dict(r) for r in rules.ask],
-        "deny": [rule_to_dict(r) for r in rules.deny],
-    }
+    return [
+        {
+            "mount": scoped.mount,
+            "commands": tree_doc(scoped.tree),
+            **({"inline": True} if scoped.inline else {}),
+        }
+        for scoped in rules.trees
+    ]
 
 
-def commands_from_dict(data: Mapping[str, Any]) -> AdmissionRules:
-    """A session's compiled admission rules read back from a record.
+def commands_from_dict(
+    data: Sequence[Mapping[str, Any]] | None,
+    flat: Mapping[str, Any] | None = None,
+) -> AdmissionRules | None:
+    """A session's command trees read back from a record.
+
+    A record written before command trees holds flat ``commands`` lists
+    and no ``command_trees``. Such a session comes back closed, every
+    line denied, so a restart never leaves it less restricted than it
+    was; recreating the session gives it its profile's trees.
 
     Args:
-        data (Mapping[str, Any]): what ``commands_to_dict`` wrote.
+        data (Sequence[Mapping[str, Any]] | None): what
+            ``commands_to_dict`` wrote, None for a record without it.
+        flat (Mapping[str, Any] | None): the record's flat ``commands``,
+            None for a record without them.
     """
-    allow = data.get("allow")
+    if data is None:
+        return None if flat is None else OLDER_FORMAT
     return AdmissionRules(
-        allow=tuple(allow) if allow is not None else None,
-        ask=tuple(rule_from_dict(r) for r in data.get("ask", ())),
-        deny=tuple(rule_from_dict(r) for r in data.get("deny", ())),
+        tuple(
+            ScopedTree(
+                command_tree(entry["commands"]),
+                entry["mount"],
+                entry.get("inline", False),
+            )
+            for entry in data
+        )
     )
 
 

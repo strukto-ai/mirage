@@ -268,6 +268,7 @@ def parse_flags(
             parsed.missing_required_operands,
             parsed.typed_dests,
             parsed.builtin,
+            parsed.env_dests,
         )
 
     # No spec: separate by type

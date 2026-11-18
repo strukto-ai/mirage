@@ -60,9 +60,11 @@ export type RedirectRun = (
   sink: JobConsole | undefined,
   paths: readonly PathSpec[],
 ) => Promise<RedirectResult>
+/** The gate is shown the redirect that opens the last target, null when no one redirect does. */
 export type RedirectGuard = (
   paths: readonly PathSpec[],
   stdin: ByteSource | null,
+  opening: Redirect | null,
 ) => Promise<RedirectResult | null>
 export type RedirectRunner = (
   run: RedirectRun,

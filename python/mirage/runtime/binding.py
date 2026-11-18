@@ -154,6 +154,10 @@ def restricted_mounts_for(
 ) -> tuple[str, ...]:
     """Map file restrictions to their owning mounts, excluding ancestor mounts.
 
+    A file restriction is a hide, a show entry with a mode, or a mount
+    mode below exec. Command trees judge lines, not file ops, so they
+    restrict no mount.
+
     Args:
         session (SessionState): the execution's session.
         prefixes (list[str]): every workspace mount, including hidden mounts.
@@ -169,9 +173,6 @@ def restricted_mounts_for(
             for e in shown.entries
             if e.mode is not None and e.mode is not MountMode.EXEC
         )
-    if session.commands is not None:
-        for rule in (*session.commands.ask, *session.commands.deny):
-            entries.extend(rule.paths or ((rule.mount,) if rule.mount else ()))
     entries.extend(
         p
         for p, mode in (session.mount_modes or {}).items()

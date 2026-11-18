@@ -255,7 +255,6 @@ async def test_missing_sdk_fails_with_install_hint(monkeypatch):
     "profile",
     [
         {"paths": {"hide": ["/data/secret"]}},
-        {"commands": {"deny": [{"paths": ["/data/secret"], "reason": "x"}]}},
         {"mounts": {"/data": "r"}},
     ],
 )

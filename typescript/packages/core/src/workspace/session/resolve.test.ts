@@ -13,41 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
-import { covers } from '../../policy/decisions.ts'
 import { PolicyError } from '../../policy/errors.ts'
-import { opRuling } from '../../policy/match/rule.ts'
-import { SessionProfile } from '../../policy/profile.ts'
-import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
+import { SessionProfile, treeDoc } from '../../policy/profile.ts'
+import { ruleTable } from '../../rs/policy.ts'
 import { DEFAULT_PROCESS_PERMISSIONS, layerProcesses } from '../../execution/process/config.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
+import { DEFAULT_VISIBILITY, MountMode } from '../../types.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import type { VfsCall } from '../../vfs/types.ts'
-import { CALLS } from '../dispatcher/constants.ts'
-import { applyProfile, compileProfile, narrow, resolveProfile, withInline } from './resolve.ts'
-import { ruleFromDict } from './serialize.ts'
+import {
+  applyProfile,
+  commandRules,
+  compileProfile,
+  narrow,
+  resolveProfile,
+  withInline,
+} from './resolve.ts'
 import { SessionState } from './session.ts'
-
-function callOf(name: string): VfsCall {
-  const call = CALLS.get(name)
-  if (call === undefined) throw new Error(`no call ${name}`)
-  return call
-}
-
-function readOp(virtual: string): VfsContext {
-  return {
-    call: callOf('read'),
-    path: new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      rawPath: virtual,
-    }),
-    write: false,
-    prefix: '/other',
-  }
-}
+import { BUILTIN_GRAMMARS } from './validate.ts'
 
 const PROFILES: Record<string, SessionProfile> = {
   default: SessionProfile({
@@ -61,40 +43,19 @@ const PROFILES: Record<string, SessionProfile> = {
   }),
 }
 
-it('preserves saved rule mount identity through compilation and inline restrictions', () => {
-  const restored = ruleFromDict({ reason: 'permission', commands: ['git push'] })
-  const omitted: CommandRule = { reason: 'permission', commands: ['git push'] }
-  for (const rule of [restored, omitted]) {
-    const base: SessionProfile = { commands: { ask: [rule] } }
-    const restricted = withInline(base, { paths: { hide: ['/secret'] } })
-    if (restricted === null) throw new Error('Expected a restricted profile')
-    for (const profile of [base, restricted]) {
-      const compiled = compileProfile(profile).policies.commands?.ask[0]
-      if (compiled === undefined) throw new Error('Expected an ask rule')
-      expect(compiled.mount).toBe(rule.mount)
-      const saved = {
-        id: 'saved',
-        sessionId: 's',
-        command: 'git',
-        argv: ['push'],
-        cwd: '/repo',
-        paths: [],
-        reason: rule.reason,
-        rule,
-        outcome: Outcome.ALLOW,
-        scope: Scope.SESSION,
-        note: '',
-      }
-      expect(covers(saved, compiled, ['git', 'push'], '/repo')).toBe(true)
-      const other: CommandRule = {
-        reason: compiled.reason,
-        commands: compiled.commands ?? [],
-        paths: compiled.paths ?? [],
-        ...(rule.mount === '' ? {} : { mount: '' }),
-      }
-      expect(covers(saved, other, ['git', 'push'], '/repo')).toBe(false)
-    }
-  }
+it("withInline keeps the profile's tree and commandRules reads both", () => {
+  const base = SessionProfile({ commands: { rm: { '-r': 'ask' } } })
+  const inline = SessionProfile({ commands: { rm: 'deny' }, paths: { hide: ['/secret'] } })
+  const merged = withInline(base, inline)
+  expect(merged?.commands).toBe(base.commands)
+  const rules = commandRules(base, inline, BUILTIN_GRAMMARS)
+  expect(rules?.trees.map((t) => [t.mount, t.inline])).toEqual([
+    ['', false],
+    ['', true],
+  ])
+  const second = rules?.trees[1]
+  expect(second === undefined ? null : treeDoc(second.tree)).toEqual({ rm: 'deny' })
+  expect(compileProfile(merged, '', null, rules).policies.commands).toBe(rules)
 })
 
 describe('resolveProfile', () => {
@@ -151,20 +112,24 @@ describe('withInline', () => {
       mounts: {
         '/repo': {
           mode: 'rw',
-          commands: { deny: ['rm'] },
+          commands: { rm: 'deny' },
           paths: { hide: ['/repo/.env'] },
         },
       },
     })
     const inline = SessionProfile({
       mounts: {
-        '/repo': { commands: { ask: ['git push'] }, paths: { hide: ['/repo/secrets'] } },
+        '/repo': { commands: { cp: 'ask' }, paths: { hide: ['/repo/secrets'] } },
       },
     })
     const entry = withInline(base, inline)?.mounts?.get('/repo')
     expect(entry?.mode).toBe(MountMode.WRITE)
-    expect(entry?.commands?.deny?.map((r) => r.commands)).toEqual([['rm']])
-    expect(entry?.commands?.ask?.map((r) => r.commands)).toEqual([['git push']])
+    expect(entry?.commands == null ? null : treeDoc(entry.commands)).toEqual({ rm: 'deny' })
+    const rules = commandRules(base, inline, BUILTIN_GRAMMARS)
+    expect(rules?.trees.map((t) => [t.mount, t.inline])).toEqual([
+      ['/repo', false],
+      ['/repo', true],
+    ])
     expect(entry?.paths).toEqual({ hide: ['/repo/.env', '/repo/secrets'] })
   })
 
@@ -174,93 +139,34 @@ describe('withInline', () => {
     expect(withInline(p, null)).toBe(p)
     expect(withInline(null, null)).toBeNull()
   })
-
-  it('adds ask and deny but refuses an allow list', () => {
-    const base = SessionProfile({
-      commands: { allow: ['ls', 'git', 'cat'], ask: ['git push'], deny: ['rm'] },
-    })
-    const inline = SessionProfile({
-      commands: { deny: [{ reason: 'no', commands: ['mv'] }] },
-    })
-    const out = withInline(base, inline)
-    // The allow list is the profile's alone, and the added rules land after
-    // it: an inline document restricts, it never installs.
-    expect(out?.commands?.allow).toEqual(['ls', 'git', 'cat'])
-    expect(out?.commands?.ask?.map((r) => r.commands)).toEqual([['git push']])
-    expect(out?.commands?.deny?.map((r) => r.commands)).toEqual([['rm'], ['mv']])
-    expect(() => withInline(base, SessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
-      'not an allow list',
-    )
-    // And with no profile to add to: the refusal belongs to where the
-    // document was written, so a workspace that happens to declare no
-    // default profile must not quietly accept what one with a profile refuses.
-    expect(() => withInline(null, SessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
-      'not an allow list',
-    )
-  })
-
-  it('leaves a stated block alone when the other is bare', () => {
-    const base = SessionProfile({ commands: { allow: ['ls'] } })
-    expect(withInline(base, { cwd: '/x' })?.commands).toEqual(base.commands)
-    const inline = SessionProfile({ commands: { deny: ['rm'] } })
-    expect(withInline({ cwd: '/x' }, inline)?.commands).toEqual(inline.commands)
-  })
 })
 
-describe('compileProfile commands', () => {
-  it("lists mount rules before the profile's own", () => {
-    const rules = compileProfile(
+describe('commandRules', () => {
+  it("holds each mount's tree with its prefix", () => {
+    const rules = commandRules(
       SessionProfile({
-        commands: { allow: ['ls', 'rm', 'git'], deny: ['shutdown'] },
+        commands: { '*': 'deny', ls: 'allow' },
         mounts: {
           '/repo': {
-            commands: {
-              ask: ['git rebase'],
-              deny: [{ reason: 'ro', commands: { rm: ['/repo/*.lock'] } }],
-            },
+            commands: { rm: { decision: 'deny', paths: ['*.pem'] }, git: { push: 'ask' } },
           },
-          '/scratch': 'r',
         },
       }),
-    ).policies.commands
-    expect(rules?.allow).toEqual(['ls', 'rm', 'git'])
-    // Every mount rule carries the root it was written under, which is
-    // what scopes it to a line working inside that mount; its paths are
-    // kept exactly as typed.
-    expect(rules?.deny[0]).toEqual({
-      reason: 'ro',
-      commands: ['rm'],
-      paths: ['/repo/*.lock'],
-      mount: '/repo',
-    })
-    expect(rules?.deny[1]?.commands).toEqual(['shutdown'])
-    expect(rules?.deny[1]?.mount).toBeUndefined()
-    expect(rules?.ask[0]?.commands).toEqual(['git rebase'])
-    expect(rules?.ask[0]?.mount).toBe('/repo')
-    expect(rules?.ask[0]?.paths).toBeUndefined()
+      null,
+      BUILTIN_GRAMMARS,
+      true,
+    )
+    expect(rules?.trees.map((t) => t.mount)).toEqual(['', '/repo'])
+    const leaves = new Map((rules === null ? [] : ruleTable(rules)).map((r) => [r.at, r]))
+    expect(leaves.get('/rm/*')?.paths).toEqual(['/repo/*.pem'])
+    expect(leaves.get('/rm/*')?.mount).toBe('/repo')
+    expect(leaves.get('/*')?.mount).toBe('')
   })
 
-  it('anchors a name pattern to its mount', () => {
-    const rules = compileProfile(
-      SessionProfile({
-        mounts: { '/repo': { commands: { deny: [{ reason: 'no pems', paths: ['*.pem'] }] } } },
-      }),
-    ).policies.commands
-    const rule = rules?.deny[0] ?? { reason: 'missing' }
-    expect(rule.paths).toEqual(['/repo/*.pem'])
-    // The stamp scopes the rule at admission, but the dispatcher reads the
-    // paths alone, so a raw name pattern refused a read in every other
-    // mount too.
-    expect(opRuling(rules, readOp('/repo/deep/key.pem'), [])).toEqual([rule, false])
-    expect(opRuling(rules, readOp('/other/key.pem'), [])).toBeNull()
-  })
-
-  it('is null when the profile states no rules', () => {
-    expect(compileProfile({}).policies.commands).toBeNull()
-    expect(compileProfile(SessionProfile({ commands: {} })).policies.commands).toBeNull()
-    expect(
-      compileProfile(SessionProfile({ mounts: { '/repo': 'r' } })).policies.commands,
-    ).toBeNull()
+  it('is null when no document states a tree', () => {
+    const bare = SessionProfile({ mounts: { '/repo': 'r' } })
+    expect(commandRules(bare, null, BUILTIN_GRAMMARS)).toBeNull()
+    expect(commandRules(null, null, BUILTIN_GRAMMARS)).toBeNull()
   })
 })
 
@@ -375,17 +281,13 @@ describe('narrow / applyProfile', () => {
     expect(applied.vars.get('ROLE')?.attrs.has(VarAttr.Export)).toBe(true)
   })
 
-  it("carries the profile's admission rules onto the session", () => {
-    const compiled = compileProfile(SessionProfile({ commands: { allow: ['ls'], ask: ['git'] } }))
-    expect(compiled.policies.commands).toEqual({
-      allow: ['ls'],
-      ask: [{ reason: DEFAULT_ASK_REASON, commands: ['git'] }],
-      deny: [],
-    })
+  it("carries the profile's trees onto the session", () => {
+    const doc = SessionProfile({ commands: { '*': 'deny', ls: 'allow' } })
+    const compiled = compileProfile(doc, '', null, commandRules(doc, null, BUILTIN_GRAMMARS))
+    expect(compiled.policies.commands).not.toBeNull()
     const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
     expect(session.commands).toEqual(compiled.policies.commands)
-    expect(compileProfile({ cwd: '/x' }).policies.commands).toBeNull()
   })
 
   it('the process list scope is part of what a session sees', () => {
@@ -428,7 +330,7 @@ describe('the path axis through resolve', () => {
         SessionProfile({ mounts: { '/repo': { paths: { show: ['/repo/secrets'] } } } }),
       ),
     ).toThrow('not show entries')
-    // And with no profile to add to, same rule as the allow list.
+    // And with no profile to add to, the same rule.
     expect(() => withInline(null, SessionProfile({ paths: { show: ['/x'] } }))).toThrow(
       'not show entries',
     )

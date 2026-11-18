@@ -48,23 +48,25 @@
      "hide": ["/vault"]
     },
     "commands": {
-     "allow": ["cat", "ls", "echo", "rm"],
-     "deny": [
-      {
-       "reason": "no deletes here",
-       "commands": ["rm"]
-      }
-     ]
+      "*": "deny",
+      "cat": "allow",
+      "ls": "allow",
+      "echo": "allow",
+      "rm": [
+        "allow",
+        {
+          "decision": "deny",
+          "reason": "no deletes here"
+        }
+      ]
     }
    },
    "asker": {
     "commands": {
-     "ask": [
-      {
-       "reason": "removal needs sign-off",
-       "commands": ["rm"]
+      "rm": {
+        "decision": "ask",
+        "reason": "removal needs sign-off"
       }
-     ]
     }
    },
    "reader": {
@@ -208,7 +210,7 @@
   {
    "id": "explain",
    "op": "explain",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"allow": ["cat", "echo", "ls", "rm"], "deny": [{"reason": "sealed", "paths": ["/sec/*"]}], "ask": [{"reason": "removal needs sign-off", "commands": ["rm"]}, {"reason": "nod", "paths": ["/out/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"*": ["deny", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "cat": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "echo": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "ls": ["allow", {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}], "rm": ["allow", {"decision": "ask", "reason": "removal needs sign-off"}, {"decision": "deny", "reason": "sealed", "paths": ["/sec/*"]}, {"decision": "ask", "reason": "nod", "paths": ["/out/*"]}]}}}},
    "session": {"id": "agent", "profile": "sealed"},
    "setup": ["mkdir /sec /out", "echo k > /sec/k", "echo key > /vault/key.txt", "echo f > /f"],
    "cases": [
@@ -216,10 +218,8 @@
     {"id": "a_line_a_path_rule_refuses", "input": {"call": "shell", "command": "cat /sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "exit_code": 1, "stderr": "cat: /sec/k: Permission denied\n", "commands": [["cat", "deny", 1]]}},
     {"id": "a_line_that_asks", "input": {"call": "shell", "command": "rm /f"}, "expect": {"outcome": "ask", "reason": "removal needs sign-off", "source": "top", "decision": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [["rm", "ask", 126]]}},
     {"id": "a_word_the_allow_list_leaves_out_fails_in_place", "input": {"call": "shell", "command": "gerp x; echo ok"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "exit_code": 0, "stderr": "", "commands": [["gerp", "deny", 126], ["echo", "allow", 0]]}},
-    {"id": "a_read_a_path_rule_refuses", "input": {"call": "read", "path": "/sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "call": "read", "error": "EACCES"}},
-    {"id": "a_write_that_asks", "input": {"call": "write", "path": "/out/a", "data": "eA=="}, "expect": {"outcome": "ask", "reason": "nod", "source": "top", "decision": "pending", "call": "write", "error": "EACCES"}},
+    {"id": "a_tree_does_not_judge_a_file_read", "input": {"call": "read", "path": "/sec/k"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "call": "read", "error": ""}},
     {"id": "a_hidden_path_explains_like_a_missing_one", "input": {"call": "read", "path": "/vault/key.txt"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "call": "read", "error": ""}},
-    {"id": "a_rename_into_a_sealed_directory", "input": {"call": "rename", "src": "/f", "dst": "/sec/g"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "call": "rename", "error": "EACCES"}},
     {"id": "a_read_only_mount", "input": {"call": "mkdir", "path": "/ro/d"}, "expect": {"outcome": "deny", "reason": "Read-only file system", "source": "", "decision": null, "call": "mkdir", "error": "EROFS"}},
     {"id": "a_free_write", "input": {"call": "write", "path": "/new", "data": "eA=="}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "call": "write", "error": ""}}
    ]
@@ -301,7 +301,7 @@
     {"id": "exposes_a_workspace_skill", "input": {"step": "expose", "id": "w", "kind": "skill", "path": "/SKILL.md"}, "expect": {"text": "exposed"}},
     {"id": "every_session_reads_them", "input": {"step": "shell", "id": "w", "command": "grep -cE ' (read|write|exec) \\|$' /VFS.md; head -2 /SKILL.md"}, "expect": {"text": "3\n---\nname: workspace-commands\n", "is_error": false}},
     {"id": "creates_a_session_to_redefine", "input": {"step": "session_create", "id": "w", "session": "s4", "profile": "reader"}, "expect": {"text": "s4"}},
-    {"id": "redefines_its_profile", "input": {"step": "set_profile", "id": "w", "name": "reader", "profile": {"commands": {"allow": ["cat", "whoami"]}}}, "expect": {"text": "reader"}},
+    {"id": "redefines_its_profile", "input": {"step": "set_profile", "id": "w", "name": "reader", "profile": {"commands": {"*": "deny", "cat": "allow", "whoami": "allow"}}}, "expect": {"text": "reader"}},
     {"id": "the_live_session_keeps_its_rules", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
     {"id": "moves_onto_the_new_definition", "input": {"step": "session_update", "id": "w", "session": "s4", "profile": "reader"}, "expect": {"text": "s4"}},
     {"id": "runs_the_new_definition_by_name", "input": {"step": "shell", "id": "w", "session": "s4", "command": "cat /vault/key.txt; whoami"}, "expect": {"text": "key\nreader\n", "is_error": false}},
@@ -429,7 +429,7 @@
   {
    "id": "audit_rules",
    "op": "session",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "deny", "reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"
@@ -448,30 +448,9 @@
    ]
   },
   {
-   "id": "audit_rules_bytes",
-   "op": "bytes",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
-   "session": {
-    "id": "agent",
-    "profile": "guarded"
-   },
-   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
-   "cases": [
-    {"id": "reads_the_file", "input": {"call": "read", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "reads_through_a_link", "input": {"call": "read", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "stats_the_file", "input": {"call": "stat", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"type": "file", "size": 9}},
-    {"id": "lists_the_parent", "input": {"call": "readdir", "path": "/data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": ["/data/dl", "/data/hdir", "/data/lnk", "/data/ok.txt", "/data/secret.txt"]},
-    {"id": "reads_the_link", "input": {"call": "readlink", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": "/data/secret.txt"},
-    {"id": "writes_the_file", "input": {"call": "write", "path": "/data/secret.txt", "data": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "writes_into_the_directory", "input": {"call": "write", "path": "/data/hdir/new", "data": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "renames_into_the_directory", "input": {"call": "rename", "src": "/data/ok.txt", "dst": "/data/hdir/moved"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "removes_the_file", "input": {"call": "unlink", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}}
-   ]
-  },
-  {
    "id": "audit_asks",
    "op": "session",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"*": {"decision": "ask", "reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}}}}},
    "session": {
     "id": "agent",
     "profile": "guarded"
@@ -487,27 +466,6 @@
     {"id": "reads_nothing_through_a_link", "input": {"command": "cat /data/lnk /data/dl/inner.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "cat: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 0aca88dcbe9c)\n", "is_error": true}, "mcp_stdio": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 0aca88dcbe9c)\n", "is_error": true}}},
     {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "echo: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "echo: Permission denied\nrequires approval: audit nod (ask 09fe09cfb66b)\n", "is_error": true}, "mcp_stdio": {"text": "echo: Permission denied\nrequires approval: audit nod (ask 09fe09cfb66b)\n", "is_error": true}}},
     {"id": "leaves_it_to_a_glob_removal", "input": {"command": "rm -f /data/*; ls -A /data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\nrequires approval: audit nod (ask d667660425e3)\n", "is_error": false}, "mcp_stdio": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\nrequires approval: audit nod (ask d667660425e3)\n", "is_error": false}}}
-   ]
-  },
-  {
-   "id": "audit_asks_bytes",
-   "op": "bytes",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
-   "session": {
-    "id": "agent",
-    "profile": "guarded"
-   },
-   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
-   "cases": [
-    {"id": "reads_the_file", "input": {"call": "read", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "reads_through_a_link", "input": {"call": "read", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "stats_the_file", "input": {"call": "stat", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"type": "file", "size": 9}},
-    {"id": "lists_the_parent", "input": {"call": "readdir", "path": "/data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": ["/data/dl", "/data/hdir", "/data/lnk", "/data/ok.txt", "/data/secret.txt"]},
-    {"id": "reads_the_link", "input": {"call": "readlink", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": "/data/secret.txt"},
-    {"id": "writes_the_file", "input": {"call": "write", "path": "/data/secret.txt", "data": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "writes_into_the_directory", "input": {"call": "write", "path": "/data/hdir/new", "data": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "renames_into_the_directory", "input": {"call": "rename", "src": "/data/ok.txt", "dst": "/data/hdir/moved"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
-    {"id": "removes_the_file", "input": {"call": "unlink", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}}
    ]
   }
  ],

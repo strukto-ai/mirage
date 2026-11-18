@@ -33,7 +33,9 @@ async function run(line: string, profiled = false): Promise<Ran> {
     profiled
       ? {
           mode: MountMode.WRITE,
-          profiles: { p: SessionProfile({ commands: { allow: ['help', 'echo'] } }) },
+          profiles: {
+            p: SessionProfile({ commands: { '*': 'deny', help: 'allow', echo: 'allow' } }),
+          },
           profile: 'p',
         }
       : { mode: MountMode.WRITE },

@@ -32,20 +32,17 @@ import {
   commandLimitsToJSON,
   parseCommandLimits,
 } from './builtin/output_cap.ts'
+import { CTX_ENV, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import {
-  CTX_ENV,
-  DEFAULT_ASK_REASON,
-  DEFAULT_DENY_REASON,
-  METHODS,
-  PROGRAM_RUNTIME,
-} from './constants.ts'
-import type {
-  AdmissionRules,
-  CommandRule,
-  HideReason,
-  ProfileScript,
-  ProfileScripts,
-  ScriptMethod,
+  type AdmissionRules,
+  type CommandNode,
+  type HideReason,
+  type OptionRule,
+  type ProfileScript,
+  type ProfileScripts,
+  type RuleLeaf,
+  type ScriptMethod,
+  type ValueRule,
 } from './types.ts'
 
 /**
@@ -78,36 +75,6 @@ export interface VarsBlock {
 }
 
 /**
- * `commands:` at the top level of a profile. `allow` lists the command
- * patterns the profile allows; a line no pattern covers is refused,
- * `<cmd>: Permission denied` at 126, like any other rule's Deny. Shell
- * builtins are subjects like everything else: a list stating only `cat`
- * refuses `echo` and `cd`. The agent's own functions are the one exemption, safe because
- * every line of a body passes the gate itself. `ask` rules are admitted
- * only with a host approval; `deny` rules refuse with a reason. A bare
- * string in either is one command pattern with the default reason.
- * `allow` null or absent (unstated) allows everything.
- */
-export interface CommandsBlock {
-  readonly allow?: readonly string[] | null
-  readonly ask?: readonly CommandRule[]
-  readonly deny?: readonly CommandRule[]
-}
-
-/**
- * `commands:` of one mount section: `ask` and `deny` only. A mount rule
- * applies to a line that works inside the mount (its cwd or one of its
- * paths lies under the root); its `paths` are absolute, like every other
- * path in the document, and must name something under that root. There
- * is no `allow` here: what a session can see is a property of the
- * session, and an operand cannot make a command "not found".
- */
-export interface MountCommandsBlock {
-  readonly ask?: readonly CommandRule[]
-  readonly deny?: readonly CommandRule[]
-}
-
-/**
  * One mount's entry in a profile: what this profile may do there. Every field
  * is optional, and an omitted mount is not a refusal: the mount is
  * reachable at the mode it declares in the workspace's `mounts:`, which
@@ -115,16 +82,15 @@ export interface MountCommandsBlock {
  * not touch a mount hides it, so the mount reads as nonexistent rather
  * than as a permission error naming something the profile cannot see.
  *
- * `commands` here carries ask and deny only: an allow list installs a
- * command for the whole session, and visibility is answered before any
- * operand exists, so it cannot be per mount. Rules written here apply to
- * a line that works inside this mount, by cwd or by operand, which is
- * what a path-scoped rule cannot express (`cd /repo && git commit` names
- * no path).
+ * `commands` here is a command tree of its own. It applies to a line
+ * that works inside this mount, by cwd or by a path it names, which a
+ * path-scoped leaf cannot express (`cd /repo && git commit` names no
+ * path). It is judged beside the top-level tree and the strictest
+ * result wins, so it only tightens.
  */
 export interface ProfileMount {
   readonly mode?: MountMode | null
-  readonly commands?: MountCommandsBlock | null
+  readonly commands?: CommandNode | null
   readonly paths?: PathsBlock | null
 }
 
@@ -163,7 +129,7 @@ export interface SessionProfile {
   readonly mounts?: ReadonlyMap<string, ProfileMount> | null
   readonly paths?: PathsBlock | null
   readonly vars?: VarsBlock | null
-  readonly commands?: CommandsBlock | null
+  readonly commands?: CommandNode | null
   /**
    * The profile's policy: for each method it answers at (`preExecute`,
    * `preCommand`, `preVfs`, `preNetwork` and their `post` twins;
@@ -313,25 +279,135 @@ function underMount(entries: readonly string[], root: string, where: string): vo
   validateDocument('under', entries, where, { root })
 }
 
-/**
- * Coerce a `deny` or `ask` list to its rules. A bare string is one
- * command pattern over the whole line, with the arm's default reason. A
- * mapping carries `reason` (defaulting) and exactly one of: `commands`
- * as a list, a whole-line rule on each pattern; `commands` as a mapping,
- * each command pattern on its own paths (one command to many paths, one
- * rule per command); `paths` alone, a path rule on every command. A list
- * of commands beside a list of paths is refused, because it does not say
- * which command the paths belong to, and a rule naming neither is
- * refused rather than read as "every command".
- */
-function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
-  const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
-  return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
+interface ValueDoc {
+  decision: RuleLeaf[]
+  options: Record<string, OptionDoc>
 }
 
-function parseAllow(raw: unknown, where: string): readonly string[] | null {
-  if (raw === undefined || raw === null) return null
-  return stringList(raw, `${where}.allow`, 'a command')
+interface OptionDoc {
+  decision: RuleLeaf[]
+  values: Record<string, ValueDoc>
+  options: Record<string, OptionDoc>
+}
+
+interface NodeDoc {
+  decision: RuleLeaf[]
+  subcommands: Record<string, NodeDoc>
+  options: Record<string, OptionDoc>
+  other_options: RuleLeaf[]
+  operands: Record<string, NodeDoc>
+}
+
+function readLeaves(raw: readonly RuleLeaf[]): readonly RuleLeaf[] {
+  return raw.map((item) => ({ decision: item.decision, reason: item.reason, paths: item.paths }))
+}
+
+function readOption(raw: OptionDoc): OptionRule {
+  return {
+    decision: readLeaves(raw.decision),
+    values: new Map(
+      Object.entries(raw.values).map(([word, rule]) => [
+        word,
+        {
+          decision: readLeaves(rule.decision),
+          options: new Map(
+            Object.entries(rule.options).map(([name, option]) => [name, readOption(option)]),
+          ),
+        },
+      ]),
+    ),
+    options: new Map(
+      Object.entries(raw.options).map(([name, option]) => [name, readOption(option)]),
+    ),
+  }
+}
+
+function readNode(raw: NodeDoc): CommandNode {
+  return {
+    decision: readLeaves(raw.decision),
+    subcommands: new Map(
+      Object.entries(raw.subcommands).map(([name, node]) => [name, readNode(node)]),
+    ),
+    options: new Map(
+      Object.entries(raw.options).map(([name, option]) => [name, readOption(option)]),
+    ),
+    otherOptions: readLeaves(raw.other_options),
+    operands: new Map(Object.entries(raw.operands).map(([word, node]) => [word, readNode(node)])),
+  }
+}
+
+/**
+ * A `commands` block read into its tree, by mirage-rs's shape check.
+ * Names are taken as written; checking them against the commands'
+ * grammars needs the workspace. A block in the old flat format (allow,
+ * ask and deny lists) is refused with a message naming the new one.
+ */
+export function commandTree(raw: unknown, where = 'commands'): CommandNode {
+  if (isPlainObject(raw) && raw.subcommands instanceof Map) return raw as unknown as CommandNode
+  return readNode(validateDocument('tree', raw, where) as NodeDoc)
+}
+
+function leavesDoc(leaves: readonly RuleLeaf[]): unknown {
+  const docs = leaves.map((leaf) =>
+    leaf.reason === '' && leaf.paths.length === 0
+      ? leaf.decision
+      : {
+          decision: leaf.decision,
+          ...(leaf.reason === '' ? {} : { reason: leaf.reason }),
+          ...(leaf.paths.length === 0 ? {} : { paths: [...leaf.paths] }),
+        },
+  )
+  return docs.length === 1 ? docs[0] : docs
+}
+
+function valueDoc(rule: ValueRule): unknown {
+  if (rule.decision.length > 0 && rule.options.size === 0) return leavesDoc(rule.decision)
+  const doc: [string, unknown][] = []
+  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  for (const [name, option] of rule.options) doc.push([name, optionDoc(option)])
+  return Object.fromEntries(doc)
+}
+
+function optionDoc(rule: OptionRule): unknown {
+  if (rule.decision.length > 0 && rule.values.size === 0 && rule.options.size === 0)
+    return leavesDoc(rule.decision)
+  const doc: [string, unknown][] = []
+  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  if (rule.values.size > 0)
+    doc.push([
+      'values',
+      Object.fromEntries([...rule.values].map(([word, value]) => [word, valueDoc(value)])),
+    ])
+  for (const [name, option] of rule.options) doc.push([name, optionDoc(option)])
+  return Object.fromEntries(doc)
+}
+
+function nodeDoc(node: CommandNode): unknown {
+  const bare =
+    node.subcommands.size === 0 &&
+    node.options.size === 0 &&
+    node.otherOptions.length === 0 &&
+    node.operands.size === 0
+  if (node.decision.length > 0 && bare) return leavesDoc(node.decision)
+  return treeDoc(node)
+}
+
+/**
+ * A command tree as the `commands` block that reads back to it, each
+ * place in its shortest spelling.
+ */
+export function treeDoc(tree: CommandNode): Record<string, unknown> {
+  const doc: [string, unknown][] = []
+  if (tree.decision.length > 0) doc.push(['*', leavesDoc(tree.decision)])
+  if (tree.otherOptions.length > 0) doc.push(['-*', leavesDoc(tree.otherOptions)])
+  for (const [name, option] of tree.options) doc.push([name, optionDoc(option)])
+  for (const [name, node] of tree.subcommands) doc.push([name, nodeDoc(node)])
+  if (tree.operands.size > 0)
+    doc.push([
+      'operands',
+      Object.fromEntries([...tree.operands].map(([word, node]) => [word, nodeDoc(node)])),
+    ])
+  return Object.fromEntries(doc)
 }
 
 /** Validate a `paths:` block. Every entry is absolute or a name pattern. */
@@ -345,23 +421,22 @@ export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
-export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
-  const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, ['allow', 'ask', 'deny'], where)
-  const ask = rules(obj.ask, where, 'ask')
-  const deny = rules(obj.deny, where, 'deny')
-  // This block is the profile's own, never a mount section's, so a rule's
-  // paths are virtual paths: absolute, or name patterns.
-  for (const rule of ask) absolutePaths(rule.paths ?? [], `${where}.ask rule paths`)
-  for (const rule of deny) absolutePaths(rule.paths ?? [], `${where}.deny rule paths`)
-  return { allow: parseAllow(obj.allow, where), ask, deny }
+function optionPaths(rule: OptionRule): string[] {
+  const out = rule.decision.flatMap((leaf) => [...leaf.paths])
+  for (const value of rule.values.values()) {
+    for (const leaf of value.decision) out.push(...leaf.paths)
+    for (const inner of value.options.values()) out.push(...optionPaths(inner))
+  }
+  for (const inner of rule.options.values()) out.push(...optionPaths(inner))
+  return out
 }
 
-/** Validate a mount section's `commands:` block (`ask` and `deny` only). */
-export function MountCommandsBlock(raw: unknown, where = 'commands'): MountCommandsBlock {
-  const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, ['ask', 'deny'], where)
-  return { ask: rules(obj.ask, where, 'ask'), deny: rules(obj.deny, where, 'deny') }
+function leafPaths(node: CommandNode): string[] {
+  const out = [...node.decision, ...node.otherOptions].flatMap((leaf) => [...leaf.paths])
+  for (const rule of node.options.values()) out.push(...optionPaths(rule))
+  for (const child of [...node.subcommands.values(), ...node.operands.values()])
+    out.push(...leafPaths(child))
+  return out
 }
 
 /** Validate one `mounts.<prefix>` section of a profile. */
@@ -369,7 +444,7 @@ export function ProfileMount(raw: unknown, root: string, where: string): Profile
   // A bare mode string is sugar for the section that carries only a mode.
   const obj = typeof raw === 'string' ? { mode: raw } : asObject(raw, where)
   rejectUnknownKeys(obj, ['mode', 'commands', 'paths'], where)
-  const out: { mode?: MountMode | null; commands?: MountCommandsBlock; paths?: PathsBlock } = {}
+  const out: { mode?: MountMode | null; commands?: CommandNode; paths?: PathsBlock } = {}
   if (obj.mode !== undefined && obj.mode !== null) {
     if (typeof obj.mode !== 'string') throw new Error(`${where}.mode must be a mode name or alias`)
     out.mode = parseMountMode(obj.mode)
@@ -385,11 +460,10 @@ export function ProfileMount(raw: unknown, root: string, where: string): Profile
     out.paths = paths
   }
   if (obj.commands !== undefined && obj.commands !== null) {
-    const commands = MountCommandsBlock(obj.commands, `${where}.commands`)
-    for (const rule of commands.ask ?? [])
-      underMount(rule.paths ?? [], root, `${where}.commands.ask`)
-    for (const rule of commands.deny ?? [])
-      underMount(rule.paths ?? [], root, `${where}.commands.deny`)
+    const commands = commandTree(obj.commands, `${where}.commands`)
+    const paths = leafPaths(commands)
+    absolutePaths(paths, `${where}.commands paths`)
+    underMount(paths, root, `${where}.commands paths`)
     out.commands = commands
   }
   return out
@@ -580,7 +654,7 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     mounts?: ReadonlyMap<string, ProfileMount> | null
     paths?: PathsBlock | null
     vars?: VarsBlock | null
-    commands?: CommandsBlock | null
+    commands?: CommandNode | null
     policy?: ProfilePrograms | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: Partial<ProcessPermissions>
@@ -627,8 +701,11 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
   if (obj.paths !== undefined && obj.paths !== null)
     out.paths = PathsBlock(obj.paths, `${where}.paths`)
   if (obj.vars !== undefined && obj.vars !== null) out.vars = VarsBlock(obj.vars, `${where}.vars`)
-  if (obj.commands !== undefined && obj.commands !== null)
-    out.commands = CommandsBlock(obj.commands, `${where}.commands`)
+  if (obj.commands !== undefined && obj.commands !== null) {
+    const commands = commandTree(obj.commands, `${where}.commands`)
+    absolutePaths(leafPaths(commands), 'commands paths')
+    out.commands = commands
+  }
   return out
 }
 
@@ -683,7 +760,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
     )
   }
   if (profile.paths != null) doc.paths = pathsDoc(profile.paths)
-  if (profile.commands != null) doc.commands = commandsDoc(profile.commands)
+  if (profile.commands != null) doc.commands = treeDoc(profile.commands)
   return doc
 }
 
@@ -722,7 +799,7 @@ function mountDoc(entry: ProfileMount): Record<string, unknown> {
   const doc: Record<string, unknown> = {}
   if (entry.mode != null) doc.mode = entry.mode
   if (entry.paths != null) doc.paths = pathsDoc(entry.paths)
-  if (entry.commands != null) doc.commands = commandsDoc(entry.commands)
+  if (entry.commands != null) doc.commands = treeDoc(entry.commands)
   return doc
 }
 
@@ -740,29 +817,4 @@ function pathsDoc(block: PathsBlock): Record<string, unknown> {
     show: Object.fromEntries(show),
     reasons: (block.reasons ?? []).map((g) => ({ patterns: [...g.patterns], reason: g.reason })),
   }
-}
-
-function commandsDoc(block: CommandsBlock | MountCommandsBlock): Record<string, unknown> {
-  const doc: Record<string, unknown> = {
-    ask: (block.ask ?? []).map(ruleDoc),
-    deny: (block.deny ?? []).map(ruleDoc),
-  }
-  if ('allow' in block && block.allow != null) doc.allow = [...block.allow]
-  return doc
-}
-
-function ruleDoc(rule: CommandRule): Record<string, unknown> {
-  const commands = rule.commands ?? []
-  const paths = rule.paths ?? []
-  // A rule naming commands and paths is the mapping form, each command
-  // on the rule's paths; it reads back as one rule per command, which
-  // admits exactly what the one rule did.
-  if (commands.length > 0 && paths.length > 0) {
-    return {
-      reason: rule.reason,
-      commands: Object.fromEntries(commands.map((c) => [c, [...paths]])),
-    }
-  }
-  if (paths.length > 0) return { reason: rule.reason, paths: [...paths] }
-  return { reason: rule.reason, commands: [...commands] }
 }

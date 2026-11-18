@@ -124,22 +124,31 @@ async def test_command_tiers_key_on_the_installed_name():
         profiles={
             "crew": {
                 "commands": {
-                    "allow": ["h1", "h2", "type"],
-                    "ask": [
-                        {
-                            "reason": "outbound needs a nod",
-                            "commands": ["h1 message send"],
-                        }
-                    ],
-                    "deny": [
-                        {
-                            "reason": "beta is read-only",
-                            "commands": ["h2 message send"],
-                        }
-                    ],
+                    "*": "deny",
+                    "h1": {
+                        "*": "allow",
+                        "message": {
+                            "send": {
+                                "decision": "ask",
+                                "reason": "outbound needs a nod",
+                            }
+                        },
+                    },
+                    "h2": {
+                        "*": "allow",
+                        "message": {
+                            "send": {
+                                "decision": "deny",
+                                "reason": "beta is read-only",
+                            }
+                        },
+                    },
+                    "type": "allow",
                 }
             },
-            "solo": {"commands": {"allow": ["h1", "type"]}},
+            "solo": {
+                "commands": {"*": "deny", "h1": "allow", "type": "allow"}
+            },
         },
     )
     tree = make_tree()
@@ -386,29 +395,51 @@ LATER = CLI(
 )
 
 
+BOSS = {"--to": {"values": {"boss": "deny"}}}
+
+
 @pytest.mark.asyncio
-async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
+async def test_an_account_cli_under_hides_runs_where_the_tree_names_it():
     hidden = {"hide": ["/data/secret.txt"]}
     workspace = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
         profiles={
             "hides": {"paths": hidden},
-            "wildcard": {"paths": hidden, "commands": {"allow": ["*"]}},
-            "other": {
+            "wildcard": {
                 "paths": hidden,
-                "commands": {"allow": ["*", "sl message read"]},
+                "commands": {"*": "allow"},
             },
-            "named": {"paths": hidden, "commands": {"allow": ["*", "sl"]}},
+            "named": {
+                "paths": hidden,
+                "commands": {"*": "allow", "sl": "allow"},
+            },
+            "only_a_deny": {
+                "paths": hidden,
+                "commands": {"*": "allow", "sl": {"message": {"send": BOSS}}},
+            },
+            "allowed_with_a_deny": {
+                "paths": hidden,
+                "commands": {
+                    "*": "allow",
+                    "sl": {"*": "allow", "message": {"send": BOSS}},
+                },
+            },
         },
     )
     workspace.register_cli("sl", make_tree(), config={"token": "tok"})
     workspace.register_cli("peek", PEEK)
     await workspace.shell("echo top > /data/secret.txt")
-    for name in ("hides", "wildcard", "other", "named"):
+    for name in (
+        "hides",
+        "wildcard",
+        "named",
+        "only_a_deny",
+        "allowed_with_a_deny",
+    ):
         workspace.create_session(name, profile=name)
     try:
-        for name in ("hides", "wildcard", "other"):
+        for name in ("hides", "wildcard", "only_a_deny"):
             io = await workspace.shell(
                 "sl message send -t x hi", session_id=name
             )
@@ -421,13 +452,24 @@ async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
             (command,) = said.node.children
             assert (command.outcome, command.source) == (
                 Outcome.DENY,
-                "commands.allow",
+                "commands",
             )
         io = await workspace.shell(
             "sl message send -t x hi", session_id="named"
         )
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"sent[tok] to=x: hi\n")
+        io = await workspace.shell(
+            "sl message send -t x hi", session_id="allowed_with_a_deny"
+        )
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (0, b"sent[tok] to=x: hi\n")
+        io = await workspace.shell(
+            "sl message send -t boss hi", session_id="allowed_with_a_deny"
+        )
+        assert io.exit_code == 126
+        assert io.decision is not None
+        assert io.decision.reason == "sl message send --to boss is not allowed"
         io = await workspace.shell("peek", session_id="hides")
         assert io.exit_code == 1
         code, out, _ = await run(workspace, "sl message send -t x hi")
@@ -444,15 +486,16 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
         profiles={
             "sealed": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "sealed",
-                            "commands": {
-                                "peek": ["/data/secret.txt"],
-                                "later": ["/data/secret.txt"],
-                            },
-                        }
-                    ]
+                    "peek": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data/secret.txt"],
+                    },
+                    "later": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data/secret.txt"],
+                    },
                 }
             }
         },
@@ -674,7 +717,7 @@ async def test_a_clis_rows_lose_what_the_session_hides_before_they_print():
         profiles={
             "hides": {
                 "paths": {"hide": ["/data/secret.txt"]},
-                "commands": {"allow": ["*", "listing"]},
+                "commands": {"*": "allow", "listing": "allow"},
             }
         },
     )
@@ -737,13 +780,15 @@ async def test_a_cli_calling_a_custom_function_meets_hides_and_its_rules():
         profiles={
             "hides": {
                 "paths": {"hide": ["/data/secret.txt"]},
-                "commands": {"allow": ["*", "shelf"]},
+                "commands": {"*": "allow", "shelf": "allow"},
             },
             "sealed": {
                 "commands": {
-                    "deny": [
-                        {"reason": "sealed", "commands": {"shelf": ["/data"]}}
-                    ]
+                    "shelf": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/data"],
+                    }
                 }
             },
         },

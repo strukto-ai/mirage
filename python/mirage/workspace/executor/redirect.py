@@ -1541,7 +1541,7 @@ async def _handle_redirect(
         scope = _ensure_scope(r.target)
         opened.targets = (*opened.targets, scope)
         if guard is not None:
-            denied = await guard(opened.targets, admission_stdin)
+            denied = await guard(opened.targets, admission_stdin, raw)
             if denied is not None:
                 return denied
         refusal = await _open_refusal(dispatch, context, [r])

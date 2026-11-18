@@ -132,8 +132,7 @@ SPECS: dict[str, CommandSpec] = {
     "cp": CommandSpec(
         arguments=(
             Argument("--debug", action="store_true"),
-            Argument("-r", action="store_true"),
-            Argument("-R", "--recursive", action="store_true"),
+            Argument("-r", "-R", "--recursive", action="store_true"),
             Argument("-a", "--archive", action="store_true"),
             # The link policy: the last of these and -a wins.
             Argument("-L", "--dereference", action="store_true"),

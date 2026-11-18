@@ -65,8 +65,21 @@ the `gh` and `slack` CLIs. Their credentials come from AWS Secrets Manager,
           hide: ["/data/secrets", "*.pem"]
           show: ["/data/secrets/README.md"]
         commands:
-          allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
-                  "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
+          "*": deny
+          cd: allow
+          pwd: allow
+          echo: allow
+          ls: allow
+          cat: allow
+          head: allow
+          grep: allow
+          find: allow
+          jq: allow
+          wc: allow
+          python3: allow
+          gh:
+            pr: {list: allow, view: allow}
+          slack: {read-messages: allow, list-members: allow}
     ```
   </Accordion>
   <Accordion title="Load the workspace">
@@ -166,11 +179,11 @@ VFS calls:
 
 ## Commands Control
 
-`commands.allow` lists the only commands the session runs, so everything an
-analyst does not need, such as `rm`, `sed` or `curl`, is off. For a CLI the
-list names single verbs, so `slack` reads messages and members but never posts,
-edits or uploads, and `gh` lists and views pull requests but cannot merge one or
-call `gh api`. The agent reads the shell's own `Permission denied` and exit 126;
+`commands` starts with `"*": deny`, so the session runs only the commands the
+tree names, and everything an analyst does not need, such as `rm`, `sed` or
+`curl`, is off. For a CLI the tree names single subcommands, so `slack` reads
+messages and members but never posts, edits or uploads, and `gh` lists and views
+pull requests but cannot merge one or call `gh api`. The agent reads the shell's own `Permission denied` and exit 126;
 the reason reaches the host on the result's `decision`, shown under each line:
 
 ```bash
@@ -213,8 +226,21 @@ profiles:
       hide: ["/data/secrets", "*.pem"]
       show: ["/data/secrets/README.md"]
     commands:
-      allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
-              "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
+      "*": deny
+      cd: allow
+      pwd: allow
+      echo: allow
+      ls: allow
+      cat: allow
+      head: allow
+      grep: allow
+      find: allow
+      jq: allow
+      wc: allow
+      python3: allow
+      gh:
+        pr: {list: allow, view: allow}
+      slack: {read-messages: allow, list-members: allow}
 ```
 
 - `cwd` and `env` start the session in `/data` with `TEAM` set.

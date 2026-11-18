@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { METADATA_OPS } from '@struktoai/mirage-core/policy/constants'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { Console } from 'node:console'
 import { createHash } from 'node:crypto'
@@ -214,6 +215,7 @@ interface PolicySpec {
   reason?: string
   prefix?: string
   suffix?: string
+  allow_metadata?: boolean
   marker?: string
   max_bytes?: number
   max_lines?: number
@@ -381,10 +383,13 @@ class LockWrites implements TestPolicy<VfsContext> {
 class SealReads implements TestPolicy<VfsContext> {
   readonly hook = 'preVfs'
   private readonly suffix: string
+  private readonly skip: ReadonlySet<string>
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
+    this.skip = spec.allow_metadata === true ? METADATA_OPS : new Set()
   }
   decide(ctx: VfsContext): Action | null {
+    if (this.skip.has(ctx.call.name)) return null
     if (!ctx.write && ctx.path.virtual.endsWith(this.suffix)) {
       return { kind: 'deny', reason: 'sealed' }
     }
@@ -432,18 +437,13 @@ class ReadControl implements Policy {
   async preVfs(ctx: VfsContext): Promise<Action | null> {
     if (ctx.call.name === 'read' && ctx.path.virtual.startsWith('/control/')) {
       const mode = ctx.path.virtual.split('/').at(-1) ?? ''
-      if (!['allow', 'hide', 'deny', 'pre', 'post', 'pre_stat', 'post_stat'].includes(mode)) {
+      if (!['allow', 'hide', 'pre', 'post', 'pre_stat', 'post_stat'].includes(mode)) {
         throw new Error(`unknown read control: ${mode}`)
       }
       const previous = this.mode
       this.mode = mode
-      const profile =
-        mode === 'hide'
-          ? { paths: { hide: [this.path] } }
-          : mode === 'deny'
-            ? { commands: { deny: [{ paths: [this.path] }] } }
-            : {}
-      if (['hide', 'deny'].includes(mode) || ['hide', 'deny'].includes(previous)) {
+      const profile = mode === 'hide' ? { paths: { hide: [this.path] } } : {}
+      if (mode === 'hide' || previous === 'hide') {
         await this.ws.setSessionProfile(
           this.ws.defaultSessionId,
           SessionProfile(profile, 'read control'),

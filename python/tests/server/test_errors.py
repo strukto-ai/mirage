@@ -183,5 +183,6 @@ def test_failure_keeps_the_policy_decision_record():
             "reason": "sign-off",
             "policy": "",
             "ask_id": "abc123",
+            "matched": None,
         },
     }

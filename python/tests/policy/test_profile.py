@@ -22,7 +22,6 @@ from pydantic import ValidationError
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
-from mirage.context import reset_caller, set_current_session
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.types import IOResult
 from mirage.policy import (
@@ -34,21 +33,20 @@ from mirage.policy import (
     Policy,
     Scope,
 )
-from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
 from mirage.policy.errors import PolicyError
 from mirage.policy.match import Outcome
 from mirage.policy.profile import (
-    CommandsBlock,
-    MountCommandsBlock,
     PathsBlock,
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    command_tree,
     compile_program,
     profile_from_dict,
     profile_to_dict,
+    tree_doc,
 )
-from mirage.policy.types import CommandRule, HideReason
+from mirage.policy.types import CommandRule, HideReason, RuleLeaf
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
@@ -139,12 +137,14 @@ DOCUMENT = {
                 "reasons": [],
             },
             "commands": {
-                "ask": [
-                    {"reason": "sign-off", "commands": {"git push": ["/repo"]}}
-                ],
-                "deny": [
-                    {"reason": "denied by policy", "commands": ["git rebase"]}
-                ],
+                "git": {
+                    "push": {
+                        "decision": "ask",
+                        "reason": "sign-off",
+                        "paths": ["/repo"],
+                    },
+                    "rebase": "deny",
+                }
             },
         },
         "/scratch": {"mode": "exec"},
@@ -155,30 +155,21 @@ DOCUMENT = {
         "reasons": [{"patterns": ["*.pem"], "reason": "keys"}],
     },
     "commands": {
-        "ask": [{"reason": "shared", "commands": {"rm": ["/scratch/*"]}}],
-        "deny": [
-            {"reason": "sealed", "paths": ["/repo/sealed"]},
-            {"reason": "denied by policy", "commands": ["curl"]},
+        "*": "deny",
+        "ls": "allow",
+        "cat": "allow",
+        "git": {"push": "allow"},
+        "rm": [
+            "allow",
+            {"decision": "ask", "reason": "shared", "paths": ["/scratch/*"]},
         ],
-        "allow": ["ls", "cat", "git push", "rm"],
+        "curl": "deny",
     },
 }
 
 
 def test_profile_to_dict_writes_the_document_it_parses_from():
     assert profile_to_dict(profile_from_dict(DOCUMENT)) == DOCUMENT
-    # A rule naming commands beside paths, which the document cannot
-    # spell, is written one command per rule and admits the same lines.
-    rule = CommandRule(reason="r", commands=("rm", "mv"), paths=("/a",))
-    profile = SessionProfile(commands=CommandsBlock(deny=(rule,)))
-    assert profile_from_dict(profile_to_dict(profile)).commands == (
-        CommandsBlock(
-            deny=(
-                CommandRule(reason="r", commands=("rm",), paths=("/a",)),
-                CommandRule(reason="r", commands=("mv",), paths=("/a",)),
-            )
-        )
-    )
     # A path shown twice answers with its weaker mode, which the mapping
     # keeps rather than the last entry's.
     shown = SessionProfile(
@@ -208,7 +199,7 @@ def test_a_mount_section_carries_a_mode_rules_and_hides():
             "mounts": {
                 "/repo": {
                     "mode": "rw",
-                    "commands": {"deny": ["git push"], "ask": ["git rebase"]},
+                    "commands": {"git": {"push": "deny", "rebase": "ask"}},
                     "paths": {"hide": ["/repo/.env"]},
                 }
             }
@@ -216,15 +207,11 @@ def test_a_mount_section_carries_a_mode_rules_and_hides():
     )
     entry = p.mounts["/repo"]
     assert entry.mode is MountMode.WRITE
-    assert entry.commands.deny[0].commands == ("git push",)
-    assert entry.commands.ask[0].commands == ("git rebase",)
+    assert entry.commands is not None
+    assert tree_doc(entry.commands) == {
+        "git": {"push": "deny", "rebase": "ask"}
+    }
     assert entry.paths == PathsBlock(hide=("/repo/.env",))
-    # What a session can see is the session's property, not an
-    # operand's, so a mount section has no allow list.
-    with pytest.raises(ValidationError):
-        SessionProfile.model_validate(
-            {"mounts": {"/repo": {"commands": {"allow": ["ls"]}}}}
-        )
 
 
 def test_profile_mounts_refuses_a_bare_list():
@@ -272,55 +259,17 @@ def test_profile_rejects_unknown_and_unshipped_fields():
             SessionProfile.model_validate(bad)
 
 
-def test_profile_commands_block_takes_allow_ask_and_deny():
-    p = SessionProfile.model_validate(
-        {
-            "commands": {
-                "allow": ["ls", "git log"],
-                "ask": [
-                    "git push",
-                    {"reason": "sign-off", "commands": {"rm": ["/shared/*"]}},
-                ],
-                "deny": [{"reason": "no", "commands": {"rm": ["/repo/*"]}}],
-            }
-        }
-    )
-    assert p.commands is not None
-    assert p.commands.allow == ("ls", "git log")
-    # A bare ask entry carries ask's default reason, not deny's.
-    assert p.commands.ask[0] == CommandRule(
-        reason=DEFAULT_ASK_REASON, commands=("git push",)
-    )
-    assert p.commands.ask[1] == CommandRule(
-        reason="sign-off", commands=("rm",), paths=("/shared/*",)
-    )
-    assert p.commands.deny[0].reason == "no"
-    # Unstated allow is None (everything installed), not an empty list.
-    assert (
-        SessionProfile.model_validate(
-            {"commands": {"deny": ["rm"]}}
-        ).commands.allow
-        is None
-    )
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        {"allow": "ls"},
-        {"allow": ["ls", ""]},
-        {"allow": ["ls", "  "]},
-        {"ask": "git push"},
-        {"ask": [""]},
-        {"deny": [{"reason": "x", "commands": [""]}]},
-        {"ask": [{"reason": "x", "mount": "/repo"}]},
-    ],
-)
-def test_commands_block_refuses_scalars_blank_patterns_and_mount(bad):
-    # A blank pattern is a prefix of every line, so it would allow, ask
-    # about or deny every command; `mount` is the compiler's field.
-    with pytest.raises(ValidationError):
-        SessionProfile.model_validate({"commands": bad})
+def test_a_flat_commands_block_fails_with_the_new_format_named():
+    for block in (
+        {"allow": ["ls"]},
+        {"deny": [{"reason": "x", "command": "rm", "paths": ["/a"]}]},
+    ):
+        with pytest.raises(ValidationError, match="old flat format"):
+            SessionProfile.model_validate({"commands": block})
+        with pytest.raises(ValidationError, match="old flat format"):
+            SessionProfile.model_validate(
+                {"mounts": {"/repo": {"commands": block}}}
+            )
 
 
 def test_processes_takes_a_scope_or_its_fields():
@@ -353,140 +302,6 @@ def test_profile_is_frozen():
         p.cwd = "/y"  # type: ignore[misc]
 
 
-def test_commands_deny_accepts_rules_and_bare_names():
-    p = SessionProfile.model_validate(
-        {
-            "commands": {
-                "deny": [
-                    {"reason": "no deletes", "commands": {"rm": ["/repo/*"]}},
-                    "python3",
-                    {"commands": ["shred"]},
-                ]
-            },
-            "paths": {"hide": ["/shared/finance"]},
-        }
-    )
-    assert p.commands == CommandsBlock(
-        deny=(
-            CommandRule(
-                reason="no deletes", commands=("rm",), paths=("/repo/*",)
-            ),
-            CommandRule(reason=DEFAULT_DENY_REASON, commands=("python3",)),
-            CommandRule(reason=DEFAULT_DENY_REASON, commands=("shred",)),
-        )
-    )
-    assert p.paths == PathsBlock(hide=("/shared/finance",))
-
-
-@pytest.mark.parametrize("deny", ["rm", {"rm": "no"}, 7])
-def test_commands_deny_is_a_list_not_a_scalar(deny):
-    with pytest.raises(
-        ValidationError, match=re.escape("commands.deny must be a list")
-    ):
-        SessionProfile.model_validate({"commands": {"deny": deny}})
-
-
-@pytest.mark.parametrize(
-    "rule",
-    [
-        {"commands": "rm"},
-        {"reason": "no", "paths": "/repo/secret"},
-        {"commands": ["rm", 3]},
-        {"reason": 7, "commands": ["rm"]},
-    ],
-)
-def test_deny_rule_refuses_scalar_lists_and_non_string_reasons(rule):
-    # `commands: rm` would tuple() into ('r', 'm') and leave rm allowed;
-    # the document fails to load instead, as it does in TypeScript.
-    with pytest.raises(ValidationError):
-        SessionProfile.model_validate({"commands": {"deny": [rule]}})
-
-
-def test_a_rule_maps_each_command_to_its_own_paths():
-    # One command to many paths, never a list of commands beside a list
-    # of paths: the document says which command each path belongs to,
-    # and compiles one rule per command.
-    p = SessionProfile.model_validate(
-        {
-            "commands": {
-                "deny": [
-                    {
-                        "reason": "prod is protected",
-                        "commands": {
-                            "rm": ["/repo/prod/*", "/shared/*"],
-                            "mv": ["/repo/prod/*"],
-                        },
-                    }
-                ],
-                "ask": [{"commands": {"git push": ["/repo/*"]}}],
-            }
-        }
-    )
-    assert p.commands.deny == (
-        CommandRule(
-            reason="prod is protected",
-            commands=("rm",),
-            paths=("/repo/prod/*", "/shared/*"),
-        ),
-        CommandRule(
-            reason="prod is protected",
-            commands=("mv",),
-            paths=("/repo/prod/*",),
-        ),
-    )
-    assert p.commands.ask == (
-        CommandRule(
-            reason=DEFAULT_ASK_REASON,
-            commands=("git push",),
-            paths=("/repo/*",),
-        ),
-    )
-
-
-@pytest.mark.parametrize(
-    "bad,message",
-    [
-        (
-            {"reason": "x", "commands": ["rm", "mv"], "paths": ["/a"]},
-            "map each command to its paths",
-        ),
-        (
-            {"reason": "x", "commands": {"rm": ["/a"]}, "paths": ["/b"]},
-            "takes no paths of its own",
-        ),
-        ({"reason": "x"}, "names no command and no path"),
-        ({"reason": "x", "commands": {}}, "must name at least one command"),
-        (
-            {"reason": "x", "commands": {"rm": []}},
-            "must list at least one path",
-        ),
-        (
-            {"reason": "x", "commands": {"rm": "/a"}},
-            "must be a list of strings",
-        ),
-        (
-            {"reason": "x", "commands": {" ": ["/a"]}},
-            "keys must name a command",
-        ),
-        (
-            {"reason": "x", "commands": {"rm": ["/a", " "]}},
-            "commands[rm][1] must name a path",
-        ),
-        ({"reason": "x", "paths": [""]}, "paths[0] must name a path"),
-        (7, "must be a command pattern or a mapping"),
-    ],
-)
-def test_a_rule_that_does_not_say_whose_path_it_is_is_refused(bad, message):
-    for doc in (SessionProfile, MountCommandsBlock):
-        payload = (
-            {"commands": {"deny": [bad]}}
-            if doc is SessionProfile
-            else {"deny": [bad]}
-        )
-        with pytest.raises(ValidationError, match=re.escape(message)):
-            doc.model_validate(payload)
-
-
 @pytest.mark.parametrize("entry", ["xxx", "secrets/*", "./x", "~/x", "a/b"])
 def test_a_relative_path_is_refused_everywhere(entry):
     # Every path in the document is a virtual path: `xxx` would silently
@@ -497,11 +312,15 @@ def test_a_relative_path_is_refused_everywhere(entry):
         SessionProfile.model_validate({"paths": {"hide": [entry]}})
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
-            {"commands": {"ask": [{"commands": {"rm": ["/ok", entry]}}]}}
+            {"commands": {"rm": {"decision": "ask", "paths": ["/ok", entry]}}}
         )
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
-            {"commands": {"deny": [{"paths": [entry]}]}}
+            {
+                "commands": {
+                    "rm": {"--force": {"decision": "deny", "paths": [entry]}}
+                }
+            }
         )
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
@@ -518,7 +337,7 @@ def test_a_mount_sections_paths_must_lie_under_that_mount(entry):
     # and protected nothing.
     for block in (
         {"paths": {"hide": [entry]}},
-        {"commands": {"deny": [{"paths": [entry]}]}},
+        {"commands": {"rm": {"decision": "deny", "paths": [entry]}}},
     ):
         with pytest.raises(ValidationError, match="outside the mount"):
             SessionProfile.model_validate({"mounts": {"/repo": block}})
@@ -543,14 +362,15 @@ def test_the_root_mounts_section_holds_every_path_under_it():
                 "/": {
                     "paths": {"hide": ["/secret", "*.pem"]},
                     "commands": {
-                        "deny": [{"reason": "sealed", "paths": ["/secret/*"]}],
+                        "*": {"decision": "deny", "paths": ["/secret/*"]}
                     },
                 }
             }
         }
     )
     assert profile.mounts["/"].paths.hide == ("/secret", "*.pem")
-    assert profile.mounts["/"].commands.deny[0].paths == ("/secret/*",)
+    assert profile.mounts["/"].commands is not None
+    assert profile.mounts["/"].commands.decision[0].paths == ("/secret/*",)
 
 
 def test_a_blank_hide_entry_is_refused():
@@ -932,17 +752,21 @@ def test_inline_permissions_add_to_the_named_profile():
     assert sess.cwd == "/a"
 
 
-def test_inline_permissions_may_not_state_an_allow_list():
-    # The one rule about combining two documents: an inline document
-    # restricts, so an allow list there would install a command the profile
-    # was never given.
-    ws = _profiled_ws()
-    with pytest.raises(PolicyError, match="not an allow list"):
-        ws.create_session(
-            "agent",
-            profile="reviewer",
-            permissions={"commands": {"allow": ["ls"]}},
-        )
+def test_inline_permissions_tighten_and_never_allow():
+    # An inline tree is judged beside the profile's, the strictest
+    # winning, so an allow there cannot open what the profile refuses.
+    ws = Workspace(
+        {"/a": (RAMVFS(), MountMode.WRITE)},
+        profiles={"p": {"commands": {"*": "deny", "ls": "allow"}}},
+    )
+    sess = ws.create_session(
+        "agent", profile="p", permissions={"commands": {"cat": "allow"}}
+    )
+    assert sess.commands is not None
+    assert [(t.mount, t.inline) for t in sess.commands.trees] == [
+        ("", False),
+        ("", True),
+    ]
 
 
 def test_profile_cwd_is_where_the_session_starts():
@@ -960,68 +784,59 @@ def test_profile_cwd_is_where_the_session_starts():
 # here reach a line that works inside /repo, by cwd or by operand, which
 # is what a path-scoped rule cannot express (`cd /repo && git commit`
 # names no path).
-REPO_SECTION = {
-    "commands": {
-        "deny": [
-            {
-                "reason": "history is read-only here",
-                "commands": ["git commit", "git reset --hard"],
-            }
-        ]
-    }
-}
+READ_ONLY = {"decision": "deny", "reason": "history is read-only here"}
+REPO_SECTION = {"commands": {"git": {"commit": READ_ONLY, "reset": READ_ONLY}}}
+FROZEN = {"decision": "deny", "reason": "frozen", "paths": ["/repo/locked/*"]}
 COMMANDS_DOC = {
     "commands": {
-        "allow": [
-            "ls",
-            "cat",
-            "echo",
-            "rm",
-            "git",
-            "python3",
-            "mkdir",
-            "touch",
-            "head",
-            "xargs",
-            "wc",
-            "man",
-            "find",
-            "type",
-            "command",
-            "which",
-            "cd",
-            "[",
-        ],
-        "deny": [
+        "*": "deny",
+        **dict.fromkeys(
+            (
+                "ls",
+                "echo",
+                "git",
+                "python3",
+                "mkdir",
+                "touch",
+                "head",
+                "xargs",
+                "wc",
+                "man",
+                "type",
+                "command",
+                "which",
+                "cd",
+                "[",
+            ),
+            "allow",
+        ),
+        "cat": ["allow", FROZEN],
+        "find": ["allow", FROZEN],
+        "rm": [
+            "allow",
             {
+                "decision": "deny",
                 "reason": "no deletes in the repo",
-                "commands": {"rm": ["/repo/*"]},
+                "paths": ["/repo/*"],
             },
-            {"reason": "frozen", "paths": ["/repo/locked/*"]},
         ],
     },
     "mounts": {"/repo": REPO_SECTION},
 }
 REVIEWER_COMMANDS = {
     "commands": {
-        "allow": [
-            "ls",
-            "cat",
-            "echo",
-            "git log",
-            "git status",
-            "xargs",
-            "type",
-            "eval",
-        ]
+        "*": "deny",
+        **dict.fromkeys(
+            ("ls", "cat", "echo", "xargs", "type", "eval"), "allow"
+        ),
+        "git": {"log": "allow", "status": "allow"},
     },
     "mounts": {"/repo": REPO_SECTION},
 }
 
 
 def _commands_ws() -> Workspace:
-    # The frozen subtree is seeded on the VFS: the pure path rule
-    # holds at every entry point, the host's `ws.vfs` included.
+    # The frozen subtree is seeded on the VFS, past every line.
     repo = RAMVFS()
     repo._store.dirs.add("/locked")
     repo._store.files["/locked/y"] = b"y\n"
@@ -1096,8 +911,7 @@ async def test_allow_list_refuses_unlisted_tools_and_hides_nothing():
         assert await _line(ws, "history") == (
             126,
             "",
-            "history: Permission denied\n"
-            "policy denied: history is not allowed\n",
+            "history: Permission denied\npolicy denied: history is not allowed\n",
         )
     finally:
         await ws.close()
@@ -1111,20 +925,18 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
         await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
         # The reviewer profile lists `cat` and not python3, whatever the
         # default profile lists; it lists `git log`, so a `git commit`
-        # line is covered by nothing (a refusal that names the program).
+        # line is covered by nothing (a refusal that names the line).
         assert (await _line(ws, "cat /repo/d/x", "rev"))[0] == 0
         assert await _line(ws, "python3 -c 1", "rev") == (
             126,
             "",
-            "python3: Permission denied\n"
-            "policy denied: python3 is not allowed\n",
+            "python3: Permission denied\npolicy denied: python3 is not allowed\n",
         )
         assert (await _line(ws, "type git", "rev"))[0] == 0
         assert await _line(ws, "git commit -m x", "rev") == (
             126,
             "",
-            "git: Permission denied\n"
-            "policy denied: git commit is not allowed\n",
+            "git: Permission denied\npolicy denied: git commit is not allowed\n",
         )
         # The verb walk normalizes the line: options before the verb are
         # not the verb, so `git -C /repo status` is `git status`.
@@ -1148,16 +960,14 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
             "",
             refused,
         )
-        # An inline document restricts what is left: it cannot shorten
-        # the allow list, but a deny rule of its own still speaks.
+        # An inline document restricts what is left: its own deny
+        # speaks beside the profile's tree.
         ws.create_session(
             "tight",
             profile="reviewer",
             permissions={
                 "commands": {
-                    "deny": [
-                        {"reason": "read-only session", "commands": ["echo"]}
-                    ]
+                    "echo": {"decision": "deny", "reason": "read-only session"}
                 }
             },
         )
@@ -1186,26 +996,24 @@ async def test_deny_rules_by_source_scope_and_voice():
             "policy denied: no deletes in the repo\n",
         )
         assert (await _line(ws, "rm /scratch/z"))[0] == 0
-        # A pure path rule holds at the command plane for any command
-        # and at the dispatcher for every op, whatever entry point.
+        # A leaf with paths refuses its command on a path it covers. A
+        # tree judges lines, so the host's own entry point is not one.
         assert await _line(ws, "cat /repo/locked/y") == (
             1,
             "",
             "cat: /repo/locked/y: Permission denied\npolicy denied: frozen\n",
         )
-        with pytest.raises(PermissionError):
-            await ws.vfs.write("/repo/locked/y", b"changed")
-        assert await ws.vfs.read("/repo/d/x") == b""
-        # A mount section's rule applies when the line works inside the
+        assert await ws.vfs.read("/repo/locked/y") == b"y\n"
+        # A mount section's tree applies when the line works inside the
         # mount (cwd under it, or a path under it), whole command; the
-        # verb walk reads `-C /repo reset --hard` as `git reset --hard`.
+        # verb walk reads `-C /repo reset` as `git reset`.
         assert await _line(ws, "cd /repo && git commit -m x") == (
             126,
             "",
             "git: Permission denied\n"
             "policy denied: history is read-only here\n",
         )
-        assert await _line(ws, "cd /scratch && git -C /repo reset --hard") == (
+        assert await _line(ws, "cd /scratch && git -C /repo reset") == (
             126,
             "",
             "git: Permission denied\n"
@@ -1213,18 +1021,18 @@ async def test_deny_rules_by_source_scope_and_voice():
         )
         code, _, err = await _line(ws, "cd /scratch && git commit -m x")
         assert "read-only" not in err
-        code, _, err = await _line(ws, "cd /repo && git reset --soft HEAD")
+        code, _, err = await _line(ws, "cd /repo && git log")
         assert "read-only" not in err
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_find_delete_is_gated_at_the_dispatcher_not_by_a_named_rule():
+async def test_find_delete_is_judged_by_finds_own_leaf_not_by_rms():
     # mirage's find has no -exec; -delete is find's own action, not an
-    # `rm` line, so a rule naming `rm` does not cover it (the same
-    # honest limit as a guest's os.remove), while a pure path rule
-    # does, at the dispatcher the removal clears.
+    # `rm` line, so a leaf on `rm` does not cover it (the same honest
+    # limit as a guest's os.remove), while find's own leaf does, on
+    # each entry its walk reaches.
     ws = _commands_ws()
     try:
         await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
@@ -1237,25 +1045,27 @@ async def test_find_delete_is_gated_at_the_dispatcher_not_by_a_named_rule():
             "policy denied: frozen\n",
         )
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
-        # The same rule holds for the host's own entry point, read or write.
-        with pytest.raises(PermissionError):
-            await ws.vfs.read("/repo/locked/y")
     finally:
         await ws.close()
 
 
 LINK_DOC = {
     "commands": {
-        "deny": [
-            {
-                "reason": "sealed",
-                "commands": {
-                    "cat": ["/data/secret*"],
-                    "head": ["/data/secret*"],
-                },
-            },
-            {"reason": "keep the link", "commands": {"rm": ["/data/link"]}},
-        ],
+        "cat": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/secret*"],
+        },
+        "head": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/secret*"],
+        },
+        "rm": {
+            "decision": "deny",
+            "reason": "keep the link",
+            "paths": ["/data/link"],
+        },
     }
 }
 
@@ -1310,13 +1120,16 @@ async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
 
 SEALED_REDIRECT_DOC = {
     "commands": {
-        "deny": [
-            {"reason": "sealed", "commands": {"cat": ["/data/secret*"]}},
-            {
-                "reason": "audit is append-only",
-                "commands": {"echo": ["/data/audit.log"]},
-            },
-        ],
+        "cat": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/secret*"],
+        },
+        "echo": {
+            "decision": "deny",
+            "reason": "audit is append-only",
+            "paths": ["/data/audit.log"],
+        },
     }
 }
 
@@ -1378,7 +1191,7 @@ async def test_a_mount_rule_speaks_on_a_walk_from_above():
                 "mounts": {
                     "/scratch/child": {
                         "commands": {
-                            "deny": [{"reason": "boxed", "commands": ["grep"]}]
+                            "grep": {"decision": "deny", "reason": "boxed"}
                         }
                     }
                 }
@@ -1446,12 +1259,10 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
                 "mounts": {
                     "/a/b/c": {
                         "commands": {
-                            "deny": [
-                                {
-                                    "reason": "boxed",
-                                    "commands": ["cp", "chmod", "mv", "du"],
-                                }
-                            ]
+                            "cp": {"decision": "deny", "reason": "boxed"},
+                            "chmod": {"decision": "deny", "reason": "boxed"},
+                            "mv": {"decision": "deny", "reason": "boxed"},
+                            "du": {"decision": "deny", "reason": "boxed"},
                         }
                     }
                 }
@@ -1527,15 +1338,16 @@ async def test_a_command_rule_reaches_what_chmod_r_walks_into():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "sealed",
-                            "commands": {
-                                "chmod": ["/a/b/secret"],
-                                "chown": ["/a/b/secret"],
-                            },
-                        }
-                    ]
+                    "chmod": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/a/b/secret"],
+                    },
+                    "chown": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/a/b/secret"],
+                    },
                 }
             }
         },
@@ -1704,11 +1516,13 @@ async def test_a_post_command_program_refuses_a_command_after_it_ran():
 
 LITERAL_DOC = {
     "commands": {
-        "deny": [
-            {"reason": "no deletes", "commands": ["rm"]},
-            {"reason": "sealed", "commands": {"cat": ["/repo/secret*"]}},
-            {"reason": "no pushes", "commands": ["git push"]},
-        ],
+        "rm": {"decision": "deny", "reason": "no deletes"},
+        "cat": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/repo/secret*"],
+        },
+        "git": {"fetch": {"decision": "deny", "reason": "no fetches"}},
     }
 }
 
@@ -1823,16 +1637,21 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [
-                        {
-                            "reason": "sealed",
-                            "commands": {
-                                "ls": ["/repo/sealed"],
-                                "find": ["/repo/sealed"],
-                                "grep": ["/repo/sealed"],
-                            },
-                        }
-                    ]
+                    "ls": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/repo/sealed"],
+                    },
+                    "find": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/repo/sealed"],
+                    },
+                    "grep": {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/repo/sealed"],
+                    },
                 }
             }
         },
@@ -1878,15 +1697,33 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
 
 VEILED_DOC = {
     "commands": {
-        "allow": ["mkdir", "echo", "touch", "cat", "rm", "ls", "head"],
-        "ask": [
-            {"reason": "sign-off", "commands": {"rm": ["/repo/shared/*"]}}
+        "*": "deny",
+        "mkdir": "allow",
+        "echo": "allow",
+        "touch": "allow",
+        "cat": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "private",
+                "paths": ["/repo/private"],
+            },
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/repo/sealed/*"],
+            },
         ],
-        "deny": [
-            {"reason": "private", "commands": {"cat": ["/repo/private"]}},
-            {"reason": "sealed", "paths": ["/repo/sealed/*"]},
-            {"reason": "no heads", "commands": ["head"]},
+        "rm": [
+            "allow",
+            {
+                "decision": "ask",
+                "reason": "sign-off",
+                "paths": ["/repo/shared/*"],
+            },
         ],
+        "ls": "allow",
+        "head": ["allow", {"decision": "deny", "reason": "no heads"}],
     }
 }
 
@@ -1970,13 +1807,15 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
 
 ASK_DOC = {
     "commands": {
-        "ask": [{"reason": "sign-off", "commands": ["rm"]}, "head"],
-        "deny": [
+        "rm": [
             {
+                "decision": "deny",
                 "reason": "no deletes in the repo",
-                "commands": {"rm": ["/repo/*"]},
-            }
+                "paths": ["/repo/*"],
+            },
+            {"decision": "ask", "reason": "sign-off"},
         ],
+        "head": "ask",
     }
 }
 
@@ -2241,35 +2080,44 @@ async def test_a_compound_line_asked_before_it_runs_is_killable_too():
 
 # A plain document, passed raw: the constructor validates it, so the
 # whole walk battery also pins the raw-doc entry point.
+SEALED = {"decision": "deny", "reason": "sealed", "paths": ["/data/t/sealed"]}
+FROZEN_T = {
+    "decision": "deny",
+    "reason": "frozen",
+    "paths": ["/data/t/locked/*"],
+}
+PRIVATE = {
+    "decision": "deny",
+    "reason": "private",
+    "paths": ["/data/t/private"],
+}
 WALK_DOC = {
     "paths": {"hide": ["/data/t/ghost"]},
     "commands": {
-        "allow": [
-            "mkdir",
-            "echo",
-            "ls",
-            "cat",
-            "grep",
-            "find",
-            "du",
-            "cp",
-            "tar",
-            "tree",
-            "stat",
-            "rm",
-            "test",
-        ],
-        "ask": [{"reason": "nod", "commands": {"grep": ["/data/t/asked/*"]}}],
-        "deny": [
-            {
-                "reason": "private",
-                "commands": {
-                    "grep": ["/data/t/private"],
-                    "ls": ["/data/t/private"],
-                },
-            },
-            {"reason": "sealed", "paths": ["/data/t/sealed"]},
-            {"reason": "frozen", "paths": ["/data/t/locked/*"]},
+        "*": "deny",
+        **{
+            name: ["allow", SEALED, FROZEN_T]
+            for name in (
+                "mkdir",
+                "echo",
+                "cat",
+                "find",
+                "du",
+                "cp",
+                "tar",
+                "tree",
+                "stat",
+                "rm",
+                "test",
+            )
+        },
+        "ls": ["allow", SEALED, FROZEN_T, PRIVATE],
+        "grep": [
+            "allow",
+            SEALED,
+            FROZEN_T,
+            PRIVATE,
+            {"decision": "ask", "reason": "nod", "paths": ["/data/t/asked/*"]},
         ],
     },
 }
@@ -2380,28 +2228,41 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
 RELAY_DOC = {
     "paths": {"hide": ["/data/r/ghost"]},
     "commands": {
-        "deny": [
-            {
-                "reason": "cut",
-                "commands": {
-                    "split": ["/data/out/xab"],
-                    "csplit": ["/data/out/xx01"],
-                    "awk": ["/data/out/locked"],
-                    "mktemp": ["/data/tmpd/*"],
-                    "unzip": ["/data/uz/*"],
-                },
-            },
-            {
-                "reason": "tarred",
-                "commands": {"tar": ["/data/r/sec", "/data/r/ghost"]},
-            },
-            {
-                "reason": "copied",
-                "commands": {
-                    "cp": ["/data/r/sec", "/data/dst/sec", "/data/r/ghost"]
-                },
-            },
-        ],
+        "split": {
+            "decision": "deny",
+            "reason": "cut",
+            "paths": ["/data/out/xab"],
+        },
+        "csplit": {
+            "decision": "deny",
+            "reason": "cut",
+            "paths": ["/data/out/xx01"],
+        },
+        "awk": {
+            "decision": "deny",
+            "reason": "cut",
+            "paths": ["/data/out/locked"],
+        },
+        "mktemp": {
+            "decision": "deny",
+            "reason": "cut",
+            "paths": ["/data/tmpd/*"],
+        },
+        "unzip": {
+            "decision": "deny",
+            "reason": "cut",
+            "paths": ["/data/uz/*"],
+        },
+        "tar": {
+            "decision": "deny",
+            "reason": "tarred",
+            "paths": ["/data/r/sec", "/data/r/ghost"],
+        },
+        "cp": {
+            "decision": "deny",
+            "reason": "copied",
+            "paths": ["/data/r/sec", "/data/dst/sec", "/data/r/ghost"],
+        },
     },
 }
 
@@ -2515,19 +2376,22 @@ async def test_a_write_through_the_command_dispatcher_meets_the_rules():
         await ws.close()
 
 
+WALLED = {"decision": "deny", "reason": "walled", "paths": ["/data/w/p.txt"]}
 WARM_DOC = {
     "paths": {"hide": ["/data/w/h.txt"]},
     "commands": {
-        "deny": [
-            {
-                "reason": "sealed",
-                "commands": {
-                    name: ["/data/w/a.txt"]
-                    for name in ("grep", "rg", "cat", "cp", "tar")
+        "*": WALLED,
+        **{
+            name: [
+                {
+                    "decision": "deny",
+                    "reason": "sealed",
+                    "paths": ["/data/w/a.txt"],
                 },
-            },
-            {"reason": "walled", "paths": ["/data/w/p.txt"]},
-        ],
+                WALLED,
+            ]
+            for name in ("grep", "rg", "cat", "cp", "tar")
+        },
     },
 }
 
@@ -2612,16 +2476,21 @@ async def test_a_warm_entry_no_rule_refuses_is_still_served_from_cache():
 
 FANOUT_DOC = {
     "commands": {
-        "deny": [
-            {
-                "reason": "sealed",
-                "commands": {
-                    "rg": ["/data/w/a.txt"],
-                    "find": ["/data/w/a.txt"],
-                    "tree": ["/data/sub/x"],
-                },
-            }
-        ],
+        "rg": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/w/a.txt"],
+        },
+        "find": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/w/a.txt"],
+        },
+        "tree": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/sub/x"],
+        },
     }
 }
 
@@ -2747,15 +2616,16 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
 
 LINKED_DOC = {
     "commands": {
-        "deny": [
-            {
-                "reason": "sealed",
-                "commands": {
-                    "awk": ["/data/secret"],
-                    "sed": ["/data/secret"],
-                },
-            }
-        ],
+        "awk": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/secret"],
+        },
+        "sed": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/secret"],
+        },
     }
 }
 
@@ -2834,12 +2704,11 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
     # on the name itself (unlink, rename) as for one that follows it.
     doc = {
         "commands": {
-            "deny": [
-                {
-                    "reason": "sealed",
-                    "commands": {"zap": ["/data/real/secret"]},
-                }
-            ],
+            "zap": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/real/secret"],
+            }
         }
     }
     for op in ("unlink", "rename"):
@@ -2876,15 +2745,16 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
     # command's own ops exactly as it holds for a named operand.
     doc = {
         "commands": {
-            "deny": [
-                {
-                    "reason": "sealed",
-                    "commands": {
-                        "sed": ["/data/dalias/secret"],
-                        "cat": ["/data/dalias/secret"],
-                    },
-                }
-            ],
+            "sed": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/dalias/secret"],
+            },
+            "cat": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/dalias/secret"],
+            },
         }
     }
     ws = Workspace(
@@ -2918,9 +2788,11 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
 
 SPELLED_DOC = {
     "commands": {
-        "deny": [
-            {"reason": "sealed", "commands": {"sed": ["/data/real/secret"]}}
-        ],
+        "sed": {
+            "decision": "deny",
+            "reason": "sealed",
+            "paths": ["/data/real/secret"],
+        }
     }
 }
 
@@ -2992,18 +2864,21 @@ async def test_concurrent_sessions_judge_dispatched_ops_by_their_own_gate():
 
 @pytest.mark.asyncio
 async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
-    # The command rules bind what a command does; the session's raw entry point
-    # (ws.vfs, the agent's file tool) is held to paths rules only, as
-    # before.
+    # A command tree binds lines; the session's raw entry point (ws.vfs,
+    # the agent's file tool) is held to hides and modes, which a path
+    # every command must keep away from belongs in.
     doc = {
         "commands": {
-            "deny": [
-                {
-                    "reason": "sealed",
-                    "commands": {"cat": ["/data/real/secret"]},
-                },
-                {"reason": "walled", "paths": ["/data/real/walled"]},
-            ],
+            "cat": {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/real/secret"],
+            },
+            "*": {
+                "decision": "deny",
+                "reason": "walled",
+                "paths": ["/data/real/walled"],
+            },
         }
     }
     ws = Workspace(
@@ -3018,8 +2893,7 @@ async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
         )
         handle = await ws.session("g", profile="mixed")
         assert await handle.vfs.read("/data/real/secret") == b"s\n"
-        with pytest.raises(PermissionError):
-            await handle.vfs.read("/data/real/walled")
+        assert await handle.vfs.read("/data/real/walled") == b"w\n"
         assert (await handle.shell("cat /data/real/secret")).exit_code == 1
     finally:
         await ws.close()
@@ -3059,25 +2933,6 @@ async def test_an_asked_scope_reached_by_a_walk_is_refused_until_named():
 
 
 @pytest.mark.asyncio
-async def test_the_dispatcher_stats_a_refused_entry_and_withholds_its_content():
-    ws = _walk_ws()
-    try:
-        await _seed_walk_tree(ws)
-        sess = ws.get_session("g")
-        token = set_current_session(sess)
-        try:
-            assert (await ws.vfs.stat("/data/t/locked/y")).size == 2
-            with pytest.raises(PermissionError):
-                await ws.vfs.read("/data/t/locked/y")
-            with pytest.raises(FileNotFoundError):
-                await ws.vfs.stat("/data/t/ghost/g")
-        finally:
-            reset_caller(token)
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_every_permissions_entry_point_accepts_the_plain_document():
     # `profiles`, `create_session(profile=)` and `create_session
     # (permissions=)` all validate raw mappings internally, so the
@@ -3092,14 +2947,20 @@ async def test_every_permissions_entry_point_accepts_the_plain_document():
         profiles={
             "default": {
                 "commands": {
-                    "deny": [{"reason": "walled", "paths": ["/data/w"]}]
+                    "*": {
+                        "decision": "deny",
+                        "reason": "walled",
+                        "paths": ["/data/w"],
+                    }
                 },
                 "mounts": {
                     "/box": {
                         "commands": {
-                            "deny": [
-                                {"reason": "boxed", "paths": ["/box/top"]}
-                            ]
+                            "*": {
+                                "decision": "deny",
+                                "reason": "boxed",
+                                "paths": ["/box/top"],
+                            }
                         }
                     }
                 },
@@ -3117,15 +2978,19 @@ async def test_every_permissions_entry_point_accepts_the_plain_document():
             "",
             "cat: /box/top: Permission denied\npolicy denied: boxed\n",
         )
-        ws.create_session("i", profile={"commands": {"allow": ["echo"]}})
+        ws.create_session(
+            "i", profile={"commands": {"*": "deny", "echo": "allow"}}
+        )
         assert (await _line(ws, "ls /data", "i"))[0] == 126
         ws.create_session(
             "d",
             permissions={
                 "commands": {
-                    "deny": [
-                        {"reason": "no", "commands": {"cat": ["/data/*"]}}
-                    ]
+                    "cat": {
+                        "decision": "deny",
+                        "reason": "no",
+                        "paths": ["/data/*"],
+                    }
                 }
             },
         )
@@ -3168,7 +3033,7 @@ def test_a_policy_alone_is_a_whole_profile():
 def test_a_policy_rides_beside_the_document():
     profile = SessionProfile.model_validate(
         {
-            "commands": {"allow": ["ls"]},
+            "commands": {"*": "deny", "ls": "allow"},
             "policy": {
                 "pre_vfs": [
                     {"script": ScriptSource("pass"), "runtime": "monty"},
@@ -3309,8 +3174,10 @@ def test_a_policy_names_its_programs_per_method():
 
 
 def test_explicit_null_reason_is_refused():
-    with pytest.raises(ValueError, match="reason must be a string"):
-        CommandsBlock(deny=[{"commands": ["rm"], "reason": None}])
+    with pytest.raises(ValidationError, match="reason"):
+        SessionProfile.model_validate(
+            {"commands": {"rm": {"decision": "deny", "reason": None}}}
+        )
 
 
 def test_a_reason_group_needs_its_reason_wherever_it_is_written():
@@ -3349,10 +3216,87 @@ def test_typed_paths_entries_are_checked_and_kept():
     assert mounted.mounts["/r"].paths.show == (ShowEntry("/r/public"),)
 
 
-def test_a_rule_list_mixes_compiled_and_written_rules():
-    kept = CommandRule(reason="x", commands=("rm",))
-    block = CommandsBlock(deny=[kept, "mv"])
-    assert block.deny[0] is kept
-    assert block.deny[1].commands == ("mv",)
-    with pytest.raises(ValidationError, match=re.escape("commands.deny[1]")):
-        CommandsBlock(deny=[kept, {"commands": ["mv"], "paths": ["/x"]}])
+_TREE = {
+    "*": "allow",
+    "rm": {"decision": "ask", "reason": "Deletes need sign-off"},
+    "gh": {
+        "*": "deny",
+        "pr": {
+            "view": "allow",
+            "merge": {"*": "allow", "--admin": "deny"},
+        },
+    },
+    "curl": {
+        "--request": {
+            "values": {"DELETE": "deny", "POST": {"--insecure": "deny"}}
+        }
+    },
+    "git": {
+        "--force": "deny",
+        "checkout": {"operands": {"main": "deny", "release/*": "ask"}},
+    },
+    "cp": {
+        "*": [
+            "ask",
+            {"decision": "deny", "paths": ["/data/keep/*"], "reason": "kept"},
+        ],
+        "-*": "deny",
+        "--recursive": {"--force": "deny"},
+    },
+}
+
+
+def test_command_tree_reads_names_options_operands_and_values():
+    tree = command_tree(_TREE)
+    assert tree.decision == (RuleLeaf(Outcome.ALLOW),)
+    assert tree.subcommands["rm"].decision == (
+        RuleLeaf(Outcome.ASK, "Deletes need sign-off"),
+    )
+    merge = tree.subcommands["gh"].subcommands["pr"].subcommands["merge"]
+    assert merge.options["--admin"].decision == (RuleLeaf(Outcome.DENY),)
+    request = tree.subcommands["curl"].options["--request"]
+    assert request.decision == ()
+    assert request.values["POST"].options["--insecure"].decision == (
+        RuleLeaf(Outcome.DENY),
+    )
+    checkout = tree.subcommands["git"].subcommands["checkout"]
+    assert checkout.operands["release/*"].decision == (RuleLeaf(Outcome.ASK),)
+    cp = tree.subcommands["cp"]
+    assert cp.decision == (
+        RuleLeaf(Outcome.ASK),
+        RuleLeaf(Outcome.DENY, "kept", ("/data/keep/*",)),
+    )
+    assert cp.other_options == (RuleLeaf(Outcome.DENY),)
+    assert cp.options["--recursive"].options["--force"].decision == (
+        RuleLeaf(Outcome.DENY),
+    )
+
+
+def test_tree_doc_writes_the_block_it_reads_from():
+    tree = command_tree(_TREE)
+    assert tree_doc(tree) == _TREE
+    assert command_tree(tree_doc(tree)) == tree
+    spelled_long = {"gh": {"*": {"decision": "deny"}, "pr": {"*": "allow"}}}
+    assert tree_doc(command_tree(spelled_long)) == {
+        "gh": {"*": "deny", "pr": "allow"}
+    }
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ({"allow": ["git status"]}, "old flat format"),
+        ({"deny": [{"reason": "x", "paths": ["/s"]}]}, "old flat format"),
+        (
+            {"curl": {"--request": {"DELETE": "deny"}}},
+            "a value goes under values",
+        ),
+        ({"--force": "deny"}, "needs a command"),
+        ({"gh": {"pr": "allow", "operands": {"x": "deny"}}}, "operands sit"),
+        ({"rm": "maybe"}, "is no decision"),
+        ({"rm": []}, "lists no decision"),
+    ],
+)
+def test_command_tree_refuses_a_misshapen_block(block, message):
+    with pytest.raises(ValueError, match=message):
+        command_tree(block)

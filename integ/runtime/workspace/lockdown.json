@@ -54,11 +54,10 @@
         "profiles": {
           "narrow": {
             "commands": {
-              "allow": [
-                "echo",
-                "cat",
-                "python3"
-              ]
+              "*": "deny",
+              "echo": "allow",
+              "cat": "allow",
+              "python3": "allow"
             }
           }
         },

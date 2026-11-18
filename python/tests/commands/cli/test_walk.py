@@ -17,15 +17,18 @@ from dataclasses import replace
 import pytest
 
 from mirage.commands.cli import CLI, CLIHandler, walk
+from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.walk import (
     env_names,
     find_child,
     find_node,
     invoked_env_names,
+    leaf_parse,
     node_help,
     owns_argv,
     supplied_env_names,
 )
+from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.runtime.types import ScriptSource
 from mirage.types import PathSpec
@@ -950,3 +953,19 @@ def test_walk_chains_a_directory_change_across_groups():
         "/w/a/b",
         None,
     ]
+
+
+def test_leaf_parse_refuses_an_abbreviation_under_cobra():
+    gh = cli_spec_for("gh")
+    result = walk("gh", gh.spec, ["auth", "token", "--ho", "x"], "/", None)
+    assert result.leaf is not None
+    rules = leaf_parse(gh.spec, result.leaf, result.path)
+    parsed = parse_command(
+        rules.spec,
+        list(result.argv),
+        "/",
+        "gh",
+        unknown_is_operand=rules.unknown_is_operand,
+        abbreviations=rules.abbreviations,
+    )
+    assert parsed.invalid_options == ["--ho"]

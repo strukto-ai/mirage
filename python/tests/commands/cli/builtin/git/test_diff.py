@@ -88,7 +88,11 @@ async def test_an_unreadable_work_tree_file_is_refused_in_git_words(
         git_rw.default_session_id,
         {
             "commands": {
-                "deny": [{"reason": "sealed", "paths": ["/repo/a.txt"]}]
+                "*": {
+                    "decision": "deny",
+                    "reason": "sealed",
+                    "paths": ["/repo/a.txt"],
+                }
             }
         },
     )

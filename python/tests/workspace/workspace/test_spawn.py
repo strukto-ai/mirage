@@ -16,9 +16,7 @@ async def test_spawn_preserves_literal_argv_and_uses_admission():
         argv = ("printf", "%s|", "a b", "$(echo bad)", "*", "a'b", "", "`")
         result = await ws.spawn(SpawnRequest(argv)).communicate()
         assert result.stdout == b"a b|$(echo bad)|*|a'b||`|"
-        ws.create_session(
-            "limited", profile={"commands": {"deny": ["printf"]}}
-        )
+        ws.create_session("limited", profile={"commands": {"printf": "deny"}})
         refused = await ws.spawn(SpawnRequest(argv), "limited").communicate()
         assert refused.exit_code != 0
         assert refused.stdout == b""

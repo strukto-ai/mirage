@@ -15,9 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import {
-  CommandsBlock,
+  commandTree,
   compileProgram,
   parseProfileMounts,
   parseProfilePolicy,
@@ -25,7 +24,9 @@ import {
   ProfileMount,
   profileToDict,
   SessionProfile,
+  treeDoc,
 } from './profile.ts'
+import { Outcome, type RuleLeaf } from './types.ts'
 
 const mountSection = (raw: unknown): unknown => ProfileMount(raw, '/repo', 'mounts[/repo]')
 
@@ -60,19 +61,30 @@ describe('SessionProfile', () => {
       mounts: {
         '/repo': {
           mode: 'rw',
-          commands: { deny: ['git push'], ask: ['git rebase'] },
+          commands: { git: { push: 'deny', rebase: 'ask' } },
           paths: { hide: ['/repo/.env'] },
         },
       },
     })
     const entry = p.mounts?.get('/repo')
     expect(entry?.mode).toBe(MountMode.WRITE)
-    expect(entry?.commands?.deny?.[0]?.commands).toEqual(['git push'])
-    expect(entry?.commands?.ask?.[0]?.commands).toEqual(['git rebase'])
+    expect(entry?.commands == null ? null : treeDoc(entry.commands)).toEqual({
+      git: { push: 'deny', rebase: 'ask' },
+    })
     expect(entry?.paths).toEqual({ hide: ['/repo/.env'] })
-    // What a session can see is the session's property, not an
-    // operand's, so a mount section has no allow list.
-    expect(() => mountSection({ commands: { allow: ['ls'] } })).toThrow(/unknown field `allow`/)
+  })
+
+  it('a flat commands block fails with the new format named', () => {
+    for (const block of [
+      { allow: ['ls'] },
+      { deny: [{ reason: 'x', command: 'rm', paths: ['/a'] }] },
+    ]) {
+      expect(() => SessionProfile({ commands: block })).toThrow('old flat format')
+      expect(() => SessionProfile({ mounts: { '/repo': { commands: block } } })).toThrow(
+        'old flat format',
+      )
+      expect(() => mountSection({ commands: block })).toThrow('old flat format')
+    }
   })
 
   it('refuses a bare list of mounts', () => {
@@ -103,7 +115,7 @@ describe('SessionProfile', () => {
     expect(() => SessionProfile({ extends: 'default' })).toThrow(/unknown field `extends`/)
     expect(() => SessionProfile({ hidden_paths: {} })).toThrow(/unknown field `hidden_paths`/)
     expect(() => SessionProfile({ hiddenPaths: {} })).toThrow(/unknown field/)
-    expect(() => SessionProfile({ commands: { hide: [] } })).toThrow(/unknown field `hide`/)
+    expect(() => SessionProfile({ commands: { hide: [] } })).toThrow()
     expect(() => SessionProfile({ paths: { carve: {} } })).toThrow(/paths: unknown field `carve`/)
     expect(() => SessionProfile({ vars: { mask: [] } })).toThrow(/unknown field `mask`/)
     expect(() => SessionProfile({ mounts: { '/a': 'w' } })).toThrow(/invalid mount mode/)
@@ -131,106 +143,6 @@ describe('SessionProfile', () => {
       expect(() => SessionProfile({ processes: bad })).toThrow(/processes/)
   })
 
-  it('the commands block takes allow, ask and deny', () => {
-    const p = SessionProfile({
-      commands: {
-        allow: ['ls', 'git log'],
-        ask: ['git push', { reason: 'sign-off', commands: { rm: ['/shared/*'] } }],
-        deny: [{ reason: 'no', commands: { rm: ['/repo/*'] } }],
-      },
-    })
-    expect(p.commands?.allow).toEqual(['ls', 'git log'])
-    // A bare ask entry carries ask's default reason, not deny's.
-    expect(p.commands?.ask).toEqual([
-      { reason: DEFAULT_ASK_REASON, commands: ['git push'] },
-      { reason: 'sign-off', commands: ['rm'], paths: ['/shared/*'] },
-    ])
-    expect(p.commands?.deny?.[0]?.reason).toBe('no')
-    // Unstated allow is null (everything installed), not an empty list.
-    expect(SessionProfile({ commands: { deny: ['rm'] } }).commands?.allow).toBeNull()
-  })
-
-  it.each([
-    { allow: 'ls' },
-    { allow: ['ls', ''] },
-    { allow: ['ls', '  '] },
-    { ask: 'git push' },
-    { ask: [''] },
-    { deny: [{ reason: 'x', commands: [''] }] },
-    { ask: [{ reason: 'x', mount: '/repo' }] },
-  ])('refuses scalars, blank patterns and the compiler field: %j', (bad) => {
-    // A blank pattern is a prefix of every line, so it would allow, ask
-    // about or deny every command; `mount` is the compiler's field.
-    expect(() => SessionProfile({ commands: bad })).toThrow()
-  })
-
-  it('deny accepts rules and bare names', () => {
-    const p = SessionProfile({
-      commands: {
-        deny: [
-          { reason: 'no deletes', commands: { rm: ['/repo/*'] } },
-          'python3',
-          { commands: ['shred'] },
-        ],
-      },
-      paths: { hide: ['/shared/finance'] },
-    })
-    expect(p.commands?.deny).toEqual([
-      { reason: 'no deletes', commands: ['rm'], paths: ['/repo/*'] },
-      { reason: DEFAULT_DENY_REASON, commands: ['python3'] },
-      { reason: DEFAULT_DENY_REASON, commands: ['shred'], paths: [] },
-    ])
-    expect(p.paths).toEqual({ hide: ['/shared/finance'] })
-  })
-
-  it('requires deny itself to be a list', () => {
-    for (const deny of ['rm', { rm: 'no' }, 7]) {
-      expect(() => SessionProfile({ commands: { deny } })).toThrow(/deny must be a list/)
-    }
-  })
-
-  it('maps each command to its own paths, one rule per command', () => {
-    // One command to many paths, never a list of commands beside a list
-    // of paths: the document says which command each path belongs to.
-    const p = SessionProfile({
-      commands: {
-        deny: [
-          {
-            reason: 'prod is protected',
-            commands: { rm: ['/repo/prod/*', '/shared/*'], mv: ['/repo/prod/*'] },
-          },
-        ],
-        ask: [{ commands: { 'git push': ['/repo/*'] } }],
-      },
-    })
-    expect(p.commands?.deny).toEqual([
-      { reason: 'prod is protected', commands: ['rm'], paths: ['/repo/prod/*', '/shared/*'] },
-      { reason: 'prod is protected', commands: ['mv'], paths: ['/repo/prod/*'] },
-    ])
-    expect(p.commands?.ask).toEqual([
-      { reason: DEFAULT_ASK_REASON, commands: ['git push'], paths: ['/repo/*'] },
-    ])
-  })
-
-  it.each([
-    [{ reason: 'x', commands: ['rm', 'mv'], paths: ['/a'] }, /map each command to its paths/],
-    [{ reason: 'x', commands: { rm: ['/a'] }, paths: ['/b'] }, /takes no paths of its own/],
-    [{ reason: 'x' }, /names no command and no path/],
-    [{ reason: 'x', commands: {} }, /must name at least one command/],
-    [{ reason: 'x', commands: { rm: [] } }, /must list at least one path/],
-    [{ reason: 'x', commands: { rm: '/a' } }, /must be a list of strings/],
-    [{ reason: 'x', commands: { ' ': ['/a'] } }, /keys must name a command/],
-    [{ reason: 'x', commands: { rm: ['/a', ' '] } }, /commands\[rm\]\[1\] must name a path/],
-    [{ reason: 'x', paths: [''] }, /paths\[0\] must name a path/],
-    [{ reason: 1 }, /reason must be a string/],
-    [{ reason: 'x', command: ['rm'] }, /unknown field `command`/],
-    [7, /must be a command pattern or a mapping/],
-  ])('refuses a rule that does not say which command a path belongs to: %j', (bad, message) => {
-    expect(() => SessionProfile({ commands: { deny: [bad] } })).toThrow(message)
-    expect(() => SessionProfile({ commands: { ask: [bad] } })).toThrow(message)
-    expect(() => mountSection({ commands: { deny: [bad] } })).toThrow(message)
-  })
-
   it.each(['xxx', 'secrets/*', './x', '~/x', 'a/b'])(
     'refuses a relative path everywhere: %s',
     (entry) => {
@@ -240,11 +152,13 @@ describe('SessionProfile', () => {
       // and it means the same thing inside a mount section as outside.
       expect(() => SessionProfile({ paths: { hide: [entry] } })).toThrow(/is relative/)
       expect(() =>
-        SessionProfile({ commands: { ask: [{ commands: { rm: ['/ok', entry] } }] } }),
+        SessionProfile({ commands: { rm: { decision: 'ask', paths: ['/ok', entry] } } }),
       ).toThrow(/is relative/)
-      expect(() => SessionProfile({ commands: { deny: [{ paths: [entry] }] } })).toThrow(
-        /is relative/,
-      )
+      expect(() =>
+        SessionProfile({
+          commands: { rm: { '--force': { decision: 'deny', paths: [entry] } } },
+        }),
+      ).toThrow(/is relative/)
       expect(() => SessionProfile({ mounts: { '/repo': { paths: { hide: [entry] } } } })).toThrow(
         /is relative/,
       )
@@ -261,7 +175,7 @@ describe('SessionProfile', () => {
       // `/repo/repo/secret` and protected nothing.
       for (const block of [
         { paths: { hide: [entry] } },
-        { commands: { deny: [{ paths: [entry] }] } },
+        { commands: { rm: { decision: 'deny', paths: [entry] } } },
       ]) {
         expect(() => SessionProfile({ mounts: { '/repo': block } })).toThrow(/outside the mount/)
       }
@@ -362,13 +276,13 @@ describe('SessionProfile', () => {
       mounts: {
         '/': {
           paths: { hide: ['/secret', '*.pem'] },
-          commands: { deny: [{ reason: 'sealed', paths: ['/secret/*'] }] },
+          commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/secret/*'] } },
         },
       },
     })
     const root = profile.mounts?.get('/')
     expect(root?.paths?.hide).toEqual(['/secret', '*.pem'])
-    expect(root?.commands?.deny?.[0]?.paths).toEqual(['/secret/*'])
+    expect(root?.commands?.decision[0]?.paths).toEqual(['/secret/*'])
   })
 })
 
@@ -507,8 +421,7 @@ const DOCUMENT = {
       mode: 'read',
       paths: { hide: ['/repo/.env'], show: { '/repo/.env.example': null }, reasons: [] },
       commands: {
-        ask: [{ reason: 'sign-off', commands: { 'git push': ['/repo'] } }],
-        deny: [{ reason: 'denied by policy', commands: ['git rebase'] }],
+        git: { push: { decision: 'ask', reason: 'sign-off', paths: ['/repo'] }, rebase: 'deny' },
       },
     },
     '/scratch': { mode: 'exec' },
@@ -519,25 +432,18 @@ const DOCUMENT = {
     reasons: [{ patterns: ['*.pem'], reason: 'keys' }],
   },
   commands: {
-    ask: [{ reason: 'shared', commands: { rm: ['/scratch/*'] } }],
-    deny: [
-      { reason: 'sealed', paths: ['/repo/sealed'] },
-      { reason: 'denied by policy', commands: ['curl'] },
-    ],
-    allow: ['ls', 'cat', 'git push', 'rm'],
+    '*': 'deny',
+    ls: 'allow',
+    cat: 'allow',
+    git: { push: 'allow' },
+    rm: ['allow', { decision: 'ask', reason: 'shared', paths: ['/scratch/*'] }],
+    curl: 'deny',
   },
 }
 
 describe('profileToDict', () => {
   it('writes the document it parses from', () => {
     expect(profileToDict(profileFromDict(DOCUMENT))).toEqual(DOCUMENT)
-    // A rule naming commands beside paths, which the document cannot
-    // spell, is written one command per rule and admits the same lines.
-    const profile = { commands: { deny: [{ reason: 'r', commands: ['rm', 'mv'], paths: ['/a'] }] } }
-    expect(profileFromDict(profileToDict(profile)).commands?.deny).toEqual([
-      { reason: 'r', commands: ['rm'], paths: ['/a'] },
-      { reason: 'r', commands: ['mv'], paths: ['/a'] },
-    ])
     // A path shown twice answers with its weaker mode, which the mapping
     // keeps rather than the last entry's.
     const shown = {
@@ -559,7 +465,71 @@ describe('profileToDict', () => {
 })
 
 it('refuses an explicit null command reason', () => {
-  expect(() => CommandsBlock({ deny: [{ commands: ['rm'], reason: null }] })).toThrow(
-    'reason must be a string',
+  expect(() => SessionProfile({ commands: { rm: { decision: 'deny', reason: null } } })).toThrow(
+    'reason',
   )
+})
+
+const TREE = {
+  '*': 'allow',
+  rm: { decision: 'ask', reason: 'Deletes need sign-off' },
+  gh: { '*': 'deny', pr: { view: 'allow', merge: { '*': 'allow', '--admin': 'deny' } } },
+  curl: { '--request': { values: { DELETE: 'deny', POST: { '--insecure': 'deny' } } } },
+  git: { '--force': 'deny', checkout: { operands: { main: 'deny', 'release/*': 'ask' } } },
+  cp: {
+    '*': ['ask', { decision: 'deny', paths: ['/data/keep/*'], reason: 'kept' }],
+    '-*': 'deny',
+    '--recursive': { '--force': 'deny' },
+  },
+}
+
+const leaf = (decision: Outcome, reason = '', paths: string[] = []): RuleLeaf => ({
+  decision,
+  reason,
+  paths,
+})
+
+describe('commandTree', () => {
+  it('reads names, options, operands and values', () => {
+    const tree = commandTree(TREE)
+    expect(tree.decision).toEqual([leaf(Outcome.ALLOW)])
+    expect(tree.subcommands.get('rm')?.decision).toEqual([
+      leaf(Outcome.ASK, 'Deletes need sign-off'),
+    ])
+    const merge = tree.subcommands.get('gh')?.subcommands.get('pr')?.subcommands.get('merge')
+    expect(merge?.options.get('--admin')?.decision).toEqual([leaf(Outcome.DENY)])
+    const request = tree.subcommands.get('curl')?.options.get('--request')
+    expect(request?.decision).toEqual([])
+    expect(request?.values.get('POST')?.options.get('--insecure')?.decision).toEqual([
+      leaf(Outcome.DENY),
+    ])
+    const checkout = tree.subcommands.get('git')?.subcommands.get('checkout')
+    expect(checkout?.operands.get('release/*')?.decision).toEqual([leaf(Outcome.ASK)])
+    const cp = tree.subcommands.get('cp')
+    expect(cp?.decision).toEqual([leaf(Outcome.ASK), leaf(Outcome.DENY, 'kept', ['/data/keep/*'])])
+    expect(cp?.otherOptions).toEqual([leaf(Outcome.DENY)])
+    expect(cp?.options.get('--recursive')?.options.get('--force')?.decision).toEqual([
+      leaf(Outcome.DENY),
+    ])
+  })
+
+  it('writes the block it reads from', () => {
+    const tree = commandTree(TREE)
+    expect(treeDoc(tree)).toEqual(TREE)
+    expect(commandTree(treeDoc(tree))).toEqual(tree)
+    const spelledLong = { gh: { '*': { decision: 'deny' }, pr: { '*': 'allow' } } }
+    expect(treeDoc(commandTree(spelledLong))).toEqual({ gh: { '*': 'deny', pr: 'allow' } })
+  })
+
+  it.each([
+    [{ allow: ['git status'] }, 'old flat format'],
+    [{ deny: [{ reason: 'x', paths: ['/s'] }] }, 'old flat format'],
+    [{ curl: { '--request': { DELETE: 'deny' } } }, 'a value goes under values'],
+    [{ '--force': 'deny' }, 'needs a command'],
+    [{ gh: { pr: 'allow', operands: { x: 'deny' } } }, 'operands sit'],
+    [{ rm: 'maybe' }, 'is no decision'],
+    [{ rm: [] }, 'lists no decision'],
+  ])('refuses a misshapen block %#', (block, message) => {
+    expect(() => commandTree(block)).toThrow(message)
+  })
 })

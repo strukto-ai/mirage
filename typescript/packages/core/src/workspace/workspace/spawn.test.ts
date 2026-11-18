@@ -8,6 +8,7 @@ import type { ChildProcess } from '../../execution/process/child.ts'
 import type { SpawnRequest } from '../../execution/process/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { Workspace } from './workspace.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 
 it('preserves literal argv and uses the admission gate', async () => {
   const ws = new Workspace({}, { machines: [] })
@@ -21,7 +22,7 @@ it('preserves literal argv and uses the admission gate', async () => {
     ).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toBe("a b|$(echo bad)|*|a'b||`|")
     ws.createSession('limited', {
-      profile: { commands: { deny: [{ commands: ['printf'], reason: 'no' }] } },
+      profile: SessionProfile({ commands: { printf: { decision: 'deny', reason: 'no' } } }),
     })
     const denied = await ws.spawn({ argv }, 'limited').communicate()
     expect(denied.exitCode).not.toBe(0)

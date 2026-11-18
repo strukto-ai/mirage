@@ -16,7 +16,7 @@ import git from 'isomorphic-git'
 import { describe, expect, it } from 'vitest'
 
 import { setAdmission } from '../../../../context/session_context.ts'
-import type { SessionProfile } from '../../../../policy/profile.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
 import type { CommandRule, EntryGate } from '../../../../policy/types.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -35,10 +35,16 @@ const ENC = new TextEncoder()
 const PROFILES: Record<string, SessionProfile> = {
   veiled: { paths: { hide: ['/repo/secret.txt', '/repo/box/secret.txt'] } },
   boxed: { paths: { hide: ['/repo/box/secret.txt'] } },
-  sealed: { commands: { deny: [{ reason: 'sealed', paths: ['/repo/secret.txt'] }] } },
+  sealed: SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/repo/secret.txt'] } },
+  }),
   half: { paths: { hide: ['/repo/a/secret.txt'] } },
-  fresh: { commands: { deny: [{ reason: 'fresh', paths: ['/repo/new.txt'] }] } },
-  walled: { commands: { deny: [{ reason: 'walled', paths: ['/repo/boxf/secret.txt'] }] } },
+  fresh: SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'fresh', paths: ['/repo/new.txt'] } },
+  }),
+  walled: SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'walled', paths: ['/repo/boxf/secret.txt'] } },
+  }),
 }
 
 /** Write one file and commit it. */

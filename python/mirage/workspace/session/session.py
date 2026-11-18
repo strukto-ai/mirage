@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Iterator, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
@@ -81,6 +82,8 @@ from mirage.workspace.session.serialize import (
     scripts_to_dict,
 )
 from mirage.workspace.types import StatusWriter
+
+logger = logging.getLogger(__name__)
 
 # The file-creation mask a fresh shell starts with, as bash's.
 _FRESH_UMASK = 0o022
@@ -396,16 +399,16 @@ class SessionState:
     umask: int = _FRESH_UMASK
     mount_modes: dict[str, MountMode] | None = None
     # What exists for this session: the profile's hides, shows, hidden
-    # variables, process scope and allow list, compiled once. The views
+    # variables and process scope, compiled once. The views
     # and the op boundary read it; fork carries it, to_dict serializes.
     visibility: Visibility = DEFAULT_VISIBILITY
     # The operator's reasons for grouped hides: never rendered to the
     # agent (a reason on ENOENT would confirm the path exists),
     # persisted so the host's read-back entry points survive a restart.
     hide_reasons: tuple[HideReason, ...] = ()
-    # The profile's admission rules, compiled: its allow list, its ask and
-    # deny rules, and every rule its mount entries carry. One document,
-    # so there is nothing above it to join with. A durable restriction
+    # The profile's command trees, normalised: the top-level tree, each
+    # mount entry's, and inline permissions', each judged on its own. A
+    # durable restriction
     # like hidden_paths, so it persists with the session record.
     commands: AdmissionRules | None = None
     # The profile's policy programs by method, run by ScriptPolicy at
@@ -814,7 +817,7 @@ class SessionState:
                 "patterns": list(vis.vars.patterns),
             }
         if self.commands is not None:
-            data["commands"] = commands_to_dict(self.commands)
+            data["command_trees"] = commands_to_dict(self.commands)
         if self.scripts:
             data["scripts"] = scripts_to_dict(self.scripts)
         if self.command_limits:
@@ -901,7 +904,8 @@ class SessionState:
         shown = data.get("shown_paths")
         reasons = data.get("hide_reasons")
         vars_ = data.get("hidden_vars")
-        commands = data.get("commands")
+        trees = data.get("command_trees")
+        flat = data.get("commands")
         scripts = data.get("scripts")
         decisions = data.get("decisions")
         limits = data.get("command_limits")
@@ -916,6 +920,8 @@ class SessionState:
                 "hidden_vars",
                 "function_aliases",
                 "function_files",
+                "command_trees",
+                "commands",
             )
         }
         if modes is not None:
@@ -930,8 +936,18 @@ class SessionState:
                 )
                 for g in reasons
             )
+        commands = commands_from_dict(trees, flat)
         if commands is not None:
-            data["commands"] = commands_from_dict(commands)
+            data["commands"] = commands
+        if trees is None and flat is not None:
+            logger.warning(
+                "session %s: its command rules were saved in an older "
+                "format, so it is closed and its approvals are dropped; "
+                "recreate it to run its profile's rules",
+                data.get("session_id"),
+            )
+            data.pop("decisions", None)
+            decisions = None
         if scripts is not None:
             data["scripts"] = scripts_from_dict(scripts)
         if decisions is not None:

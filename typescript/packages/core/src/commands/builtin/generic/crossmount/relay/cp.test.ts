@@ -84,7 +84,7 @@ describe('crossmount cp relay', () => {
       ['/src/sub/y.txt', new Uint8Array([2])],
     ])
     const dispatch = makeDispatch(files, new Set(['/src', '/src/sub']))
-    const [, io] = await runCp([spec('/src'), spec('/dst')], { r: true }, dispatch)
+    const [, io] = await runCp([spec('/src'), spec('/dst')], { recursive: true }, dispatch)
     expect(files.has('/dst/x.txt')).toBe(true)
     expect(files.has('/dst/sub/y.txt')).toBe(true)
     expect(io.exitCode).toBe(0)

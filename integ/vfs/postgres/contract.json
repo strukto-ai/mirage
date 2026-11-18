@@ -510,14 +510,13 @@
       "session_profiles": {
         "pg-deny-books": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/pg/public/tables/books/rows.jsonl"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/pg/public/tables/books/rows.jsonl"
+              ]
+            }
           }
         }
       }
@@ -538,14 +537,13 @@
       "session_profiles": {
         "pg-deny-books": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/pg/public/tables/books/rows.jsonl"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/pg/public/tables/books/rows.jsonl"
+              ]
+            }
           }
         }
       }
@@ -566,14 +564,13 @@
       "session_profiles": {
         "pg-deny-books": {
           "commands": {
-            "deny": [
-              {
-                "reason": "sealed",
-                "paths": [
-                  "/pg/public/tables/books/rows.jsonl"
-                ]
-              }
-            ]
+            "*": {
+              "decision": "deny",
+              "reason": "sealed",
+              "paths": [
+                "/pg/public/tables/books/rows.jsonl"
+              ]
+            }
           }
         }
       }

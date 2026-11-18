@@ -500,7 +500,9 @@ describe('a wrapper', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell("printf 'a|b\\nx\\n' > /data/e.txt")
-      ws.createSession('narrow', { profile: { commands: { allow: ['egrep'] } } })
+      ws.createSession('narrow', {
+        profile: SessionProfile({ commands: { '*': 'deny', egrep: 'allow' } }),
+      })
       const io = await ws.shell("egrep 'a|x' /data/e.txt", { sessionId: 'narrow' })
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'a|b\nx\n'])
       const plain = await ws.shell('grep x /data/e.txt', { sessionId: 'narrow' })
@@ -549,7 +551,7 @@ describe('a wrapper', () => {
           default: SessionProfile({
             mounts: {
               '/scratch/child': {
-                commands: { deny: [{ reason: 'boxed', commands: ['egrep'] }] },
+                commands: { egrep: { decision: 'deny', reason: 'boxed' } },
               },
             },
           }),
@@ -580,9 +582,7 @@ describe('a wrapper', () => {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: {
-              deny: [{ reason: 'sealed', commands: { fgrep: ['/private/*'] } }],
-            },
+            commands: { fgrep: { decision: 'deny', reason: 'sealed', paths: ['/private/*'] } },
           }),
         },
       },

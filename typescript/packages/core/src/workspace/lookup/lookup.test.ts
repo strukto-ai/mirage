@@ -21,9 +21,10 @@ import { parseCommand } from '../../commands/spec/index.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { headAllowed } from '../../policy/match/allow.ts'
+import { runs } from '../../policy/match/allow.ts'
 import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
+import { trees } from '../../test-utils.ts'
 import * as stream from '../../rs/stream.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { MachineName } from '../../execution/types.ts'
@@ -56,6 +57,7 @@ import {
 } from './index.ts'
 import { routedConsumer, runsOnMachine, runsWrapper } from './lookup.ts'
 import { buildRuntime } from '../../runtime/table.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
@@ -634,13 +636,13 @@ describe('line facts against effects', () => {
   })
 })
 
-describe('allow lists', () => {
-  it('do not narrow lookup', () => {
-    // The allow list is a policy: a word it leaves out is still found in
-    // its layer, and the gate refuses it when it runs.
+describe('a closed tree', () => {
+  it('does not narrow lookup', () => {
+    // A closed tree is a policy: a word it names nothing for is still found
+    // in its layer, and the gate refuses it when it runs.
     const { session, ws } = fixture()
     ws.registerCli('prog', cliTree())
-    session.commands = { allow: ['cat'], ask: [], deny: [] }
+    session.commands = trees({ '*': 'deny', cat: 'allow' })
     const reg = ws.registry
     expect(lookup('cat', session, reg)).toBe(Consumer.MOUNT)
     expect(lookup('prog', session, reg)).toBe(Consumer.CLI)
@@ -697,17 +699,17 @@ describe('program', () => {
     for (const name of ['cd', 'export', '[[']) expect(names).not.toContain(name)
   })
 
-  it('programs lists every program whatever the allow list', () => {
+  it('programs lists every program whatever the tree', () => {
     const { session, ws } = fixture()
     const narrow = new SessionState({
       sessionId: 'n',
-      commands: { allow: ['cat'], ask: [], deny: [] },
+      commands: trees({ '*': 'deny', cat: 'allow' }),
     })
     expect(programs(narrow, ws.registry)).toEqual(programs(session, ws.registry))
   })
 
   // Debian's egrep is `exec grep -E "$@"`, so it is a program wherever grep is
-  // one, and an allow list naming only grep refuses it when it runs.
+  // one, and a closed tree naming only grep refuses it when it runs.
   it('makes a wrapper a program where what it runs is', () => {
     const { session, ws } = fixture()
     for (const name of ['egrep', 'fgrep', 'zegrep', 'zfgrep']) {
@@ -719,10 +721,10 @@ describe('program', () => {
     )
     const narrow = new SessionState({
       sessionId: 'n',
-      commands: { allow: ['grep'], ask: [], deny: [] },
+      commands: trees({ '*': 'deny', grep: 'allow' }),
     })
     expect(lookup('egrep', narrow, ws.registry)).toBe(Consumer.MOUNT)
-    expect(headAllowed('egrep', narrow.commands)).toBe(false)
+    expect(runs('egrep', narrow.commands)).toBe(false)
   })
 
   // An interpreter is a program only where a language runtime runs it; a
@@ -1165,7 +1167,9 @@ function mirageWorkspace(...entries: Runtime[]): Workspace {
     {
       mode: MountMode.EXEC,
       machines: [...entries],
-      profiles: { tight: { commands: { allow: ['cd', 'grep'] } } },
+      profiles: {
+        tight: SessionProfile({ commands: { '*': 'deny', cd: 'allow', grep: 'allow' } }),
+      },
     },
   )
 }

@@ -112,9 +112,8 @@ A profile names a tool the way it names any CLI subcommand:
 profiles:
   triage:
     commands:
-      deny:
-        - commands: ["issues delete-issue"]
-          reason: triage never deletes
+      issues:
+        delete-issue: {decision: deny, reason: triage never deletes}
 ```
 
 A tool the server marks `readOnlyHint` runs as a read; every other tool

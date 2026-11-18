@@ -581,7 +581,7 @@ async def test_a_session_the_restore_creates_runs_under_the_default_profile():
     target = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"deny": ["rm"]}}},
+        profiles={"default": {"commands": {"rm": "deny"}}},
     )
     try:
         await apply_state_dict(target, state)
@@ -644,7 +644,7 @@ async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():
     source = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"ask": ["rm"]}}},
+        profiles={"default": {"commands": {"rm": "ask"}}},
     )
     try:
         assert (await source.shell("rm /f.txt")).exit_code == 126
@@ -667,7 +667,7 @@ async def test_a_load_takes_the_callers_profiles_and_runtimes():
     source = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles={"default": {"commands": {"deny": ["rm"]}}},
+        profiles={"default": {"commands": {"rm": "deny"}}},
     )
     try:
         assert (await source.shell("echo kept > /f.txt")).exit_code == 0
@@ -676,7 +676,7 @@ async def test_a_load_takes_the_callers_profiles_and_runtimes():
         await source.close()
     loaded = await Workspace.from_state(
         state,
-        profiles={"default": {"commands": {"deny": ["cat"]}}},
+        profiles={"default": {"commands": {"cat": "deny"}}},
         machines=[],
     )
     try:

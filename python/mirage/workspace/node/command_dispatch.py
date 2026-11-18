@@ -58,6 +58,7 @@ from mirage.policy import (
     render_deny,
     resolve_producer,
 )
+from mirage.policy.match import closed_by_default
 from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
 from mirage.runtime.machine.runtime import RemoteRuntime
@@ -85,7 +86,7 @@ from mirage.shell.helpers import (
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.types import AliasExpansion, TSNodeLike
+from mirage.shell.types import AliasExpansion, Redirect, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellVar, VarAttr
 from mirage.shell.voice import shell_voice
@@ -892,7 +893,9 @@ async def _run_argv(
     asked: tuple[bool | str, ...] | None = None
 
     async def guard(
-        paths: tuple[PathSpec, ...], given: ByteSource | None
+        paths: tuple[PathSpec, ...],
+        given: ByteSource | None,
+        opening: Redirect | None = None,
     ) -> RedirectResult | None:
         nonlocal admitted, asked
         key: tuple[bool | str, ...] = (
@@ -1516,15 +1519,15 @@ def _refused(
 
 
 def _unreadable(name: str, session: SessionState) -> Refused | None:
-    """An allow list's refusal of what only the machine can resolve (a
-    path, a line run under the box): the list names only what the gate
-    can read. None under any other profile.
+    """A closed profile's refusal of what only the machine can resolve (a
+    path, a line run under the box): a tree that denies by default names
+    only what the gate can read. None under any other profile.
 
     Args:
         name (str): the word refused.
         session (SessionState): the session running the line.
     """
-    if session.commands is None or session.commands.allow is None:
+    if not closed_by_default(session.commands):
         return None
     deny = Deny(UNREADABLE_LINES)
     err, code = render_deny(name, deny)
@@ -1545,7 +1548,7 @@ async def _wrapped_verdict(
     run is followed as the line's pass follows it (``program_lines``):
     each program is admitted as ``env`` and ``timeout`` have theirs
     admitted, at the place the pass judged it, and a line the gate
-    cannot read (``nohup /opt/bin/env``) is refused under an allow list.
+    cannot read (``nohup /opt/bin/env``) is refused under a closed tree.
     The machine runs the program itself, so a function of its name does
     not stand in for it. A program spelled by its ``/usr/bin`` path is
     admitted under its name too, as the plain path admits it.

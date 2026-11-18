@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import type { SessionProfile } from '../../../../policy/profile.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -37,7 +37,9 @@ const ENV = {
 }
 
 const SEALED: Record<string, SessionProfile> = {
-  sealed: { commands: { deny: [{ reason: 'sealed', paths: ['/repo/a.txt'] }] } },
+  sealed: SessionProfile({
+    commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/repo/a.txt'] } },
+  }),
 }
 
 let tmp: string

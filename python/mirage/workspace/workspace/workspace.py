@@ -44,6 +44,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.cli.walk import owns_argv
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.context import (
@@ -121,7 +122,14 @@ from mirage.policy import (
 )
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
-from mirage.policy.types import DryRun, PolicyCaller, policy_caller
+from mirage.policy.match.grammar import unread_names
+from mirage.policy.types import (
+    AdmissionRules,
+    DryRun,
+    Grammar,
+    PolicyCaller,
+    policy_caller,
+)
 from mirage.rs.diff_pool import DiffPool
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import (
@@ -223,13 +231,17 @@ from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
 from mirage.workspace.session.resolve import (
+    command_rules,
     compile_profile,
     resolve_profile,
     with_inline,
 )
 from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
-from mirage.workspace.session.validate import check_cli_verbs
+from mirage.workspace.session.validate import (
+    BUILTIN_GRAMMARS,
+    renormalized,
+)
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import (
     DriftQueue,
@@ -289,6 +301,15 @@ from mirage.workspace.workspace.utils import fork_for_call
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+def _tree_grammar(cli: CLI) -> Grammar:
+    """The grammar a command tree reads a line with.
+
+    Args:
+        cli (CLI): the command tree.
+    """
+    return Grammar(cli.spec, tree=True, passthrough=owns_argv(cli))
 
 
 def _declared_sources(
@@ -713,6 +734,10 @@ class Workspace:
         self._router = Router(self._registry, self._runtimes, self._namespace)
 
         self._start_installs(clis, specs)
+        self._trees_changed()
+        for mounted in self._registry.mounts():
+            mounted.trees_changed = self._trees_changed
+        self._session_mgr.rules_read = self._read_back
         self.machine_table.hold_handles()
 
     def _apply_limits(
@@ -1393,6 +1418,9 @@ class Workspace:
             self._cache.cache_limit > 0 and vfs.caches_reads,
         )
         self._registry.check_vfs_available(vfs)
+        handed = [cmd for cmd in vfs.commands() if isinstance(cmd, CLI)]
+        if handed:
+            self._check_trees(self._grammars(handed))
         if isinstance(vfs, MachineVFS):
             if self._program_machine is None:
                 raise ValueError(
@@ -1412,6 +1440,9 @@ class Workspace:
         )
         prepare_added_mount(self._registry, entry, previous)
         self._registry.rows_changed()
+        entry.trees_changed = self._trees_changed
+        if handed:
+            self._restate_trees(self._grammars())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -1499,7 +1530,14 @@ class Workspace:
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        return self._registry.clis.install(name, spec, config)
+        grammars = {
+            **self._grammars(),
+            name: _tree_grammar(spec),
+        }
+        self._check_trees(grammars)
+        install = self._registry.clis.install(name, spec, config)
+        self._restate_trees(grammars)
+        return install
 
     async def unregister_cli(self, name: str) -> None:
         """Remove an installed CLI and close its accessor; its head word
@@ -2619,7 +2657,7 @@ class Workspace:
 
         Raises:
             PolicyError: an unknown profile name, or an inline document
-                that states an allow list or a script.
+                that states a script.
         """
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
@@ -2633,10 +2671,7 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
-        compiled = self._compile(
-            with_inline(base, inline, self._workspace_processes), profile
-        )
-        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
+        compiled = self._compile(base, profile, inline, defer=False)
         return self._session_mgr.create(session_id, profile=compiled)
 
     async def session(
@@ -2689,17 +2724,104 @@ class Workspace:
         )
         return Session(self, session_id)
 
-    def _cli_verbs(self) -> dict[str, frozenset[str]]:
-        """The verbs each installed CLI declares, keyed by head word.
+    def _check_trees(
+        self, grammars: Mapping[str, Grammar]
+    ) -> Mapping[str, Grammar]:
+        """Check every profile's and live session's command trees
+        against the commands and CLIs the workspace will have, and
+        return those grammars for ``_restate_trees``.
+
+        A command no grammar reads yet is left as written, for
+        ``register_cli`` to check when it arrives and for
+        ``create_session`` to refuse if it never does.
+
+        Args:
+            grammars (Mapping[str, Grammar]): each command's grammar by
+                name.
+
+        Raises:
+            PolicyError: a tree names something a grammar lacks.
+        """
+        for doc in self._profiles.values():
+            command_rules(doc, None, grammars, defer=True)
+        for session in self._session_mgr.list():
+            renormalized(session.commands, grammars)
+        return grammars
+
+    def _trees_changed(self) -> None:
+        """Check and restate every command tree against the grammars the
+        workspace has now: at construction, and as a mount serves a
+        command tree.
+
+        Raises:
+            PolicyError: a tree names something a grammar lacks.
+        """
+        self._restate_trees(self._check_trees(self._grammars()))
+
+    def _read_back(self, rules: AdmissionRules) -> AdmissionRules:
+        """Rules a session record held, marked again with the commands
+        whose options or subcommands no grammar here reads, which a
+        record does not keep.
+
+        Args:
+            rules (AdmissionRules): the trees the record held.
+        """
+        unread = unread_names(rules.trees, self._grammars())
+        return (
+            rules if unread == rules.unread else replace(rules, unread=unread)
+        )
+
+    def _restate_trees(self, grammars: Mapping[str, Grammar]) -> None:
+        """Hold every live session's command trees by the names the
+        grammars ``_check_trees`` passed give them.
+
+        Args:
+            grammars (Mapping[str, Grammar]): each command's grammar by
+                name.
+        """
+        self._session_mgr.restate_commands(
+            lambda rules: renormalized(rules, grammars)
+        )
+
+    def _grammars(self, handed: Sequence[CLI] = ()) -> dict[str, Grammar]:
+        """The grammar each command name is read by: a command tree's
+        (``_cli_grammars``), else the built-in command's spec, as the
+        line reader picks one.
+
+        Args:
+            handed (Sequence[CLI]): the trees a mount about to be added
+                will serve.
+        """
+        return {**BUILTIN_GRAMMARS, **self._cli_grammars(handed)}
+
+    def _cli_grammars(self, handed: Sequence[CLI] = ()) -> dict[str, Grammar]:
+        """The grammar of each command tree, keyed by head word: an
+        installed CLI's, else the first one a mount serves, as lookup
+        resolves the name, holding every other tree a mount serves under
+        that name in ``others``, since the line's mount picks which one
+        reads it.
 
         Read at ``create_session`` rather than at compile time because a
         CLI is registered on the workspace after it is built.
+
+        Args:
+            handed (Sequence[CLI]): the trees a mount about to be added
+                will serve.
         """
+        served: dict[str, list[CLI]] = {}
+        mounted = [mount.served_trees() for mount in self._registry.mounts()]
+        for trees in (*mounted, {cli.spec.name: cli for cli in handed}):
+            for name, cli in trees.items():
+                held = served.setdefault(name, [])
+                if all(cli.spec is not other.spec for other in held):
+                    held.append(cli)
+        for name, install in self._registry.clis.items().items():
+            served[name] = [install.cli]
         return {
-            name: frozenset(
-                child.name for child in (install.cli.spec.subcommands or ())
+            name: replace(
+                _tree_grammar(first), others=tuple(map(_tree_grammar, rest))
             )
-            for name, install in self._registry.clis.items().items()
+            for name, (first, *rest) in served.items()
         }
 
     def _base_profile(
@@ -2719,22 +2841,29 @@ class Workspace:
 
     def _compile(
         self,
-        effective: SessionProfile | None,
+        base: SessionProfile | None,
         profile: str | SessionProfile | None,
+        inline: SessionProfile | None = None,
+        defer: bool = True,
     ) -> CompiledProfile:
         """A session's profile compiled over the workspace's
         ``processes``, the one way a profile reaches a session.
 
         Args:
-            effective (SessionProfile | None): the profile with any
-                inline document added.
+            base (SessionProfile | None): the resolved profile.
             profile (str | SessionProfile | None): what the caller
                 named, for the profile's name.
+            inline (SessionProfile | None): the inline document
+                ``create_session`` adds.
+            defer (bool): keep a command no grammar reads yet as
+                written, where a CLI may still be registered; a session
+                being created refuses its options and subcommands.
         """
         return compile_profile(
-            effective,
+            with_inline(base, inline, self._workspace_processes),
             self._profile_name(profile),
             self._workspace_processes,
+            command_rules(base, inline, self._grammars(), defer),
         )
 
     def _profile_name(
@@ -2792,9 +2921,7 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
-        check_cli_verbs(
-            self._compile(doc, name).policies.commands, self._cli_verbs()
-        )
+        self._compile(doc, name)
         self._profiles[name] = doc
 
     async def set_session_profile(
@@ -2818,8 +2945,9 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        compiled = self._compile(self._base_profile(profile), profile)
-        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
+        compiled = self._compile(
+            self._base_profile(profile), profile, defer=False
+        )
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:

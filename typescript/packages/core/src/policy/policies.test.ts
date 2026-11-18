@@ -42,6 +42,7 @@ import {
   decisionOf,
   renderDeny,
 } from './policies.ts'
+import { SessionProfile } from './profile.ts'
 import { scriptContext } from './script.ts'
 import { Outcome, type PolicyCaller, type RouteContext } from './types.ts'
 import type {
@@ -227,7 +228,7 @@ function recordPaths(node: Record<string, unknown>): unknown[] {
 }
 
 function executableWorkspace(
-  deny?: readonly CommandRule[],
+  commands?: Record<string, unknown>,
   policies?: readonly Policy[],
   machines?: Runtime[],
 ): Workspace {
@@ -236,7 +237,7 @@ function executableWorkspace(
     { '/data/': ram },
     {
       mode: MountMode.WRITE,
-      ...(deny ? { profiles: { default: { commands: { allow: null, ask: [], deny } } } } : {}),
+      ...(commands ? { profiles: { default: SessionProfile({ commands }) } } : {}),
       ...(policies ? { policies } : {}),
       ...(machines ? { machines } : {}),
     },
@@ -304,8 +305,8 @@ describe('Policies', () => {
       { '/data/': new RAMVFS() },
       { mode: MountMode.WRITE, policies: [refusesTargetStat] },
     )
-    const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
-    ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
+    const rule = { decision: 'deny', reason: 'sealed', paths: ['/data/sec/*'] }
+    ws.createSession('agent', { profile: SessionProfile({ commands: { '*': rule } }) })
     try {
       await ws.shell(
         'mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; ' +
@@ -395,8 +396,8 @@ describe('Policies', () => {
     // and no other operand is read.
     const ram = new StallingStat()
     const ws = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE })
-    const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
-    ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
+    const rule = { decision: 'deny', reason: 'sealed', paths: ['/data/sec/*'] }
+    ws.createSession('agent', { profile: SessionProfile({ commands: { '*': rule } }) })
     try {
       await ws.shell('mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b')
       ram.armed = true
@@ -526,13 +527,9 @@ describe('workspace policies', () => {
   })
 
   it('guards refuse before backend I/O and leave other paths open', async () => {
-    const ws = executableWorkspace([
-      {
-        reason: 'production data is protected',
-        commands: ['rm'],
-        paths: ['/data/prod/*'],
-      },
-    ])
+    const ws = executableWorkspace({
+      rm: { decision: 'deny', reason: 'production data is protected', paths: ['/data/prod/*'] },
+    })
     try {
       await ws.shell('mkdir -p /data/prod && echo keep > /data/prod/x.txt')
       const refused = await ws.shell('rm /data/prod/x.txt')
@@ -589,10 +586,10 @@ describe('workspace policies', () => {
     // source is a dispatch-level shell builtin and touch is
     // namespace-routed; neither reaches handleCommand, so this pins
     // the method at the dispatch chokepoint.
-    const ws = executableWorkspace([
-      { reason: 'disabled', commands: ['source'] },
-      { reason: 'frozen', commands: ['touch'], paths: ['/data/prod/*'] },
-    ])
+    const ws = executableWorkspace({
+      source: { decision: 'deny', reason: 'disabled' },
+      touch: { decision: 'deny', reason: 'frozen', paths: ['/data/prod/*'] },
+    })
     try {
       const refused = await ws.shell('source /data/setup.sh')
       expect(refused.exitCode).toBe(126)
@@ -602,6 +599,7 @@ describe('workspace policies', () => {
         reason: 'disabled',
         policy: 'PermissionsPolicy',
         askId: null,
+        matched: { command: ['source'], flags: [], keys: [] },
       })
       const frozen = await ws.shell('touch /data/prod/x')
       expect(frozen.exitCode).toBe(1)
@@ -619,9 +617,9 @@ describe('workspace policies', () => {
   it('guards cover path-valued flags', async () => {
     // shuf discovers its output path from -o, not a positional
     // operand; the policy context must include flag-valued paths.
-    const ws = executableWorkspace([
-      { reason: 'prod is protected', commands: ['shuf'], paths: ['/data/prod/*'] },
-    ])
+    const ws = executableWorkspace({
+      shuf: { decision: 'deny', reason: 'prod is protected', paths: ['/data/prod/*'] },
+    })
     try {
       await ws.shell('mkdir -p /data/prod')
       const refused = await ws.shell('shuf -e a -o /data/prod/out')
@@ -629,24 +627,6 @@ describe('workspace policies', () => {
       expect(refused.decision?.reason).toBe('prod is protected')
       const listing = await ws.shell('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('path guards hold at the programmatic entry point', async () => {
-    // ws.dispatch is the one TS dispatcher (FUSE routes through it); a
-    // path-only guard must refuse it, not just shell commands (#675).
-    const ws = executableWorkspace([{ reason: 'prod is protected', paths: ['/data/prod/*'] }])
-    try {
-      await ws.shell('mkdir -p /data/other')
-      await ws.dispatch('write', '/data/other/ok.txt', [new TextEncoder().encode('fine')])
-      await expect(
-        ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('nope')]),
-      ).rejects.toThrow(PolicyDenied)
-      await expect(ws.dispatch('read', '/data/prod/x.txt')).rejects.toMatchObject({
-        decision: { reason: 'prod is protected' },
-      })
     } finally {
       await ws.close()
     }
@@ -1270,9 +1250,9 @@ describe('postCommand', () => {
       await ws.vfs.write('/data/a', 'a\n'.repeat(50000))
       await ws.vfs.write('/data/b', 'b\n'.repeat(3))
       ws.createSession('agent', {
-        profile: {
-          commands: { ask: [{ reason: 'b', commands: ['cat'], paths: ['/data/b'] }] },
-        },
+        profile: SessionProfile({
+          commands: { cat: { decision: 'ask', reason: 'b', paths: ['/data/b'] } },
+        }),
       })
       const line = 'cat /data/a /data/b | tail -c 4'
       const held = await ws.shell(line, { sessionId: 'agent' })

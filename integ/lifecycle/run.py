@@ -31,7 +31,7 @@ from typing import Any
 from mirage import ShellExecution
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_caller, set_current_session
 from mirage.errors import classify
@@ -62,7 +62,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 from mirage.shell.console import Channel, JobConsole
-from mirage.types import Limit, MountMode, PathSpec
+from mirage.types import Limit, MountMode, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
@@ -300,6 +300,17 @@ def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
     ]
 
 
+def matched_of(decision: PolicyDecision | None) -> dict[str, Any] | None:
+    """What fired in the profile rule that refused, as a case pins it."""
+    if decision is None or decision.matched is None:
+        return None
+    return {
+        "command": list(decision.matched.command),
+        "flags": list(decision.matched.flags),
+        "keys": list(decision.matched.keys),
+    }
+
+
 def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
     """An explanation as a case pins it: a VFS call's verdict, or a
     line's with its commands in the order the line reads them."""
@@ -308,6 +319,7 @@ def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
         "reason": expl.reason,
         "answers": answered(expl.answers),
         "decision": expl.decision.kind if expl.decision is not None else None,
+        "matched": matched_of(expl.decision),
     }
     if isinstance(expl, VfsExplanation):
         return {"call": expl.call, **verdict, "error": expl.error}
@@ -466,6 +478,29 @@ async def action(
         ) -> tuple[bytes, IOResult]:
             return out, IOResult()
 
+        verbs = step.get("verbs")
+        if verbs is not None:
+            ws.mount(step["path"]).register_commands(
+                [
+                    CLI(
+                        spec=CommandSpec(
+                            name=step["name"],
+                            subcommands=tuple(
+                                CommandSpec(
+                                    name=verb["name"],
+                                    aliases=tuple(verb.get("aliases", ())),
+                                    arguments=(Argument("words", nargs="*"),),
+                                )
+                                for verb in verbs
+                            ),
+                        ),
+                        handlers={
+                            verb["name"]: CLIHandler(answer) for verb in verbs
+                        },
+                    )
+                ]
+            )
+            return None
         ws.mount(step["path"]).register_commands(
             [
                 command(
@@ -545,6 +580,7 @@ async def action(
                     "decision": result.decision.reason
                     if result.decision
                     else None,
+                    "matched": matched_of(result.decision),
                 }
             except MirageAbortError:
                 value = {"aborted": True}
@@ -626,6 +662,7 @@ async def action(
             "stdout": await result.stdout_str(),
             "stderr": await result.stderr_str(),
             "decision": result.decision.reason if result.decision else None,
+            "matched": matched_of(result.decision),
         }
         if sink is not None:
             value["streamed"] = (await sink.snapshot(Channel.STDOUT)).decode()
