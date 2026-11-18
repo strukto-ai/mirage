@@ -39,11 +39,16 @@ from mirage.policy.constants import (
 from mirage.policy.types import (
     AdmissionRules,
     AllowFlags,
+    CommandNode,
     CommandRule,
     HideReason,
+    OptionRule,
+    Outcome,
     ProfileScript,
     ProfileScripts,
+    RuleLeaf,
     ScriptMethod,
+    ValueRule,
 )
 from mirage.rs.document import validate_document
 from mirage.runtime.types import ScriptSource
@@ -143,6 +148,149 @@ def _rules(v: Any, where: str) -> Any:
             )
         )
     return tuple(rules)
+
+
+def _read_leaves(raw: list[Any]) -> tuple[RuleLeaf, ...]:
+    return tuple(
+        RuleLeaf(
+            decision=Outcome(item["decision"]),
+            reason=item["reason"],
+            paths=tuple(item["paths"]),
+        )
+        for item in raw
+    )
+
+
+def _read_option(raw: Mapping[str, Any]) -> OptionRule:
+    return OptionRule(
+        decision=_read_leaves(raw["decision"]),
+        values={
+            word: ValueRule(
+                decision=_read_leaves(rule["decision"]),
+                options={
+                    name: _read_option(option)
+                    for name, option in rule["options"].items()
+                },
+            )
+            for word, rule in raw["values"].items()
+        },
+        options={
+            name: _read_option(option)
+            for name, option in raw["options"].items()
+        },
+    )
+
+
+def _read_node(raw: Mapping[str, Any]) -> CommandNode:
+    return CommandNode(
+        decision=_read_leaves(raw["decision"]),
+        subcommands={
+            name: _read_node(node) for name, node in raw["subcommands"].items()
+        },
+        options={
+            name: _read_option(option)
+            for name, option in raw["options"].items()
+        },
+        other_options=_read_leaves(raw["other_options"]),
+        operands={
+            word: _read_node(node) for word, node in raw["operands"].items()
+        },
+    )
+
+
+def command_tree(raw: Any, where: str = "commands") -> CommandNode:
+    """A ``commands`` block read into its tree, by mirage-rs's shape
+    check.
+
+    Names are taken as written; checking them against the commands'
+    grammars needs the workspace. A block in the old flat format (allow,
+    ask and deny lists) is refused with a message naming the new one.
+
+    Args:
+        raw (Any): the block as written, or a tree already read.
+        where (str): the block's name, for the messages.
+
+    Raises:
+        ValueError: the block is not a command tree.
+    """
+    if isinstance(raw, CommandNode):
+        return raw
+    return _read_node(validate_document("tree", raw, where))
+
+
+def _leaves_doc(leaves: tuple[RuleLeaf, ...]) -> Any:
+    docs = [
+        leaf.decision.value
+        if not leaf.reason and not leaf.paths
+        else {
+            "decision": leaf.decision.value,
+            **({"reason": leaf.reason} if leaf.reason else {}),
+            **({"paths": list(leaf.paths)} if leaf.paths else {}),
+        }
+        for leaf in leaves
+    ]
+    return docs[0] if len(docs) == 1 else docs
+
+
+def _value_doc(rule: ValueRule) -> Any:
+    if rule.decision and not rule.options:
+        return _leaves_doc(rule.decision)
+    doc: dict[str, Any] = {}
+    if rule.decision:
+        doc["*"] = _leaves_doc(rule.decision)
+    doc.update(
+        {name: _option_doc(option) for name, option in rule.options.items()}
+    )
+    return doc
+
+
+def _option_doc(rule: OptionRule) -> Any:
+    if rule.decision and not rule.values and not rule.options:
+        return _leaves_doc(rule.decision)
+    doc: dict[str, Any] = {}
+    if rule.decision:
+        doc["*"] = _leaves_doc(rule.decision)
+    if rule.values:
+        doc["values"] = {
+            word: _value_doc(value) for word, value in rule.values.items()
+        }
+    doc.update(
+        {name: _option_doc(option) for name, option in rule.options.items()}
+    )
+    return doc
+
+
+def _node_doc(node: CommandNode) -> Any:
+    if node.decision and not (
+        node.subcommands or node.options or node.other_options or node.operands
+    ):
+        return _leaves_doc(node.decision)
+    return tree_doc(node)
+
+
+def tree_doc(tree: CommandNode) -> dict[str, Any]:
+    """A command tree as the ``commands`` block that reads back to it,
+    each place in its shortest spelling.
+
+    Args:
+        tree (CommandNode): the tree, or one node of it.
+    """
+    doc: dict[str, Any] = {}
+    if tree.decision:
+        doc["*"] = _leaves_doc(tree.decision)
+    if tree.other_options:
+        doc["-*"] = _leaves_doc(tree.other_options)
+    doc.update(
+        {name: _option_doc(option) for name, option in tree.options.items()}
+    )
+    doc.update(
+        {name: _node_doc(node) for name, node in tree.subcommands.items()}
+    )
+    if tree.operands:
+        doc["operands"] = {
+            word: _node_doc(node) for word, node in tree.operands.items()
+        }
+    return doc
 
 
 def _parse_allow(v: Any) -> Any:

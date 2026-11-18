@@ -44,11 +44,13 @@ from mirage.policy.profile import (
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    command_tree,
     compile_program,
     profile_from_dict,
     profile_to_dict,
+    tree_doc,
 )
-from mirage.policy.types import CommandRule, HideReason
+from mirage.policy.types import CommandRule, HideReason, RuleLeaf
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
@@ -3456,3 +3458,89 @@ def test_a_rule_list_mixes_compiled_and_written_rules():
     assert block.deny[1].commands == ("mv",)
     with pytest.raises(ValidationError, match=re.escape("commands.deny[1]")):
         CommandsBlock(deny=[kept, {"commands": ["mv"], "paths": ["/x"]}])
+
+
+_TREE = {
+    "*": "allow",
+    "rm": {"decision": "ask", "reason": "Deletes need sign-off"},
+    "gh": {
+        "*": "deny",
+        "pr": {
+            "view": "allow",
+            "merge": {"*": "allow", "--admin": "deny"},
+        },
+    },
+    "curl": {
+        "--request": {
+            "values": {"DELETE": "deny", "POST": {"--insecure": "deny"}}
+        }
+    },
+    "git": {
+        "--force": "deny",
+        "checkout": {"operands": {"main": "deny", "release/*": "ask"}},
+    },
+    "cp": {
+        "*": [
+            "ask",
+            {"decision": "deny", "paths": ["/data/keep/*"], "reason": "kept"},
+        ],
+        "-*": "deny",
+        "--recursive": {"--force": "deny"},
+    },
+}
+
+
+def test_command_tree_reads_names_options_operands_and_values():
+    tree = command_tree(_TREE)
+    assert tree.decision == (RuleLeaf(Outcome.ALLOW),)
+    assert tree.subcommands["rm"].decision == (
+        RuleLeaf(Outcome.ASK, "Deletes need sign-off"),
+    )
+    merge = tree.subcommands["gh"].subcommands["pr"].subcommands["merge"]
+    assert merge.options["--admin"].decision == (RuleLeaf(Outcome.DENY),)
+    request = tree.subcommands["curl"].options["--request"]
+    assert request.decision == ()
+    assert request.values["POST"].options["--insecure"].decision == (
+        RuleLeaf(Outcome.DENY),
+    )
+    checkout = tree.subcommands["git"].subcommands["checkout"]
+    assert checkout.operands["release/*"].decision == (RuleLeaf(Outcome.ASK),)
+    cp = tree.subcommands["cp"]
+    assert cp.decision == (
+        RuleLeaf(Outcome.ASK),
+        RuleLeaf(Outcome.DENY, "kept", ("/data/keep/*",)),
+    )
+    assert cp.other_options == (RuleLeaf(Outcome.DENY),)
+    assert cp.options["--recursive"].options["--force"].decision == (
+        RuleLeaf(Outcome.DENY),
+    )
+
+
+def test_tree_doc_writes_the_block_it_reads_from():
+    tree = command_tree(_TREE)
+    assert tree_doc(tree) == _TREE
+    assert command_tree(tree_doc(tree)) == tree
+    spelled_long = {"gh": {"*": {"decision": "deny"}, "pr": {"*": "allow"}}}
+    assert tree_doc(command_tree(spelled_long)) == {
+        "gh": {"*": "deny", "pr": "allow"}
+    }
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ({"allow": ["git status"]}, "old flat format"),
+        ({"deny": [{"reason": "x", "paths": ["/s"]}]}, "old flat format"),
+        (
+            {"curl": {"--request": {"DELETE": "deny"}}},
+            "a value goes under values",
+        ),
+        ({"--force": "deny"}, "needs a command"),
+        ({"gh": {"pr": "allow", "operands": {"x": "deny"}}}, "operands sit"),
+        ({"rm": "maybe"}, "is no decision"),
+        ({"rm": []}, "lists no decision"),
+    ],
+)
+def test_command_tree_refuses_a_misshapen_block(block, message):
+    with pytest.raises(ValueError, match=message):
+        command_tree(block)

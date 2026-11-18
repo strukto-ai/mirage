@@ -603,6 +603,88 @@ class AdmissionRules:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleLeaf:
+    """One decision a command tree states at one place.
+
+    A leaf with paths speaks only for a path it covers; for any other
+    path it says nothing, and the decision from higher up applies.
+
+    Args:
+        decision (Outcome): allow, ask or deny.
+        reason (str): why, carried on a refusal or an ask; empty for the
+            default reason.
+        paths (tuple[str, ...]): the paths it covers, in the document's
+            path grammar; empty covers every path.
+    """
+
+    decision: Outcome
+    reason: str = ""
+    paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ValueRule:
+    """What one value of an option decides.
+
+    Args:
+        decision (tuple[RuleLeaf, ...]): what the value decides, in
+            place of its option's own decision.
+        options (Mapping[str, OptionRule]): options that must also be on
+            the line, by canonical name.
+    """
+
+    decision: tuple[RuleLeaf, ...] = ()
+    options: Mapping[str, "OptionRule"] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class OptionRule:
+    """What an option decides at its node and below it.
+
+    Args:
+        decision (tuple[RuleLeaf, ...]): what the option decides on its
+            own.
+        values (Mapping[str, ValueRule]): its values, each key a shell
+            glob over the value the line gives.
+        options (Mapping[str, OptionRule]): options that must also be on
+            the line, by canonical name.
+    """
+
+    decision: tuple[RuleLeaf, ...] = ()
+    values: Mapping[str, ValueRule] = field(default_factory=dict)
+    options: Mapping[str, "OptionRule"] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandNode:
+    """One node of a profile's command tree: the root, a command, a
+    subcommand, or an operand under one.
+
+    The root's ``subcommands`` are the commands, and its ``decision`` is
+    the root ``"*"``, every command the tree does not name. ``operands``
+    sit only on a node without subcommands.
+
+    Args:
+        decision (tuple[RuleLeaf, ...]): the node's own decision, the
+            ``"*"`` of its mapping; empty when it states none.
+        subcommands (Mapping[str, CommandNode]): its subcommands, by
+            canonical name.
+        options (Mapping[str, OptionRule]): its options, by canonical
+            name, applying here and below.
+        other_options (tuple[RuleLeaf, ...]): the ``"-*"`` entry, for an
+            option on the line that no entry on the walk names.
+        operands (Mapping[str, CommandNode]): the next operand, each key
+            a shell glob over the word the line gives.
+    """
+
+    decision: tuple[RuleLeaf, ...] = ()
+    subcommands: Mapping[str, "CommandNode"] = field(default_factory=dict)
+    options: Mapping[str, OptionRule] = field(default_factory=dict)
+    other_options: tuple[RuleLeaf, ...] = ()
+    operands: Mapping[str, "CommandNode"] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ProfileScript:
     """One program of a profile's policy, as a session carries it: the
     program, the runtime it runs on, and the profile it speaks for.

@@ -42,11 +42,15 @@ import {
 import {
   type AdmissionRules,
   AllowFlags,
+  type CommandNode,
   type CommandRule,
   type HideReason,
+  type OptionRule,
   type ProfileScript,
   type ProfileScripts,
+  type RuleLeaf,
   type ScriptMethod,
+  type ValueRule,
 } from './types.ts'
 
 /**
@@ -329,6 +333,137 @@ function underMount(entries: readonly string[], root: string, where: string): vo
 function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
   const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
   return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
+}
+
+interface ValueDoc {
+  decision: RuleLeaf[]
+  options: Record<string, OptionDoc>
+}
+
+interface OptionDoc {
+  decision: RuleLeaf[]
+  values: Record<string, ValueDoc>
+  options: Record<string, OptionDoc>
+}
+
+interface NodeDoc {
+  decision: RuleLeaf[]
+  subcommands: Record<string, NodeDoc>
+  options: Record<string, OptionDoc>
+  other_options: RuleLeaf[]
+  operands: Record<string, NodeDoc>
+}
+
+function readLeaves(raw: readonly RuleLeaf[]): readonly RuleLeaf[] {
+  return raw.map((item) => ({ decision: item.decision, reason: item.reason, paths: item.paths }))
+}
+
+function readOption(raw: OptionDoc): OptionRule {
+  return {
+    decision: readLeaves(raw.decision),
+    values: new Map(
+      Object.entries(raw.values).map(([word, rule]) => [
+        word,
+        {
+          decision: readLeaves(rule.decision),
+          options: new Map(
+            Object.entries(rule.options).map(([name, option]) => [name, readOption(option)]),
+          ),
+        },
+      ]),
+    ),
+    options: new Map(
+      Object.entries(raw.options).map(([name, option]) => [name, readOption(option)]),
+    ),
+  }
+}
+
+function readNode(raw: NodeDoc): CommandNode {
+  return {
+    decision: readLeaves(raw.decision),
+    subcommands: new Map(
+      Object.entries(raw.subcommands).map(([name, node]) => [name, readNode(node)]),
+    ),
+    options: new Map(
+      Object.entries(raw.options).map(([name, option]) => [name, readOption(option)]),
+    ),
+    otherOptions: readLeaves(raw.other_options),
+    operands: new Map(Object.entries(raw.operands).map(([word, node]) => [word, readNode(node)])),
+  }
+}
+
+/**
+ * A `commands` block read into its tree, by mirage-rs's shape check.
+ * Names are taken as written; checking them against the commands'
+ * grammars needs the workspace. A block in the old flat format (allow,
+ * ask and deny lists) is refused with a message naming the new one.
+ */
+export function commandTree(raw: unknown, where = 'commands'): CommandNode {
+  if (isPlainObject(raw) && raw.subcommands instanceof Map) return raw as unknown as CommandNode
+  return readNode(validateDocument('tree', raw, where) as NodeDoc)
+}
+
+function leavesDoc(leaves: readonly RuleLeaf[]): unknown {
+  const docs = leaves.map((leaf) =>
+    leaf.reason === '' && leaf.paths.length === 0
+      ? leaf.decision
+      : {
+          decision: leaf.decision,
+          ...(leaf.reason === '' ? {} : { reason: leaf.reason }),
+          ...(leaf.paths.length === 0 ? {} : { paths: [...leaf.paths] }),
+        },
+  )
+  return docs.length === 1 ? docs[0] : docs
+}
+
+function valueDoc(rule: ValueRule): unknown {
+  if (rule.decision.length > 0 && rule.options.size === 0) return leavesDoc(rule.decision)
+  const doc: [string, unknown][] = []
+  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  for (const [name, option] of rule.options) doc.push([name, optionDoc(option)])
+  return Object.fromEntries(doc)
+}
+
+function optionDoc(rule: OptionRule): unknown {
+  if (rule.decision.length > 0 && rule.values.size === 0 && rule.options.size === 0)
+    return leavesDoc(rule.decision)
+  const doc: [string, unknown][] = []
+  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  if (rule.values.size > 0)
+    doc.push([
+      'values',
+      Object.fromEntries([...rule.values].map(([word, value]) => [word, valueDoc(value)])),
+    ])
+  for (const [name, option] of rule.options) doc.push([name, optionDoc(option)])
+  return Object.fromEntries(doc)
+}
+
+function nodeDoc(node: CommandNode): unknown {
+  const bare =
+    node.subcommands.size === 0 &&
+    node.options.size === 0 &&
+    node.otherOptions.length === 0 &&
+    node.operands.size === 0
+  if (node.decision.length > 0 && bare) return leavesDoc(node.decision)
+  return treeDoc(node)
+}
+
+/**
+ * A command tree as the `commands` block that reads back to it, each
+ * place in its shortest spelling.
+ */
+export function treeDoc(tree: CommandNode): Record<string, unknown> {
+  const doc: [string, unknown][] = []
+  if (tree.decision.length > 0) doc.push(['*', leavesDoc(tree.decision)])
+  if (tree.otherOptions.length > 0) doc.push(['-*', leavesDoc(tree.otherOptions)])
+  for (const [name, option] of tree.options) doc.push([name, optionDoc(option)])
+  for (const [name, node] of tree.subcommands) doc.push([name, nodeDoc(node)])
+  if (tree.operands.size > 0)
+    doc.push([
+      'operands',
+      Object.fromEntries([...tree.operands].map(([word, node]) => [word, nodeDoc(node)])),
+    ])
+  return Object.fromEntries(doc)
 }
 
 /**

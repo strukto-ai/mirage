@@ -18,6 +18,7 @@ import { MountMode } from '../types.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import {
   CommandsBlock,
+  commandTree,
   compileProgram,
   parseProfileMounts,
   parseProfilePolicy,
@@ -25,7 +26,9 @@ import {
   ProfileMount,
   profileToDict,
   SessionProfile,
+  treeDoc,
 } from './profile.ts'
+import { Outcome, type RuleLeaf } from './types.ts'
 
 const mountSection = (raw: unknown): unknown => ProfileMount(raw, '/repo', 'mounts[/repo]')
 
@@ -578,4 +581,68 @@ it('refuses an explicit null command reason', () => {
   expect(() => CommandsBlock({ deny: [{ commands: ['rm'], reason: null }] })).toThrow(
     'reason must be a string',
   )
+})
+
+const TREE = {
+  '*': 'allow',
+  rm: { decision: 'ask', reason: 'Deletes need sign-off' },
+  gh: { '*': 'deny', pr: { view: 'allow', merge: { '*': 'allow', '--admin': 'deny' } } },
+  curl: { '--request': { values: { DELETE: 'deny', POST: { '--insecure': 'deny' } } } },
+  git: { '--force': 'deny', checkout: { operands: { main: 'deny', 'release/*': 'ask' } } },
+  cp: {
+    '*': ['ask', { decision: 'deny', paths: ['/data/keep/*'], reason: 'kept' }],
+    '-*': 'deny',
+    '--recursive': { '--force': 'deny' },
+  },
+}
+
+const leaf = (decision: Outcome, reason = '', paths: string[] = []): RuleLeaf => ({
+  decision,
+  reason,
+  paths,
+})
+
+describe('commandTree', () => {
+  it('reads names, options, operands and values', () => {
+    const tree = commandTree(TREE)
+    expect(tree.decision).toEqual([leaf(Outcome.ALLOW)])
+    expect(tree.subcommands.get('rm')?.decision).toEqual([
+      leaf(Outcome.ASK, 'Deletes need sign-off'),
+    ])
+    const merge = tree.subcommands.get('gh')?.subcommands.get('pr')?.subcommands.get('merge')
+    expect(merge?.options.get('--admin')?.decision).toEqual([leaf(Outcome.DENY)])
+    const request = tree.subcommands.get('curl')?.options.get('--request')
+    expect(request?.decision).toEqual([])
+    expect(request?.values.get('POST')?.options.get('--insecure')?.decision).toEqual([
+      leaf(Outcome.DENY),
+    ])
+    const checkout = tree.subcommands.get('git')?.subcommands.get('checkout')
+    expect(checkout?.operands.get('release/*')?.decision).toEqual([leaf(Outcome.ASK)])
+    const cp = tree.subcommands.get('cp')
+    expect(cp?.decision).toEqual([leaf(Outcome.ASK), leaf(Outcome.DENY, 'kept', ['/data/keep/*'])])
+    expect(cp?.otherOptions).toEqual([leaf(Outcome.DENY)])
+    expect(cp?.options.get('--recursive')?.options.get('--force')?.decision).toEqual([
+      leaf(Outcome.DENY),
+    ])
+  })
+
+  it('writes the block it reads from', () => {
+    const tree = commandTree(TREE)
+    expect(treeDoc(tree)).toEqual(TREE)
+    expect(commandTree(treeDoc(tree))).toEqual(tree)
+    const spelledLong = { gh: { '*': { decision: 'deny' }, pr: { '*': 'allow' } } }
+    expect(treeDoc(commandTree(spelledLong))).toEqual({ gh: { '*': 'deny', pr: 'allow' } })
+  })
+
+  it.each([
+    [{ allow: ['git status'] }, 'old flat format'],
+    [{ deny: [{ reason: 'x', paths: ['/s'] }] }, 'old flat format'],
+    [{ curl: { '--request': { DELETE: 'deny' } } }, 'a value goes under values'],
+    [{ '--force': 'deny' }, 'needs a command'],
+    [{ gh: { pr: 'allow', operands: { x: 'deny' } } }, 'operands sit'],
+    [{ rm: 'maybe' }, 'is no decision'],
+    [{ rm: [] }, 'lists no decision'],
+  ])('refuses a misshapen block %#', (block, message) => {
+    expect(() => commandTree(block)).toThrow(message)
+  })
 })

@@ -497,6 +497,55 @@ export interface AdmissionRules {
 }
 
 /**
+ * One decision a command tree states at one place. A leaf with paths
+ * speaks only for a path it covers; for any other path it says nothing,
+ * and the decision from higher up applies. An empty reason is the
+ * default one.
+ */
+export interface RuleLeaf {
+  readonly decision: Outcome
+  readonly reason: string
+  readonly paths: readonly string[]
+}
+
+/**
+ * What one value of an option decides, in place of its option's own
+ * decision, and the options that must also be on the line, by canonical
+ * name.
+ */
+export interface ValueRule {
+  readonly decision: readonly RuleLeaf[]
+  readonly options: ReadonlyMap<string, OptionRule>
+}
+
+/**
+ * What an option decides at its node and below it: on its own, by its
+ * values (each key a shell glob over the value the line gives), and with
+ * options that must also be on the line.
+ */
+export interface OptionRule {
+  readonly decision: readonly RuleLeaf[]
+  readonly values: ReadonlyMap<string, ValueRule>
+  readonly options: ReadonlyMap<string, OptionRule>
+}
+
+/**
+ * One node of a profile's command tree: the root, a command, a
+ * subcommand, or an operand under one. The root's `subcommands` are the
+ * commands and its `decision` the root `"*"`. `otherOptions` is the
+ * `"-*"` entry, for an option on the line no entry on the walk names;
+ * `operands` keys are shell globs over the next operand, and sit only on
+ * a node without subcommands.
+ */
+export interface CommandNode {
+  readonly decision: readonly RuleLeaf[]
+  readonly subcommands: ReadonlyMap<string, CommandNode>
+  readonly options: ReadonlyMap<string, OptionRule>
+  readonly otherOptions: readonly RuleLeaf[]
+  readonly operands: ReadonlyMap<string, CommandNode>
+}
+
+/**
  * The one session question the permissions policy asks. The
  * SessionManager satisfies it structurally, so the policy reads the
  * rules by session id without this package importing the workspace.
