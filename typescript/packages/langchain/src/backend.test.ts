@@ -255,6 +255,39 @@ describe('LangchainWorkspace.ls', () => {
     expect(fileEntry?.is_dir).toBe(false)
   })
 
+  it('follows directory links and lists dangling links', async () => {
+    const ws = mkWs()
+    const backend = new LangchainWorkspace(ws)
+    await backend.write('/data/dir/file', 'hello')
+    await ws.vfs.symlink('/data/dir-link', 'dir')
+    await ws.vfs.symlink('/data/file-link', 'dir/file')
+    await ws.vfs.symlink('/data/dangling', 'missing')
+    expect(await backend.ls('/data')).toEqual({
+      files: [
+        { path: '/data/dangling', is_dir: false },
+        { path: '/data/dir', is_dir: true },
+        { path: '/data/dir-link', is_dir: true },
+        { path: '/data/file-link', is_dir: false },
+      ],
+    })
+    ws.createSession('agent')
+    const agent = new LangchainWorkspace(ws, { sessionId: 'agent' })
+    await agent.execute('cd /data')
+    expect((await agent.ls('.')).files).toContainEqual({ path: './dir-link', is_dir: true })
+  })
+
+  it('rejects an incomplete filename when ls hits its byte limit', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { ls: new Limit({ maxBytes: 3 }) } },
+    )
+    const backend = new LangchainWorkspace(ws)
+    await backend.write('/data/report.txt', 'hello')
+    const listed = await backend.ls('/data')
+    expect(listed.files).toBeUndefined()
+    expect(listed.error).toContain('output truncated at limit')
+  })
+
   it('handles paths with single quotes via shellQuote', async () => {
     const ws = mkWs()
     await ws.vfs.mkdir("/it's a dir")

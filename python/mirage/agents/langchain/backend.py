@@ -49,7 +49,8 @@ from mirage.agents.langchain.convert import (
 from mirage.bridge.sync import on_owner_loop
 from mirage.commands.builtin.utils.limit import TRUNCATION_NOTICE
 from mirage.io.types import IOResult
-from mirage.workspace.files import Files
+from mirage.utils.path import resolve_path
+from mirage.workspace.files import Files, reader_of
 from mirage.workspace.tools.io_text import replace_text, with_decision
 from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
@@ -131,8 +132,8 @@ async def _command_error(
 class LangchainWorkspace(SandboxBackendProtocol):
     """Deep Agents backend backed by a Mirage Workspace.
 
-    File operations (read, write, edit, ls, upload, download) go through the
-    Files facade directly. Shell operations (execute, grep, glob, delete) go through
+    File operations (read, write, edit, upload, download) go through the
+    Files facade directly. Shell operations (execute, ls, grep, glob, delete) go through
     Workspace.shell() for pipe and flag support. Both run as the session,
     so its profile judges every call.
 
@@ -203,18 +204,32 @@ class LangchainWorkspace(SandboxBackendProtocol):
         io = await self._exec(
             f"ls -1Ap --zero --quoting-style=literal -- {shlex.quote(base + '/')}"
         )
-        stdout = await io.stdout_str()
         error = await _command_error(io)
         if error:
             return LsResult(error=error)
-        result = [
-            FileInfo(
-                path=f"{base}/{name.removesuffix('/')}",
-                is_dir=name.endswith("/"),
-            )
-            for name in stdout.split("\0")
-            if name
-        ]
+        if await _capped(io):
+            return LsResult(error=(await io.stderr_str()).strip())
+        entries = (await io.stdout_str()).split("\0")
+        if entries.pop():
+            return LsResult(error="Incomplete directory listing")
+
+        ops = self._vfs
+        cwd = self._ws.get_session(
+            self._session_id or self._ws.default_session_id
+        ).cwd
+        directory = resolve_path(base or "/", cwd)
+        links = reader_of(ops).link_names_under(directory)
+        result = []
+        try:
+            for entry in entries:
+                name = entry.removesuffix("/")
+                is_dir = entry.endswith("/") or (
+                    name in links
+                    and await ops.is_dir(f"{directory.rstrip('/')}/{name}")
+                )
+                result.append(FileInfo(path=f"{base}/{name}", is_dir=is_dir))
+        except (OSError, ValueError) as exc:
+            return LsResult(error=str(exc))
         return LsResult(entries=result)
 
     # ── read ─────────────────────────────────────────────────

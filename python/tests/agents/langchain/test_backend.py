@@ -495,6 +495,44 @@ async def test_als(backend):
 
 
 @pytest.mark.asyncio
+async def test_als_follows_directory_links(backend, workspace):
+    await backend.awrite("/data/dir/file", "hello")
+    await workspace.vfs.symlink("/data/dir-link", "dir")
+    await workspace.vfs.symlink("/data/file-link", "dir/file")
+    await workspace.vfs.symlink("/data/dangling", "missing")
+    listed = await backend.als("/data")
+    assert listed.error is None
+    assert {row["path"]: row["is_dir"] for row in listed.entries or []} == {
+        "/data/dir": True,
+        "/data/dir-link": True,
+        "/data/file-link": False,
+        "/data/dangling": False,
+    }
+    workspace.create_session("agent")
+    agent = LangchainWorkspace(workspace, session_id="agent")
+    await agent.aexecute("cd /data")
+    relative = await agent.als(".")
+    assert {"path": "./dir-link", "is_dir": True} in (relative.entries or [])
+
+
+@pytest.mark.asyncio
+async def test_als_rejects_a_partial_name():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"ls": Limit(max_bytes=3)},
+    )
+    try:
+        backend = LangchainWorkspace(ws)
+        await backend.awrite("/data/report.txt", "hello")
+        listed = await backend.als("/data")
+        assert listed.entries is None
+        assert "output truncated at limit" in (listed.error or "")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_als_reports_command_errors(backend):
     result = await backend.als("/missing")
 

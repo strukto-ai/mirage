@@ -17,9 +17,10 @@ import { TRUNCATION_NOTICE } from '@struktoai/mirage-core/commands/builtin/utils
 import type { Workspace } from '@struktoai/mirage-node'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
+import { resolvePath } from '@struktoai/mirage-core/utils/path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { readerOf, type Files } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import picomatch from 'picomatch'
 import { normalizeReadPagination } from 'deepagents'
@@ -157,11 +158,25 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     )
     const error = commandError(io)
     if (error !== undefined) return { error }
+    if (capped(io)) return { error: io.stderrText.trim() }
+    const entries = io.stdoutText.split('\0')
+    if (entries.pop()) return { error: 'Incomplete directory listing' }
+
+    const vfs = this.vfs
+    const cwd = this.ws.getSession(this.sessionId ?? this.ws.defaultSessionId).cwd
+    const directory = resolvePath(base || '/', cwd)
+    const links = readerOf(vfs).linkNamesUnder(directory)
     const files: FileInfo[] = []
-    for (const name of io.stdoutText.split('\0')) {
-      if (name === '') continue
-      const isDir = name.endsWith('/')
-      files.push({ path: `${base}/${isDir ? name.slice(0, -1) : name}`, is_dir: isDir })
+    try {
+      for (const entry of entries) {
+        const name = rstripSlash(entry)
+        const isDir =
+          entry.endsWith('/') ||
+          (links.has(name) && (await vfs.isDir(`${rstripSlash(directory)}/${name}`)))
+        files.push({ path: `${base}/${name}`, is_dir: isDir })
+      }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
     }
     return { files }
   }
