@@ -269,7 +269,9 @@ FIFO_NAME = "fd"
 # writes is the program's, with its start in clock ticks, on stderr behind
 # ``RUN_PID_MARK`` ahead of anything the program writes; once the program
 # exits its status follows behind ``run_exit_mark``, so the exec that runs
-# the program brings both back itself. A shell reports
+# the program brings both back itself, and stdout ends what the program
+# wrote with the same status behind ``run_done_mark``, so a reader knows
+# when that output has all arrived. A shell reports
 # a child a signal ended on its stderr, so the wrapper's goes nowhere and
 # the program gets the real one back. It needs only a POSIX shell at
 # ``/bin/sh``.
@@ -279,7 +281,8 @@ RUN_WRAPPER = (
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
     'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
-    's=$?; printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+    's=$?; printf "\\036mirage-done %s %s\\n" "$n" "$s"; '
+    'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 )
 
 # Where a run's program starts in what ``run_argv`` builds: past
@@ -291,6 +294,8 @@ RUN_PROGRAM_AT = 6
 # stderr, a record separator first so no program's output starts with it.
 RUN_PID_MARK = b"\x1emirage-pid "
 RUN_EXIT_MARK = b"\x1emirage-exit "
+# The mark ahead of the line that ends a program's stdout.
+RUN_DONE_MARK = b"\x1emirage-done "
 # The most digits an exit status has, 0 to 255.
 EXIT_DIGITS = 3
 # How much of stderr may come ahead of that line, the exec client's own
@@ -498,6 +503,16 @@ def run_argv(tag: str, nonce: str, argv: Sequence[str]) -> tuple[str, ...]:
         f"{PROCESS}={tag}",
         *argv,
     )
+
+
+def run_done_mark(nonce: str) -> bytes:
+    """What the line that ends one run's stdout starts with:
+    ``RUN_DONE_MARK`` and the run's own word (``run_exit_mark``).
+
+    Args:
+        nonce (str): the run's own word (``run_argv``).
+    """
+    return RUN_DONE_MARK + nonce.encode() + b" "
 
 
 def run_exit_mark(nonce: str) -> bytes:

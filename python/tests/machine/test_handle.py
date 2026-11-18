@@ -39,6 +39,7 @@ from mirage.machine.constants import (
     faketime_probe,
     fifo_line,
     is_run,
+    run_done_mark,
     run_exit_mark,
     run_tag,
     stop_line,
@@ -922,9 +923,11 @@ class ExitsFirstBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"0\n")
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"0\n")
         for _ in range(200):
             await output(b"x" * 4096)
+        await output(run_done_mark(nonce) + b"0\n")
         return RunResult(exit_code=0)
 
 
@@ -957,7 +960,9 @@ class LogsOnBox(RecordingMachine):
             return await super()._exec_argv(
                 argv, stdin, env, cwd, output, errors
             )
-        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"3\n")
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"3\n")
+        await output(b"main\n" + run_done_mark(nonce) + b"3\n")
         while True:
             await output(b"log\n")
             await asyncio.sleep(0.1)
@@ -973,7 +978,43 @@ async def test_a_run_ends_while_what_it_left_running_keeps_writing():
         async with asyncio.timeout(5):
             io = await ws.shell("train")
         assert io.exit_code == 3
-        assert (await materialize(io.stdout)).startswith(b"log\n")
+        assert (await materialize(io.stdout)).startswith(b"main\nlog\n")
+    finally:
+        await ws.close()
+
+
+class SpacedBox(RecordingMachine):
+    """A program that has exited while its last output still comes over
+    the transport in chunks 50 ms apart, the exec held open after it."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        nonce = argv[RUN_PROGRAM_AT - 2]
+        await errors(run_exit_mark(nonce) + b"0\n")
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            await output(b"x" * 4096)
+        await output(run_done_mark(nonce) + b"0\n")
+        await asyncio.Event().wait()
+
+
+# Output the program wrote still arriving in spaced chunks after its exit
+# line all comes before the run is let go: the line ending its stdout says
+# when it has.
+@pytest.mark.asyncio
+async def test_a_run_waits_for_the_end_of_what_its_program_wrote():
+    box = SpacedBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(10):
+            io = await ws.shell("train | wc -c")
+        assert (io.exit_code, await materialize(io.stdout)) == (
+            0,
+            b"163840\n",
+        )
     finally:
         await ws.close()
 

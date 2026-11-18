@@ -37,6 +37,7 @@ import {
   RUN_PID_HOLD,
   RUN_PID_MARK,
   RUN_PROGRAM_AT,
+  runDoneMark,
   runExitMark,
   runTag,
   stopLine,
@@ -1007,9 +1008,10 @@ class ExitsFirstBox extends RecordingMachine {
     errors: OutputFn,
   ): Promise<RunResult> {
     if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
-    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
-    await errors(new Uint8Array([...mark, ...ENC.encode('0\n')]))
+    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('0\n')]))
     for (let i = 0; i < 200; i++) await output(new Uint8Array(4096).fill(120))
+    await output(new Uint8Array([...runDoneMark(nonce), ...ENC.encode('0\n')]))
     return { exitCode: 0 }
   }
 }
@@ -1041,8 +1043,11 @@ class LogsOnBox extends RecordingMachine {
     signal?: AbortSignal,
   ): Promise<RunResult> {
     if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
-    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
-    await errors(new Uint8Array([...mark, ...ENC.encode('3\n')]))
+    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('3\n')]))
+    await output(
+      new Uint8Array([...ENC.encode('main\n'), ...runDoneMark(nonce), ...ENC.encode('3\n')]),
+    )
     while (signal?.aborted !== true) {
       await output(ENC.encode('log\n'))
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -1059,11 +1064,53 @@ it('ends a run while what it left running keeps writing', async () => {
   try {
     const io = await ws.shell('train')
     expect(io.exitCode).toBe(3)
-    expect(DEC.decode(await materialize(io.stdout)).startsWith('log\n')).toBe(true)
+    expect(DEC.decode(await materialize(io.stdout)).startsWith('main\nlog\n')).toBe(true)
   } finally {
     await ws.close()
   }
 }, 5000)
+
+// A box whose program has exited while its last output still comes over the
+// transport in chunks 50 ms apart, the exec held open after it.
+class SpacedBox extends RecordingMachine {
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
+    const nonce = argv[RUN_PROGRAM_AT - 2] ?? ''
+    await errors(new Uint8Array([...runExitMark(nonce), ...ENC.encode('0\n')]))
+    for (let i = 0; i < 40; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await output(new Uint8Array(4096).fill(120))
+    }
+    await output(new Uint8Array([...runDoneMark(nonce), ...ENC.encode('0\n')]))
+    return new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(new Error('let go'))
+      })
+    })
+  }
+}
+
+// Output the program wrote still arriving in spaced chunks after its exit line
+// all comes before the run is let go: the line ending its stdout says when it
+// has.
+it('waits for the end of what its program wrote', async () => {
+  const box = new SpacedBox({ captures: ['train'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('train | wc -c')
+    expect([io.exitCode, DEC.decode(await materialize(io.stdout))]).toEqual([0, '163840\n'])
+  } finally {
+    await ws.close()
+  }
+}, 10000)
 
 // A box whose program, once stopped, exits 0 by its own trap while the exec
 // takes longer than the drain to answer the stop.

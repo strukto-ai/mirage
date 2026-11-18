@@ -50,6 +50,7 @@ import {
   faketimeProbe,
   resourcesLine,
   runArgv,
+  runDoneMark,
   runExitMark,
   scanLine,
   signalLine,
@@ -209,47 +210,32 @@ export class ExitLineFilter {
 }
 
 /**
- * How long a run's output has had nothing on its way since `restart`. A chunk
- * still being handed to its sink counts as on its way until the sink takes it,
- * and a pause between chunks shorter than `STOP_POLL_SECONDS` counts as none,
- * so a reader slow to take what the program wrote keeps the run, while what
- * the program left running writes now and then does not keep it forever.
- * Mirrors Python's `OutputWatch`.
+ * How long a run's output has been quiet. A chunk still being handed to its
+ * sink counts as moving until the sink takes it, so a reader slow to take what
+ * the program wrote never makes the output quiet. Mirrors Python's
+ * `OutputWatch`.
  */
 export class OutputWatch {
   private busy = 0
-  private freeSince = performance.now() / 1000
-  private idleSeconds = 0
+  private moved = performance.now() / 1000
 
-  /** `sink`, with each chunk handed to it counted as on its way. */
+  /** `sink`, with each chunk handed to it counted as moving. */
   watched(sink: OutputFn): OutputFn {
     return async (data) => {
-      if (this.busy === 0) this.idleSeconds += this.pause()
       this.busy += 1
+      this.moved = performance.now() / 1000
       try {
         await sink(data)
       } finally {
         this.busy -= 1
-        if (this.busy === 0) this.freeSince = performance.now() / 1000
+        this.moved = performance.now() / 1000
       }
     }
   }
 
-  /** Count from now, leaving out what the output did before. */
-  restart(): void {
-    this.idleSeconds = 0
-    this.freeSince = performance.now() / 1000
-  }
-
-  /** Seconds the output has had nothing on its way since `restart`. */
-  idle(): number {
-    return this.idleSeconds + (this.busy > 0 ? 0 : this.pause())
-  }
-
-  /** The current pause, or 0 when it is too short to count. */
-  private pause(): number {
-    const pause = performance.now() / 1000 - this.freeSince
-    return pause >= STOP_POLL_SECONDS ? pause : 0
+  /** Seconds since the output last moved; 0 while a chunk is still being handed on. */
+  quiet(): number {
+    return this.busy > 0 ? 0 : performance.now() / 1000 - this.moved
   }
 }
 
@@ -480,14 +466,19 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const exited = (code: number): void => {
       settle(code)
     }
+    let deliver: (code: number) => void = () => undefined
+    const drained = new Promise<number>((resolve) => {
+      deliver = resolve
+    })
     const pidLine = new PidLineFilter(errors, found, true)
     const exitLine = new ExitLineFilter(pidLine.write, exited, mark)
-    const filters: (ExitLineFilter | PidLineFilter)[] = [exitLine, pidLine]
-    let sink = output
+    const doneLine = new ExitLineFilter(output, deliver, runDoneMark(nonce))
+    let filters: (ExitLineFilter | PidLineFilter)[] = [exitLine, pidLine, doneLine]
+    let sink = doneLine.write
     if (this.joinsStreams) {
-      const outPid = new PidLineFilter(output, found, false)
+      const outPid = new PidLineFilter(doneLine.write, found, false)
       const outExit = new ExitLineFilter(outPid.write, exited, mark)
-      filters.push(outExit, outPid)
+      filters = [outExit, outPid, ...filters]
       sink = outExit.write
     }
     const watch = new OutputWatch()
@@ -502,7 +493,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     let done: RunResult
     try {
-      done = await this.outcome(execution, ended, watch, letGo, ctx.signal)
+      done = await this.outcome(execution, ended, drained, watch, letGo, ctx.signal)
       for (const filter of filters) await filter.finish()
     } catch (error) {
       if (ctx.signal?.aborted === true) {
@@ -531,15 +522,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * How a run ended: its exec's answer, or, when its exit line says its
    * program has exited while the exec stays open because something the
    * program left running holds its output, the status the line gave. That
-   * exec is let go once its output has had nothing on its way for
-   * `RUN_DRAIN_SECONDS` since the line (`OutputWatch`), so output a slow reader
-   * is still taking all arrives, and what the program left running stays. A run stopped meanwhile ends as stopped, whatever its
+   * exec is kept until the line that ends the program's stdout has been handed
+   * on (`drained`), so output a slow reader is still taking all arrives, then
+   * let go after `RUN_DRAIN_SECONDS`, and what the program left running stays. A
+   * stdout that never brings that line is waited on only until it has been
+   * quiet that long. A run stopped meanwhile ends as stopped, whatever its
    * program said as it went, as Python's cancelled `_outcome` does. Mirrors
    * Python's `_outcome`.
    */
   private async outcome(
     execution: Promise<RunResult>,
     ended: Promise<number>,
+    drained: Promise<number>,
     watch: OutputWatch,
     letGo: AbortController,
     signal?: AbortSignal,
@@ -550,11 +544,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     const code = await Promise.race([ended, closed])
     if (code === null) return execution
-    watch.restart()
-    for (let idle = watch.idle(); idle < RUN_DRAIN_SECONDS; idle = watch.idle()) {
-      const wait = Math.max(RUN_DRAIN_SECONDS - idle, STOP_POLL_SECONDS)
-      if (await settledWithin(execution, wait)) return execution
+    const either = Promise.race([closed, drained])
+    for (let quiet = watch.quiet(); quiet < RUN_DRAIN_SECONDS; quiet = watch.quiet()) {
+      const wait = Math.max(RUN_DRAIN_SECONDS - quiet, STOP_POLL_SECONDS)
+      if (await settledWithin(either, wait)) break
     }
+    if (await settledWithin(closed, 0)) return execution
+    const delivered = await settledWithin(drained, 0)
+    if (delivered && (await settledWithin(execution, RUN_DRAIN_SECONDS))) return execution
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
     signal?.throwIfAborted()
