@@ -77,14 +77,15 @@ export function readWire(read: CommandRead): Record<string, util.JSONType> {
 }
 
 /**
- * What a tree walks, in the stream's wire shape: the line's tokens, its
- * read when its grammar read it, and whether a tool runs it (a shell
- * function is no tool). Mirrors Python's line_words.
+ * What a tree walks, in the stream's wire shape: the line's read when
+ * its grammar read it, else its tokens, and whether a tool runs it (a
+ * shell function is no tool). A read already holds every word, so the
+ * tokens are not sent beside it. Mirrors Python's line_words.
  */
 export function lineWords(ctx: CommandContext): Record<string, util.JSONType> {
   const read = ctx.read ?? null
   return {
-    tokens: lineTokens(ctx).map(units),
+    tokens: read === null ? lineTokens(ctx).map(units) : [],
     line: read === null ? null : readWire(read),
     tool: ctx.tool ?? true,
   }

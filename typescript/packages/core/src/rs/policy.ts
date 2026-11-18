@@ -54,11 +54,26 @@ export function request(
   >,
 ): string {
   const held: string[] = []
-  const text = JSON.stringify({ op, ...args }, (_key, value: unknown) => {
+  const place = (value: util.JSONType | Encoded): util.JSONType => {
     if (!(value instanceof Encoded)) return value
     held.push(value.text)
     return `\u0000${String(held.length - 1)}\u0000`
-  })
+  }
+  const fields: Record<string, util.JSONType> = { op }
+  for (const [key, value] of Object.entries(args)) {
+    fields[key] =
+      value instanceof Encoded ||
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+        ? place(value as util.JSONType | Encoded)
+        : Object.fromEntries(
+            Object.entries(value as Readonly<Record<string, util.JSONType | Encoded>>).map(
+              ([inner, field]) => [inner, place(field)],
+            ),
+          )
+  }
+  const text = JSON.stringify(fields)
   return held.reduce(
     (out, raw, at) => out.replace(`"\\u0000${String(at)}\\u0000"`, () => raw),
     text,

@@ -104,15 +104,18 @@ def read_wire(read: CommandRead) -> dict[str, Any]:
 
 
 def line_words(ctx: CommandContext) -> dict[str, Any]:
-    """What a tree walks, in the stream's wire shape: the line's tokens,
-    its read when its grammar read it, and whether a tool runs it (a
-    shell function is no tool).
+    """What a tree walks, in the stream's wire shape: the line's read
+    when its grammar read it, else its tokens, and whether a tool runs it
+    (a shell function is no tool). A read already holds every word, so
+    the tokens are not sent beside it.
 
     Args:
         ctx (CommandContext): the classified command.
     """
     return {
-        "tokens": [units(v) for v in line_tokens(ctx)],
+        "tokens": (
+            [units(v) for v in line_tokens(ctx)] if ctx.read is None else []
+        ),
         "line": None if ctx.read is None else read_wire(ctx.read),
         "tool": ctx.tool,
     }
