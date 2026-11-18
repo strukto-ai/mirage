@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from collections.abc import Sequence
+from bisect import bisect_right
+from collections.abc import Iterable, Sequence
 
 from mirage.shell.bytes import decode_text
 from mirage.shell.helpers import same_line
@@ -24,7 +25,31 @@ from mirage.workspace.history.types import HistoryEntry
 
 
 def _descendants(node: TSNodeLike) -> list[TSNodeLike]:
-    return [node, *(d for c in node.children for d in _descendants(c))]
+    nodes: list[TSNodeLike] = []
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        nodes.append(current)
+        pending.extend(reversed(current.children))
+    return nodes
+
+
+class _Spans:
+    def __init__(self, spans: Iterable[tuple[int, int]]) -> None:
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+        end = -1
+        for start, stop in sorted(spans):
+            end = max(end, stop)
+            self.starts.append(start)
+            self.ends.append(end)
+
+    def end_at(self, index: int) -> int:
+        at = bisect_right(self.starts, index) - 1
+        return self.ends[at] if at >= 0 else -1
+
+    def contains(self, index: int) -> bool:
+        return index < self.end_at(index)
 
 
 def _blanks(rows: bytes) -> list[HistoryEntry]:
@@ -63,6 +88,31 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
         for i, byte in enumerate(text_read)
         if byte == 0x0A
     }
+    removed: dict[int, int] | None = None
+
+    def before(at: int) -> int:
+        nonlocal removed
+        if removed is None:
+            missing: list[int] = []
+            newline = source.find(b"\n")
+            while newline >= 0:
+                if newline not in breaks:
+                    missing.append(newline)
+                newline = source.find(b"\n", newline + 1)
+            removed = dict.fromkeys(missing, base)
+            pending = len(missing)
+            # Reverse logical order preserves the last match even in a moved heredoc.
+            for i in range(base + len(text_read) - 1, base - 1, -1):
+                if not pending:
+                    break
+                original = typed(i) + 1
+                if original < missing[pending - 1]:
+                    first = bisect_right(missing, original, 0, pending)
+                    for newline in missing[first:pending]:
+                        removed[newline] = i
+                    pending = first
+        return removed[at]
+
     groups: list[list[TSNodeLike]] = []
     for child in root.children:
         if not child.is_named:
@@ -82,18 +132,15 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
             if (doc := getattr(n, "heredoc", None)) is not None
         ]
 
-        def inside(node: TSNodeLike) -> bool:
-            return any(
-                n.start_byte <= node.start_byte and node.end_byte <= n.end_byte
-                for n, _ in folded
-            )
+        doc_spans = _Spans((n.start_byte, n.end_byte) for n, _ in folded)
+        leaves = [n for n in nodes if not n.children]
 
         start = source.rfind(b"\n", 0, max(0, typed(first.start_byte))) + 1
         end = max(
             [
                 typed(n.end_byte - 1) + 1
-                for n in nodes
-                if not n.children and not inside(n)
+                for n in leaves
+                if doc_spans.end_at(n.start_byte) < n.end_byte
             ]
             + [doc.end for _, doc in folded]
         )
@@ -101,6 +148,14 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
         stop = len(source) if found < 0 else found
         entries.extend(_blanks(source[read:start]))
         read = stop + 1
+        if (newline := source.find(b"\n", start)) < 0 or newline >= stop:
+            text = source[start:stop]
+            if any(doc.end - 1 == stop for _, doc in folded):
+                text += b"\n"
+            entries.append(
+                HistoryEntry(decode_text(text), typed(first.start_byte))
+            )
+            continue
         if any(n.type == NT.ERROR for n in nodes):
             entries.append(
                 HistoryEntry(
@@ -109,49 +164,42 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
             )
             continue
         comments = {typed(n.start_byte) for n in nodes if n.type == NT.COMMENT}
-
-        def within(index: int) -> bool:
-            return any(
-                n.type in WORDS and n.start_byte < index < n.end_byte
-                for n in nodes
-            )
+        words = _Spans(
+            (n.start_byte + 1, n.end_byte) for n in nodes if n.type in WORDS
+        )
+        arrays = _Spans(
+            (n.start_byte + 1, n.end_byte) for n in nodes if n.type == NT.ARRAY
+        )
+        docs = _Spans((doc.word_end, doc.end) for _, doc in folded)
+        nested_docs = _Spans(
+            (doc.word_end, doc.end)
+            for n, doc in folded
+            if words.contains(n.start_byte)
+        )
+        leaves.sort(key=lambda n: n.end_byte)
+        leaf_ends = [n.end_byte for n in leaves]
 
         def joint(at: int) -> bytes:
-            docs = [
-                (n, doc) for n, doc in folded if doc.word_end <= at < doc.end
-            ]
-            if docs:
-                if not all(at == doc.end - 1 for _, doc in docs):
+            doc_end = docs.end_at(at)
+            if at < doc_end:
+                if at != doc_end - 1:
                     return b"\n"
-                if any(within(n.start_byte) for n, _ in docs):
+                if nested_docs.contains(at):
                     return b"\n\n"
                 return b"\n "
             index = breaks.get(at)
             if index is None:
-                before = base
-                for i in range(base, base + len(text_read)):
-                    if typed(i) < at - 1:
-                        before = i
-                if within(before) or source[at - 1] != 0x5C:
+                if words.contains(before(at)) or source[at - 1] != 0x5C:
                     return b"\n"
                 return b""
-            if within(index):
+            if words.contains(index):
                 return b"\n"
-            if any(
-                n.type == NT.ARRAY and n.start_byte < index < n.end_byte
-                for n in nodes
-            ):
+            if arrays.contains(index):
                 return b" "
-            leaf: TSNodeLike | None = None
-            for n in nodes:
-                if (
-                    not n.children
-                    and n.end_byte <= index
-                    and (leaf is None or n.end_byte >= leaf.end_byte)
-                ):
-                    leaf = n
-            if leaf is None:
+            previous = bisect_right(leaf_ends, index) - 1
+            if previous < 0:
                 return b"; "
+            leaf = leaves[previous]
             if leaf.type == NT.COMMENT:
                 return b"\n"
             if not leaf.is_named and leaf.type in OPENERS:
@@ -164,7 +212,7 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
                 return b" "
             return b"; "
 
-        text = b""
+        chunks: list[bytes] = []
         blank = False
         comment = False
         at = start
@@ -173,7 +221,7 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
             ends = stop if following < 0 or following > stop else following
             row = source[at:ends]
             if at == start:
-                text = row
+                chunks.append(row)
             else:
                 between = joint(at - 1)
                 word = between.startswith(b"\n")
@@ -186,18 +234,23 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
                         joined = b" "
                     else:
                         joined = between
-                    text = (
-                        (text[:-1] if between == b"" else text) + joined + row
-                    )
+                    if between == b"":
+                        while chunks and not chunks[-1]:
+                            chunks.pop()
+                        if chunks:
+                            chunks[-1] = chunks[-1][:-1]
+                    chunks.extend((joined, row))
                     blank = not word and not row.strip()
                     comment = False
             if ends >= stop:
                 break
             at = ends + 1
         if any(doc.end - 1 == stop for _, doc in folded):
-            text += b"\n"
+            chunks.append(b"\n")
         entries.append(
-            HistoryEntry(decode_text(text), typed(first.start_byte))
+            HistoryEntry(
+                decode_text(b"".join(chunks)), typed(first.start_byte)
+            )
         )
     entries.extend(_blanks(source[read:]))
     return entries

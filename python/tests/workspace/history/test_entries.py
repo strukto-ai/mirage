@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 
 from mirage.shell.parse.parse import parse
+from mirage.shell.types import TSNodeLike
 from mirage.workspace.history.entries import history_entries
 
 # Each pinned against Debian Bash 5.2.37, `bash --norc -i` with `set +H`.
@@ -57,3 +61,82 @@ CASES = [
 @pytest.mark.parametrize(("source", "expected"), CASES)
 def test_history_entries(source: str, expected: list[str]) -> None:
     assert [e.text for e in history_entries(parse(source))] == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "cat <<A <<B\na\nA\nb\nB\necho z\n",
+            [("cat <<A <<B\na\nA\nb\nB\n", 0), ("echo z", 20)],
+        ),
+        (
+            "X=$(cat <<A\na\nA\n)\ncat <<B\nb\nB\n",
+            [("X=$(cat <<A\na\nA\n\n)", 0), ("cat <<B\nb\nB\n", 18)],
+        ),
+        ("if true; then\necho z\n", [("if true; then\necho z", 0)]),
+    ],
+)
+def test_history_positions(
+    source: str, expected: list[tuple[str, int]]
+) -> None:
+    assert [(e.text, e.at) for e in history_entries(parse(source))] == expected
+
+
+def test_history_nonmonotone_continuation_map() -> None:
+    word = SimpleNamespace(
+        type="string", start_byte=1, end_byte=4, children=[], is_named=True
+    )
+    command = SimpleNamespace(
+        type="command",
+        start_byte=0,
+        end_byte=4,
+        children=[word],
+        is_named=True,
+    )
+    root = SimpleNamespace(
+        text=b"abc\n",
+        source_text=b"a\\\nb\\\nc\n",
+        offsets=[0, 6, 1, 7, 8],
+        start_byte=0,
+        children=[command],
+    )
+    entries = history_entries(cast(TSNodeLike, root))
+    assert [(e.text, e.at) for e in entries] == [("ab\\\nc", 0)]
+
+
+@pytest.mark.parametrize("last", ["word", "|"])
+def test_history_leaf_predecessor_tie(last: str) -> None:
+    leaves = [
+        SimpleNamespace(
+            type=kind,
+            start_byte=0,
+            end_byte=1,
+            children=[],
+            is_named=kind == "word",
+            parent=None,
+        )
+        for kind in (["|", "word"] if last == "word" else ["word", "|"])
+    ]
+    command = SimpleNamespace(
+        type="command",
+        start_byte=0,
+        end_byte=3,
+        children=[
+            *leaves,
+            SimpleNamespace(
+                type="word",
+                start_byte=2,
+                end_byte=3,
+                children=[],
+                is_named=True,
+                parent=None,
+            ),
+        ],
+        is_named=True,
+    )
+    root = SimpleNamespace(text=b"a\nb\n", start_byte=0, children=[command])
+    entries = history_entries(cast(TSNodeLike, root))
+    assert [(e.text, e.at) for e in entries] == [
+        ("a; b" if last == "word" else "a b", 0)
+    ]
