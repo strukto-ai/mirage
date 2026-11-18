@@ -787,6 +787,7 @@ export class MountRegistry {
         calls: mount.calls,
         searchable: vfs.searchable,
         walkLimit: vfs.walkLimit,
+        soleWriter: vfs.soleWriter,
         commandLimits: mount.commandLimits,
         workspaceLimits: this.commandLimits,
       }

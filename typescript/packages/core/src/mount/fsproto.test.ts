@@ -294,6 +294,32 @@ describe('FsprotoServer', () => {
     await serving
   })
 
+  it('gives a folder another mount serves its own cache choice', async () => {
+    class SharedRAM extends RAMVFS {
+      override readonly soleWriter: boolean = false
+    }
+    const ws = new Workspace(
+      { '/notes': new RAMVFS(), '/notes/shared': new SharedRAM() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.session('agent')
+    const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
+      prefix: '/notes',
+      machine: 'dev',
+      changes: null,
+    })
+    const end = client()
+    const serving = server.serve(end.reader, end.writer)
+    await ws.vfs.write('/notes/plan.txt', 'plan')
+    const listed = await end.call({ op: 'list', path: '/notes' })
+    const rows = new Map(listed.head.e as [string, Record<string, unknown>][])
+    expect(listed.head.k).toBe(true)
+    expect(rows.get('shared')?.k).toBe(false)
+    expect(rows.get('plan.txt')?.k).toBeUndefined()
+    end.close()
+    await serving
+  })
+
   it('refuses a request outside the served prefix', async () => {
     const { end, serving } = await served()
     expect((await end.call({ op: 'getattr', path: '/elsewhere' })).head.errno).toBe('EACCES')

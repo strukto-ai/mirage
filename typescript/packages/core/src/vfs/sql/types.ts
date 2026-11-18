@@ -52,6 +52,11 @@ export interface SqlDriver {
   /** Where the database lives, for `storageLocation` and `df`. */
   readonly location: string
   readonly dialect: SqlDialect
+  /**
+   * Whether nothing but this driver writes the database (one in memory, a
+   * Durable Object's own), so every change to it passes the workspace.
+   */
+  readonly exclusive: boolean
   /** The rows one statement answers. */
   query(sql: string, params?: readonly SqlValue[]): Promise<SqlRow[]>
   /** Run every statement in one transaction: all of them land or none. */

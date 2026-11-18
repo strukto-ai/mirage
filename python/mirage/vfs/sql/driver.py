@@ -58,6 +58,10 @@ class SqliteDriver:
     def dialect(self) -> SqlDialect:
         return SqlDialect.SQLITE
 
+    @property
+    def exclusive(self) -> bool:
+        return self.path == ":memory:"
+
     def _open(self) -> sqlite3.Connection:
         if self._db is None:
             # Autocommit, so a lone statement lands at once and batch

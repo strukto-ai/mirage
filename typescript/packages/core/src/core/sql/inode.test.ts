@@ -26,6 +26,7 @@ function memoryDriver(): SqlDriver {
   return {
     location: ':memory:',
     dialect: SqlDialect.SQLITE,
+    exclusive: true,
     query: (sql, params = []) =>
       Promise.resolve(db.prepare(sql).all(...(params as SQLInputValue[])) as SqlRow[]),
     batch: (statements) => {

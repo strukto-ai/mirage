@@ -83,6 +83,10 @@ class PostgresSqlDriver:
         return self._location
 
     @property
+    def exclusive(self) -> bool:
+        return False
+
+    @property
     def dialect(self) -> SqlDialect:
         return SqlDialect.POSTGRES
 

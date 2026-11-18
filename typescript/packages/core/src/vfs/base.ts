@@ -167,6 +167,14 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly sizesAlwaysKnown: boolean = false
   /**
+   * Whether nothing but this workspace writes the store, so every change
+   * passes the dispatcher and is noted (`RecentChanges`): mirage-fuse then
+   * keeps the mount's answers until a change is pushed. True for a store
+   * held in this process (ram) or one only this workspace opens. Mirrors
+   * Python's `BaseVFS.sole_writer`.
+   */
+  readonly soleWriter: boolean = false
+  /**
    * Whether a `read: fresh` mount can actually be revalidated against this
    * backend: the driver's `stat` op and the read record must stamp the
    * *same kind* of content token, so the gate can compare them with `===`. False

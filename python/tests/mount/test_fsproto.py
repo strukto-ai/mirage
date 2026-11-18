@@ -308,6 +308,34 @@ async def test_a_change_to_a_name_the_session_hides_is_never_pushed():
     await end.end(serving)
 
 
+class SharedRAM(RAMVFS):
+    sole_writer = False
+
+
+@pytest.mark.asyncio
+async def test_a_folder_another_mount_serves_carries_its_own_cache_choice():
+    ws = Workspace(
+        {"/notes": RAMVFS(), "/notes/shared": SharedRAM()},
+        mode=MountMode.WRITE,
+    )
+    await ws.session("agent")
+    server = FsprotoServer(
+        ws.vfs,
+        ws.get_session("agent"),
+        None,
+        ServedPrefix("/notes", "dev", None),
+    )
+    end = Client()
+    serving = asyncio.create_task(server.serve(end.reader, end))
+    await ws.vfs.write("/notes/plan.txt", b"plan")
+    listed = await end.call({"op": "list", "path": "/notes"})
+    rows = {name: a for name, a in listed.head["e"]}
+    assert listed.head["k"] is True
+    assert rows["shared"]["k"] is False
+    assert "k" not in rows["plan.txt"]
+    await end.end(serving)
+
+
 @pytest.mark.asyncio
 async def test_a_request_outside_the_served_prefix_is_refused():
     ws, server, end, serving = await served()

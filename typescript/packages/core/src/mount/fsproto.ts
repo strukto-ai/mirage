@@ -27,7 +27,6 @@ import {
   FSPROTO_FETCH_DIR_BYTES,
   FSPROTO_FETCH_FILE_BYTES,
   FSPROTO_FRAME_BYTES,
-  FSPROTO_KEPT,
   FSPROTO_TREE_ENTRIES,
   FSPROTO_VERSION,
   FSPROTO_WHOLE_BYTES,
@@ -182,7 +181,7 @@ function condition(err: unknown): string {
  * SFTP's are, so a release never overtakes the writes it settles. Each
  * reply about a path says whether the client may keep it until told
  * otherwise (`k`): only for a backend nothing but the workspace changes
- * (`FSPROTO_KEPT`), whose every change this server pushes to the client as
+ * (`BaseVFS.soleWriter`), whose every change this server pushes to the client as
  * it is noted, and `begin` waits until the client has applied them all.
  * Mirrors Python's `FsprotoServer`.
  */
@@ -360,7 +359,7 @@ export class FsprotoServer {
         continue
       }
       if (count + below.length > FSPROTO_TREE_ENTRIES) continue
-      folders.push([folder, below.map(([name, a]) => [name, wire(a)])])
+      folders.push([folder, this.rows(folder, below, true)])
       count += below.length
       for (const [name, a] of below) if (isDir(a)) queue.push(child(folder, name))
     }
@@ -373,9 +372,21 @@ export class FsprotoServer {
     throw eacces(path)
   }
 
+  /**
+   * A listing on the wire: in a kept one, a folder another mount serves
+   * carries that mount's own `k`. Mirrors Python's `_rows`.
+   */
+  private rows(folder: string, rows: [string, MountAttrs][], kept: boolean): unknown[] {
+    return rows.map(([name, a]) => {
+      const row = wire(a)
+      if (kept && (a.mode & S_IFMT) === S_IFDIR && !this.kept(child(folder, name))) row.k = false
+      return [name, row]
+    })
+  }
+
   private kept(path: string): boolean {
     const row = readerOf(this.core.files).owner(path)
-    return row !== null && FSPROTO_KEPT.includes(row.kind)
+    return row?.soleWriter === true
   }
 
   private pathOf(fd: number): string {
@@ -422,7 +433,7 @@ export class FsprotoServer {
       case 'list': {
         const kept = this.kept(path)
         const rows = shown(await core.listing(path))
-        const head: Head = { e: rows.map(([name, a]) => [name, wire(a)]), k: kept }
+        const head: Head = { e: this.rows(path, rows, kept), k: kept }
         if (h.deep === true && kept) head.d = await this.tree(path, rows)
         return [head, EMPTY]
       }
@@ -535,8 +546,8 @@ export class FsprotoServer {
         const rest = [num(h.mode), num(h.uid), num(h.gid), atime, mtime].some((v) => v !== null)
         const target = fd === null ? path : this.pathOf(fd)
         if (fd !== null) {
-          if (size !== null) await core.ftruncate(fd, size)
           if (rest && core.handles.get(fd)?.detached !== undefined) throw enoent(target)
+          if (size !== null) await core.ftruncate(fd, size)
         } else if (size !== null) {
           await core.truncate(path, size)
         }

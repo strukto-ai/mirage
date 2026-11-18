@@ -126,6 +126,7 @@ class SqlVFS(BaseVFS):
         )
         self.accessor = SqlAccessor(opened, root)
         self.usage = _shared_usage(self.name, opened, capacity)
+        self.sole_writer = opened.exclusive
 
     def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
         # The usage tells writes on one file apart by path, and mounts on

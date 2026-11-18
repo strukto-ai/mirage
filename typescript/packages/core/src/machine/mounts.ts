@@ -511,8 +511,9 @@ export class MachineMounts {
     if (refusal !== null || this.served.size === 0 || changes === null) return refusal
     if (this.transport === 'mirage') {
       const served = [...this.served]
-      const confirmed = await Promise.all(
-        served.map(([, { server }]) => server.begin?.() ?? Promise.resolve(true)),
+      const confirmed = await abortable(
+        Promise.all(served.map(([, { server }]) => server.begin?.() ?? Promise.resolve(true))),
+        signal,
       )
       const late = served.find((_, i) => confirmed[i] === false)?.[0]
       if (late !== undefined) {

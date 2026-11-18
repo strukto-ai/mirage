@@ -1171,6 +1171,7 @@ class MountRegistry:
                 resource_type=m.vfs.name,
                 mode=m.mode,
                 sizes_always_known=m.vfs.sizes_always_known,
+                sole_writer=m.vfs.sole_writer,
                 anchor=m is self._anchor,
                 visible=m.visible,
                 searchable=m.vfs.searchable,

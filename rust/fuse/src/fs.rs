@@ -45,9 +45,11 @@ pub struct Attrs {
 
 impl Attrs {
     /// The attributes in a reply's `a` (or a listing row), kept when the
-    /// reply's `k` says so.
+    /// reply's `k` says so and the row's own `k`, which a folder another
+    /// mount serves carries, does not say otherwise.
     pub fn parse(value: &Value, kept: bool) -> Option<Attrs> {
         let f = |key: &str| value.get(key).and_then(Value::as_f64);
+        let kept = kept && value.get("k").and_then(Value::as_bool) != Some(false);
         Some(Attrs {
             mode: f("m")? as u32,
             size: f("s").unwrap_or(0.0) as u64,
@@ -78,6 +80,10 @@ struct Known {
 /// One entry of a folder stream: the offset after it, its name, inode
 /// and attributes.
 type Row = (u64, String, u64, Attrs);
+
+/// An open folder stream: the folder, the epoch it was listed at (never
+/// current again once a change of this machine's reached it), its rows.
+type Stream = (String, u64, Vec<(String, Attrs)>);
 
 impl Known {
     fn fresh(&self) -> bool {
@@ -134,7 +140,7 @@ struct State {
     bytes: usize,
     fetched: HashSet<String>,
     opens: HashMap<u64, Open>,
-    dirs: HashMap<u64, (u64, Vec<(String, Attrs)>)>,
+    dirs: HashMap<u64, Stream>,
     next_fh: u64,
     epoch: u64,
 }
@@ -501,7 +507,8 @@ impl MirageFs {
     }
 
     /// Drop what the client holds of `path` and its folder's listing after
-    /// a change of its own, which the kernel already knows of.
+    /// a change of its own, which the kernel already knows of; a stream
+    /// of that folder opened before it hands the kernel no attributes.
     fn changed(&self, path: &str) {
         let mut st = self.st();
         st.known.remove(path);
@@ -512,6 +519,38 @@ impl MirageFs {
             st.listings.remove(&dir);
             st.fetched.remove(&dir);
             st.known.remove(&dir);
+            for (folder, listed, _) in st.dirs.values_mut() {
+                if *folder == dir {
+                    *listed = u64::MAX;
+                }
+            }
+        }
+    }
+
+    /// Have the cached opens of `path` read it anew, after a write on this
+    /// machine changed its bytes in place.
+    fn rewritten(&self, path: &str) {
+        for open in self.st().opens.values_mut() {
+            if open.path == path && open.host.is_none() {
+                open.data = None;
+            }
+        }
+    }
+
+    /// Forget `path` and what is under it, mappings included, after a
+    /// change whose outcome the host never answered.
+    fn unknown(&self, path: &str) {
+        self.shared.forget(path);
+        let mut st = self.st();
+        let gone: Vec<(String, u64)> = st
+            .inodes
+            .iter()
+            .filter(|(p, _)| reaches(path, p))
+            .map(|(p, &i)| (p.clone(), i))
+            .collect();
+        for (p, ino) in gone {
+            st.inodes.remove(&p);
+            st.paths.remove(&ino);
         }
     }
 
@@ -773,7 +812,7 @@ impl MirageFs {
         let (rest, current) = {
             let st = self.st();
             match st.dirs.get(&fh.0) {
-                Some((listed, rows)) => (
+                Some((_, listed, rows)) => (
                     rows.get((start - 2) as usize..).unwrap_or(&[]).to_vec(),
                     *listed == st.epoch,
                 ),
@@ -827,13 +866,24 @@ impl Filesystem for MirageFs {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
-        let Some(path) = self.path(ino) else {
+        let open = fh.and_then(|fh| self.st().opens.get(&fh.0).cloned());
+        let Some(path) = self
+            .path(ino)
+            .or_else(|| open.as_ref().map(|o| o.path.clone()))
+        else {
             return reply.error(Errno::ENOENT);
         };
-        let host = fh.and_then(|fh| self.st().opens.get(&fh.0).and_then(|o| o.host));
-        let found = match host {
-            Some(host) => self.fstat(&path, host),
-            None => match self.stat(&path) {
+        let found = match open {
+            Some(Open {
+                host: Some(host), ..
+            }) => self.fstat(&path, host),
+            Some(Open {
+                attrs: Some(attrs), ..
+            }) => Ok(Attrs {
+                kept: false,
+                ..attrs
+            }),
+            _ => match self.stat(&path) {
                 Err(err) if err == Errno::ENOENT => self.held(&path).unwrap_or(Err(err)),
                 found => found,
             },
@@ -862,12 +912,16 @@ impl Filesystem for MirageFs {
         _flags: Option<fuser::BsdFileFlags>,
         reply: ReplyAttr,
     ) {
-        let Some(path) = self.path(ino) else {
+        let open = fh.and_then(|fh| self.st().opens.get(&fh.0).cloned());
+        let Some(path) = self
+            .path(ino)
+            .or_else(|| open.as_ref().map(|o| o.path.clone()))
+        else {
             return reply.error(Errno::ENOENT);
         };
         let mut args = Map::new();
         args.insert("path".into(), path.clone().into());
-        let host = fh.and_then(|fh| self.st().opens.get(&fh.0).and_then(|o| o.host));
+        let host = open.and_then(|o| o.host);
         if let Some(host) = host {
             args.insert("fh".into(), host.into());
         }
@@ -901,6 +955,9 @@ impl Filesystem for MirageFs {
                         },
                         None => self.keep(&path, attrs, asked).unwrap_or_else(|a| a),
                     };
+                    if size.is_some() {
+                        self.rewritten(&path);
+                    }
                     reply.attr(&ttl(&attrs), &self.attr(ino.0, &attrs))
                 }
                 None => reply.error(Errno::EIO),
@@ -1069,7 +1126,13 @@ impl Filesystem for MirageFs {
                 drop(st);
                 reply.ok()
             }
-            Err(err) => reply.error(err),
+            Err(err) => {
+                if err == Errno::ETIMEDOUT {
+                    self.unknown(&from);
+                    self.unknown(&to);
+                }
+                reply.error(err)
+            }
         }
     }
 
@@ -1161,13 +1224,24 @@ impl Filesystem for MirageFs {
         let Some(open) = self.st().opens.get(&fh.0).cloned() else {
             return reply.error(Errno::EBADF);
         };
-        if let Some(data) = open.data {
+        let Some(host) = open.host else {
+            let data = match (open.data, open.attrs) {
+                (Some(data), _) => data,
+                (None, Some(attrs)) => match self.whole(&open.path, attrs) {
+                    Ok((data, now)) => {
+                        if let Some(held) = self.st().opens.get_mut(&fh.0) {
+                            held.data = Some(data.clone());
+                            held.attrs = Some(now);
+                        }
+                        data
+                    }
+                    Err(err) => return reply.error(err),
+                },
+                (None, None) => return reply.error(Errno::EBADF),
+            };
             let start = (offset as usize).min(data.len());
             let end = start.saturating_add(size as usize).min(data.len());
             return reply.data(&data[start..end]);
-        }
-        let Some(host) = open.host else {
-            return reply.error(Errno::EBADF);
         };
         match self.call(
             "read",
@@ -1199,7 +1273,10 @@ impl Filesystem for MirageFs {
         };
         self.changed(&open.path);
         match self.call("write", json!({ "fh": host, "offset": offset }), data) {
-            Ok(_) => reply.written(data.len() as u32),
+            Ok(_) => {
+                self.rewritten(&open.path);
+                reply.written(data.len() as u32)
+            }
             Err(err) => reply.error(err),
         }
     }
@@ -1236,6 +1313,7 @@ impl Filesystem for MirageFs {
             self.link.post("release", json!({ "fh": host }));
             if writes {
                 self.changed(&path);
+                self.rewritten(&path);
             }
         }
         reply.ok();
@@ -1266,7 +1344,7 @@ impl Filesystem for MirageFs {
                 let mut st = self.st();
                 let fh = st.next_fh;
                 st.next_fh += 1;
-                st.dirs.insert(fh, (listed, rows));
+                st.dirs.insert(fh, (dir, listed, rows));
                 reply.opened(FileHandle(fh), FopenFlags::empty())
             }
             Err(err) => reply.error(err),
@@ -1487,7 +1565,9 @@ mod tests {
 
     impl Host {
         fn next(&mut self) -> Frame {
-            read_frame(&mut self.requests).unwrap().unwrap()
+            read_frame(&mut self.requests)
+                .expect("the client sent no request in time")
+                .expect("the client closed its pipe")
         }
 
         fn send(&mut self, head: Value, body: &[u8]) {
@@ -1500,6 +1580,9 @@ mod tests {
 
     fn hosted() -> (Arc<MirageFs>, Host) {
         let (client_out, requests) = UnixStream::pair().unwrap();
+        requests
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let (replies, mut client_in) = UnixStream::pair().unwrap();
         let link = Arc::new(Link::new(Box::new(client_out)));
         let (notes, _) = channel();
@@ -1689,6 +1772,18 @@ mod tests {
         assert!(st.covered.contains("/w/sub"));
         assert!(st.listings["/w/sub"].names.contains("a.txt"));
         assert_eq!(st.known["/w/sub/a.txt"].attrs.size, 1);
+    }
+
+    #[test]
+    fn a_folder_another_mount_serves_keeps_its_own_cache_choice() {
+        let rows = entries(
+            Some(&json!([["a", {"m": 0o100644}], ["disk", {"m": 0o040755, "k": false}]])),
+            true,
+        );
+        assert_eq!(
+            rows.iter().map(|(_, a)| a.kept).collect::<Vec<_>>(),
+            [true, false]
+        );
     }
 
     #[test]

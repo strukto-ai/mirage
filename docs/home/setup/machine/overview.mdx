@@ -276,7 +276,8 @@ machine serves, and rules that depend on which program opens a file.
 
 - The machine needs `mirage-fuse` on its `PATH` or in `~/.mirage/bin`, and
   FUSE. No Mirage, keys or open port.
-- Files on `ram` and `sql` mounts, which only the workspace changes, stay
+- Files on `ram` mounts, and on `sql` mounts whose database only the
+  workspace opens (one in memory, a Durable Object's own), stay
   cached on the machine until they change, so a program that walks a
   project, such as `pytest` or `git status`, runs at about local-disk speed
   after its first read. A change made through Mirage reaches the machine

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../types.ts'
-
 /** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
 export const LISTING_CONCURRENCY = 16
 
@@ -66,13 +64,6 @@ export const FSPROTO_VERSION = 1
 
 // The largest fsproto frame either side accepts.
 export const FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
-
-// The backends whose answers mirage-fuse may keep until told otherwise:
-// nothing but the workspace changes them, so every change reaches the
-// machine as an invalidation (`RecentChanges`). Any other backend's answers
-// last KERNEL_CACHE_SECONDS, as sshfs keeps them. Mirrors Python's
-// `FSPROTO_KEPT`.
-export const FSPROTO_KEPT: readonly string[] = [VFSName.RAM, VFSName.SQL]
 
 // The largest file read whole for mirage-fuse's cache, and the files and
 // total a folder's prefetch carries. Mirror Python's constants.

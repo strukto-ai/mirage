@@ -7,8 +7,10 @@ use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
-/// How long a request waits for its reply: a host whose backend stalls
-/// fails the call rather than holding the machine's programs forever.
+/// How long a sent request waits for its reply: a host whose backend
+/// stalls fails the call rather than holding the machine's programs
+/// forever. Sending is not bounded: the host reads its pipe without
+/// pause, so a write blocks only while the host itself is stopped.
 pub const REPLY_WAIT: Duration = Duration::from_secs(300);
 
 /// Why a request got no answer: the host refused it with a condition such
@@ -109,16 +111,24 @@ impl Link {
     }
 
     /// Route each frame on `input` until it ends: a reply to the request
-    /// waiting for it, any other frame to `push`. Every request still
-    /// waiting then fails as lost.
+    /// waiting for it, any other frame to `push`. A reply no request waits
+    /// for any more that opened a host handle has it released, as no one
+    /// else will. Every request still waiting then fails as lost.
     pub fn serve(&self, input: &mut impl Read, mut push: impl FnMut(Frame)) -> io::Result<()> {
         let ended = loop {
             match read_frame(input) {
                 Ok(Some(frame)) => match frame.u64("id") {
                     Some(id) => {
                         let waiter = locked(&self.pending).as_mut().and_then(|p| p.remove(&id));
-                        if let Some(waiter) = waiter {
-                            let _ = waiter.send(frame);
+                        match waiter {
+                            Some(waiter) => {
+                                let _ = waiter.send(frame);
+                            }
+                            None => {
+                                if let Some(fh) = frame.u64("fh") {
+                                    self.post("release", serde_json::json!({ "fh": fh }));
+                                }
+                            }
                         }
                     }
                     None => push(frame),
@@ -192,6 +202,41 @@ mod tests {
         let mut pushed = 0;
         link.serve(&mut input.as_slice(), |_| pushed += 1).unwrap();
         assert_eq!(pushed, 0);
+    }
+
+    #[derive(Clone, Default)]
+    struct Kept(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Kept {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            locked(&self.0).extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_late_reply_that_opened_a_handle_has_it_released() {
+        let out = Kept::default();
+        let link = Link::waiting(Box::new(out.clone()), Duration::from_millis(20));
+        assert!(matches!(
+            link.call("open", json!({"path": "/w/a"}), &[]),
+            Err(Failure::Late)
+        ));
+        let input = frame(json!({"id": 1, "fh": 7, "k": true}), b"");
+        link.serve(&mut input.as_slice(), |_| {}).unwrap();
+        let sent = locked(&out.0).clone();
+        let mut frames = sent.as_slice();
+        let open = crate::proto::read_frame(&mut frames).unwrap().unwrap();
+        let release = crate::proto::read_frame(&mut frames).unwrap().unwrap();
+        assert_eq!(open.str("op"), Some("open"));
+        assert_eq!(
+            (release.str("op"), release.u64("fh")),
+            (Some("release"), Some(7))
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@ export function fileDriver(path: string): SqlDriver {
   return {
     location: path,
     dialect: SqlDialect.SQLITE,
+    exclusive: false,
     query: (sql, params = []) =>
       Promise.resolve(db.prepare(sql).all(...(params as SQLInputValue[])) as SqlRow[]),
     batch: (statements) => {

@@ -31,6 +31,9 @@ class MountRow:
         sizes_always_known (bool): mirrors ``BaseVFS.sizes_always_known``;
             read by the fskit mount guard, which cannot serve a VFS that
             sizes files only on read.
+        sole_writer (bool): mirrors ``BaseVFS.sole_writer``; read by
+            mirage-fuse's server, which lets its client keep such a
+            mount's answers until a change is pushed.
         anchor (bool): the scratch root: the one the workspace adds when
             no mount claims ``/``, or one a restore marks as such.
         visible (Callable[[str | None], bool] | None): whether the
@@ -55,6 +58,7 @@ class MountRow:
     resource_type: str
     mode: MountMode
     sizes_always_known: bool = False
+    sole_writer: bool = False
     anchor: bool = False
     visible: Callable[[str | None], bool] | None = None
     searchable: tuple[str, ...] | None = None

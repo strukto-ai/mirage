@@ -14,8 +14,6 @@
 
 import os
 
-from mirage.types import VFSName
-
 # Who owns what a mount shows when a row names its owner by name (the
 # kernel wants numbers): the mounting user. Windows has none; WinFsp
 # presents files as the mounting user's.
@@ -70,12 +68,6 @@ FSPROTO_VERSION = 1
 
 # The largest fsproto frame either side accepts.
 FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
-
-# The backends whose answers mirage-fuse may keep until told otherwise:
-# nothing but the workspace changes them, so every change reaches the
-# machine as an invalidation (``RecentChanges``). Any other backend's
-# answers last KERNEL_CACHE_SECONDS, as sshfs keeps them.
-FSPROTO_KEPT: frozenset[str] = frozenset({VFSName.RAM, VFSName.SQL})
 
 # The largest file read whole for mirage-fuse's cache, and the files and
 # total a folder's prefetch carries.

@@ -45,6 +45,7 @@ class RAMVFS(BaseVFS):
     name: str = VFSName.RAM
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
+    sole_writer: bool = True
     index_ttl: float = 0
 
     reads_ranges: bool = True

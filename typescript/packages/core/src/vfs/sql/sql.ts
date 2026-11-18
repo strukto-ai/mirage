@@ -95,6 +95,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   override readonly local: boolean = true
   override readonly accessor: SqlAccessor
   override readonly usage: StorageUsage | null
+  override readonly soleWriter: boolean
   private readonly ownsDriver: boolean
 
   /**
@@ -111,6 +112,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     super()
     this.accessor = new SqlAccessor(driver, options.root ?? '/')
     this.usage = sharedUsage(this.name, driver, options.capacity ?? null)
+    this.soleWriter = driver.exclusive
     this.ownsDriver = options.ownsDriver ?? false
   }
 

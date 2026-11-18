@@ -95,21 +95,33 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
     };
     let notifier = background.notifier();
     std::thread::spawn(move || {
+        let mut kept = false;
         for note in pending {
-            match note {
+            let done = match note {
                 Note::Entry(parent, name) => {
-                    let _ = notifier.inval_entry(INodeNo(parent), OsStr::new(&name));
+                    notifier.inval_entry(INodeNo(parent), OsStr::new(&name))
                 }
-                Note::Inode(ino) => {
-                    let _ = notifier.inval_inode(INodeNo(ino), 0, 0);
-                }
+                Note::Inode(ino) => notifier.inval_inode(INodeNo(ino), 0, 0),
                 Note::Ack(hid) => {
+                    if std::mem::take(&mut kept) {
+                        eprintln!(
+                            "mirage-fuse: not answering barrier {hid}: the kernel kept what it was told to drop"
+                        );
+                        continue;
+                    }
                     let mut head = Map::new();
                     head.insert("hid".into(), hid.into());
                     if let Err(err) = link.send(&head, &[]) {
                         eprintln!("mirage-fuse: answering a barrier failed: {err}");
                     }
+                    continue;
                 }
+            };
+            if let Err(err) = done
+                && err.kind() != io::ErrorKind::NotFound
+            {
+                eprintln!("mirage-fuse: the kernel did not drop an entry: {err}");
+                kept = true;
             }
         }
     });

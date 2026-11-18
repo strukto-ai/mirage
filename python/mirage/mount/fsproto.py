@@ -29,7 +29,6 @@ from mirage.mount.constants import (
     FSPROTO_FETCH_DIR_BYTES,
     FSPROTO_FETCH_FILE_BYTES,
     FSPROTO_FRAME_BYTES,
-    FSPROTO_KEPT,
     FSPROTO_TREE_ENTRIES,
     FSPROTO_VERSION,
     FSPROTO_WHOLE_BYTES,
@@ -228,7 +227,7 @@ class FsprotoServer:
     as SFTP's are, so a release never overtakes the writes it settles.
     Each reply about a path says whether the client may keep it until
     told otherwise (``k``): only for a backend nothing but the workspace
-    changes (``FSPROTO_KEPT``), whose every change this server pushes to
+    changes (``BaseVFS.sole_writer``), whose every change this server pushes to
     the client as it is noted, and ``begin`` waits until the client has
     applied them all.
 
@@ -397,9 +396,29 @@ class FsprotoServer:
             except Exception as err:
                 logger.debug("fsproto: answering %s failed: %r", rid, err)
 
+    def _rows(
+        self, folder: str, rows: list[tuple[str, MountAttrs]], kept: bool
+    ) -> list[list[Any]]:
+        """A listing on the wire: in a kept one, a folder another mount
+        serves carries that mount's own ``k``.
+
+        Args:
+            folder (str): the folder listed.
+            rows (list[tuple[str, MountAttrs]]): its entries.
+            kept (bool): whether the folder's mount is kept.
+        """
+        out: list[list[Any]] = []
+        for name, a in rows:
+            row = wire(a)
+            if kept and stat.S_ISDIR(a.mode):
+                if not self._kept(child(folder, name)):
+                    row["k"] = False
+            out.append([name, row])
+        return out
+
     def _kept(self, path: str) -> bool:
         row = reader_of(self._core.files).owner(path)
-        return row is not None and row.resource_type in FSPROTO_KEPT
+        return row is not None and row.sole_writer
 
     def _path_of(self, fh: int) -> str:
         handle = self._core.handles.get(fh)
@@ -462,10 +481,7 @@ class FsprotoServer:
         if op == "list":
             kept = self._kept(path)
             rows = shown(await core.listing(path))
-            head: Head = {
-                "e": [[name, wire(a)] for name, a in rows],
-                "k": kept,
-            }
+            head: Head = {"e": self._rows(path, rows, kept), "k": kept}
             if h.get("deep") is True and kept:
                 head["d"] = await self._tree(path, rows)
             return head, EMPTY
@@ -626,7 +642,7 @@ class FsprotoServer:
                 continue
             if count + len(below) > FSPROTO_TREE_ENTRIES:
                 continue
-            folders.append([folder, [[name, wire(a)] for name, a in below]])
+            folders.append([folder, self._rows(folder, below, True)])
             count += len(below)
             queue.extend(
                 child(folder, name)
@@ -674,11 +690,11 @@ class FsprotoServer:
         rest = any(v is not None for v in (mode, uid, gid, atime, mtime))
         if fh is not None:
             path = self._path_of(int(fh))
-            if size is not None:
-                await core.ftruncate(int(fh), int(size))
             held = core.handles.get(int(fh))
             if rest and held is not None and held.detached is not None:
                 raise enoent(path)
+            if size is not None:
+                await core.ftruncate(int(fh), int(size))
         elif size is not None:
             await core.truncate(path, int(size))
         if rest:
