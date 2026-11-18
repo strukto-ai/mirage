@@ -4823,7 +4823,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5134,7 +5133,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5412,7 +5410,6 @@ paths:
                     created_by: null
                     created_at: null
                     updated_at: null
-                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -8743,9 +8740,6 @@ components:
             - string
             - 'null'
           format: date-time
-        used_by:
-          type: integer
-          description: Number of templates using this configuration. Included in list responses only.
       required:
         - id
         - name

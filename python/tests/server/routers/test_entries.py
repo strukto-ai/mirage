@@ -68,7 +68,7 @@ async def test_an_entry_answers_its_sealed_fields_by_name_only(client, store):
     assert "ghp_x" not in r.text
     listed = (await client.get("/v1/vfs")).json()["items"]
     assert [i["name"] for i in listed] == ["github"]
-    assert listed[0]["used_by"] == 0
+    assert "used_by" not in listed[0]
     assert "sealed" not in listed[0]
     assert "ghp_x" not in str(listed)
     revealed = await store.reveal_entry("vfs", "github")
@@ -198,9 +198,7 @@ async def test_a_pointer_is_refused_until_its_store_is_saved(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
-    client, store
-):
+async def test_delete_wipes_even_while_a_template_uses_it(client, store):
     await client.post("/v1/vfs", json=GITHUB)
     config = {
         "mounts": {
@@ -217,12 +215,9 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
         }
     }
     await store.put_template(TemplateInput(name="agent", config=config))
-    assert (await client.get("/v1/vfs")).json()["items"][0]["used_by"] == 1
-    r = await client.delete("/v1/vfs/github")
-    assert r.status_code == 409
-    assert r.json()["error"]["message"] == "github is used by agent"
-    await store.delete_template("agent")
+    assert "used_by" not in (await client.get("/v1/vfs")).json()["items"][0]
     assert (await client.delete("/v1/vfs/github")).status_code == 204
+    assert (await store.get_template("agent")).config == config
     assert (await client.get("/v1/vfs/github")).status_code == 404
     assert (await client.delete("/v1/vfs/github")).status_code == 404
     await client.post("/v1/vfs", json={**GITHUB, "fields": {"token": "n"}})

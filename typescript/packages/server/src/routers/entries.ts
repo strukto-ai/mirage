@@ -15,7 +15,6 @@
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { NAME, NOUN } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
-import { usesOf } from '@struktoai/mirage-core/resources/refs'
 import type { Entry, EntryKind, Fields } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
@@ -51,7 +50,7 @@ interface ListQuery {
  * An entry as a route answers it. The daemon keeps no id, creator or
  * times, so the id is the name and the rest are null.
  */
-function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string, JsonValue> {
+function present(kind: EntryKind, entry: Entry): Record<string, JsonValue> {
   return {
     id: entry.name,
     name: entry.name,
@@ -62,7 +61,6 @@ function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string,
     created_by: null,
     created_at: null,
     updated_at: null,
-    ...(usedBy !== undefined ? { used_by: usedBy } : {}),
   }
 }
 
@@ -161,13 +159,12 @@ export function registerEntryRoutes(
   app.get<{ Querystring: ListQuery }>(route, (req) =>
     answered(registry, async () => {
       const entries = await resources.listEntries(kind)
-      const used = usesOf(await resources.listTemplates())
       const type = req.query.type ?? ''
       const text = (req.query.q ?? '').trim().toLowerCase()
       return {
         items: entries
           .filter((e) => (type === '' || e.type === type) && e.name.toLowerCase().includes(text))
-          .map((e) => present(kind, e, used.get(e.name)?.length ?? 0)),
+          .map((e) => present(kind, e)),
       }
     }),
   )

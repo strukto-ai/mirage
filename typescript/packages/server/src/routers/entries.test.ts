@@ -43,7 +43,6 @@ afterEach(async () => {
 
 interface Item {
   name: string
-  used_by?: number
 }
 
 interface PolicyDecision {
@@ -91,7 +90,7 @@ describe('entries router', () => {
     expect(got.text).not.toContain('ghp_x')
     const listed = await call(app, 'GET', '/v1/vfs')
     expect(listed.body.items.map((i) => i.name)).toEqual(['github'])
-    expect(listed.body.items[0]?.used_by).toBe(0)
+    expect(listed.body.items[0]).not.toHaveProperty('used_by')
     expect(listed.body.items[0]).not.toHaveProperty('sealed')
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'ghp_x' })
   })
@@ -202,7 +201,7 @@ describe('entries router', () => {
     expect(stores.status).toBe(404)
   })
 
-  it('wipes on delete, refused while a template uses the entry', async () => {
+  it('wipes on delete, even while a template uses the entry', async () => {
     const { app, store } = setup()
     await call(app, 'POST', '/v1/vfs', GITHUB)
     const config = {
@@ -214,14 +213,9 @@ describe('entries router', () => {
       },
     }
     await store.putTemplate({ name: 'agent', config })
-    expect((await call(app, 'GET', '/v1/vfs')).body.items[0]?.used_by).toBe(1)
-    const refused = await call(app, 'DELETE', '/v1/vfs/github')
-    expect(refused).toMatchObject({
-      status: 409,
-      body: { error: { code: 'conflict', message: 'github is used by agent' } },
-    })
-    await store.deleteTemplate('agent')
+    expect((await call(app, 'GET', '/v1/vfs')).body.items[0]).not.toHaveProperty('used_by')
     expect((await call(app, 'DELETE', '/v1/vfs/github')).status).toBe(204)
+    expect((await store.getTemplate('agent')).config).toEqual(config)
     expect((await call(app, 'GET', '/v1/vfs/github')).status).toBe(404)
     await call(app, 'POST', '/v1/vfs', { ...GITHUB, fields: { ...GITHUB.fields, token: 'n' } })
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'n' })

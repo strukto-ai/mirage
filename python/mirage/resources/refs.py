@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.resources.constants import STRUKTO
-from mirage.resources.types import Template
 from mirage.secrets.config import EnvVar
 from mirage.secrets.sources import is_config_pointer
 from mirage.types import JsonValue
@@ -69,18 +68,3 @@ def secret_refs(config: JsonValue) -> list[str]:
     found: list[str] = []
     walk_refs(config, found)
     return found
-
-
-def uses_of(templates: list[Template]) -> dict[str, list[str]]:
-    """The templates whose config names each entry, by the entry's name.
-
-    Args:
-        templates (list[Template]): the saved templates.
-    """
-    out: dict[str, list[str]] = {}
-    for template in templates:
-        for ref in secret_refs(template.config):
-            names = out.setdefault(ref, [])
-            if template.name not in names:
-                names.append(template.name)
-    return out

@@ -344,12 +344,10 @@ function formatEntry(entry: {
   ].join('\n')
 }
 
-function formatEntries(listing: {
-  items?: { name: string; type: string; used_by?: number }[]
-}): string {
+function formatEntries(listing: { items?: { name: string; type: string }[] }): string {
   return formatTable(
-    ['NAME', 'TYPE', 'USED BY'],
-    (listing.items ?? []).map((i) => [i.name, i.type, String(i.used_by ?? 0)]),
+    ['NAME', 'TYPE'],
+    (listing.items ?? []).map((i) => [i.name, i.type]),
   )
 }
 

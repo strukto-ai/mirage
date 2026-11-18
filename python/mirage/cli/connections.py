@@ -374,11 +374,8 @@ def format_entry(entry: dict[str, Any]) -> str:
 
 
 def format_entries(listing: dict[str, Any]) -> str:
-    rows = [
-        [i["name"], i["type"], str(i.get("used_by", 0))]
-        for i in listing.get("items", [])
-    ]
-    return format_table(["NAME", "TYPE", "USED BY"], rows)
+    rows = [[i["name"], i["type"]] for i in listing.get("items", [])]
+    return format_table(["NAME", "TYPE"], rows)
 
 
 def format_fields(spec: list[dict[str, Any]]) -> str:
