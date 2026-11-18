@@ -32,7 +32,9 @@ describe('attrsCommand', () => {
     ).toBe(
       "chmod 640 -- '/t/x' && chown 'app:staff' -- '/t/x' && touch -c -m -d @1704067200 -- '/t/x'",
     )
-    expect(attrsCommand('/t/x', { gid: 7 })).toBe("chgrp '7' -- '/t/x'")
+    expect(attrsCommand('/t/x', { gid: 7 })).toBe("chgrp '+7' -- '/t/x'")
+    expect(attrsCommand('/t/x', { uid: 1234, gid: 2345 })).toBe("chown '+1234:+2345' -- '/t/x'")
+    expect(attrsCommand('/t/x', { uid: 0, gid: 'staff' })).toBe("chown '+0:staff' -- '/t/x'")
   })
 })
 

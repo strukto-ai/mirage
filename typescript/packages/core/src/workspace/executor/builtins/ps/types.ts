@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Identity } from '../../../../commands/builtin/utils/identity.ts'
 import { type Zone } from '../../../../utils/timezone.ts'
 
 /**
@@ -32,14 +33,14 @@ export interface PsOptions {
 
 /**
  * What every row of one ps line reads besides its runner: the moment ps runs
- * (epoch seconds), the zone times print in (the session's TZ), the session's
- * profile as its runners' owner and group, and the calling session with its
- * `$$`.
+ * (epoch seconds), the zone times print in (the session's TZ), who the
+ * calling session is, its runners' owner and group, and the calling session
+ * with its `$$`.
  */
 export interface PsContext {
   now: number
   zone: Zone
-  group: string | null
+  identity: Identity
   sessionId: string
   shellPid: number | null
   running: number | null

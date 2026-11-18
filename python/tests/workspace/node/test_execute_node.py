@@ -456,19 +456,16 @@ def test_printenv_all():
 # ── whoami ──────────────────────────────────────
 
 
-def test_whoami_errors_without_identity():
-    # A session with no profile: GNU errors for a uid with
-    # no passwd entry, and so do we.
+def test_whoami_without_a_profile_is_root():
     stdout, io, _, _, _, _ = _exec("whoami", env={})
-    assert io.exit_code == 1
-    assert io.stderr == b"whoami: cannot find name for user ID\n"
+    assert io.exit_code == 0
+    assert stdout == b"root\n"
 
 
 def test_whoami_ignores_env_user():
     # GNU whoami reports the effective user, never $USER.
     stdout, io, _, _, _, _ = _exec("whoami", env={"USER": "alice"})
-    assert io.exit_code == 1
-    assert stdout != b"alice\n"
+    assert stdout == b"root\n"
 
 
 # ── unsupported node errors gracefully ──────────

@@ -12,9 +12,9 @@ from mirage.commands.builtin.utils.formatting import (
 )
 from mirage.commands.builtin.utils.identity import (
     Identity,
-    group_name,
+    group_label,
     identity_of,
-    owner_name,
+    owner_label,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
@@ -942,9 +942,9 @@ def _meta(flags: TreeFlags, node: _TreeNode) -> str:
     if flags.perms:
         fields.append(ls_mode_string(node.stat))
     if flags.owner:
-        fields.append(owner_name(node.stat.uid, flags.identity).ljust(8))
+        fields.append(owner_label(node.stat.uid, flags.identity).ljust(8))
     if flags.group:
-        fields.append(group_name(node.stat.gid, flags.identity).ljust(8))
+        fields.append(group_label(node.stat.gid, flags.identity).ljust(8))
     if flags.si:
         fields.append(_si_text(_size(flags, node)))
     elif flags.sizes or flags.du:
@@ -1180,9 +1180,9 @@ def _json_entry(
         mode = posix_mode(node.stat) & 0o7777
         text += f',"mode":"{mode:04o}","prot":"{ls_mode_string(node.stat)}"'
     if flags.owner:
-        text += f',"user":"{owner_name(node.stat.uid, flags.identity)}"'
+        text += f',"user":"{owner_label(node.stat.uid, flags.identity)}"'
     if flags.group:
-        text += f',"group":"{group_name(node.stat.gid, flags.identity)}"'
+        text += f',"group":"{group_label(node.stat.gid, flags.identity)}"'
     if flags.sizes or flags.du or flags.si:
         text += f',"size":{_size(flags, node)}'
     if flags.dates:

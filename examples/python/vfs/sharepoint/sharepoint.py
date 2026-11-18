@@ -283,7 +283,7 @@ async def run_suite(ws: Workspace, test_dir: str, test_file: str):
     print(f"=== metadata overlay on {test_file} ===")
     meta_res = await ws.shell(
         f"chmod 640 {shlex.quote(test_file)}"
-        f" && chown 500:dev {shlex.quote(test_file)}"
+        f" && chown 500:nogroup {shlex.quote(test_file)}"
         f" && touch -t 202601021530 {shlex.quote(test_file)}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

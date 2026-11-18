@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on /langfuse/prompts/summarize ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "/langfuse/prompts/summarize" && chown 500:dev "/langfuse/prompts/summarize" && touch -t 202601021530 "/langfuse/prompts/summarize"`,
+      `chmod 640 "/langfuse/prompts/summarize" && chown 500:nogroup "/langfuse/prompts/summarize" && touch -t 202601021530 "/langfuse/prompts/summarize"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `/langfuse/prompts/summarize`)) as FileStat

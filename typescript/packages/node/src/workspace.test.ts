@@ -129,10 +129,10 @@ describe('@struktoai/mirage-node Workspace disk metadata', () => {
 
   it('overlays chown and renders owner/group in ls -l', async () => {
     const { ws, cleanup } = makeDiskWs()
-    const c = await ws.shell('chown 500:dev /data/f.txt')
+    const c = await ws.shell('chown 500:nogroup /data/f.txt')
     expect(c.exitCode).toBe(0)
     const ls = await ws.shell('ls -l /data')
-    expect(ls.stdoutText).toContain(' 500 dev ')
+    expect(ls.stdoutText).toContain(' 500 nogroup ')
     await ws.close()
     cleanup()
   })

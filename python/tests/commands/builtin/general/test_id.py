@@ -17,19 +17,27 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 
 
-# A workspace with no agent id has no identity: GNU id's shapes with a
-# dash in each slot, and the name lookups fail.
+# A session with no profile is root, as debian:stable-slim's root prints.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line,expected",
     [
-        ("id", ("uid=- gid=- groups=-\n", "", 0)),
-        ("id -u", ("-\n", "", 0)),
-        ("id -un", ("-\n", "id: cannot find name for user ID\n", 1)),
-        ("id -Gn", ("-\n", "id: cannot find name for group ID\n", 1)),
+        ("id", ("uid=0(root) gid=0(root) groups=0(root)\n", "", 0)),
+        ("id -u", ("0\n", "", 0)),
+        ("id -un", ("root\n", "", 0)),
+        ("id -Gn", ("root\n", "", 0)),
+        (
+            "id nobody",
+            (
+                "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n",
+                "",
+                0,
+            ),
+        ),
+        ("id 1000", ("", "id: '1000': no such user\n", 1)),
     ],
 )
-async def test_id_without_identity_prints_dash(line, expected):
+async def test_id_without_a_profile_is_root(line, expected):
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         io = await ws.shell(line)

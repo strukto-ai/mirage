@@ -24,3 +24,11 @@ async def test_groups():
     assert await io.stdout_str() == "rc=1\n"
     assert await io.stderr_str() == "groups: 'nosuch': no such user\n"
     assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_groups_reads_an_operand_as_a_name_never_a_uid():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("groups 0 root")
+    assert await io.stdout_str() == "root : root\n"
+    assert await io.stderr_str() == "groups: '0': no such user\n"

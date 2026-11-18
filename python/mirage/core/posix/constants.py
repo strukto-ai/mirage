@@ -22,7 +22,7 @@ from mirage.errors.types import FsCondition
 # find's type letter, mode, size, times, owner and group names (numbers
 # when they have none) and relative path.
 FIND = "env LC_ALL=C find -L"
-TREE_FORMAT = "%y %m %s %T@ %A@ %u %g %P\\0"
+TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
 
 WC = "env LC_ALL=C wc -l"
 

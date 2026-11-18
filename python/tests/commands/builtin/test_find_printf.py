@@ -89,7 +89,7 @@ def test_expand_owner_directives():
     search = _spec("/data")
     identity = Identity(profile="admin")
     # No uid/gid on the entry: the owner and the group are the session's
-    # profile, the rule ls -l draws its columns by.
+    # user, the rule ls -l draws its columns by; %U and %G are its ids.
     assert (
         _expand(
             "%u %U %g %G\n",
@@ -99,9 +99,10 @@ def test_expand_owner_directives():
             warnings,
             identity=identity,
         )
-        == "admin admin admin admin\n"
+        == "admin 1000 admin 1000\n"
     )
-    # A reported owner wins; `-` when nothing names one.
+    # A reported owner wins, by name where the user database holds one;
+    # outside a workspace the session is root.
     owned = replace(_stat(), uid=501, gid="staff")
     assert (
         _expand(
@@ -115,7 +116,18 @@ def test_expand_owner_directives():
         == "501 staff\n"
     )
     assert (
-        _expand("%u %g\n", "/data/a.txt", search, _stat(), warnings) == "- -\n"
+        _expand(
+            "%U %G %u %g\n",
+            "/data/a.txt",
+            search,
+            replace(_stat(), uid="alice", gid="staff"),
+            warnings,
+        )
+        == "? ? alice staff\n"
+    )
+    assert (
+        _expand("%u %U %g\n", "/data/a.txt", search, _stat(), warnings)
+        == "root 0 root\n"
     )
     assert warnings == []
 

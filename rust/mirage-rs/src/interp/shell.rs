@@ -248,10 +248,10 @@ impl Shell {
         self.vars.scalar("IFS")
     }
 
-    /// The home directory `~` names: `$HOME`, or `/` when unset, which
-    /// bash answers for a user with no entry in its user database.
+    /// The home directory `~` names: `$HOME`, or when unset the session
+    /// user's home in its user database, `/` for a user with no entry.
     pub fn home(&self) -> &[u8] {
-        self.vars.scalar("HOME").unwrap_or(b"/")
+        self.vars.scalar("HOME").unwrap_or(self.vars.own_home())
     }
 
     /// Whether characters are UTF-8 here (`Store::utf8`).

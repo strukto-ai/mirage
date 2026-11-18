@@ -124,7 +124,7 @@ async def main() -> None:
     print("=== metadata writes refuse on read-only mounts ===")
     for cmd in (
         "chmod 600 /data/example.json",
-        "chown 500:dev /data/example.json",
+        "chown 500:nogroup /data/example.json",
         "touch -t 202601021530 /data/example.json",
     ):
         result = await ws.shell(cmd)

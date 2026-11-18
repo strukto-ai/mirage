@@ -123,8 +123,8 @@ export class RedisVFS extends BaseVFS {
 
   override readonly local: boolean = true
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return redisTree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return redisTree(this.accessor, path, handed?.limit)
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

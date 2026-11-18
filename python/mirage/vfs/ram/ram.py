@@ -37,7 +37,7 @@ from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.capacity import storage_usage
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
-from mirage.vfs.ram.store import RAMFiles, RAMStore
+from mirage.vfs.ram.store import RAMDirs, RAMFiles, RAMStore
 
 
 class RAMVFS(BaseVFS):
@@ -89,8 +89,10 @@ class RAMVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+    async def read_tree(
+        self, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, limit)
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
@@ -165,7 +167,8 @@ class RAMVFS(BaseVFS):
         self._store.files.clear()
         for key, data in state.get("files", {}).items():
             self._store.files[key] = data
-        self._store.dirs = set(state.get("dirs", ())) | {"/"}
+        self._store.dirs = RAMDirs(state.get("dirs", ()))
+        self._store.dirs.add("/")
         self._store.modified = dict(state.get("modified", {}))
         self._store.attrs = {
             k: v.copy() for k, v in state.get("attrs", {}).items()

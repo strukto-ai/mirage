@@ -150,7 +150,7 @@ Expand one for its signature and an example.
     ws.setSessionProfile(sessionId, profile): Promise<SessionState>
     ```
 
-    Change the rules after the workspace is built. `setProfile` defines a profile name or replaces what it means; a document no session could run under throws `PolicyError` and leaves the table as it was. A live session keeps its rules until `setSessionProfile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `null` picks the workspace default, and a document passed directly runs without a name.
+    Change the rules after the workspace is built. `setProfile` defines a profile name or replaces what it means; a document no session could run under throws `PolicyError` and leaves the table as it was. A live session keeps its rules until `setSessionProfile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `null` picks the workspace default, and a document passed directly runs without a name. The name is the user the session runs as: `whoami` prints it with uid 1000, a session with no profile is `root`, and one under a document without a name is uid 1000 with no name.
 
     ```ts
     ws.setProfile('user', { commands: { allow: ['ls', 'cat'] }, paths: { hide: ['/data/secret'] } })

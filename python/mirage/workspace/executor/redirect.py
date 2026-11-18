@@ -107,7 +107,7 @@ from mirage.workspace.executor.create import (
 from mirage.workspace.executor.statement import write_error_line
 from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.session.shell_dirs import tilde_home
+from mirage.workspace.session.shell_dirs import tilde_homes
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -1972,7 +1972,7 @@ async def redirect_stdin(
             sources[r.fd] = b""
         elif r.kind == RedirectKind.STDIN:
             target = (
-                literal_word(r.target_node, tilde_home(session))
+                literal_word(r.target_node, tilde_homes(session))
                 if r.target_node is not None
                 else r.target
             )

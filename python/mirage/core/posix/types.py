@@ -34,8 +34,8 @@ class TreeRow:
         atime (int): the access time, in whole seconds.
         mtime_ms (int): the modification time, in epoch milliseconds.
         atime_ms (int): the access time, in epoch milliseconds.
-        user (str): the owner's name, or its number when it has none.
-        group (str): the group's name, or its number.
+        uid (int): the owner's uid.
+        gid (int): the group's gid.
         rel (str): the path under the listed scope, empty for the scope.
     """
 
@@ -46,6 +46,6 @@ class TreeRow:
     atime: int
     mtime_ms: int
     atime_ms: int
-    user: str
-    group: str
+    uid: int
+    gid: int
     rel: str

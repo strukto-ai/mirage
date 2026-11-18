@@ -687,6 +687,8 @@ it.each([
   expect(() => parseFindExpression(tokens)).toThrow(message)
 })
 
+const IDS = { users: { root: 0, bob: 1000 }, groups: { root: 0 }, uid: 1000, gid: 1000 }
+
 describe('the tests and actions find gained', () => {
   it('binds the new tests to their nodes', () => {
     const expr = parseFind([
@@ -707,7 +709,7 @@ describe('the tests and actions find gained', () => {
       '-ipath',
       'D*',
       '-quit',
-    ]).bind([], undefined, { LC_ALL: 'C.UTF-8' }, 'me')
+    ]).bind([], undefined, { LC_ALL: 'C.UTF-8' }, IDS)
     expect(expr.tree).toEqual({
       op: 'and',
       kids: [
@@ -723,15 +725,34 @@ describe('the tests and actions find gained', () => {
         { op: 'lname', pattern: 'x', icase: true },
         { op: 'xtype', kind: 'l' },
         { op: 'perm', mode: 0o100, bits: 'any' },
-        { op: 'count', field: 'links', cmp: '+', count: 1 },
-        { op: 'owner', name: 'bob', group: false, profile: 'me' },
-        { op: 'nouser', group: true },
+        { op: 'count', field: 'links', cmp: '+', count: 1, ids: IDS },
+        { op: 'owner', id: 1000, group: false, ids: IDS },
+        { op: 'nouser', group: true, ids: IDS },
         { op: 'access', mode: 'w' },
         { op: 'path', pattern: 'D*', icase: true },
         { op: 'quit', fired: [] },
       ],
     })
     expect(expr.actions).toEqual([])
+  })
+
+  it('reads -user as a name, then a number with an optional plus', () => {
+    for (const [text, uid] of [
+      ['bob', 1000],
+      ['+0', 0],
+      ['4242', 4242],
+    ] as const) {
+      const expr = parseFind(['-user', text]).bind([], undefined, null, IDS)
+      expect(expr.tree).toEqual({ op: 'owner', id: uid, group: false, ids: IDS })
+    }
+    for (const text of ['toString', '__proto__', '++5']) {
+      expect(() => parseFind(['-user', text]).bind([], undefined, null, IDS)).toThrow(UsageError)
+    }
+    const plus = { users: { '+42': 1000 }, groups: { '+42': 1000 }, uid: 1000, gid: 1000 }
+    for (const test of ['-user', '-group']) {
+      const expr = parseFind([test, '+42']).bind([], undefined, null, plus)
+      expect(expr.tree).toEqual({ op: 'owner', id: 42, group: test === '-group', ids: plus })
+    }
   })
 
   it('carries the file and directory of an action', () => {

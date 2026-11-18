@@ -14,8 +14,15 @@
 
 from typing import Any
 
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    home_of,
+    session_uid,
+    user_homes,
+)
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
+from mirage.workspace.session.state import seed_user
 
 
 def command_name(command: str) -> str:
@@ -38,8 +45,8 @@ def fork_for_call(
 
     A per-call ``cwd``/``env`` runs in an ephemeral clone, matching a
     bash subshell: ``cd`` and ``export`` inside the line do not leak
-    back to the persistent session. Without overrides the persistent
-    session is used as is.
+    back to the persistent session, and the clone runs as the same
+    user. Without overrides the persistent session is used as is.
 
     Args:
         session (SessionState): the persistent session for the call.
@@ -54,4 +61,19 @@ def fork_for_call(
         overrides["cwd"] = cwd
     if env is not None:
         overrides["vars"] = {**session.vars, **vars_from_env(env)}
-    return session.fork(**overrides)
+    forked = session.fork(**overrides)
+    seed_session_user(forked)
+    return forked
+
+
+def seed_session_user(session: SessionState) -> None:
+    """Give a session the user its profile runs as: ``$UID``, ``$EUID``
+    and the homes ``~`` reads, which a fork does not carry.
+
+    Args:
+        session (SessionState): the session a line runs in.
+    """
+    identity = Identity(profile=session.profile)
+    seed_user(
+        session, session_uid(identity), home_of(identity), user_homes(identity)
+    )

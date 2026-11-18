@@ -199,7 +199,7 @@ def _failing_entry(exc: Exception):
         (
             FileNotFoundError("/dir/b.txt"),
             {"layout": LsFormat.VERBOSE},
-            "?????????? ? ? ? ?            ? b.txt",
+            "?????????? ? ?    ?    ?            ? b.txt",
             b"ls: cannot access '/dir/b.txt': No such file or directory\n",
         ),
         (
@@ -211,7 +211,7 @@ def _failing_entry(exc: Exception):
         (
             OSError(errno.EIO, "socket hang up"),
             {"layout": LsFormat.VERBOSE},
-            "?????????? ? ? ? ?            ? b.txt",
+            "?????????? ? ?    ?    ?            ? b.txt",
             b"ls: cannot access '/dir/b.txt': Input/output error\n",
         ),
     ],
@@ -916,8 +916,8 @@ async def test_dot_entries_respect_mount_boundary(prefix, subdir, namespace):
         if namespace
         else "drwxr-xr-x"
     )
-    assert f"{dot_mode} 1 - - 4096 - .\n" in output.decode()
-    assert f"{parent_mode} 1 - - 4096 - ..\n" in output.decode()
+    assert f"{dot_mode} 1 root root 4096 - .\n" in output.decode()
+    assert f"{parent_mode} 1 root root 4096 - ..\n" in output.decode()
     if namespace:
         parent = (
             prefix if subdir and prefix else (root.rsplit("/", 1)[0] or "/")
@@ -1145,7 +1145,7 @@ async def test_columns_come_from_the_environment_and_notices_lead_stderr():
     [
         (
             "touch -d '2024-03-05 06:07:08' /d/a; ls -lD /d/a",
-            "  -rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n//DIRED// 34 38\n"
+            "  -rw-r--r-- 1 root root 0 Mar  5  2024 /d/a\n//DIRED// 40 44\n"
             "//DIRED-OPTIONS// --quoting-style=literal\n",
         ),
         (
@@ -1159,16 +1159,16 @@ async def test_columns_come_from_the_environment_and_notices_lead_stderr():
         ),
         (
             "touch -d '2024-03-05 06:07:08' '/d/b c'; ls -lDQ '/d/b c'",
-            '  -rw-r--r-- 1 - - 0 Mar  5  2024 "/d/b c"\n//DIRED// 34 42\n'
+            '  -rw-r--r-- 1 root root 0 Mar  5  2024 "/d/b c"\n//DIRED// 40 48\n'
             "//DIRED-OPTIONS// --quoting-style=c\n",
         ),
         (
             "touch -d '2024-03-05 06:07:08' /d/a; ls -l --author /d/a",
-            "-rw-r--r-- 1 - - - 0 Mar  5  2024 /d/a\n",
+            "-rw-r--r-- 1 root root root 0 Mar  5  2024 /d/a\n",
         ),
         (
             "touch -d '2024-03-05 06:07:08' /d/a; ls -lg --author /d/a",
-            "-rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n",
+            "-rw-r--r-- 1 root root 0 Mar  5  2024 /d/a\n",
         ),
         ("touch /d/a; ls -D -C /d/a", "/d/a\n"),
     ],

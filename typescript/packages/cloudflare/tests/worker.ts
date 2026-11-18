@@ -47,6 +47,7 @@ interface Env {
 interface SqlRun {
   readonly lines: readonly string[]
   readonly on: 'd1' | 'object'
+  readonly walkLimit?: number
   // The workspace's sessions, and on `object` its Durable Object.
   readonly id: string
 }
@@ -172,8 +173,10 @@ async function sftpRead(): Promise<Response> {
 // A workspace whose files and sessions live in `driver`, as a fresh one
 // built for each request: what it answers comes from the database alone.
 async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
+  const vfs = new SqlVFS(driver)
+  if (run.walkLimit !== undefined) vfs.walkLimit = run.walkLimit
   const ws = new Workspace(
-    { '/s': new SqlVFS(driver) },
+    { '/s': vfs },
     {
       mode: MountMode.EXEC,
       workspaceId: run.id,

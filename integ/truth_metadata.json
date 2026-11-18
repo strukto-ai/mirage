@@ -1,9 +1,9 @@
 {
   "overlay_snapshot_mode": "601",
   "overlay_snapshot_uid": "500",
-  "overlay_snapshot_gid": "dev",
+  "overlay_snapshot_gid": "65534",
   "overlay_snapshot_mtime": "2026-01-02T15:30:00",
   "overlay_orphan_before": true,
   "overlay_orphan_after": false,
-  "snapshot_ls_line": "total ?\n-rw------x 1 500 dev 6 Jan  2  2026 f.txt"
+  "snapshot_ls_line": "total ?\n-rw------x 1 500 nogroup 6 Jan  2  2026 f.txt"
 }

@@ -46,7 +46,7 @@ from mirage.commands.config import Context
 from mirage.context import session_visibility
 from mirage.context.session_context import awaits_as, current_caller
 from mirage.errors.fs import eacces, eisdir, enoent
-from mirage.errors.types import DotWalkError
+from mirage.errors.types import DotWalkError, WalkDeclinedError
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
@@ -320,6 +320,8 @@ class ReadAhead:
         ):
             await self._warmed(path)
         result, io = await self.inner(name, path, **options)
+        if not self.kept:
+            return result, io
         folder = path.virtual.rstrip("/") or "/"
         if name == "stat" and path.virtual in self.specs:
             if isinstance(result, FileStat):
@@ -363,6 +365,7 @@ class ReadAhead:
                 run.warming[name] = task
         if pending is not None and not await asyncio.shield(pending):
             self.kept = False
+            self.trees.clear()
 
     def _paced(self, run: _Run, at: int, hit: bool) -> int:
         """How many files a walk's read at ``at`` warms: twice the pace on
@@ -994,19 +997,42 @@ def command_files(
             await call("follow", path, n=n, interval=interval),
         )
 
+    declined: tuple[str, str, bool, bool] | None = None
+
     async def files_containing(
-        path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+        path: PathSpec,
+        text: str,
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        prune: bool = False,
     ) -> list[PathSpec] | None:
-        return cast(
-            list[PathSpec] | None,
-            await call(
-                "files_containing",
-                path,
-                text=text,
-                whole_word=whole_word,
-                ignore_case=ignore_case,
-            ),
-        )
+        nonlocal declined
+        if prune and (
+            crossing or (reading is not None and reading.stream is not None)
+        ):
+            return None
+        query = (path.virtual, text, whole_word, ignore_case)
+        if query == declined:
+            return None
+        try:
+            return cast(
+                list[PathSpec] | None,
+                await call(
+                    "files_containing",
+                    path,
+                    text=text,
+                    whole_word=whole_word,
+                    ignore_case=ignore_case,
+                    **({"prune": True} if prune else {}),
+                ),
+            )
+        except WalkDeclinedError as exc:
+            if not prune:
+                raise
+            logger.debug("grep candidate search declined: %s", exc)
+            declined = query
+            return None
 
     async def lines_containing(
         path: PathSpec, text: str, *, ignore_case: bool

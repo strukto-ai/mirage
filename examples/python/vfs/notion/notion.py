@@ -80,7 +80,7 @@ async def explore_pages(ws: Workspace) -> None:
     print(f"=== metadata overlay on {base}/page.json ===")
     meta_res = await ws.shell(
         f"chmod 640 {shlex.quote(f'{base}/page.json')}"
-        f" && chown 500:dev {shlex.quote(f'{base}/page.json')}"
+        f" && chown 500:nogroup {shlex.quote(f'{base}/page.json')}"
         f" && touch -t 202601021530 {shlex.quote(f'{base}/page.json')}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

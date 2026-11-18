@@ -48,6 +48,11 @@ ALLOWED = {
     "SHLVL as a shell starts, not names the agent chose; a readonly "
     "SHLVL is left as it is",
     (
+        "mirage/workspace/session/state.py",
+        "seed_user",
+    ): "the shell's own bookkeeping for the two fixed names UID and EUID "
+    "as a shell starts, not a name the agent chose",
+    (
         "mirage/workspace/session/shell_dirs.py",
         "change_dir",
     ): "the shell's own bookkeeping for the two fixed names PWD and "

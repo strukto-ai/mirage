@@ -167,7 +167,7 @@ def test_ls_renders_finds_own_layout_per_match() -> None:
         assert len(lines) >= 2
         for line in lines:
             assert re.fullmatch(
-                r"        \?      \? -rw-r--r--   1 -        -        "
+                r"        \?      \? -rw-r--r--   1 root     root     "
                 r" {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d /.*\.html",
                 line,
             ), line

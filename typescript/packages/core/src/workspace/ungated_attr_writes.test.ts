@@ -44,6 +44,9 @@ const ALLOWED: Record<string, string> = {
     "the shell's own bookkeeping for the fixed names BASH_VERSINFO and " +
     'SHLVL as a shell starts, not names the agent chose; a readonly ' +
     'SHLVL is left as it is',
+  'workspace/session/state.ts::seedUser':
+    "the shell's own bookkeeping for the two fixed names UID and EUID as a " +
+    'shell starts, not a name the agent chose',
   'workspace/session/shell_dirs.ts::changeDir':
     "the shell's own bookkeeping for the two fixed names PWD and " +
     'OLDPWD as part of a cd the router already authorized, not a name ' +

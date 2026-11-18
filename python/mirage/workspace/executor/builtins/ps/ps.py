@@ -17,7 +17,14 @@ import shlex
 from dataclasses import replace
 from datetime import datetime
 
-from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
+from mirage.commands.builtin.utils.identity import (
+    UNKNOWN_NAME,
+    Identity,
+    group_label,
+    owner_label,
+    session_gid,
+    session_uid,
+)
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
@@ -323,10 +330,10 @@ def _started(fact: str, info: Process, ctx: PsContext) -> str:
 def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     """One -o cell for a process.
 
-    The owner columns print the workspace user and the session's
-    profile, names in the id columns too, as ``id`` does, and ``-``
-    where nobody claimed one or the runner is another session's, whose
-    profile this one cannot name. A runner of the calling session belongs
+    The owner columns print the calling session's user and group, by
+    name in the name columns and by number in the id columns, as ``id``
+    does, and ``-`` for another session's runner, whose profile this one
+    cannot name. A runner of the calling session belongs
     to the session ``$$`` leads; another session's to its own group. The
     machine column names the machine a program runs on, ``mirage`` for a
     process that is Mirage's own, and each pid column shows what the
@@ -381,9 +388,18 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
         return branch + _comm(info)
-    if fact in ("user", "group"):
-        own = info.session_id == ctx.session_id
-        return (ctx.group if own else None) or UNKNOWN_NAME
+    if fact in ("user", "uid", "group", "gid"):
+        if info.session_id != ctx.session_id:
+            return UNKNOWN_NAME
+        if fact == "user":
+            return owner_label(None, ctx.identity)
+        if fact == "group":
+            return group_label(None, ctx.identity)
+        return str(
+            session_uid(ctx.identity)
+            if fact == "uid"
+            else session_gid(ctx.identity)
+        )
     elapsed = max(0, int(ctx.now - info.started_at))
     if fact == "etime":
         return _elapsed(elapsed)
@@ -590,7 +606,9 @@ async def handle_ps(
     ctx = PsContext(
         now=system_now(),
         zone=zone_from_env(session.env if session is not None else None),
-        group=session.profile if session is not None else None,
+        identity=Identity(
+            profile=session.profile if session is not None else None
+        ),
         session_id=sid,
         shell_pid=session.shell_pid if session is not None else None,
         running=running.pid if running is not None else None,

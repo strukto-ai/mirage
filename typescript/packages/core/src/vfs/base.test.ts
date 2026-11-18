@@ -466,7 +466,7 @@ describe('custom VFS capability fallbacks', () => {
       expect(new TextDecoder().decode(result.stderr)).toBe(
         `cp: cannot create directory '/custom/dst': ${reason}\n`,
       )
-      expect(store.dirs).toEqual(before)
+      expect(new Set(store.dirs)).toEqual(before)
       expect([...store.files.keys()]).toEqual(['/src/file'])
     } finally {
       await ws.close()

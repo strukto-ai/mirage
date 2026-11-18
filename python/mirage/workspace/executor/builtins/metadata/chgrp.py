@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.identity import Identity, group_id
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
@@ -35,12 +36,13 @@ async def handle_chgrp(
 ) -> Result:
     """chgrp GROUP FILE...: set group ownership via setattr.
 
-    The group half of chown: writes gid and leaves uid untouched. Group is
-    stored, not enforced (mirage has no group model); a name is kept
-    verbatim, a numeric id becomes an int. ``-h`` writes the link node's
-    own group, and ``-R`` walks the subtree under the same implicit
-    ``-P`` as chown, or ``-H`` or ``-L``. ``--reference`` copies a
-    file's group.
+    The group half of chown: writes gid and leaves uid untouched. The
+    group is stored as an id, not enforced: a name the session's user
+    database holds is its id, any number is one, and a name it lacks is
+    refused. ``-h`` writes the link node's own group, and ``-R`` walks
+    the subtree under the same implicit ``-P`` as chown, or ``-H`` or
+    ``-L``. ``--reference`` copies a file's group, the session's for a
+    file that reports none.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -51,6 +53,7 @@ async def handle_chgrp(
     parsed, fl, refused = parse_line("chgrp", args, session.cwd)
     if refused is not None:
         return refused
+    identity = Identity(profile=session.profile)
     reference = fl.as_path("reference")
     if reference is not None:
         operands = reference_operands(parsed.texts, parsed.paths, session.cwd)
@@ -70,16 +73,24 @@ async def handle_chgrp(
             fl,
             operands,
             None,
-            found.gid,
+            group_id(found.gid, identity),
         )
     if not parsed.texts or not parsed.paths:
         last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chgrp", last)
         return fail("chgrp", f"{error}\n", error.exit_code)
     group_text = parsed.texts[0]
-    gid = parse_group(group_text)
+    gid = parse_group(group_text, identity)
     if gid is None:
         return fail("chgrp", f"chgrp: invalid group: '{group_text}'\n", 1)
     return await change_owner(
-        namespace, dispatch, session, "chgrp", fl, parsed.paths, None, gid
+        namespace,
+        dispatch,
+        session,
+        "chgrp",
+        fl,
+        parsed.paths,
+        None,
+        gid,
+        spec=(None, group_text),
     )

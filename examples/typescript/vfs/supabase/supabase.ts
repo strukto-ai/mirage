@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${key} ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${key}" && chown 500:dev "${key}" && touch -t 202601021530 "${key}"`,
+      `chmod 640 "${key}" && chown 500:nogroup "${key}" && touch -t 202601021530 "${key}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     try {

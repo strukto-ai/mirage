@@ -71,7 +71,7 @@ async def exercise() -> None:
     print(f"=== metadata overlay on {TEST_FILE} ===")
     meta_res = await ws.shell(
         f'chmod 640 "{TEST_FILE}"'
-        f' && chown 500:dev "{TEST_FILE}"'
+        f' && chown 500:nogroup "{TEST_FILE}"'
         f' && touch -t 202601021530 "{TEST_FILE}"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

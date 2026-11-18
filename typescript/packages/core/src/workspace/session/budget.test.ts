@@ -182,7 +182,7 @@ describe('max_env', () => {
   })
 
   it('stops counting the set-aside value once the prefix is restored', async () => {
-    const [out, , code] = await run('X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok')
+    const [out, , code] = await run('X=$(printf %0100d 0); X= eval :; Y=$(printf %040d 0); echo ok')
     expect([out, code]).toEqual(['ok\n', 0])
   })
 

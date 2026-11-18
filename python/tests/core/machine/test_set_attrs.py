@@ -30,7 +30,13 @@ def test_attrs_command_sets_every_field_asked():
         " && touch -c -m -d @1704067200.0 -- '/t/x'"
     )
     assert attrs_command("/t/x", None, None, 7, None, None) == (
-        "chgrp '7' -- '/t/x'"
+        "chgrp '+7' -- '/t/x'"
+    )
+    assert attrs_command("/t/x", None, 1234, 2345, None, None) == (
+        "chown '+1234:+2345' -- '/t/x'"
+    )
+    assert attrs_command("/t/x", None, 0, "staff", None, None) == (
+        "chown '+0:staff' -- '/t/x'"
     )
 
 

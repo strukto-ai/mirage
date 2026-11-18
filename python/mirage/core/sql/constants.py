@@ -36,6 +36,12 @@ MAX_PARAMS = 100
 # 100.
 MAX_COLUMNS = 100
 
+# Allow room for each eager subtree row, its path, stat and walk indexes.
+TREE_ENTRY_BYTES = 4096
+
+# The bytes fetched per streamed read when workspace memory is tight.
+READ_BYTES = 64 * 1024
+
 # The bytes a streamed write gathers before it lands them.
 FLUSH_BYTES = 1024 * 1024
 
@@ -152,6 +158,8 @@ SQL: dict[str, str] = {
       FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)
     SELECT t.id, t.depth, t.rel, {columns("i")}
     FROM tree t JOIN fs_inode i ON i.ino = t.ino""",
+    "chunk_slice": "SELECT substr(data, ?, ?) AS data FROM fs_data"
+    " WHERE ino = ? AND chunk_index = ?",
     "chunks": """SELECT chunk_index, data FROM fs_data
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index""",
     "used_bytes": "SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode"
@@ -191,3 +199,36 @@ def clear_under(ino: int) -> tuple[str, ...]:
         f" OR ino = {_RESTORE_BASE}",
         f"DELETE FROM fs_dentry WHERE id IN ({tree} SELECT id FROM tree)",
     )
+
+
+def children_of(count: int) -> str:
+    """Direct children of a bounded batch of parents, with their inode rows."""
+    slots = ", ".join("?" for _ in range(count))
+    return f"""SELECT d.parent_ino, d.name, {columns("i")}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN ({slots}) LIMIT ?"""
+
+
+def candidate_files(ignore_case: bool) -> str:
+    """SQLite candidate files, including matches split across two storage rows."""
+    body = "CAST(lower(b.data) AS BLOB)" if ignore_case else "b.data"
+    # SQLite folds BLOBs as database-encoded text. Keep every populated
+    # file when that encoding cannot represent ASCII as single bytes.
+    binary = (
+        "CAST('A' AS BLOB) <> X'41' OR instr(b.data, X'00') > 0 OR "
+        if ignore_case
+        else ""
+    )
+    return f"""WITH RECURSIVE tree(ino, rel) AS (
+      SELECT ino, name FROM fs_dentry WHERE parent_ino = ?
+      UNION ALL
+      SELECT d.ino, t.rel || '/' || d.name
+      FROM tree t JOIN fs_dentry d ON d.parent_ino = t.ino)
+    SELECT t.rel FROM tree t WHERE EXISTS (
+      SELECT 1 FROM fs_data b WHERE b.ino = t.ino AND
+      (instr({body}, ?) > 0 OR
+       (length(b.data) = ? AND instr(substr({body}, ?), ?) > 0) OR
+       (b.chunk_index > 0 AND instr(substr({body}, 1, ?), ?) > 0) OR
+       {binary}
+       (b.chunk_index = 0 AND substr(b.data, 1, 1) IN (X'FE', X'FF'))))
+    LIMIT ?"""

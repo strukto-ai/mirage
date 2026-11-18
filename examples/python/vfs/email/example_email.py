@@ -141,7 +141,7 @@ async def main() -> None:
     print(f"=== metadata overlay on {first_msg} ===")
     meta_res = await ws.shell(
         f"chmod 640 {shlex.quote(first_msg)}"
-        f" && chown 500:dev {shlex.quote(first_msg)}"
+        f" && chown 500:nogroup {shlex.quote(first_msg)}"
         f" && touch -t 202601021530 {shlex.quote(first_msg)}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

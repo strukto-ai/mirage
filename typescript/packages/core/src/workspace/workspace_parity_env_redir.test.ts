@@ -74,13 +74,11 @@ describe('workspace: whoami', () => {
     await ws.close()
   })
 
-  it('errors without a profile', async () => {
-    // A session with no profile: GNU errors for a uid with no passwd
-    // entry, and so do we.
+  it('is root without a profile', async () => {
     const { ws } = makeWorkspace()
     const io = await ws.shell('whoami')
-    expect(io.exitCode).toBe(1)
-    expect(new TextDecoder().decode(io.stderr)).toBe('whoami: cannot find name for user ID\n')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('root\n')
     await ws.close()
   })
 

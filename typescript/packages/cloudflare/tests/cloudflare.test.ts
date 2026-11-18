@@ -241,10 +241,14 @@ describe('mirage in workerd', () => {
     },
   )
   for (const on of ['d1', 'object'] as const) {
-    const sql = async (id: string, lines: readonly string[]): Promise<Result[]> => {
+    const sql = async (
+      id: string,
+      lines: readonly string[],
+      walkLimit?: number,
+    ): Promise<Result[]> => {
       const response = await worker.fetch('http://cloudflare.test/sql', {
         method: 'POST',
-        body: JSON.stringify({ lines, on, id }),
+        body: JSON.stringify({ lines, on, id, walkLimit }),
       })
       expect(response.status).toBe(200)
       return (await response.json()) as Result[]
@@ -301,6 +305,25 @@ describe('mirage in workerd', () => {
         { exit: 0, stdout: '', stderr: '' },
         { exit: 1, stdout: '', stderr: 'ast-grep: parser resource limit exceeded\n' },
         { exit: 0, stdout: source + '\n', stderr: '' },
+      ])
+    })
+
+    it(`searches a SQLite checkout across chunk boundaries on ${on}`, async () => {
+      const id = `t-${on}-${crypto.randomUUID()}`
+      const base = `/s/${id}`
+      const results = await sql(
+        id,
+        [
+          `mkdir -p ${base}/src && printf '%4093sNeedleFound' '' > ${base}/src/hit && printf other > ${base}/miss`,
+          `grep -rlF NeedleFound ${base}`,
+          `rg -lF NeedleFound ${base}`,
+          `grep -rilF needlefound ${base}`,
+        ],
+        1,
+      )
+      expect(results.map((r) => [r.exit, r.stdout, r.stderr])).toEqual([
+        [0, '', ''],
+        ...Array.from({ length: 3 }, () => [0, `${base}/src/hit\n`, '']),
       ])
     })
 

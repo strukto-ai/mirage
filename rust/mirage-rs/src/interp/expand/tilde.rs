@@ -92,9 +92,9 @@ impl<H: Host> Expander<'_, H> {
     }
 
     /// What a word's tilde prefix names: `~` and `~/rest` the home
-    /// directory (`HOME=/` makes `~/x` `//x`), `~+` `$PWD`, `~-` `$OLDPWD`;
-    /// None for any other prefix, a user name (no user database) or a
-    /// `$PWD` or `$OLDPWD` that is unset.
+    /// directory (`HOME=/` makes `~/x` `//x`), `~+` `$PWD`, `~-` `$OLDPWD`,
+    /// `~name` that user's home; None for a user the session's user
+    /// database lacks or a `$PWD` or `$OLDPWD` that is unset.
     pub fn tilde_prefix(&self, text: &[u8]) -> Option<Vec<u8>> {
         let rest = text.strip_prefix(b"~")?;
         let slash = rest.iter().position(|b| *b == b'/').unwrap_or(rest.len());
@@ -103,7 +103,7 @@ impl<H: Host> Expander<'_, H> {
             b"" => self.shell.home(),
             b"+" => self.shell.vars.scalar("PWD")?,
             b"-" => self.shell.vars.scalar("OLDPWD")?,
-            _ => return None,
+            name => self.shell.vars.home_of(name)?,
         };
         Some([base, tail].concat())
     }

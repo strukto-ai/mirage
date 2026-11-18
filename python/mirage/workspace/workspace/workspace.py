@@ -2737,10 +2737,13 @@ class Workspace:
             self._workspace_processes,
         )
 
-    def _profile_name(self, profile: str | SessionProfile | None) -> str:
+    def _profile_name(
+        self, profile: str | SessionProfile | None
+    ) -> str | None:
         """The name of the profile ``_base_profile`` resolves, which its
-        programs read as ``ctx["profile"]`` and the session reports as
-        its group; empty for a profile document passed without one.
+        programs read as ``ctx["profile"]`` and the session runs as;
+        empty for a profile document passed without one, None for no
+        profile at all, which runs as root.
 
         Args:
             profile (str | SessionProfile | None): what the caller
@@ -2752,7 +2755,7 @@ class Workspace:
             return self._default_profile_name
         if profile is None and DEFAULT_PROFILE in self._profiles:
             return DEFAULT_PROFILE
-        return ""
+        return None if profile is None else ""
 
     def get_session(self, session_id: str) -> SessionState:
         return self._session_mgr.get(session_id)

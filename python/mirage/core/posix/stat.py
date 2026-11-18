@@ -70,7 +70,7 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
     rows: list[TreeRow] = []
     for record in out.split(b"\0")[:-1]:
         try:
-            kind, mode, size, mtime, atime, user, group, rel = (
+            kind, mode, size, mtime, atime, uid, gid, rel = (
                 record.decode().split(" ", 7)
             )
             rows.append(
@@ -82,8 +82,8 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
                     atime=int(atime.split(".")[0]),
                     mtime_ms=_milliseconds(mtime),
                     atime_ms=_milliseconds(atime),
-                    user=user,
-                    group=group,
+                    uid=int(uid),
+                    gid=int(gid),
                     rel=rel,
                 )
             )

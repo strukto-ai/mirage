@@ -1960,3 +1960,28 @@ it('leaves a relative path after a cd the pass lost to the gate', async () => {
   const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })
   expect([io.exitCode, DEC.decode(io.stdout)]).toEqual([0, 'harmless\n'])
 })
+
+it.each(['~/secret', '~agent/secret'])(
+  'reads %s as the user’s home when the line is judged',
+  async (operand) => {
+    // HOME is unset, so `~` is the user's home in the user database, as the
+    // run expands it; the whole-line check reads the same path.
+    const agent = SessionProfile({
+      commands: {
+        allow: ['cat', 'echo'],
+        deny: [{ reason: 'the secret is refused', commands: { cat: ['/home/agent/secret'] } }],
+      },
+    })
+    const w = new Workspace(
+      { '/data': new RAMVFS(), '/home': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { agent } },
+    )
+    open.push(w)
+    await w.shell('mkdir -p /home/agent')
+    await w.vfs.write('/home/agent/secret', new TextEncoder().encode('s\n'))
+    w.createSession('a', { profile: 'agent' })
+    const ran = await w.shell(`echo changed > /data/marker; cat ${operand}`, { sessionId: 'a' })
+    expect(ran.exitCode).toBe(1)
+    expect(await w.vfs.readdir('/data')).not.toContain('/data/marker')
+  },
+)

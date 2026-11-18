@@ -16,6 +16,17 @@ import { currentCaller, liveCallers, bindCaller } from '../../context/session_co
 
 let sequence = 0
 
+export interface CommandKey {
+  readonly started: number
+}
+
+const active = new Map<number, CommandKey>()
+
+export function commandKey(): CommandKey | null {
+  const started = soleCommandStarted()
+  return started === null ? null : (active.get(started) ?? null)
+}
+
 /**
  * The next point in the one order commands and listing writes share.
  *
@@ -65,6 +76,12 @@ export function soleCommandStarted(): number | null {
  * nested command (a `$(...)`, a function body) gets its own later stamp,
  * and the outer one comes back when it ends.
  */
-export function commandScope<T>(fn: () => Promise<T>): Promise<T> {
-  return bindCaller({ ...currentCaller(), started: tick() }, fn)
+export async function commandScope<T>(fn: () => Promise<T>): Promise<T> {
+  const started = tick()
+  active.set(started, { started })
+  try {
+    return await bindCaller({ ...currentCaller(), started }, fn)
+  } finally {
+    active.delete(started)
+  }
 }

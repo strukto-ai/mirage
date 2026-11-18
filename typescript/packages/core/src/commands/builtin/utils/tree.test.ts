@@ -68,6 +68,46 @@ class Mount {
 const at = (p: string): PathSpec => PathSpec.fromStrPath(p)
 
 describe('treeWalk', () => {
+  it('declines an oversized tree and uses a complete child batch', async () => {
+    const calls: [string, number | undefined, boolean][] = []
+    const leaf = new FileStat({ name: 'leaf', type: FILE, size: 2 })
+    const sub = new FileStat({ name: 'sub', type: DIR })
+    const mount = new Mount()
+    const readTree = (path: PathSpec, limit?: number, level = false) => {
+      calls.push([path.virtual, limit, level])
+      if (level) return Promise.resolve(new Map([['sub', sub]]))
+      if (path.virtual === '/m')
+        return Promise.resolve(
+          new Map([
+            ['sub', sub],
+            ['sub/leaf', leaf],
+          ]),
+        )
+      return Promise.resolve(new Map([['leaf', leaf]]))
+    }
+    const [readdir, stat] = treeWalk(readTree, mount.readdir, mount.stat, true, undefined, 1)
+    expect(await readdir(at('/m'))).toEqual(['/m/sub'])
+    expect(await readdir(at('/m/sub'))).toEqual(['/m/sub/leaf'])
+    expect((await stat(at('/m/sub/leaf'))).size).toBe(2)
+    expect(calls).toEqual([
+      ['/m', 1, false],
+      ['/m', undefined, true],
+      ['/m/sub', 1, false],
+    ])
+    expect(mount.calls).toEqual([])
+  })
+  it('retains ancestor stats and releases completed directories in a depth-first walk', async () => {
+    const rows = new Map([['file', new FileStat({ name: 'file', type: FILE, size: 2 })]])
+    const mount = new Mount(null, undefined, rows)
+    const [readdir, stat] = treeWalk(mount.readTree, mount.readdir, mount.stat, false, undefined, 2)
+    for (const dir of ['/m', '/m/a', '/m/ab']) await readdir(at(dir))
+    expect((await stat(at('/m/file'))).size).toBe(2)
+    expect((await stat(at('/m/ab/file'))).size).toBe(2)
+    await stat(at('/m/a/file'))
+    expect(mount.calls).toEqual(['stat /m/a/file'])
+    expect(mount.asked).toEqual([])
+  })
+
   it('lists and stats the whole walk from one answer', async () => {
     const mount = new Mount(found())
     const [readdir, stat] = mount.walk()

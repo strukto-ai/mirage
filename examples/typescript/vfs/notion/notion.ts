@@ -83,7 +83,7 @@ async function explorePages(ws: Workspace): Promise<void> {
   // dispatch-level stat.
   console.log(`=== metadata overlay on ${base}/page.json ===`)
   const metaRes = await ws.shell(
-    `chmod 640 ${shellQuote(`${base}/page.json`)} && chown 500:dev ${shellQuote(`${base}/page.json`)} && touch -t 202601021530 ${shellQuote(`${base}/page.json`)}`,
+    `chmod 640 ${shellQuote(`${base}/page.json`)} && chown 500:nogroup ${shellQuote(`${base}/page.json`)} && touch -t 202601021530 ${shellQuote(`${base}/page.json`)}`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', `${base}/page.json`)) as FileStat

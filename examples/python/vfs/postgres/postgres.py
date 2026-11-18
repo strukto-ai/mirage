@@ -84,7 +84,7 @@ async def main():
     # dispatch-level stat.
     print(f"=== metadata overlay on {fp} ===")
     meta_res = await ws.shell(
-        f'chmod 640 "{fp}" && chown 500:dev "{fp}"'
+        f'chmod 640 "{fp}" && chown 500:nogroup "{fp}"'
         f' && touch -t 202601021530 "{fp}"'
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")

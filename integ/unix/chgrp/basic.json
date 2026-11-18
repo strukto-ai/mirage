@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cg && echo alpha > /data/cg/f.txt && chmod 644 /data/cg/f.txt && touch -t 202601021530 /data/cg/f.txt && chgrp staff /data/cg/f.txt && ls -l /data/cg",
+      "command": "mkdir -p /data/cg && echo alpha > /data/cg/f.txt && chmod 644 /data/cg/f.txt && touch -t 202601021530 /data/cg/f.txt && chgrp nogroup /data/cg/f.txt && ls -l /data/cg",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n-rw-r--r-- 1 - staff 6 Jan  2  2026 f.txt\n",
+        "stdout": "total ?\n-rw-r--r-- 1 root nogroup 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },
@@ -66,7 +66,7 @@
       "command": "chgrp 20 /data/cg/f.txt && ls -l /data/cg",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n-rw-r--r-- 1 - 20 6 Jan  2  2026 f.txt\n",
+        "stdout": "total ?\n-rw-r--r-- 1 root 20 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },
@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "chown alice /data/cg/f.txt && chgrp ops /data/cg/f.txt && ls -l /data/cg",
+      "command": "chown nobody /data/cg/f.txt && chgrp root /data/cg/f.txt && ls -l /data/cg",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n-rw-r--r-- 1 alice ops 6 Jan  2  2026 f.txt\n",
+        "stdout": "total ?\n-rw-r--r-- 1 nobody root 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },
@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "chgrp -R staff /data/cg && stat -c '%G' /data/cg/f.txt",
+      "command": "chgrp -R nogroup /data/cg && stat -c '%G' /data/cg/f.txt",
       "expect": {
         "exit": 0,
-        "stdout": "staff\n",
+        "stdout": "nogroup\n",
         "stderr": ""
       }
     }

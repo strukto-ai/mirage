@@ -302,7 +302,7 @@ async def test_ps_lays_columns_out_as_procps_does():
 
 # The issue's line: `$$` is the session's first line, which ps lists
 # while it runs as the session leader procps marks with `s`; the owner
-# is the workspace user and the group the session's profile.
+# and group are the session's user, by name and by id.
 @pytest.mark.asyncio
 async def test_ps_lists_the_session_leader_with_its_owner():
     ws = Workspace(
@@ -318,8 +318,8 @@ async def test_ps_lists_the_session_leader_with_its_owner():
             "    PID    PPID    PGID     SID STAT USER       UID GROUP      "
             "GID CMD\n"
             f"{FIRST_PID:>7}       0 {FIRST_PID:>7} {FIRST_PID:>7} Rs   "
-            "admin    admin admin    "
-            f"admin {line}\n"
+            "admin     1000 admin     "
+            f"1000 {line}\n"
         )
     finally:
         await ws.close()

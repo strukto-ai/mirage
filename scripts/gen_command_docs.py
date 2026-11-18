@@ -198,8 +198,8 @@ SECTIONS = (
             ),
             (
                 ("id", "whoami", "groups", "logname", "users", "who"),
-                "Report identity: the session's profile is its user and group, "
-                "and nobody logs in",
+                "Report identity: a session with no profile is root, one with "
+                "a profile is that profile's user, and nobody logs in",
             ),
             (
                 ("tty", "sync"),

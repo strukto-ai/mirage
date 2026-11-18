@@ -38,7 +38,16 @@ import {
   LS_RECENT_SECONDS,
   MONTHS,
 } from './constants.ts'
-import { groupName, ownerName, UNKNOWN_NAME, type Identity } from './identity.ts'
+import {
+  groupId,
+  groupLabel,
+  groupName,
+  ownerId,
+  ownerLabel,
+  ownerName,
+  UNKNOWN_NAME,
+  type Identity,
+} from './identity.ts'
 import { gnuStrftime } from './strftime.ts'
 
 // What a stat field a VFS cannot know renders as, in `stat -c` and in
@@ -64,7 +73,8 @@ export interface BlockSize {
 }
 
 /** Which columns an `ls` row carries and how its time is spelled: -g
- * drops the owner, -o the group, --author adds the owner after the group; -i leads with the inode column, -s with
+ * drops the owner, -o the group, -n prints both as ids, --author adds the
+ * owner after the group; -i leads with the inode column, -s with
  * the block column after it, and -Z puts the context column before the
  * size, each `?` since a VFS has no inode, allocation or context;
  * timeKind picks the timestamp; timeStyle is `locale` (the six-month
@@ -72,6 +82,7 @@ export interface BlockSize {
 export interface LsColumns {
   readonly owner: boolean
   readonly group: boolean
+  readonly numeric: boolean
   readonly author: boolean
   readonly inode: boolean
   readonly blocks: boolean
@@ -84,6 +95,7 @@ export interface LsColumns {
 export const DEFAULT_COLUMNS: LsColumns = Object.freeze({
   owner: true,
   group: true,
+  numeric: false,
   author: false,
   inode: false,
   blocks: false,
@@ -312,17 +324,17 @@ function lsSizeAndTime(
 }
 
 // `ls -l` rows: mode, links, owner, group, size, time, name. The owner is
-// the entry's uid when a backend or the attr overlay reports one, else
-// the workspace user; the group is the gid, else the session's profile;
-// `-` when nothing names one. A row whose stat failed is GNU's: the type
+// the entry's uid when a backend or the attr overlay reports one, else the
+// session's, named through the user database and printed as a number where
+// it holds no name (always, under -n); the group likewise, each padded to
+// its column's widest cell. A row whose stat failed is GNU's: the type
 // letter the listing gave, then `?` for every stat field, the time
 // right-aligned in its column.
 export function formatLsLong(
   stats: readonly FileStat[],
   opts: {
     human?: boolean
-    // Who the session is; null outside a workspace, where both the owner
-    // and the group column fall back to `-`.
+    // Who the session is; null outside a workspace, which is root.
     identity?: Identity | null
     // Which columns to carry and how to spell the time.
     columns?: LsColumns
@@ -341,6 +353,14 @@ export function formatLsLong(
   )
   const width = cells.reduce((m, [size]) => Math.max(m, size.length), 1)
   const timeWidth = cells.reduce((m, [, time]) => Math.max(m, time.length), 1)
+  const owners = stats.map((s) =>
+    idCell(s, columns.numeric ? null : ownerName(s.uid, identity), ownerId(s.uid, identity)),
+  )
+  const groups = stats.map((s) =>
+    idCell(s, columns.numeric ? null : groupName(s.gid, identity), groupId(s.gid, identity)),
+  )
+  const ownerWidth = owners.reduce((m, [owner]) => Math.max(m, owner.length), 1)
+  const groupWidth = groups.reduce((m, [group]) => Math.max(m, group.length), 1)
   return stats.map((s, i) => {
     const [rawSize, time] = cells[i] ?? [UNKNOWN_NAME, UNKNOWN_NAME]
     const failed = s.extra[STAT_FAILED_KEY] === true
@@ -350,9 +370,10 @@ export function formatLsLong(
           UNKNOWN_STAT_FIELD,
         ]
       : [lsModeString(s), '1']
-    if (columns.owner) fields.push(failed ? UNKNOWN_STAT_FIELD : ownerName(s.uid, identity))
-    if (columns.group) fields.push(failed ? UNKNOWN_STAT_FIELD : groupName(s.gid, identity))
-    if (columns.author) fields.push(failed ? UNKNOWN_STAT_FIELD : ownerName(s.uid, identity))
+    const owner = owners[i] ?? [UNKNOWN_STAT_FIELD, false]
+    if (columns.owner) fields.push(padId(owner, ownerWidth))
+    if (columns.group) fields.push(padId(groups[i] ?? [UNKNOWN_STAT_FIELD, false], groupWidth))
+    if (columns.author) fields.push(padId(owner, ownerWidth))
     if (columns.context) fields.push(UNKNOWN_STAT_FIELD)
     fields.push(
       rawSize.padStart(width),
@@ -362,6 +383,30 @@ export function formatLsLong(
     const lead = `${UNKNOWN_STAT_FIELD} `.repeat(Number(columns.inode) + Number(columns.blocks))
     return lead + fields.join(' ')
   })
+}
+
+/**
+ * An owner or group id as a numeric field prints it: the number, or `?` for a
+ * name the user database cannot resolve to one.
+ */
+export function idText(id: number | string): string {
+  return typeof id === 'number' ? String(id) : UNKNOWN_STAT_FIELD
+}
+
+/**
+ * An owner or group cell of a long listing and whether it is a number,
+ * which GNU aligns right where it aligns a name left. `name` is the one the
+ * user database holds, null for `-n` or an id it holds no name for.
+ */
+function idCell(s: FileStat, name: string | null, id: number | string): [string, boolean] {
+  if (s.extra[STAT_FAILED_KEY] === true) return [UNKNOWN_STAT_FIELD, false]
+  if (name === null) return [idText(id), typeof id === 'number']
+  return [name, false]
+}
+
+/** An owner or group cell padded to its column's width. */
+function padId([text, number]: [string, boolean], width: number): string {
+  return number ? text.padStart(width) : text.padEnd(width)
 }
 
 /**
@@ -376,8 +421,7 @@ export function formatLsLong(
  * helpers, so the two listings cannot disagree about a row; only the
  * name is spelled differently, escaped (`escapeFindName`) so the row
  * stays one line of fixed fields. `s` is the row named as find printed
- * it; `identity` is null outside a workspace, where both name columns
- * fall back to `-`.
+ * it; `identity` is null outside a workspace, which is root.
  */
 /**
  * Spell a name the way `find -ls` prints it. findutils escapes a name so
@@ -412,8 +456,8 @@ function findLsName(s: FileStat): string {
 
 export function formatFindLs(s: FileStat, identity: Identity | null): string {
   const [size, time] = lsSizeAndTime(s, false, true)
-  const who = ownerName(s.uid, identity)
-  const grp = groupName(s.gid, identity)
+  const who = ownerLabel(s.uid, identity)
+  const grp = groupLabel(s.gid, identity)
   return (
     `${UNKNOWN_STAT_FIELD.padStart(9)} ${UNKNOWN_STAT_FIELD.padStart(6)} ` +
     `${lsModeString(s)} ${'1'.padStart(3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +

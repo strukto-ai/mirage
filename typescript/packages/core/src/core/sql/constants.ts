@@ -35,6 +35,12 @@ export const MAX_PARAMS = 100
 /** The most columns one query answers: D1 and Durable Objects stop at 100. */
 export const MAX_COLUMNS = 100
 
+/** Allow room for each eager subtree row, its path, stat and walk indexes. */
+export const TREE_ENTRY_BYTES = 4096
+
+/** The bytes fetched per streamed read when workspace memory is tight. */
+export const READ_BYTES = 64 * 1024
+
 /** The bytes a streamed write gathers before it lands them. */
 export const FLUSH_BYTES = 1024 * 1024
 
@@ -146,6 +152,7 @@ export const SQL = {
       FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)
     SELECT t.id, t.depth, t.rel, ${columns('i')}
     FROM tree t JOIN fs_inode i ON i.ino = t.ino`,
+  chunkSlice: 'SELECT substr(data, ?, ?) AS data FROM fs_data WHERE ino = ? AND chunk_index = ?',
   chunks: `SELECT chunk_index, data FROM fs_data
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index`,
   usedBytes: `SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE mode = ${String(FILE)}`,
@@ -183,4 +190,32 @@ export function clearUnder(ino: number): string[] {
     `DELETE FROM fs_inode WHERE ino IN (${tree} SELECT ino FROM tree) OR ino = ${RESTORE_BASE}`,
     `DELETE FROM fs_dentry WHERE id IN (${tree} SELECT id FROM tree)`,
   ]
+}
+
+/** Direct children of a bounded batch of parents, with their inode rows. */
+export function childrenOf(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT d.parent_ino, d.name, ${columns('i')}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN (${slots}) LIMIT ?`
+}
+
+/** SQLite candidate files, including matches split across two storage rows. */
+export function candidateFiles(ignoreCase: boolean): string {
+  const body = ignoreCase ? 'CAST(lower(b.data) AS BLOB)' : 'b.data'
+  // SQLite interprets the BLOB as database-encoded text before folding case.
+  const binary = ignoreCase ? "CAST('A' AS BLOB) <> X'41' OR instr(b.data, X'00') > 0 OR " : ''
+  return `WITH RECURSIVE tree(ino, rel) AS (
+      SELECT ino, name FROM fs_dentry WHERE parent_ino = ?
+      UNION ALL
+      SELECT d.ino, t.rel || '/' || d.name
+      FROM tree t JOIN fs_dentry d ON d.parent_ino = t.ino)
+    SELECT t.rel FROM tree t WHERE EXISTS (
+      SELECT 1 FROM fs_data b WHERE b.ino = t.ino AND
+      (instr(${body}, ?) > 0 OR
+       (length(b.data) = ? AND instr(substr(${body}, ?), ?) > 0) OR
+       (b.chunk_index > 0 AND instr(substr(${body}, 1, ?), ?) > 0) OR
+       ${binary}
+       (b.chunk_index = 0 AND substr(b.data, 1, 1) IN (X'FE', X'FF'))))
+    LIMIT ?`
 }

@@ -59,28 +59,37 @@ describe('resolveSymlinks', () => {
 })
 
 describe('expandTilde', () => {
+  const homes = { '': '/home/u', root: '/root' }
+
   it('~ alone → home', () => {
-    expect(expandTilde('~', '/home/u')).toBe('/home/u')
+    expect(expandTilde('~', homes)).toBe('/home/u')
   })
 
   it('~/sub → home/sub', () => {
-    expect(expandTilde('~/file.txt', '/home/u')).toBe('/home/u/file.txt')
+    expect(expandTilde('~/file.txt', homes)).toBe('/home/u/file.txt')
   })
 
   it('~/sub with root home', () => {
-    expect(expandTilde('~/file.txt', '/')).toBe('/file.txt')
+    expect(expandTilde('~/file.txt', { '': '/' })).toBe('/file.txt')
   })
 
-  it('~user left unchanged', () => {
-    expect(expandTilde('~other/x', '/home/u')).toBe('~other/x')
+  it('~name → that user’s home', () => {
+    expect(expandTilde('~root', homes)).toBe('/root')
+    expect(expandTilde('~root/x', homes)).toBe('/root/x')
+  })
+
+  it('~user the homes lack left unchanged', () => {
+    expect(expandTilde('~other/x', homes)).toBe('~other/x')
+    expect(expandTilde('~toString/x', homes)).toBe('~toString/x')
   })
 
   it('non-leading ~ left unchanged', () => {
-    expect(expandTilde('a~b', '/home/u')).toBe('a~b')
+    expect(expandTilde('a~b', homes)).toBe('a~b')
   })
 
   it('plain word left unchanged', () => {
-    expect(expandTilde('file.txt', '/home/u')).toBe('file.txt')
+    expect(expandTilde('file.txt', homes)).toBe('file.txt')
+    expect(expandTilde('~/x', null)).toBe('~/x')
   })
 })
 

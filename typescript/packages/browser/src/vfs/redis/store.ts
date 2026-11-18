@@ -307,18 +307,31 @@ export class UpstashRedisStore implements RedisStoreLike {
     return reply
   }
 
-  private async scan(pattern: string): Promise<string[]> {
-    const keys: string[] = []
+  private async *scanKeys(pattern: string, set?: string): AsyncIterable<string> {
+    const command = set === undefined ? ['SCAN'] : ['SSCAN', set]
     let cursor = '0'
     do {
-      const reply = await this.command(['SCAN', cursor, 'MATCH', pattern, 'COUNT', SCAN_COUNT])
+      const reply = await this.command([...command, cursor, 'MATCH', pattern, 'COUNT', SCAN_COUNT])
       if (!Array.isArray(reply) || reply.length !== 2) {
         throw new Error('upstash: SCAN did not answer a cursor and a page')
       }
       cursor = expectString(reply[0] ?? null, 'SCAN')
-      for (const key of expectStrings(reply[1] ?? null, 'SCAN')) keys.push(key)
+      for (const key of expectStrings(reply[1] ?? null, 'SCAN')) yield key
     } while (cursor !== '0')
+  }
+
+  private async scan(pattern: string): Promise<string[]> {
+    const keys: string[] = []
+    for await (const key of this.scanKeys(pattern)) keys.push(key)
     return keys
+  }
+
+  async *scanPaths(prefix: string): AsyncIterable<[string, boolean]> {
+    const head = this.fk('')
+    for await (const key of this.scanKeys(escapeGlob(head + prefix) + '*')) {
+      yield [key.slice(head.length), false]
+    }
+    for await (const key of this.scanKeys(escapeGlob(prefix) + '*', this.dk())) yield [key, true]
   }
 
   async getFile(path: string): Promise<Uint8Array | null> {

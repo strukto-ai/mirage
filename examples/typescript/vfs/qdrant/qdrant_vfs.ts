@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   console.log('=== metadata overlay on /fashion/Men/Shoes/White/3.json ===')
   const metaRes = await ws.shell(
     'chmod 640 "/fashion/Men/Shoes/White/3.json"' +
-      ' && chown 500:dev "/fashion/Men/Shoes/White/3.json"' +
+      ' && chown 500:nogroup "/fashion/Men/Shoes/White/3.json"' +
       ' && touch -t 202601021530 "/fashion/Men/Shoes/White/3.json"',
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

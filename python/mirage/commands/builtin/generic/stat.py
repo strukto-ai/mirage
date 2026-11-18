@@ -6,12 +6,16 @@ from typing import cast
 
 from mirage.commands.builtin.utils.formatting import (
     full_iso_time,
+    id_text,
     ls_mode_string,
 )
 from mirage.commands.builtin.utils.identity import (
+    UNKNOWN_ID_NAME,
     Identity,
+    group_id,
     group_name,
     identity_of,
+    owner_id,
     owner_name,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
@@ -30,9 +34,11 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import byte_char, encode_text
+from mirage.shell.bytes import byte_char, decode_text, encode_text
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -63,7 +69,10 @@ from mirage.utils.stat_view import (
 )
 from mirage.view.types import LinkView, MountView, StatPath
 
-_STR_DIRECTIVES = frozenset("nNF")
+_STR_DIRECTIVES = frozenset("nNFUG")
+# The ids, which a precision pads to that many digits, as printf pads
+# an unsigned integer.
+_ID_DIRECTIVES = frozenset("ug")
 
 # The directives GNU knows (coreutils 9.7). It prints any other as a bare
 # '?', which no width pads; one it knows that a VFS cannot answer is
@@ -78,6 +87,12 @@ _KNOWN = frozenset("aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%") | {
 # The placeholders for a value that is not known, which a 0 flag pads
 # with spaces rather than zeros.
 _PLACEHOLDERS = frozenset({"-", "?"})
+# The widest field printf takes, INT_MAX: past it a directive prints
+# nothing, as GNU stat does.
+_FIELD_MAX = 2147483647
+# The longest field either host builds, V8's longest string: a longer one
+# is "memory exhausted" on both, whatever the workspace's max_memory.
+_FIELD_ROOM = (1 << 29) - 24
 
 _FORMAT_FLAGS = frozenset("'-+ #0I")
 
@@ -267,7 +282,8 @@ def _quote_name(name: str) -> str:
 def _apply_flags(
     value: str, flags: str, width: str, precision: str | None, text: bool
 ) -> str:
-    """Apply GNU printf flags/width/precision to a rendered directive.
+    """Apply GNU printf flags/width/precision to a rendered directive,
+    counting bytes as printf does.
 
     Args:
         value (str): the raw directive value.
@@ -277,17 +293,57 @@ def _apply_flags(
         text (bool): the directive prints a string, which a precision
             cuts short.
     """
+    raw = encode_text(value)
     if precision is not None and text:
-        value = value[: int(precision)] if precision else ""
-    if width and len(value) < int(width):
-        w = int(width)
+        raw = raw[: _field_number(precision)]
+    pad = _field_number(width) - len(raw)
+    if pad > 0:
+        _check_field(len(raw) + pad)
         if "-" in flags:
-            value = value.ljust(w)
+            raw += b" " * pad
         elif "0" in flags and value not in _PLACEHOLDERS:
-            value = value.rjust(w, "0")
+            raw = b"0" * pad + raw
         else:
-            value = value.rjust(w)
-    return value
+            raw = b" " * pad + raw
+    return decode_text(raw)
+
+
+def _past_field_max(digits: str | None) -> bool:
+    """Whether a width or precision is past :data:`_FIELD_MAX`.
+
+    Args:
+        digits (str | None): the width or precision as written.
+    """
+    significant = (digits or "").lstrip("0")
+    return len(significant) > len(str(_FIELD_MAX)) or (
+        _field_number(significant) > _FIELD_MAX
+    )
+
+
+def _check_field(size: int) -> None:
+    """Refuse a field too long to build: past the workspace's memory
+    budget or :data:`_FIELD_ROOM`.
+
+    Args:
+        size (int): the field's bytes once padded.
+
+    Raises:
+        MemoryExhausted: the field does not fit.
+    """
+    check_memory(size)
+    if size > _FIELD_ROOM:
+        raise MemoryExhausted()
+
+
+def _field_number(digits: str | None) -> int:
+    """A width or precision as a number, leading zeros and all; empty is
+    0, as printf reads a bare ``.``.
+
+    Args:
+        digits (str | None): the width or precision as written, no
+            longer than :data:`_FIELD_MAX` once its zeros are gone.
+    """
+    return int((digits or "").lstrip("0") or "0")
 
 
 def _directive_value(
@@ -307,10 +363,14 @@ def _directive_value(
         return ls_mode_string(s)
     if spec == "f":
         return format(posix_mode(s), "x")
-    if spec in ("u", "U"):
-        return owner_name(s.uid, identity)
-    if spec in ("g", "G"):
-        return group_name(s.gid, identity)
+    if spec == "u":
+        return id_text(owner_id(s.uid, identity))
+    if spec == "U":
+        return owner_name(s.uid, identity) or UNKNOWN_ID_NAME
+    if spec == "g":
+        return id_text(group_id(s.gid, identity))
+    if spec == "G":
+        return group_name(s.gid, identity) or UNKNOWN_ID_NAME
     if spec == "x":
         return _stat_time(s.atime or s.modified)
     if spec == "X":
@@ -395,6 +455,8 @@ def _render_directive(
     """
     if d.spec not in _KNOWN:
         return "?"
+    if _past_field_max(d.width) or _past_field_max(d.precision):
+        return ""
     if d.spec == "N":
         # GNU formats the name and a symlink's target as two separate
         # fields, so a width pads each one rather than the joined line.
@@ -406,8 +468,18 @@ def _render_directive(
     value = _directive_value(d.spec, s, name, identity)
     if "#" in d.flags and d.spec == "a" and not value.startswith("0"):
         value = "0" + value
+    flags = d.flags
+    if (
+        d.spec in _ID_DIRECTIVES
+        and d.precision is not None
+        and value.isdigit()
+    ):
+        digits = _field_number(d.precision)
+        _check_field(digits)
+        value = "" if value == "0" and not digits else value.zfill(digits)
+        flags = flags.replace("0", "")
     return _apply_flags(
-        value, d.flags, d.width, d.precision, d.spec in _STR_DIRECTIVES
+        value, flags, d.width, d.precision, d.spec in _STR_DIRECTIVES
     )
 
 
@@ -647,8 +719,8 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
 
     A VFS has rendered bytes, modes, logical owners and its mount's
     device, but no inode, allocation blocks, IO block size or link
-    count: those print '?'. An absent size, owner number or time prints
-    '-'. Each time is the one its directive prints (``%x %y %z %w``),
+    count: those print '?'. An absent size or time prints '-'. Each
+    time is the one its directive prints (``%x %y %z %w``),
     the name is unquoted as GNU's default prints it, and times are UTC.
 
     Args:
@@ -657,10 +729,10 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
         identity (Identity | None): session owner and group defaults.
     """
     size = _directive_value("s", s, name, identity)
-    uid = str(s.uid) if s.uid is not None else "-"
-    gid = str(s.gid) if s.gid is not None else "-"
-    owner = owner_name(s.uid, identity)
-    group = group_name(s.gid, identity)
+    uid = id_text(owner_id(s.uid, identity))
+    gid = id_text(group_id(s.gid, identity))
+    owner = owner_name(s.uid, identity) or UNKNOWN_ID_NAME
+    group = group_name(s.gid, identity) or UNKNOWN_ID_NAME
     links = "Links: ?"
     if is_char_device(s):
         major = _directive_value("Hr", s, name, identity)
@@ -880,9 +952,10 @@ async def stat(
         mounts (MountView | None): the mount boundaries, so a mount root
             reports its own name rather than the backend's name for its
             root.
-        identity (Identity | None): who the session is: what ``%U`` and
-            ``%G`` print for an entry that reports no uid or gid of its
-            own; None outside a workspace, where both print ``-``.
+        identity (Identity | None): who the session is: the owner and
+            group of an entry that reports none of its own, and the user
+            database ``%U`` and ``%G`` name ids from; None outside a
+            workspace, which is root.
         statfs (StatfsFn | None): the type name and capacity of the
             mount holding a path, for -f; None outside a workspace.
     """

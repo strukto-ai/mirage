@@ -77,7 +77,9 @@ class DevVFS(RAMVFS):
     async def stat(self, path: PathSpec) -> FileStat:
         return await dev_stat(self.accessor, path)
 
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+    async def read_tree(
+        self, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
         """None: a walk of /dev is one readdir.
 
         Args:

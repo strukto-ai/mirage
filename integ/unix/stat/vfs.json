@@ -193,7 +193,7 @@
       "command": "find /vfs -name settings.json -printf \"%u %g %U %G\\n\"",
       "expect": {
         "exit": 0,
-        "stdout": "ops ops ops ops\n",
+        "stdout": "ops ops 1000 1000\n",
         "stderr": ""
       }
     },

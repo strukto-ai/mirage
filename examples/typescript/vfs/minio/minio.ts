@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on /minio/notes.txt ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "/minio/notes.txt" && chown 500:dev "/minio/notes.txt" && touch -t 202601021530 "/minio/notes.txt"`,
+      `chmod 640 "/minio/notes.txt" && chown 500:nogroup "/minio/notes.txt" && touch -t 202601021530 "/minio/notes.txt"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `/minio/notes.txt`)) as FileStat

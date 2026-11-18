@@ -20,6 +20,7 @@ from mirage.core.generic.types import (
     Effects,
     Empty,
     FindEntry,
+    Ids,
     Lname,
     Mtime,
     Name,
@@ -750,6 +751,11 @@ def test_a_newermt_that_is_no_date_is_refused_in_gnus_words():
         parse_find(["-newermt", "nope"]).bind()
 
 
+IDS = Ids(
+    users={"root": 0, "bob": 1000}, groups={"root": 0}, uid=1000, gid=1000
+)
+
+
 def test_the_new_tests_bind_to_their_nodes():
     expr = parse_find(
         [
@@ -771,21 +777,34 @@ def test_the_new_tests_bind_to_their_nodes():
             "D*",
             "-quit",
         ]
-    ).bind(env={"LC_ALL": "C.UTF-8"}, profile="me")
+    ).bind(env={"LC_ALL": "C.UTF-8"}, ids=IDS)
     assert isinstance(expr.tree, And)
     assert expr.tree.kids == [
         Regex("a.*", utf8=True),
         Lname("x", icase=True),
         XType("l"),
         Perm(0o100, "any"),
-        Count("links", "+", 1),
-        Owner("bob", profile="me"),
-        NoOwner(group=True),
+        Count("links", "+", 1, ids=IDS),
+        Owner(1000, ids=IDS),
+        NoOwner(group=True, ids=IDS),
         Access("w"),
         Path("D*", icase=True),
         Quit(),
     ]
     assert expr.actions == []
+
+
+def test_user_reads_a_name_then_a_number_with_an_optional_plus():
+    for text, uid in (("bob", 1000), ("+0", 0), ("4242", 4242)):
+        tree = parse_find(["-user", text]).bind(ids=IDS).tree
+        assert tree == Owner(uid, ids=IDS)
+    for text in ("toString", "++5", "\u00b2"):
+        with pytest.raises(UsageError):
+            parse_find(["-user", text]).bind(ids=IDS)
+    plus = Ids(users={"+42": 1000}, groups={"+42": 1000}, uid=1000, gid=1000)
+    for test in ("-user", "-group"):
+        tree = parse_find([test, "+42"]).bind(ids=plus).tree
+        assert tree == Owner(42, group=test == "-group", ids=plus)
 
 
 def test_the_new_actions_carry_their_file_and_directory():

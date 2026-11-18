@@ -24,11 +24,31 @@ import { Workspace } from '../../../workspace/workspace.ts'
 import { parseGroup, parseOwner, parseTouchStamp, walkOwned } from './metadata.ts'
 
 describe('parseOwner', () => {
-  it('parses owner and group forms', () => {
-    expect(parseOwner('1000:staff')).toEqual([1000, 'staff'])
-    expect(parseOwner('alice')).toEqual(['alice', null])
-    expect(parseOwner(':dev')).toEqual([null, 'dev'])
-    expect(parseOwner('500:501')).toEqual([500, 501])
+  it('parses owner and group forms against the user database', () => {
+    const root = { profile: null }
+    expect(parseOwner('1000:nogroup', root)).toEqual([1000, 65534])
+    expect(parseOwner('nobody', root)).toEqual([65534, null])
+    expect(parseOwner(':root', root)).toEqual([null, 0])
+    expect(parseOwner('500:501', root)).toEqual([500, 501])
+    expect(parseOwner('nobody:', root)).toEqual([65534, 65534])
+    expect(parseOwner('agent', { profile: 'agent' })).toEqual([1000, null])
+    expect(() => parseOwner('alice', root)).toThrow("chown: invalid user: 'alice'")
+    expect(() => parseOwner('alice:root', root)).toThrow("chown: invalid user: 'alice:root'")
+    expect(() => parseOwner('root:staff', root)).toThrow("chown: invalid group: 'root:staff'")
+    expect(() => parseOwner('4242:', root)).toThrow("chown: invalid spec: '4242:'")
+    expect(() => parseOwner('0:', root)).toThrow("chown: invalid spec: '0:'")
+    expect(() => parseOwner('++5', root)).toThrow("chown: invalid user: '++5'")
+    expect(() => parseOwner('4294967295', root)).toThrow("chown: invalid user: '4294967295'")
+    expect(() => parseOwner(':4294967295', root)).toThrow("chown: invalid group: ':4294967295'")
+    expect(parseOwner('+1000:+20', root)).toEqual([1000, 20])
+  })
+
+  it('reads a plus as a number over a name the database holds', () => {
+    const plus = { profile: '+42' }
+    expect(parseOwner('+42', plus)).toEqual([42, null])
+    expect(parseOwner(':+42', plus)).toEqual([null, 42])
+    expect(parseGroup('+42', plus)).toBe(42)
+    expect(() => parseOwner('+42:', plus)).toThrow("chown: invalid spec: '+42:'")
   })
 })
 
@@ -61,9 +81,14 @@ describe('parseTouchStamp', () => {
 
 describe('parseGroup', () => {
   it('parses names, numeric ids, and empty', () => {
-    expect(parseGroup('staff')).toBe('staff')
-    expect(parseGroup('20')).toBe(20)
-    expect(parseGroup('')).toBeNull()
+    const root = { profile: null }
+    expect(parseGroup('nogroup', root)).toBe(65534)
+    expect(parseGroup('20', root)).toBe(20)
+    expect(parseGroup('+20', root)).toBe(20)
+    expect(parseGroup(`${'0'.repeat(20)}7`, root)).toBe(7)
+    expect(parseGroup('4294967295', root)).toBeNull()
+    expect(parseGroup('staff', root)).toBeNull()
+    expect(parseGroup('', root)).toBeNull()
   })
 })
 
@@ -187,10 +212,10 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
   it('chown renders owner and group', async () => {
     const [ws] = makeWs()
-    const [code] = await run(ws, 'chown 500:dev /data/f.txt')
+    const [code] = await run(ws, 'chown 500:nogroup /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain(' 500 dev ')
+    expect(out).toContain(' 500 nogroup ')
     await ws.close()
   })
 
@@ -221,7 +246,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [, out] = await run(ws, 'ls -l /data')
     // The mode lands on the target, not the link. The link's own row is
     // listed too and is wider, so the size column pads f.txt's 5.
-    expect(out).toContain('-rw-r----- 1 - -  5')
+    expect(out).toContain('-rw-r----- 1 root root  5')
     expect(out).toContain('lrwxrwxrwx')
     await ws.close()
   })
@@ -230,7 +255,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [ws] = makeWs(MountMode.READ)
     for (const [cmd, action] of [
       ['chmod 644', 'changing permissions of'],
-      ['chown alice', 'changing ownership of'],
+      ['chown nobody', 'changing ownership of'],
       ['touch', 'cannot touch'],
       ['touch -c', 'setting times of'],
     ] as const) {
@@ -247,14 +272,14 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [ws, vfs] = makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(
       ws,
-      'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
+      'chmod 601 /data/f.txt && chown 500:nogroup /data/f.txt && touch -t 202603041200 /data/f.txt',
     )
     expect(code).toBe(0)
     expect(vfs.store.attrs.size).toBe(0)
     const stat = await statOf(ws, '/data/f.txt')
     expect(stat.mode).toBe(0o601)
     expect(stat.uid).toBe(500)
-    expect(stat.gid).toBe('dev')
+    expect(stat.gid).toBe(65534)
     expect(stat.modified).toBe('2026-03-04T12:00:00Z')
     await ws.close()
   })
@@ -265,11 +290,11 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [ws] = makeOverlayWs({ '/f.txt': 'hello' })
     await run(
       ws,
-      'chmod 664 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
+      'chmod 664 /data/f.txt && chown 500:nogroup /data/f.txt && touch -t 202603041200 /data/f.txt',
     )
     const [, out] = await run(ws, 'ls -l /data')
     expect(out).toContain('-rw-rw-r--')
-    expect(out).toContain(' 500 dev ')
+    expect(out).toContain(' 500 nogroup ')
     expect(out).toContain('Mar  4  2026')
     await ws.close()
   })
@@ -433,28 +458,33 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
   it('chgrp renders the group and leaves the owner default', async () => {
     const [ws] = makeWs()
-    const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
+    const [code, , err] = await run(ws, 'chgrp nogroup /data/f.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain(' - staff ')
+    expect(out).toContain(' root nogroup ')
     await ws.close()
   })
 
   it('chgrp changes only the group, keeping a prior chown owner', async () => {
     const [ws] = makeWs()
-    await run(ws, 'chown alice:devs /data/f.txt')
+    await run(ws, 'chown nobody:nogroup /data/f.txt')
     const [code, , err] = await run(ws, 'chgrp 20 /data/f.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain(' alice 20 ')
+    expect(out).toContain(' nobody 20 ')
     await ws.close()
   })
 
   it('chgrp reports missing operand, invalid group, -R, and missing files', async () => {
     const [ws] = makeWs()
-    expect((await run(ws, 'chgrp staff'))[0]).toBe(1)
+    expect((await run(ws, 'chgrp nogroup'))[0]).toBe(1)
+    expect(await run(ws, 'chgrp staff /data/f.txt')).toEqual([
+      1,
+      '',
+      "chgrp: invalid group: 'staff'\n",
+    ])
     expect((await run(ws, "chgrp '' /data/f.txt"))[0]).toBe(1)
-    const [code, , err] = await run(ws, 'chgrp staff /data/nope.txt')
+    const [code, , err] = await run(ws, 'chgrp nogroup /data/nope.txt')
     expect(code).toBe(1)
     expect(err).toContain('nope.txt')
     await ws.close()
@@ -462,17 +492,17 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
   it('chgrp falls back to the namespace overlay when the mount has no setattr', async () => {
     const [ws, vfs] = makeOverlayWs({ '/f.txt': 'hello' })
-    const [code] = await run(ws, 'chgrp dev /data/f.txt')
+    const [code] = await run(ws, 'chgrp nogroup /data/f.txt')
     expect(code).toBe(0)
     expect(vfs.store.attrs.size).toBe(0)
-    expect((await statOf(ws, '/data/f.txt')).gid).toBe('dev')
+    expect((await statOf(ws, '/data/f.txt')).gid).toBe(65534)
     await ws.close()
   })
 
   it('chgrp -h targets the link node, leaving the target group untouched', async () => {
     const [ws] = makeWs()
     await run(ws, 'ln -s /data/f.txt /data/link')
-    const [code, , err] = await run(ws, 'chgrp -h ops /data/link')
+    const [code, , err] = await run(ws, 'chgrp -h nogroup /data/link')
     expect(code, err).toBe(0)
     // stat follows the link; -h wrote the link node, so the target is clean.
     expect((await statOf(ws, '/data/f.txt')).gid).toBeNull()
@@ -481,7 +511,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
   it('chgrp refuses a read-only mount', async () => {
     const [ws] = makeWs(MountMode.READ)
-    const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
+    const [code, , err] = await run(ws, 'chgrp nogroup /data/f.txt')
     expect(code).toBe(1)
     expect(err).toBe("chgrp: changing group of '/data/f.txt': Read-only file system\n")
     await ws.close()
@@ -543,13 +573,13 @@ describe('recursive metadata flags (-R)', () => {
     await run(ws, 'mkdir -p /data/tree')
     await run(ws, 'echo aaa > /data/tree/a.txt')
     await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
-    const [code] = await run(ws, 'chown -R alice /data/tree')
+    const [code] = await run(ws, 'chown -R nobody /data/tree')
     expect(code).toBe(0)
     const [, out] = await run(ws, "stat -c '%U %n' /data/tree /data/tree/a.txt /data/tree/link.txt")
     expect(out.trimEnd().split('\n')).toEqual([
-      'alice /data/tree',
-      'alice /data/tree/a.txt',
-      'alice /data/tree/link.txt',
+      'nobody /data/tree',
+      'nobody /data/tree/a.txt',
+      'nobody /data/tree/link.txt',
     ])
     await ws.close()
   })
@@ -559,10 +589,10 @@ describe('recursive metadata flags (-R)', () => {
     await run(ws, 'mkdir -p /data/tree/sub')
     await run(ws, 'echo bbb > /data/tree/sub/b.txt')
     await run(ws, 'ln -s /data/tree/sub /data/dirlink')
-    const [code] = await run(ws, 'chown -R bob /data/dirlink')
+    const [code] = await run(ws, 'chown -R nobody /data/dirlink')
     expect(code).toBe(0)
     const [, out] = await run(ws, "stat -c '%U %n' /data/dirlink /data/tree/sub/b.txt")
-    expect(out.trimEnd().split('\n')).toEqual(['bob /data/dirlink', '- /data/tree/sub/b.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['nobody /data/dirlink', 'root /data/tree/sub/b.txt'])
     await ws.close()
   })
 
@@ -571,22 +601,25 @@ describe('recursive metadata flags (-R)', () => {
     await run(ws, 'mkdir -p /data/tree')
     await run(ws, 'echo aaa > /data/tree/a.txt')
     await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
-    const [code] = await run(ws, 'chgrp -R dev /data/tree')
+    const [code] = await run(ws, 'chgrp -R nogroup /data/tree')
     expect(code).toBe(0)
     const [, out] = await run(ws, "stat -c '%G %n' /data/tree/a.txt /data/tree/link.txt")
-    expect(out.trimEnd().split('\n')).toEqual(['dev /data/tree/a.txt', 'dev /data/tree/link.txt'])
+    expect(out.trimEnd().split('\n')).toEqual([
+      'nogroup /data/tree/a.txt',
+      'nogroup /data/tree/link.txt',
+    ])
     await ws.close()
   })
 
   it('chown -h ownership reaches ls and stat', async () => {
     const [ws] = makeWs()
     await run(ws, 'ln -s /data/f.txt /data/link')
-    const [code] = await run(ws, 'chown -h alice /data/link')
+    const [code] = await run(ws, 'chown -h nobody /data/link')
     expect(code).toBe(0)
     const [, statOut] = await run(ws, "stat -c '%U' /data/link")
-    expect(statOut).toBe('alice\n')
+    expect(statOut).toBe('nobody\n')
     const [, lsOut] = await run(ws, 'ls -l /data/link')
-    expect(lsOut).toContain(' alice ')
+    expect(lsOut).toContain(' nobody ')
     await ws.close()
   })
 

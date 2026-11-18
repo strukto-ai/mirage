@@ -77,7 +77,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   constructor(options: DiskWorkspaceStateStoreOptions = {}) {
     const { root, ...overrides } = options
     super(overrides)
-    this.root = expandTilde(root ?? DEFAULT_STATE_ROOT, homedir())
+    this.root = expandTilde(root ?? DEFAULT_STATE_ROOT, { '': homedir() })
   }
 
   private wsRoot(workspaceId: string): string {

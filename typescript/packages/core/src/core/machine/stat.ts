@@ -46,8 +46,8 @@ export function rowStat(name: string, row: TreeRow): FileStat {
     type: kind,
     ...(regular ? { content: contentTypeForPath(name) } : {}),
     mode: row.mode,
-    uid: row.user,
-    gid: row.group,
+    uid: row.uid,
+    gid: row.gid,
     atime: msToRfc3339(row.atimeMs),
   })
 }

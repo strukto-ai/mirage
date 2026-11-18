@@ -34,10 +34,10 @@ export interface TreeRow {
   readonly mtimeMs: number
   /** The access time, in epoch milliseconds. */
   readonly atimeMs: number
-  /** The owner's name, or its number when it has none. */
-  readonly user: string
-  /** The group's name, or its number. */
-  readonly group: string
+  /** The owner's uid. */
+  readonly uid: number
+  /** The group's gid. */
+  readonly gid: number
   /** The path under the listed scope, empty for the scope. */
   readonly rel: string
 }

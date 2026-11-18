@@ -19,7 +19,8 @@ import { type OpenStream, openStreamSync } from '../../rs/stream.ts'
 import { byteView } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { PrintfPart } from './types.ts'
-import { groupName, ownerName, type Identity } from './utils/identity.ts'
+import { idText } from './utils/formatting.ts'
+import { groupId, groupLabel, ownerId, ownerLabel, type Identity } from './utils/identity.ts'
 
 export interface PrintfStatFacts {
   size: number
@@ -64,8 +65,10 @@ function facts(
     kind,
     target: kind === 'l' ? (st?.targetKind ?? 'N') : kind,
     mode: st?.mode ?? null,
-    owner: byteView(ownerName(st?.uid ?? null, identity)),
-    group: byteView(groupName(st?.gid ?? null, identity)),
+    owner: byteView(ownerLabel(st?.uid ?? null, identity)),
+    uid: byteView(idText(ownerId(st?.uid ?? null, identity))),
+    group: byteView(groupLabel(st?.gid ?? null, identity)),
+    gid: byteView(idText(groupId(st?.gid ?? null, identity))),
     timestamp: st?.mtimeEpoch ?? 0,
   }
 }
