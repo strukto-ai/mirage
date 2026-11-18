@@ -869,7 +869,7 @@ impl<'a> Writer<'a> {
         let bytes = outcome
             .writes
             .iter()
-            .map(|write| write.name.len() + write.value.len())
+            .map(|write| self.store.target(&write.name).len() + write.value.len())
             .sum();
         if !outcome.writes.iter().all(open) || !self.fits(0, bytes) {
             return None;
@@ -1142,6 +1142,24 @@ mod tests {
         assert!(matches!(failed, Err(Fault::Signal(_))));
         assert_eq!(text(&store, "z").as_deref(), Some("4"));
         assert_eq!(text(&store, "w").as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn quick_arithmetic_sizes_a_write_by_the_name_it_lands_on() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.place(
+            "r",
+            Some(Arc::new(Var {
+                value: Some(scalar("long_target")),
+                attrs: NAMEREF,
+                managed: None,
+            })),
+        );
+        let room = store.held() + "x1".len() + "r1".len();
+        let mut writer = writer(&mut store);
+        writer.limit = Some(room);
+        assert_eq!(writer.clean_arith(b"x=1, r=1"), None);
+        assert_eq!(store.scalar("x"), None);
     }
 
     #[test]
