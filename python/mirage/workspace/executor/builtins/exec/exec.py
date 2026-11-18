@@ -252,13 +252,18 @@ async def _install(
         named = named_descriptor(
             redirect, lambda fd: fd in session.descriptors
         )
-        if named is not None and _identity(session, named[0].target)[0] == CLOSED:
+        if (
+            named is not None
+            and _identity(session, named[0].target)[0] == CLOSED
+        ):
             label = (
                 redirect.target.raw_path
                 if isinstance(redirect.target, PathSpec)
                 else str(redirect.target)
             )
-            missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
+            missing = FileNotFoundError(
+                errno.ENOENT, "No such file or directory"
+            )
             return _error_line(label, missing)
         for operation in named or redirect_operations(redirect):
             error = await _install_descriptor(

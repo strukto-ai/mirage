@@ -669,7 +669,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "place" => {
             let name = args.string()?;
             let var = args.maybe()?.map(record_in).transpose()?.map(Arc::new);
-            Item::opt(shell.store_mut()?.place(&name, var), |old| {
+            Item::opt(shell.store_mut()?.place_written(&name, var), |old| {
                 host::record_out(&old)
             })
         }

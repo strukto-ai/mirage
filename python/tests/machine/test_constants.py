@@ -110,7 +110,16 @@ def test_a_run_a_signal_ended_ends_its_stdout_with_nothing():
 
 def _checked(path):
     done = subprocess.run(
-        ["/bin/sh", "-c", PROGRAM_CHECK, "sh", "x: ", "command not found", "", path],
+        [
+            "/bin/sh",
+            "-c",
+            PROGRAM_CHECK,
+            "sh",
+            "x: ",
+            "command not found",
+            "",
+            path,
+        ],
         capture_output=True,
         check=False,
     )
@@ -123,7 +132,10 @@ def _checked(path):
 # searched and lacks it makes the program missing.
 def test_a_program_path_is_reported_by_its_nearest_folder(tmp_path):
     (tmp_path / "file").write_text("")
-    assert _checked(str(tmp_path / "file" / "x")) == (126, "x: Not a directory\n")
+    assert _checked(str(tmp_path / "file" / "x")) == (
+        126,
+        "x: Not a directory\n",
+    )
     assert _checked(str(tmp_path / "gone" / "x")) == (
         127,
         "x: No such file or directory\n",
@@ -134,7 +146,10 @@ def test_a_program_path_is_reported_by_its_nearest_folder(tmp_path):
     (locked / "sub").mkdir(parents=True)
     locked.chmod(0)
     try:
-        assert _checked(str(locked / "sub" / "x")) == (126, "x: Permission denied\n")
+        assert _checked(str(locked / "sub" / "x")) == (
+            126,
+            "x: Permission denied\n",
+        )
         assert _checked(str(locked / "x")) == (126, "x: Permission denied\n")
     finally:
         locked.chmod(0o700)

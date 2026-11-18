@@ -269,7 +269,7 @@ impl Shell {
             None => None,
         };
         self.store_mut()?
-            .place(name, var.map(Arc::new))
+            .place_written(name, var.map(Arc::new))
             .map(|old| py_of(py, &host::record_out(&old)))
             .transpose()
     }

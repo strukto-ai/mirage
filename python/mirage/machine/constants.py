@@ -174,9 +174,9 @@ PROGRAM_CHECK = (
     "printf '%sIs a directory\\n' \"$1\" >&2; exit 126; "
     "elif [ ! -e \"$4\" ]; then e='No such file or directory'; c=127; d=$4; "
     'while case $d in */*) d=${d%/*};; *) d=;; esac; [ -n "$d" ]; do '
-    "if [ -e \"$d\" ]; then if [ ! -d \"$d\" ]; then e='Not a directory'; c=126; "
+    'if [ -e "$d" ]; then if [ ! -d "$d" ]; then e=\'Not a directory\'; c=126; '
     "elif [ ! -x \"$d\" ]; then e='Permission denied'; c=126; fi; break; fi; done; "
-    "printf '%s%s\\n' \"$1\" \"$e\" >&2; exit $c; "
+    'printf \'%s%s\\n\' "$1" "$e" >&2; exit $c; '
     'elif [ ! -x "$4" ]; then '
     "printf '%sPermission denied\\n' \"$1\" >&2; exit 126; fi;; "
     "*) f=; r=$PATH; while :; do d=${r%%:*}; d=${d:-.}; "

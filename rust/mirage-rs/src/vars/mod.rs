@@ -741,6 +741,16 @@ impl Store {
         self.place(name, Some(Arc::new(var)));
     }
 
+    /// `place` for a record a host writes (a prefix assignment's
+    /// temporary): a value landing on a special `SECONDS` restarts its
+    /// count, as `land` does for the shell's own writes.
+    pub fn place_written(&mut self, name: &str, var: Option<Arc<Var>>) -> Option<Arc<Var>> {
+        if let Some(value) = var.as_deref().and_then(|var| var.value.as_ref()) {
+            self.restart_seconds(name, value);
+        }
+        self.place(name, var)
+    }
+
     /// Restart the count of a special `SECONDS` a value lands on, by any
     /// write a prefix assignment included; marking it (`export`) or a scope
     /// putting its record back restarts nothing.
@@ -1597,6 +1607,16 @@ mod tests {
         assert!(store.fork().dynamic(SECONDS).is_some());
         store.hide_vars(&[SRANDOM.to_owned()], &[]);
         assert_eq!(store.dynamic(SRANDOM), None);
+    }
+
+    #[test]
+    fn a_host_written_seconds_restarts_its_count() {
+        let mut store = store();
+        store.set_clock(9_000_000, 1_000_000);
+        store.dynamic(SECONDS);
+        store.place_written(SECONDS, Some(Arc::new(Var::scalar("100"))));
+        store.set_clock(10_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"101".to_vec()));
     }
 
     #[test]

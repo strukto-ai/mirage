@@ -113,7 +113,7 @@ describe('drive', () => {
     }
   })
 
-  it('brings a substitution\'s end time to the words after it', async () => {
+  it("brings a substitution's end time to the words after it", async () => {
     const ws = new Workspace({}, { clock: new ManualClock(1_000_000) })
     try {
       const result = await ws.shell('SECONDS=0; echo "$(sleep 3)$SECONDS"')

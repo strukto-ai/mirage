@@ -57,7 +57,9 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
     ],
 )
 def test_row_stat_maps_each_kind(kind, want, size):
-    got = row_stat("n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, "root", "root", ""))
+    got = row_stat(
+        "n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, "root", "root", "")
+    )
     assert (got.type, got.size) == (want, size)
 
 

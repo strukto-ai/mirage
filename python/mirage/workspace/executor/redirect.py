@@ -1904,7 +1904,9 @@ def _redirect_failure(
     return None, io, node
 
 
-def _unnamed(target: str | int | PathSpec) -> tuple[None, IOResult, ExecutionNode]:
+def _unnamed(
+    target: str | int | PathSpec,
+) -> tuple[None, IOResult, ExecutionNode]:
     """The failure of a redirect onto the path of a descriptor the command
     has closed (``0<&- </dev/fd/0``): bash opens the path, which names
     nothing then, where ``0<&0`` copies a closed descriptor onto itself.
