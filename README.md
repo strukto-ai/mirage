@@ -57,7 +57,7 @@ AI agents work in a terminal. Mirage is **a virtual terminal** that separates th
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/mirage-terminal-dark.svg">
-    <img src="assets/mirage-terminal-light.svg" alt="Mirage over three virtual filesystems (S3, Slack, Google Drive), three virtual CLIs (gh, linear, deepwiki-mcp), three VMs (Monty, an E2B sandbox, an EC2 GPU) and a policy layer: one grep searches all three filesystems, the three CLIs feed one grep, one pipeline runs a stage on each VM, and one line that reads a hidden .pem key, deletes from the read-only /s3 mount and merges a PR is refused by policy before any of it reaches a service" width="100%">
+    <img src="assets/mirage-terminal-light.svg" alt="Mirage over three virtual filesystems (S3, Slack, Google Drive), three virtual CLIs (gh, linear, deepwiki-mcp), three VMs (Monty, an E2B sandbox, an EC2 GPU) and a policy layer: one grep searches all three filesystems, the three CLIs feed one grep, one pipeline runs a stage on each VM, and policy refuses one line that reads a hidden .pem key, deletes from the read-only /s3 mount and merges a PR" width="100%">
   </picture>
 </p>
 

@@ -56,7 +56,7 @@ Les agents IA travaillent dans un terminal. Mirage est **un terminal virtuel** q
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="Mirage sur trois systèmes de fichiers virtuels (S3, Slack, Google Drive), trois CLI virtuelles (gh, linear, deepwiki-mcp), trois VM (Monty, un sandbox E2B, un GPU EC2) et une couche de politique : un grep parcourt les trois systèmes de fichiers, les trois CLI alimentent un seul grep, un pipeline exécute une étape sur chaque VM, et une ligne qui lit une clé .pem masquée, supprime sur le montage /s3 en lecture seule et fusionne une PR est refusée par la politique avant d'atteindre un service" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage sur trois systèmes de fichiers virtuels (S3, Slack, Google Drive), trois CLI virtuelles (gh, linear, deepwiki-mcp), trois VM (Monty, un sandbox E2B, un GPU EC2) et une couche de politique : un grep parcourt les trois systèmes de fichiers, les trois CLI alimentent un seul grep, un pipeline exécute une étape sur chaque VM, et une ligne qui lit une clé .pem masquée, supprime sur le montage /s3 en lecture seule et fusionne une PR est refusée par la politique" width="100%">
   </picture>
 </p>
 
