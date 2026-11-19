@@ -4,39 +4,50 @@ description: Answer head, tail and wc -l from a service's own queries.
 icon: list-ol
 ---
 
-Lines lets a VFS answer line commands without reading a whole file. Override
-`first_lines`, `last_lines`, `line_count` and `follow` to make `head`, `tail`,
-`wc -l` and `tail -f` cheaper.
+Lines lets a VFS answer `head`, `tail`, `wc -l` and `tail -f` without reading
+the whole file. [Built-in VFSs](/home/integration/overview#lines) lists which
+VFSs support it.
 
-## Supported commands
+## VFS and Lines Integration
 
-These commands ask the VFS for lines or a count. The others read the file as
-usual.
-
-| Command | What happens |
-| --- | --- |
-| `head`, `head -n N`, `head -N` | Asks for the first lines. The file is not read. |
-| `tail`, `tail -n N`, `tail -N` | Asks for the last lines. The file is not read. |
-| `wc -l` | Asks for the line count. The file is not read. |
-| `tail -f`, `tail -f -n N` on one file | Asks for the last lines and then each new line, instead of reading the file every `interval` seconds (`tail -s`, 1 by default). If the stream ends, `tail -f` exits 1 with `tail: no files remaining`. |
-| `head -c N`, `head -n -N`, `head -z` | Reads the file. |
-| `tail -c N`, `tail -n +N` | Reads the file. |
-| `wc` with another count (`-c`, `-w`, `-m` or `-L`) | Reads the file. |
-| `tail -F`, `tail --follow=name`, `tail -f -c N`, `tail -f -n +N`, `tail -f` on more than one file | Reads the file every `interval` seconds. |
-| Any of these reading standard input | Never asks. |
-
-## For VFS authors
-
-A custom VFS overrides the methods its service can answer. Each method returns
-exactly what a read would hold, or `None` (TypeScript: `null`) and Mirage
-reads the file. TypeScript names methods in camelCase (`first_lines` is
-`firstLines`) and returns `Uint8Array` for `bytes`. The examples extend
-`NotesVFS` from
-[Adding a New VFS](/home/setup/vfs/new#write-one).
+A VFS overrides the methods its service can answer. Each method returns
+exactly what a read would hold, or `None` (TypeScript: `null`) when it cannot
+answer, and Mirage reads the file instead. TypeScript names methods in
+camelCase (`first_lines` is `firstLines`) and returns `Uint8Array` for
+`bytes`. A command reading standard input never asks. The examples extend
+`NotesVFS` from [Adding a New VFS](/home/setup/vfs/new#write-one), mounted at
+`/notes`.
 
 ### `first_lines`
 
-The first lines of one file, for `head`.
+The first lines of one file.
+
+**Commands:** `head`, `head -n N` and `head -N`. `head -c N`, `head -n -N` and
+`head -z` read the file without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file, on this mount.
+</ParamField>
+
+<ParamField body="n" type="int" required>
+How many lines to return, 1 or more.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `n` |
+| --- | --- | --- |
+| `head /notes/todo.txt` | `/notes/todo.txt` | `10` |
+| `head -n 3 /notes/todo.txt` | `/notes/todo.txt` | `3` |
+
+<ResponseField name="returns" type="bytes | None">
+
+| Return | What happens |
+| --- | --- |
+| The first `n` lines, or the whole file if it is shorter | `head` prints them, and the file is not read. |
+| `None` | The file is read. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -69,13 +80,39 @@ The first lines of one file, for `head`.
   </Tab>
 </Tabs>
 
-`path` is the file. `n` is how many lines, 1 or more, and 10 for plain `head`.
-Return the first `n` lines, or all of them if the file is shorter. With this
-example, `head -n 1` on a page reads nothing, and `head -c 3` still reads it.
+With this example, `head -n 1` on a page reads nothing, and `head -c 3` still
+reads it.
 
 ### `last_lines`
 
-The last lines of one file, for `tail`.
+The last lines of one file.
+
+**Commands:** `tail`, `tail -n N` and `tail -N`. `tail -c N` and `tail -n +N`
+read the file without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file, on this mount.
+</ParamField>
+
+<ParamField body="n" type="int" required>
+How many lines to return, 1 or more.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `n` |
+| --- | --- | --- |
+| `tail /notes/todo.txt` | `/notes/todo.txt` | `10` |
+| `tail -n 5 /notes/todo.txt` | `/notes/todo.txt` | `5` |
+
+<ResponseField name="returns" type="bytes | None">
+
+| Return | What happens |
+| --- | --- |
+| The last `n` lines, or the whole file if it is shorter | `tail` prints them, and the file is not read. |
+| `None` | The file is read. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -108,12 +145,31 @@ The last lines of one file, for `tail`.
   </Tab>
 </Tabs>
 
-`path` is the file. `n` is how many lines, 1 or more, and 10 for plain `tail`.
-Return the last `n` lines, or all of them if the file is shorter.
-
 ### `line_count`
 
-The number of lines in one file, for `wc -l`.
+The number of lines in one file.
+
+**Commands:** `wc -l`. `wc` with another count (`-c`, `-w`, `-m` or `-L`)
+reads the file without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file, on this mount.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` |
+| --- | --- |
+| `wc -l /notes/todo.txt` | `/notes/todo.txt` |
+
+<ResponseField name="returns" type="int | None">
+
+| Return | What happens |
+| --- | --- |
+| The number of newline characters in the file | `wc -l` prints it, and the file is not read. |
+| `None` | The file is read. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -142,11 +198,41 @@ The number of lines in one file, for `wc -l`.
   </Tab>
 </Tabs>
 
-`path` is the file. Return the number of newline characters in it.
-
 ### `follow`
 
-The last lines of one file, then each new line as it arrives, for `tail -f`.
+The last lines of one file, then each new line as it arrives.
+
+**Commands:** `tail -f` and `tail -f -n N` on one file. `tail -F`,
+`tail --follow=name`, `tail -f -c N`, `tail -f -n +N` and `tail -f` on more
+than one file read the file every `interval` seconds without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file, on this mount.
+</ParamField>
+
+<ParamField body="n" type="int" required>
+How many of the file's last lines to send first, 0 for none.
+</ParamField>
+
+<ParamField body="interval" type="float" required>
+The seconds between two checks for new lines. A service that pushes new lines can ignore it.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `n` | `interval` |
+| --- | --- | --- | --- |
+| `tail -f /notes/log.txt` | `/notes/log.txt` | `10` | `1.0` |
+| `tail -f -n 0 -s 5 /notes/log.txt` | `/notes/log.txt` | `0` | `5.0` |
+
+<ResponseField name="returns" type="AsyncIterator[bytes] | None">
+
+| Return | What happens |
+| --- | --- |
+| A stream that yields the last `n` lines, then each new whole line in order, and never ends on its own | `tail -f` prints it until it is stopped. If the stream ends, `tail -f` exits 1 with `tail: no files remaining`. |
+| `None` | The file is read every `interval` seconds. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -209,14 +295,6 @@ The last lines of one file, then each new line as it arrives, for `tail -f`.
     ```
   </Tab>
 </Tabs>
-
-`path` is the file. `n` is how many of its last lines come first, 0 for none.
-`interval` is the seconds between two checks for new lines (`tail -s`, 1 by
-default). A service that pushes new lines can ignore it.
-
-Return a stream that yields the last `n` lines, then each new whole line in
-order, and never ends on its own. Mirage prints it until `tail -f` is stopped.
-If the stream ends, `tail -f` exits 1 with `tail: no files remaining`.
 
 A real service would push new lines over a stream. This example checks the
 dictionary every `interval` seconds instead. It yields on every check, an
