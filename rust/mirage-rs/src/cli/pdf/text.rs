@@ -731,14 +731,18 @@ fn raw(glyphs: &[Glyph], nodiag: bool) -> String {
 const GUTTER: usize = 3;
 /// The most blank lines a placed page puts between two of its lines.
 const BLANKS: i64 = 4;
+/// The farthest column a piece is placed at before the gutters narrow,
+/// low enough that adding a page's text to it fits a 32-bit `usize`.
+const FARTHEST: f32 = (1u32 << 30) as f32;
 
 /// A page's text placed as it stands: a blank line for each further
 /// height of a line's smallest type down to the next line, up to
 /// `BLANKS`, and each piece at the column its place across the page maps
 /// to.
 fn layout(glyphs: &[Glyph], nodiag: bool) -> String {
+    let placed: Vec<Glyph> = glyphs.iter().filter(|g| g.x.is_finite()).cloned().collect();
     let mut pieces: Vec<Segment> = Vec::new();
-    for (_, rows) in page_rows(glyphs, nodiag) {
+    for (_, rows) in page_rows(&placed, nodiag) {
         for row in &rows {
             let mut from = 0;
             for at in row.gaps.iter().map(|g| g.0).chain([row.glyphs.len()]) {
@@ -806,8 +810,10 @@ fn layout(glyphs: &[Glyph], nodiag: bool) -> String {
 }
 
 /// The column each piece starts at: its place across the page in half
-/// the page's usual font size, pushed past the piece before it on its own
-/// line, then every gutter empty on all lines narrowed to `GUTTER`.
+/// the page's usual font size, at most `FARTHEST`, pushed past the piece
+/// before it on its own line, then every gutter empty on all lines
+/// narrowed to `GUTTER`, worked out from the pieces' spans so that memory
+/// follows the text rather than how far apart it is drawn.
 fn columns(pieces: &[Segment], texts: &[String], lines: &[(f32, f32, Vec<usize>)]) -> Vec<usize> {
     let mut sizes: Vec<(f32, usize)> = pieces
         .iter()
@@ -831,39 +837,33 @@ fn columns(pieces: &[Segment], texts: &[String], lines: &[(f32, f32, Vec<usize>)
     for (_, _, items) in lines {
         let mut end = 0usize;
         for (k, &i) in items.iter().enumerate() {
-            let at = ((pieces[i].start - left) / pitch).round().max(0.0) as usize;
+            let at = ((pieces[i].start - left) / pitch)
+                .round()
+                .clamp(0.0, FARTHEST) as usize;
             let gap = if k == 0 { 0 } else { 1 };
             col[i] = at.max(end + gap);
             end = col[i] + texts[i].chars().count();
         }
     }
-    let width = pieces
+    let mut spans: Vec<(usize, usize)> = col
         .iter()
-        .enumerate()
-        .map(|(i, _)| col[i] + texts[i].chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut used = vec![false; width];
-    for (i, text) in texts.iter().enumerate() {
-        used[col[i]..col[i] + text.chars().count()].fill(true);
-    }
-    let mut shift = vec![0usize; width + 1];
+        .zip(texts)
+        .map(|(&c, text)| (c, c + text.chars().count()))
+        .collect();
+    spans.sort_unstable();
+    let mut cuts: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
     let mut cut = 0usize;
-    let mut run = 0usize;
-    let mut seen_text = false;
-    for c in 0..width {
-        if used[c] {
-            if seen_text && run > GUTTER {
-                cut += run - GUTTER;
-            }
-            run = 0;
-            seen_text = true;
-        } else {
-            run += 1;
+    let mut reach: Option<usize> = None;
+    for (from, to) in spans {
+        if let Some(reach) = reach {
+            cut += from.saturating_sub(reach + GUTTER);
         }
-        shift[c] = cut;
+        cuts.push((from, cut));
+        reach = Some(reach.map_or(to, |reach| reach.max(to)));
     }
-    col.iter().map(|&c| c - shift[c]).collect()
+    col.iter()
+        .map(|&c| c - cuts[cuts.partition_point(|&(from, _)| from <= c) - 1].1)
+        .collect()
 }
 
 /// A page's text in the given mode.
@@ -872,5 +872,57 @@ pub(crate) fn page(glyphs: &[Glyph], mode: Mode, nodiag: bool) -> String {
         Mode::Reading => reading(glyphs, nodiag),
         Mode::Raw => raw(glyphs, nodiag),
         Mode::Layout => layout(glyphs, nodiag),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word(text: &str, x: f32) -> Vec<Glyph> {
+        text.chars()
+            .enumerate()
+            .map(|(i, text)| Glyph {
+                text,
+                x: x + 6.0 * i as f32,
+                y: 720.0,
+                width: 6.0,
+                bare: 6.0,
+                size: 12.0,
+                ascent: 9.0,
+                descent: 3.0,
+                turn: 0,
+                diagonal: false,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn layout_places_a_glyph_at_any_distance_in_memory_for_its_text() {
+        for (x, line) in [
+            (1e15, "Left   x\n"),
+            (-1e15, "x   Left\n"),
+            (1e38, "Left   x\n"),
+            (-1e38, "x   Left\n"),
+            (f32::INFINITY, "Left\n"),
+            (f32::NEG_INFINITY, "Left\n"),
+            (f32::NAN, "Left\n"),
+        ] {
+            let glyphs = [word("Left", 72.0), word("x", x)].concat();
+            assert_eq!(page(&glyphs, Mode::Layout, false), line, "x={x}");
+        }
+    }
+
+    #[test]
+    fn a_gutter_narrows_only_where_no_line_has_text() {
+        let mut below = [word("x", 84.0), word("y", 192.0)].concat();
+        for glyph in &mut below {
+            glyph.y = 700.0;
+        }
+        let glyphs = [word("ABCDEFGHIJKLMNOP", 72.0), below].concat();
+        assert_eq!(
+            page(&glyphs, Mode::Layout, false),
+            format!("ABCDEFGHIJKLMNOP\n  x{}y\n", " ".repeat(16))
+        );
     }
 }

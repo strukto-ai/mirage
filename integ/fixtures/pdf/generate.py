@@ -306,6 +306,11 @@ BANDS = {
     "pages": [{"text": lines(72, 720, ["Only the password opens this page."])}],
 }
 
+FAR = {
+    "info": {"Title": "Stray glyph"},
+    "pages": [{"text": [{"x": 72, "y": 720, "text": "Left"}, {"x": 10**15, "y": 720, "text": "x"}]}],
+}
+
 
 def main() -> None:
     OUT.mkdir(exist_ok=True)
@@ -317,6 +322,7 @@ def main() -> None:
         build(BANDS, Lock(b"keeper", -4, b"reader"))
     )
     (OUT / "notes.pdf").write_bytes(b"These are plain notes, not a PDF.\n")
+    (OUT / "far.pdf").write_bytes(build(FAR))
 
 
 if __name__ == "__main__":

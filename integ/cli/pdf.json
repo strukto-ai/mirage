@@ -740,6 +740,20 @@
         "stdout": "",
         "stderr": "Command Line Error: Incorrect password\n"
       }
+    },
+    {
+      "id": "pdf_text_layout_glyph_far_off_the_page",
+      "seq": 13650057,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -layout /docs/far.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Left   x\n\f",
+        "stderr": ""
+      },
+      "conformance_skip": "poppler drops a glyph outside the page box; mirage places it past a narrowed gutter"
     }
   ]
 }

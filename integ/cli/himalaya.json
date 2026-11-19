@@ -1564,6 +1564,18 @@
         "stdout": "[\"dkim_signature\",\"authentication_results\",{\"other\":\"X-Probe\"}]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hm_read_refuses_a_message_nested_past_64_levels",
+      "seq": 9940141,
+      "targets": ["cli-himalaya"],
+      "command": "{ for i in $(seq 65); do printf 'Content-Type: message/rfc822\\r\\n\\r\\n'; done; printf 'Subject: deep\\r\\n\\r\\nbody\\r\\n'; } | himalaya message add -m Archive > /dev/null; id=$(himalaya --json envelope list -m Archive | jq -r '.envelopes[0].id'); himalaya message read -m Archive \"$id\"; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Error: Message nests more than 64 attached messages\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nrc=1\n",
+        "stderr": ""
+      },
+      "conformance_skip": "mirage refuses a message nested past 64 levels, as rendering and freeing one walk the nesting on the stack; himalaya renders it"
     }
   ]
 }
