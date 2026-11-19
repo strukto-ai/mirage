@@ -2251,11 +2251,7 @@ def explained_line(
         )
     tree = parse(line, aliases)
     functions = _defined_functions(tree)
-    parts = [
-        part
-        for part in _in_line_order(judged, opened)
-        if not _calls_function(part, functions)
-    ]
+    parts = _in_line_order(judged, opened, functions)
     strictest = max(
         (_verdict_of(part)[0] for part in parts),
         key=STRICTNESS.__getitem__,
@@ -2264,7 +2260,7 @@ def explained_line(
     commands: dict[tuple[int, int], list[Judgment]] = {}
     for one in judged:
         at = one.occurrence
-        if at.parent is None and not _calls_function(one.judgment, functions):
+        if at.parent is None and not _calls_function(one, functions):
             commands.setdefault((at.start, at.end), []).append(one.judgment)
     redirects: dict[tuple[int, int], list[Judgment]] = {}
     for open_ in opened:
@@ -2288,13 +2284,14 @@ def explained_line(
     )
 
 
-def _defined_functions(tree: Any) -> frozenset[str]:
-    """The names of the functions a line defines, anywhere in it.
+def _defined_functions(tree: Any) -> dict[str, int]:
+    """The functions a line defines, each with where its first
+    definition ends on the line.
 
     Args:
         tree (Any): the line, parsed.
     """
-    names: set[str] = set()
+    names: dict[str, int] = {}
     stack = [tree]
     while stack:
         current = stack.pop()
@@ -2306,40 +2303,55 @@ def _defined_functions(tree: Any) -> frozenset[str]:
             None,
         )
         if name is not None:
-            names.add(get_text(name))
-    return frozenset(names)
+            ends = names.get(get_text(name), current.end_byte)
+            names[get_text(name)] = min(ends, current.end_byte)
+    return names
 
 
-def _calls_function(judgment: Judgment, functions: frozenset[str]) -> bool:
+def _calls_function(one: Judged, functions: Mapping[str, int]) -> bool:
     """Whether a judgment is a tree root's own decision about a call to
-    a function the line defines. The walk reads the line before the
-    definition runs, so it judges the call as a tool, but the run calls
-    the function, which no root's own decision speaks for (``is_tool``);
-    a rule that names the function still does.
+    a function the line defined before it. The walk reads the line
+    before the definition runs, so it judges the call as a tool, but
+    the run calls the function, which no root's own decision speaks for
+    (``is_tool``); a rule that names the function still does. A command
+    of that name before the definition is no call and keeps its answer.
 
     Args:
-        judgment (Judgment): one command's judgment.
-        functions (frozenset[str]): the functions the line defines.
+        one (Judged): one command's judgment and place.
+        functions (Mapping[str, int]): the functions the line defines,
+            each with where its first definition ends.
     """
-    return judgment.command in functions and _by_default(judgment)
+    defined = functions.get(one.judgment.command)
+    return (
+        defined is not None
+        and _line_start(one.occurrence) >= defined
+        and _by_default(one.judgment)
+    )
 
 
 def _in_line_order(
-    judged: Sequence[Judged], opened: Sequence[Opened]
+    judged: Sequence[Judged],
+    opened: Sequence[Opened],
+    functions: Mapping[str, int],
 ) -> list[Judgment]:
     """Every command's judgment and every unowned redirect's, in the
     order the line reaches them: a command where its statement starts
     on the typed line (one a nested line runs, where the command that
     runs it does), a redirect where the statement it opens for starts,
-    since the shell opens it before the statement runs.
+    since the shell opens it before the statement runs. A call to a
+    function the line defined is left out (:func:`_calls_function`).
 
     Args:
         judged (Sequence[Judged]): the line's command judgments, in the
             order the gate reads them.
         opened (Sequence[Opened]): the line's unowned redirects.
+        functions (Mapping[str, int]): the functions the line defines,
+            each with where its first definition ends.
     """
     placed = [
-        (_line_start(one.occurrence), one.judgment) for one in judged
+        (_line_start(one.occurrence), one.judgment)
+        for one in judged
+        if not _calls_function(one, functions)
     ] + [(_line_start(open_.occurrence), open_.judgment) for open_ in opened]
     placed.sort(key=lambda pair: pair[0])
     return [judgment for _, judgment in placed]

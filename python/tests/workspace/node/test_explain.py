@@ -2393,6 +2393,12 @@ SUMMARY_NOD = {
 SUMMARIES = [
     (SUMMARY_CLOSED, "ls /data", Outcome.ALLOW, ""),
     (SUMMARY_CLOSED, "f() { ls /data; }; f", Outcome.ALLOW, ""),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x; sort() { ls /data; }",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
     (SUMMARY_CLOSED, "sort /data/x", Outcome.DENY, "sort is not allowed"),
     (
         SUMMARY_CLOSED,

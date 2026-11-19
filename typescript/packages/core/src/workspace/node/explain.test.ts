@@ -2020,6 +2020,7 @@ const SUMMARY_NOD = { '*': ['allow', { decision: 'ask', reason: 'nod', paths: [S
 it.each([
   [SUMMARY_CLOSED, 'ls /data', Outcome.ALLOW, ''],
   [SUMMARY_CLOSED, 'f() { ls /data; }; f', Outcome.ALLOW, ''],
+  [SUMMARY_CLOSED, 'sort /data/x; sort() { ls /data; }', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'sort /data/x', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'ls /data; sort /data/x', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'sort /data/x; ls /data', Outcome.DENY, 'sort is not allowed'],

@@ -1758,7 +1758,7 @@ export function explainedLine(
   }
   const tree = reparse(line)
   const functions = definedFunctions(tree)
-  const parts = inLineOrder(judged, opened).filter((part) => !callsFunction(part, functions))
+  const parts = inLineOrder(judged, opened, functions)
   let strictest = Outcome.ALLOW
   for (const part of parts) {
     const [said] = verdictOf(part)
@@ -1767,7 +1767,7 @@ export function explainedLine(
   const commands = new Map<string, Judgment[]>()
   for (const one of judged) {
     const at = one.occurrence
-    if (at.parent !== null || callsFunction(one.judgment, functions)) continue
+    if (at.parent !== null || callsFunction(one, functions)) continue
     const span = `${String(at.start)}:${String(at.end)}`
     const list = commands.get(span) ?? []
     list.push(one.judgment)
@@ -1813,31 +1813,35 @@ export function explainedLine(
 }
 
 /**
- * The names of the functions a line defines, anywhere in it. Mirrors the
- * Python `_defined_functions`.
+ * The functions a line defines, each with where its first definition ends
+ * on the line. Mirrors the Python `_defined_functions`.
  */
-function definedFunctions(tree: TSNodeLike): ReadonlySet<string> {
-  const names = new Set<string>()
+function definedFunctions(tree: TSNodeLike): ReadonlyMap<string, number> {
+  const names = new Map<string, number>()
   const stack = [tree]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
     stack.push(...current.namedChildren)
     if (current.type !== NodeType.FUNCTION_DEFINITION) continue
     const name = current.namedChildren.find((c) => c.type === NodeType.WORD)
-    if (name !== undefined) names.add(getText(name))
+    if (name === undefined) continue
+    const end = current.endIndex ?? 0
+    names.set(getText(name), Math.min(names.get(getText(name)) ?? end, end))
   }
   return names
 }
 
 /**
  * Whether a judgment is a tree root's own decision about a call to a
- * function the line defines. The walk reads the line before the
+ * function the line defined before it. The walk reads the line before the
  * definition runs, so it judges the call as a tool, but the run calls the
  * function, which no root's own decision speaks for (`isTool`); a rule
- * that names the function still does. Mirrors the Python
+ * that names the function still does. A command of that name before the
+ * definition is no call and keeps its answer. Mirrors the Python
  * `_calls_function`.
  */
-function callsFunction(judgment: Judgment, functions: ReadonlySet<string>): boolean {
-  return functions.has(judgment.command) && byDefault(judgment)
+function callsFunction(one: Judged, functions: ReadonlyMap<string, number>): boolean {
+  const defined = functions.get(one.judgment.command)
+  return defined !== undefined && lineStart(one.occurrence) >= defined && byDefault(one.judgment)
 }
 
 /**
@@ -1845,11 +1849,18 @@ function callsFunction(judgment: Judgment, functions: ReadonlySet<string>): bool
  * line reaches them: a command where its statement starts on the typed
  * line (one a nested line runs, where the command that runs it does), a
  * redirect where the statement it opens for starts, since the shell opens
- * it before the statement runs. Mirrors the Python `_in_line_order`.
+ * it before the statement runs. A call to a function the line defined is
+ * left out (`callsFunction`). Mirrors the Python `_in_line_order`.
  */
-function inLineOrder(judged: readonly Judged[], opened: readonly Opened[]): Judgment[] {
+function inLineOrder(
+  judged: readonly Judged[],
+  opened: readonly Opened[],
+  functions: ReadonlyMap<string, number>,
+): Judgment[] {
   const placed: [number, Judgment][] = [
-    ...judged.map((one): [number, Judgment] => [lineStart(one.occurrence), one.judgment]),
+    ...judged
+      .filter((one) => !callsFunction(one, functions))
+      .map((one): [number, Judgment] => [lineStart(one.occurrence), one.judgment]),
     ...opened.map((open): [number, Judgment] => [lineStart(open.occurrence), open.judgment]),
   ]
   placed.sort((a, b) => a[0] - b[0])
