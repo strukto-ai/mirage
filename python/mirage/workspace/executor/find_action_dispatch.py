@@ -629,7 +629,7 @@ async def run_listed_find(
         )
 
     status = 1 if refused else 0
-    if refused and sink is not None and expr.execs:
+    if refused and sink is not None:
         await sink.emit(Channel.STDERR, encode_text(refused))
         refused = ""
     stdout, io = line_output(run, status, sink)

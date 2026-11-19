@@ -485,9 +485,8 @@ export async function runListedFind(
   const given = source === '-' ? null : stdin
   const execute = executeFn
   const status = refused !== '' ? 1 : 0
-  const hasExec = expr.actions.some((a) => a.kind === 'exec')
   let said = refused
-  if (said !== '' && sink !== undefined && hasExec) {
+  if (said !== '' && sink !== undefined) {
     await sink.emit(Channel.STDERR, encodeText(said))
     said = ''
   }

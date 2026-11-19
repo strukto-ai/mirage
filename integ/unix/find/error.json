@@ -1524,6 +1524,20 @@
         "stdout": "find: '/data/fx.lst':1: invalid zero-length file name\ne\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_files0_from_refusal_precedes_its_walk_errors",
+      "seq": 19996019,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '\\0/data/nope\\0' > /data/f0.lst && find -files0-from /data/f0.lst; echo rc=$?; rm /data/f0.lst",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "find: '/data/f0.lst':1: invalid zero-length file name\nfind: '/data/nope': No such file or directory\n"
+      }
     }
   ]
 }
