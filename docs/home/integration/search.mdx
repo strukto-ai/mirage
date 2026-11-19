@@ -338,7 +338,7 @@ Which commands the entry limits.
 </ParamField>
 
 <ParamField body="walk_limit" type="int" default="1000">
-How many files one command may read or list under a folder. The default is 5000 on GitHub, and 10000 on disk, RAM and OPFS.
+How many files a search may read, or entries a listing may list, under a folder. A search counts only the files it reads, and a listing counts folders too. The default is 5000 on GitHub, and 10000 on disk, RAM and OPFS.
 
 | Value | What happens |
 | --- | --- |
@@ -359,7 +359,9 @@ How many files one command may read or list under a folder. The default is 5000 
 
 - A command that stops prints
   `<command>: <folder>: stopped after <N> files (walk_limit); narrow the path`.
-  One that does not run prints `more than <N> files` and changes nothing.
+  One that does not run prints `more than <N> files` and leaves that folder
+  untouched. `rm -r` takes its folders in order, so an earlier one may
+  already be removed.
 - Codex's `fs/walk` ([exec-server](/home/agents/codex#exec-server-forward))
   stops the same way and returns `truncated: true`.
 

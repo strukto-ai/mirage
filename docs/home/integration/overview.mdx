@@ -55,8 +55,10 @@ reads only those files.
 | <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | Every search | None |
 | <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SQL with SQLite](/python/vfs/sql) | Every search for ASCII text | None |
 
-- A search a VFS does not speed up reads every file, so it misses nothing.
-  Some patterns and flags always read every file; see
+- A search a VFS does not speed up reads the files itself, up to the mount's
+  [`walk_limit`](/home/integration/search#walk_limit), and says so on stderr
+  when it stops there. It never leaves a file out silently. Some patterns and
+  flags always read every file; see
   [Search](/home/integration/search#files_containing).
 - A file the service's search leaves out is not read, so `grep` does not
   print a match in it. To read every file instead, set the mount's
