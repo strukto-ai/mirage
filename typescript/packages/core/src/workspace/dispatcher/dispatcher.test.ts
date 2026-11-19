@@ -4166,3 +4166,28 @@ describe('a mount point is a folder of the directory it sits in', () => {
     }
   })
 })
+
+describe('a link change moves the time of the folder it is in', () => {
+  it('moves it for a link made, removed or renamed', async () => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    const old = "touch -d '2000-01-01 00:00:00' /d/f; "
+    const year = "stat -c '%y' /d/f | cut -c1-4"
+    try {
+      await ws.shell('mkdir /d/f')
+      const out: string[] = []
+      for (const change of [
+        'ln -s /x /d/f/l',
+        'rm /d/f/l',
+        "ln -s /x /d/f/m && touch -d '2000-01-01 00:00:00' /d/f && mv /d/f/m /d/f/n",
+      ]) {
+        const result = await ws.shell(`${old}${change} && ${year}`)
+        out.push(result.stdoutText)
+      }
+      expect(out).toHaveLength(3)
+      expect(out.every((line) => line !== '')).toBe(true)
+      expect(out).not.toContain('2000\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})

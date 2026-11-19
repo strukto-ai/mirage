@@ -296,9 +296,9 @@ describe('DiskVFS — shared host-link contract', () => {
 
   it('uses the same visible tree for snapshots, find, du and the op table', async () => {
     expect(Object.keys((await vfs.getState()).files).sort()).toEqual(fixture.visible_files)
-    expect(await shell(vfs, 'find /data -type f', 'du -s /data')).toEqual([
+    expect(await shell(vfs, 'find /data -type f', 'du -sb /data')).toEqual([
       fixture.visible_files.map((p) => `/data/${p}\n`).join(''),
-      '28\t/data\n',
+      '13\t/data\n',
     ])
     for (const p of fixture.hidden_paths) {
       expect(await existsCore(vfs.accessor, spec(p))).toBe(false)
@@ -314,7 +314,7 @@ describe('DiskVFS — shared host-link contract', () => {
     const alias = join(root, 'alias')
     await symlink(vfs.root, alias)
     const mounted = new DiskVFS({ root: alias })
-    expect(await shell(mounted, 'du -s /data')).toEqual(['28\t/data\n'])
+    expect(await shell(mounted, 'du -sb /data')).toEqual(['13\t/data\n'])
     expect(Object.keys((await mounted.getState()).files).sort()).toEqual(fixture.visible_files)
   })
 

@@ -296,7 +296,8 @@ describe('StreamHost', () => {
       calls.push(`${op} ${p.virtual}`)
       if (op === 'stat') {
         const modified = '2001-09-09T01:46:40+00:00'
-        return [new FileStat({ name: 'f', type: FileType.FILE, modified }), new IOResult()]
+        const row = new FileStat({ name: 'f', type: FileType.FILE, modified, mode: 0o750 })
+        return [row, new IOResult()]
       }
       if (op === 'setattr') modes.set(p.virtual, kwargs.mode as number)
       return [null, new IOResult()]
@@ -309,7 +310,12 @@ describe('StreamHost', () => {
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     const stat = await h.serve({ op: 'stat', path: '/f' }, new Uint8Array())
-    expect(stat.reply).toEqual({ kind: 'file', mtime: 1_000_000_000, wall: 1_000_000_000 })
+    expect(stat.reply).toEqual({
+      kind: 'file',
+      mode: 0o750,
+      mtime: 1_000_000_000,
+      wall: 1_000_000_000,
+    })
     const chmod = await h.serve({ op: 'chmod', path: '/f', mode: 416 }, new Uint8Array())
     expect(chmod.reply).toEqual({})
     expect(modes.get('/f')).toBe(416)

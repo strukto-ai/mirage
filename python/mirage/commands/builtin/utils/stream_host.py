@@ -68,6 +68,7 @@ from mirage.utils.dates import (
     stat_epoch,
 )
 from mirage.utils.path import CycleError
+from mirage.utils.stat_view import posix_mode
 from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
@@ -522,7 +523,8 @@ class StreamHost:
 
     async def _path_op(self, op: str, name: str) -> Served:
         """Unlink, make (one level) or stat a path; a stat answers what
-        stands there, ``dir`` or ``file``, or why it found nothing."""
+        stands there, ``dir`` or ``file``, with its permission bits and
+        time, or why it found nothing."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
@@ -533,7 +535,13 @@ class StreamHost:
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
-        return Served({"kind": kind, **self._stamp(found.modified)})
+        return Served(
+            {
+                "kind": kind,
+                "mode": posix_mode(found) & 0o7777,
+                **self._stamp(found.modified),
+            }
+        )
 
     def _stamp(self, modified: str | None) -> dict[str, JsonValue]:
         """A stat's time in UTC and on the session's wall clock, the time

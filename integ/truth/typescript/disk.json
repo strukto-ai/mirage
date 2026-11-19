@@ -34,9 +34,9 @@
     "$ stat /data/example.json",
     "  File: /data/example.json",
     {
-      "re": "  Size: \\d+ +\\tBlocks: \\? +IO Block: \\? +regular file"
+      "re": "  Size: \\d+ +\\tBlocks: \\d+ +IO Block: 4096 +regular file"
     },
-    "Device: 42358,2210976247\tInode: ?           Links: ?",
+    "Device: 42358,2210976247\tInode: ?           Links: 1",
     {
       "re": "Access: \\(0[0-7]{3}/[-rwxstST]{10}\\)  Uid: \\(.*\\)   Gid: \\(.*\\)"
     },
@@ -67,7 +67,7 @@
     "/data/qdrant.json",
     "",
     "$ du /data/",
-    "1545519\t/data/",
+    "1520\t/data/",
     "",
     "$ jq .company /data/example.json",
     "\"Strukto\"",

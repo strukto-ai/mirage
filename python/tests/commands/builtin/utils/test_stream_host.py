@@ -384,6 +384,7 @@ async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
                 name="f",
                 type=FileType.FILE,
                 modified="2001-09-09T01:46:40+00:00",
+                mode=0o750,
             )
             return row, IOResult()
         return None, IOResult()
@@ -399,6 +400,7 @@ async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
     stat = await host.serve({"op": "stat", "path": "/f"}, b"")
     assert stat.reply == {
         "kind": "file",
+        "mode": 0o750,
         "mtime": 1_000_000_000,
         "wall": 1_000_000_000,
     }

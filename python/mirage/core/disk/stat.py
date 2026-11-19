@@ -110,7 +110,7 @@ def stat_of(
         ctime=ns_to_iso(st.st_ctime_ns),
         birthtime=birthtime,
         nlink=st.st_nlink,
-        blocks=st.st_blocks,
+        blocks=getattr(st, "st_blocks", None),
     )
 
 

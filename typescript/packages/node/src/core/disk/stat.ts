@@ -93,7 +93,7 @@ export async function statOf(
     ctime: st.ctime.toISOString(),
     birthtime,
     nlink: Number(st.nlink),
-    blocks: Number(st.blocks),
+    blocks: Number.isFinite(Number(st.blocks)) ? Number(st.blocks) : null,
   })
 }
 

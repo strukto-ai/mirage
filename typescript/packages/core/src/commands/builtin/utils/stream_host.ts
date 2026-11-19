@@ -46,6 +46,7 @@ import {
 } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { CycleError } from '../../../utils/path.ts'
+import { posixMode } from '../../../utils/stat_view.ts'
 import type { Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
@@ -551,7 +552,7 @@ export class StreamHost {
     return { reply: {} }
   }
 
-  /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, or why it found nothing. */
+  /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, with its permission bits and time, or why it found nothing. */
   private async pathOp(op: 'unlink' | 'mkdir' | 'stat' | 'rmdir', name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
@@ -567,6 +568,7 @@ export class StreamHost {
     return {
       reply: {
         kind: row.type === FileType.DIRECTORY ? 'dir' : 'file',
+        mode: posixMode(row) & 0o7777,
         ...this.stamp(row.modified),
       },
     }

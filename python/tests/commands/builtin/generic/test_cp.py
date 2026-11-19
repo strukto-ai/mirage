@@ -533,6 +533,39 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
         assert used["dir_copy"], flags
 
 
+@pytest.mark.parametrize("umask, whole", [(0o022, True), (0o077, False)])
+@pytest.mark.asyncio
+async def test_a_set_umask_copies_a_tree_entry_by_entry(umask, whole):
+    # A store's one-call tree copy makes each copy under its own umask, so
+    # a session umask other than the default sends the copy entry by entry,
+    # where each new copy takes its mode under the session's.
+    files = {"/t/f.txt": b"F"}
+    dirs = {"/t", "/t/empt"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+    used = {"dir_copy": False}
+
+    async def dir_copy(src, dst) -> None:
+        used["dir_copy"] = True
+        dirs.add(_key(dst))
+
+    async def dispatch(op, path, **kwargs):
+        return None, IOResult()
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True),
+        dispatch=dispatch,
+        umask=umask,
+    )
+    assert io.exit_code == 0
+    assert used["dir_copy"] is whole
+    assert "/c" in dirs
+
+
 @pytest.mark.parametrize("refuse", [walk_declined, enotsup])
 @pytest.mark.asyncio
 async def test_a_declined_dir_copy_copies_entry_by_entry(refuse):

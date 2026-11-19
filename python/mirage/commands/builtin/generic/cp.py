@@ -47,7 +47,7 @@ from mirage.commands.spec.usage import (
     word_refusal_error,
 )
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.context import session_umask
+from mirage.context import DEFAULT_UMASK, session_umask
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
@@ -255,8 +255,12 @@ class Keeper:
 
     @property
     def per_entry(self) -> bool:
-        """Whether a copy must go entry by entry for what this keeps."""
-        return bool(self.keep)
+        """Whether a copy must go entry by entry: for what this keeps, or
+        for a umask other than the default, which a store's one-call tree
+        copy, made under its own, would not apply."""
+        return bool(self.keep) or (
+            self.umask is not None and self.umask != DEFAULT_UMASK
+        )
 
     async def prepare(
         self, src: PathSpec, dst: PathSpec, made: bool = False

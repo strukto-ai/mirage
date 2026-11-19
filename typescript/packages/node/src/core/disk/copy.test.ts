@@ -37,17 +37,20 @@ describe('core/disk/copy', () => {
     expect(await readFile(join(root, 'dst'), 'utf-8')).toBe('CP')
   })
 
-  it('leaves the mode to the copy, as an open of the destination does', async () => {
-    await writeFile(join(root, 'src'), 'CP')
-    await chmod(join(root, 'src'), 0o750)
-    await writeFile(join(root, 'held'), 'old')
-    await chmod(join(root, 'held'), 0o600)
-    await copy(accessor, spec('/src'), spec('/held'))
-    await copy(accessor, spec('/src'), spec('/new'))
-    expect((await stat(join(root, 'held'))).mode & 0o7777).toBe(0o600)
-    expect((await stat(join(root, 'new'))).mode & 0o7777).toBe(0o644)
-    expect(await readFile(join(root, 'held'), 'utf-8')).toBe('CP')
-  })
+  it.skipIf(process.platform === 'win32')(
+    'leaves the mode to the copy, as an open of the destination does',
+    async () => {
+      await writeFile(join(root, 'src'), 'CP')
+      await chmod(join(root, 'src'), 0o750)
+      await writeFile(join(root, 'held'), 'old')
+      await chmod(join(root, 'held'), 0o600)
+      await copy(accessor, spec('/src'), spec('/held'))
+      await copy(accessor, spec('/src'), spec('/new'))
+      expect((await stat(join(root, 'held'))).mode & 0o7777).toBe(0o600)
+      expect((await stat(join(root, 'new'))).mode & 0o7777).toBe(0o644)
+      expect(await readFile(join(root, 'held'), 'utf-8')).toBe('CP')
+    },
+  )
   it('does not create parent directories for the destination', async () => {
     // cp is not `mkdir -p`: GNU reports ENOENT on the destination.
     await writeFile(join(root, 'src'), 'X')

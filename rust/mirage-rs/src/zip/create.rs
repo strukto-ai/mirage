@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use super::format::{
     ARCHIVE, CENTRAL, END, END_SEARCH, END64, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
-    end_record, say, u16_at, u32_at, wildcard,
+    end_record, extended_time, say, u16_at, u32_at, wildcard,
 };
 use super::unzip;
 use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
@@ -248,6 +248,14 @@ struct Original {
     records: Vec<Record>,
     prefix: u64,
     comment: Vec<u8>,
+}
+
+/// The UTC modification time a central record's extended timestamp holds,
+/// which `-u` and `-f` weigh a file's time against when it is there.
+fn central_utc(central: &[u8]) -> Option<i64> {
+    let start = 46 + usize::from(u16_at(central, 28));
+    let end = (start + usize::from(u16_at(central, 30))).min(central.len());
+    central.get(start..end).and_then(extended_time)
 }
 
 /// Whether an extra field is whole and holds no ZIP64 field.
@@ -825,19 +833,21 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     if config.delete {
         return delete(&host, &config, archive, old, &warnings).await;
     }
-    let held: HashMap<Vec<u8>, u64> = old.as_ref().map_or_else(HashMap::new, |old| {
-        old.records
-            .iter()
-            .map(|r| {
-                let stamp =
-                    (u64::from(u16_at(&r.central, 14)) << 16) | u64::from(u16_at(&r.central, 12));
-                (r.name.clone(), stamp)
-            })
-            .collect()
-    });
+    let held: HashMap<Vec<u8>, (u64, Option<i64>)> =
+        old.as_ref().map_or_else(HashMap::new, |old| {
+            old.records
+                .iter()
+                .map(|r| {
+                    let stamp = (u64::from(u16_at(&r.central, 14)) << 16)
+                        | u64::from(u16_at(&r.central, 12));
+                    (r.name.clone(), (stamp, central_utc(&r.central)))
+                })
+                .collect()
+        });
     if config.update || config.freshen {
         members.retain(|(name, found)| match held.get(name.as_slice()) {
-            Some(&stamp) => dos_stamp(found.mtime) > stamp,
+            Some(&(_, Some(utc))) if found.utc.is_some() => found.utc > Some(utc),
+            Some(&(stamp, _)) => dos_stamp(found.mtime) > stamp,
             None => config.update,
         });
     }
@@ -1034,16 +1044,17 @@ async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> V
                 continue;
             }
         }
-        if let Some((kind, stamp)) = host.stat_time(&record.name).await {
-            if kind == "file" {
-                stored.push(Found {
-                    spelled: record.name.clone(),
-                    path: Some(record.name.clone()),
-                    mtime: stamp.wall,
-                    utc: stamp.utc,
-                    ..Found::default()
-                });
-            }
+        let path = record.name.clone();
+        let (reply, _) = host.ask(Request::Stat { path }).await;
+        if reply.kind.as_deref() == Some("file") {
+            stored.push(Found {
+                spelled: record.name.clone(),
+                path: Some(record.name.clone()),
+                mtime: reply.wall,
+                utc: reply.mtime,
+                mode: reply.mode,
+                ..Found::default()
+            });
         }
     }
     stored

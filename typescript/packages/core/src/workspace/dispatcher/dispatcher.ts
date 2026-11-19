@@ -2938,8 +2938,9 @@ export class Dispatcher {
    * A directory's stat with a link for each folder the namespace adds to it
    * that its own store holds none of: a mount point is a folder of the
    * directory it sits in, as on Linux, and so is a folder above a deeper link.
-   * A store that counts no links keeps its count unknown. Mirrors Python's
-   * Dispatcher._with_folders.
+   * A store that counts no links keeps its count unknown, and a folder its
+   * store cannot be asked about is left to the store's count. Mirrors
+   * Python's Dispatcher._with_folders.
    */
   private async withFolders(call: Call, mount: MountEntry, row: unknown): Promise<unknown> {
     if (!(row instanceof FileStat) || row.type !== FileType.DIRECTORY || row.nlink === null) {
@@ -2958,9 +2959,13 @@ export class Dispatcher {
         const held = (await mount.call('stat', `${base}/${name}`)) as FileStat
         if (held.type !== FileType.DIRECTORY) added += 1
       } catch (err) {
-        if (!isMissError(err)) throw err
-        console.debug(`${base}/${name} is the namespace's: ${String(err)}`)
-        added += 1
+        // Nothing there is the answer: the folder is the namespace's.
+        if (isMissError(err)) {
+          added += 1
+          continue
+        }
+        if (!isFsError(err)) throw err
+        console.debug(`${base}/${name} not checked: ${String(err)}`)
       }
     }
     return added > 0 ? row.with({ nlink: row.nlink + added }) : row
@@ -3715,6 +3720,7 @@ export class Dispatcher {
     if (name === 'unlink') {
       target = this.namespace.readlink(path.virtual) ?? ''
       await this.namespace.unlink(path.virtual)
+      await this.touchFolder(path.virtual)
     } else if (name === 'rename') {
       target = this.namespace.readlink(path.virtual) ?? ''
       const dst = args[0]
@@ -3738,6 +3744,8 @@ export class Dispatcher {
       }
       await this.namespace.unlink(dst.virtual)
       await this.namespace.rename(path.virtual, dst.virtual)
+      await this.touchFolder(path.virtual)
+      await this.touchFolder(dst.virtual)
     } else if (name === 'symlink') {
       target = String(kwargs.target)
       // symlink(2) refuses an occupied name and a name its parent cannot
@@ -3750,6 +3758,7 @@ export class Dispatcher {
       const refusal = await this.symlinkRefusal(path, issuer)
       if (refusal !== null) throw refusal
       await this.namespace.symlink(path.virtual, target, systemNow())
+      await this.touchFolder(path.virtual)
     } else if (name === 'stat') {
       const row = this.namespace.linkStatAt(path.virtual)
       if (row === null) throw enoent(path)
@@ -3764,6 +3773,28 @@ export class Dispatcher {
     record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
     return (await boundary.complete(mark, path, write, result, issuer)) as string | FileStat | null
+  }
+
+  /**
+   * Move the time of the folder a link is made in, removed from or renamed
+   * through, as a directory's moves when a name in it changes. A folder whose
+   * store keeps no time of its own keeps the time it has. Mirrors Python's
+   * Dispatcher._touch_folder.
+   */
+  private async touchFolder(link: string): Promise<void> {
+    const trimmed = rstripSlash(link)
+    const cut = trimmed.lastIndexOf('/')
+    const parent = cut > 0 ? trimmed.slice(0, cut) : '/'
+    const mount = this.namespace.tryMountFor(parent)
+    if (!mount?.answers('setattr')) return
+    try {
+      await mount.call('setattr', parent, [], { mtime: nowIso() }, this.access)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`${parent} keeps its time: ${String(err)}`)
+      return
+    }
+    await this.changed(parent, FileChangeKind.UPDATE, null, { times: false })
   }
 
   /**

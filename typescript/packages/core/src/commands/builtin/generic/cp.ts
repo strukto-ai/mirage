@@ -76,7 +76,7 @@ import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import { classify } from '../../../errors/classify.ts'
-import { sessionUmask } from '../../../context/session_context.ts'
+import { DEFAULT_UMASK, sessionUmask } from '../../../context/session_context.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE } from '../../../utils/mode.ts'
 
 const ENC = new TextEncoder()
@@ -233,9 +233,13 @@ export class Keeper {
     readonly umask: number | null = null,
   ) {}
 
-  /** Whether a copy must go entry by entry for what this keeps. */
+  /**
+   * Whether a copy must go entry by entry: for what this keeps, or for a
+   * umask other than the default, which a store's one-call tree copy, made
+   * under its own, would not apply.
+   */
   get perEntry(): boolean {
-    return this.keep.size > 0
+    return this.keep.size > 0 || (this.umask !== null && this.umask !== DEFAULT_UMASK)
   }
 
   /** Note the mode a copy about to be made is owed: its source's under the

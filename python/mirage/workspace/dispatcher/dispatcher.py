@@ -53,7 +53,7 @@ from mirage.context.session_context import (
     effective_path_mode,
     session_access,
 )
-from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.constants import FS_ERRORS, MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
     eexist,
@@ -3344,7 +3344,8 @@ class Dispatcher:
         adds to it that its own store holds none of: a mount point is a
         folder of the directory it sits in, as on Linux, and so is a
         folder above a deeper link. A store that counts no links keeps
-        its count unknown.
+        its count unknown, and a folder its store cannot be asked about
+        is left to the store's count.
 
         Args:
             call (_Call): the stat that ran.
@@ -3371,6 +3372,9 @@ class Dispatcher:
             except MISS_ERRORS as exc:
                 logger.debug("%s/%s is the namespace's: %s", base, name, exc)
                 added += 1
+                continue
+            except FS_ERRORS as exc:
+                logger.debug("%s/%s not checked: %s", base, name, exc)
                 continue
             added += int(held.type != FileType.DIRECTORY)
         return replace(row, nlink=row.nlink + added) if added else row
@@ -3900,6 +3904,7 @@ class Dispatcher:
         if name == "unlink":
             target = self._namespace.readlink(path.virtual) or ""
             await self._namespace.unlink(path.virtual)
+            await self._touch_folder(path.virtual)
         elif name == "rename":
             target = self._namespace.readlink(path.virtual) or ""
             dst = kwargs["dst"]
@@ -3926,6 +3931,8 @@ class Dispatcher:
                     await self.dispatch("unlink", dst, caller=caller)
             await self._namespace.unlink(dst.virtual)
             await self._namespace.rename(path.virtual, dst.virtual)
+            await self._touch_folder(path.virtual)
+            await self._touch_folder(dst.virtual)
         elif name == "symlink":
             target = str(kwargs["target"])
             # symlink(2) refuses an occupied name and a name its parent
@@ -3940,6 +3947,7 @@ class Dispatcher:
             if refusal is not None:
                 raise refusal
             await self._namespace.symlink(path.virtual, target, system_now())
+            await self._touch_folder(path.virtual)
         elif name == "stat":
             row = self._namespace.link_stat_at(path.virtual)
             if row is None:
@@ -3961,6 +3969,31 @@ class Dispatcher:
         )
         _memory_answered(report)
         return await boundary.complete(mark, path, write, result)
+
+    async def _touch_folder(self, link: str) -> None:
+        """Move the time of the folder a link is made in, removed from or
+        renamed through, as a directory's moves when a name in it
+        changes. A folder whose store keeps no time of its own keeps the
+        time it has.
+
+        Args:
+            link (str): the link's virtual path.
+        """
+        parent = posixpath.dirname(link.rstrip("/")) or "/"
+        mount = self._namespace.try_mount_for(parent)
+        if mount is None or not mount.answers_at("setattr", parent):
+            return
+        try:
+            await mount.call("setattr", parent, mtime=now_iso())
+        except FS_ERRORS as exc:
+            logger.debug("%s keeps its time: %s", parent, exc)
+            return
+        await self._changed(
+            mount,
+            PathSpec.from_str_path(parent),
+            FileChangeKind.UPDATE,
+            times=False,
+        )
 
     async def _readlink_miss(self, path: PathSpec, caller: Caller) -> OSError:
         """The error a readlink of something that is not a link answers.

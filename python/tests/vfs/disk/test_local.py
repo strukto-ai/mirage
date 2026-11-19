@@ -175,7 +175,7 @@ async def test_host_link_contract(host_tree):
         assert found.stdout.decode().splitlines() == [
             "/data/" + p for p in fixture["visible_files"]
         ]
-        assert (await ws.shell("du -s /data")).stdout == b"28\t/data\n"
+        assert (await ws.shell("du -sb /data")).stdout == b"13\t/data\n"
     finally:
         await ws.close()
     for path in fixture["hidden_paths"]:
@@ -278,7 +278,7 @@ async def test_root_alias_keeps_the_same_visible_tree(host_tree):
     mounted = DiskVFS(str(alias))
     ws = Workspace({"/data/": mounted})
     try:
-        assert (await ws.shell("du -s /data")).stdout == b"28\t/data\n"
+        assert (await ws.shell("du -sb /data")).stdout == b"13\t/data\n"
     finally:
         await ws.close()
     assert sorted(mounted.get_state()["files"]) == fixture["visible_files"]

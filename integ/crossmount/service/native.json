@@ -606,7 +606,7 @@
       "command": "printf \"hit root\\n\" > /meta/top; printf \"hit child\\n\" > /meta/child/leaf; find /meta -type f; du -s /meta",
       "expect": {
         "exit": 0,
-        "stdout": "/meta/child/leaf\n/meta/top\n19\t/meta\n",
+        "stdout": "/meta/child/leaf\n/meta/top\n16\t/meta\n",
         "stderr": ""
       }
     },
