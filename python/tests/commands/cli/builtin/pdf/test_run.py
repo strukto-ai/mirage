@@ -247,14 +247,25 @@ FILTERED = {
 
 def one_page(content: bytes, resources: bytes, *more: bytes) -> bytes:
     """A one-page PDF: catalog 1, pages 2, page 3, content 4, then `more`."""
+    return pages([(content, resources)], *more)
+
+
+def pages(each: list[tuple[bytes, bytes]], *more: bytes) -> bytes:
+    """A PDF of pages, each a (content, resources) pair: catalog 1, pages
+    2, then each page and its content, then `more`."""
+    kids = [3 + 2 * at for at in range(len(each))]
     bodies = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Contents 4 0 R /Resources " + resources + b" >>",
-        content,
-        *more,
+        b"<< /Type /Pages /Kids [%s] /Count %d >>"
+        % (b" ".join(b"%d 0 R" % kid for kid in kids), len(kids)),
     ]
+    for kid, (content, resources) in zip(kids, each):
+        bodies.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents %d 0 R /Resources %s >>" % (kid + 1, resources)
+        )
+        bodies.append(content)
+    bodies.extend(more)
     out = b"%PDF-1.4\n"
     offsets = []
     for number, body in enumerate(bodies, 1):
@@ -412,6 +423,52 @@ async def test_forms_that_fit_one_at_a_time_are_refused_together():
         "",
         "pdftotext: memory exhausted\n",
     )
+
+
+@pytest.mark.asyncio
+async def test_forms_held_on_earlier_pages_are_checked_again_together():
+    form = flate(
+        HELLO + b" " * (9 << 20),
+        b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << >> ",
+    )
+    shared = (
+        b"<< /Font << /F1 9 0 R >> /XObject << /X0 10 0 R /X1 11 0 R >> >>"
+    )
+    document = pages(
+        [
+            (flate(HELLO + b"/X0 Do\n"), shared),
+            (flate(HELLO + b"/X1 Do\n"), shared),
+            (flate(HELLO + b"/X0 Do /X1 Do\n"), shared),
+        ],
+        FONT,
+        form,
+        form,
+    )
+    code, _, err = await capped(document, "pdftotext /w/d.pdf -")
+    assert (code, err) == (1, "pdftotext: memory exhausted\n")
+
+
+@pytest.mark.asyncio
+async def test_a_form_without_resources_reads_each_pages_own():
+    page = flate(HELLO + b"/X0 Do\n")
+    document = pages(
+        [
+            (page, b"<< /Font << /F1 7 0 R >> /XObject << /X0 8 0 R >> >>"),
+            (
+                page,
+                b"<< /Font << /F1 7 0 R >> "
+                b"/XObject << /X0 8 0 R /Nested 9 0 R >> >>",
+            ),
+        ],
+        FONT,
+        flate(
+            b"/Nested Do\n",
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] ",
+        ),
+        flate(BIG, b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "),
+    )
+    code, _, err = await capped(document, "pdftotext /w/d.pdf -")
+    assert (code, err) == (1, "pdftotext: memory exhausted\n")
 
 
 @pytest.mark.asyncio

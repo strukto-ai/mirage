@@ -194,6 +194,10 @@ pub(crate) async fn measure(
         }
         current = decoded;
     }
+    host.ask(Request::Memory {
+        size: held + current.len() as u64,
+    })
+    .await;
     current.len() as u64
 }
 

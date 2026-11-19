@@ -8,6 +8,7 @@ use pdf_oxide::object::{Object, ObjectRef};
 
 use super::inflate::{Inflated, flate_only, inflate, measure, scan};
 use super::text::Glyph;
+use crate::request::Request;
 use crate::task::Host;
 
 /// How deep forms and Type 3 glyphs nest their own resources before the
@@ -300,23 +301,27 @@ impl Doc {
                 if dict.get("Subtype").and_then(Object::as_name) != Some("Form") {
                     continue;
                 }
+                let inherits = !dict.contains_key("Resources");
                 let own = dict
                     .get("Resources")
                     .and_then(|r| self.resolved(r))
                     .unwrap_or_else(|| resources.clone());
-                let size = match measured.sizes.get(&at) {
-                    Some(size) => *size,
-                    None => {
+                let (size, nested) = match (measured.sizes.get(&at), measured.draws.get(&at)) {
+                    (Some(size), Some(nested)) if !inherits => {
+                        let size = *size;
+                        host.ask(Request::Memory { size: *held + size }).await;
+                        (size, nested.clone())
+                    }
+                    _ => {
                         let (size, nested) = self.form(host, dict, data, &own, *held).await;
                         measured.sizes.insert(at, size);
-                        measured.draws.insert(at, nested);
-                        size
+                        measured.draws.insert(at, nested.clone());
+                        (size, nested)
                     }
                 };
                 *held += size;
                 self.measure_fonts(host, &own, held, measured, seen).await;
                 if depth < NESTING {
-                    let nested = measured.draws.get(&at).cloned().unwrap_or_default();
                     pending.push_back((own, nested, depth + 1));
                 }
             }
@@ -372,6 +377,7 @@ impl Doc {
         }
         if let Some(size) = measured.sizes.get(&at) {
             *held += size;
+            host.ask(Request::Memory { size: *held }).await;
             return;
         }
         let size = match self.inner.load_object(at) {

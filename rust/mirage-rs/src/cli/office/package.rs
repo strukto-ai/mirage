@@ -155,13 +155,23 @@ impl<'h> Pkg<'h> {
         Ok(pkg)
     }
 
-    /// The content types part and every XML part a relationship reaches
-    /// from the package root, each kept as it inflates; a part nothing
-    /// links to stays in the spool and is copied as it stands on save.
+    /// The content types part, every relationships part, and every XML part
+    /// a relationship reaches from the package root, each kept as it
+    /// inflates: a part nothing links to stays in the spool and is copied
+    /// as it stands on save, while its relationships still keep what it
+    /// links to when another part is removed.
     async fn load_reachable(&mut self) {
         let stored: HashMap<String, String> =
             self.names.iter().map(|n| (key(n), n.clone())).collect();
         self.load(&stored, CONTENT_TYPES).await;
+        for rels in stored
+            .keys()
+            .filter(|k| k.ends_with(".rels"))
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.load(&stored, &rels).await;
+        }
         let mut seen: HashSet<String> = HashSet::new();
         let mut owners = vec!["/".to_string()];
         while let Some(owner) = owners.pop() {

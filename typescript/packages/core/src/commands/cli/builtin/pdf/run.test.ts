@@ -240,13 +240,26 @@ function onePage(
   resources: string,
   ...more: (string | Uint8Array)[]
 ): Uint8Array {
-  const bodies = [
+  return pages([[content, resources]], ...more)
+}
+
+/**
+ * A PDF of pages, each a [content, resources] pair: catalog 1, pages 2, then
+ * each page and its content, then `more`.
+ */
+function pages(each: [Uint8Array, string][], ...more: (string | Uint8Array)[]): Uint8Array {
+  const kids = each.map((_, at) => 3 + 2 * at)
+  const bodies: (string | Uint8Array)[] = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources ${resources} >>`,
-    content,
-    ...more,
+    `<< /Type /Pages /Kids [${kids.map((k) => `${String(k)} 0 R`).join(' ')}] /Count ${String(kids.length)} >>`,
   ]
+  each.forEach(([content, resources], at) => {
+    bodies.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${String(4 + 2 * at)} 0 R /Resources ${resources} >>`,
+      content,
+    )
+  })
+  bodies.push(...more)
   const out: Uint8Array[] = [ENC.encode('%PDF-1.4\n')]
   let length = out[0].length
   const offsets: number[] = []
@@ -384,6 +397,41 @@ describe('under max_memory', () => {
       '',
       'pdftotext: memory exhausted\n',
     ])
+  })
+
+  it('checks forms held on earlier pages again when a page draws them together', async () => {
+    const form = flate(
+      joined(HELLO, ' '.repeat(9 << 20)),
+      '/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << >> ',
+    )
+    const shared = '<< /Font << /F1 9 0 R >> /XObject << /X0 10 0 R /X1 11 0 R >> >>'
+    const document = pages(
+      [
+        [flate(ENC.encode(HELLO + '/X0 Do\n')), shared],
+        [flate(ENC.encode(HELLO + '/X1 Do\n')), shared],
+        [flate(ENC.encode(HELLO + '/X0 Do /X1 Do\n')), shared],
+      ],
+      FONT,
+      form,
+      form,
+    )
+    const [code, , err] = await capped(document, 'pdftotext /w/d.pdf -')
+    expect([code, err]).toEqual([1, 'pdftotext: memory exhausted\n'])
+  })
+
+  it("reads each page's resources for a form without its own", async () => {
+    const page = flate(ENC.encode(HELLO + '/X0 Do\n'))
+    const document = pages(
+      [
+        [page, '<< /Font << /F1 7 0 R >> /XObject << /X0 8 0 R >> >>'],
+        [page, '<< /Font << /F1 7 0 R >> /XObject << /X0 8 0 R /Nested 9 0 R >> >>'],
+      ],
+      FONT,
+      flate(ENC.encode('/Nested Do\n'), '/Type /XObject /Subtype /Form /BBox [0 0 612 792] '),
+      flate(BIG, '/Type /XObject /Subtype /Form /BBox [0 0 612 792] '),
+    )
+    const [code, , err] = await capped(document, 'pdftotext /w/d.pdf -')
+    expect([code, err]).toEqual([1, 'pdftotext: memory exhausted\n'])
   })
 
   it('holds no form the page never draws', async () => {
