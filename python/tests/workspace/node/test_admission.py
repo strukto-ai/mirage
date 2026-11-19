@@ -1174,6 +1174,40 @@ async def test_a_redirect_no_command_owns_meets_no_leaf_about_commands():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "stats"),
+    [
+        ("{ cat; } < /data/a/f", []),
+        ("if true; then cat; fi < /data/a/f", []),
+        ("cat < /data/a/f", ["/data/a/f"]),
+    ],
+)
+async def test_only_a_command_redirect_stats_its_input(line, stats):
+    vfs = RAMVFS()
+    seen = []
+    stat = vfs.stat
+
+    async def counted(path, *args, **kwargs):
+        seen.append(path.virtual)
+        return await stat(path, *args, **kwargs)
+
+    ws = Workspace(
+        {"/data/": (vfs, MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"sealed": SEALED},
+    )
+    try:
+        await ws.shell("mkdir /data/a; echo top > /data/a/f")
+        ws.create_session("s", profile="sealed")
+        vfs.stat = counted
+        io = await ws.shell(line, session_id="s")
+        assert (io.exit_code, await io.materialize_stdout()) == (0, b"top\n")
+        assert seen == stats
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_admit_line_judges_a_redirect_no_command_owns():
     ws = Workspace(
         {"/data/": (RAMVFS(), MountMode.WRITE)},

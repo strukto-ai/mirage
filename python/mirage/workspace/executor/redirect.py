@@ -712,6 +712,7 @@ async def handle_redirect(
     args: tuple[str, ...] = (),
     forked: bool = False,
     follow: Callable[[str], str] | None = None,
+    gate: RedirectGuard | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
@@ -749,6 +750,10 @@ async def handle_redirect(
             closed pipe ends it alone.
         follow (Callable[[str], str] | None): resolves a path's links,
             to tell whether two targets are one file.
+        gate (RedirectGuard | None): admit each resolved target of a
+            statement no command owns, by the target alone. It does not
+            judge the statement's input, so the input is not classified
+            for it as it is for ``guard``.
     """
     owned: list[SharedInput] = []
     try:
@@ -769,6 +774,7 @@ async def handle_redirect(
             args,
             forked,
             follow,
+            gate,
         )
     finally:
         await context.session.release_inputs(owned)
@@ -1496,6 +1502,7 @@ async def _handle_redirect(
     args: tuple[str, ...] = (),
     forked: bool = False,
     follow: Callable[[str], str] | None = None,
+    gate: RedirectGuard | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -1540,8 +1547,10 @@ async def _handle_redirect(
             continue
         scope = _ensure_scope(r.target)
         opened.targets = (*opened.targets, scope)
-        if guard is not None:
-            denied = await guard(opened.targets, admission_stdin, raw)
+        for admits in (guard, gate):
+            if admits is None:
+                continue
+            denied = await admits(opened.targets, admission_stdin, raw)
             if denied is not None:
                 return denied
         refusal = await _open_refusal(dispatch, context, [r])
@@ -1552,7 +1561,7 @@ async def _handle_redirect(
         else:
             last = len(expanded) == len(redirects) and _output_only(name, args)
             failure = await _open_output(
-                opened, r, scope, last, command, guard
+                opened, r, scope, last, command, guard or gate
             )
         if failure is not None:
             return failure

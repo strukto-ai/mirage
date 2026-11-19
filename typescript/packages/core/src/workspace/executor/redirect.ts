@@ -573,6 +573,10 @@ export async function handleRedirect(
   forked = false,
   // Resolves a path's links, to tell whether two targets are one file.
   follow: ((path: string) => string) | null = null,
+  // Admits each resolved target of a statement no command owns, by the
+  // target alone. It does not judge the statement's input, so the input
+  // is not classified for it as it is for `guard`.
+  gate?: RedirectGuard,
 ): Promise<RedirectResult> {
   const owned: SharedInput[] = []
   try {
@@ -593,6 +597,7 @@ export async function handleRedirect(
       args,
       forked,
       follow,
+      gate,
     )
   } finally {
     await context.session.releaseInputs(owned)
@@ -1167,6 +1172,7 @@ async function runRedirects(
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
   follow: ((path: string) => string) | null = null,
+  gate?: RedirectGuard,
 ): Promise<RedirectResult> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
@@ -1207,8 +1213,9 @@ async function runRedirects(
     }
     const scope = ensureScope(r.target)
     targets.push(scope)
-    if (guard !== undefined) {
-      const denied = await guard(targets, admissionStdin, raw)
+    for (const admits of [guard, gate]) {
+      if (admits === undefined) continue
+      const denied = await admits(targets, admissionStdin, raw)
       if (denied !== null) return denied
     }
     const refusal = await openRefusal(dispatch, context, [r])
@@ -1222,7 +1229,7 @@ async function runRedirects(
             scope,
             expanded.length === redirects.length && outputOnly(name, args),
             command,
-            guard,
+            guard ?? gate,
           )
     if (failure !== null) return failure
   }
