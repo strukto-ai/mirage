@@ -329,12 +329,14 @@ describe('explain', () => {
 
   it('refuses the whole line only for a verdict', async () => {
     // A word the closed root refuses fails where it stands and the rest
-    // of the line runs; a rule's refusal holds the whole line, whatever
-    // failed before it.
+    // of the line runs, so the line exits as its last command does while
+    // its outcome is the refusal; a rule's refusal holds the whole line,
+    // whatever failed before it.
     const w = await ws()
     let said = await w.explain('gerp x; echo ok', 's')
     let ran = await w.shell('gerp x; echo ok', { sessionId: 's' })
-    expect([ran.exitCode, said.outcome, said.exitCode]).toEqual([0, Outcome.ALLOW, 0])
+    expect([ran.exitCode, said.outcome, said.exitCode]).toEqual([0, Outcome.DENY, 0])
+    expect(said.stderr).toBe(DEC.decode(ran.stderr))
     const [gerp] = said.node.children
     expect(
       gerp !== undefined && 'command' in gerp
@@ -456,7 +458,7 @@ describe('explain', () => {
     const line = 'find /data -name a.txt -exec cat /data/secret.txt \\;'
     const said = await w.explain(line, 's')
     const ran = await w.shell(line, { sessionId: 's' })
-    expect([said.exitCode, said.outcome]).toEqual([0, Outcome.ALLOW])
+    expect([said.exitCode, said.outcome]).toEqual([0, Outcome.ASK])
     expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([0, 'cat: Permission denied\n'])
     expect(w.decisions.pending()).toHaveLength(1)
   })
@@ -1826,11 +1828,12 @@ describe('explain answers and the op form', () => {
         { kind: 'ask', reason: 'sign-off', policy: 'AskRm' },
         { kind: 'deny', reason: 'no', policy: 'DenyRm' },
       ])
-      // A policy's refusal is the command's: the line itself runs.
+      // A policy's refusal is the command's: the line itself runs, and
+      // exits as the refused command does.
       expect(
         rm !== undefined && 'command' in rm ? [rm.exitCode, rm.decision?.reason] : null,
       ).toEqual([126, 'no'])
-      expect([said.outcome, said.exitCode]).toEqual([Outcome.ALLOW, 0])
+      expect([said.outcome, said.reason, said.exitCode]).toEqual([Outcome.DENY, 'no', 126])
       expect(await new Session(ws, null).explain.shell('rm /data/x')).toEqual(said)
     } finally {
       await ws.close()
@@ -2000,5 +2003,59 @@ it.each(['~/secret', '~agent/secret'])(
     const ran = await w.shell(`echo changed > /data/marker; cat ${operand}`, { sessionId: 'a' })
     expect(ran.exitCode).toBe(1)
     expect(await w.vfs.readdir('/data')).not.toContain('/data/marker')
+  },
+)
+
+const SUMMARY_SECRET = '/data/secret.txt'
+const SUMMARY_CLOSED = { '*': 'deny', ls: 'allow' }
+const SUMMARY_SEALED = {
+  '*': ['allow', { decision: 'deny', reason: 'sealed', paths: [SUMMARY_SECRET] }],
+}
+const SUMMARY_NOD = { '*': ['allow', { decision: 'ask', reason: 'nod', paths: [SUMMARY_SECRET] }] }
+
+// A command refused where it stands and a redirect no command owns both
+// fail while the rest of the line runs: the summary names the strictest
+// of them and exits as the run does, a `;` list with its last command's
+// status.
+it.each([
+  [SUMMARY_CLOSED, 'ls /data', Outcome.ALLOW, ''],
+  [SUMMARY_CLOSED, 'f() { ls /data; }; f', Outcome.ALLOW, ''],
+  [SUMMARY_CLOSED, 'sort /data/x', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'ls /data; sort /data/x', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'sort /data/x; ls /data', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'ls /data | sort', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'sort /data/x && ls /data', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'sort /data/x || ls /data', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'if ls /data; then sort /data/x; fi', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_SEALED, '{ cat; } < /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, '> /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, '(cat) < /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'while read l; do :; done < /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'if true; then cat; fi < /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, '> /data/secret.txt; ls /data', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'ls /data && > /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'ls /data\n> /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, '{ cat; } < /data/secret.txt; > /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_CLOSED, '! sort /data/x | ls /data', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_SEALED, 'cd /data && > secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'cd /data && { cat; } < secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'cd /data/d; (cat) < ../secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_SEALED, 'exec 3< /data/secret.txt', Outcome.DENY, 'sealed'],
+  [SUMMARY_NOD, '{ cat; } < /data/secret.txt', Outcome.ASK, 'nod'],
+  [SUMMARY_NOD, '{ cat; } < /data/secret.txt; ls /data', Outcome.ASK, 'nod'],
+])(
+  'summarises %j %j as its strictest part at the run exit',
+  async (commands, line, outcome, reason) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell(
+      "mkdir -p /data/d && printf 'b\\na\\n' > /data/x && printf 's\\n' > /data/secret.txt",
+    )
+    w.createSession('s', { profile: SessionProfile({ commands }) })
+    const said = await w.explain(line, 's')
+    expect(w.decisions.pending()).toEqual([])
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.outcome, said.reason]).toEqual([outcome, reason])
+    expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
   },
 )

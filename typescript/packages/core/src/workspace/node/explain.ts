@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { voiceName } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
@@ -60,7 +61,10 @@ import {
   admitRedirect,
   classifiedWords,
   gate,
+  openedBy,
+  redirectAsked,
   redirectPaths,
+  redirectRefused,
   resolved,
   statementRedirects,
   statementStdin,
@@ -151,6 +155,43 @@ const SHAPES: ReadonlyMap<string, string> = new Map([
 const SUBSTITUTIONS: ReadonlySet<string> = new Set([
   NodeType.COMMAND_SUBSTITUTION,
   NodeType.PROCESS_SUBSTITUTION,
+])
+
+/** How strict an outcome is, for a line's summary: the strictest part of the line speaks for it. Mirrors the Python STRICTNESS. */
+const STRICTNESS: ReadonlyMap<Outcome, number> = new Map([
+  [Outcome.ALLOW, 0],
+  [Outcome.ASK, 1],
+  [Outcome.DENY, 2],
+])
+
+/** Nodes a list of statements holds that run nothing. Mirrors the Python INERT. */
+const INERT: ReadonlySet<string> = new Set(['comment', 'heredoc_body'])
+
+/**
+ * The nodes the shell may open a redirect for that no command owns
+ * (`openedBy`): a bare redirect, the statements a redirect binds to whole,
+ * and an assignment. Mirrors the Python OPENERS.
+ */
+const OPENERS: ReadonlySet<string> = new Set([
+  NodeType.REDIRECTED_STATEMENT,
+  NodeType.COMPOUND_STATEMENT,
+  NodeType.SUBSHELL,
+  NodeType.IF_STATEMENT,
+  NodeType.WHILE_STATEMENT,
+  NodeType.FOR_STATEMENT,
+  NodeType.C_STYLE_FOR_STATEMENT,
+  NodeType.CASE_STATEMENT,
+  NodeType.VARIABLE_ASSIGNMENT,
+  NodeType.VARIABLE_ASSIGNMENTS,
+  NodeType.DECLARATION_COMMAND,
+  NodeType.UNSET_COMMAND,
+])
+
+/** The redirects a redirected statement carries after its body. Mirrors the Python REDIRECT_TYPES. */
+const REDIRECT_TYPES: ReadonlySet<string> = new Set([
+  NodeType.FILE_REDIRECT,
+  NodeType.HEREDOC_REDIRECT,
+  NodeType.HERESTRING_REDIRECT,
 ])
 
 /**
@@ -247,6 +288,16 @@ export interface Judged {
    * before it in that line is where it stands.
    */
   readonly session?: SessionState
+}
+
+/**
+ * A redirect no command owns (`{ cat; } < f`, `> f`), as the dry run judges
+ * it: what opening its target would do (`command` empty), and where the
+ * node it opens for stands. Mirrors the Python Opened.
+ */
+export interface Opened {
+  readonly judgment: Judgment
+  readonly occurrence: Occurrence
 }
 
 /**
@@ -714,6 +765,23 @@ function* walkNode(
   elsewhere: readonly SessionState[] = [],
 ): Walk {
   if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
+  const opened =
+    OPENERS.has(node.type) || (node.type === NodeType.COMMAND && getText(node).startsWith('exec'))
+      ? openedBy(node, homes)
+      : []
+  if (opened.length > 0) {
+    // The files the shell opens for no command as it reaches the node,
+    // where it stands: no command's words, so only a walk that asks for
+    // them sees them (`walkedLine`).
+    yield {
+      words: [],
+      redirects: opened,
+      session,
+      occurrence: occurrenceIn(node, frame),
+      lost,
+      elsewhere,
+    }
+  }
   if (node.type === NodeType.TEST_COMMAND) {
     // The shell's own test, judged as a command of its own name, a test at
     // a time as the gate admits it.
@@ -906,7 +974,9 @@ function afterCd(
  * would do and the pass deciding whether to let it run cannot differ,
  * or `explain` would report an allow the run then refuses. The redirects
  * ride along for the same reason: they are read here so both readers
- * judge the file the shell opens, not just the operands.
+ * judge the file the shell opens, not just the operands. With `opens`, each
+ * statement's redirects no command owns come too, as an item with no
+ * words, where the statement stands (`explainRedirects`).
  */
 function* walkedLine(
   root: TSNodeLike,
@@ -914,8 +984,19 @@ function* walkedLine(
   reparse: (line: string) => TSNodeLike,
   frame: Frame | null = null,
   lost = false,
+  opens = false,
 ): Generator<Walked> {
-  yield* walkNode(root, session, tildeHomes(session), frame ?? rootFrame(root, null), reparse, lost)
+  const homes = tildeHomes(session)
+  for (const item of walkNode(
+    root,
+    session,
+    homes,
+    frame ?? rootFrame(root, null),
+    reparse,
+    lost,
+  )) {
+    if (item.words.length > 0 || opens) yield item
+  }
 }
 
 /**
@@ -1587,21 +1668,30 @@ export async function explainLine(
 
 /**
  * A line's public explanation: its verdict and its parse tree, with every
- * command's explanation where the command stands. The verdict is the
- * first command, in the order the gate reads them, whose refusal by the
- * profile's rules (`verdicts`, the line judged with `every` false) holds
- * the whole line (`holds`), as the run reports it; a line nothing holds
- * runs, carrying the first ask an approval lets through. A command
- * refused only where it stands, a policy's own `preCommand` refusal
- * included, keeps its refusal to its own node, since the rest of the
- * line still runs. A runtime that takes the line whole (`wholeLine`) runs
- * none of it once any command is refused (`admitLine`), so there every
- * refusal is the line's, and `verdicts` is `judged` itself, whose gate asks
- * every policy. Every scope a command reads its words in (the typed line, a
- * `$( )` body, a `bash -c` string) is parsed on its own with `reparse`, as the nested
- * line will be; a judgment is placed on the command at its span in that
- * scope, and a nested scope under the command holding it. Mirrors the
- * Python `explained_line`.
+ * command's explanation where the command stands. A line the profile's
+ * rules hold (`holds`, read off `verdicts`, the line judged with `every`
+ * false) runs none of it, so its verdict is the first command, in the
+ * order the gate reads them, whose refusal holds it, as the run reports
+ * it. A runtime that takes the line whole (`wholeLine`) runs none of it
+ * once any command is refused (`admitLine`), so there every refusal is
+ * the line's, `verdicts` is `judged` itself, whose gate asks every policy,
+ * and a line it runs carries the first ask an approval lets through.
+ * Otherwise the line runs, and a command refused where it stands (a word a
+ * closed tree names nothing for, a policy's own `preCommand` refusal) or a
+ * redirect no command owns that its tree refuses (`opened`) fails while
+ * the rest goes on. The outcome is then the strictest of every command and
+ * every such redirect, deny over ask over allow; the reason, source and
+ * decision are the first part's that gives it, in line order; the exit
+ * code and stderr are the run's, read off the line's own control flow
+ * (`lineStatus`, with `pipefail` the session's option), on the assumption
+ * that every command let through succeeds. A line nothing refuses or asks
+ * about exits 0 here, since what it returns then is its commands' own
+ * business. Every scope a command reads
+ * its words in (the typed line, a `$( )` body, a `bash -c` string) is
+ * parsed on its own with `reparse`, as the nested line will be; a
+ * judgment is placed on the command at its span in that scope, and a
+ * nested scope under the command holding it. Mirrors the Python
+ * `explained_line`.
  */
 export function explainedLine(
   line: string,
@@ -1610,6 +1700,8 @@ export function explainedLine(
   placedOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
+  opened: readonly Opened[] = [],
+  pipefail = false,
 ): ShellExplanation {
   const scopes: Scope[] = []
   for (const one of judged) {
@@ -1646,11 +1738,67 @@ export function explainedLine(
       stderr: judgment.stderr,
     }
   }
-  const asked = verdicts.find(
-    (one) => one.judgment.exitCode === 0 && verdictOf(one.judgment)[0] === Outcome.ASK,
-  )
-  const [outcome, reason, source] =
-    asked === undefined ? [Outcome.ALLOW, '', ''] : verdictOf(asked.judgment)
+  if (wholeLine) {
+    const asked = verdicts.find(
+      (one) => one.judgment.exitCode === 0 && verdictOf(one.judgment)[0] === Outcome.ASK,
+    )
+    const [outcome, reason, source] =
+      asked === undefined ? [Outcome.ALLOW, '', ''] : verdictOf(asked.judgment)
+    return {
+      line,
+      node,
+      outcome,
+      reason,
+      source,
+      answers: [],
+      decision: null,
+      exitCode: 0,
+      stderr: '',
+    }
+  }
+  const tree = reparse(line)
+  const functions = definedFunctions(tree)
+  const parts = inLineOrder(judged, opened).filter((part) => !callsFunction(part, functions))
+  let strictest = Outcome.ALLOW
+  for (const part of parts) {
+    const [said] = verdictOf(part)
+    if ((STRICTNESS.get(said) ?? 0) > (STRICTNESS.get(strictest) ?? 0)) strictest = said
+  }
+  const commands = new Map<string, Judgment[]>()
+  for (const one of judged) {
+    const at = one.occurrence
+    if (at.parent !== null || callsFunction(one.judgment, functions)) continue
+    const span = `${String(at.start)}:${String(at.end)}`
+    const list = commands.get(span) ?? []
+    list.push(one.judgment)
+    commands.set(span, list)
+  }
+  const redirects = new Map<string, Judgment[]>()
+  for (const open of opened) {
+    const at = open.occurrence
+    if (at.parent !== null) continue
+    const span = `${String(at.start)}:${String(at.end)}`
+    const list = redirects.get(span) ?? []
+    list.push(open.judgment)
+    redirects.set(span, list)
+  }
+  const first =
+    strictest === Outcome.ALLOW ? undefined : parts.find((part) => verdictOf(part)[0] === strictest)
+  if (first === undefined) {
+    return {
+      line,
+      node,
+      outcome: Outcome.ALLOW,
+      reason: '',
+      source: '',
+      answers: [],
+      decision: null,
+      exitCode: 0,
+      stderr: '',
+    }
+  }
+  const [exitCode, ran] = lineStatus(tree, commands, redirects, pipefail)
+  const [outcome, reason, source] = verdictOf(first)
   return {
     line,
     node,
@@ -1658,10 +1806,257 @@ export function explainedLine(
     reason,
     source,
     answers: [],
-    decision: null,
-    exitCode: 0,
-    stderr: '',
+    decision: first.decision,
+    exitCode,
+    stderr: ran.map((part) => part.stderr).join(''),
   }
+}
+
+/**
+ * The names of the functions a line defines, anywhere in it. Mirrors the
+ * Python `_defined_functions`.
+ */
+function definedFunctions(tree: TSNodeLike): ReadonlySet<string> {
+  const names = new Set<string>()
+  const stack = [tree]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    stack.push(...current.namedChildren)
+    if (current.type !== NodeType.FUNCTION_DEFINITION) continue
+    const name = current.namedChildren.find((c) => c.type === NodeType.WORD)
+    if (name !== undefined) names.add(getText(name))
+  }
+  return names
+}
+
+/**
+ * Whether a judgment is a tree root's own decision about a call to a
+ * function the line defines. The walk reads the line before the
+ * definition runs, so it judges the call as a tool, but the run calls the
+ * function, which no root's own decision speaks for (`isTool`); a rule
+ * that names the function still does. Mirrors the Python
+ * `_calls_function`.
+ */
+function callsFunction(judgment: Judgment, functions: ReadonlySet<string>): boolean {
+  return functions.has(judgment.command) && byDefault(judgment)
+}
+
+/**
+ * Every command's judgment and every unowned redirect's, in the order the
+ * line reaches them: a command where its statement starts on the typed
+ * line (one a nested line runs, where the command that runs it does), a
+ * redirect where the statement it opens for starts, since the shell opens
+ * it before the statement runs. Mirrors the Python `_in_line_order`.
+ */
+function inLineOrder(judged: readonly Judged[], opened: readonly Opened[]): Judgment[] {
+  const placed: [number, Judgment][] = [
+    ...judged.map((one): [number, Judgment] => [lineStart(one.occurrence), one.judgment]),
+    ...opened.map((open): [number, Judgment] => [lineStart(open.occurrence), open.judgment]),
+  ]
+  placed.sort((a, b) => a[0] - b[0])
+  return placed.map(([, judgment]) => judgment)
+}
+
+/**
+ * Where on the typed line a part stands: its own start, or for a part a
+ * nested line runs, the start of what runs that line. Mirrors the Python
+ * `_line_start`.
+ */
+function lineStart(at: Occurrence): number {
+  let top = at
+  while (top.parent !== null) top = top.parent
+  return top.start
+}
+
+/**
+ * The exit code a line would return and the refusals it would print on
+ * the way, read off the line's control flow with every command let
+ * through taken to succeed: a list returns its last statement's status,
+ * `&&` and `||` skip what bash skips, a pipeline returns its last stage's
+ * (its last failing one under `pipefail`), `!` inverts a command or a whole
+ * pipeline, an `if` runs the
+ * branch its condition picks, a loop its body once when its condition
+ * lets it in, and a node whose redirect no command owns is refused fails
+ * with 1 without running. A case statement, a function definition, a call to a
+ * function the line defines and the lines a command runs in turn (`$( )`,
+ * `bash -c`, `eval`) answer 0. `commands` holds each command's judgments
+ * on the typed line, and `redirects` those of the redirects no command
+ * owns, by the span of the node they open for. Mirrors the Python `_line_status`.
+ */
+function lineStatus(
+  tree: TSNodeLike,
+  commands: ReadonlyMap<string, readonly Judgment[]>,
+  redirects: ReadonlyMap<string, readonly Judgment[]>,
+  pipefail: boolean,
+): [number, Judgment[]] {
+  const ran: Judgment[] = []
+  const spanOf = (node: TSNodeLike): string =>
+    `${String(node.startIndex ?? 0)}:${String(node.endIndex ?? 0)}`
+  const refused = (judgments: readonly Judgment[]): number => {
+    const first = judgments.find((j) => j.exitCode !== 0)
+    if (first === undefined) return 0
+    ran.push(first)
+    return first.exitCode
+  }
+  const statements = (nodes: readonly TSNodeLike[]): number => {
+    let code = 0
+    for (const node of nodes) {
+      if (node.isNamed === true && !INERT.has(node.type)) code = status(node)
+    }
+    return code
+  }
+  const status = (node: TSNodeLike): number => {
+    const kind = node.type
+    const span = spanOf(node)
+    const code = refused(redirects.get(span) ?? [])
+    if (code !== 0) return code
+    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) {
+      return refused(commands.get(span) ?? [])
+    }
+    if (kind === NodeType.REDIRECTED_STATEMENT) {
+      const body = node.namedChildren[0]
+      if (body === undefined || REDIRECT_TYPES.has(body.type)) return 0
+      return status(body)
+    }
+    if (kind === NodeType.LIST) {
+      const left = node.children[0]
+      const op = node.children[1]
+      const right = node.children[node.children.length - 1]
+      if (left === undefined || op === undefined || right === undefined) return 0
+      const code = status(left)
+      if ((op.type === NodeType.AND) === (code === 0)) return status(right)
+      return code
+    }
+    if (kind === NodeType.PIPELINE) {
+      const stages = [...node.namedChildren]
+      const first = stages[0]
+      const negated = first?.type === NodeType.NEGATED_COMMAND
+      if (negated) {
+        const inner = first.namedChildren[first.namedChildren.length - 1]
+        if (inner !== undefined) stages[0] = inner
+      }
+      const codes = stages.map((stage) => status(stage))
+      const last = pipefail
+        ? ([...codes].reverse().find((c) => c !== 0) ?? 0)
+        : (codes[codes.length - 1] ?? 0)
+      return negated ? (last !== 0 ? 0 : 1) : last
+    }
+    if (kind === NodeType.NEGATED_COMMAND) return statements(node.children) !== 0 ? 0 : 1
+    if (kind === NodeType.IF_STATEMENT) {
+      const [head, body] = clause(node)
+      if (statements(head) === 0) return statements(body)
+      for (const child of node.namedChildren) {
+        if (child.type === NodeType.ELIF_CLAUSE) {
+          const [elifHead, elifBody] = clause(child)
+          if (statements(elifHead) === 0) return statements(elifBody)
+        } else if (child.type === NodeType.ELSE_CLAUSE) {
+          return statements(child.children)
+        }
+      }
+      return 0
+    }
+    if (kind === NodeType.WHILE_STATEMENT) {
+      const loop = node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP)
+      const head = node.children.filter((c) => c.type !== NodeType.DO_GROUP)
+      const entered = statements(head) === 0
+      if (entered === (node.children[0]?.type === NodeType.UNTIL)) return 0
+      return statements(loop)
+    }
+    if (kind === NodeType.FUNCTION_DEFINITION || kind === NodeType.CASE_STATEMENT) return 0
+    if (kind === NodeType.FOR_STATEMENT || kind === NodeType.C_STYLE_FOR_STATEMENT) {
+      return statements(node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP))
+    }
+    return statements(backgrounded(node.children))
+  }
+  return [status(tree), ran]
+}
+
+/**
+ * An `if` or `elif`'s condition and the body it guards, as two lists of
+ * parsed children; the branches after it are left out. Mirrors the Python
+ * `_clause`.
+ */
+function clause(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
+  const head: TSNodeLike[] = []
+  const body: TSNodeLike[] = []
+  let into = head
+  for (const child of node.children) {
+    if (child.type === 'then') into = body
+    else if (child.type !== NodeType.ELIF_CLAUSE && child.type !== NodeType.ELSE_CLAUSE) {
+      into.push(child)
+    }
+  }
+  return [head, body]
+}
+
+/**
+ * A scope's statements with each one sent to the background (`&`) dropped,
+ * since the scope does not wait on its status. Mirrors the Python
+ * `_backgrounded`.
+ */
+function backgrounded(children: readonly TSNodeLike[]): TSNodeLike[] {
+  return children.filter((_, i) => children[i + 1]?.type !== NodeType.BACKGROUND)
+}
+
+/**
+ * Every redirect of a line no command owns that the session's trees refuse
+ * or ask about, judged where its statement stands, a `cd` before it on the
+ * line included, as `admitRedirect` judges it when the shell opens it,
+ * without asking anyone: an ask reads the session's standing grants and
+ * stops there (`Decisions.held`), as a command's does. A target only the
+ * runtime can expand (`> $f`), or a relative one after a `cd` the walk
+ * could not follow, is left to the run. Mirrors the Python
+ * `explain_redirects`.
+ */
+export async function explainRedirects(
+  root: TSNodeLike,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  reparse: (line: string) => TSNodeLike,
+): Promise<Opened[]> {
+  const out: Opened[] = []
+  for (const item of walkedLine(root, session, reparse, null, false, true)) {
+    if (item.words.length > 0) continue
+    const at = item.occurrence
+    const row = at.source.slice(0, at.start).split('\n').length
+    const voice = `${voiceName(item.session)}: line ${String(row)}: `
+    for (const word of item.redirects) {
+      if (item.lost === true && !wordValue(word).startsWith('/')) continue
+      const targets = redirectPaths([word], registry, item.session.cwd)
+      const asked = redirectAsked(targets, item.session, namespace)
+      if (asked === null) continue
+      const answer = asked.answer
+      const action =
+        answer.kind === 'ask' ? await registry.decisions.held(asked.question, answer) : answer
+      const rule = answer.rule ?? null
+      let judgment: Judgment = {
+        command: '',
+        argv: asked.question.argv,
+        outcome: answer.kind === 'ask' ? Outcome.ASK : Outcome.DENY,
+        rule,
+        reason: answer.reason,
+        source: rule === null ? '' : sourceOf(rule),
+        matchedPath: asked.named,
+        paths: asked.question.argv,
+        exitCode: 0,
+        stderr: '',
+        decision: null,
+        answers: [answer],
+        words: [],
+      }
+      if (action !== null) {
+        const refusal = redirectRefused(targets, asked.named, action, voice)
+        judgment = {
+          ...judgment,
+          exitCode: refusal.exitCode,
+          stderr: decodeText(refusal.stderr),
+          decision: refusal.decision,
+        }
+      }
+      out.push({ judgment, occurrence: at })
+    }
+  }
+  return out
 }
 
 /** One scope of a line: the occurrence its text was evaluated from, the text, and its judgments. */

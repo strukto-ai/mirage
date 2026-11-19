@@ -222,6 +222,7 @@ from mirage.workspace.mount.write_policy import (
 )
 from mirage.workspace.node.explain import (
     explain_line,
+    explain_redirects,
     explained_line,
     holds,
     line_judgments,
@@ -1058,6 +1059,10 @@ class Workspace:
         verdicts = await explain_line(
             ast, session, self._registry, self._namespace, every=False
         )
+        opened = explain_redirects(
+            ast, session, self._registry, self._namespace
+        )
+        pipefail = bool(session.shell_options.get("pipefail"))
         if holds([one.judgment for one in verdicts]):
             # The run leaves a held line on its static bindings for the
             # gate to answer (``Router.decide``), whole when they take it
@@ -1087,6 +1092,8 @@ class Workspace:
                 ),
                 whole_line,
                 aliases,
+                opened,
+                pipefail,
             )
         answers, placed = await self._router.placement(
             line,
@@ -1136,6 +1143,8 @@ class Workspace:
             self._router.placements(judged, placed),
             whole_line,
             aliases,
+            opened,
+            pipefail,
         )
         if whole_line and said.outcome is Outcome.ALLOW:
             # A command routed off the runtime that runs the line whole
