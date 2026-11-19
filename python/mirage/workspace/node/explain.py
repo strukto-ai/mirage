@@ -424,18 +424,19 @@ class Traced:
             function the shell has defined when they run.
         reached (frozenset[tuple[int, int, int]]): the judgments the
             fold reached, run or skipped.
-        defined (frozenset[str]): every function a definition the line
-            runs defines, wherever it stands.
+        at (Mapping[int, frozenset[str]]): for each node the fold
+            enters, by where it starts, the functions defined when it
+            runs, which is what a line it runs in turn sees.
         bodies (Mapping[int, frozenset[str]]): for each definition the
-            line runs, by where it starts, the functions defined when a
-            command calls it, which is what its body sees.
+            line runs, by where it starts, the functions defined at
+            every command that calls it, which is what its body sees.
     """
 
     exit_code: int
     ran: tuple[Judgment, ...]
     calls: frozenset[tuple[int, int, int]]
     reached: frozenset[tuple[int, int, int]]
-    defined: frozenset[str]
+    at: Mapping[int, frozenset[str]]
     bodies: Mapping[int, frozenset[str]]
 
 
@@ -2334,9 +2335,9 @@ def _calls_function(
     reads the line before any definition runs, so it judges every such
     call as a tool. A command the fold reached is a call when the
     function was defined where it stands (:class:`Traced`); one in a
-    function's body when the function was defined at a call of that
+    function's body when the function was defined at every call of that
     body; any other, in a substitution or a line a command runs, when
-    any definition the line runs names it.
+    the function was defined where that command stands.
 
     Args:
         one (Judged): one command's judgment and place.
@@ -2347,7 +2348,8 @@ def _calls_function(
     if key is not None and key in traced.reached:
         return key in traced.calls
     judgment = one.judgment
-    visible = traced.bodies.get(_line_start(one.occurrence), traced.defined)
+    start = _line_start(one.occurrence)
+    visible = traced.bodies.get(start, traced.at.get(start, frozenset()))
     return judgment.command in visible and _by_default(judgment)
 
 
@@ -2408,8 +2410,11 @@ def _line_status(
     definition counts once it runs, one in a subshell or a pipeline
     stage or a substitution is gone when that child shell ends, and one
     on a branch the line skips never counts; a function's body sees the
-    functions defined when it is called. A tree root's own decision about a command
-    that calls such a function is no refusal (``is_tool``).
+    functions defined at every call of it, and a line a command runs in
+    turn the functions defined where that command stands, its own
+    substitutions folded as child shells before it. A tree root's own
+    decision about a command that calls such a function is no refusal
+    (``is_tool``).
 
     Args:
         tree (Any): the line, parsed.
@@ -2424,7 +2429,7 @@ def _line_status(
     calls: set[tuple[int, int, int]] = set()
     reached: set[tuple[int, int, int]] = set()
     defined: set[str] = set()
-    every: set[str] = set()
+    at: dict[int, frozenset[str]] = {}
     starts: dict[str, list[int]] = {}
     seen: dict[str, set[str]] = {}
 
@@ -2462,7 +2467,10 @@ def _line_status(
             reached.add(key)
             if judgment.command in defined and _by_default(judgment):
                 calls.add(key)
-                seen.setdefault(judgment.command, set()).update(defined)
+                if judgment.command in seen:
+                    seen[judgment.command] &= defined
+                else:
+                    seen[judgment.command] = set(defined)
             else:
                 kept.append(judgment)
         return refused(kept, runs)
@@ -2470,12 +2478,17 @@ def _line_status(
     def status(node: Any, runs: bool) -> int:
         kind = node.type
         span = (node.start_byte, node.end_byte)
+        at.setdefault(node.start_byte, frozenset(defined))
         code = refused(redirects.get(span, ()), runs)
         if code:
             return code
         if kind in (NodeType.COMMAND, NodeType.TEST_COMMAND):
+            for sub in _substitutions(node.children):
+                status(sub, runs)
             return command(span, runs)
         if kind == NodeType.REDIRECTED_STATEMENT:
+            for sub in _substitutions(node.named_children[1:]):
+                status(sub, runs)
             body = node.named_children[:1]
             if not body or body[0].type in REDIRECT_TYPES:
                 return 0
@@ -2544,7 +2557,6 @@ def _line_status(
             )
             if runs and name is not None:
                 defined.add(get_text(name))
-                every.add(get_text(name))
                 starts.setdefault(get_text(name), []).append(node.start_byte)
             return 0
         if kind == NodeType.CASE_STATEMENT:
@@ -2569,13 +2581,33 @@ def _line_status(
         tuple(ran),
         frozenset(calls),
         frozenset(reached),
-        frozenset(every),
+        at,
         {
             start: frozenset(seen.get(name, ()))
             for name, places in starts.items()
             for start in places
         },
     )
+
+
+def _substitutions(nodes: Sequence[Any]) -> list[Any]:
+    """The outermost substitutions (``$( )``, ``<( )``) among a command's
+    words or a statement's redirects, which run, each in a child shell,
+    before the command does.
+
+    Args:
+        nodes (Sequence[Any]): the words or redirects, parsed.
+    """
+    found: list[Any] = []
+    for node in nodes:
+        if node.type in (
+            NodeType.COMMAND_SUBSTITUTION,
+            NodeType.PROCESS_SUBSTITUTION,
+        ):
+            found.append(node)
+        else:
+            found.extend(_substitutions(node.children))
+    return found
 
 
 def _clause(node: Any) -> tuple[list[Any], list[Any]]:

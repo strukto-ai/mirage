@@ -2425,6 +2425,12 @@ SUMMARIES = [
     ),
     (
         SUMMARY_CLOSED,
+        "sort() { ls /data; }; x=$(sort /data/x)",
+        Outcome.ALLOW,
+        "",
+    ),
+    (
+        SUMMARY_CLOSED,
         "sort /data/x; ls /data &",
         Outcome.DENY,
         "sort is not allowed",
@@ -2557,12 +2563,15 @@ async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
         "outer() { sort /data/x; }; outer; sort() { ls /data; }",
         "(sort() { ls /data; }); outer() { sort /data/x; }; outer",
         "outer() { inner /data/x; }; outer; inner() { ls /data; }",
+        "outer() { sort /data/x; }; outer; sort() { ls /data; }; outer",
+        "(sort() { ls /data; }); ls $(sort /data/x)",
     ],
 )
 async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
-    # `outer`'s body runs where the function it names is not in scope,
-    # defined later or in a subshell, so that name is the tool the closed
-    # root refuses, as the run says.
+    # The function a body or a substitution names is not in scope where
+    # it runs (defined later, in a subshell, or only after an earlier
+    # call), so that name is the tool the closed root refuses, as the run
+    # says.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("printf 'b\\na\\n' > /data/x")

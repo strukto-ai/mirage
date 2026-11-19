@@ -2030,6 +2030,7 @@ it.each([
   ],
   [SUMMARY_CLOSED, 'outer() { inner; }; inner() { ls /data; }; outer', Outcome.ALLOW, ''],
   [SUMMARY_CLOSED, 'x=$(sort() { ls /data; }); sort /data/x', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'sort() { ls /data; }; x=$(sort /data/x)', Outcome.ALLOW, ''],
   [SUMMARY_CLOSED, 'sort /data/x; ls /data &', Outcome.DENY, 'sort is not allowed'],
   [
     SUMMARY_CLOSED,
@@ -2078,13 +2079,15 @@ it.each([
   },
 )
 
-// `outer`'s body runs where the function it names is not in scope, defined
-// later or in a subshell, so that name is the tool the closed root refuses, as
-// the run says.
+// The function a body or a substitution names is not in scope where it runs
+// (defined later, in a subshell, or only after an earlier call), so that name
+// is the tool the closed root refuses, as the run says.
 it.each([
   'outer() { sort /data/x; }; outer; sort() { ls /data; }',
   '(sort() { ls /data; }); outer() { sort /data/x; }; outer',
   'outer() { inner /data/x; }; outer; inner() { ls /data; }',
+  'outer() { sort /data/x; }; outer; sort() { ls /data; }; outer',
+  '(sort() { ls /data; }); ls $(sort /data/x)',
 ])('lets a function body see the functions defined when it runs: %j', async (line) => {
   const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   open.push(w)

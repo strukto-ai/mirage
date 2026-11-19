@@ -1826,9 +1826,10 @@ export function explainedLine(
  * refusals it would print in order, the judgments (by span and place among
  * their span's) of the commands that call a function the shell has
  * defined when they run, the judgments the fold reached, run or skipped,
- * every function a definition the line runs defines, and for each
- * definition the line runs, by where it starts, the functions defined when
- * a command calls it, which is what its body sees. Mirrors the Python
+ * for each node the fold enters, by where it starts, the functions defined
+ * when it runs, and for each definition the line runs, by where it starts,
+ * the functions defined at every command that calls it, which is what its
+ * body sees. Mirrors the Python
  * Traced.
  */
 interface Traced {
@@ -1836,7 +1837,7 @@ interface Traced {
   readonly ran: readonly Judgment[]
   readonly calls: ReadonlySet<string>
   readonly reached: ReadonlySet<string>
-  readonly defined: ReadonlySet<string>
+  readonly at: ReadonlyMap<number, ReadonlySet<string>>
   readonly bodies: ReadonlyMap<number, ReadonlySet<string>>
 }
 
@@ -1847,13 +1848,14 @@ interface Traced {
  * any definition runs, so it judges every such call as a tool. A command
  * the fold reached (`key`, its span and place on the typed line) is a call
  * when the function was defined where it stands; one in a function's body
- * when the function was defined at a call of that body; any other, in a
- * substitution or a line a command runs, when any definition the line runs
- * names it. Mirrors the Python `_calls_function`.
+ * when the function was defined at every call of that body; any other, in a
+ * substitution or a line a command runs, when the function was defined
+ * where that command stands. Mirrors the Python `_calls_function`.
  */
 function callsFunction(one: Judged, key: string | null, traced: Traced): boolean {
   if (key !== null && traced.reached.has(key)) return traced.calls.has(key)
-  const visible = traced.bodies.get(lineStart(one.occurrence)) ?? traced.defined
+  const start = lineStart(one.occurrence)
+  const visible = traced.bodies.get(start) ?? traced.at.get(start) ?? new Set<string>()
   return visible.has(one.judgment.command) && byDefault(one.judgment)
 }
 
@@ -1900,7 +1902,9 @@ function lineStart(at: Occurrence): number {
  * which functions the shell has defined: a definition counts once it runs,
  * one in a subshell, a pipeline stage or a substitution is gone when that
  * child shell ends, and one on a branch the line skips never counts; a
- * function's body sees the functions defined when it is called, and a tree
+ * function's body sees the functions defined at every call of it, and a
+ * line a command runs in turn the functions defined where that command
+ * stands, its own substitutions folded as child shells before it. A tree
  * root's own decision about a command that calls such a function is no
  * refusal.
  * `commands` holds each command's judgments on the typed line, and
@@ -1917,7 +1921,7 @@ function lineStatus(
   const calls = new Set<string>()
   const reached = new Set<string>()
   const defined = new Set<string>()
-  const every = new Set<string>()
+  const at = new Map<number, ReadonlySet<string>>()
   const starts = new Map<string, number[]>()
   const seen = new Map<string, Set<string>>()
   const spanOf = (node: TSNodeLike): string =>
@@ -1956,9 +1960,13 @@ function lineStatus(
       reached.add(key)
       if (defined.has(judgment.command) && byDefault(judgment)) {
         calls.add(key)
-        const visible = seen.get(judgment.command) ?? new Set<string>()
-        for (const name of defined) visible.add(name)
-        seen.set(judgment.command, visible)
+        const visible = seen.get(judgment.command)
+        seen.set(
+          judgment.command,
+          visible === undefined
+            ? new Set(defined)
+            : new Set([...visible].filter((name) => defined.has(name))),
+        )
       } else {
         kept.push(judgment)
       }
@@ -1968,10 +1976,16 @@ function lineStatus(
   const status = (node: TSNodeLike, runs: boolean): number => {
     const kind = node.type
     const span = spanOf(node)
+    const start = node.startIndex ?? 0
+    if (!at.has(start)) at.set(start, new Set(defined))
     const code = refused(redirects.get(span) ?? [], runs)
     if (code !== 0) return code
-    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) return command(span, runs)
+    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) {
+      for (const sub of substitutions(node.children)) status(sub, runs)
+      return command(span, runs)
+    }
     if (kind === NodeType.REDIRECTED_STATEMENT) {
+      for (const sub of substitutions(node.namedChildren.slice(1))) status(sub, runs)
       const body = node.namedChildren[0]
       if (body === undefined || REDIRECT_TYPES.has(body.type)) return 0
       return status(body, runs)
@@ -2038,7 +2052,6 @@ function lineStatus(
       const name = node.namedChildren.find((c) => c.type === NodeType.WORD)
       if (runs && name !== undefined) {
         defined.add(getText(name))
-        every.add(getText(name))
         starts.set(getText(name), [...(starts.get(getText(name)) ?? []), node.startIndex ?? 0])
       }
       return 0
@@ -2066,7 +2079,27 @@ function lineStatus(
   for (const [name, places] of starts) {
     for (const start of places) bodies.set(start, seen.get(name) ?? new Set<string>())
   }
-  return { exitCode, ran, calls, reached, defined: every, bodies }
+  return { exitCode, ran, calls, reached, at, bodies }
+}
+
+/**
+ * The outermost substitutions (`$( )`, `<( )`) among a command's words or a
+ * statement's redirects, which run, each in a child shell, before the
+ * command does. Mirrors the Python `_substitutions`.
+ */
+function substitutions(nodes: readonly TSNodeLike[]): TSNodeLike[] {
+  const found: TSNodeLike[] = []
+  for (const node of nodes) {
+    if (
+      node.type === NodeType.COMMAND_SUBSTITUTION ||
+      node.type === NodeType.PROCESS_SUBSTITUTION
+    ) {
+      found.push(node)
+    } else {
+      found.push(...substitutions(node.children))
+    }
+  }
+  return found
 }
 
 /**
