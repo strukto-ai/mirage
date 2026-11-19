@@ -2564,6 +2564,7 @@ async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
         "(sort() { ls /data; }); outer() { sort /data/x; }; outer",
         "outer() { inner /data/x; }; outer; inner() { ls /data; }",
         "outer() { sort /data/x; }; outer; sort() { ls /data; }; outer",
+        "outer() { inner /data/x; }; outer; inner() { ls /data; }; outer",
         "(sort() { ls /data; }); ls $(sort /data/x)",
     ],
 )

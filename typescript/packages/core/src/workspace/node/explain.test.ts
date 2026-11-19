@@ -2087,6 +2087,7 @@ it.each([
   '(sort() { ls /data; }); outer() { sort /data/x; }; outer',
   'outer() { inner /data/x; }; outer; inner() { ls /data; }',
   'outer() { sort /data/x; }; outer; sort() { ls /data; }; outer',
+  'outer() { inner /data/x; }; outer; inner() { ls /data; }; outer',
   '(sort() { ls /data; }); ls $(sort /data/x)',
 ])('lets a function body see the functions defined when it runs: %j', async (line) => {
   const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
