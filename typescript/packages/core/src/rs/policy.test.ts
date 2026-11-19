@@ -137,6 +137,21 @@ describe('policy stream', () => {
     expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(false)
   })
 
+  it('shares a rule table nobody can change between equal rule sets', () => {
+    const built = () =>
+      new AdmissionRules([
+        { tree: tree({ rm: { decision: 'deny', paths: ['/a'] } }), mount: '', inline: false },
+      ])
+    const [first, second] = [built(), built()]
+    const row = ruleTable(first)[0]
+    if (row === undefined) throw new Error('expected one rule')
+    expect(() => {
+      row.reason = 'changed'
+    }).toThrow(TypeError)
+    expect(() => (row.paths as string[]).push('/b')).toThrow(TypeError)
+    expect(ruleTable(second)[0]).toMatchObject({ reason: '', paths: ['/a'] })
+  })
+
   it('keeps component depth and surrogate text', () => {
     const vis: Visibility = {
       paths: { paths: [], patterns: ['secret', '*.key'] },

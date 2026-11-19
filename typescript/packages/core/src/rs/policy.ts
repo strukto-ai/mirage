@@ -96,19 +96,20 @@ export class PolicyMatcher {
    * Every leaf of the compiled trees as the rule a ruling names, in the
    * order the stream numbers them, read once. An ask with no reason reads
    * as the default one; a deny's stays empty, since what its refusal names
-   * depends on the line (`reasonOf`).
+   * depends on the line (`reasonOf`). Every row is frozen, since equal
+   * rule sets share one matcher and its table.
    */
   rules(): readonly CommandRule[] {
     this.table ??= Object.freeze(
       (this.ask('rules') as readonly RuleRow[]).map((row): CommandRule => {
         const reason = fromUnits(row.reason)
-        return {
+        return Object.freeze({
           reason: reason === '' && row.decision === Outcome.ASK ? DEFAULT_ASK_REASON : reason,
           decision: row.decision,
           at: fromUnits(row.at),
-          paths: row.paths.map(fromUnits),
+          paths: Object.freeze(row.paths.map(fromUnits)),
           mount: row.mount === null ? '' : fromUnits(row.mount),
-        }
+        })
       }),
     )
     return this.table

@@ -44,12 +44,13 @@ def _sealed(held: Mapping[str, T]) -> Mapping[str, T]:
     """A tree node's mapping as one nobody can change in place, so a
     rule set reads the same for as long as it lives and the matcher
     compiled for it stays its matcher. An empty mapping is the one
-    shared empty, since most nodes hold three.
+    shared empty, since most nodes hold three. A mapping proxy is
+    copied too: it is a view, and its backing dict may still change.
 
     Args:
         held (Mapping[str, T]): the mapping as built.
     """
-    if isinstance(held, MappingProxyType):
+    if held is _EMPTY:
         return held
     return MappingProxyType(dict(held)) if held else _EMPTY
 
