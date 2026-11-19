@@ -274,11 +274,12 @@ With this example, `diff -r /notes /backup` on a folder of 150 pages prints
 
 ## `walk_limit`
 
-`walk_limit` caps how many files one `grep -r` or `rg` reads under a folder
-(TypeScript: `walkLimit`). A search counts only the files it reads, so when
-[`files_containing`](#files_containing) names the files, only those count.
-When it returns `None`, the search reads every file until it reaches the
-limit, then stops. Other commands that walk a folder, such as `find` and
+`walk_limit` caps how many files one `grep -r` or `rg` searches under a folder
+(TypeScript: `walkLimit`). A search counts each file it searches, whether it
+reads the file or [`lines_containing`](#lines_containing) answers it. A file
+[`files_containing`](#files_containing) rules out costs nothing. When
+`files_containing` returns `None`, the search goes through every file until
+it reaches the limit, then stops. Other commands that walk a folder, such as `find` and
 `cp -r`, stop at the same limit.
 
 ### Set it
@@ -338,7 +339,7 @@ Which commands the entry limits.
 </ParamField>
 
 <ParamField body="walk_limit" type="int" default="1000">
-How many files a search may read, or entries a listing may list, under a folder. A search counts only the files it reads, and a listing counts folders too. The default is 5000 on GitHub, and 10000 on disk, RAM and OPFS.
+How many files a search may search, or entries a listing may list, under a folder. A search counts each file it reads or `lines_containing` answers, and a listing counts folders too. The default is 5000 on GitHub, and 10000 on disk, RAM and OPFS.
 
 | Value | What happens |
 | --- | --- |
