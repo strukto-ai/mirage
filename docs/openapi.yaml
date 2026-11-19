@@ -8427,11 +8427,18 @@ components:
               type: string
             exit_code:
               type: integer
-              description: What the line is refused with, 0 when it runs.
+              description: What the line would exit with. A line refused whole exits with the
+                refusal's code. A line that runs exits as the run does, with every command
+                the policies let through taken to succeed, so `sort x; ls` exits `0` even
+                when `sort` is refused.
             stderr:
               type: string
+              description: The refusals the line would print, empty when nothing is refused.
             node:
               $ref: '#/components/schemas/ExplainNode'
+      description: For a line, `outcome` is the strictest of every command on it and every
+        redirect no command owns (`{ cat; } < f`, `> f`), `deny` before `ask` before
+        `allow`, and `reason`, `source` and `decision` come from the first part that gives it.
       title: Explanation (explain=true)
     MachineEntry:
       type: object

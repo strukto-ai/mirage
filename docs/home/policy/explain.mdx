@@ -60,12 +60,12 @@ a request that also sends stdin, a `cwd` or a `machine` is refused.
 
 | Field | What it is |
 | --- | --- |
-| `outcome` | `allow`, `deny` or `ask` |
+| `outcome` | `allow`, `deny` or `ask`; for a line, the strictest of its commands and of any redirect no command owns, such as `{ cat; } < f` |
 | `reason` | the deciding answer's reason, or empty |
 | `source` | where the profile writes the rule, such as `top`; empty for a coded policy |
 | `answers` | every policy that answered, in order |
 | `decision` | the record the agent would get, or `null` |
-| `exit_code`, `stderr` | a line: what the agent would read |
+| `exit_code`, `stderr` | a line: what the agent would read. A line that runs exits as bash would, so `sort x; ls` with `sort` refused is `deny` with exit 0 |
 | `node` | a line: the line as a tree, each command with its own `outcome`, `exit_code`, `stderr`, `words` and the `machine` that would run it |
 | `error` | a VFS call: the error it would raise (`EACCES`, `EROFS`), or empty |
 
@@ -77,7 +77,6 @@ row with its outcome.
 - `post_` methods, since nothing comes back to judge.
 - The file calls of a line, which happen only as it runs: explain the VFS
   call itself to see its `pre_vfs` answer.
-- A `pre_command` answer shows on its command, and the line stays `allow`.
 - A hidden path explains like any path no rule names, so explain never
   reveals it exists.
 
