@@ -901,8 +901,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * Run a lookup the agent typed (`which perl`) as the machine answers it:
    * in the environment a program run there gets (`env` over the machine's
-   * own), at `/`, connecting first. Asked anew each time, so a program
-   * installed since the last one is found.
+   * own), connecting first. It runs at `/`: the session's cwd is often a
+   * mount the machine is served only for a run. Asked anew each time, so a
+   * program installed since the last one is found.
    *
    * @param line the lookup's shell line.
    * @param env the session's exported variables.
