@@ -400,14 +400,16 @@ export function lookup(
  *
  * Empty when nothing holds it, where `lookup` says UNKNOWN. Only
  * introspection (`type -a`, `which -a`) needs this: dispatch runs the
- * winner and never asks what it shadowed.
+ * winner and never asks what it shadowed. `routing` is the line's
+ * placement; outside a line the static bindings answer.
  */
 export function lookupAll(
   name: string,
   session: SessionState,
   registry: MountRegistry,
+  routing?: RouteDecision<Runtime>,
 ): Consumer[] {
-  return [...layers(name, session, registry)]
+  return [...layers(name, session, registry, routing)]
 }
 
 /**

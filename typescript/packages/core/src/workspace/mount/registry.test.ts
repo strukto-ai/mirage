@@ -840,3 +840,14 @@ describe('MountRegistry.networkOf', () => {
     expect(watch).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('MountRegistry.mountBeneath', () => {
+  it('answers the mount a path reaches past the top mount', () => {
+    const reg = new MountRegistry({}, MountMode.READ)
+    const root = reg.mount('/', new RAMVFS(), MountMode.READ)
+    const view = reg.mount('/usr/bin/', new RAMVFS(), MountMode.READ)
+    expect(reg.tryMountFor('/usr/bin/perl')).toBe(view)
+    expect(reg.mountBeneath(view, '/usr/bin/perl')).toBe(root)
+    expect(reg.mountBeneath(root, '/x')).toBeNull()
+  })
+})

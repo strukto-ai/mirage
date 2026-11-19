@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+import logging
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from mirage.accessor.bin import BinAccessor
@@ -20,24 +21,37 @@ from mirage.core.bin.read import read as _read
 from mirage.core.bin.readdir import readdir as _readdir
 from mirage.core.bin.refuse import refuse
 from mirage.core.bin.stat import stat as _stat
+from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils.dates import now_iso
 from mirage.vfs.base import BaseVFS
+
+logger = logging.getLogger(__name__)
 
 
 class BinViewVFS(BaseVFS):
     """Read-only view VFS backing the /usr/bin mount.
 
-    Lists one executable file per program, rendered
-    from the workspace's command lookup on every call; holds no storage
-    of its own.
+    Lists one executable file per program Mirage runs, rendered from the
+    workspace's command lookup on every call; holds no storage of its
+    own. A name it leaves to what lies under it (one a machine runs, or
+    none of Mirage's) is the file or folder the mount beneath shows at
+    that path, with all under it: with a machine's disk at ``/``,
+    ``/usr/bin/python3`` is the machine's own file and ``/usr/bin/grep``
+    Mirage's. Where nothing lies beneath, a program a machine runs keeps
+    its file here.
 
     Args:
         programs (Callable[[], list[str]]): every program name the
             session can run, sorted.
         note (Callable[[str], str | None]): the line one program's file
             says about it, None when the name runs as no program.
+        leaves (Callable[[str], bool] | None): whether the view leaves a
+            name to the mount beneath; None leaves none.
+        beneath (Callable[[str], tuple[BaseVFS, PathSpec] | None] | None):
+            the mount beneath the view and the path in it, for a
+            virtual path under the view; None when nothing lies there.
     """
 
     accessor: BinAccessor
@@ -49,17 +63,89 @@ class BinViewVFS(BaseVFS):
         self,
         programs: Callable[[], list[str]],
         note: Callable[[str], str | None],
+        leaves: Callable[[str], bool] | None = None,
+        beneath: (
+            Callable[[str], tuple[BaseVFS, PathSpec] | None] | None
+        ) = None,
     ) -> None:
         super().__init__()
         self.accessor = BinAccessor(programs, note, now_iso())
+        self._leaves = leaves
+        self._beneath = beneath
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    def leaves(self, name: str) -> bool:
+        """Whether the view leaves ``name`` to the mount beneath it: a
+        program a machine runs, or a name none of Mirage's layers runs.
 
-    async def read(self, path: PathSpec) -> bytes:
+        Args:
+            name (str): a name under the view.
+        """
+        return (
+            self._leaves is not None and "/" not in name and self._leaves(name)
+        )
+
+    def _below(self, path: PathSpec) -> tuple[BaseVFS, PathSpec] | None:
+        key = path.mount_path.strip("/")
+        if self._beneath is None or (
+            key and not self.leaves(key.split("/")[0])
+        ):
+            return None
+        return self._beneath(path.virtual)
+
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        below = self._below(path)
+        if below is not None and path.mount_path.strip("/"):
+            vfs, spec = below
+            try:
+                return await vfs.readdir(spec)
+            except FileNotFoundError:
+                logger.debug("%s: none beneath", path.virtual)
+        mine = await _readdir(self.accessor, path)
+        if below is None:
+            return mine
+        vfs, spec = below
+        try:
+            listed = await vfs.readdir(spec)
+        except FS_ERRORS:
+            logger.debug("nothing beneath %s", path.virtual, exc_info=True)
+            return mine
+        theirs = listed.entries if isinstance(listed, DirListing) else listed
+        held = {row.name for row in theirs if self.leaves(row.name)}
+        kept = [row for row in mine if row.name not in held]
+        named = {row.name for row in kept}
+        rows = kept + [
+            row
+            for row in theirs
+            if row.name not in named and self.leaves(row.name)
+        ]
+        rows.sort(key=lambda row: row.name)
+        if not isinstance(listed, DirListing):
+            return rows
+        return DirListing(rows, partial=listed.partial, window=listed.window)
+
+    async def read(self, path: PathSpec) -> ByteSource:
+        below = self._below(path)
+        if below is not None and path.mount_path.strip("/"):
+            vfs, spec = below
+            try:
+                await vfs.stat(spec)
+            except FileNotFoundError:
+                logger.debug("%s: none beneath", path.virtual)
+            else:
+                found = vfs.read(spec)
+                return (
+                    found if isinstance(found, AsyncIterator) else await found
+                )
         return await _read(self.accessor, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
+        below = self._below(path)
+        if below is not None and path.mount_path.strip("/"):
+            vfs, spec = below
+            try:
+                return await vfs.stat(spec)
+            except FileNotFoundError:
+                logger.debug("%s: none beneath", path.virtual)
         return await _stat(self.accessor, path)
 
     # What the view holds is the lookup's to say, so every write answers

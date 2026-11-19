@@ -102,9 +102,16 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('bare cd with $HOME unset → error (HOME not set)', async () => {
     const ws = makeWs()
-    const io = await ws.shell('cd /ram/subdir && cd')
+    const io = await ws.shell('unset HOME; cd /ram/subdir && cd')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('HOME not set')
+    await ws.close()
+  })
+
+  it("starts a session with its user's home, unexported", async () => {
+    const ws = makeWs()
+    const out = await runOut(ws, 'echo "$HOME"; env | grep -c ^HOME=; bash -c \'echo "$HOME"\'')
+    expect(out).toBe('/root\n0\n/root\n')
     await ws.close()
   })
 
@@ -193,6 +200,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('echo $HOME with $HOME unset → empty', async () => {
     const ws = makeWs()
+    await ws.shell('unset HOME')
     expect((await runOut(ws, 'echo "[$HOME]"')).trim()).toBe('[]')
     await ws.close()
   })

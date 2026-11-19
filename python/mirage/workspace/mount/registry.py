@@ -760,6 +760,22 @@ class MountRegistry:
             return None
         return self.try_mount_for_prefix(owner)
 
+    def mount_beneath(self, entry: MountEntry, path: str) -> MountEntry | None:
+        """The mount that would handle ``path`` were ``entry`` not mounted:
+        where a view that leaves a name to what lies under it (the
+        ``/usr/bin`` view) hands that name; None when nothing lies there.
+
+        Args:
+            entry (MountEntry): the mount on top.
+            path (str): an absolute virtual path under it.
+        """
+        owner = owner_prefix(
+            (m.prefix for m in self.visible_mounts() if m is not entry), path
+        )
+        if owner is None:
+            return None
+        return self.try_mount_for_prefix(owner)
+
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:
             if m.prefix == DEV_PREFIX:

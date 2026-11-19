@@ -4,6 +4,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.shell.constants import DEFAULT_PATH
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.workspace.executor.builtins.env import handle_env
 from mirage.workspace.session.session import SessionState
@@ -84,7 +85,7 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
     # The session environment is restored after the inner command runs.
     assert session.env == {
         "PWD": "/",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",

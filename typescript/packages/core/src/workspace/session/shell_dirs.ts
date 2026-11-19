@@ -26,6 +26,22 @@ export function tildeHomes(session: SessionState): Record<string, string> {
   return { ...userHomes(identity), '': envGet(session, 'HOME') ?? homeOf(identity) }
 }
 
+/**
+ * Give a session the `HOME` a machine's login hands bash: its user's home,
+ * set but not exported, as `PATH` is, so a program keeps the home its own
+ * machine gives it. Seeded as the session is made or its profile applied and
+ * never after, so a line's `unset HOME` stays unset; one the environment
+ * hands in wins. Mirrors Python's `seed_home`.
+ *
+ * @param session the session.
+ * @param again seed over the home seeded before, as a profile applied to a
+ *   session already made moves it to its user.
+ */
+export function seedHome(session: SessionState, again = false): void {
+  if (again || !session.vars.has('HOME'))
+    seedVar(session, 'HOME', homeOf({ profile: session.profile }))
+}
+
 // Returns $HOME from the session env, or null when unset/empty, matching
 // GNU bash (no implicit home; `cd` errors). Read through the session view,
 // not the raw env: this is HOME's own resolution channel, so a hidden HOME

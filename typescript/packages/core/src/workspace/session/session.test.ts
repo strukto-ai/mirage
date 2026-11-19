@@ -22,6 +22,7 @@ import type { Decision } from '../../policy/types.ts'
 import { trees } from '../../test-utils.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import { makeArray } from '../../shell/array.ts'
+import { DEFAULT_PATH } from '../../shell/constants.ts'
 
 describe('SessionState', () => {
   it('defaults cwd=/ and an env holding only the seeded $PWD', () => {
@@ -29,7 +30,7 @@ describe('SessionState', () => {
     expect(s.cwd).toBe('/')
     // bash exports $PWD from startup, so even a session that never ran
     // `cd` has one, a PATH when the environment gives none, and IFS.
-    expect(s.env).toEqual({ PWD: '/', PATH: '/usr/bin', IFS: ' \t\n', OPTIND: '1', OPTERR: '1' })
+    expect(s.env).toEqual({ PWD: '/', PATH: DEFAULT_PATH, IFS: ' \t\n', OPTIND: '1', OPTERR: '1' })
     expect(s.functions).toEqual({})
     expect(s.lastExitCode).toBe(0)
   })
@@ -48,7 +49,7 @@ describe('SessionState', () => {
     expect(json).toEqual({
       session_id: 'x',
       cwd: '/a',
-      env: { K: 'V', PWD: '/a', PATH: '/usr/bin', IFS: ' \t\n', OPTIND: '1', OPTERR: '1' },
+      env: { K: 'V', PWD: '/a', PATH: DEFAULT_PATH, IFS: ' \t\n', OPTIND: '1', OPTERR: '1' },
       // The attributes ride beside the values rather than being guessed
       // on the way back in: `varsFromEnv` exports what it seeds, so both
       // names carry `x` here, the seeded OPTIND its `i`, while the seeded
@@ -77,7 +78,7 @@ describe('SessionState', () => {
     expect(restored.env).toEqual({
       K: 'V',
       PWD: '/a',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -210,7 +211,7 @@ describe('SessionState.fork', () => {
     expect(forked.env).toEqual({
       FOO: 'bar',
       PWD: '/disk',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -235,7 +236,7 @@ describe('SessionState.fork', () => {
     expect(forked.env).toEqual({
       BAZ: 'qux',
       PWD: '/ram',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -244,7 +245,7 @@ describe('SessionState.fork', () => {
     expect(original.env).toEqual({
       FOO: 'bar',
       PWD: '/disk',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -367,7 +368,7 @@ describe('SessionState.newShell', () => {
       OPTERR: makeVar('1'),
       RANDOM: makeVar('42', exported),
       PWD: makeVar('/w', exported),
-      PATH: makeVar('/usr/bin'),
+      PATH: makeVar(DEFAULT_PATH),
       IFS: makeVar(' \t\n'),
     })
     expect(child.functions).toEqual({ f: 'f() { :; }' })
@@ -647,5 +648,13 @@ describe('a profile network', () => {
     >[0]
     expect(SessionState.fromDict(data).network).toEqual({ allowed_domains: ['*.github.com'] })
     expect(new SessionState({ sessionId: 't' }).toDict()).not.toHaveProperty('network')
+  })
+})
+
+describe('SessionState.newShell HOME', () => {
+  it('carries HOME as a login exports it', () => {
+    const parent = new SessionState({ sessionId: 's', vars: { HOME: makeVar('/root') } })
+    expect(parent.newShell().vars.get('HOME')).toEqual(makeVar('/root'))
+    expect(new SessionState({ sessionId: 's' }).newShell().vars.has('HOME')).toBe(false)
   })
 })

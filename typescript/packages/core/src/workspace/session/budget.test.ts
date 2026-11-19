@@ -9,6 +9,7 @@ import { ShellArray } from '../../shell/array.ts'
 import {
   BASH_VERSINFO,
   BASH_VERSION,
+  DEFAULT_PATH,
   SHLVL,
   VERSION_PARTS,
   VERSION_TEXT,
@@ -16,13 +17,16 @@ import {
 
 const DEC = new TextDecoder()
 
-// The max_env these lines run under: 200 bytes for what each line grows,
-// past the variables every shell starts with (`seedShell`).
+// The max_env these lines run under: 188 bytes for what each line grows,
+// past the variables every shell starts with (`seedShell`, and the PATH and
+// HOME a session is made with).
 const LIMIT =
-  200 +
+  188 +
   entryBytes(BASH_VERSION, VERSION_TEXT) +
   entryBytes(BASH_VERSINFO, new ShellArray(VERSION_PARTS.map((part, i) => [i, part]))) +
-  entryBytes(SHLVL, '1')
+  entryBytes(SHLVL, '1') +
+  entryBytes('PATH', DEFAULT_PATH) +
+  entryBytes('HOME', '/root')
 
 async function run(
   line: string,

@@ -15,6 +15,7 @@
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { METADATA_OPS } from '@struktoai/mirage-core/policy/constants'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
+import { spawn } from 'node:child_process'
 import { Console } from 'node:console'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
@@ -151,6 +152,8 @@ interface Step {
   handle?: HandleStep
   // What one backend answers differently, merged over `expect`.
   expect_on?: Record<string, Expect>
+  // Expect what plain bash on the docker machine answers the same line.
+  same_as_bash?: boolean
   facade?: FacadeSpec
   expect?: Expect
   // Steps run at once, each on a session of its own.
@@ -1175,14 +1178,58 @@ async function runParallel(
   return (await Promise.all(runs)).flat()
 }
 
+/**
+ * What plain bash on the docker machine answers `command`, reading the step's
+ * stdin: a `same_as_bash` step expects exactly this, so it fails on any
+ * difference between Mirage and the machine's own bash. A stream that is not
+ * UTF-8 fails the case.
+ */
+function bashAnswer(command: string, stdin: string | undefined): Promise<Expect> {
+  const container = process.env.MIRAGE_INTEG_DOCKER_CONTAINER ?? ''
+  const strict = new TextDecoder('utf-8', { fatal: true })
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'docker',
+      ['exec', ...(stdin !== undefined ? ['-i'] : []), container, 'bash', '-c', command],
+      { stdio: [stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] },
+    )
+    const out: Buffer[] = []
+    const err: Buffer[] = []
+    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk))
+    child.stderr?.on('data', (chunk: Buffer) => err.push(chunk))
+    child.on('error', reject)
+    child.on('close', (code) => {
+      try {
+        resolve({
+          exit: code ?? 1,
+          stdout: strict.decode(Buffer.concat(out)),
+          stderr: strict.decode(Buffer.concat(err)),
+        })
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
+    // A line that exits before reading all its input closes the pipe; its
+    // close still reports the answer.
+    child.stdin?.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') reject(error)
+    })
+    if (stdin !== undefined) child.stdin?.end(stdin)
+  })
+}
+
 async function runStep(
   ws: Workspace,
   caseId: string,
   label: string,
-  step: Step,
+  given: Step,
   sessionId?: string,
   handles?: RetainedHandles,
 ): Promise<string[]> {
+  const step =
+    given.same_as_bash === true && typeof given.command === 'string'
+      ? { ...given, expect: await bashAnswer(given.command, given.stdin) }
+      : given
   const before = backendReads(ws)
   const nativeBefore = nativeCalls(ws).length
   const problems = await performStep(ws, caseId, label, step, sessionId, handles)

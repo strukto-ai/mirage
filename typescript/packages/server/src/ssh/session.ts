@@ -27,7 +27,6 @@ import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 
 const FALLBACK_PROMPT = 'mirage$ '
-const LOGIN_HOME = '/'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -75,13 +74,12 @@ export interface ChannelRequest {
 }
 
 /**
- * The environment sshd hands a login: who, from where, on what. `HOME` is
- * `/`, where every session starts, and the user is the workspace id, since
- * that is the name the client logged in as.
+ * The environment sshd hands a login: who, from where, on what. The user is
+ * the workspace id, since that is the name the client logged in as. `HOME`
+ * is the session's own, its user's home.
  */
 export function loginEnv(request: ChannelRequest): Record<string, string> {
   const env: Record<string, string> = {
-    HOME: LOGIN_HOME,
     USER: request.username,
     LOGNAME: request.username,
   }

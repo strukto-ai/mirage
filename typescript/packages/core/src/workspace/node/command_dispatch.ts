@@ -24,6 +24,7 @@ import {
   redirectRunnerFor,
   redirectSyntaxFor,
   bindCaller,
+  setProgramInvocation,
   setRedirectPaths,
   sessionAccess,
   syntaxHead,
@@ -108,7 +109,13 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { lookup, programRuntime, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
-import { linkMachine, operandMachine, programMachine, severalMachines } from '../lookup/machine.ts'
+import {
+  binProgram,
+  linkMachine,
+  operandMachine,
+  programMachine,
+  severalMachines,
+} from '../lookup/machine.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -1474,7 +1481,30 @@ async function routeArgv(
         ? async (): Promise<RedirectResult> => {
             const unread = unreadable(name, session)
             if (unread !== null) return refused([name, ...argv.args].join(' '), unread)
-            return runExternal(argv, stdin, session, registry, placed, signal, sink)
+            const program = binProgram(
+              name,
+              session,
+              registry,
+              namespace.sessionLinks(session),
+              placed,
+            )
+            if (program === null) {
+              return runExternal(argv, stdin, session, registry, placed, signal, sink)
+            }
+            return setProgramInvocation(
+              session,
+              () =>
+                runExternal(
+                  new Argv(program, argv.args, argv.operands),
+                  stdin,
+                  session,
+                  registry,
+                  placed,
+                  signal,
+                  sink,
+                ),
+              `${shellVoice()}${name}`,
+            )
           }
         : undefined
     return handleExecPath(

@@ -899,6 +899,21 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
+   * Run a lookup the agent typed (`which perl`) as the machine answers it:
+   * in the environment a program run there gets (`env` over the machine's
+   * own), connecting first. It runs at `/`: the session's cwd is often a
+   * mount the machine is served only for a run. Asked anew each time, so a
+   * program installed since the last one is found.
+   *
+   * @param line the lookup's shell line.
+   * @param env the session's exported variables.
+   */
+  async lookUp(line: string, env: Readonly<Record<string, string>>): Promise<RunAnswer> {
+    await this.ensureConnected()
+    return this.execLine(line, null, { ...this.config.env, ...env }, '/')
+  }
+
+  /**
    * Unmount what the machine was served; the machine itself is the user's.
    * The next run connects again, so a workspace that takes the handle after
    * this one reaches the machine anew. On a machine that pauses, a connect

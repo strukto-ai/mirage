@@ -471,7 +471,10 @@ def lookup(
 
 
 def lookup_all(
-    name: str, session: SessionState, registry: MountRegistry
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> list[Consumer]:
     """Every layer holding the name, most-preferred first.
 
@@ -483,8 +486,10 @@ def lookup_all(
         name (str): expanded command name.
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement; None
+            outside a line, where the static bindings answer.
     """
-    return list(_layers(name, session, registry))
+    return list(_layers(name, session, registry, routing))
 
 
 def program(

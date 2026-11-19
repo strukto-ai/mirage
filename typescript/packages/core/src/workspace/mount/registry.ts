@@ -767,6 +767,25 @@ export class MountRegistry {
   }
 
   /**
+   * The mount that would handle `path` were `entry` not mounted: where a
+   * view that leaves a name to what lies under it (the `/usr/bin` view)
+   * hands that name; null when nothing lies there.
+   *
+   * @param entry the mount on top.
+   * @param path an absolute virtual path under it.
+   */
+  mountBeneath(entry: MountEntry, path: string): MountEntry | null {
+    const owner = ownerPrefix(
+      this.visibleMounts()
+        .filter((m) => m !== entry)
+        .map((m) => m.prefix),
+      path,
+    )
+    if (owner === null) return null
+    return this.tryMountForPrefix(owner)
+  }
+
+  /**
    * One row per registered mount, for the namespace reader the dispatcher
    * hands out; built once per change to the mount list. The functions a VFS
    * answers are the ones its mount read when it was mounted

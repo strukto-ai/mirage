@@ -63,11 +63,11 @@
         "ram",
         "opfs"
       ],
-      "command": "type -p cd",
+      "command": "type -p cd; f() { :; }; type -f f; echo rc=$?; type -tf f; echo rc=$?; type -f ls",
       "expect": {
         "exit": 0,
-        "stdout": "",
-        "stderr": ""
+        "stdout": "rc=1\nrc=1\nls is /usr/bin/ls\n",
+        "stderr": "bash: line 1: type: f: not found\n"
       }
     },
     {

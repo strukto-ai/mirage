@@ -47,7 +47,6 @@ from mirage.workspace.executor.statement import record_status
 logger = logging.getLogger(__name__)
 
 FALLBACK_PROMPT = "mirage$ "
-LOGIN_HOME = "/"
 
 
 def prompt(cwd: str) -> str:
@@ -75,8 +74,8 @@ def ends_shell(line: str) -> bool:
 def login_env(process: asyncssh.SSHServerProcess[str]) -> dict[str, str]:
     """The environment sshd hands a login: who, from where, on what.
 
-    ``HOME`` is ``/``, where every session starts, and the user is the
-    workspace id, since that is the name the client logged in as.
+    The user is the workspace id, since that is the name the client
+    logged in as. ``HOME`` is the session's own, its user's home.
 
     Args:
         process (asyncssh.SSHServerProcess[str]): the channel's process.
@@ -85,7 +84,7 @@ def login_env(process: asyncssh.SSHServerProcess[str]) -> dict[str, str]:
         dict[str, str]: variable name to value.
     """
     user = process.get_extra_info("username")
-    env = {"HOME": LOGIN_HOME, "USER": user, "LOGNAME": user}
+    env = {"USER": user, "LOGNAME": user}
     peer = process.get_extra_info("peername")
     local = process.get_extra_info("sockname")
     if peer and local:

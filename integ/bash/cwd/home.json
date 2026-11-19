@@ -69,6 +69,42 @@
         "stdout": "/data\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cwd_home_is_the_session_users",
+      "seq": 499500,
+      "note": "A session starts with its user's home in HOME, set but not exported as PATH is, so a program on a machine keeps the home its machine gives it; a nested bash gets it exported, as a login hands it.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo \"$HOME\"; printenv HOME || echo not exported; bash -c 'echo \"$HOME\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/root\nnot exported\n/root\n",
+        "stderr": ""
+      }
     }
   ]
 }

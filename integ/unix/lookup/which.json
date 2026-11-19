@@ -185,17 +185,17 @@
       }
     },
     {
-      "id": "path_names_the_program_directory",
+      "id": "path_is_the_one_a_login_hands_root",
       "seq": 991506,
       "targets": [
         "ram",
         "opfs"
       ],
-      "note": "bash 5.2 on debian:stable-slim, started with an empty environment, sets PATH without exporting it: printenv PATH exits 1 and declare -p shows --, so a child process keeps its own PATH.",
+      "note": "A session starts with the PATH Debian's login and Docker images hand root, held unexported as bash 5.2 holds a PATH it sets itself (debian:stable-slim, an empty environment): printenv PATH exits 1 and declare -p shows --, so a program on a machine keeps its own PATH.",
       "command": "echo \"$PATH\"; printenv PATH || echo not exported; declare -p PATH",
       "expect": {
         "exit": 0,
-        "stdout": "/usr/bin\nnot exported\ndeclare -- PATH=\"/usr/bin\"\n",
+        "stdout": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nnot exported\ndeclare -- PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"\n",
         "stderr": ""
       }
     },

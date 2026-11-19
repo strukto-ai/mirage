@@ -923,6 +923,22 @@ export function xargsMissing(name: string): string {
 }
 
 /**
+ * Whether a command came back as one xargs could not run at all: a machine
+ * reports a program it has no file for in the words xargs handed the run
+ * for that command (`xargs: NAME: No such file or directory`) and 127,
+ * which stops xargs with GNU's 127 as an exec failure does. A program that
+ * ran and exited 127 counts as a failed command, a nested xargs reporting
+ * its own command included. Mirrors Python's `_not_run`.
+ *
+ * @param name the command word xargs ran.
+ * @param status the command's status.
+ * @param said what it wrote on stderr.
+ */
+function notRun(name: string, status: number, said: Uint8Array): boolean {
+  return status === NOT_FOUND_STATUS && decodeText(said) === xargsMissing(name)
+}
+
+/**
  * What xargs says, and the status it stops with, when it cannot exec its
  * command: 127 for nothing to run, 126 for a directory or a path exec
  * refuses (`./file/child` is not a directory), as GNU's exec answers; null
@@ -1013,7 +1029,7 @@ async function* runLines(
   const taken = new Set<number>()
   const stdin = opts.stdin == null ? new DeviceInput() : new SharedStdin(opts.stdin)
   // xargs execs its command, so a builtin that is also a program answers
-  // as the program.
+  // as the program, and one it cannot run is reported in xargs's words.
   const active = new Map<Promise<unknown>, [IOResult, PipeConsole]>()
   const run = async (
     words: string[],
@@ -1025,13 +1041,17 @@ async function* runLines(
     // xargs stays its process and forks each program as a child of it.
     const process = currentCaller().process
     if (process != null) process.oneCommand = false
+    const failure = `xargs: ${words[0] ?? ''}`
     if (!forked) {
-      await setProgramInvocation(session, () =>
-        drainChild(
-          executeFn(line, { sessionId: session.sessionId, context, stdin, signal, sink: pipe }),
-          output,
-          pipe,
-        ),
+      await setProgramInvocation(
+        session,
+        () =>
+          drainChild(
+            executeFn(line, { sessionId: session.sessionId, context, stdin, signal, sink: pipe }),
+            output,
+            pipe,
+          ),
+        failure,
       )
       return
     }
@@ -1045,19 +1065,22 @@ async function* runLines(
     }
     try {
       await setCurrentEvaluation(childEvaluation, () =>
-        setProgramInvocation(child, () =>
-          drainChild(
-            executeFn(line, {
-              sessionId: child.sessionId,
-              context: childEvaluation,
-              session: child,
-              stdin,
-              signal,
-              sink: pipe,
-            }),
-            output,
-            pipe,
-          ),
+        setProgramInvocation(
+          child,
+          () =>
+            drainChild(
+              executeFn(line, {
+                sessionId: child.sessionId,
+                context: childEvaluation,
+                session: child,
+                stdin,
+                signal,
+                sink: pipe,
+              }),
+              output,
+              pipe,
+            ),
+          failure,
         ),
       )
       return
@@ -1090,6 +1113,11 @@ async function* runLines(
     const task = (async (): Promise<unknown> => {
       try {
         await run(words, io, pipe, signal)
+        const said = await io.materializeStderr()
+        if (!stopped() && notRun(name, io.exitCode, said)) {
+          stop = NOT_FOUND_STATUS
+          stopping.abort()
+        }
         if (io.exitCode === 255 && !stopped()) {
           io.stderr = (
             await io.merge(
@@ -1290,8 +1318,12 @@ export async function handleXargs(
       merged.addStderr(concat(pending.splice(0)))
     }
     async function record(io: IOResult): Promise<boolean> {
+      const said = await materialize(io.stderr)
       if (io.exitCode === 255 && stopped === null) stopped = 124
-      pending.push(await materialize(io.stderr))
+      if (stopped === null && notRun(command[0] ?? '', io.exitCode, said)) {
+        stopped = NOT_FOUND_STATUS
+      }
+      pending.push(said)
       return io.exitCode !== 0
     }
     try {

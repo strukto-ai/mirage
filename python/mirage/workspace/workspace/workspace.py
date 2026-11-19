@@ -190,6 +190,8 @@ from mirage.utils.clock import (
 )
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource, check_name
+from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import parent
 from mirage.utils.size import parse_limit
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
@@ -210,6 +212,7 @@ from mirage.workspace.expand.globs import GlobOptions, resolve_globs
 from mirage.workspace.files import Files, WorkspaceFiles
 from mirage.workspace.lookup import program, program_note, programs
 from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.machine import lookup_machine
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -902,7 +905,9 @@ class Workspace:
         )
         # One file per program, where PATH finds it: the same lookup
         # which, type and command -v answer from. Each session lists its
-        # own programs, so no listing is kept.
+        # own programs, so no listing is kept. A program a machine runs
+        # is the file the mount beneath shows, the machine's own where
+        # its disk lies under the view.
         self._registry.mount(
             BIN_PREFIX,
             BinViewVFS(
@@ -910,6 +915,8 @@ class Workspace:
                 lambda name: program_note(
                     name, self._call_session(), self._registry
                 ),
+                self._bin_leaves,
+                self._bin_beneath,
             ),
             MountMode.READ,
             DEFAULT_READ_SPEC,
@@ -1631,6 +1638,42 @@ class Workspace:
             for prefix in self._sandbox_mounts()
             if path_visible(vis, prefix.rstrip("/") or "/")
         ]
+
+    def _bin_leaves(self, name: str) -> bool:
+        """Whether the ``/usr/bin`` view leaves ``name`` to the mount
+        beneath it: a program a machine runs, or a name none of Mirage's
+        layers runs as a program.
+
+        Args:
+            name (str): a name under the view.
+        """
+        session = self._call_session()
+        return (
+            lookup_machine(name, session, self._registry, None, True)
+            is not None
+            or program(name, session, self._registry) is None
+        )
+
+    def _bin_beneath(self, virtual: str) -> tuple[BaseVFS, PathSpec] | None:
+        """The mount beneath the ``/usr/bin`` view and the path in it,
+        for a virtual path under the view; None when nothing lies there.
+
+        Args:
+            virtual (str): an absolute virtual path under the view.
+        """
+        view = self._registry.try_mount_for_prefix(BIN_PREFIX)
+        entry = (
+            None
+            if view is None
+            else self._registry.mount_beneath(view, virtual)
+        )
+        if entry is None:
+            return None
+        return entry.vfs, PathSpec(
+            virtual=virtual,
+            directory=parent(virtual),
+            vfs_path=mount_key(virtual, entry.prefix),
+        )
 
     def _call_session(self) -> SessionState:
         """The session an op runs under: the bound one, else the default."""

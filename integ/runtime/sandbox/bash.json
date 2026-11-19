@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "each_line_answers_as_plain_bash_on_the_machine",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "With the machine's disk at / and the machine taking @external, every line runs once in plain bash on the docker machine and once through Mirage, and the two answers must match byte for byte: program lookups, /usr/bin, a program the machine lacks under each wrapper, and the PATH and HOME a session starts with. Each step stands alone, since plain bash runs it in a shell of its own.",
+      "runtimes": [
+        "docker"
+      ],
+      "world": {
+        "mounts": {
+          "/": {
+            "vfs": "machine",
+            "config": {
+              "root": "/"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "which perl; which -a perl; type perl; type -t perl; type -a perl; command -v perl; command -V perl",
+          "same_as_bash": true
+        },
+        {
+          "command": "type -P ldconfig; which -a ldconfig; command -v ldconfig; type ldconfig",
+          "same_as_bash": true
+        },
+        {
+          "command": "which nosuch; echo rc=$?; type nosuch; echo rc=$?; command -V nosuch; echo rc=$?; command -v nosuch; echo rc=$?",
+          "same_as_bash": true
+        },
+        {
+          "command": "which grep; type grep; command -v grep; type -t grep; type -P grep",
+          "same_as_bash": true
+        },
+        {
+          "command": "type cd; type -t cd; command -v cd; which cd; echo rc=$?",
+          "same_as_bash": true
+        },
+        {
+          "command": "[ -x /usr/bin/perl ] && echo runs; head -c 4 /usr/bin/perl | tail -c 3; echo; /usr/bin/perl -e 'print 1+1, qq(\\n)'; ls /usr/bin | grep -x perl; ls /usr/bin/perl",
+          "same_as_bash": true
+        },
+        {
+          "command": "perl -e 'print qq(on the machine\\n)'; $(which perl) -e 'print 3*3, qq(\\n)'",
+          "same_as_bash": true
+        },
+        {
+          "command": "env nosuch; echo rc=$?; (exec nosuch); echo rc=$?; echo x | xargs nosuch; echo rc=$?; timeout 5 nosuch; echo rc=$?; nohup nosuch; echo rc=$?",
+          "same_as_bash": true
+        },
+        {
+          "command": "echo \"$PATH\"; echo \"$HOME\"; cd; pwd",
+          "same_as_bash": true
+        },
+        {
+          "command": "xargs which; echo rc=$?",
+          "stdin": "perl\nnosuch\n",
+          "same_as_bash": true
+        },
+        {
+          "command": "/usr/bin/nosuch; echo rc=$?; perl() { :; }; type -f perl; type -t -- -nosuch; echo rc=$?; echo x | xargs xargs nosuch; echo rc=$?",
+          "same_as_bash": true
+        }
+      ]
+    }
+  ]
+}

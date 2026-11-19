@@ -65,6 +65,7 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { makeArray, ShellArray } from '../../shell/array.ts'
+import { DEFAULT_PATH } from '../../shell/constants.ts'
 
 async function readBody(out: ByteSource | null): Promise<string> {
   if (out === null) return ''
@@ -1517,7 +1518,7 @@ describe('handleSet', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1' }) })
     const [out] = handleSet([], s)
     expect(decode(out as Uint8Array)).toBe(
-      "A=1\nBASH_LINENO=()\nBASH_SOURCE=()\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
+      `A=1\nBASH_LINENO=()\nBASH_SOURCE=()\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=${DEFAULT_PATH}\nPWD=/\n`,
     )
   })
 

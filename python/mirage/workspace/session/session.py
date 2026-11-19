@@ -39,7 +39,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
-    BIN_PREFIX,
+    DEFAULT_PATH,
     IFS_DEFAULT,
     SHELL_ARGV0,
 )
@@ -1145,11 +1145,11 @@ class SessionState:
         self.vars.setdefault(
             "PWD", ShellVar(self.cwd, frozenset({VarAttr.EXPORT}))
         )
-        # bash starts with a PATH when the environment gives it none, and
-        # does not export it: `env` does not list it and a child process,
-        # such as a host interpreter, keeps its own. The one directory here
-        # is where every program's file is.
-        self.vars.setdefault("PATH", ShellVar(BIN_PREFIX, frozenset()))
+        # A session starts with the PATH a machine's login hands root,
+        # and does not export it: `env` does not list it and a child
+        # process, such as a host interpreter or a program on a machine,
+        # keeps its own.
+        self.vars.setdefault("PATH", ShellVar(DEFAULT_PATH, frozenset()))
         # bash sets IFS at startup and never exports it, so a fresh shell
         # reads `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the
         # default back rather than an empty IFS that splits nothing.
@@ -1254,7 +1254,9 @@ class SessionState:
         variables, which bash never reads from its environment: IFS is
         dropped and ``STARTUP_VALUES`` restart. A managed variable not
         yet fetched crosses as its pointer, which the nested shell
-        fetches through.
+        fetches through. ``HOME`` crosses as a machine's login exports it,
+        though the session holds it unexported so a program keeps the
+        home its own machine gives it.
 
         Args:
             None
@@ -1262,6 +1264,9 @@ class SessionState:
         exported = frozenset({VarAttr.EXPORT})
         variables: dict[str, ShellVar] = {}
         for name, var in self.vars.records():
+            if name == "HOME" and isinstance(var.value, str):
+                variables[name] = ShellVar(var.value, var.attrs & exported)
+                continue
             if VarAttr.EXPORT not in var.attrs or name == "IFS":
                 continue
             if not isinstance(var.value, str) and var.managed is None:

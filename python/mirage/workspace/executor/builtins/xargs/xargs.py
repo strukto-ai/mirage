@@ -919,6 +919,24 @@ def xargs_missing(name: str) -> str:
     return f"xargs: {name}: No such file or directory\n"
 
 
+def _not_run(name: str, status: int, said: bytes) -> bool:
+    """Whether a command came back as one xargs could not run at all: a
+    machine reports a program it has no file for in the words xargs
+    handed the run for that command (``xargs: NAME: No such file or
+    directory``) and 127, which stops xargs with GNU's 127 as an exec
+    failure does. A program that ran and exited 127 counts as a failed
+    command, a nested xargs reporting its own command included.
+
+    Args:
+        name (str): the command word xargs ran.
+        status (int): the command's status.
+        said (bytes): what it wrote on stderr.
+    """
+    return status == NOT_FOUND_STATUS and said == encode_text(
+        xargs_missing(name)
+    )
+
+
 async def _unrunnable(
     name: str,
     session: SessionState,
@@ -1038,9 +1056,11 @@ async def _run_lines(
         if process is not None:
             process.one_command = False
         # xargs execs its command, so a builtin that is also a program
-        # answers as the program.
+        # answers as the program, and one it cannot run is reported in
+        # xargs's words.
+        failure = f"xargs: {words[0]}"
         if not forked:
-            marked = set_program_invocation(session)
+            marked = set_program_invocation(session, failure)
             try:
                 await _drain_child(execute_fn(line, **extra), output, pipe)
             finally:
@@ -1055,7 +1075,7 @@ async def _run_lines(
                 str(slot), frozenset({VarAttr.EXPORT})
             )
         token = set_current_evaluation(child_evaluation)
-        marked = set_program_invocation(child)
+        marked = set_program_invocation(child, failure)
         try:
             await _drain_child(execute_fn(line, **extra), output, pipe)
         finally:
@@ -1091,6 +1111,12 @@ async def _run_lines(
             nonlocal stop
             try:
                 await run(words, io, pipe)
+                io.stderr = await materialize(io.stderr)
+                if stop is None and _not_run(
+                    words[0], io.exit_code, io.stderr
+                ):
+                    stop = NOT_FOUND_STATUS
+                    stopping.set()
                 if io.exit_code == 255 and stop is None:
                     aborted = f"xargs: {words[0]}: exited with status 255; aborting\n"
                     combined = await io.merge(
@@ -1298,9 +1324,14 @@ async def handle_xargs(
         async def record(io: IOResult) -> None:
             nonlocal failed, stop
             failed = failed or io.exit_code != 0
+            said = await materialize(io.stderr)
             if io.exit_code == 255 and stop is None:
                 stop = 124
-            pending.append(await materialize(io.stderr))
+            if stop is None and _not_run(
+                decode_text(base[0]), io.exit_code, said
+            ):
+                stop = NOT_FOUND_STATUS
+            pending.append(said)
 
         results = _run_lines(
             execute_fn,

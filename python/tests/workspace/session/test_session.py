@@ -19,6 +19,7 @@ from mirage.policy.match import Outcome
 from mirage.policy.types import CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import array_set, make_array
+from mirage.shell.constants import DEFAULT_PATH
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
@@ -71,7 +72,7 @@ def test_session_defaults():
     # ran `cd` has one.
     assert s.env == {
         "PWD": "/",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -121,7 +122,7 @@ def test_session_to_dict():
     assert d["env"] == {
         "K": "V",
         "PWD": "/data",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -216,7 +217,7 @@ def test_fork_copies_every_field_including_mount_modes():
     assert forked.env == {
         "FOO": "bar",
         "PWD": "/disk",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -268,7 +269,7 @@ def test_fork_overrides_apply_without_mutating_original():
     assert forked.env == {
         "BAZ": "qux",
         "PWD": "/ram",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -277,7 +278,7 @@ def test_fork_overrides_apply_without_mutating_original():
     assert original.env == {
         "FOO": "bar",
         "PWD": "/disk",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -345,7 +346,7 @@ def test_to_dict_carries_the_attributes_beside_the_values():
     # name has no value to carry and appears only in `var_attrs`.
     assert data["env"] == {
         "PWD": "/",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -746,7 +747,7 @@ def test_new_shell_starts_from_the_environment():
         "OPTERR": ShellVar("1"),
         "RANDOM": ShellVar("42", exported),
         "PWD": ShellVar("/w", exported),
-        "PATH": ShellVar("/usr/bin"),
+        "PATH": ShellVar(DEFAULT_PATH),
         "IFS": ShellVar(" \t\n"),
     }
     assert child.functions == {"f": "f() { :; }"}
@@ -767,3 +768,10 @@ def test_a_profile_network_survives_the_record():
         "allowed_domains": ["*.github.com"]
     }
     assert "network" not in SessionState(session_id="t").to_dict()
+
+
+def test_a_new_shell_carries_home_as_a_login_exports_it():
+    parent = SessionState(session_id="s", vars={"HOME": ShellVar("/root")})
+    assert parent.new_shell().vars["HOME"] == ShellVar("/root")
+    bare = SessionState(session_id="s")
+    assert "HOME" not in bare.new_shell().vars

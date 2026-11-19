@@ -91,6 +91,11 @@ because the runners run one case at a time. No CLI reaches a process's own
   step runs in. `expect_on` overrides it by `runtime`,
   `runtime@host`, `backend` or `runtime@backend`. Every override is a
   recorded difference, named in the folder's README.
+- `same_as_bash` on a step expects what plain bash on the docker machine
+  answers the same line, which the runner runs there once through
+  `docker exec`, so the step fails on any difference between Mirage and the
+  machine's own bash. Plain bash runs each such step in a shell of its own,
+  so it carries nothing from the steps before it.
 - `profile` gives the default session a profile from that step on. A
   world's `profiles` apply before its files are seeded, so a case that
   hides a seeded file sets it as a step.
