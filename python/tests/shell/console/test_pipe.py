@@ -85,10 +85,11 @@ async def test_stderr_goes_on_to_the_console_it_is_given():
 
 @pytest.mark.asyncio
 async def test_stderr_it_keeps_counts_against_the_memory_budget():
-    async def emit() -> None:
-        pipe = PipeConsole()
-        for _ in range(3):
-            await pipe.emit(Channel.STDERR, b"abcd")
-
     with pytest.raises(MemoryExhausted):
-        await run_with_memory(MemoryBudget(8, lambda: 0), emit())
+        await run_with_memory(MemoryBudget(8, lambda: 0), _emit_stderr())
+
+
+async def _emit_stderr() -> None:
+    pipe = PipeConsole()
+    for _ in range(3):
+        await pipe.emit(Channel.STDERR, b"abcd")

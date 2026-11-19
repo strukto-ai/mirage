@@ -122,17 +122,21 @@ async def test_answer_of_keeps_what_a_run_wrote_whole():
 
 @pytest.mark.asyncio
 async def test_a_bounded_answer_is_held_to_the_memory_budget():
-    async def run(output, errors):
-        for _ in range(3):
-            await output(b"abcd")
-        return RunResult(exit_code=0)
-
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            MemoryBudget(8, lambda: 0), answer_of(run, bounded=True)
+            MemoryBudget(8, lambda: 0),
+            answer_of(_outs_abcd_thrice, bounded=True),
         )
-    answer = await run_with_memory(MemoryBudget(8, lambda: 0), answer_of(run))
+    answer = await run_with_memory(
+        MemoryBudget(8, lambda: 0), answer_of(_outs_abcd_thrice)
+    )
     assert answer.stdout == b"abcd" * 3
+
+
+async def _outs_abcd_thrice(output, errors) -> RunResult:
+    for _ in range(3):
+        await output(b"abcd")
+    return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

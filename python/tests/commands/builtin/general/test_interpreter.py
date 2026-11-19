@@ -223,12 +223,7 @@ async def test_run_output_keeps_what_the_result_already_said_on_stderr():
 
 @pytest.mark.asyncio
 async def test_run_output_counts_the_stderr_it_keeps_against_the_memory_budget():
-    async def run(output, errors):
-        for _ in range(3):
-            await errors(b"abcd")
-        return RunResult(exit_code=0)
-
-    stdout, _ = run_output(run)
+    stdout, _ = run_output(_errs_abcd_thrice)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(MemoryBudget(8, lambda: 0), materialize(stdout))
 
@@ -240,20 +235,28 @@ async def test_line_output_writes_stderr_to_the_callers_sink_in_order():
     async def errors(chunk):
         seen.append(("err", chunk))
 
-    async def line(console):
-        await console.emit(Channel.STDOUT, b"o1")
-        await console.emit(Channel.STDERR, b"e1")
-        await console.emit(Channel.STDOUT, b"o2")
-        return IOResult()
-
-    async def unused(chunk):
-        raise AssertionError(chunk)
-
-    stdout, io = line_output(line, sink=Relay(unused, errors))
+    stdout, io = line_output(_out_err_out, sink=Relay(_unused, errors))
     async for chunk in stdout:
         seen.append(("out", chunk))
     assert seen == [("out", b"o1"), ("err", b"e1"), ("out", b"o2")]
     assert io.stderr is None
+
+
+async def _errs_abcd_thrice(output, errors) -> RunResult:
+    for _ in range(3):
+        await errors(b"abcd")
+    return RunResult(exit_code=0)
+
+
+async def _out_err_out(console) -> IOResult:
+    await console.emit(Channel.STDOUT, b"o1")
+    await console.emit(Channel.STDERR, b"e1")
+    await console.emit(Channel.STDOUT, b"o2")
+    return IOResult()
+
+
+async def _unused(chunk):
+    raise AssertionError(chunk)
 
 
 # The run starts as its output is read, so the workspace settles the

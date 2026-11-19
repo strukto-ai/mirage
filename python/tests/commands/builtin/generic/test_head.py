@@ -329,10 +329,13 @@ async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kwargs", [{"n": -100}, {"c": -100}])
 async def test_head_minus_counts_its_window_against_the_memory_budget(kwargs):
-    async def parts():
-        for part in (b"ab\n", b"cd\n", b"ef\n", b"gh\n"):
-            yield part
-
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
-        await run_with_memory(memory, _drain(head_stream(parts(), **kwargs)))
+        await run_with_memory(
+            memory, _drain(head_stream(_four_lines(), **kwargs))
+        )
+
+
+async def _four_lines():
+    for part in (b"ab\n", b"cd\n", b"ef\n", b"gh\n"):
+        yield part
