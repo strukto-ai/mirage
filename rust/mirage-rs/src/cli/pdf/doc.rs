@@ -11,7 +11,8 @@ use super::text::Glyph;
 use crate::task::Host;
 
 /// How deep forms and Type 3 glyphs nest their own resources before the
-/// rest are left unmeasured: past the ten forms deep the reader follows.
+/// rest are left unmeasured: deeper than the reader, which follows forms
+/// ten deep.
 const NESTING: usize = 16;
 
 /// What the streams a page's text decodes come to, measured once a
@@ -110,8 +111,9 @@ impl Doc {
     /// with the workspace asked whether it fits, so a page that would not
     /// is refused before the reader holds it: its fonts' programs and
     /// character maps, then its content, kept as it inflates, then each
-    /// form the content draws, the streams the reader decodes itself
-    /// counted once a document. The reader's own path keeps the last
+    /// form the content may draw, the streams the reader decodes itself
+    /// decoded once a document and counted once a page. The reader's own
+    /// path keeps the last
     /// sixty-four pages' contents whole, so only an encrypted document,
     /// which only it decrypts, goes that way.
     pub(crate) async fn content(
@@ -195,7 +197,7 @@ impl Doc {
     async fn decoded(&self, host: &Host, stream: &Object, held: u64) -> Option<Vec<u8>> {
         if let Object::Stream { dict, data } = stream {
             if flate_only(dict) && !dict.contains_key("DecodeParms") {
-                match inflate(host, data, held).await.0 {
+                match inflate(host, data, held).await {
                     Inflated::Whole(data) => return Some(data),
                     Inflated::Dropped => return None,
                     Inflated::Broken => {}

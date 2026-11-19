@@ -193,6 +193,11 @@ def flate(data: bytes, extra: bytes = b"") -> bytes:
     return stream(zlib.compress(data, 9), b"/Filter /FlateDecode " + extra)
 
 
+def raw_deflate(data: bytes) -> bytes:
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    return packer.compress(data) + packer.flush()
+
+
 def lzw_run(longest: int) -> bytes:
     """An LZW stream of spaces: each code one longer than the last until
     the table fills, then the longest one `longest` times."""
@@ -282,6 +287,27 @@ BOMBS = {
         b"/ToUnicode 6 0 R >>",
         flate(BIG),
     ),
+    "descendant font file": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H "
+        b"/DescendantFonts [6 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo "
+        b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) "
+        b"/Supplement 0 >> /FontDescriptor 7 0 R >>",
+        b"<< /Type /FontDescriptor /FontName /Foo /Flags 32 "
+        b"/FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 "
+        b"/Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>",
+        flate(BIG),
+    ),
+    "content behind a broken zlib header": one_page(
+        stream(
+            b"\x78\x00" + raw_deflate(HELLO + BIG),
+            b"/Filter /FlateDecode ",
+        ),
+        FONT_ONLY,
+        FONT,
+    ),
     "font file": one_page(
         flate(HELLO),
         FONT_ONLY,
@@ -360,6 +386,26 @@ async def test_a_form_behind_a_predictor_counts_each_form_it_names():
             b"/Resources << /XObject << /X1 7 0 R >> >> " % len(draws),
         ),
         flate(BIG, b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "),
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        1,
+        "",
+        "pdftotext: memory exhausted\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_forms_that_fit_one_at_a_time_are_refused_together():
+    form = flate(
+        HELLO + b" " * (10 << 20),
+        b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] ",
+    )
+    page = one_page(
+        flate(HELLO + b"/X0 Do /X1 Do\n"),
+        b"<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R /X1 7 0 R >> >>",
+        FONT,
+        form,
+        form,
     )
     assert await capped(page, "pdftotext /w/d.pdf -") == (
         1,

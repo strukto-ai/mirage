@@ -378,6 +378,27 @@ async def test_a_document_that_parses_past_max_memory_is_refused():
 
 
 @pytest.mark.asyncio
+async def test_parts_that_fit_one_at_a_time_are_refused_together():
+    pad = b" " * (10 << 20)
+    rels = (
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/'
+        b'2006/relationships"><Relationship Id="rId1" Type="http://schemas.'
+        b'openxmlformats.org/officeDocument/2006/relationships/styles" '
+        b'Target="styles.xml"/></Relationships>'
+    )
+    styles = (
+        b'<w:styles xmlns:w="http://schemas.openxmlformats.org/'
+        b'wordprocessingml/2006/main">' + pad + b"</w:styles>"
+    )
+    document = word(
+        b"<w:p/>" + pad,
+        {"word/_rels/document.xml.rels": rels, "word/styles.xml": styles},
+    )
+    [got] = await office_under_cap(document, "office get /w/d.docx")
+    assert got == (1, b"", b"office get: memory exhausted\n")
+
+
+@pytest.mark.asyncio
 async def test_a_document_that_fits_max_memory_reads():
     [got] = await office_under_cap(
         word(b"<w:p/>" * 1_000), "office get /w/d.docx /body/p[1000]"

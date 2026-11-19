@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { randomBytes } from 'node:crypto'
-import { brotliCompressSync, deflateSync } from 'node:zlib'
+import { brotliCompressSync, deflateRawSync, deflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -282,6 +282,22 @@ const BOMBS: Record<string, Uint8Array> = {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>',
     flate(BIG),
   ),
+  'descendant font file': onePage(
+    flate(ENC.encode(HELLO)),
+    FONT_ONLY,
+    '<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H /DescendantFonts [6 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 7 0 R >>',
+    '<< /Type /FontDescriptor /FontName /Foo /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>',
+    flate(BIG),
+  ),
+  'content behind a broken zlib header': onePage(
+    stream(
+      joined(new Uint8Array([0x78, 0x00]), deflateRawSync(joined(HELLO, BIG))),
+      '/Filter /FlateDecode ',
+    ),
+    FONT_ONLY,
+    FONT,
+  ),
   'font file': onePage(
     flate(ENC.encode(HELLO)),
     FONT_ONLY,
@@ -343,6 +359,25 @@ describe('under max_memory', () => {
           '/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /X1 7 0 R >> >> ',
       ),
       flate(BIG, '/Type /XObject /Subtype /Form /BBox [0 0 612 792] '),
+    )
+    expect(await capped(page, 'pdftotext /w/d.pdf -')).toEqual([
+      1,
+      '',
+      'pdftotext: memory exhausted\n',
+    ])
+  })
+
+  it('refuses forms that fit one at a time together', async () => {
+    const form = flate(
+      joined(HELLO, ' '.repeat(10 << 20)),
+      '/Type /XObject /Subtype /Form /BBox [0 0 612 792] ',
+    )
+    const page = onePage(
+      flate(ENC.encode(HELLO + '/X0 Do /X1 Do\n')),
+      '<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R /X1 7 0 R >> >>',
+      FONT,
+      form,
+      form,
     )
     expect(await capped(page, 'pdftotext /w/d.pdf -')).toEqual([
       1,

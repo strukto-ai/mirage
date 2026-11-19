@@ -322,6 +322,22 @@ describe('office under max_memory', () => {
     expect(got).toEqual([[1, new Uint8Array(), 'office get: memory exhausted\n']])
   })
 
+  it('refuses parts that fit one at a time together', async () => {
+    const pad = ' '.repeat(10 << 20)
+    const rels =
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+    const styles = `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${pad}</w:styles>`
+    const got = await officeUnderCap(
+      word('<w:p/>' + pad, [
+        ['word/_rels/document.xml.rels', ENC.encode(rels)],
+        ['word/styles.xml', ENC.encode(styles)],
+      ]),
+      'office get /w/d.docx',
+    )
+    expect(got).toEqual([[1, new Uint8Array(), 'office get: memory exhausted\n']])
+  })
+
   it('reads a document that fits', async () => {
     const [[code]] = await officeUnderCap(
       word('<w:p/>'.repeat(1_000)),

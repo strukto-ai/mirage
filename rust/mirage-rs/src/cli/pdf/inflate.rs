@@ -74,10 +74,10 @@ pub(crate) fn flate_only(dict: &HashMap<String, Object>) -> bool {
 /// `packed` inflated a window at a time, the workspace asked after each
 /// window whether `held` and the bytes so far still fit, so a stream that
 /// would not is refused before it is whole, and dropped where pdf_oxide
-/// drops a stream. Returns what it inflated to and its length.
-pub(crate) async fn inflate(host: &Host, packed: &[u8], held: u64) -> (Inflated, u64) {
+/// drops a stream.
+pub(crate) async fn inflate(host: &Host, packed: &[u8], held: u64) -> Inflated {
     if packed.is_empty() {
-        return (Inflated::Whole(Vec::new()), 0);
+        return Inflated::Whole(Vec::new());
     }
     let mut z = Decompress::new(true);
     let mut window = vec![0u8; WINDOW];
@@ -95,29 +95,28 @@ pub(crate) async fn inflate(host: &Host, packed: &[u8], held: u64) -> (Inflated,
             host.ask(Request::Memory { size: held + count }).await;
         }
         if count > MOST_KEPT || count / packed.len() as u64 > RATIO {
-            return (Inflated::Dropped, count);
+            return Inflated::Dropped;
         }
         out.extend_from_slice(&window[..made]);
         match status {
-            Ok(Status::StreamEnd) => return (Inflated::Whole(out), count),
+            Ok(Status::StreamEnd) => return Inflated::Whole(out),
             Ok(_) if made == 0 && z.total_in() == read => {
-                let stopped = at == packed.len() && count > 0;
-                let end = if stopped {
+                return if at == packed.len() && count > 0 {
                     Inflated::Whole(out)
                 } else {
                     Inflated::Broken
                 };
-                return (end, count);
             }
             Ok(_) => {}
-            Err(_) => return (Inflated::Broken, count),
+            Err(_) => return Inflated::Broken,
         }
     }
 }
 
 /// A zlib stream read a window at a time without keeping it, each window
 /// handed to `each` and the workspace asked whether `held` and the bytes
-/// so far still fit; its length, or None when it is no zlib stream.
+/// so far still fit; its length, or None when it is no zlib stream or
+/// breaks partway, where pdf_oxide may read other bytes in its place.
 pub(crate) async fn scan(
     host: &Host,
     packed: &[u8],
@@ -131,7 +130,7 @@ pub(crate) async fn scan(
         total += made;
         host.ask(Request::Memory { size: held + total }).await;
     }
-    (total > 0).then_some(total)
+    (!zlib.failed && total > 0).then_some(total)
 }
 
 /// What decoding `data` through `dict`'s filters comes to, as pdf_oxide
@@ -165,11 +164,7 @@ pub(crate) async fn measure(
             held + current.len() as u64
         };
         let counted = match filter.as_str() {
-            "FlateDecode" => {
-                let zlib = count(host, &mut Zlib::new(&current, true), base).await;
-                let raw = count(host, &mut Zlib::new(&current, false), base).await;
-                Some(zlib.max(raw))
-            }
+            "FlateDecode" => Some(flate(host, &current, base).await),
             "LZWDecode" => {
                 let late = count(host, &mut Lzw::new(&current, 0), base).await;
                 let early = count(host, &mut Lzw::new(&current, 1), base).await;
@@ -202,6 +197,29 @@ pub(crate) async fn measure(
     current.len() as u64
 }
 
+/// The most pdf_oxide's FlateDecode holds of `input`: the zlib stream it
+/// reads first, or, when that fails before it yields, the largest of the
+/// recoveries it then tries in turn: raw deflate from each of the first
+/// twenty bytes, and zlib with a corrupt method fixed.
+async fn flate(host: &Host, input: &[u8], held: u64) -> u64 {
+    let mut zlib = Zlib::new(input, true);
+    let size = count(host, &mut zlib, held).await;
+    if zlib.ended || (!zlib.failed && size > 0) {
+        return size;
+    }
+    let mut most = size;
+    if input.len() >= 2 && input[0] & 0x0F != 8 {
+        let mut fixed = input.to_vec();
+        fixed[0] = (input[0] & 0xF0) | 0x08;
+        most = most.max(count(host, &mut Zlib::new(&fixed, true), held).await);
+    }
+    for offset in 0..input.len().min(20) {
+        let raw = count(host, &mut Zlib::new(&input[offset..], false), held).await;
+        most = most.max(raw);
+    }
+    most
+}
+
 /// A decoder that counts what it would write, a window at a time.
 trait Count {
     /// The bytes the next window comes to, or None once the stream ends
@@ -223,6 +241,10 @@ struct Zlib<'a> {
     input: &'a [u8],
     z: Decompress,
     window: Vec<u8>,
+    /// Whether the stream reached its end marker.
+    ended: bool,
+    /// Whether its bytes broke the format.
+    failed: bool,
 }
 
 impl<'a> Zlib<'a> {
@@ -231,6 +253,8 @@ impl<'a> Zlib<'a> {
             input,
             z: Decompress::new(header),
             window: vec![0u8; WINDOW],
+            ended: false,
+            failed: false,
         }
     }
 }
@@ -249,9 +273,11 @@ impl Count for Zlib<'_> {
             .decompress(&self.input[at..], &mut self.window, FlushDecompress::None);
         let made = self.z.total_out() - wrote;
         match status {
-            Ok(_) if made > 0 => Some(made),
-            _ => None,
+            Ok(Status::StreamEnd) => self.ended = true,
+            Err(_) => self.failed = true,
+            Ok(_) => {}
         }
+        (made > 0).then_some(made)
     }
 }
 
@@ -326,7 +352,7 @@ impl Count for Lzw<'_> {
                 continue;
             }
             let length = match self.previous {
-                _ if code < self.next && code != 256 && code != 257 => self.lengths[code],
+                _ if code < self.next => self.lengths[code],
                 Some(previous) if code == self.next => self.lengths[previous] + 1,
                 _ => {
                     self.done = true;
@@ -369,9 +395,6 @@ impl Count for RunLength<'_> {
             }
             self.at += read;
             made += wrote as u64;
-        }
-        if made == 0 {
-            self.at = self.input.len();
         }
         (made > 0).then_some(made)
     }
