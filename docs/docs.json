@@ -341,7 +341,7 @@
             "group": "Machines",
             "pages": [
               "home/setup/machine/overview",
-              "home/setup/machine/local",
+              "home/setup/machine/machine_files",
               "home/setup/machine/in_process",
               {
                 "group": "Runtimes",
@@ -1218,6 +1218,10 @@
     {
       "source": "/home/setup/runtime/custom",
       "destination": "/home/setup/machine/overview"
+    },
+    {
+      "source": "/home/setup/machine/local",
+      "destination": "/home/setup/machine/machine_files"
     },
     {
       "source": "/python/runtime/python",

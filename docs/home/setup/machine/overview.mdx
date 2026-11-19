@@ -199,7 +199,7 @@ python3 /tmp/fix.py
 # patched
 ```
 
-See [Machine files](/home/setup/machine/local) for how Mirage reaches those
+See [Machine Files](/home/setup/machine/machine_files) for how Mirage reaches those
 files and what runs where.
 
 ## Providers
@@ -265,7 +265,7 @@ there yourself. Once connected, run the shared
   and a command that would exit 0 exits 1.
 - The root mount and `/dev` are not served, nor a path the machine holds
   itself: `/tmp` and `/dev/shm` show the machine's own
-  files ([Machine files](/home/setup/machine/local)), so they stay its own.
+  files ([Machine Files](/home/setup/machine/machine_files)), so they stay its own.
 
 Mirage refuses to run a program when it cannot enforce the session's file
 rules: restrictions on `/`, `/dev` or a path the machine holds itself, hiding a mount when that would expose

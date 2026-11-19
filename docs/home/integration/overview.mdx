@@ -52,7 +52,7 @@ reads only those files.
 | <img noZoom src="/images/qdrant-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Qdrant](/python/vfs/qdrant#integration) | Every search for ASCII text | None |
 | <img noZoom src="/images/lancedb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[LanceDB](/python/vfs/lancedb#integration) | Every search | None |
 | <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | Every search, on a server that runs commands | None |
-| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | Every search | None |
+| <Icon icon="server" size={14} /> [Machine Files](/python/vfs/machine#integration) | Every search | None |
 | <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SQL with SQLite](/python/vfs/sql) | Every search for ASCII text | None |
 
 - A search a VFS does not speed up reads the files itself, up to the mount's
@@ -88,7 +88,7 @@ count, without reading the whole file.
 | <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Notion](/python/vfs/notion#integration) | `head -n` | Renders only the first rows |
 | <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/python/vfs/slack#integration), <img noZoom src="/images/discord-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Discord](/python/vfs/discord#integration) | `tail -f` | Each new message as it is posted |
 | <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | `wc -l`, `tail -f` | The same command on the server |
-| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | `head -n`, `tail -n`, `wc -l` | The same command on the machine |
+| <Icon icon="server" size={14} /> [Machine Files](/python/vfs/machine#integration) | `head -n`, `tail -n`, `wc -l` | The same command on the machine |
 
 ### Checksums
 
@@ -103,7 +103,7 @@ Other files are hashed by reading them.
 | <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[HF Models](/python/vfs/hf_models#integration), <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Datasets](/python/vfs/hf_datasets#integration), <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Spaces](/python/vfs/hf_spaces#integration) | `sha256sum` | The LFS hash, for files in LFS |
 | <img noZoom src="/images/nextcloud-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Nextcloud](/python/vfs/nextcloud#integration) | `md5sum`, `sha1sum`, `sha256sum` | The hash the uploading client stored |
 | <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | `md5sum` and the `sha*sum` commands | The same command on the server |
-| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | `md5sum` and the `sha*sum` commands | The same command on the machine |
+| <Icon icon="server" size={14} /> [Machine Files](/python/vfs/machine#integration) | `md5sum` and the `sha*sum` commands | The same command on the machine |
 
 ### Walks
 
@@ -120,4 +120,4 @@ one call, not one listing per folder.
 | <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GridFS](/python/vfs/gridfs#integration) | One `fs.files` query |
 | <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SQL](/python/vfs/sql) | One query |
 | <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | One `find` on the server |
-| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | One `find` on the machine |
+| <Icon icon="server" size={14} /> [Machine Files](/python/vfs/machine#integration) | One `find` on the machine |

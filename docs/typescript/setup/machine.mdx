@@ -1,13 +1,18 @@
 ---
-title: Machine files
+title: Machine Files
 icon: hard-drive
 description: Mount a machine's own files from Node.
+tag: "Experimental"
 ---
+
+<Note>
+  Machine Files is experimental: its config and behavior may still change.
+</Note>
 
 `MachineVFS` shows the files of the workspace's machines at a prefix, reached
 through the exec each machine's handle already holds. A workspace with
 machines mounts `/tmp` and `/dev/shm` this way, and `'@<machine>'` picks one
-machine's; see [Machine files](/home/setup/machine/local).
+machine's; see [Machine Files](/home/setup/machine/machine_files).
 
 ## Install
 
@@ -59,10 +64,10 @@ is none of them is refused when the workspace is built.
 - **Placement:** on several machines a read goes to the machine holding the
   name and a new name lands on the machine running the command's program,
   else on `defaultMachine`. See
-  [Several machines](/home/setup/machine/local#several-machines).
+  [Several machines](/home/setup/machine/machine_files#several-machines).
 - **Commands:** a command whose every path is one machine's own runs on that
   machine whole. See
-  [Where a command runs](/home/setup/machine/local#where-a-command-runs).
+  [Where a command runs](/home/setup/machine/machine_files#where-a-command-runs).
 - **Browser:** a page has no machines, so `@struktoai/mirage-browser` mounts
   none of this.
 
