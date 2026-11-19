@@ -823,7 +823,9 @@ async def run_case(
             cross-check, which is worth its extra dry run only where a
             verdict exists to predict. A case whose verdict the command
             plane cannot reach says so in ``explain_blind`` and is left
-            out, never silently.
+            out, never silently. A case that sets ``explain`` runs the
+            cross-check on a target without reasons, for a session it
+            declares itself.
         faults (str | None): the target's kit fake for this run, where
             a case's ``faults`` are armed for the length of its command;
             None for a target with none.
@@ -857,7 +859,7 @@ async def run_case(
         await answer_decisions(ws, case["answer"])
     predicted = None
     recorded = 0
-    if reasons and not case.get("explain_blind"):
+    if (reasons or case.get("explain")) and not case.get("explain_blind"):
         before = len(ws.decisions.pending())
         predicted = await predicted_refusal(ws, case)
         # Counted here, not after the run: the run records its own
@@ -889,7 +891,7 @@ async def run_case(
     out = raw_out.decode(errors="replace")
     err = raw_err.decode(errors="replace")
     notes = undecodable({"stdout": raw_out, "stderr": raw_err}) + unspent
-    if reasons and not case.get("explain_blind"):
+    if (reasons or case.get("explain")) and not case.get("explain_blind"):
         notes += explain_notes(predicted, recorded, result.exit_code, out, err)
     check_out = None
     if read_paths:

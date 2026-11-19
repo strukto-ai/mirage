@@ -71,6 +71,9 @@ export interface Case {
   // refusal from the dispatcher below the gate, a function the same line
   // defines. Named rather than silently omitted.
   explain_blind?: string
+  // Run the dry run on this case even on a target whose documents carry no
+  // reason, for a session the case declares with `session_profiles`.
+  explain?: boolean
   scenario?: ScenarioStep[]
   // Fault plans armed on the target's kit fake for the length of the
   // command, in the shape its /_kit/faults reads; every plan must be spent.
@@ -470,7 +473,7 @@ export async function runCase(
   }
   const start = performance.now()
   if (c.answer !== undefined) await answerDecisions(ws, c.answer)
-  const checks = reasons.length > 0 && c.explain_blind === undefined
+  const checks = (reasons.length > 0 || c.explain === true) && c.explain_blind === undefined
   let predicted: [number, string] | null = null
   let recorded = 0
   if (checks) {
