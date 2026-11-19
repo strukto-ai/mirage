@@ -7272,7 +7272,7 @@
           "expect": {
             "value": {
               "exit_code": 1,
-              "stdout": "6\t/data/d/a.txt\n5\t/data/d/b.txt\n11\t/data/d\n",
+              "stdout": "4\t/data/d/a.txt\n4\t/data/d/b.txt\n12\t/data/d\n",
               "stderr": "du: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
