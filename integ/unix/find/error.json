@@ -1532,7 +1532,7 @@
         "ram",
         "disk"
       ],
-      "command": "printf '\\0/data/nope\\0' > /data/f0.lst && find -files0-from /data/f0.lst; echo rc=$?; rm /data/f0.lst",
+      "command": "printf '\\0/data/nope\\0' > /data/f0.lst && LC_ALL=C find -files0-from /data/f0.lst; echo rc=$?; rm /data/f0.lst",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
