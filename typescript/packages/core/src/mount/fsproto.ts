@@ -20,17 +20,10 @@ import { READ, type OpenMode } from '../runtime/handles/index.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { posixNormpath } from '../utils/path.ts'
-import { S_IFDIR, S_IFMT, S_IFREG } from '../utils/stat_view.ts'
+import { S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
-import {
-  FSPROTO_FETCH_DIR_BYTES,
-  FSPROTO_FETCH_FILE_BYTES,
-  FSPROTO_FRAME_BYTES,
-  FSPROTO_TREE_ENTRIES,
-  FSPROTO_VERSION,
-  FSPROTO_WHOLE_BYTES,
-} from './constants.ts'
+import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './constants.ts'
 import { MountCore } from './core.ts'
 import { messageCondition } from './errors.ts'
 import type { MountAttrs, ServedPrefix } from './types.ts'
@@ -67,9 +60,8 @@ export function encodeFrame(head: Head, body: Uint8Array = EMPTY): Uint8Array {
 }
 
 /**
- * A reply as a frame the client accepts: one past `limit` goes without the
- * folders a tree answer adds (`d`), and is refused as `EFBIG` when it is
- * still too large, so the pipe stays usable. Mirrors Python's `bounded`.
+ * A reply as a frame the client accepts: one past `limit` is refused as
+ * `EFBIG`, so the pipe stays usable. Mirrors Python's `bounded`.
  */
 export function bounded(
   head: Head,
@@ -78,11 +70,6 @@ export function bounded(
 ): Uint8Array {
   const frame = encodeFrame(head, body)
   if (frame.byteLength - 4 <= limit) return frame
-  if ('d' in head) {
-    const rest = { ...head }
-    delete rest.d
-    return bounded(rest, body, limit)
-  }
   return encodeFrame({ id: head.id, errno: 'EFBIG' })
 }
 
@@ -183,7 +170,8 @@ function condition(err: unknown): string {
  * otherwise (`k`): only for a backend nothing but the workspace changes
  * (`BaseVFS.soleWriter`), whose every change this server pushes to the client as
  * it is noted, and `begin` waits until the client has applied them all.
- * Mirrors Python's `FsprotoServer`.
+ * While a policy judges the session's file calls, no answer is kept, so
+ * every call a program makes reaches it. Mirrors Python's `FsprotoServer`.
  */
 export class FsprotoServer {
   private readonly core: MountCore
@@ -196,6 +184,8 @@ export class FsprotoServer {
   private flushing = false
   private hid = 0
   private ended = false
+  private keeping = false
+  private readonly sessionId: string
 
   /**
    * @param run runs one request, with a line's write admission.
@@ -209,6 +199,7 @@ export class FsprotoServer {
     private readonly served: ServedPrefix | null = null,
   ) {
     this.core = new MountCore(files, { session })
+    this.sessionId = session.sessionId
   }
 
   /** Answer the client's requests until it closes the pipe. */
@@ -252,7 +243,9 @@ export class FsprotoServer {
 
   /**
    * Wait until the client has applied every change noted so far: the
-   * barrier a line passes before its program starts.
+   * barrier a line passes before its program starts. Once a policy judges
+   * the session's file calls, the client first forgets all it kept, so
+   * each call the program makes reaches that policy.
    *
    * @returns false when the client did not answer within
    *   BEGIN_WAIT_SECONDS or its pipe ended first, so the line must not run
@@ -260,6 +253,11 @@ export class FsprotoServer {
    */
   async begin(): Promise<boolean> {
     if (this.ended || this.writer === null) return true
+    const served = this.served
+    if (served !== null && this.keeping && (await this.watching())) {
+      this.keeping = false
+      this.invalid.add(served.prefix)
+    }
     this.flush()
     this.hid += 1
     const hid = this.hid
@@ -338,34 +336,6 @@ export class FsprotoServer {
     })
   }
 
-  /**
-   * The listings of the kept folders under `root`, breadth first, each
-   * whole and only while they fit in FSPROTO_TREE_ENTRIES entries. Mirrors
-   * Python's `_tree`.
-   */
-  private async tree(root: string, rows: [string, MountAttrs][]): Promise<[string, unknown[]][]> {
-    const folders: [string, unknown[]][] = []
-    let count = rows.length
-    const isDir = (a: MountAttrs): boolean => (a.mode & S_IFMT) === S_IFDIR
-    const queue = rows.filter(([, a]) => isDir(a)).map(([name]) => child(root, name))
-    while (queue.length > 0 && count < FSPROTO_TREE_ENTRIES) {
-      const folder = queue.shift()
-      if (folder === undefined || !this.kept(folder)) continue
-      let below: [string, MountAttrs][]
-      try {
-        below = shown(await this.core.listing(folder))
-      } catch (err) {
-        console.debug(`fsproto: listing ${folder} failed`, err)
-        continue
-      }
-      if (count + below.length > FSPROTO_TREE_ENTRIES) continue
-      folders.push([folder, this.rows(folder, below, true)])
-      count += below.length
-      for (const [name, a] of below) if (isDir(a)) queue.push(child(folder, name))
-    }
-    return folders
-  }
-
   /** `path`, refused as EACCES when it is outside the prefix the client mounts. */
   private inside(path: string): string {
     if (this.served === null || under(path, this.served.prefix)) return path
@@ -376,17 +346,39 @@ export class FsprotoServer {
    * A listing on the wire: in a kept one, a folder another mount serves
    * carries that mount's own `k`. Mirrors Python's `_rows`.
    */
-  private rows(folder: string, rows: [string, MountAttrs][], kept: boolean): unknown[] {
-    return rows.map(([name, a]) => {
+  private async rows(
+    folder: string,
+    rows: [string, MountAttrs][],
+    kept: boolean,
+  ): Promise<unknown[]> {
+    const out: unknown[] = []
+    for (const [name, a] of rows) {
       const row = wire(a)
-      if (kept && (a.mode & S_IFMT) === S_IFDIR && !this.kept(child(folder, name))) row.k = false
-      return [name, row]
-    })
+      if (kept && (a.mode & S_IFMT) === S_IFDIR && !(await this.kept(child(folder, name)))) {
+        row.k = false
+      }
+      out.push([name, row])
+    }
+    return out
   }
 
-  private kept(path: string): boolean {
-    const row = readerOf(this.core.files).owner(path)
-    return row?.soleWriter === true
+  /**
+   * Whether the client may keep its answer about `path`: only on a sole
+   * writer's mount (`BaseVFS.soleWriter`), and never while a policy judges
+   * the session's file calls, which must each reach it. Mirrors Python's
+   * `_kept`.
+   */
+  private async kept(path: string): Promise<boolean> {
+    if (await this.watching()) return false
+    const kept = readerOf(this.core.files).owner(path)?.soleWriter === true
+    this.keeping = this.keeping || kept
+    return kept
+  }
+
+  private async watching(): Promise<boolean> {
+    const watched = this.served?.watched
+    if (watched === undefined || watched === null) return false
+    return watched(this.sessionId)
   }
 
   private pathOf(fd: number): string {
@@ -426,44 +418,19 @@ export class FsprotoServer {
         return [{ proto: FSPROTO_VERSION }, EMPTY]
       case 'getattr': {
         const fd = num(h.fh)
-        if (fd === null) return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+        if (fd === null)
+          return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
         const held = this.pathOf(fd)
-        return [{ a: wire(await core.fgetattr(held, fd)), k: this.kept(held) }, EMPTY]
+        return [{ a: wire(await core.fgetattr(held, fd)), k: await this.kept(held) }, EMPTY]
       }
       case 'list': {
-        const kept = this.kept(path)
+        const kept = await this.kept(path)
         const rows = shown(await core.listing(path))
-        const head: Head = { e: this.rows(path, rows, kept), k: kept }
-        if (h.deep === true && kept) head.d = await this.tree(path, rows)
-        return [head, EMPTY]
-      }
-      case 'fetchdir': {
-        if (!this.kept(path)) return [{ k: false, f: [] }, EMPTY]
-        const files: [string, Head][] = []
-        const parts: Uint8Array[] = []
-        let total = 0
-        for (const [name, a] of await core.listing(path)) {
-          if ((a.mode & S_IFMT) !== S_IFREG || a.size > FSPROTO_FETCH_FILE_BYTES) continue
-          if (total + a.size > FSPROTO_FETCH_DIR_BYTES) continue
-          try {
-            const [now, data] = await this.whole(child(path, name))
-            if (
-              data.byteLength > FSPROTO_FETCH_FILE_BYTES ||
-              total + data.byteLength > FSPROTO_FETCH_DIR_BYTES
-            )
-              continue
-            files.push([name, wire(now)])
-            parts.push(data)
-            total += data.byteLength
-          } catch (err) {
-            console.debug(`fsproto: prefetching ${child(path, name)} failed:`, err)
-          }
-        }
-        return [{ k: true, f: files }, concat(parts)]
+        return [{ e: await this.rows(path, rows, kept), k: kept }, EMPTY]
       }
       case 'readall': {
         const [a, data] = await this.whole(path)
-        return [{ a: wire(a), k: this.kept(path) }, data]
+        return [{ a: wire(a), k: await this.kept(path) }, data]
       }
       case 'readlink':
         return [{ target: await core.readlink(path) }, EMPTY]
@@ -478,7 +445,7 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode)
-        return [{ fh: fd, k: this.kept(path) }, EMPTY]
+        return [{ fh: fd, k: await this.kept(path) }, EMPTY]
       }
       case 'create': {
         const mode: OpenMode = {
@@ -491,7 +458,7 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode, num(h.mode))
-        return [{ fh: fd, a: wire(await core.fgetattr(path, fd)), k: this.kept(path) }, EMPTY]
+        return [{ fh: fd, a: wire(await core.fgetattr(path, fd)), k: await this.kept(path) }, EMPTY]
       }
       case 'read': {
         const fd = whole(h.fh, -1)
@@ -521,7 +488,7 @@ export class FsprotoServer {
       }
       case 'mkdir':
         await core.mkdir(path, num(h.mode))
-        return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+        return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
       case 'unlink':
         await core.unlink(path)
         return [{}, EMPTY]
@@ -530,7 +497,7 @@ export class FsprotoServer {
         return [{}, EMPTY]
       case 'symlink':
         await core.symlink(typeof h.target === 'string' ? h.target : '', path)
-        return [{ a: wire(await core.getattr(path)), k: this.kept(path) }, EMPTY]
+        return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
       case 'rename': {
         const from = this.inside(workspacePath(h.from))
         const to = this.inside(workspacePath(h.to))
@@ -562,7 +529,7 @@ export class FsprotoServer {
           )
         }
         const attrs = fd === null ? await core.getattr(path) : await core.fgetattr(target, fd)
-        return [{ a: wire(attrs), k: this.kept(target) }, EMPTY]
+        return [{ a: wire(attrs), k: await this.kept(target) }, EMPTY]
       }
       case 'statfs': {
         const s = core.statfs()

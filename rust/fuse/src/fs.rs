@@ -135,11 +135,9 @@ struct State {
     next_ino: u64,
     known: HashMap<String, Known>,
     listings: HashMap<String, Listing>,
-    covered: HashSet<String>,
     content: HashMap<String, Content>,
     order: VecDeque<String>,
     bytes: usize,
-    fetched: HashSet<String>,
     opens: HashMap<u64, Open>,
     dirs: HashMap<u64, Stream>,
     next_fh: u64,
@@ -161,8 +159,7 @@ fn entries(rows: Option<&Value>, kept: bool) -> Vec<(String, Attrs)> {
 }
 
 impl State {
-    /// Keep `dir`'s listing and each entry's attributes; a folder a tree
-    /// answer listed counts as covered, so it is listed alone after.
+    /// Keep `dir`'s listing and each entry's attributes.
     fn listed(&mut self, dir: &str, rows: &[(String, Attrs)], kept: bool, at: Instant) {
         for (name, attrs) in rows {
             self.known.insert(
@@ -173,7 +170,6 @@ impl State {
                 },
             );
         }
-        self.covered.insert(dir.to_string());
         self.listings.insert(
             dir.to_string(),
             Listing {
@@ -382,7 +378,6 @@ impl Shared {
             let hit = |p: &str| everything || reaches(changed, p);
             st.known.retain(|p, _| !hit(p));
             st.listings.retain(|p, _| !hit(p));
-            st.fetched.retain(|p| !hit(p));
             let gone: Vec<String> = st.content.keys().filter(|p| hit(p)).cloned().collect();
             for p in gone {
                 if let Some(c) = st.content.remove(&p) {
@@ -392,7 +387,6 @@ impl Shared {
             st.order.retain(|p| !hit(p));
             if let Some((dir, _)) = split(changed) {
                 st.listings.remove(&dir);
-                st.fetched.remove(&dir);
                 if let Some(&ino) = st.inodes.get(&dir) {
                     notes.push(Note::Inode(ino));
                 }
@@ -518,7 +512,6 @@ impl MirageFs {
         }
         if let Some((dir, _)) = split(path) {
             st.listings.remove(&dir);
-            st.fetched.remove(&dir);
             st.known.remove(&dir);
             for (folder, listed, _) in st.dirs.values_mut() {
                 if *folder == dir {
@@ -620,20 +613,19 @@ impl MirageFs {
     }
 
     /// `dir`'s entries with their attributes, from a kept listing or the
-    /// host, and the epoch they hold at. The first listing of a folder
-    /// asks for its tree: a kept mount answers the folders under it too, so
-    /// a walk costs a few round trips, not one per folder. A folder a tree
-    /// answer covered is listed alone after. An answer a forget crossed is
-    /// used once and not kept.
+    /// host, and the epoch they hold at. Only the folder a program lists
+    /// is asked for, so the host's policies see each listing a program
+    /// makes and no other. An answer a forget crossed is used once and not
+    /// kept.
     fn list(&self, dir: &str) -> Result<(Vec<(String, Attrs)>, u64), Errno> {
-        let (deep, asked) = {
+        let asked = {
             let st = self.st();
             if let Some(listing) = st.listings.get(dir).filter(|l| l.fresh()) {
                 return Ok((listing.rows.clone(), st.epoch));
             }
-            (!st.covered.contains(dir), st.epoch)
+            st.epoch
         };
-        let frame = self.call("list", json!({ "path": dir, "deep": deep }), &[])?;
+        let frame = self.call("list", json!({ "path": dir }), &[])?;
         let kept = frame
             .head
             .get("k")
@@ -644,23 +636,7 @@ impl MirageFs {
         if st.epoch != asked {
             return Ok((rows, asked));
         }
-        let now = Instant::now();
-        st.listed(dir, &rows, kept, now);
-        for folder in frame
-            .head
-            .get("d")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(path) = folder.get(0).and_then(Value::as_str) {
-                let below = entries(folder.get(1), kept);
-                st.listed(path, &below, kept, now);
-            }
-        }
-        if deep {
-            st.covered.insert(dir.to_string());
-        }
+        st.listed(dir, &rows, kept, Instant::now());
         Ok((rows, asked))
     }
 
@@ -699,59 +675,6 @@ impl MirageFs {
             );
         }
         Ok((data, now))
-    }
-
-    /// Bring the small files of `dir` into the cache in one request, once
-    /// until a change reaches the folder; an answer a forget crossed is
-    /// dropped, for a later open to ask again.
-    fn prefetch(&self, dir: &str) {
-        let asked = {
-            let mut st = self.st();
-            if !st.fetched.insert(dir.to_string()) {
-                return;
-            }
-            st.epoch
-        };
-        let Ok(frame) = self.call("fetchdir", json!({ "path": dir }), &[]) else {
-            return;
-        };
-        let kept = frame
-            .head
-            .get("k")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if !kept {
-            return;
-        }
-        let mut st = self.st();
-        if st.epoch != asked {
-            st.fetched.remove(dir);
-            return;
-        }
-        let now = Instant::now();
-        let mut at = 0usize;
-        for row in frame
-            .head
-            .get("f")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let (Some(name), Some(attrs)) = (
-                row.get(0).and_then(Value::as_str),
-                row.get(1).and_then(|a| Attrs::parse(a, true)),
-            ) else {
-                return;
-            };
-            let end = at + attrs.size as usize;
-            let Some(bytes) = frame.body.get(at..end) else {
-                return;
-            };
-            let path = child(dir, name);
-            st.store(&path, attrs.version(), Arc::new(bytes.to_vec()));
-            st.known.insert(path, Known { attrs, at: now });
-            at = end;
-        }
     }
 
     fn opened(
@@ -1179,16 +1102,10 @@ impl Filesystem for MirageFs {
                 let fh = self.opened(&path, None, Some((data, attrs)), false);
                 return reply.opened(FileHandle(fh), FopenFlags::FOPEN_KEEP_CACHE);
             }
-            if let Some((dir, _)) = split(&path) {
-                self.prefetch(&dir);
-            }
-            let held = match self.cached(&path, &attrs) {
-                Some(data) => Some((data, attrs)),
-                None => match self.whole(&path, attrs) {
-                    Ok(held) => Some(held),
-                    Err(err) if err == Errno::EFBIG => None,
-                    Err(err) => return reply.error(err),
-                },
+            let held = match self.whole(&path, attrs) {
+                Ok(held) => Some(held),
+                Err(err) if err == Errno::EFBIG => None,
+                Err(err) => return reply.error(err),
             };
             if let Some(held) = held {
                 let fh = self.opened(&path, None, Some(held), false);
@@ -1792,7 +1709,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_answer_keeps_each_folder_listed_and_covered() {
+    fn a_listing_keeps_each_entry_it_names() {
         let rows = entries(
             Some(&json!([["a.txt", {"m": 0o100644, "s": 1}], ["sub", {"m": 0o040755}], ["bad"]])),
             true,
@@ -1803,7 +1720,6 @@ mod tests {
         );
         let mut st = State::default();
         st.listed("/w/sub", &rows, true, Instant::now());
-        assert!(st.covered.contains("/w/sub"));
         assert!(st.listings["/w/sub"].names.contains("a.txt"));
         assert_eq!(st.known["/w/sub/a.txt"].attrs.size, 1);
     }

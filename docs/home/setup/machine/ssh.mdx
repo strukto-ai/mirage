@@ -94,6 +94,8 @@ Python on the machine too.
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the machine needs `sshfs`, and
 passwordless `sudo` for a mountpoint its user cannot create (`/data`).
+With `mirage`, it needs `mirage-fuse` on its `PATH` or in
+`~/.mirage/bin`, `fuse3`, and the same `sudo`.
 
 Without `mount_type`, two ways:
 

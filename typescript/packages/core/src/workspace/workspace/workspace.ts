@@ -712,6 +712,7 @@ export class Workspace {
       this.processTable,
       this.registry.changes,
       (machine) => this.localPrefixes(machine),
+      (sessionId) => this.watched(sessionId),
     )
     this.machineTable = new MachineTable(
       handles,
@@ -908,6 +909,21 @@ export class Workspace {
         (entry) => entry.vfs instanceof MachineVFS && entry.vfs.showsOwn(machine, entry.prefix),
       )
       .map((entry) => entry.prefix)
+  }
+
+  /**
+   * Whether a policy judges `sessionId`'s file calls (`preVfs` or
+   * `postVfs`), so a machine keeps none of them. Mirrors Python's
+   * `_watched`.
+   *
+   * @param sessionId the session a machine is served as.
+   */
+  private async watched(sessionId: string): Promise<boolean> {
+    const policies = this.registry.policies
+    return (
+      (await policies.wantsFor('preVfs', sessionId)) ||
+      (await policies.wantsFor('postVfs', sessionId))
+    )
   }
 
   /**

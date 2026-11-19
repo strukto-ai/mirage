@@ -29,6 +29,7 @@ from mirage.mount.fsproto import (
     encode_frame,
 )
 from mirage.mount.types import ServedPrefix
+from mirage.policy import Action, Policy, VfsContext
 from mirage.utils.clock import ManualClock
 
 
@@ -139,22 +140,13 @@ async def test_a_ram_mount_s_answers_are_kept():
 
 
 @pytest.mark.asyncio
-async def test_a_deep_listing_carries_the_folders_under_it():
+async def test_a_listing_answers_only_the_folder_asked_for():
     ws, server, end, serving = await served()
     await ws.vfs.mkdir("/notes/sub")
-    await ws.vfs.mkdir("/notes/sub/deeper")
     await ws.vfs.write("/notes/sub/a.txt", b"a")
-    await ws.vfs.write("/notes/sub/deeper/b.txt", b"b")
-    deep = await end.call({"op": "list", "path": "/notes", "deep": True})
-    assert [name for name, _ in deep.head["e"]] == ["plan.txt", "sub"]
-    assert [
-        (folder, [name for name, _ in rows]) for folder, rows in deep.head["d"]
-    ] == [
-        ("/notes/sub", ["a.txt", "deeper"]),
-        ("/notes/sub/deeper", ["b.txt"]),
-    ]
-    alone = await end.call({"op": "list", "path": "/notes"})
-    assert "d" not in alone.head
+    listed = await end.call({"op": "list", "path": "/notes", "deep": True})
+    assert [name for name, _ in listed.head["e"]] == ["plan.txt", "sub"]
+    assert "d" not in listed.head
     await end.end(serving)
 
 
@@ -235,16 +227,96 @@ async def test_setattr_truncates_and_answers_the_new_size():
 
 
 @pytest.mark.asyncio
-async def test_a_folder_of_small_files_prefetches_in_one_reply():
+async def test_no_request_reads_ahead_of_the_program():
     ws, server, end, serving = await served()
-    await ws.vfs.write("/notes/b.txt", b"bee")
     fetched = await end.call({"op": "fetchdir", "path": "/notes"})
-    assert [(name, a["s"]) for name, a in fetched.head["f"]] == [
-        ("b.txt", 3),
-        ("plan.txt", 4),
-    ]
-    assert fetched.body == b"beeplan"
+    assert "errno" in fetched.head
+    assert fetched.body == b""
     await end.end(serving)
+
+
+class Watch:
+    """Whether a policy judges the session's file calls, as a test sets
+    it."""
+
+    def __init__(self) -> None:
+        self.on = False
+        self.asked: list[str] = []
+
+    async def __call__(self, session_id: str) -> bool:
+        self.asked.append(session_id)
+        return self.on
+
+
+async def watched(watch: Watch):
+    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/notes/plan.txt", b"plan")
+    await ws.session("agent")
+    server = FsprotoServer(
+        ws.vfs,
+        ws.get_session("agent"),
+        None,
+        ServedPrefix("/notes", "dev", RecentChanges(ManualClock(0), 1), watch),
+    )
+    end = Client()
+    serving = asyncio.create_task(server.serve(end.reader, end))
+    return server, end, serving
+
+
+@pytest.mark.asyncio
+async def test_while_a_policy_judges_file_calls_nothing_is_kept():
+    watch = Watch()
+    watch.on = True
+    server, end, serving = await watched(watch)
+    stat = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    listed = await end.call({"op": "list", "path": "/notes"})
+    whole = await end.call({"op": "readall", "path": "/notes/plan.txt"})
+    assert (stat.head["k"], listed.head["k"], whole.head["k"]) == (
+        False,
+        False,
+        False,
+    )
+    assert set(watch.asked) == {"agent"}
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_comes_drops_all_the_client_kept_first():
+    watch = Watch()
+    server, end, serving = await watched(watch)
+    stat = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert stat.head["k"] is True
+    watch.on = True
+    barrier = asyncio.create_task(server.begin())
+    await end.until(
+        lambda: any(f.head.get("op") == "begin" for f in end.pushes)
+    )
+    assert end.pushes[0].head == {"push": "inval", "paths": ["/notes"]}
+    begin = next(f for f in end.pushes if f.head.get("op") == "begin")
+    end.send({"hid": begin.head["hid"]})
+    assert await barrier is True
+    end.pushes.clear()
+    again = asyncio.create_task(server.begin())
+    await end.until(lambda: len(end.pushes) > 0)
+    assert end.pushes[0].head.get("op") == "begin"
+    end.send({"hid": end.pushes[0].head["hid"]})
+    assert await again is True
+    await end.end(serving)
+
+
+class Reads(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_says_whether_a_policy_judges_file_calls():
+    plain = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    judged = Workspace(
+        {"/notes": RAMVFS()}, mode=MountMode.WRITE, policies=[Reads()]
+    )
+    assert await plain._watched("") is False
+    assert await judged._watched("") is True
 
 
 @pytest.mark.asyncio
@@ -369,13 +441,13 @@ async def test_a_barrier_the_client_never_answers_is_refused(monkeypatch):
     await end.end(serving)
 
 
-def test_a_reply_past_the_frame_limit_drops_its_tree_then_is_refused():
+def test_a_reply_past_the_frame_limit_is_refused():
     def head(frame: bytes) -> dict:
         (length,) = struct.unpack(">I", frame[4:8])
         return json.loads(frame[8 : 8 + length])
 
-    tree = {"id": 1, "e": [], "k": True, "d": [["/w/a", [["x" * 80, {}]]]]}
-    assert head(bounded(tree, b"", 64)) == {"id": 1, "e": [], "k": True}
+    small = {"id": 1, "e": [], "k": True}
+    assert head(bounded(small, b"", 64)) == small
     big = {"id": 2, "e": [["x" * 80, {}]], "k": True}
     assert head(bounded(big, b"", 64)) == {"id": 2, "errno": "EFBIG"}
 
