@@ -1,0 +1,82 @@
+---
+title: OPFS
+icon: hard-drive
+description: Virtualize the browser's Origin Private File System from the browser.
+---
+
+`OPFSVFS` mounts the
+[Origin Private File System](https://web.dev/articles/origin-private-file-system):
+files persist across page reloads and stay scoped to the page's origin. It
+needs no service and no credentials; see the [OPFS page](/home/setup/opfs).
+
+<Note>
+  Browser only. Node has no OPFS; for local files in Node, use
+  [Disk](/typescript/vfs/disk).
+</Note>
+
+## Install
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+## Configure
+
+```ts
+import { MountMode, OPFSVFS, Workspace } from '@struktoai/mirage-browser'
+
+const opfs = new OPFSVFS({ root: 'mirage' })
+const ws = new Workspace({ '/data': opfs }, { mode: MountMode.WRITE })
+
+const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`capacity: '100MB'` caps the bytes the folder holds; a write past it fails with
+"Disk quota exceeded". See [capacity](/home/setup/vfs#mount-capacity). A mount
+takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `root` | `''` | Folder under the origin's OPFS root, so several workspaces can keep apart. Empty mounts the OPFS root itself. |
+| `capacity` | none | The most bytes the folder may hold, a size like `100MB` or a count of bytes. |
+
+## Layout
+
+```text
+/data/
+  note.txt
+  drafts/
+    plan.md
+```
+
+With `root: 'mirage'`, `/data/drafts/plan.md` is `mirage/drafts/plan.md` in
+the origin's OPFS.
+
+## Behavior
+
+- **Origin scope:** another origin, or another browser profile, sees none of
+  the files.
+
+### Storage and quotas
+
+The browser sets a quota per origin, typically a fraction of free disk. A
+write past it fails with `QuotaExceededError`.
+
+```ts
+const { quota, usage } = await navigator.storage.estimate()
+console.log(`${usage} / ${quota} bytes`)
+```
+
+Under storage pressure the browser may evict the data. For a long-lived
+workspace, ask for persistent storage early:
+
+```ts
+await navigator.storage.persist()
+```
+
+See [TypeScript Limitations: Browser](/typescript/limitations#browser) for
+every browser constraint.

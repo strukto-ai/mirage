@@ -556,6 +556,7 @@ def main() -> int:
         documented = {p.stem for p in directory.glob("*.mdx")} - {
             "index",
             "new",
+            "new-reference",
             "mcp",
         }
         listed = set(BUILTIN_CLI_SPECS) - UNLISTED

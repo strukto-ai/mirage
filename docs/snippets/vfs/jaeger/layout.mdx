@@ -1,0 +1,17 @@
+## Layout
+
+```text
+/jaeger/
+  services/
+    <service>/
+      operations.json
+      traces/
+        <trace-id>.json
+```
+
+- **`services/`:** one folder per service Jaeger reports, including Jaeger's
+  own `jaeger` service when it traces itself.
+- **`operations.json`:** the service's operation records, as Jaeger returns
+  them.
+- **`traces/<trace-id>.json`:** the trace document Jaeger returns, with
+  `traceID`, `spans`, `processes` and `warnings`.

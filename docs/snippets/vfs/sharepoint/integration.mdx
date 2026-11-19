@@ -1,0 +1,17 @@
+## Integration
+
+SharePoint answers these commands through its own API, so fewer files are
+read. See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Microsoft Graph search names the files to read,
+  for whole words, within one document library; a directory above a library
+  is read in full. Every file is read when the search fails or finds nothing.
+  Graph searches the text it extracted, not the bytes, and indexes a write
+  some time after it lands, so it can miss Office files, PDFs, archives, the
+  end of a large file, a word Graph splits differently (`foo.bar`) and recent
+  writes. `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/limits#command-output) reads every file instead.
+- `grep -r` and `rg` without `-w`: every file is read.
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.

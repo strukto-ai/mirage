@@ -1,0 +1,305 @@
+---
+title: Qdrant
+icon: /images/qdrant-logo.svg
+description: Virtualize a Qdrant collection from Node or the browser.
+---
+
+import Integration from '/snippets/vfs/qdrant/integration.mdx'
+
+`QdrantVFS` mounts a [Qdrant](https://qdrant.tech/) collection, read-only, as
+nested folders, one level per group-by payload field. Each point is a `.json`
+payload file, plus a `.txt` text file and an optional blob. Set up the cluster URL and API key as in [Qdrant setup](/home/setup/qdrant).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node @qdrant/js-client-rest
+```
+
+## Configure
+
+```ts
+import { MountMode, QdrantVFS, Workspace } from '@struktoai/mirage-node'
+
+const fashion = new QdrantVFS({
+  url: process.env.QDRANT_URL!,
+  apiKey: process.env.QDRANT_API_KEY!,
+  collection: 'fashion',
+  groupBy: ['gender', 'articleType', 'baseColour'],
+  textField: 'productDisplayName',
+})
+const ws = new Workspace({ '/fashion': fashion }, { mode: MountMode.READ })
+
+const result = await ws.shell('ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.json')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+A self-hosted Qdrant sets `host` and `port` (default `localhost:6333`) instead
+of `url`. `blobField` and `blobExt` serve a payload field of raw or base64
+bytes as a file, such as `3.jpg`.
+
+### Fields
+
+{/* generated: config-table qdrant start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="url" type={"string"} default={"null"}>
+  Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored.
+</ResponseField>
+<ResponseField name="host" type={"string"} default={"'localhost'"}>
+  Host name of the Qdrant server when `url` is unset.
+</ResponseField>
+<ResponseField name="port" type={"number"} default={"6333"}>
+  Port of the Qdrant server when `url` is unset.
+</ResponseField>
+<ResponseField name="https" type={"boolean"} default={"false"}>
+  Connect to `host` over HTTPS when `url` is unset.
+</ResponseField>
+<ResponseField name="apiKey" type={"string"} default={"null"} post={["secret"]}>
+  Qdrant API key, required by Qdrant Cloud.
+</ResponseField>
+<ResponseField name="collection" type={"string"} default={"null"}>
+  Collection the mount root shows; unset lists every collection as a top-level folder.
+</ResponseField>
+<ResponseField name="groupBy" type={"string[]"} default={"[]"}>
+  Payload fields that become folder levels, one per field in order; dotted paths reach nested keys. Unset puts every point's files directly under the collection.
+</ResponseField>
+<ResponseField name="basenameFields" type={"string[]"} default={"[]"}>
+  `groupBy` fields whose folder names keep only the last path or URL segment of the value; two values with one basename under the same parent are refused as a collision.
+</ResponseField>
+<ResponseField name="idField" type={"string"} default={"'id'"}>
+  Key the point id is written under in a point's `.json`; it replaces a payload field of that name.
+</ResponseField>
+<ResponseField name="nameField" type={"string"} default={"null"}>
+  Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone.
+</ResponseField>
+<ResponseField name="textField" type={"string"} default={"null"}>
+  Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`.
+</ResponseField>
+<ResponseField name="blobField" type={"string"} default={"null"}>
+  Payload field of raw or base64 bytes served as `<id>.<blobExt>` and left out of the `.json`; unset adds no blob file.
+</ResponseField>
+<ResponseField name="blobExt" type={"string"} default={"'bin'"}>
+  File extension of the blob file, without the dot.
+</ResponseField>
+<ResponseField name="vectorField" type={"string"} default={"null"}>
+  Payload field holding a copy of the vector, left out of the `.json`.
+</ResponseField>
+<ResponseField name="searchLimit" type={"number"} default={"10"}>
+  Results `search` returns when `--top-k` is not given.
+</ResponseField>
+<ResponseField name="maxRows" type={"number"} default={"1000"}>
+  Most points one folder listing scrolls; points past it are left out, and a group folder lists only the values those points carry.
+</ResponseField>
+<ResponseField name="embeddingModel" type={"string"} default={"'sentence-transformers/all-MiniLM-L6-v2'"}>
+  Model the server embeds a `search` query with under `cloudInference`; it must match the model the stored vectors came from.
+</ResponseField>
+<ResponseField name="cloudInference" type={"boolean"} default={"false"}>
+  Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query.
+</ResponseField>
+<ResponseField name="embed" type={"function"} default={"null"} post={["secret"]}>
+  Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table qdrant end */}
+
+## Authentication
+
+A self-hosted Qdrant needs no key. Qdrant Cloud needs `apiKey`; a read-only
+key, for the cluster or for the mounted collections, is enough to browse.
+
+A filtered listing creates a keyword payload index for a `groupBy` field only
+when Qdrant reports that one is required. A read-only key cannot create it, so
+index those fields first or use a key that manages the collection.
+
+## Layout
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      White/
+        3.json
+        3.txt
+  Women/
+    Tops/
+      Blue/
+        12.json
+        12.txt
+```
+
+Each folder level filters on one `groupBy` field, in order. Once every field is
+bound, the folder lists each point's files, named by point id, or
+`<name>__<id>` with `nameField`. Without `collection`, every collection is a
+top-level folder. A value holding `/` renders as `∕`, and a blank or dot-led
+value is led by `⁄`, so every value keeps its own folder that lists and opens.
+
+- `<id>.txt` is the `textField` value, the text the vector was built from.
+- `<id>.json` is the full payload as compact JSON, without the vector and the
+  blob.
+- `<id>.<blobExt>` is the raw bytes of `blobField`, when it is set.
+
+## Behavior
+
+- **Read-only:** no command changes the collection.
+- **Nested fields:** fields take Qdrant's dotted keys. For LangChain-style
+  chunks, `groupBy: ['metadata.source']`, `basenameFields: ['metadata.source']`,
+  `nameField: 'metadata.page'` and `textField: 'page_content'` show page `004`
+  of `s3://docs/policies/refund-2026.pdf` as
+  `refund-2026.pdf/004__<point-id>.txt`.
+- **File names:** the point id stays in every name, so two equal labels never
+  collide. Only the name a listing shows opens: another label in front of the
+  same id reads as absent. A label that is not a string is written as compact
+  JSON (`true`, `1`, `1e-7`).
+- **Basenames:** `basenameFields` keeps only the last path or URL segment of a
+  value. Two values with one basename under the same parent are refused rather
+  than merged, and opening a basename folder checks every point of its parent,
+  so a second source past `maxRows` is refused rather than hidden. A name over
+  255 bytes is cut to fit and ends in `__` plus the md5 of the whole name.
+- **Listing cap:** one folder listing scrolls at most `maxRows` (1,000) points;
+  points past it are left out. Keep `groupBy` to low-cardinality fields on a
+  large collection.
+
+### Semantic search
+
+The `search` CLI runs Qdrant's vector query. Register
+it on the workspace:
+
+```ts
+import { SEARCH } from '@struktoai/mirage-node'
+
+ws.registerCli('search', SEARCH)
+```
+
+Each hit prints the point's `.txt` path, or its `.json` without `textField`,
+with the similarity score, then the content. `--top-k` defaults to
+`searchLimit` (10). `--threshold` is the lowest score kept. `--method` takes
+only `semantic`.
+
+The query needs a vector. `embed`, a `(text: string) => Promise<number[]>`,
+builds it in-process, so a self-hosted Qdrant works with any model. Without it,
+`cloudInference: true` sends the query text to the cluster, which must have
+inference enabled (Qdrant Cloud) and store vectors from the same
+`embeddingModel`. With neither, `search` refuses the query. `embed` never lands
+in a snapshot, so a restored mount needs a fresh `QdrantVFS`.
+
+## Browser
+
+The same `QdrantVFS` runs in the browser from `@struktoai/mirage-browser`.
+
+```bash
+npm install @struktoai/mirage-browser @qdrant/js-client-rest
+```
+
+```ts
+import { MountMode, QdrantVFS, Workspace } from '@struktoai/mirage-browser'
+
+const fashion = new QdrantVFS({
+  url: 'https://xyz-example.eu-central.aws.cloud.qdrant.io:6333',
+  apiKey: QDRANT_API_KEY,
+  collection: 'fashion',
+  groupBy: ['gender', 'articleType', 'baseColour'],
+  textField: 'productDisplayName',
+})
+const ws = new Workspace({ '/fashion': fashion }, { mode: MountMode.READ })
+```
+
+- The page calls Qdrant directly, so the server must accept requests from the
+  page's origin.
+- The API key is visible to anyone who loads the page: use a read-only key
+  limited to the mounted collections.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`.
+
+{/* generated: vfs-md qdrant start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `qdrant`, read |
+
+    **VFS Layout**
+
+    **`/<path>`**
+
+    - At the root each directory is a collection, unless config pins one.
+    - Inside a collection, directories are the group-by payload fields;
+      descending one narrows a filter.
+    - Each point is `<id>.json` (its payload), plus `<id>.txt` (source text)
+      and `<id>.<ext>` (blob bytes) when those fields are configured. The
+      vector is never shown.
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `qdrant`, read |
+
+    ## VFS Layout
+
+    ### `/<path>`
+
+    - At the root each directory is a collection, unless config pins one.
+    - Inside a collection, directories are the group-by payload fields;
+      descending one narrows a filter.
+    - Each point is `<id>.json` (its payload), plus `<id>.txt` (source text)
+      and `<id>.<ext>` (blob bytes) when those fields are configured. The
+      vector is never shown.
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md qdrant end */}

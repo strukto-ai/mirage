@@ -1,0 +1,16 @@
+## Integration
+
+Trello answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Trello search runs for each word, and only the cards
+  that hold every word are read, where the search names it or the listing
+  keeps it. The listing keeps each card's other fields (ids, due date, flags,
+  link) and each name or description word the search can miss, such as one
+  inside a link; the cards are listed once more, so a change since the last
+  listing is still found. Comments and the board's other files are always
+  read. Every card is read when the word is a key of the card JSON (`desc`,
+  `due`) or a JSON literal, has a digit or only the letters a to f, or when a
+  search fails, returns 1,000 cards or finds nothing. `walk_limit: -1` in the
+  mount's `"@all"` [command limit](/home/limits#command-output) reads every file
+  instead.

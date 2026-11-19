@@ -1,0 +1,240 @@
+---
+title: Postgres
+icon: /images/postgres-logo.svg
+description: Virtualize a Postgres database from Node or the browser.
+---
+
+import Authentication from '/snippets/vfs/postgres/authentication.mdx'
+import Layout from '/snippets/vfs/postgres/layout.mdx'
+
+`PostgresVFS` turns a Postgres database into a read-only tree: every schema is a
+folder of tables and views, and each one holds its column types, a summary of
+what it means and its rows as JSON lines. Set up the connection string and a read-only role as in [Postgres setup](/home/setup/postgres).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node pg
+```
+
+## Configure
+
+```ts
+import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-node'
+
+const pg = new PostgresVFS({
+  dsn: process.env.DATABASE_URL!,
+  schemas: ['public'],
+})
+const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
+
+const result = await ws.shell('head -n 3 /pg/public/tables/customers/rows.jsonl')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`schemas` limits the tree to those schemas. `maxReadRows` and `maxReadBytes`
+set how much one read of `rows.jsonl` may return.
+
+### Fields
+
+{/* generated: config-table postgres start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="dsn" type={"string"} required post={["secret"]}>
+  Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.
+</ResponseField>
+<ResponseField name="schemas" type={"string[]"} default={"null"}>
+  Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.
+</ResponseField>
+<ResponseField name="defaultRowLimit" type={"number"} default={"1000"}>
+  Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.
+</ResponseField>
+<ResponseField name="maxReadRows" type={"number"} default={"10000"}>
+  Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.
+</ResponseField>
+<ResponseField name="maxReadBytes" type={"number"} default={"10485760 (10 MiB)"}>
+  Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table postgres end */}
+
+<Authentication />
+
+<Layout />
+
+## Behavior
+
+- **Read-only:** the mount only reads; no command changes the database.
+- **Read limits:** a whole read of `rows.jsonl` past `maxReadRows` (counted on
+  the rows the table really has) or `maxReadBytes` fails with `File too large`,
+  and so does a `head -n` or `tail -n` count past it; `wc -l` counts past it.
+  `defaultRowLimit` is what a windowed read with an offset but no limit
+  returns.
+- **File size:** `rows.jsonl` is rendered on demand, so `stat -c %s` and
+  `ls -l` show `-` while its byte length is unknown. `wc -c rows.jsonl` counts
+  it, within the read limits.
+- **Snapshots:** the DSN is redacted. Hand the mount back at load (the third
+  argument of `Workspace.load`, or a config over the server and CLI).
+
+## Browser
+
+The browser `PostgresVFS` from `@struktoai/mirage-browser` reaches the
+database over Neon's HTTP transport, with the same fields.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-browser'
+
+const pg = new PostgresVFS({
+  dsn: 'postgresql://mirage_reader:password@<endpoint>.neon.tech/app?sslmode=require',
+  schemas: ['public'],
+})
+const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
+```
+
+- Anyone who opens the page can read the connection string. Use a read-only
+  demo role on Neon, and keep private credentials in a Node backend.
+
+## Integration
+
+Postgres answers these commands through its own API, so fewer rows are read.
+See [Integration](/home/integration/overview).
+
+- `grep` and `rg` on one file: `LIKE` (`ILIKE` for `-i`) fetches only the rows
+  that may match.
+- `head -n N`: `LIMIT N`.
+- `tail -n N`: the last N rows by one query.
+- `wc -l`: `COUNT(*)`.
+- `tail -f`: polls for rows past the last key, on a table with a primary key.
+
+For one plain text in a `rows.jsonl`, grep and rg search the rows a `LIKE` over
+each column returns, in the order a plain read returns them. A column is
+searched through its cast when a line spells it the same way: text, an integer,
+a boolean, a uuid, an enum, `jsonb`, `char(n)` for a text without a space, and
+an array of text, integers or uuids. A number, date or time column is left out
+when the text holds a character it never spells (`ada` in a `float8`). The file
+is read as usual when another column type is present (`json`, `interval`,
+`bytea`), when the text could lie inside one of those values, match a key,
+`null` or the JSON between values, or when more than `maxReadRows` rows
+match. A relation too large to read can still be searched when the output
+shows no line numbers or context.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path>`.
+
+{/* generated: vfs-md postgres start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `postgres`, read |
+
+    **VFS Layout**
+
+    **`/<path>`**
+
+    ```text
+    /<path>
+      database.json          # cross-schema graph and sizes
+      <schema>/              # a Postgres schema (namespace)
+        tables/<table>/
+          schema.json        # column types, PK/FK, indexes
+          semantic.json      # descriptions, roles, sample values
+          rows.jsonl         # data (size-guarded)
+        views/<view>/
+          schema.json
+          semantic.json
+          rows.jsonl
+    ```
+
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `postgres` for the matching lines. `head`, `tail` and `wc -l` ask `postgres` instead of reading a file. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `postgres`, read |
+
+    ## VFS Layout
+
+    ### `/<path>`
+
+    ```text
+    /<path>
+      database.json          # cross-schema graph and sizes
+      <schema>/              # a Postgres schema (namespace)
+        tables/<table>/
+          schema.json        # column types, PK/FK, indexes
+          semantic.json      # descriptions, roles, sample values
+          rows.jsonl         # data (size-guarded)
+        views/<view>/
+          schema.json
+          semantic.json
+          rows.jsonl
+    ```
+
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `postgres` for the matching lines. `head`, `tail` and `wc -l` ask `postgres` instead of reading a file. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md postgres end */}

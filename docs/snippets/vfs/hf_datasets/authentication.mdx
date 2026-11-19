@@ -1,0 +1,6 @@
+## Authentication
+
+A public dataset needs no token. A gated or private one needs `token`: a `read`
+token, or a fine-grained token with read access to that dataset; a gated
+dataset also needs its conditions accepted on the Hub. A repository or revision
+the token cannot see, or that does not exist, answers `Permission denied`.

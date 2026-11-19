@@ -4,6 +4,10 @@ description: Virtualize a MongoDB GridFS bucket from Python.
 icon: /images/mongodb-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/gridfs/authentication.mdx'
+import Layout from '/snippets/vfs/gridfs/layout.mdx'
+import Integration from '/snippets/vfs/gridfs/integration.mdx'
+
 `GridFSVFS` mounts a MongoDB GridFS bucket: every file in the bucket becomes a
 file and every `/` in a filename a folder. Metadata lives in the
 `<bucket>.files` collection and content in `<bucket>.chunks`. Set up the connection URI as in [GridFS setup](/home/setup/gridfs).
@@ -62,26 +66,9 @@ of it, and `keep_revisions` bounds the history each file keeps. A mount takes
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}
 
-## Authentication
+<Authentication />
 
-The user in the URI needs `readWrite` on the database that holds the bucket,
-or `read` for a `read` mount. On Atlas, the built-in **Read and write to any
-database** role also works.
-
-## Layout
-
-```text
-/gridfs/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-```
-
-`/gridfs/data/file.txt` is the GridFS filename `data/file.txt`. Folders come
-from the `/` in filenames; `mkdir` stores a zero-byte `data/` marker so an
-empty folder stays visible.
+<Layout />
 
 ## Behavior
 
@@ -106,16 +93,7 @@ revisions past that count per filename, oldest first, under the file's name and
 in the trash alike; a snapshot pinned to a pruned revision then fails to read
 it. Unset keeps every revision.
 
-## Integration
-
-GridFS answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
-- `grep -r`, `rg` and `cp -r`: one `fs.files` query for the whole tree; see
-  [Walks](/home/integration/walks).
+<Integration />
 
 ## VFS.md
 

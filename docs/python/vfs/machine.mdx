@@ -5,6 +5,8 @@ description: Mount a machine's own files from Python.
 tag: "Experimental"
 ---
 
+import Integration from '/snippets/vfs/machine/integration.mdx'
+
 <Note>
   Machine Files is experimental: its config and behavior may still change.
 </Note>
@@ -62,15 +64,7 @@ is none of them is refused when the workspace is built.
   machine whole. See
   [Where a command runs](/home/setup/machine/machine_files#where-a-command-runs).
 
-## Integration
-
-The machine answers these on its own side, so the bytes do not travel:
-
-- `head -n`, `tail -n`: `head` and `tail` there.
-- `wc -l`: `wc -l` there.
-- `md5sum`, `sha256sum` and the other hash commands: the matching sum tool.
-- `grep -r` and `rg`: `grep -l` there finds which files hold the text.
-- `find`, `du`, `ls -R`, `tree`: one `find` there.
+<Integration />
 
 ## VFS.md
 

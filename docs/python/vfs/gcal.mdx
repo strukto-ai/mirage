@@ -4,6 +4,8 @@ description: Virtualize Google Calendar calendars and events from Python.
 icon: /images/gcal-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gcal/layout.mdx'
+
 `GCalVFS` mounts every calendar an account can see: each calendar becomes a
 folder of days, and each event a `.gcal.json` file holding the Calendar API's
 JSON. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -94,28 +96,7 @@ The mount needs the Google Calendar API with the
 read-only mount. `rm` needs the `owner` or `writer` role on the event's
 calendar; otherwise it fails with `Permission denied`.
 
-## Layout
-
-```text
-/gcal/
-  primary/
-    calendar.json
-    2026-11-16/
-      7kq2m9__0900-0930_Team_Standup.gcal.json
-  Engineering__team@group.calendar.google.com/
-    2026-11-16/
-      ...
-```
-
-- The primary calendar is `primary`; every other one ends in
-  `__<calendar-id>`.
-- An event file is named `<event-id>__<HHMM-HHMM>_<title>.gcal.json`. The
-  times are clamped to that day, so an event running through it reads
-  `0000-2400`, and an event over several days appears under each.
-- An event file holds the unmodified Calendar API payload: attendees,
-  description, location, and start and end with their offsets.
-- `calendar.json` holds the calendar's access role and the zone its days are
-  cut in.
+<Layout />
 
 ## Behavior
 

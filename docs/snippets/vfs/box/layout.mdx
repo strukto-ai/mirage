@@ -1,0 +1,14 @@
+## Layout
+
+```text
+/box/
+  Contracts/
+    2026_MSA.pdf
+  Roadmap.gdoc
+  Team Notes.boxnote
+  data.csv
+```
+
+Box addresses items by numeric ID, and the account root is folder `0`. The
+mount resolves each path one folder level at a time, so the first access to a
+nested folder costs one request per level, and keeps the result.

@@ -1,0 +1,250 @@
+---
+title: Gmail
+description: Virtualize a Gmail mailbox from Node or the browser.
+icon: /images/gmail-logo.svg
+---
+
+import Layout from '/snippets/vfs/gmail/layout.mdx'
+
+`GmailVFS` mounts a Gmail account read only: each label becomes a folder of
+days, each message a `.gmail.json` file and its attachments a folder beside
+it. Set up the credentials as in [Google Workspace setup](/home/setup/google).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { GmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const gmail = new GmailVFS({
+  clientId: process.env.GOOGLE_CLIENT_ID!,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+})
+const ws = new Workspace({ '/gmail': gmail }, { mode: MountMode.READ })
+
+const result = await ws.shell("ls /gmail && ls /gmail/INBOX | head -n 3")
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`accessToken` replaces the client and refresh token with a token or a
+function that returns one.
+
+### Fields
+
+{/* generated: config-table gmail omit=folderId start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="accessToken" type={"string | function"} post={["secret"]}>
+  OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`.
+</ResponseField>
+<ResponseField name="clientId" type={"string"}>
+  Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself.
+</ResponseField>
+<ResponseField name="clientSecret" type={"string"} post={["secret"]}>
+  Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client.
+</ResponseField>
+<ResponseField name="refreshToken" type={"string"} post={["secret"]}>
+  User's OAuth refresh token. Required with `clientId` when `accessToken` is unset.
+</ResponseField>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
+  Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.
+</ResponseField>
+<ResponseField name="apiBase" type={"string"}>
+  One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table gmail end */}
+
+## Authentication
+
+Credentials come from the first of:
+
+1. `accessToken`, a token or a function, sync or async, that returns one.
+2. `clientId` and `refreshToken`, with `clientSecret` unless the client uses
+   PKCE. Mirage trades the refresh token for access tokens on its own, or
+   hands it to `refreshFn` when set, so the secret can stay on a backend.
+
+The mount needs the Gmail API with the
+`https://www.googleapis.com/auth/gmail.modify` scope, which the `gws gmail`
+commands also use, or `gmail.readonly` for reading alone.
+
+<Layout />
+
+## Behavior
+
+- **Read only:** no command changes the mailbox. Sending, replying,
+  forwarding and triage go through the [`gws`](/typescript/cli/gws) CLI.
+- **Recent window:** `ls` of a label lists the days of its 50 most recent
+  messages. A glob over the day names (`ls /gmail/INBOX/2026-03-*`) or a day
+  folder named directly reaches older days.
+- **Message JSON:** a `.gmail.json` is shaped by Mirage, not the raw Gmail
+  API answer: sender, recipients, subject, date, the decoded plain-text body,
+  labels and the attachment list.
+
+## Browser
+
+The same `GmailVFS` comes from `@struktoai/mirage-browser`. In a page, an
+`accessToken` function fetches a fresh token from a backend, so the client
+secret never reaches the browser.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { GmailVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const gmail = new GmailVFS({
+  accessToken: async () => (await fetch('/api/google-token')).text(),
+})
+const ws = new Workspace({ '/gmail': gmail }, { mode: MountMode.READ })
+```
+
+- `/api/google-token` stands for a backend endpoint that returns an access
+  token.
+- A PKCE OAuth client needs no secret: `clientId` and `refreshToken` alone
+  mount it.
+- `refreshFn` sends each refresh to a backend instead of Google's token
+  endpoint.
+
+## Integration
+
+Gmail answers these commands from what its listing already fetched, so fewer
+messages are read. See [Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: listing a label fetches its messages in full, and the
+  listing keeps each message's text. Only the messages whose text holds the
+  pattern's text, in any case, are read, and the output is what reading every
+  message prints. Gmail's own search is not used, since it reads a message's
+  HTML part and can miss a word of the plain-text body. Attachments are
+  always read, and so is every message for a text that is not ASCII or that
+  may be part of the labels field (`inbox`, `STARRED`, `Label_1`, `abel`),
+  since labels change after the listing. With `walkLimit: -1` in the mount's
+  `"@all"` [command limit](/home/limits#command-output), the listing keeps no
+  text and every message is read.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at
+`/<path>`.
+
+{/* generated: vfs-md gmail start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gmail`, read |
+
+    **VFS Layout**
+
+    **`/<path>`**
+
+    ```text
+    /<path>
+      <label>/
+        <yyyy-mm-dd>/
+          <subject>__<message-id>.gmail.json   # the email, body included
+          <subject>__<message-id>/             # its attachments, if any
+            <attachment-filename>
+    ```
+
+    - `<label>` is a Gmail label (`INBOX`, `SENT`, `STARRED`, ... or a user
+      label); `<yyyy-mm-dd>` is the received date, and listing one queries
+      only that day.
+    - `ls` a date directory for the names rather than building `<subject>`.
+    - A `.gmail.json` is the email processed by Mirage, not the raw API
+      response: `.from`, `.to`, `.subject`, `.date`, `.body_text`, `.labels`,
+      `.attachments[]`.
+    - The sibling directory holds attachments only (`cat` one for its bytes)
+      and is absent when there are none; `grep -r` skips its binary files.
+    - Triage and other changes go through the `gws gmail` CLI.
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `gmail` which files may match. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `gmail` answers only for `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gmail`, read |
+
+    ## VFS Layout
+
+    ### `/<path>`
+
+    ```text
+    /<path>
+      <label>/
+        <yyyy-mm-dd>/
+          <subject>__<message-id>.gmail.json   # the email, body included
+          <subject>__<message-id>/             # its attachments, if any
+            <attachment-filename>
+    ```
+
+    - `<label>` is a Gmail label (`INBOX`, `SENT`, `STARRED`, ... or a user
+      label); `<yyyy-mm-dd>` is the received date, and listing one queries
+      only that day.
+    - `ls` a date directory for the names rather than building `<subject>`.
+    - A `.gmail.json` is the email processed by Mirage, not the raw API
+      response: `.from`, `.to`, `.subject`, `.date`, `.body_text`, `.labels`,
+      `.attachments[]`.
+    - The sibling directory holds attachments only (`cat` one for its bytes)
+      and is absent when there are none; `grep -r` skips its binary files.
+    - Triage and other changes go through the `gws gmail` CLI.
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `gmail` which files may match. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `gmail` answers only for `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md gmail end */}

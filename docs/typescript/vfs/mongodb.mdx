@@ -1,0 +1,219 @@
+---
+title: MongoDB
+icon: /images/mongodb-logo.svg
+description: Virtualize MongoDB databases from Node or the browser.
+---
+
+import Authentication from '/snippets/vfs/mongodb/authentication.mdx'
+import Layout from '/snippets/vfs/mongodb/layout.mdx'
+import Integration from '/snippets/vfs/mongodb/integration.mdx'
+
+`MongoDBVFS` turns MongoDB databases into a read-only tree: every collection
+and view is a folder holding its sampled schema and its documents as JSON
+lines. Set up the connection URI as in [MongoDB setup](/home/setup/mongodb).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node mongodb
+```
+
+## Configure
+
+```ts
+import { MongoDBVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const mongo = new MongoDBVFS({
+  uri: process.env.MONGODB_URI!,
+  databases: ['sample_mflix'],
+})
+const ws = new Workspace({ '/mongodb': mongo }, { mode: MountMode.READ })
+
+const result = await ws.shell('head -n 3 /mongodb/sample_mflix/collections/movies/documents.jsonl')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`databases` limits the tree to those databases.
+`elideFields: { 'sample_mflix.movies': ['plot_embedding'] }` drops heavy
+fields, such as embeddings, from what an agent reads.
+
+### Fields
+
+{/* generated: config-table mongodb start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="uri" type={"string"} required post={["secret"]}>
+  MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.
+</ResponseField>
+<ResponseField name="databases" type={"string[]"} default={"null"}>
+  Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`.
+</ResponseField>
+<ResponseField name="maxDocLimit" type={"number"} default={"5000"}>
+  Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`).
+</ResponseField>
+<ResponseField name="elideFields" type={"object"} default={"{}"}>
+  Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table mongodb end */}
+
+<Authentication />
+
+<Layout />
+
+## Behavior
+
+- **Read-only:** the mount only reads; no command changes the database.
+- **Streaming:** `cat`, `grep`, `jq` and `head` read documents in batches, and
+  `head` stops after its count. Commands that need the whole input, such as
+  `sort` or `jq -s`, still buffer it, so read a large collection in bounded
+  slices.
+- **Read limit:** `tail -n` with a count past `maxDocLimit` on a collection
+  that long fails with `File too large` rather than printing fewer lines.
+- **Elided fields:** fields under `elideFields` are dropped from
+  `documents.jsonl`, for `cat` and `tail -f` alike, and keep their type in
+  `schema.json`. Nested paths use dots, such as `metadata.embedding`.
+- **File size:** `documents.jsonl` is rendered on demand, so `stat` and `ls -l`
+  show `-` for its size and `du` counts `0`. `wc -c` measures the bytes and
+  `wc -l` counts the documents; both may scan the collection. A nonempty
+  `ls -l` prints `total ?`.
+- **Following inserts:** `tail -f` prints the last lines, then follows new
+  inserts through a change stream. That needs a replica set on MongoDB 5.0 or
+  later, which Atlas is; on a standalone server, and on a view, it polls.
+
+## Browser
+
+The browser `MongoDBVFS` from `@struktoai/mirage-browser` sends HTTP requests
+to a backend route, which keeps the connection URI on the server. Its `uri` is
+that route.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MongoDBVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const mongo = new MongoDBVFS({ uri: '/api/mongo' })
+const ws = new Workspace({ '/mongodb': mongo }, { mode: MountMode.READ })
+```
+
+- The repository's
+  [Vite middleware](https://github.com/strukto-ai/mirage/blob/main/examples/browser/scripts/mongo_proxy.ts)
+  serves the database listing for local development. It does not yet serve
+  document streams or schema reads.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>`.
+
+{/* generated: vfs-md mongodb start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `mongodb`, read |
+
+    **VFS Layout**
+
+    **`/<path>`**
+
+    ```text
+    /<path>
+      <database>/
+        database.json              # collection and view names
+        collections/<collection>/
+          schema.json              # sampled field types, validator, indexes
+          documents.jsonl          # streamed BSON Extended JSON documents
+        views/<view>/
+          schema.json
+          documents.jsonl
+    ```
+
+    - Read `database.json` first, and `schema.json` before a large
+      `documents.jsonl`.
+    - Sizes show as `-`; `wc -c` and `wc -l` count on demand and may scan
+      the collection.
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `mongodb` for the matching lines. `tail` and `wc -l` ask `mongodb` instead of reading a file. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `mongodb`, read |
+
+    ## VFS Layout
+
+    ### `/<path>`
+
+    ```text
+    /<path>
+      <database>/
+        database.json              # collection and view names
+        collections/<collection>/
+          schema.json              # sampled field types, validator, indexes
+          documents.jsonl          # streamed BSON Extended JSON documents
+        views/<view>/
+          schema.json
+          documents.jsonl
+    ```
+
+    - Read `database.json` first, and `schema.json` before a large
+      `documents.jsonl`.
+    - Sizes show as `-`; `wc -c` and `wc -l` count on demand and may scan
+      the collection.
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `mongodb` for the matching lines. `tail` and `wc -l` ask `mongodb` instead of reading a file. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md mongodb end */}

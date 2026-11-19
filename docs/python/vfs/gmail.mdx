@@ -4,6 +4,8 @@ description: Virtualize a Gmail mailbox from Python.
 icon: /images/gmail-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gmail/layout.mdx'
+
 `GmailVFS` mounts a Gmail account read only: each label becomes a folder of
 days, each message a `.gmail.json` file and its attachments a folder beside
 it. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -74,30 +76,7 @@ The mount needs the Gmail API with the
 `https://www.googleapis.com/auth/gmail.modify` scope, which the `gws gmail`
 commands also use, or `gmail.readonly` for reading alone.
 
-## Layout
-
-```text
-/gmail/
-  INBOX/
-    2026-11-16/
-      Invoice_November__18c2f9a4b7e3d1a0.gmail.json
-      Invoice_November__18c2f9a4b7e3d1a0/
-        invoice.pdf
-  SENT/
-  STARRED/
-  Receipts/
-```
-
-- System labels are named by their label ID (`INBOX`, `SENT`, `STARRED`);
-  user labels by their name.
-- Inside a label, one folder per day, the date each message was received.
-- A message file is named `<subject>__<message-id>.gmail.json`, the subject
-  sanitized and cut short when needed. `ls` the day rather than build the
-  name.
-- A message with attachments has a folder of the same name without
-  `.gmail.json`, holding the decoded files.
-- The part after `__` is the message id that `gws gmail read --id` and
-  `gws gmail reply --message-id` take.
+<Layout />
 
 ## Behavior
 

@@ -4,6 +4,9 @@ description: Virtualize a self-hosted MinIO bucket from Python.
 icon: /images/minio-logo.svg
 ---
 
+import Layout from '/snippets/vfs/minio/layout.mdx'
+import Integration from '/snippets/vfs/minio/integration.mdx'
+
 `MinIOVFS` mounts one bucket on a self-hosted MinIO server: every object becomes
 a file and every `/` in a key a folder. It reaches MinIO through its S3 API.
 Set up credentials as in [MinIO setup](/home/setup/minio).
@@ -91,20 +94,7 @@ Credentials come from the first of:
 The key inherits its user's policies: `readonly` to read, `readwrite` to write.
 A request the credentials may not make answers `Permission denied`.
 
-## Layout
-
-```text
-/minio/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-    q2.csv
-```
-
-`/minio/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
-keys; MinIO stores no folder objects.
+<Layout />
 
 ## Behavior
 
@@ -116,16 +106,7 @@ keys; MinIO stores no folder objects.
   another mount is a write and goes through. See
   [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
 
-## Integration
-
-MinIO answers these commands through its own API, so fewer objects are read. See
-[Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

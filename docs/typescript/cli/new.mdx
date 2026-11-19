@@ -13,6 +13,9 @@ A typed CLI declares its grammar with `CommandSpec`, the same parser Mirage's
 built-in commands use, so its `--help`, error messages and exit codes work
 the same way as theirs.
 
+[Custom CLI Reference](/typescript/cli/new-reference) lists the fields of `CLI`,
+`CommandSpec`, `Argument` and `Context`.
+
 ## Write a typed CLI
 
 A handler gets the same four arguments a shell command's handler gets: the
@@ -293,7 +296,7 @@ async function login(
 After `pager-eng login`, `echo $PAGER_ACCOUNT` prints `engineering`. If
 `PAGER_ACCOUNT` is readonly, the command exits 1 with
 `pager-eng login: PAGER_ACCOUNT: readonly variable`. To run another command
-from a handler, use `await ctx.shell(line)`; see [`Context`](#context).
+from a handler, use `await ctx.shell(line)`; see [`Context`](/typescript/cli/new-reference#context).
 
 ### On a mount
 
@@ -468,72 +471,3 @@ const ConfigSchema = z.object({ token: secretStr(), account: z.string() })
 A script CLI's snapshot embeds the script, and saves its config as it is,
 since there is no config model to mark secrets. Keep credentials in the
 environment, or pass fresh config through `clis` when loading.
-
-## Reference
-
-The constructors document exact types and defaults:
-[`CLI` and `CLIHandler`](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/src/commands/cli/types.ts),
-and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/src/commands/spec/types.ts).
-
-### `CLI` and `CLIHandler`
-
-| Field | Meaning |
-| --- | --- |
-| `CLI.spec` | The root `CommandSpec`. |
-| `CLI.handlers` | Each leaf's path mapped to its `CLIHandler`. |
-| `CLI.configModel` | The Zod schema, or a normalizer function, each install's config must pass. |
-| `CLI.accessor` | Builds the install's accessor from its config, once per install; Mirage closes it when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.machine`, `CLI.runtime` | The embedded script, the machine type that runs it (`in_process`, the default in code, or `host`) and the runtime there, if named. A CLI without a script runs on `in_process` only. |
-| `CLIHandler.fn` | The handler, called as `fn(accessor, paths, texts, ctx)`. |
-| `CLIHandler.write`, `CLIHandler.limit` | Whether the handler changes the service, and its execution limit. |
-| `CLIHandler.writeWhen` | Options that make an otherwise read-only leaf a write on the line that passes them, as `himalaya message read --seen` marks mail read. |
-
-### `CommandSpec`
-
-| Field | Meaning |
-| --- | --- |
-| `name`, `aliases` | The command word, and other words for a subcommand. |
-| `subcommands` | A group's children. |
-| `arguments` | Options and positionals; a group's options pass to its leaves. |
-| `description`, `epilog` | Help text, and text after it. |
-| `usageStyle` | How help and refusals read: argparse, Git, clap, Cobra or poppler. Cobra leaves a missing positional to the handler. poppler answers an option error with the help page and exit 99. |
-| `allowAbbrev` | Whether a unique prefix of a long option counts as the option. |
-
-### `Argument`
-
-| Field | Meaning |
-| --- | --- |
-| Names | One positional name, or one or more dashed option spellings. |
-| `type` | `str` (default), `int`, `float`, or `path` for a workspace path. |
-| `action` | `store` (default), `store_true`, `count`, `append`, or `extend`. |
-| `nargs` | One value by default; `?` for optional or an integer for a fixed count. Positionals also take `*`, `+` or `REMAINDER`; only one positional may take a variable count, and it must come last. |
-| `choices` | The allowed values. |
-| `required` | Whether an option must be given; a positional's count comes from `nargs`. |
-| `default`, `env` | An option's fallbacks; a value from the environment counts as given. |
-| `help`, `metavar` | Help text, and the value's name in help. |
-
-The names follow argparse, which Mirage supports in part. Positionals take no
-`default`, and options take no variable count. `append` collects one value per
-use; `extend` flattens fixed groups. The other fields of `CommandSpec` and
-`Argument` describe shell builtins' grammars, such as `tar`'s old-style
-options; a CLI doesn't need them.
-
-### `Context`
-
-| Argument or field | Holds |
-| --- | --- |
-| `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`null` without a config model). |
-| `paths` | The path operands, resolved against the working directory. |
-| `texts` | The text and number operands, in declaration order. |
-| `ctx.argv` | The words after the command name as typed, subcommands included. |
-| `ctx.flags` | Group and leaf flags keyed by option name, `--dry-run` as `dry_run`. |
-| `ctx.spec` | The leaf's `CommandSpec`. |
-| `ctx.stdin` | Piped bytes, an async byte source, or `null`. |
-| `ctx.cwd` | The session's working directory. |
-| `ctx.env` | A copy of the environment taken when the command starts. |
-| `ctx.vfs`, `ctx.session` | The session's files and live session; absent outside a workspace. |
-| `ctx.shell` | `await ctx.shell(line)` runs another line in the calling session and returns its `IOResult`. Calling it after the command returns raises an error. |
-| `ctx.processes` | The session's processes, as `ps` and `jobs` see them. |
-| `ctx.ids` | The workspace's source of generated names and random values, so a seeded workspace replays them. |
-| `ctx.signal` | Aborts when the line is cancelled or times out. |
-| `ctx.runtime`, `ctx.diff`, `ctx.find` | Not set for a CLI; they serve interpreter commands, `diff` and `find`. Run code through `ctx.shell` instead. |

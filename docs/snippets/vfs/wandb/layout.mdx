@@ -1,0 +1,32 @@
+## Layout
+
+```text
+/wandb/
+  my-team/
+    image-cls/
+      3k9x2m7q/
+        run.json
+        config.json
+        summary.json
+        history.jsonl
+        files/
+          output.log
+          wandb-metadata.json
+```
+
+A path is `/<entity>/<project>/<run-id>/`. Run IDs name the folders, so runs
+that share a display name stay separate. `files/` holds the run's files at
+their relative paths, as raw bytes.
+
+`run.json` holds the run's metadata:
+
+| Fields | Contents |
+| --- | --- |
+| `entity`, `project`, `run`, `path` | Run identity and its `entity/project/run-id` path |
+| `storage_id`, `display_name`, `state` | W&B's opaque storage ID, display name, and reported state |
+| `tags`, `sweep_name`, `group`, `job_type` | Experiment organization |
+| `commit`, `created_at`, `heartbeat_at` | Source revision, creation time, and last heartbeat |
+| `description`, `notes`, `user` | Run description, notes, and creator's `id`/`name`/`username`/`email` |
+| `read_only` | W&B's reported edit permission; the Mirage mount remains read-only |
+| `system_metrics` | Latest system metrics decoded as JSON, retaining nested values |
+| `history_line_count`, `history_keys`, `file_count` | History row count, metric-key metadata including the last step, and file count |

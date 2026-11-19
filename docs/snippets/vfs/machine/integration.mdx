@@ -1,0 +1,9 @@
+## Integration
+
+The machine answers these on its own side, so the bytes do not travel:
+
+- `head -n`, `tail -n`: `head` and `tail` there.
+- `wc -l`: `wc -l` there.
+- `md5sum`, `sha256sum` and the other hash commands: the matching sum tool.
+- `grep -r` and `rg`: `grep -l` there finds which files hold the text.
+- `find`, `du`, `ls -R`, `tree`: one `find` there.

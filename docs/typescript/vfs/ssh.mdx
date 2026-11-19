@@ -1,0 +1,177 @@
+---
+title: SSH
+icon: /images/ssh-logo.svg
+description: Virtualize a remote server's filesystem over SSH from Node.
+---
+
+import Layout from '/snippets/vfs/ssh/layout.mdx'
+import Integration from '/snippets/vfs/ssh/integration.mdx'
+
+`SSHVFS` mounts a directory of a remote server over SFTP: its folders and
+files appear as they are on the server. Set up the key and server as in [SSH setup](/home/setup/ssh). It ships in `@struktoai/mirage-node` only; the
+browser package has no SSH client.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node ssh2
+```
+
+`ssh2` is a peer package that only this mount needs.
+
+## Configure
+
+```ts
+import { MountMode, SSHVFS, Workspace } from '@struktoai/mirage-node'
+
+const ssh = new SSHVFS({
+  host: 'server.example.com',
+  username: 'deploy',
+  identityFile: '~/.ssh/id_ed25519',
+  root: '/srv/data',
+})
+const ws = new Workspace({ '/remote': ssh }, { mode: MountMode.WRITE })
+
+const result = await ws.shell('ls /remote && tail -n 20 /remote/logs/app.log')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`hostname` connects to another address than `host`, and `port` to another
+port. Use `MountMode.EXEC` when `python3` or `js` should run scripts from the
+mount.
+
+### Fields
+
+{/* generated: config-table ssh start */}
+<ResponseField name="host" type={"string"} required>
+  DNS name or IP address of the remote.
+</ResponseField>
+<ResponseField name="hostname" type={"string"}>
+  Address to connect to instead of `host`.
+</ResponseField>
+<ResponseField name="port" type={"number"} default={"22"}>
+  SSH port.
+</ResponseField>
+<ResponseField name="username" type={"string"}>
+  Login user; unset uses the local user name.
+</ResponseField>
+<ResponseField name="password" type={"string"} post={["secret"]}>
+  Password for password authentication; prefer `identityFile`.
+</ResponseField>
+<ResponseField name="identityFile" type={"string"}>
+  Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`).
+</ResponseField>
+<ResponseField name="privateKey" type={"string"} post={["secret"]}>
+  A private key's own text, such as one a credential pointer reads from a secret store; offered after `identityFile`'s.
+</ResponseField>
+<ResponseField name="passphrase" type={"string"} post={["secret"]}>
+  Passphrase of an encrypted private key, from `identityFile`, `privateKey` or a default key.
+</ResponseField>
+<ResponseField name="root" type={"string"} default={"'/'"}>
+  Path on the remote that becomes the mount root.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"30"}>
+  Seconds to wait for the connection to be ready, authentication included.
+</ResponseField>
+<ResponseField name="knownHosts" type={"string"}>
+  Accepted but not applied: this backend does not verify host keys.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table ssh end */}
+
+## Authentication
+
+The mount offers, in order, the key at `identityFile`, then the key text in
+`privateKey`, which a [credential pointer](/home/service-credentials#pointer-fields)
+can read from a secret store. Without either, it tries the SSH agent and the
+default keys in `~/.ssh`. `passphrase` unlocks an encrypted key. `password`
+works too, but a key is preferred.
+
+The server needs SFTP turned on. Reads and writes go as far as the SSH
+account's own file permissions allow.
+
+<Layout />
+
+## Behavior
+
+- **Host keys:** not verified. `knownHosts` is accepted but not applied, so
+  any host key is accepted.
+- **Caching:** listings are cached for 60 seconds by default. File bytes are
+  served from cache without a check until the mount's `ttl:`; an SSH mount
+  does not accept `read: fresh`.
+- **Running programs:** this mount reads and writes files. To run programs on
+  the server, use the [SSH machine](/home/setup/machine/ssh).
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with SSH mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
+
+{/* generated: vfs-md ssh start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `ssh`, `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` ask `ssh` which files may match. `wc -l` asks `ssh` instead of reading a file. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `ssh`, `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` ask `ssh` which files may match. `wc -l` asks `ssh` instead of reading a file. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md ssh end */}

@@ -1,0 +1,16 @@
+## Integration
+
+SSH answers these commands on the server, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: `grep` on the server finds which files hold the text,
+  then only those are read, so nothing is missed. Every file is read when the
+  server runs no commands (an SFTP-only account), its `grep` refuses an
+  option (busybox), or it cannot read a file.
+- `wc -l`: `wc -l` on the server.
+- `tail -f`: `tail -f` on the server.
+- `md5sum`, `sha256sum` and the other hash commands: the matching sum tool on
+  the server.
+- `find`: one `find` on the server.
+- `du`: one `find` on the server.
+- `ls -R` and `tree`: one `find` on the server.

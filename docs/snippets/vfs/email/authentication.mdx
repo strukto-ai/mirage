@@ -1,0 +1,14 @@
+## Authentication
+
+The mount logs in to IMAP with `username` and `password`; sending through
+`himalaya` uses the same pair on SMTP. Most providers want an app password
+instead of the account password. Microsoft 365 is unsupported: it requires
+OAuth for IMAP, and the mount accepts only passwords.
+
+| Provider | IMAP host | SMTP host | Notes |
+| --- | --- | --- | --- |
+| Yahoo | `imap.mail.yahoo.com` | `smtp.mail.yahoo.com` | App password |
+| Fastmail | `imap.fastmail.com` | `smtp.fastmail.com` | App password |
+| iCloud | `imap.mail.me.com` | `smtp.mail.me.com` | App password |
+| ProtonMail | `127.0.0.1` | `127.0.0.1` | Proton Mail Bridge |
+| Self-hosted | the server's hostname | the server's hostname | The server's own login |

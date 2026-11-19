@@ -1,0 +1,26 @@
+## Layout
+
+```text
+/airtable/
+  bases/
+    Product_Roadmap__appRoadmapBase001/
+      base.json
+      Features__tblFeatures000001/
+        table.json
+        records.jsonl
+        views/
+          Done_shipped__viwDone0000000001.jsonl
+```
+
+Each folder is `<name>__<id>`. Names are sanitized (`Ops / Finance` becomes
+`Ops_Finance`); the id after the last `__` is exact. List a folder to find
+names rather than building them.
+
+- `base.json`: the base id, name, the token's permission level and the tables.
+- `table.json`: the typed field schema, with each field's options (select
+  choices, number precision, link targets), and the saved views.
+- `records.jsonl`: one record per line, `{"record_id", "created_time",
+  "fields"}`, with `fields` keyed by field name and valued exactly as Airtable
+  returns them.
+- `views/<view>.jsonl`: the records the view shows, filtered and ordered by
+  the view.

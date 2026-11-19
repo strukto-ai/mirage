@@ -1,0 +1,146 @@
+---
+title: Machine Files
+icon: hard-drive
+description: Mount a machine's own files from Node.
+tag: "Experimental"
+---
+
+import Integration from '/snippets/vfs/machine/integration.mdx'
+
+<Note>
+  Machine Files is experimental: its config and behavior may still change.
+</Note>
+
+`MachineVFS` shows the files of the workspace's machines at a prefix, reached
+through the exec each machine's handle already holds. A workspace with
+machines mounts `/tmp` and `/dev/shm` this way, and `'@<machine>'` picks one
+machine's; see [Machine Files](/home/setup/machine/machine_files).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { MachineVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/tmp': new MachineVFS({ machines: ['gpu'], root: '/tmp' }) },
+  {
+    mode: MountMode.WRITE,
+    machines: {
+      cpu: { provider: 'docker', container: 'my-sandbox' },
+      gpu: { provider: 'ssh', host: 'gpu.example.com' },
+    },
+  },
+)
+const result = await ws.shell('ls /tmp')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`'/tmp': '@gpu'` is the same mount, written short. A machine mount needs a
+workspace with machines, and a name in `machines` or `defaultMachine` that
+is none of them is refused when the workspace is built.
+
+### Fields
+
+{/* generated: config-table machine start */}
+<ResponseField name="machines" type={"string[]"}>
+  The machines whose files the mount shows, by their `machines:` names; unset shows every machine's.
+</ResponseField>
+<ResponseField name="root" type={"string"} default={"'/'"}>
+  The path on each machine that becomes the mount root.
+</ResponseField>
+<ResponseField name="defaultMachine" type={"string"}>
+  Where a new name lands when the command writing it runs no program on a machine; unset is the machine that runs the programs nothing in Mirage resolves, else the first.
+</ResponseField>
+{/* generated: config-table machine end */}
+
+## Behavior
+
+- **Caching:** none; every read and listing asks the machine.
+- **Placement:** on several machines a read goes to the machine holding the
+  name and a new name lands on the machine running the command's program,
+  else on `defaultMachine`. See
+  [Several machines](/home/setup/machine/machine_files#several-machines).
+- **Commands:** a command whose every path is one machine's own runs on that
+  machine whole. See
+  [Where a command runs](/home/setup/machine/machine_files#where-a-command-runs).
+- **Browser:** a page has no machines, so `@struktoai/mirage-browser` mounts
+  none of this.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with a machine mount at
+`/<path>`. `<mode>` is the mount's mode: `read`, `write` or `exec`. The
+commands shown are those of a `write` mount.
+
+{/* generated: vfs-md machine start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `machine`, `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` ask `machine` which files may match. `head`, `tail` and `wc -l` ask `machine` instead of reading a file. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `machine`, `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` ask `machine` which files may match. `head`, `tail` and `wc -l` ask `machine` instead of reading a file. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md machine end */}

@@ -4,6 +4,8 @@ description: Virtualize Google Sheets spreadsheets from Python.
 icon: /images/gsheets-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gsheets/layout.mdx'
+
 `GSheetsVFS` mounts the Google Sheets an account can see: each spreadsheet
 becomes a `.gsheet.json` file holding the Sheets API's JSON, split into the
 spreadsheets it owns and those shared with it. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -75,22 +77,7 @@ The mount needs the Google Sheets API with the
 `https://www.googleapis.com/auth/drive` scope, since the listing comes from
 Drive. A read-only mount can use the `readonly` variants of both scopes.
 
-## Layout
-
-```text
-/gsheets/
-  owned/
-    2026-11-14_Roadmap__1Xk9rT2bQ.gsheet.json
-  shared/
-    2026-10-02_Budget__1Pq7sV4mN.gsheet.json
-```
-
-- `owned/` holds the spreadsheets the account owns, shared or not; `shared/`
-  holds those others shared with it.
-- A file is named `<YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json`. The date
-  is the last modified day and is left out when Drive gives none.
-- A file holds the Sheets API's JSON for the spreadsheet: its properties and
-  every sheet with its cell values.
+<Layout />
 
 ## Behavior
 

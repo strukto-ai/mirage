@@ -1,0 +1,316 @@
+---
+title: DigitalOcean Spaces
+icon: /images/digitalocean-logo.svg
+description: Virtualize a DigitalOcean Space from Node or the browser.
+---
+
+import Layout from '/snippets/vfs/digitalocean/layout.mdx'
+import Integration from '/snippets/vfs/digitalocean/integration.mdx'
+
+`DigitalOceanVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at DigitalOcean Spaces's
+endpoint, so commands behave as they do on S3. Set up credentials as in [DigitalOcean Spaces setup](/home/setup/digitalocean).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const spaces = new DigitalOceanVFS({
+  bucket: process.env.DO_SPACE!,
+  region: process.env.DO_REGION!,
+  accessKeyId: process.env.DO_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.DO_SECRET_ACCESS_KEY!,
+})
+const ws = new Workspace({ '/spaces': spaces }, { mode: MountMode.WRITE })
+
+const result = await ws.shell("ls /spaces && find /spaces -name '*.csv'")
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`region` also picks the endpoint, `https://<region>.digitaloceanspaces.com`;
+`endpoint` replaces it.
+A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
+
+{/* generated: config-table digitalocean start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table digitalocean end */}
+
+## Authentication
+
+Credentials come from the first of:
+
+1. `accessKeyId` and `secretAccessKey`, with `sessionToken` for temporary
+   credentials.
+2. `profile`, a profile in `~/.aws/credentials`.
+3. The AWS SDK credential chain: environment variables, then the instance or
+   container role.
+
+The Spaces key needs **Limited Access** with **Read** on the Space, or
+**Read/Write/Delete** for a write mount. **Full Access** reaches every
+Space.
+An object the key may not read or change answers `Permission denied`.
+
+<Layout />
+
+## Behavior
+
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/spaces/notes.md` is the key `users/42/notes.md`.
+
+## Browser
+
+The browser `DigitalOceanVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the DigitalOcean Spaces keys, and the
+browser fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const spaces = new DigitalOceanVFS({
+  bucket: 'my-space',
+  region: 'nyc3',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/spaces': spaces }, { mode: MountMode.READ })
+```
+
+- Requests go to the host each signed URL names; `region` and `endpoint` only
+  name the mount's storage location.
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server and the key's permissions.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
+
+An Express route that signs URLs:
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const REGION = process.env.DO_REGION!
+const BUCKET = process.env.DO_SPACE!
+const client = new S3Client({
+  region: REGION,
+  endpoint: `https://${REGION}.digitaloceanspaces.com`,
+  credentials: {
+    accessKeyId: process.env.DO_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.DO_SECRET_ACCESS_KEY!,
+  },
+})
+
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
+    }); break
+  }
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
+})
+```
+
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
+
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
+
+Spaces takes the S3 `PutBucketCors` call, so the AWS CLI works against
+its endpoint. The control panel sets the same rules under the Space's
+**Settings** > **CORS Configurations**.
+
+```bash
+aws s3api put-bucket-cors --bucket "$DO_SPACE" \
+  --endpoint-url "https://$DO_REGION.digitaloceanspaces.com" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+```
+
+  </Accordion>
+  <Accordion title="Browser fields">
+
+{/* generated: config-table browser/digitalocean start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/digitalocean end */}
+
+  </Accordion>
+</AccordionGroup>
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with DigitalOcean Spaces mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
+
+{/* generated: vfs-md digitalocean start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md digitalocean end */}

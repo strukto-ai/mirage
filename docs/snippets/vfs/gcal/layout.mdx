@@ -1,0 +1,22 @@
+## Layout
+
+```text
+/gcal/
+  primary/
+    calendar.json
+    2026-11-16/
+      7kq2m9__0900-0930_Team_Standup.gcal.json
+  Engineering__team@group.calendar.google.com/
+    2026-11-16/
+      ...
+```
+
+- The primary calendar is `primary`; every other one ends in
+  `__<calendar-id>`.
+- An event file is named `<event-id>__<HHMM-HHMM>_<title>.gcal.json`. The
+  times are clamped to that day, so an event running through it reads
+  `0000-2400`, and an event over several days appears under each.
+- An event file holds the unmodified Calendar API payload: attendees,
+  description, location, and start and end with their offsets.
+- `calendar.json` holds the calendar's access role and the zone its days are
+  cut in.

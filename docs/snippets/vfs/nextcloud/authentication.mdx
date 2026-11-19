@@ -1,0 +1,6 @@
+## Authentication
+
+The mount sends `username` and `password` as Basic Auth; without them it sends
+no credentials. Use an app password (Settings, Security in Nextcloud) rather
+than the account password: it can be revoked on its own. A request the server
+refuses answers `Permission denied`.

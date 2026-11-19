@@ -1,0 +1,25 @@
+## Layout
+
+```text
+/knowledge/
+  README.md
+  guides/
+    api.md
+    quickstart.md
+  policies/
+    support.md
+```
+
+A document's path is the value of its `slug` metadata field; without one, the
+file takes the document name.
+
+| Dify document | Metadata | Mirage path |
+| --- | --- | --- |
+| `Quickstart` | `slug=guides/quickstart.md` | `/knowledge/guides/quickstart.md` |
+| `README.md` | no slug | `/knowledge/README.md` |
+
+- `/` makes folders. No empty segment, `.` or `..`.
+- Each slug is unique across the dataset.
+- A slug is never also a folder: `guides` and `guides/quickstart.md` cannot
+  both be documents.
+- Only enabled, fully indexed, unarchived documents appear.

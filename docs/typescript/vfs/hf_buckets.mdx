@@ -1,0 +1,151 @@
+---
+title: HF Buckets
+icon: /images/huggingface-logo.svg
+description: Virtualize a Hugging Face Storage Bucket from Node.
+---
+
+import Authentication from '/snippets/vfs/hf_buckets/authentication.mdx'
+import Layout from '/snippets/vfs/hf_buckets/layout.mdx'
+import Integration from '/snippets/vfs/hf_buckets/integration.mdx'
+
+`HfBucketsVFS` mounts one
+[Hugging Face Storage Bucket](https://huggingface.co/docs/hub/storage-buckets):
+every file in it becomes a file and every `/` in its path a folder. Set up the bucket and token as in [HF Buckets setup](/home/setup/hf_buckets).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node opendal
+```
+
+`opendal` is a native binding, so the mount runs in Node only, not in the
+browser.
+
+## Configure
+
+```ts
+import { HfBucketsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const hf = new HfBucketsVFS({
+  bucket: process.env.HF_BUCKET_NAME!,
+  token: process.env.HF_TOKEN!,
+})
+const ws = new Workspace({ '/hf': hf }, { mode: MountMode.WRITE })
+
+const result = await ws.shell("ls /hf && find /hf -name '*.json'")
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`bucket` is the bucket's id, `<owner>/<name>`. `endpoint` points the mount at
+a mirror or a self-hosted Hub. A mount takes `MountMode.READ`, `WRITE` or
+`EXEC`.
+
+### Fields
+
+{/* generated: config-table hf_buckets start */}
+<ResponseField name="bucket" type={"string"} required>
+  Bucket id in `namespace/name` form.
+</ResponseField>
+<ResponseField name="token" type={"string"} post={["secret"]}>
+  Hugging Face access token.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://huggingface.co'"}>
+  Hub origin requests go to, for a mirror or a self-hosted Hub.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Path inside the bucket that becomes the mount root; files outside it are not listed.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table hf_buckets end */}
+
+<Authentication />
+
+<Layout />
+
+## Behavior
+
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket, so
+  `/hf/notes.md` is the file `users/42/notes.md`. A leading `/` is dropped and
+  a trailing `/` added.
+- **Folders:** a folder exists only while it holds a file, so `mkdir` creates
+  nothing.
+- **No move:** `mv` and `rmdir` are not supported.
+- **No history:** a bucket keeps no history, so a removed file is gone for
+  good.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with HF Buckets mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
+
+{/* generated: vfs-md hf_buckets start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `mv`, `rmdir`. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `mv`, `rmdir`. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md hf_buckets end */}

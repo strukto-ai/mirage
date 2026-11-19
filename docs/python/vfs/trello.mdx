@@ -4,6 +4,10 @@ description: Virtualize Trello boards from Python.
 icon: /images/trello-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/trello/authentication.mdx'
+import Layout from '/snippets/vfs/trello/layout.mdx'
+import Integration from '/snippets/vfs/trello/integration.mdx'
+
 `TrelloVFS` mounts Trello as read-only JSON files: workspaces, boards, lists,
 cards with their comments, members and labels. Set up the API key and token as in [Trello setup](/home/setup/trello).
 
@@ -60,51 +64,9 @@ boards. `base_url` points at a proxy.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table trello end */}
 
-## Authentication
+<Authentication />
 
-The mount needs an API key and a token authorized for it. `scope=read` is
-enough for the mount; the [`trello`](/home/setup/cli/trello) CLI needs
-`write`. Keep the token secret: with the key it reaches the whole account.
-
-## Layout
-
-```text
-/trello/
-  workspaces/
-    Acme_Product__<workspace-id>/
-      workspace.json
-      boards/
-        Sprint_Board__<board-id>/
-          board.json
-          members/
-            Alice_Chen__<member-id>.json
-          labels/
-            bug__<label-id>.json
-          lists/
-            Doing__<list-id>/
-              list.json
-              cards/
-                Fix_login_redirect__<card-id>/
-                  card.json
-                  comments.jsonl
-```
-
-- **Names:** every name ends in `__<id>`, so a command can take the id
-  without a lookup. The readable part is sanitized, so `ls` the parent to
-  find a name.
-- **`workspace.json`, `board.json`:** the workspace's and the board's
-  metadata.
-- **`list.json`:** the list, with fields such as `list_id`, `list_name`,
-  `board_id`, `closed` and `pos`.
-- **`card.json`:** the card, with fields such as `card_id`, `board_id`,
-  `list_id`, `member_ids`, `label_ids`, `due` and `url` that commands take as
-  they are.
-- **`comments.jsonl`:** the card's comments, one JSON object per line, ordered
-  by `created_at`. It is a Mirage format, not a Trello one.
-- **Members:** each file carries `member_id` and `username`, ready for
-  commands such as `trello card assign`.
-- **Labels:** each file carries `label_id`, `label_name`, `color` and
-  `board_id`.
+<Layout />
 
 ## Behavior
 
@@ -116,22 +78,7 @@ enough for the mount; the [`trello`](/home/setup/cli/trello) CLI needs
 - **Recent writes:** Trello indexes a write some time after it lands, so a
   search can miss a recent change. See Integration.
 
-## Integration
-
-Trello answers this command through its own API, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `grep -rw` and `rg -w`: Trello search runs for each word, and only the cards
-  that hold every word are read, where the search names it or the listing
-  keeps it. The listing keeps each card's other fields (ids, due date, flags,
-  link) and each name or description word the search can miss, such as one
-  inside a link; the cards are listed once more, so a change since the last
-  listing is still found. Comments and the board's other files are always
-  read. Every card is read when the word is a key of the card JSON (`desc`,
-  `due`) or a JSON literal, has a digit or only the letters a to f, or when a
-  search fails, returns 1,000 cards or finds nothing. `walk_limit: -1` in the
-  mount's `"@all"` [command limit](/home/limits#command-output) reads every file
-  instead.
+<Integration />
 
 ## VFS.md
 

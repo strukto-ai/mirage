@@ -48,7 +48,7 @@ no Node `fs`. Every command runs in-process, and `python3` runs on
 
 - **No FUSE.** A page cannot mount a folder: the browser `Workspace` takes
   plain mounts. Use `ws.shell(...)` and `ws.vfs`.
-- **OPFS quota and eviction.** [`OPFSVFS`](/typescript/setup/opfs) stores
+- **OPFS quota and eviction.** [`OPFSVFS`](/typescript/vfs/opfs) stores
   files under the browser's per-origin quota. Set its `capacity` so a write
   fails with `Disk quota exceeded` before the browser's own quota does;
   `navigator.storage.estimate()` shows the room left. The browser may clear

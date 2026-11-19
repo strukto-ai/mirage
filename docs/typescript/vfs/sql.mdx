@@ -1,0 +1,166 @@
+---
+title: SQL
+icon: database
+description: Virtualize a filesystem kept in SQL tables from Node.
+---
+
+import Layout from '/snippets/vfs/sql/layout.mdx'
+
+`SqlVFS` keeps a filesystem in a database's tables: a SQLite file, a Postgres
+server, a Durable Object's storage or a D1 database. Every command that writes
+works, and the files persist with the database. Setup is on the
+[SQL page](/home/setup/sql).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+Postgres also needs the `pg` peer package.
+
+## Configure
+
+```ts
+import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+const sql = new SqlVFS({ path: './workspace.db' })
+const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
+
+const result = await ws.shell('echo hello > /sql/note.txt && ls /sql')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+Leave out `path` to keep the database in memory. `capacity: '100MB'` caps the
+bytes the database's files hold; see [capacity](/home/setup/vfs#mount-capacity).
+To keep the tables in Postgres, pass its driver:
+
+```ts
+import { PostgresSqlDriver, SqlVFS } from '@struktoai/mirage-node'
+
+const driver = new PostgresSqlDriver(process.env.DATABASE_URL!)
+const sql = new SqlVFS({ driver })
+```
+
+### Fields
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `path` | `:memory:` | The SQLite file, opened and closed with the mount. |
+| `driver` | none | A database to borrow instead of a file: `SqliteDriver` or `PostgresSqlDriver`. The caller closes it. Not with `path`. |
+| `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
+| `root` | `/` | The folder of the database the mount serves, made if missing. |
+
+<Layout />
+
+## Behavior
+
+- **One filesystem, both runtimes:** the Python mount reads and writes the
+  same tables, so the two runtimes on one file serve one filesystem.
+- **Several mounts on one database:** a mount serves one folder of its
+  database, `/` by default. Hand two mounts one driver to serve the whole
+  database and one folder as a mount of its own:
+
+  ```ts
+  import { MountMode, SqliteDriver, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+  const driver = new SqliteDriver('./workspace.db')
+  const ws = new Workspace(
+    {
+      '/': new SqlVFS({ driver, capacity: '1GB' }),
+      '/workspace': new SqlVFS({ driver, root: '/workspace', capacity: '1GB' }),
+    },
+    { mode: MountMode.WRITE },
+  )
+  ```
+
+- **Capacity:** `capacity` counts every file in the database, whichever mount
+  wrote it. Mounts on one driver with the same `capacity` share one count, so
+  their writes together stay within it. Mounts on separate drivers count apart,
+  even on one file, and together they can pass it.
+- **Snapshots:** a snapshot keeps the mount's own folder, and loading it
+  replaces that folder. The rest of the database stays as it was.
+
+## Cloudflare
+
+`@struktoai/mirage-cloudflare` takes a driver as the first argument and the
+same `root` and `capacity` after it: `DurableObjectSqlDriver` over a Durable
+Object's storage, or `D1SqlDriver` over a D1 database.
+
+```ts
+import { DurableObjectSqlDriver, MountMode, SqlVFS, Workspace } from '@struktoai/mirage-cloudflare'
+
+const sql = new SqlVFS(new DurableObjectSqlDriver(ctx.storage), { root: '/workspace' })
+const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
+```
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
+
+{/* generated: vfs-md sql start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` can ask SQLite which files may match. Postgres searches walk the files. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. `grep -r` and `rg` can ask SQLite which files may match. Postgres searches walk the files. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md sql end */}

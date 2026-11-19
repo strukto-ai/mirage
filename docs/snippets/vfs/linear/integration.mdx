@@ -1,0 +1,21 @@
+## Integration
+
+Linear answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Linear's issue search runs for each word, and only
+  the issues that hold every word are read, where the search names it or the
+  listing keeps it. The listing keeps each issue's other fields (team,
+  project, cycle, state, people, labels, dates, link) and each title or
+  description word the search can miss, such as one inside a link. Every issue
+  is read when the word is a key of the issue JSON (`title`, `priority`) or a
+  JSON literal, has a digit or only the letters a to f, or when a search
+  fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's
+  `"@all"` [command limit](/home/limits#command-output) reads every file instead.
+- `grep -r` and `rg` on members, projects, cycles and documents: the listing
+  keeps their whole JSON, so only the files whose text holds the pattern's
+  text in any case are read, whatever `walk_limit` is. Issues are listed once
+  more, so a change since the last listing is still found. A file over 8 KiB,
+  and every file for a text that is not ASCII, is read as usual. Comments are
+  always read: they are fetched per issue, and Linear's comment search can
+  miss a word inside a link.

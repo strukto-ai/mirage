@@ -1,0 +1,313 @@
+---
+title: OCI Object Storage
+icon: /images/oracle-logo.svg
+description: Virtualize an Oracle Cloud Infrastructure Object Storage bucket from Node or the browser.
+---
+
+import Layout from '/snippets/vfs/oci/layout.mdx'
+import Integration from '/snippets/vfs/oci/integration.mdx'
+
+`OCIVFS` mounts one Oracle Cloud Infrastructure Object Storage bucket: every
+object becomes a file and every `/` in a key a folder. It reaches OCI through
+the Amazon S3 Compatibility API. Set up credentials as in [OCI setup](/home/setup/oci).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-node'
+
+const oci = new OCIVFS({
+  bucket: process.env.OCI_BUCKET!,
+  namespace: process.env.OCI_NAMESPACE!,
+  region: process.env.OCI_REGION!,
+  accessKeyId: process.env.OCI_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.OCI_SECRET_ACCESS_KEY!,
+})
+const ws = new Workspace({ '/oci': oci }, { mode: MountMode.WRITE })
+
+const result = await ws.shell("ls /oci && find /oci -name '*.csv'")
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`namespace` and `region` build the endpoint
+`https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com`;
+`endpoint` replaces it. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
+
+{/* generated: config-table oci start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"} default={"true"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+<ResponseField name="namespace" type={"string"} required>
+  Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table oci end */}
+
+## Authentication
+
+Credentials come from `accessKeyId` and `secretAccessKey`, a Customer Secret
+Key, with `sessionToken` for temporary credentials. Without them, the AWS SDK
+reads its own chain: environment variables, `~/.aws/credentials`, then the
+instance or container role.
+
+The user's group needs policies such as
+`Allow group <group> to read buckets in compartment <compartment>` and
+`Allow group <group> to manage objects in compartment <compartment>`
+(`read objects` for a read-only mount). A request the credentials may not make
+answers `Permission denied`.
+
+<Layout />
+
+## Behavior
+
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/oci/notes.md` is the key `users/42/notes.md`.
+- **Path style:** the S3 Compatibility API takes only path-style URLs, so
+  `forcePathStyle` defaults to `true`.
+
+## Browser
+
+The browser `OCIVFS` from `@struktoai/mirage-browser` keeps credentials off the
+page: a server signs a URL for each S3 call with the OCI keys, and the browser
+fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-browser'
+
+const oci = new OCIVFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/oci': oci }, { mode: MountMode.READ })
+```
+
+- The S3 Compatibility API answers CORS for any origin by default. Its CORS
+  rules cannot be set through the S3 `PutBucketCors` call.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server.
+- `namespace`, `region` and `endpoint` only name the mount's storage location:
+  requests go to the host each signed URL names.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
+
+An Express route that signs URLs:
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const NAMESPACE = process.env.OCI_NAMESPACE!
+const REGION = process.env.OCI_REGION!
+
+const client = new S3Client({
+  region: REGION,
+  endpoint: `https://${NAMESPACE}.compat.objectstorage.${REGION}.oci.customer-oci.com`,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.OCI_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.OCI_SECRET_ACCESS_KEY!,
+  },
+})
+const BUCKET = process.env.OCI_BUCKET!
+
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
+    }); break
+  }
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
+})
+```
+
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
+
+  </Accordion>
+  <Accordion title="Browser fields">
+
+{/* generated: config-table browser/oci start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="namespace" type={"string"}>
+  Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/oci end */}
+
+  </Accordion>
+</AccordionGroup>
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with OCI mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
+
+{/* generated: vfs-md oci start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `<mode>` |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md oci end */}

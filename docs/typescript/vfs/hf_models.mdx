@@ -1,0 +1,169 @@
+---
+title: HF Models
+description: Virtualize a Hugging Face model repository from Node.
+icon: /images/huggingface-logo.svg
+---
+
+import Authentication from '/snippets/vfs/hf_models/authentication.mdx'
+import Integration from '/snippets/vfs/hf_models/integration.mdx'
+
+`HfModelsVFS` mounts one [Hugging Face model](https://huggingface.co/models)
+repository, read-only: every file in the repo becomes a file, read lazily, so
+configs, tokenizers and the model card open without downloading the weights.
+Set up the tokens for gated and private models as in [HF Models setup](/home/setup/hf_models).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { HfModelsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const model = new HfModelsVFS({
+  repoId: 'sapientinc/HRM-Text-1B',
+  token: process.env.HF_TOKEN,
+})
+const ws = new Workspace({ '/model': model }, { mode: MountMode.READ })
+
+const result = await ws.shell('ls -lh /model && jq .architectures /model/config.json')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`revision` pins a branch, tag or commit (default `main`), and `keyPrefix`
+mounts one folder of the repo. `endpoint` points at a mirror or a self-hosted
+Hub.
+
+### Fields
+
+{/* generated: config-table hf_models start */}
+<ResponseField name="repoId" type={"string"} required>
+  Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner.
+</ResponseField>
+<ResponseField name="token" type={"string"} post={["secret"]}>
+  Hugging Face access token; unset sends anonymous requests, which reach public repositories only.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://huggingface.co'"}>
+  Hub origin requests go to, for a mirror or a self-hosted Hub.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Path inside the repository that becomes the mount root; files outside it are not listed.
+</ResponseField>
+<ResponseField name="revision" type={"string"}>
+  Branch, tag or commit the mount reads; unset reads `main`.
+</ResponseField>
+<ResponseField name="expandCommits" type={"boolean"}>
+  Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table hf_models end */}
+
+<Authentication />
+
+## Layout
+
+```text
+/model/
+  LICENSE
+  README.md
+  config.json
+  model.safetensors
+  tokenizer.json
+  tokenizer_config.json
+```
+
+Files keep their repo paths: `/model/config.json` is `config.json` in the
+repo. `repoId` is `namespace/name`, or a
+bare name under the token's owner.
+
+## Behavior
+
+- **Read-only:** a Hub write is a commit, and a file write cannot say where a
+  commit ends, so `echo >`, `rm`, `cp` and `mv` are refused rather than making
+  one commit per file. The [`hf` CLI](/typescript/cli/hf) is the write half:
+  `hf download --local-dir` puts a copy on a writable mount, and `hf upload`
+  sends it back as one commit.
+- **Lazy reads:** `ls` and `stat` never download a file, so the weights'
+  size shows without fetching them; they stream only when a command reads
+  them.
+- **Fresh reads:** under `read: fresh`, each command checks once which commit
+  `revision` points at, even when `revision` is a full commit sha, since a
+  branch or tag can carry the same name.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with HF Models mounted at `/<path>`.
+
+{/* generated: vfs-md hf_models start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | read |
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | read |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md hf_models end */}

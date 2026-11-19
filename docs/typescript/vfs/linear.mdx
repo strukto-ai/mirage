@@ -1,0 +1,213 @@
+---
+title: Linear
+icon: /images/linear-logo.svg
+description: Virtualize a Linear workspace from Node or the browser.
+---
+
+import Authentication from '/snippets/vfs/linear/authentication.mdx'
+import Layout from '/snippets/vfs/linear/layout.mdx'
+import Behavior from '/snippets/vfs/linear/behavior.mdx'
+import Integration from '/snippets/vfs/linear/integration.mdx'
+
+`LinearVFS` mounts a Linear workspace as read-only JSON files: teams, members,
+issues with their comments, projects, cycles and documents. Set up the API key as in [Linear setup](/home/setup/linear).
+
+## Install
+
+```bash
+npm install @struktoai/mirage-node
+```
+
+## Configure
+
+```ts
+import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const linear = new LinearVFS({ apiKey: process.env.LINEAR_API_KEY! })
+const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
+
+const result = await ws.shell('ls /linear/teams && tree -L 2 /linear/teams')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+`teamIds` limits the mount to some teams. `baseUrl` points at another GraphQL
+endpoint, such as a proxy.
+
+### Fields
+
+{/* generated: config-table linear start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="apiKey" type={"string"} required post={["secret"]}>
+  Linear personal API key.
+</ResponseField>
+<ResponseField name="teamIds" type={"string[]"}>
+  Only these teams are listed or readable. Unset shows every team the key can reach.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://api.linear.app/graphql'"}>
+  Linear GraphQL endpoint; override to point at a fake or proxy.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table linear end */}
+
+<Authentication />
+
+<Layout />
+
+<Behavior />
+
+## Browser
+
+The browser `LinearVFS` from `@struktoai/mirage-browser` takes the same fields.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const linear = new LinearVFS({ apiKey: LINEAR_API_KEY })
+const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
+```
+
+- The API key reaches the page, so give it only the **Read** permission.
+
+<Integration />
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`.
+
+{/* generated: vfs-md linear start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Virtual Filesystem**
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `linear`, read |
+
+    **VFS Layout**
+
+    **`/<path>`**
+
+    ```text
+    /<path>
+      teams/
+        <team-key>__<team-name>__<team-id>/
+          team.json
+          members/
+            <display-name>__<user-id>.json
+          issues/
+            <issue-key>__<issue-id>/
+              issue.json
+              comments.jsonl
+          projects/
+            <name>__<project-id>.json
+          cycles/
+            <name>__<cycle-id>.json
+          documents/
+            <title>__<document-id>.json
+    ```
+
+    - A named segment is `<sanitized-name>__<id>`; the id after the last `__`
+      is exact. `ls` the parent for exact names rather than building them.
+    - Files are JSON normalized by Mirage with snake_case keys (`issue_key`,
+      `state_name`, `assignee_email`, `label_names`), not Linear's GraphQL
+      shape. `comments.jsonl` holds one comment per line.
+    - `team.json` lists the team's workflow states; a project file lists its
+      issues with their state.
+    - To create, update, assign, transition or comment on issues, use the
+      `linear` CLI if installed (`linear --help`).
+
+    **Supported Unix Commands for VFS**
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `linear` which files may match. |
+
+    **Limitations of Unix Commands for VFS**
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `linear` answers only for `teams/*/issues/*/issue.json`, `teams/*/members/*`, `teams/*/projects/*`, `teams/*/cycles/*` and `teams/*/documents/*`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `linear`, read |
+
+    ## VFS Layout
+
+    ### `/<path>`
+
+    ```text
+    /<path>
+      teams/
+        <team-key>__<team-name>__<team-id>/
+          team.json
+          members/
+            <display-name>__<user-id>.json
+          issues/
+            <issue-key>__<issue-id>/
+              issue.json
+              comments.jsonl
+          projects/
+            <name>__<project-id>.json
+          cycles/
+            <name>__<cycle-id>.json
+          documents/
+            <title>__<document-id>.json
+    ```
+
+    - A named segment is `<sanitized-name>__<id>`; the id after the last `__`
+      is exact. `ls` the parent for exact names rather than building them.
+    - Files are JSON normalized by Mirage with snake_case keys (`issue_key`,
+      `state_name`, `assignee_email`, `label_names`), not Linear's GraphQL
+      shape. `comments.jsonl` holds one comment per line.
+    - `team.json` lists the team's workflow states; a project file lists its
+      issues with their state.
+    - To create, update, assign, transition or comment on issues, use the
+      `linear` CLI if installed (`linear --help`).
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `linear` which files may match. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `linear` answers only for `teams/*/issues/*/issue.json`, `teams/*/members/*`, `teams/*/projects/*`, `teams/*/cycles/*` and `teams/*/documents/*`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: vfs-md linear end */}

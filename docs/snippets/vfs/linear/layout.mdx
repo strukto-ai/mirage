@@ -1,0 +1,40 @@
+## Layout
+
+```text
+/linear/
+  teams/
+    ENG__Engineering__<team-id>/
+      team.json
+      members/
+        Alice_Chen__<user-id>.json
+      issues/
+        ENG-142__<issue-id>/
+          issue.json
+          comments.jsonl
+      projects/
+        Q4_Launch__<project-id>.json
+      cycles/
+        Cycle_12__<cycle-id>.json
+      documents/
+        Roadmap_2027__<document-id>.json
+```
+
+- **Names:** every name ends in `__<id>`: a team is
+  `<team-key>__<team-name>__<team-id>`, an issue `<issue-key>__<issue-id>`, a
+  member `<display-name>__<user-id>.json`, and a project, cycle or document
+  `<name>__<id>.json`. The readable part is sanitized, so `ls` the parent
+  instead of building a name.
+- **`team.json`:** the team's metadata.
+- **`issue.json`:** the issue, with fields such as `issue_id`, `issue_key`,
+  `team_id`, `state_id` and `assignee_id` that commands take as they are.
+- **`comments.jsonl`:** the issue's comments, one JSON object per line, ordered
+  by `created_at`. It is a Mirage format, not a Linear one.
+- **Members:** each file carries `user_id` and `email`, ready for commands such
+  as `linear issue assign`.
+- **Projects and cycles:** a project lists its related issues; a cycle carries
+  its start and end dates.
+- **Documents:** each file holds the title, the markdown content, the linked
+  project and the creator.
+
+Files hold Mirage's JSON with snake_case keys, not Linear's raw GraphQL
+response.

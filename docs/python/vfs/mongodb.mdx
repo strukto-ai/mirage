@@ -4,6 +4,10 @@ description: Virtualize MongoDB databases from Python.
 icon: /images/mongodb-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/mongodb/authentication.mdx'
+import Layout from '/snippets/vfs/mongodb/layout.mdx'
+import Integration from '/snippets/vfs/mongodb/integration.mdx'
+
 `MongoDBVFS` turns MongoDB databases into a read-only tree: every collection
 and view is a folder holding its sampled schema and its documents as JSON
 lines. Set up the connection URI as in [MongoDB setup](/home/setup/mongodb).
@@ -56,43 +60,9 @@ such as embeddings, from what an agent reads.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mongodb end */}
 
-## Authentication
+<Authentication />
 
-The user in the URI needs to read the databases the mount shows: the built-in
-**Only read any database** role on Atlas, or `read` on each database.
-
-## Layout
-
-```text
-/mongodb/
-  sample_mflix/
-    database.json
-    collections/
-      movies/
-        schema.json
-        documents.jsonl
-    views/
-      top_movies/
-        schema.json
-        documents.jsonl
-```
-
-The tree mirrors MongoDB's cluster, database, collection and view. The
-database folder always appears, even when `databases` names one database.
-Listings show databases, collections, views and their fixed files, never one
-entry per document.
-
-- `database.json`: the collection and view names, without counts.
-- `schema.json`: field paths and the BSON types seen in the first 100
-  documents in `_id` order, the indexes and the `$jsonSchema` validator if one
-  is set. Views have no indexes. Unchanged data reads as identical bytes.
-- `documents.jsonl`: one document per line in
-  [Relaxed Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/),
-  in `_id` order:
-
-```json
-{"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
-```
+<Layout />
 
 ## Behavior
 
@@ -114,27 +84,7 @@ entry per document.
   inserts through a change stream. That needs a replica set on MongoDB 5.0 or
   later, which Atlas is; on a standalone server, and on a view, it polls.
 
-## Integration
-
-MongoDB answers these commands through its own API, so fewer documents are
-read. See [Integration](/home/integration/overview).
-
-- `grep` and `rg` on one file: a filter on the server sends only the documents
-  that may match. `grep -r` on a folder does the same for each
-  `documents.jsonl` under it.
-- `tail -n N`: the last N documents by `_id`, sorted on the server.
-- `wc -l`: `countDocuments()` on the server.
-- `tail -f`: a change stream yields each new insert.
-
-For one plain text, the filter matches it in any case against every key and
-string of a document, eight levels deep, in the `_id` order a plain read takes.
-A document nested deeper, or holding a value the filter cannot look into
-(binary, a regex, code), is always sent. MongoDB still scans the collection,
-but only those documents are sent. The file is read as usual when the text
-holds anything but ASCII letters and spaces, or could match an Extended JSON
-key (`$oid`, `$date`, `$numberLong`), a JSON literal (`true`, `null`) or an id
-(a word of hex letters only, such as `ada`). `schema.json` and `database.json`
-are always read, and `-m` stops the cursor early.
+<Integration />
 
 ## VFS.md
 

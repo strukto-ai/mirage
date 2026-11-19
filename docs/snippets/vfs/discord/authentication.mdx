@@ -1,0 +1,15 @@
+## Authentication
+
+`token` is a bot token, sent with Discord's `Bot <token>` scheme. The bot
+needs:
+
+- **Message Content Intent**: without it, message text and attachments come
+  back empty.
+- **Server Members Intent**: for the `members/` folder; without it, `members/`
+  is empty.
+- The **View Channels** and **Read Message History** permissions in each
+  server it reads. The mount never posts.
+
+A channel the bot cannot read answers `Permission denied`: `ls` names it and
+fails, `find` reports it and walks on. A channel deleted since it was listed
+answers `No such file or directory`.

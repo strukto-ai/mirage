@@ -4,6 +4,9 @@ icon: /images/postgres-logo.svg
 description: Virtualize a Postgres database from Python.
 ---
 
+import Authentication from '/snippets/vfs/postgres/authentication.mdx'
+import Layout from '/snippets/vfs/postgres/layout.mdx'
+
 `PostgresVFS` turns a Postgres database into a read-only tree: every schema is a
 folder of tables and views, and each one holds its column types, a summary of
 what it means and its rows as JSON lines. Set up the connection string and a read-only role as in [Postgres setup](/home/setup/postgres).
@@ -58,35 +61,9 @@ await ws.close()
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table postgres end */}
 
-## Authentication
+<Authentication />
 
-The role in `dsn` needs `USAGE` on each schema the mount shows and `SELECT` on
-its tables and views. Add `?sslmode=require` when the server needs TLS.
-
-## Layout
-
-```text
-/pg/
-  database.json
-  public/
-    tables/
-      customers/
-        schema.json
-        semantic.json
-        rows.jsonl
-    views/
-      paid_orders/
-        schema.json
-        semantic.json
-        rows.jsonl
-```
-
-- `database.json`: every table with its estimated rows and size, and the
-  relationships between them.
-- `schema.json`: columns, keys and indexes.
-- `semantic.json`: what a table means: dimensions, time dimensions and facts,
-  comments, enum domains and example values.
-- `rows.jsonl`: one row per line.
+<Layout />
 
 ## Behavior
 

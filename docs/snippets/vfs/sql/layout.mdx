@@ -1,0 +1,16 @@
+## Layout
+
+```text
+/sql/
+  notes/
+    hello.txt
+  users.csv
+```
+
+The tables are laid out as [AgentFS](https://github.com/tursodatabase/agentfs)'s:
+
+- `fs_inode`: one row per file and folder, with its size and mtime.
+- `fs_dentry`: each entry's name under its parent folder.
+- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless
+  the database says otherwise).
+- `fs_config`: the chunk size.

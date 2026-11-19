@@ -1,0 +1,9 @@
+## Integration
+
+LanceDB answers this command through its own API, so fewer cards are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: a `LIKE` query over each row's string columns picks the
+  cards to read, for any text, and misses nothing. A text that could match a
+  column's name, a boolean or `null`, or the `column: ` prefix reads every
+  card, as does a table that renders a list, struct or bytes column.

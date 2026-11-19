@@ -1,0 +1,7 @@
+## Authentication
+
+The API key is sent as HTTP Basic auth and reads what its user can read.
+Mirage does not discover entities from the key: set `entities` to the user or
+team segment of a project URL (`wandb.ai/<entity>/<project>`). An empty
+`api_key` sends no credentials. Only downloads from the `base_url` origin
+carry the key.

@@ -4,6 +4,9 @@ description: Virtualize a Google Cloud Storage bucket from Python.
 icon: /images/gcs-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gcs/layout.mdx'
+import Integration from '/snippets/vfs/gcs/integration.mdx'
+
 `GCSVFS` mounts one Google Cloud Storage bucket: every object becomes a file and
 every `/` in a key a folder. It reaches GCS through the S3-compatible XML API at
 `https://storage.googleapis.com`, signed with an HMAC key. Set up credentials as in [GCS setup](/home/setup/gcs).
@@ -93,36 +96,14 @@ Object User** (or **Storage Object Admin**) to write. A new key can take up to a
 minute to work. A request the credentials may not make answers
 `Permission denied`.
 
-## Layout
-
-```text
-/gcs/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-    q2.csv
-```
-
-`/gcs/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
-keys; GCS stores no folder objects.
+<Layout />
 
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
   so `/gcs/notes.md` is the key `users/42/notes.md`.
 
-## Integration
-
-GCS answers these commands through its own API, so fewer objects are read. See
-[Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

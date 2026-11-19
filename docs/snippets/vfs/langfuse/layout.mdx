@@ -1,0 +1,30 @@
+## Layout
+
+```text
+/langfuse/
+  traces/
+    <trace-id>.json
+  sessions/
+    <session-id>/
+      <trace-id>.json
+  prompts/
+    <prompt-name>/
+      1.json
+      2.json
+  datasets/
+    <dataset-name>/
+      items.jsonl
+      runs/
+        <run-name>.jsonl
+```
+
+- **`traces/`:** one `.json` file per trace: the trace's root observation,
+  with its other observations (spans, generations, events) in `observations`
+  and its scores in `scores`. `input` and `output` are the strings Langfuse
+  stores; `jq '.input | fromjson'` parses a JSON one.
+- **`sessions/`:** the sessions of the traces `traces/` lists, each holding
+  its own traces.
+- **`prompts/`:** one folder per prompt name, one file per version (`1.json`,
+  `2.json`) with the prompt content and metadata.
+- **`datasets/`:** one folder per dataset, with `items.jsonl` (its items) and
+  `runs/`, one `.jsonl` file per experiment run.

@@ -653,6 +653,7 @@
                 ]
               },
               "python/cli/new",
+              "python/cli/new-reference",
               "python/cli/mcp"
             ]
           },
@@ -752,7 +753,7 @@
                   "typescript/agents/vercel",
                   "typescript/agents/mastra",
                   "typescript/agents/claude-agent-sdk",
-                  "typescript/agents/openai",
+                  "typescript/agents/openai-agents",
                   "typescript/agents/langchain"
                 ]
               },
@@ -769,112 +770,112 @@
           {
             "group": "VFS",
             "pages": [
-              "typescript/setup/vfs",
+              "typescript/vfs/index",
               {
                 "group": "Local",
                 "icon": "hard-drive",
                 "pages": [
-                  "typescript/setup/ram",
-                  "typescript/setup/disk",
-                  "typescript/setup/opfs"
+                  "typescript/vfs/ram",
+                  "typescript/vfs/disk",
+                  "typescript/vfs/opfs"
                 ]
               },
               {
                 "group": "Buckets",
                 "icon": "bucket",
                 "pages": [
-                  "typescript/setup/s3",
-                  "typescript/setup/r2",
-                  "typescript/setup/gcs",
-                  "typescript/setup/oci",
-                  "typescript/setup/supabase",
-                  "typescript/setup/minio",
-                  "typescript/setup/ceph",
-                  "typescript/setup/seaweedfs",
-                  "typescript/setup/wasabi",
-                  "typescript/setup/backblaze",
-                  "typescript/setup/digitalocean",
-                  "typescript/setup/tencent",
-                  "typescript/setup/aliyun",
-                  "typescript/setup/scaleway",
-                  "typescript/setup/qingstor",
-                  "typescript/setup/hf_buckets"
+                  "typescript/vfs/s3",
+                  "typescript/vfs/r2",
+                  "typescript/vfs/gcs",
+                  "typescript/vfs/oci",
+                  "typescript/vfs/supabase",
+                  "typescript/vfs/minio",
+                  "typescript/vfs/ceph",
+                  "typescript/vfs/seaweedfs",
+                  "typescript/vfs/wasabi",
+                  "typescript/vfs/backblaze",
+                  "typescript/vfs/digitalocean",
+                  "typescript/vfs/tencent",
+                  "typescript/vfs/aliyun",
+                  "typescript/vfs/scaleway",
+                  "typescript/vfs/qingstor",
+                  "typescript/vfs/hf_buckets"
                 ]
               },
               {
                 "group": "Files",
                 "icon": "folder-open",
                 "pages": [
-                  "typescript/setup/gdrive",
-                  "typescript/setup/gdocs",
-                  "typescript/setup/gsheets",
-                  "typescript/setup/gslides",
-                  "typescript/setup/onedrive",
-                  "typescript/setup/sharepoint",
-                  "typescript/setup/dropbox",
-                  "typescript/setup/box",
-                  "typescript/setup/nextcloud",
-                  "typescript/setup/databricks_volume",
-                  "typescript/setup/tidb_filesystem",
-                  "typescript/setup/ssh",
-                  "typescript/setup/machine"
+                  "typescript/vfs/gdrive",
+                  "typescript/vfs/gdocs",
+                  "typescript/vfs/gsheets",
+                  "typescript/vfs/gslides",
+                  "typescript/vfs/onedrive",
+                  "typescript/vfs/sharepoint",
+                  "typescript/vfs/dropbox",
+                  "typescript/vfs/box",
+                  "typescript/vfs/nextcloud",
+                  "typescript/vfs/databricks_volume",
+                  "typescript/vfs/tidb_filesystem",
+                  "typescript/vfs/ssh",
+                  "typescript/vfs/machine"
                 ]
               },
               {
                 "group": "Databases",
                 "icon": "database",
                 "pages": [
-                  "typescript/setup/postgres",
-                  "typescript/setup/mongodb",
-                  "typescript/setup/gridfs",
-                  "typescript/setup/redis",
-                  "typescript/setup/upstash",
-                  "typescript/setup/sql",
-                  "typescript/setup/airtable"
+                  "typescript/vfs/postgres",
+                  "typescript/vfs/mongodb",
+                  "typescript/vfs/gridfs",
+                  "typescript/vfs/redis",
+                  "typescript/vfs/upstash",
+                  "typescript/vfs/sql",
+                  "typescript/vfs/airtable"
                 ]
               },
               {
                 "group": "AI",
                 "icon": "sparkles",
                 "pages": [
-                  "typescript/setup/chroma",
-                  "typescript/setup/lancedb",
-                  "typescript/setup/qdrant",
-                  "typescript/setup/dify",
-                  "typescript/setup/mem0",
-                  "typescript/setup/hf_datasets",
-                  "typescript/setup/hf_models"
+                  "typescript/vfs/chroma",
+                  "typescript/vfs/lancedb",
+                  "typescript/vfs/qdrant",
+                  "typescript/vfs/dify",
+                  "typescript/vfs/mem0",
+                  "typescript/vfs/hf_datasets",
+                  "typescript/vfs/hf_models"
                 ]
               },
               {
                 "group": "Developer",
                 "icon": "code",
                 "pages": [
-                  "typescript/setup/github",
-                  "typescript/setup/hf_spaces",
-                  "typescript/setup/linear",
-                  "typescript/setup/wandb",
-                  "typescript/setup/langfuse",
-                  "typescript/setup/jaeger"
+                  "typescript/vfs/github",
+                  "typescript/vfs/hf_spaces",
+                  "typescript/vfs/linear",
+                  "typescript/vfs/wandb",
+                  "typescript/vfs/langfuse",
+                  "typescript/vfs/jaeger"
                 ]
               },
               {
                 "group": "Chat",
                 "icon": "comments",
                 "pages": [
-                  "typescript/setup/slack",
-                  "typescript/setup/discord",
-                  "typescript/setup/gmail",
-                  "typescript/setup/email"
+                  "typescript/vfs/slack",
+                  "typescript/vfs/discord",
+                  "typescript/vfs/gmail",
+                  "typescript/vfs/email"
                 ]
               },
               {
                 "group": "Productivity",
                 "icon": "list-check",
                 "pages": [
-                  "typescript/setup/gcal",
-                  "typescript/setup/notion",
-                  "typescript/setup/trello"
+                  "typescript/vfs/gcal",
+                  "typescript/vfs/notion",
+                  "typescript/vfs/trello"
                 ]
               },
               "typescript/vfs/new"
@@ -924,6 +925,7 @@
                 ]
               },
               "typescript/cli/new",
+              "typescript/cli/new-reference",
               "typescript/cli/mcp"
             ]
           },
@@ -1254,6 +1256,250 @@
     {
       "source": "/home/examples/runtime-routing",
       "destination": "/home/examples/multi-machine-terminal"
+    },
+    {
+      "source": "/typescript/setup/airtable",
+      "destination": "/typescript/vfs/airtable"
+    },
+    {
+      "source": "/typescript/setup/aliyun",
+      "destination": "/typescript/vfs/aliyun"
+    },
+    {
+      "source": "/typescript/setup/backblaze",
+      "destination": "/typescript/vfs/backblaze"
+    },
+    {
+      "source": "/typescript/setup/box",
+      "destination": "/typescript/vfs/box"
+    },
+    {
+      "source": "/typescript/setup/ceph",
+      "destination": "/typescript/vfs/ceph"
+    },
+    {
+      "source": "/typescript/setup/chroma",
+      "destination": "/typescript/vfs/chroma"
+    },
+    {
+      "source": "/typescript/setup/databricks_volume",
+      "destination": "/typescript/vfs/databricks_volume"
+    },
+    {
+      "source": "/typescript/setup/dify",
+      "destination": "/typescript/vfs/dify"
+    },
+    {
+      "source": "/typescript/setup/digitalocean",
+      "destination": "/typescript/vfs/digitalocean"
+    },
+    {
+      "source": "/typescript/setup/discord",
+      "destination": "/typescript/vfs/discord"
+    },
+    {
+      "source": "/typescript/setup/disk",
+      "destination": "/typescript/vfs/disk"
+    },
+    {
+      "source": "/typescript/setup/dropbox",
+      "destination": "/typescript/vfs/dropbox"
+    },
+    {
+      "source": "/typescript/setup/email",
+      "destination": "/typescript/vfs/email"
+    },
+    {
+      "source": "/typescript/setup/gcal",
+      "destination": "/typescript/vfs/gcal"
+    },
+    {
+      "source": "/typescript/setup/gcs",
+      "destination": "/typescript/vfs/gcs"
+    },
+    {
+      "source": "/typescript/setup/gdocs",
+      "destination": "/typescript/vfs/gdocs"
+    },
+    {
+      "source": "/typescript/setup/gdrive",
+      "destination": "/typescript/vfs/gdrive"
+    },
+    {
+      "source": "/typescript/setup/github",
+      "destination": "/typescript/vfs/github"
+    },
+    {
+      "source": "/typescript/setup/gmail",
+      "destination": "/typescript/vfs/gmail"
+    },
+    {
+      "source": "/typescript/setup/gridfs",
+      "destination": "/typescript/vfs/gridfs"
+    },
+    {
+      "source": "/typescript/setup/gsheets",
+      "destination": "/typescript/vfs/gsheets"
+    },
+    {
+      "source": "/typescript/setup/gslides",
+      "destination": "/typescript/vfs/gslides"
+    },
+    {
+      "source": "/typescript/setup/hf_buckets",
+      "destination": "/typescript/vfs/hf_buckets"
+    },
+    {
+      "source": "/typescript/setup/hf_datasets",
+      "destination": "/typescript/vfs/hf_datasets"
+    },
+    {
+      "source": "/typescript/setup/hf_models",
+      "destination": "/typescript/vfs/hf_models"
+    },
+    {
+      "source": "/typescript/setup/hf_spaces",
+      "destination": "/typescript/vfs/hf_spaces"
+    },
+    {
+      "source": "/typescript/setup/jaeger",
+      "destination": "/typescript/vfs/jaeger"
+    },
+    {
+      "source": "/typescript/setup/lancedb",
+      "destination": "/typescript/vfs/lancedb"
+    },
+    {
+      "source": "/typescript/setup/langfuse",
+      "destination": "/typescript/vfs/langfuse"
+    },
+    {
+      "source": "/typescript/setup/linear",
+      "destination": "/typescript/vfs/linear"
+    },
+    {
+      "source": "/typescript/setup/machine",
+      "destination": "/typescript/vfs/machine"
+    },
+    {
+      "source": "/typescript/setup/mem0",
+      "destination": "/typescript/vfs/mem0"
+    },
+    {
+      "source": "/typescript/setup/minio",
+      "destination": "/typescript/vfs/minio"
+    },
+    {
+      "source": "/typescript/setup/mongodb",
+      "destination": "/typescript/vfs/mongodb"
+    },
+    {
+      "source": "/typescript/setup/nextcloud",
+      "destination": "/typescript/vfs/nextcloud"
+    },
+    {
+      "source": "/typescript/setup/notion",
+      "destination": "/typescript/vfs/notion"
+    },
+    {
+      "source": "/typescript/setup/oci",
+      "destination": "/typescript/vfs/oci"
+    },
+    {
+      "source": "/typescript/setup/onedrive",
+      "destination": "/typescript/vfs/onedrive"
+    },
+    {
+      "source": "/typescript/setup/opfs",
+      "destination": "/typescript/vfs/opfs"
+    },
+    {
+      "source": "/typescript/setup/postgres",
+      "destination": "/typescript/vfs/postgres"
+    },
+    {
+      "source": "/typescript/setup/qdrant",
+      "destination": "/typescript/vfs/qdrant"
+    },
+    {
+      "source": "/typescript/setup/qingstor",
+      "destination": "/typescript/vfs/qingstor"
+    },
+    {
+      "source": "/typescript/setup/r2",
+      "destination": "/typescript/vfs/r2"
+    },
+    {
+      "source": "/typescript/setup/ram",
+      "destination": "/typescript/vfs/ram"
+    },
+    {
+      "source": "/typescript/setup/redis",
+      "destination": "/typescript/vfs/redis"
+    },
+    {
+      "source": "/typescript/setup/s3",
+      "destination": "/typescript/vfs/s3"
+    },
+    {
+      "source": "/typescript/setup/scaleway",
+      "destination": "/typescript/vfs/scaleway"
+    },
+    {
+      "source": "/typescript/setup/seaweedfs",
+      "destination": "/typescript/vfs/seaweedfs"
+    },
+    {
+      "source": "/typescript/setup/sharepoint",
+      "destination": "/typescript/vfs/sharepoint"
+    },
+    {
+      "source": "/typescript/setup/slack",
+      "destination": "/typescript/vfs/slack"
+    },
+    {
+      "source": "/typescript/setup/sql",
+      "destination": "/typescript/vfs/sql"
+    },
+    {
+      "source": "/typescript/setup/ssh",
+      "destination": "/typescript/vfs/ssh"
+    },
+    {
+      "source": "/typescript/setup/supabase",
+      "destination": "/typescript/vfs/supabase"
+    },
+    {
+      "source": "/typescript/setup/tencent",
+      "destination": "/typescript/vfs/tencent"
+    },
+    {
+      "source": "/typescript/setup/tidb_filesystem",
+      "destination": "/typescript/vfs/tidb_filesystem"
+    },
+    {
+      "source": "/typescript/setup/trello",
+      "destination": "/typescript/vfs/trello"
+    },
+    {
+      "source": "/typescript/setup/upstash",
+      "destination": "/typescript/vfs/upstash"
+    },
+    {
+      "source": "/typescript/setup/vfs",
+      "destination": "/typescript/vfs/index"
+    },
+    {
+      "source": "/typescript/setup/wandb",
+      "destination": "/typescript/vfs/wandb"
+    },
+    {
+      "source": "/typescript/setup/wasabi",
+      "destination": "/typescript/vfs/wasabi"
+    },
+    {
+      "source": "/typescript/agents/openai",
+      "destination": "/typescript/agents/openai-agents"
     }
   ],
   "navbar": {

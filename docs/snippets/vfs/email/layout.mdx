@@ -1,0 +1,24 @@
+## Layout
+
+```text
+/email/
+  INBOX/
+    2026-11-16/
+      Meeting_Notes__12345.email.json
+      Meeting_Notes__12345/
+        report.pdf
+        screenshot.png
+  Sent/
+    2026-11-16/
+      ...
+```
+
+- **Folders:** the root lists the IMAP folders under their own names
+  (`INBOX`, `Sent`, `Drafts`).
+- **Days:** inside a folder, messages are grouped by the `YYYY-MM-DD` of their
+  `Date` header.
+- **Messages:** each message is `<subject>__<uid>.email.json`, with a
+  sanitized subject, so `ls` the day rather than build the name. The UID
+  after `__` is what `himalaya` takes.
+- **Attachments:** a message with attachments gets a folder of the same base
+  name holding them.
