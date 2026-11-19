@@ -349,6 +349,7 @@ describe('MountCore', () => {
     const getattr = vi.spyOn(core, 'getattr')
     const rows = new Map(await core.listing('/data/sub'))
     expect(getattr.mock.calls.map(([path]) => path)).not.toContain('/data')
+    expect(rows.get('.')).toBeDefined()
     expect(rows.get('..')).toEqual(rows.get('.'))
   })
 
