@@ -4,6 +4,9 @@ description: Virtualize a Backblaze B2 bucket from Python.
 icon: /images/backblaze-logo.svg
 ---
 
+import Layout from '/snippets/vfs/backblaze/layout.mdx'
+import Integration from '/snippets/vfs/backblaze/integration.mdx'
+
 `BackblazeVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at Backblaze B2's
 endpoint, so commands behave as they do on S3. Set up credentials as in [Backblaze B2 setup](/home/setup/backblaze).
@@ -97,35 +100,14 @@ application key does not work with the S3-compatible API, and neither
 does a key created before May 4, 2020.
 An object the key may not read or change answers `Permission denied`.
 
-## Layout
-
-```text
-/b2/
-  README.md
-  logs/
-    app-2026-11-15.log
-    app-2026-11-16.log
-  reports/
-    2026-q3.csv
-    2026-q4.csv
-```
-
-`/b2/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
-from the `/` in keys.
+<Layout />
 
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
   so `/b2/notes.md` is the key `users/42/notes.md`.
 
-## Integration
-
-Backblaze B2 answers these commands through its own API, so fewer objects are
-read. See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

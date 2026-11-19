@@ -1,0 +1,30 @@
+## Layout
+
+```text
+/discord/
+  Acme Labs__1098765432101234567/
+    channels/
+      general__1098765432101234570/
+        2026-11-16/
+          chat.jsonl
+          files/
+            diagram__1174567890123456789.png
+    members/
+      alice__1012345678901234567.json
+```
+
+- **Names:** a server, channel, member or attachment is
+  `<display-name>__<id>`, so the CLI's flags take the snowflake id from the
+  path and two entities with one name never collide. Spaces, apostrophes and
+  emoji are kept; only `/` becomes `∕` (U+2215). Quote names with spaces.
+  `stat` also shows the id.
+- **Servers:** the root lists one folder per server the bot is in.
+- **`channels/`:** text channels (types 0, 5 and 15), each with one folder per
+  day for the 30 days up to its newest message, so an inactive channel shows
+  days around its last activity, not today.
+- **`chat.jsonl`:** one message per line as Discord's API returns it, with
+  `.id`, `.content`, `.author.username` and `.attachments`.
+- **`files/`:** the attachments posted that day, named
+  `<stem>__<attachment-id>.<ext>`. `cat` downloads one from Discord's CDN.
+- **`members/`:** one file per member, holding the member as Discord's API
+  returns it.

@@ -4,6 +4,8 @@ description: Virtualize a Dropbox account or folder from Node or the browser.
 icon: /images/dropbox-logo.svg
 ---
 
+import Integration from '/snippets/vfs/dropbox/integration.mdx'
+
 `DropboxVFS` mounts a Dropbox account, or one folder of it: files keep their
 names and bytes, and folders stay folders. Set up the app key, app secret and refresh token as in [Dropbox setup](/home/setup/dropbox).
 
@@ -136,31 +138,7 @@ const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
 - To keep a secret on a backend instead, pass `refreshFn`: it takes the
   refresh token and returns `{ accessToken, expiresIn }`.
 
-## Integration
-
-Dropbox answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `grep -rw` and `rg -w`: [Dropbox search](https://www.dropbox.com/developers/documentation/http/documentation#files-search)
-  names the files to read, for whole words. Every file is read when the
-  search fails, reaches its 10,000-match limit or finds nothing.
-  [Search](/home/integration/search) lists how each option uses it. Dropbox
-  can leave out a file that holds the word:
-  - Full-text search needs a Professional, Essentials or Business plan; on
-    other plans Dropbox matches file names only.
-  - Dropbox searches the text it extracted, not the bytes, and indexes a
-    write some time after it lands, so it can miss Office files, PDFs,
-    archives, the end of a large file, a word Dropbox splits differently
-    (`foo.bar`) and recent writes.
-
-  `walk_limit: -1` in the mount's `"@all"`
-  [command limit](/home/limits#command-output) reads every file instead.
-- `grep -a` (`--binary-files=text`): files with a binary extension, such as
-  `.pdf` or `.zip`, are read and searched as text even when the search did
-  not name them. `grep -I` skips binary files.
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

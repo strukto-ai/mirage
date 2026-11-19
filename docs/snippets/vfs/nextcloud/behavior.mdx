@@ -1,0 +1,9 @@
+## Behavior
+
+- **Partial reads:** reads stream in chunks, and partial reads such as
+  `head -c` send HTTP `Range` requests.
+- **Writes:** a write buffers the whole file before it uploads. `cp`, `mv`,
+  `rm` and `mkdir` run as WebDAV `COPY`, `MOVE`, `DELETE` and `MKCOL`.
+- **Snapshots:** a snapshot keeps the mount's settings but not the password,
+  so hand the password back when loading it. Files are not checked for
+  changes on replay.

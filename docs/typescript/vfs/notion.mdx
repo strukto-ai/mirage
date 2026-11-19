@@ -4,6 +4,9 @@ icon: /images/notion-logo.svg
 description: Virtualize a Notion workspace from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/notion/layout.mdx'
+import Integration from '/snippets/vfs/notion/integration.mdx'
+
 `NotionVFS` mounts the Notion pages and databases shared with a connection as
 read-only JSON files: pages with their content as Markdown, and databases with
 their schema and rows. Set up the token as in [Notion setup](/home/setup/notion).
@@ -59,50 +62,7 @@ capability also works: it acts with its creator's permissions and needs no
 sharing. The update and insert content capabilities are only for writes
 through the `ntn` CLI.
 
-## Layout
-
-```text
-/notion/
-  pages/
-    Engineering_Wiki__<page-id>/
-      page.json
-      Onboarding__<child-id>/
-        page.json
-  databases/
-    Roadmap__<database-id>/
-      database.json
-      Roadmap__<data-source-id>/
-        data_source.json
-        rows.jsonl
-```
-
-Titles are sanitized and end in `__<id>`, so `ls` the parent instead of
-building a path. `pages/` mirrors Notion's page tree, with child pages as
-nested folders. Since the `2025-09-03` API, a database is a container of one
-or more data sources, so `databases/` is one level deeper. A single-source
-database repeats its name, since Notion names the data source after its
-database.
-
-- **`page.json`:** a page, a database row included. Blocks render to
-  `markdown` and stay raw under `blocks`; blocks with children embed them
-  under `children`. A row's cell values are under `properties`, as Notion's
-  own property objects; a standalone page's `properties` holds only its
-  title.
-- **`database.json`:** the container: `database_id`, `title`, `url`,
-  timestamps, `parent`, `archived`, `is_inline` and the `data_sources` that
-  name the folders beneath it. It carries no `properties`.
-- **`data_source.json`:** the typed column schema under `properties`, with no
-  rows. A data source id is not its database id; `ntn datasources resolve
-  <database-id>` turns one into the other.
-- **`rows.jsonl`:** every row, one JSON object per line in query order: the
-  row's `page.json` without the body, plus `path`, where that `page.json` is
-  below the data source folder.
-
-```bash
-jq -r 'select(.properties.Priority.number > 1) | .title' "$DS/rows.jsonl"
-grep -c '"checkbox":true' "$DS/rows.jsonl"
-cat "$DS/$(jq -r 'select(.title == "Write spec") | .path' "$DS/rows.jsonl")"
-```
+<Layout />
 
 ## Behavior
 
@@ -153,12 +113,7 @@ Fields marked secret are redacted in snapshots.
   </Accordion>
 </AccordionGroup>
 
-## Integration
-
-Notion answers this command through its own API, so less is read. See
-[Integration](/home/integration/overview).
-
-- `head -n N`: renders only the first N rows.
+<Integration />
 
 ## VFS.md
 

@@ -1,0 +1,24 @@
+## Layout
+
+```text
+/pg/
+  database.json
+  public/
+    tables/
+      customers/
+        schema.json
+        semantic.json
+        rows.jsonl
+    views/
+      paid_orders/
+        schema.json
+        semantic.json
+        rows.jsonl
+```
+
+- `database.json`: every table with its estimated rows and size, and the
+  relationships between them.
+- `schema.json`: columns, keys and indexes.
+- `semantic.json`: what a table means: dimensions, time dimensions and facts,
+  comments, enum domains and example values.
+- `rows.jsonl`: one row per line.

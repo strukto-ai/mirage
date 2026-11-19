@@ -4,6 +4,11 @@ icon: /images/linear-logo.svg
 description: Virtualize a Linear workspace from Node or the browser.
 ---
 
+import Authentication from '/snippets/vfs/linear/authentication.mdx'
+import Layout from '/snippets/vfs/linear/layout.mdx'
+import Behavior from '/snippets/vfs/linear/behavior.mdx'
+import Integration from '/snippets/vfs/linear/integration.mdx'
+
 `LinearVFS` mounts a Linear workspace as read-only JSON files: teams, members,
 issues with their comments, projects, cycles and documents. Set up the API key as in [Linear setup](/home/setup/linear).
 
@@ -48,61 +53,11 @@ endpoint, such as a proxy.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table linear end */}
 
-## Authentication
+<Authentication />
 
-The mount reads with a personal API key. The key's **Read** permission is
-enough; the [`linear`](/home/setup/cli/linear) CLI needs **Write** or the
-create permissions to change issues. A key limited to some teams sees only
-those teams.
+<Layout />
 
-## Layout
-
-```text
-/linear/
-  teams/
-    ENG__Engineering__<team-id>/
-      team.json
-      members/
-        Alice_Chen__<user-id>.json
-      issues/
-        ENG-142__<issue-id>/
-          issue.json
-          comments.jsonl
-      projects/
-        Q4_Launch__<project-id>.json
-      cycles/
-        Cycle_12__<cycle-id>.json
-      documents/
-        Roadmap_2027__<document-id>.json
-```
-
-- **Names:** every name ends in `__<id>`: a team is
-  `<team-key>__<team-name>__<team-id>`, an issue `<issue-key>__<issue-id>`, a
-  member `<display-name>__<user-id>.json`, and a project, cycle or document
-  `<name>__<id>.json`. The readable part is sanitized, so `ls` the parent
-  instead of building a name.
-- **`team.json`:** the team's metadata.
-- **`issue.json`:** the issue, with fields such as `issue_id`, `issue_key`,
-  `team_id`, `state_id` and `assignee_id` that commands take as they are.
-- **`comments.jsonl`:** the issue's comments, one JSON object per line, ordered
-  by `created_at`. It is a Mirage format, not a Linear one.
-- **Members:** each file carries `user_id` and `email`, ready for commands such
-  as `linear issue assign`.
-- **Projects and cycles:** a project lists its related issues; a cycle carries
-  its start and end dates.
-- **Documents:** each file holds the title, the markdown content, the linked
-  project and the creator.
-
-Files hold Mirage's JSON with snake_case keys, not Linear's raw GraphQL
-response.
-
-## Behavior
-
-- **Read only:** the mount cannot change issues. Use the `linear` CLI to
-  create, update, assign and comment on issues; the tree serves the same
-  entities as JSON files.
-- **Recent writes:** Linear indexes a write some time after it lands, so a
-  search can miss a recent issue change. See Integration.
+<Behavior />
 
 ## Browser
 
@@ -121,27 +76,7 @@ const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
 
 - The API key reaches the page, so give it only the **Read** permission.
 
-## Integration
-
-Linear answers this command through its own API, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `grep -rw` and `rg -w`: Linear's issue search runs for each word, and only
-  the issues that hold every word are read, where the search names it or the
-  listing keeps it. The listing keeps each issue's other fields (team,
-  project, cycle, state, people, labels, dates, link) and each title or
-  description word the search can miss, such as one inside a link. Every issue
-  is read when the word is a key of the issue JSON (`title`, `priority`) or a
-  JSON literal, has a digit or only the letters a to f, or when a search
-  fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's
-  `"@all"` [command limit](/home/limits#command-output) reads every file instead.
-- `grep -r` and `rg` on members, projects, cycles and documents: the listing
-  keeps their whole JSON, so only the files whose text holds the pattern's
-  text in any case are read, whatever `walk_limit` is. Issues are listed once
-  more, so a change since the last listing is still found. A file over 8 KiB,
-  and every file for a text that is not ASCII, is read as usual. Comments are
-  always read: they are fetched per issue, and Linear's comment search can
-  miss a word inside a link.
+<Integration />
 
 ## VFS.md
 

@@ -4,6 +4,8 @@ description: Virtualize an in-memory filesystem from Node or the browser.
 icon: memory
 ---
 
+import Integration from '/snippets/vfs/ram/integration.mdx'
+
 `RAMVFS` keeps files in process memory, for scratch work, tests and trying
 Mirage. The mount starts empty and its files are gone when the process exits.
 It needs no service and no credentials; see the [RAM page](/home/setup/ram).
@@ -56,14 +58,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
 ```
 
-## Integration
-
-RAM answers these commands from its own tree, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

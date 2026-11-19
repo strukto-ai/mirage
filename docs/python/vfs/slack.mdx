@@ -4,6 +4,8 @@ description: Virtualize a Slack workspace from Python.
 icon: /images/slack-logo.svg
 ---
 
+import Layout from '/snippets/vfs/slack/layout.mdx'
+
 `SlackVFS` mounts a Slack workspace as read-only files: channels and DMs as
 one folder per day of messages and attachments, plus user profiles. Set up the tokens as in [Slack setup](/home/setup/slack).
 
@@ -80,36 +82,7 @@ Slack's search methods; the bot token still does every read. For `grep` and
 `rg`, that user token also needs `channels:read`, `groups:read`, `im:read` and
 `mpim:read`, so Mirage can tell which channels and DMs its search covers.
 
-## Layout
-
-```text
-/slack/
-  channels/
-    general__C04KEPWF6V7/
-      2026-11-16/
-        chat.jsonl
-        files/
-          roadmap__F07AB12CD.pdf
-  dms/
-    alice__D0AQDJ5FP9V/
-      2026-11-16/
-        chat.jsonl
-  users/
-    alice__U12345678.json
-```
-
-- **Names:** a channel, DM or user is `<display-name>__<id>`, so the CLI's
-  channel and user flags take the id from the path. Only `/` in a name
-  becomes `∕` (U+2215); `ls` the parent for exact names and quote names with
-  spaces.
-- **Days:** each channel and DM lists one folder per day for the 90 days up
-  to its newest message; a date glob finds earlier days.
-- **`chat.jsonl`:** one message per line as Slack's API returns it (`.text`,
-  `.user`, `.ts`, `.files`). `.user` is a user id, matched against
-  `users/<name>__<user-id>.json`.
-- **`files/`:** the attachments shared that day.
-- **`users/`:** one file per user that is not deleted or a bot, holding the
-  full profile from Slack.
+<Layout />
 
 ## Behavior
 

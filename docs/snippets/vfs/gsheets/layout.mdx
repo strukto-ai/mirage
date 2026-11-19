@@ -1,0 +1,16 @@
+## Layout
+
+```text
+/gsheets/
+  owned/
+    2026-11-14_Roadmap__1Xk9rT2bQ.gsheet.json
+  shared/
+    2026-10-02_Budget__1Pq7sV4mN.gsheet.json
+```
+
+- `owned/` holds the spreadsheets the account owns, shared or not; `shared/`
+  holds those others shared with it.
+- A file is named `<YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json`. The date
+  is the last modified day and is left out when Drive gives none.
+- A file holds the Sheets API's JSON for the spreadsheet: its properties and
+  every sheet with its cell values.

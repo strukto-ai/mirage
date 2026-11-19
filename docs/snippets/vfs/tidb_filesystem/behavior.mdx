@@ -1,0 +1,16 @@
+## Behavior
+
+- **Large files:** a file under 50,000 bytes is written with one request; a
+  larger one goes up in parts, a few at a time, and reads of it stream from
+  object storage, ranged when a command reads only part of it.
+- **Appends:** `>>` onto a file of 50,000 bytes or more sends only the new
+  bytes and the file's last part; a smaller file is read and written back.
+- **Moves and deletes:** `mv` is one server-side rename, for a file or a whole
+  directory. `rm -r` is one recursive delete.
+- **Copies:** `cp` reads the file and writes the copy, so the two never share
+  content.
+- **Local errors:** before a write, `mkdir` or `mv`, the mount checks the
+  destination and its parents, so a missing parent, a file in the way or a
+  directory target fails as it does on a local disk.
+- **Extent layout:** a file in the extent layout, which only the file system's
+  FUSE client writes and reads, reads as `Operation not supported`.

@@ -4,6 +4,9 @@ icon: /images/huggingface-logo.svg
 description: Virtualize a Hugging Face Space repository from Node.
 ---
 
+import Authentication from '/snippets/vfs/hf_spaces/authentication.mdx'
+import Integration from '/snippets/vfs/hf_spaces/integration.mdx'
+
 `HfSpacesVFS` mounts one [Hugging Face Space](https://huggingface.co/spaces)
 repository as read-only files: its app code, README, config and requirements.
 Set up a token for a private Space as in [HF Spaces setup](/home/setup/hf_spaces).
@@ -62,11 +65,7 @@ self-hosted Hub. The class ships in `@struktoai/mirage-node` only.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_spaces end */}
 
-## Authentication
-
-A public Space needs no token: unset `token` sends anonymous requests, which
-reach public repositories only. A private Space needs a **Read** token, or a
-**Fine-grained** one with read access to that Space's repository.
+<Authentication />
 
 ## Layout
 
@@ -94,12 +93,7 @@ the repository at `revision`: `/space/app.py` is `app.py`.
   `revision` resolves to with one small request, also when `revision` is a
   full commit SHA, since a branch or tag could carry the same name.
 
-## Integration
-
-The Hub answers this command through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `sha256sum`: the LFS sha256 the Hub keeps; other files are read.
+<Integration />
 
 ## VFS.md
 

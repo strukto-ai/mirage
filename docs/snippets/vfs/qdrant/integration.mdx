@@ -1,0 +1,10 @@
+## Integration
+
+Qdrant answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: one scroll per folder, as a listing does, picks the
+  `.json` and `.txt` files whose text holds the pattern's text in any case, for
+  ASCII text, and misses nothing. A point changed since the last listing is
+  still found. A blob, a `.json` or `.txt` over 8 KiB, and every file for a
+  text that is not ASCII are read as usual.

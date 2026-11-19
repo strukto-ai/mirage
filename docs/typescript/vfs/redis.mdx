@@ -4,6 +4,8 @@ icon: /images/redis-logo.svg
 description: Virtualize a Redis database from Node or the browser.
 ---
 
+import Integration from '/snippets/vfs/redis/integration.mdx'
+
 `RedisVFS` keeps a filesystem in Redis: every file is one key under
 `keyPrefix`, and the tree is whatever commands write. Files persist across
 processes, and every workspace pointed at the same URL and prefix sees them.
@@ -144,14 +146,7 @@ const ws = new Workspace({ '/redis': redis }, { mode: MountMode.WRITE })
   it.
 - Workers refuse connections to Cloudflare's own IP ranges.
 
-## Integration
-
-Redis answers these commands through its own API, so fewer keys are read. See
-[Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

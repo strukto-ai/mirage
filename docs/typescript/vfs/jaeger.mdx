@@ -4,6 +4,8 @@ icon: /images/jaeger-logo.svg
 description: Virtualize a Jaeger query service from Node.
 ---
 
+import Layout from '/snippets/vfs/jaeger/layout.mdx'
+
 `JaegerVFS` mounts an existing Jaeger query service as read-only JSON files:
 each service becomes a folder with its operations and one file per trace. Set up the connection as in [Jaeger setup](/home/setup/jaeger).
 
@@ -52,23 +54,7 @@ YAML config or `buildVfs('jaeger', ...)`, the same fields are snake_case
 </ResponseField>
 {/* generated: config-table jaeger end */}
 
-## Layout
-
-```text
-/jaeger/
-  services/
-    <service>/
-      operations.json
-      traces/
-        <trace-id>.json
-```
-
-- **`services/`:** one folder per service Jaeger reports, including Jaeger's
-  own `jaeger` service when it traces itself.
-- **`operations.json`:** the service's operation records, as Jaeger returns
-  them.
-- **`traces/<trace-id>.json`:** the trace document Jaeger returns, with
-  `traceID`, `spans`, `processes` and `warnings`.
+<Layout />
 
 ## Behavior
 

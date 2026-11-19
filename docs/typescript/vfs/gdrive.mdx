@@ -4,6 +4,8 @@ description: Virtualize Google Drive folders and files from Node or the browser.
 icon: /images/gdrive-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gdrive/layout.mdx'
+
 `GoogleDriveVFS` mounts a Google Drive account: every folder becomes a
 directory, every file a file, and Docs, Sheets and Slides read as JSON. My
 Drive and every Shared Drive the account can see are included. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -81,26 +83,7 @@ item, so a write mount can still hold files the account may not change. A
 change Drive refuses fails with `Permission denied` on that operand, and the
 rest of the mount keeps working.
 
-## Layout
-
-```text
-/gdrive/
-  Projects/
-    roadmap.gsheet.json
-    spec.pdf
-  Notes/
-    meeting.gdoc.json
-  Engineering/
-    ...
-```
-
-- The root holds My Drive's folders and files plus one folder per Shared
-  Drive. A Shared Drive whose name clashes gets a `[Shared Drive]` suffix and,
-  if needed, a number.
-- Regular files (PDFs, images, CSVs) keep their names and read as their
-  bytes.
-- Docs, Sheets and Slides cannot be downloaded as bytes, so they read as the
-  JSON of their own API: `.gdoc.json`, `.gsheet.json` and `.gslide.json`.
+<Layout />
 
 ## Behavior
 

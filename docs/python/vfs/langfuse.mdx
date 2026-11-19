@@ -4,6 +4,9 @@ description: Virtualize a Langfuse project from Python.
 icon: /images/langfuse-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/langfuse/authentication.mdx'
+import Layout from '/snippets/vfs/langfuse/layout.mdx'
+
 `LangfuseVFS` mounts one Langfuse project as read-only files: its traces with
 their observations and scores, sessions, prompt versions and datasets. Set up the key pair as in [Langfuse setup](/home/setup/langfuse).
 
@@ -61,44 +64,9 @@ await ws.close()
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table langfuse end */}
 
-## Authentication
+<Authentication />
 
-The mount reads with a project's key pair, the public key (`pk-lf-...`) and
-the secret key (`sk-lf-...`), and sees only that project. `host` is the
-project's region, such as `https://cloud.langfuse.com` (EU) or
-`https://us.cloud.langfuse.com` (US), or a self-hosted URL. The mount reads
-the Langfuse v4 API, so a self-hosted instance must run Langfuse v4.
-
-## Layout
-
-```text
-/langfuse/
-  traces/
-    <trace-id>.json
-  sessions/
-    <session-id>/
-      <trace-id>.json
-  prompts/
-    <prompt-name>/
-      1.json
-      2.json
-  datasets/
-    <dataset-name>/
-      items.jsonl
-      runs/
-        <run-name>.jsonl
-```
-
-- **`traces/`:** one `.json` file per trace: the trace's root observation,
-  with its other observations (spans, generations, events) in `observations`
-  and its scores in `scores`. `input` and `output` are the strings Langfuse
-  stores; `jq '.input | fromjson'` parses a JSON one.
-- **`sessions/`:** the sessions of the traces `traces/` lists, each holding
-  its own traces.
-- **`prompts/`:** one folder per prompt name, one file per version (`1.json`,
-  `2.json`) with the prompt content and metadata.
-- **`datasets/`:** one folder per dataset, with `items.jsonl` (its items) and
-  `runs/`, one `.jsonl` file per experiment run.
+<Layout />
 
 ## Behavior
 

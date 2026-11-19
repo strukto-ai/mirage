@@ -4,6 +4,10 @@ icon: /images/huggingface-logo.svg
 description: Virtualize a Hugging Face Storage Bucket from Node.
 ---
 
+import Authentication from '/snippets/vfs/hf_buckets/authentication.mdx'
+import Layout from '/snippets/vfs/hf_buckets/layout.mdx'
+import Integration from '/snippets/vfs/hf_buckets/integration.mdx'
+
 `HfBucketsVFS` mounts one
 [Hugging Face Storage Bucket](https://huggingface.co/docs/hub/storage-buckets):
 every file in it becomes a file and every `/` in its path a folder. Set up the bucket and token as in [HF Buckets setup](/home/setup/hf_buckets).
@@ -59,28 +63,9 @@ a mirror or a self-hosted Hub. A mount takes `MountMode.READ`, `WRITE` or
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_buckets end */}
 
-## Authentication
+<Authentication />
 
-`token` is a Hugging Face access token: **Read** for a read mount, **Write** to
-upload. A fine-grained token needs read access, or write access to upload, on
-the bucket's namespace. A bucket the token cannot reach, or one that does not
-exist, answers `Permission denied`.
-
-## Layout
-
-```text
-/hf/
-  checkpoints/
-    step-1000/
-      config.json
-    step-2000/
-      config.json
-  logs/
-    train.log
-```
-
-`/hf/logs/train.log` is the file `logs/train.log` in the bucket. Folders come
-from the `/` in file paths.
+<Layout />
 
 ## Behavior
 
@@ -93,14 +78,7 @@ from the `/` in file paths.
 - **No history:** a bucket keeps no history, so a removed file is gone for
   good.
 
-## Integration
-
-HF Buckets answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

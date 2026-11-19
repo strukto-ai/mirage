@@ -1,0 +1,22 @@
+## Behavior
+
+- **Read only:** the mount registers no write operations and no W&B CLI.
+- **`run.json`:** unavailable metadata is `null`; empty tags, zero counts,
+  false permissions and original timestamp strings are kept. `user` is the
+  run's creator, not the key's user, and is `null` when the creator is
+  missing. Machine and runtime details are in `files/wandb-metadata.json` when
+  uploaded. Listing and `stat` fetch none of these fields.
+- **`config.json` and `summary.json`:** `config.json` unwraps W&B's `value`
+  envelopes. `summary.json` is the stored summary, which can differ from the
+  best value in history. Both keep run-defined keys, nested values, nulls and
+  metric names holding `/` or `.`.
+- **`history.jsonl`:** the full, unsampled history, in order, with missing keys,
+  nulls and logged training-step fields kept; `_step` and a training-step
+  metric are separate values. The last step is fixed when a read begins, so
+  rows logged later show on the next read. Reads stream, so `head` stops
+  before the whole history is fetched.
+- **Sizes:** `run.json`, `config.json`, `summary.json` and `history.jsonl` have
+  unknown sizes; file sizes come from W&B's file metadata.
+- **Pagination:** listings follow W&B pagination, `page_size` (100, at most
+  1000) items per page and at most `max_pages` (10000) pages. Running out fails
+  rather than return a partial list. Recursive `du` stops at 1000 entries.

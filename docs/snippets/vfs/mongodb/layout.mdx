@@ -1,0 +1,32 @@
+## Layout
+
+```text
+/mongodb/
+  sample_mflix/
+    database.json
+    collections/
+      movies/
+        schema.json
+        documents.jsonl
+    views/
+      top_movies/
+        schema.json
+        documents.jsonl
+```
+
+The tree mirrors MongoDB's cluster, database, collection and view. The
+database folder always appears, even when `databases` names one database.
+Listings show databases, collections, views and their fixed files, never one
+entry per document.
+
+- `database.json`: the collection and view names, without counts.
+- `schema.json`: field paths and the BSON types seen in the first 100
+  documents in `_id` order, the indexes and the `$jsonSchema` validator if one
+  is set. Views have no indexes. Unchanged data reads as identical bytes.
+- `documents.jsonl`: one document per line in
+  [Relaxed Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/),
+  in `_id` order:
+
+```json
+{"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
+```

@@ -1,0 +1,14 @@
+## Layout
+
+```text
+/gridfs/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+```
+
+`/gridfs/data/file.txt` is the GridFS filename `data/file.txt`. Folders come
+from the `/` in filenames; `mkdir` stores a zero-byte `data/` marker so an
+empty folder stays visible.

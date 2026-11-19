@@ -4,6 +4,10 @@ description: Virtualize a MongoDB GridFS bucket from Node.
 icon: /images/mongodb-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/gridfs/authentication.mdx'
+import Layout from '/snippets/vfs/gridfs/layout.mdx'
+import Integration from '/snippets/vfs/gridfs/integration.mdx'
+
 `GridFSVFS` mounts a MongoDB GridFS bucket: every file in the bucket becomes a
 file and every `/` in a filename a folder. Metadata lives in the
 `<bucket>.files` collection and content in `<bucket>.chunks`. Set up the connection URI as in [GridFS setup](/home/setup/gridfs).
@@ -63,26 +67,9 @@ names a bucket other than `fs`, `keyPrefix` scopes the mount to part of it, and
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}
 
-## Authentication
+<Authentication />
 
-The user in the URI needs `readWrite` on the database that holds the bucket,
-or `read` for a `read` mount. On Atlas, the built-in **Read and write to any
-database** role also works.
-
-## Layout
-
-```text
-/gridfs/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-```
-
-`/gridfs/data/file.txt` is the GridFS filename `data/file.txt`. Folders come
-from the `/` in filenames; `mkdir` stores a zero-byte `data/` marker so an
-empty folder stays visible.
+<Layout />
 
 ## Behavior
 
@@ -113,16 +100,7 @@ GridFS needs a direct MongoDB connection, so `GridFSVFS` ships in
 `@struktoai/mirage-node` only. A browser workspace reaches GridFS through a
 Node-side Mirage server instead.
 
-## Integration
-
-GridFS answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
-- `grep -r`, `rg` and `cp -r`: one `fs.files` query for the whole tree; see
-  [Walks](/home/integration/walks).
+<Integration />
 
 ## VFS.md
 

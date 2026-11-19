@@ -1,0 +1,39 @@
+## Layout
+
+```text
+/trello/
+  workspaces/
+    Acme_Product__<workspace-id>/
+      workspace.json
+      boards/
+        Sprint_Board__<board-id>/
+          board.json
+          members/
+            Alice_Chen__<member-id>.json
+          labels/
+            bug__<label-id>.json
+          lists/
+            Doing__<list-id>/
+              list.json
+              cards/
+                Fix_login_redirect__<card-id>/
+                  card.json
+                  comments.jsonl
+```
+
+- **Names:** every name ends in `__<id>`, so a command can take the id
+  without a lookup. The readable part is sanitized, so `ls` the parent to
+  find a name.
+- **`workspace.json`, `board.json`:** the workspace's and the board's
+  metadata.
+- **`list.json`:** the list, with fields such as `list_id`, `list_name`,
+  `board_id`, `closed` and `pos`.
+- **`card.json`:** the card, with fields such as `card_id`, `board_id`,
+  `list_id`, `member_ids`, `label_ids`, `due` and `url` that commands take as
+  they are.
+- **`comments.jsonl`:** the card's comments, one JSON object per line, ordered
+  by `created_at`. It is a Mirage format, not a Trello one.
+- **Members:** each file carries `member_id` and `username`, ready for
+  commands such as `trello card assign`.
+- **Labels:** each file carries `label_id`, `label_name`, `color` and
+  `board_id`.

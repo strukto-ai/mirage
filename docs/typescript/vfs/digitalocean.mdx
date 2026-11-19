@@ -4,6 +4,9 @@ icon: /images/digitalocean-logo.svg
 description: Virtualize a DigitalOcean Space from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/digitalocean/layout.mdx'
+import Integration from '/snippets/vfs/digitalocean/integration.mdx'
+
 `DigitalOceanVFS` mounts one bucket: every object becomes a file and every `/` in a key
 a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at DigitalOcean Spaces's
 endpoint, so commands behave as they do on S3. Set up credentials as in [DigitalOcean Spaces setup](/home/setup/digitalocean).
@@ -91,21 +94,7 @@ The Spaces key needs **Limited Access** with **Read** on the Space, or
 Space.
 An object the key may not read or change answers `Permission denied`.
 
-## Layout
-
-```text
-/spaces/
-  README.md
-  logs/
-    app-2026-11-15.log
-    app-2026-11-16.log
-  reports/
-    2026-q3.csv
-    2026-q4.csv
-```
-
-`/spaces/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
-from the `/` in keys.
+<Layout />
 
 ## Behavior
 
@@ -254,16 +243,7 @@ Fields marked secret are redacted in snapshots.
   </Accordion>
 </AccordionGroup>
 
-## Integration
-
-DigitalOcean Spaces answers these commands through its own API, so fewer objects are
-read. See [Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

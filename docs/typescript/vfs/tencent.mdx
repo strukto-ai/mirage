@@ -4,6 +4,9 @@ icon: /images/tencent-logo.svg
 description: Virtualize a Tencent COS bucket from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/tencent/layout.mdx'
+import Integration from '/snippets/vfs/tencent/integration.mdx'
+
 `TencentVFS` mounts one bucket: every object becomes a file and every `/` in a key
 a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Tencent COS's
 endpoint, so commands behave as they do on S3. Set up credentials as in [Tencent COS setup](/home/setup/tencent).
@@ -91,21 +94,7 @@ sub-user needs a COS policy: read-only for a read mount, read and write
 for a write mount.
 An object the key may not read or change answers `Permission denied`.
 
-## Layout
-
-```text
-/cos/
-  README.md
-  logs/
-    app-2026-11-15.log
-    app-2026-11-16.log
-  reports/
-    2026-q3.csv
-    2026-q4.csv
-```
-
-`/cos/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
-from the `/` in keys.
+<Layout />
 
 ## Behavior
 
@@ -251,14 +240,7 @@ Fields marked secret are redacted in snapshots.
   </Accordion>
 </AccordionGroup>
 
-## Integration
-
-Tencent COS answers these commands through its own API, so fewer objects are
-read. See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

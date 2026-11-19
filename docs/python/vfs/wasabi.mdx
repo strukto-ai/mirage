@@ -4,6 +4,9 @@ description: Virtualize a Wasabi bucket from Python.
 icon: /images/wasabi-logo.svg
 ---
 
+import Layout from '/snippets/vfs/wasabi/layout.mdx'
+import Integration from '/snippets/vfs/wasabi/integration.mdx'
+
 `WasabiVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at Wasabi's
 endpoint, so commands behave as they do on S3. Set up credentials as in [Wasabi setup](/home/setup/wasabi).
@@ -95,37 +98,14 @@ write mount. A sub-user whose policy covers only the bucket is the safer
 choice.
 An object the key may not read or change answers `Permission denied`.
 
-## Layout
-
-```text
-/wasabi/
-  README.md
-  logs/
-    app-2026-11-15.log
-    app-2026-11-16.log
-  reports/
-    2026-q3.csv
-    2026-q4.csv
-```
-
-`/wasabi/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
-from the `/` in keys.
+<Layout />
 
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
   so `/wasabi/notes.md` is the key `users/42/notes.md`.
 
-## Integration
-
-Wasabi answers these commands through its own API, so fewer objects are
-read. See [Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

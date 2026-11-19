@@ -4,6 +4,9 @@ icon: microsoft
 description: Virtualize a OneDrive drive or SharePoint document library from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/onedrive/layout.mdx'
+import Integration from '/snippets/vfs/onedrive/integration.mdx'
+
 `OneDriveVFS` mounts one Microsoft Graph drive: a personal OneDrive, OneDrive
 for Business or one SharePoint document library. Its files and folders become
 a folder tree of raw bytes. Set up the tokens and drive IDs as in [OneDrive setup](/home/setup/onedrive).
@@ -81,20 +84,7 @@ Reads need `Files.Read`; writes need `Files.ReadWrite` or a wider write
 permission. Other drives and SharePoint may need `Files.Read.All`,
 `Files.ReadWrite.All` or a `Sites.*` permission.
 
-## Layout
-
-```text
-/onedrive/
-  Documents/
-    file.txt
-    config.json
-  Reports/
-    q1.csv
-    q2.csv
-```
-
-`/onedrive/Documents/file.txt` is the driveItem at `/root:/Documents/file.txt`.
-Folders are real driveItems, so the tree matches what OneDrive shows.
+<Layout />
 
 ## Behavior
 
@@ -135,22 +125,7 @@ const ws = new Workspace({ '/onedrive': drive }, { mode: MountMode.READ })
 - Pass a token function, such as one backed by the page's sign-in library, so
   a `401` fetches a fresh token and retries.
 
-## Integration
-
-OneDrive answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `grep -rw` and `rg -w`: Microsoft Graph search names the files to read,
-  for whole words. Every file is read when the search fails or finds nothing.
-  Graph searches the text it extracted, not the bytes, and indexes a write
-  some time after it lands, so it can miss Office files, PDFs, archives, the
-  end of a large file, a word Graph splits differently (`foo.bar`) and recent
-  writes. `walk_limit: -1` in the mount's `"@all"`
-  [command limit](/home/limits#command-output) reads every file instead.
-- `grep -r` and `rg` without `-w`: every file is read.
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

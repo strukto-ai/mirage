@@ -4,6 +4,8 @@ icon: /images/qdrant-logo.svg
 description: Virtualize a Qdrant collection from Node or the browser.
 ---
 
+import Integration from '/snippets/vfs/qdrant/integration.mdx'
+
 `QdrantVFS` mounts a [Qdrant](https://qdrant.tech/) collection, read-only, as
 nested folders, one level per group-by payload field. Each point is a `.json`
 payload file, plus a `.txt` text file and an optional blob. Set up the cluster URL and API key as in [Qdrant setup](/home/setup/qdrant).
@@ -210,16 +212,7 @@ const ws = new Workspace({ '/fashion': fashion }, { mode: MountMode.READ })
 - The API key is visible to anyone who loads the page: use a read-only key
   limited to the mounted collections.
 
-## Integration
-
-Qdrant answers this command through its own API, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `grep -r` and `rg`: one scroll per folder, as a listing does, picks the
-  `.json` and `.txt` files whose text holds the pattern's text in any case, for
-  ASCII text, and misses nothing. A point changed since the last listing is
-  still found. A blob, a `.json` or `.txt` over 8 KiB, and every file for a
-  text that is not ASCII are read as usual.
+<Integration />
 
 ## VFS.md
 

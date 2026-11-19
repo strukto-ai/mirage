@@ -1,0 +1,20 @@
+## Layout
+
+```text
+/gdrive/
+  Projects/
+    roadmap.gsheet.json
+    spec.pdf
+  Notes/
+    meeting.gdoc.json
+  Engineering/
+    ...
+```
+
+- The root holds My Drive's folders and files plus one folder per Shared
+  Drive. A Shared Drive whose name clashes gets a `[Shared Drive]` suffix and,
+  if needed, a number.
+- Regular files (PDFs, images, CSVs) keep their names and read as their
+  bytes.
+- Docs, Sheets and Slides cannot be downloaded as bytes, so they read as the
+  JSON of their own API: `.gdoc.json`, `.gsheet.json` and `.gslide.json`.

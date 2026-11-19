@@ -4,6 +4,11 @@ description: Virtualize Nextcloud or any WebDAV server from Node.
 icon: /images/nextcloud-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/nextcloud/authentication.mdx'
+import Layout from '/snippets/vfs/nextcloud/layout.mdx'
+import Behavior from '/snippets/vfs/nextcloud/behavior.mdx'
+import Integration from '/snippets/vfs/nextcloud/integration.mdx'
+
 `NextcloudVFS` mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
 server: Nextcloud, ownCloud, Hetzner Storage Share or any other WebDAV
 endpoint. Its folders and files appear as they are, with their own names and
@@ -60,48 +65,13 @@ accepted but not applied: every request verifies the server's certificate.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table nextcloud end */}
 
-## Authentication
+<Authentication />
 
-The mount sends `username` and `password` as Basic Auth; without them it sends
-no credentials. Use an app password (Settings, Security in Nextcloud) rather
-than the account password: it can be revoked on its own. A request the server
-refuses answers `Permission denied`.
+<Layout />
 
-## Layout
+<Behavior />
 
-```text
-/nc/
-  Documents/
-    notes.md
-    contract.pdf
-  Photos/
-    2024/
-      cat.jpg
-```
-
-`/nc/Documents/notes.md` is `<NEXTCLOUD_URL>/Documents/notes.md` on the
-server.
-
-## Behavior
-
-- **Partial reads:** reads stream in chunks, and partial reads such as
-  `head -c` send HTTP `Range` requests.
-- **Writes:** a write buffers the whole file before it uploads. `cp`, `mv`,
-  `rm` and `mkdir` run as WebDAV `COPY`, `MOVE`, `DELETE` and `MKCOL`.
-- **Snapshots:** a snapshot keeps the mount's settings but not the password,
-  so hand the password back when loading it. Files are not checked for
-  changes on replay.
-
-## Integration
-
-Nextcloud answers these commands through its own API, so fewer files are read.
-See [Integration](/home/integration/overview).
-
-- `md5sum`, `sha256sum` and the other hash commands: the digest Nextcloud
-  keeps (`oc:checksums`), when the uploading client set one.
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

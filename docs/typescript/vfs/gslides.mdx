@@ -4,6 +4,8 @@ description: Virtualize Google Slides presentations from Node or the browser.
 icon: /images/gslides-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gslides/layout.mdx'
+
 `GSlidesVFS` mounts the Google Slides an account can see: each presentation
 becomes a `.gslide.json` file holding the Slides API's JSON, split into the
 presentations it owns and those shared with it. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -76,22 +78,7 @@ The mount needs the Google Slides API with the
 `https://www.googleapis.com/auth/drive` scope, since the listing comes from
 Drive. A read-only mount can use the `readonly` variants of both scopes.
 
-## Layout
-
-```text
-/gslides/
-  owned/
-    2026-11-14_QBR_Deck__1Xk9rT2bQ.gslide.json
-  shared/
-    2026-10-02_Launch_Plan__1Pq7sV4mN.gslide.json
-```
-
-- `owned/` holds the presentations the account owns, shared or not;
-  `shared/` holds those others shared with it.
-- A file is named `<YYYY-MM-DD>_<title>__<presentation-id>.gslide.json`. The date
-  is the last modified day and is left out when Drive gives none.
-- A file holds the Slides API's JSON for the presentation: its slides,
-  layouts and text.
+<Layout />
 
 ## Behavior
 

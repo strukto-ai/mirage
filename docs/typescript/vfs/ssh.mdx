@@ -4,6 +4,9 @@ icon: /images/ssh-logo.svg
 description: Virtualize a remote server's filesystem over SSH from Node.
 ---
 
+import Layout from '/snippets/vfs/ssh/layout.mdx'
+import Integration from '/snippets/vfs/ssh/integration.mdx'
+
 `SSHVFS` mounts a directory of a remote server over SFTP: its folders and
 files appear as they are on the server. Set up the key and server as in [SSH setup](/home/setup/ssh). It ships in `@struktoai/mirage-node` only; the
 browser package has no SSH client.
@@ -89,18 +92,7 @@ works too, but a key is preferred.
 The server needs SFTP turned on. Reads and writes go as far as the SSH
 account's own file permissions allow.
 
-## Layout
-
-```text
-/remote/
-  logs/
-    app.log
-  reports/
-    2026-11.csv
-```
-
-The tree mirrors the server from `root`: `/remote/logs/app.log` is
-`/srv/data/logs/app.log` on the server.
+<Layout />
 
 ## Behavior
 
@@ -112,22 +104,7 @@ The tree mirrors the server from `root`: `/remote/logs/app.log` is
 - **Running programs:** this mount reads and writes files. To run programs on
   the server, use the [SSH machine](/home/setup/machine/ssh).
 
-## Integration
-
-SSH answers these commands on the server, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `grep -r` and `rg`: `grep` on the server finds which files hold the text,
-  then only those are read, so nothing is missed. Every file is read when the
-  server runs no commands (an SFTP-only account), its `grep` refuses an
-  option (busybox), or it cannot read a file.
-- `wc -l`: `wc -l` on the server.
-- `tail -f`: `tail -f` on the server.
-- `md5sum`, `sha256sum` and the other hash commands: the matching sum tool on
-  the server.
-- `find`: one `find` on the server.
-- `du`: one `find` on the server.
-- `ls -R` and `tree`: one `find` on the server.
+<Integration />
 
 ## VFS.md
 

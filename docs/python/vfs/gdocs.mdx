@@ -4,6 +4,8 @@ description: Virtualize Google Docs documents from Python.
 icon: /images/gdocs-logo.svg
 ---
 
+import Layout from '/snippets/vfs/gdocs/layout.mdx'
+
 `GDocsVFS` mounts the Google Docs an account can see: each document becomes a
 `.gdoc.json` file holding the Docs API's JSON, split into the documents it owns
 and those shared with it. Set up the credentials as in [Google Workspace setup](/home/setup/google).
@@ -75,21 +77,7 @@ The mount needs the Google Docs API with the
 `https://www.googleapis.com/auth/drive` scope, since the listing comes from
 Drive. A read-only mount can use the `readonly` variants of both scopes.
 
-## Layout
-
-```text
-/gdocs/
-  owned/
-    2026-11-14_Meeting_Notes__1Xk9rT2bQ.gdoc.json
-  shared/
-    2026-10-02_Design_Review__1Pq7sV4mN.gdoc.json
-```
-
-- `owned/` holds the documents the account owns, shared or not; `shared/`
-  holds those others shared with it.
-- A file is named `<YYYY-MM-DD>_<title>__<document-id>.gdoc.json`. The date
-  is the last modified day and is left out when Drive gives none.
-- A file holds the Docs API's JSON for the document, with every tab.
+<Layout />
 
 ## Behavior
 

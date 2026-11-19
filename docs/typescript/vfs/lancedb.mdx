@@ -4,6 +4,8 @@ icon: /images/lancedb-logo.svg
 description: Virtualize a LanceDB table from Node.
 ---
 
+import Integration from '/snippets/vfs/lancedb/integration.mdx'
+
 `LanceDBVFS` mounts a LanceDB table, read-only, as nested folders, one level per
 group-by column. Each row is a Markdown card plus an optional blob file, such
 as its image. Set up the local, object storage and LanceDB Cloud connections as in [LanceDB setup](/home/setup/lancedb).
@@ -169,15 +171,7 @@ $ search "white running sneakers" /fashion
 `--top-k` defaults to `searchLimit` (10). `--threshold` is the largest distance
 kept. `--method` takes only `semantic`.
 
-## Integration
-
-LanceDB answers this command through its own API, so fewer cards are read. See
-[Integration](/home/integration/overview).
-
-- `grep -r` and `rg`: a `LIKE` query over each row's string columns picks the
-  cards to read, for any text, and misses nothing. A text that could match a
-  column's name, a boolean or `null`, or the `column: ` prefix reads every
-  card, as does a table that renders a list, struct or bytes column.
+<Integration />
 
 ## VFS.md
 

@@ -4,6 +4,9 @@ description: Virtualize a Cloudflare R2 bucket from Python.
 icon: /images/cloudflare-logo.svg
 ---
 
+import Layout from '/snippets/vfs/r2/layout.mdx'
+import Integration from '/snippets/vfs/r2/integration.mdx'
+
 `R2VFS` mounts one Cloudflare R2 bucket: every object becomes a file and every
 `/` in a key a folder. It reaches R2 through its S3-compatible API at
 `https://<account_id>.r2.cloudflarestorage.com`. Set up credentials as in [R2 setup](/home/setup/r2).
@@ -95,36 +98,14 @@ Credentials come from the first of:
 The token needs **Object Read only** on the bucket, or **Object Read & Write**
 to write. A request the credentials may not make answers `Permission denied`.
 
-## Layout
-
-```text
-/r2/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-    q2.csv
-```
-
-`/r2/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
-keys; R2 stores no folder objects.
+<Layout />
 
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
   so `/r2/notes.md` is the key `users/42/notes.md`.
 
-## Integration
-
-R2 answers these commands through its own API, so fewer objects are read. See
-[Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

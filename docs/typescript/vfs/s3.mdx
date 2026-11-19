@@ -4,6 +4,9 @@ icon: /images/s3-logo.svg
 description: Virtualize an Amazon S3 or S3-compatible bucket from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/s3/layout.mdx'
+import Integration from '/snippets/vfs/s3/integration.mdx'
+
 `S3VFS` mounts one bucket: every object becomes a file and every `/` in a key a
 folder. It works with Amazon S3 and any S3-compatible server, such as MinIO,
 Ceph or SeaweedFS. Set up credentials as in [S3 setup](/home/setup/s3).
@@ -97,20 +100,7 @@ The mount needs `s3:ListBucket` on the bucket, `s3:GetObject` to read, and
 read answers `Permission denied`. Without `s3:ListBucket`, a missing file
 answers `Permission denied` too, since S3 then hides which keys exist.
 
-## Layout
-
-```text
-/s3/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-    q2.csv
-```
-
-`/s3/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
-keys; S3 stores no folder objects.
+<Layout />
 
 ## Behavior
 
@@ -260,16 +250,7 @@ the Node fields' credentials, which puts the keys in the page.
   </Accordion>
 </AccordionGroup>
 
-## Integration
-
-S3 answers these commands through its own API, so fewer objects are read. See
-[Integration](/home/integration/overview).
-
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

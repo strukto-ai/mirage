@@ -4,6 +4,9 @@ icon: /images/aliyun-logo.svg
 description: Virtualize an Alibaba Cloud OSS bucket from Node or the browser.
 ---
 
+import Layout from '/snippets/vfs/aliyun/layout.mdx'
+import Integration from '/snippets/vfs/aliyun/integration.mdx'
+
 `AliyunVFS` mounts one bucket: every object becomes a file and every `/` in a key
 a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Alibaba OSS's
 endpoint, so commands behave as they do on S3. Set up credentials as in [Alibaba OSS setup](/home/setup/aliyun).
@@ -91,21 +94,7 @@ Use a RAM user's AccessKey pair, not the root account's. The user needs
 `AliyunOSSReadOnlyAccess`, or `AliyunOSSFullAccess` for a write mount.
 An object the key may not read or change answers `Permission denied`.
 
-## Layout
-
-```text
-/oss/
-  README.md
-  logs/
-    app-2026-11-15.log
-    app-2026-11-16.log
-  reports/
-    2026-q3.csv
-    2026-q4.csv
-```
-
-`/oss/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
-from the `/` in keys.
+<Layout />
 
 ## Behavior
 
@@ -249,14 +238,7 @@ Fields marked secret are redacted in snapshots.
   </Accordion>
 </AccordionGroup>
 
-## Integration
-
-Alibaba OSS answers these commands through its own API, so fewer objects are
-read. See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

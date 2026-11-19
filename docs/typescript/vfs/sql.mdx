@@ -4,6 +4,8 @@ icon: database
 description: Virtualize a filesystem kept in SQL tables from Node.
 ---
 
+import Layout from '/snippets/vfs/sql/layout.mdx'
+
 `SqlVFS` keeps a filesystem in a database's tables: a SQLite file, a Postgres
 server, a Durable Object's storage or a D1 database. Every command that writes
 works, and the files persist with the database. Setup is on the
@@ -50,22 +52,7 @@ const sql = new SqlVFS({ driver })
 | `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
 | `root` | `/` | The folder of the database the mount serves, made if missing. |
 
-## Layout
-
-```text
-/sql/
-  notes/
-    hello.txt
-  users.csv
-```
-
-The tables are laid out as [AgentFS](https://github.com/tursodatabase/agentfs)'s:
-
-- `fs_inode`: one row per file and folder, with its size and mtime.
-- `fs_dentry`: each entry's name under its parent folder.
-- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless
-  the database says otherwise).
-- `fs_config`: the chunk size.
+<Layout />
 
 ## Behavior
 

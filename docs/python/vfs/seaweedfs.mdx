@@ -4,6 +4,9 @@ description: Virtualize a SeaweedFS bucket from Python.
 icon: /images/seaweedfs-logo.svg
 ---
 
+import Layout from '/snippets/vfs/seaweedfs/layout.mdx'
+import Integration from '/snippets/vfs/seaweedfs/integration.mdx'
+
 `SeaweedFSVFS` mounts one bucket on a SeaweedFS S3 gateway: every object becomes
 a file and every `/` in a key a folder. It reaches the gateway (port `8333` by
 default) through its S3 API. Set up credentials as in [SeaweedFS setup](/home/setup/seaweedfs).
@@ -92,20 +95,7 @@ The identity needs the `Read` and `List` actions on the bucket, and `Write` to
 write. A gateway with no identities accepts any key pair. A request the
 credentials may not make answers `Permission denied`.
 
-## Layout
-
-```text
-/seaweedfs/
-  data/
-    config.json
-    file.txt
-  reports/
-    q1.csv
-    q2.csv
-```
-
-`/seaweedfs/data/file.txt` is the key `data/file.txt`. Folders come from the `/`
-in keys; SeaweedFS stores no folder objects.
+<Layout />
 
 ## Behavior
 
@@ -115,14 +105,7 @@ in keys; SeaweedFS stores no folder objects.
   the drive's `s3Url` and use a drive access token's credentials as the key
   pair.
 
-## Integration
-
-SeaweedFS answers these commands through its own API, so fewer objects are read.
-See [Integration](/home/integration/overview).
-
-- `find`: one recursive listing.
-- `du`: one recursive listing.
-- `ls -R` and `tree`: one recursive listing.
+<Integration />
 
 ## VFS.md
 

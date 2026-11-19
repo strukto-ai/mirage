@@ -4,6 +4,9 @@ description: Virtualize an IMAP mailbox from Python.
 icon: envelope
 ---
 
+import Authentication from '/snippets/vfs/email/authentication.mdx'
+import Layout from '/snippets/vfs/email/layout.mdx'
+
 `EmailVFS` mounts an IMAP mailbox as read-only files: each folder holds one
 folder per day of messages as JSON, with their attachments. The
 [`himalaya`](/python/cli/himalaya) CLI sends mail over SMTP. Set up the credentials as in [Email setup](/home/setup/email).
@@ -84,45 +87,9 @@ how many messages each folder lists. `save_copy`, `sent_folder` and
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}
 
-## Authentication
+<Authentication />
 
-The mount logs in to IMAP with `username` and `password`; sending through
-`himalaya` uses the same pair on SMTP. Most providers want an app password
-instead of the account password. Microsoft 365 is unsupported: it requires
-OAuth for IMAP, and the mount accepts only passwords.
-
-| Provider | IMAP host | SMTP host | Notes |
-| --- | --- | --- | --- |
-| Yahoo | `imap.mail.yahoo.com` | `smtp.mail.yahoo.com` | App password |
-| Fastmail | `imap.fastmail.com` | `smtp.fastmail.com` | App password |
-| iCloud | `imap.mail.me.com` | `smtp.mail.me.com` | App password |
-| ProtonMail | `127.0.0.1` | `127.0.0.1` | Proton Mail Bridge |
-| Self-hosted | the server's hostname | the server's hostname | The server's own login |
-
-## Layout
-
-```text
-/email/
-  INBOX/
-    2026-11-16/
-      Meeting_Notes__12345.email.json
-      Meeting_Notes__12345/
-        report.pdf
-        screenshot.png
-  Sent/
-    2026-11-16/
-      ...
-```
-
-- **Folders:** the root lists the IMAP folders under their own names
-  (`INBOX`, `Sent`, `Drafts`).
-- **Days:** inside a folder, messages are grouped by the `YYYY-MM-DD` of their
-  `Date` header.
-- **Messages:** each message is `<subject>__<uid>.email.json`, with a
-  sanitized subject, so `ls` the day rather than build the name. The UID
-  after `__` is what `himalaya` takes.
-- **Attachments:** a message with attachments gets a folder of the same base
-  name holding them.
+<Layout />
 
 ## Behavior
 

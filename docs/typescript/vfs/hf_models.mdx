@@ -4,6 +4,9 @@ description: Virtualize a Hugging Face model repository from Node.
 icon: /images/huggingface-logo.svg
 ---
 
+import Authentication from '/snippets/vfs/hf_models/authentication.mdx'
+import Integration from '/snippets/vfs/hf_models/integration.mdx'
+
 `HfModelsVFS` mounts one [Hugging Face model](https://huggingface.co/models)
 repository, read-only: every file in the repo becomes a file, read lazily, so
 configs, tokenizers and the model card open without downloading the weights.
@@ -63,12 +66,7 @@ Hub.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_models end */}
 
-## Authentication
-
-A public model needs no token. A gated or private one needs `token`: a `read`
-token, or a fine-grained token with read access to that model; a gated model
-also needs its conditions accepted on the Hub. A repository or revision
-the token cannot see, or that does not exist, answers `Permission denied`.
+<Authentication />
 
 ## Layout
 
@@ -100,12 +98,7 @@ bare name under the token's owner.
   `revision` points at, even when `revision` is a full commit sha, since a
   branch or tag can carry the same name.
 
-## Integration
-
-The Hub answers this command through its own API, so fewer files are read. See
-[Integration](/home/integration/overview).
-
-- `sha256sum`: the LFS sha256 the Hub keeps; other files are read.
+<Integration />
 
 ## VFS.md
 
