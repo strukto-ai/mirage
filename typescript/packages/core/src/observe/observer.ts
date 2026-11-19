@@ -51,6 +51,7 @@ import {
   TRACE_CONTENT_MAX_BYTES_ENV,
   TRACER_NAME,
 } from './constants.ts'
+import { callMade, lineEnded } from './metrics.ts'
 import type { OpRecord } from './record.ts'
 import { RAMObserverStore, type ObserverStore } from './store.ts'
 
@@ -368,6 +369,7 @@ export class Observer {
    * commands' own work and send none.
    */
   async logOp(rec: OpRecord, session: string, cwd?: string, parent?: string): Promise<void> {
+    callMade(rec)
     await this.log(LogEntry.fromOpRecord(rec, session, cwd, parent))
     if (parent === undefined) callSpan(this.workspaceId, this.machine, rec, session)
   }
@@ -679,6 +681,7 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
+      lineEnded(io.exitCode, took)
       endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err])
     }
     const init: LogEntryInit = {

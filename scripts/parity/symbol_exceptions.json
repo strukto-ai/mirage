@@ -1294,6 +1294,11 @@
     "WorkerOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
    }
   },
+  "observe/metrics": {
+   "typescript_only": {
+    "held": "Python makes the instruments once through functools.cache on _instruments; TypeScript keeps the instruments it made in this variable."
+   }
+  },
   "observe/observer": {
    "python_only": {
     "_NS_PER_MS": "OpenTelemetry's Python API takes a span's times in nanoseconds; its JavaScript API takes the recorder's milliseconds as they are."
