@@ -40,7 +40,8 @@ to register the provider (`pnpm add @struktoai/mirage-core`), pass
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
 `ssh` each file call is about 150 ms for a small file from a laptop; under
 `mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
-read, and its template needs `mirage-fuse`. With `own`,
+read, unless a policy judges the session's file calls, and its template
+needs `mirage-fuse`. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
@@ -54,6 +55,24 @@ import { Sandbox, Template } from 'e2b'
 await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
 const sandbox = await Sandbox.create('mirage-sshfs', { timeoutMs: 3_600_000 })
 console.log(sandbox.sandboxId)
+```
+
+### A template for mirage
+
+`mirage` needs [`mirage-fuse`](/home/setup/machine/overview#mirage), built
+for x86_64, and `fuse3` in the sandbox. Build a template with both, from the
+directory holding `mirage-fuse`, and name it as `template`:
+
+```typescript
+import { Template } from 'e2b'
+
+await Template.build(
+  Template()
+    .fromBaseImage()
+    .aptInstall('fuse3')
+    .copy('mirage-fuse', '/usr/local/bin/mirage-fuse', { user: 'root', mode: 0o755 }),
+  'mirage-fuse',
+)
 ```
 
 ## In a browser

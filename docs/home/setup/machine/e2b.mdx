@@ -135,6 +135,41 @@ it and pass its ID as `sandbox_id`:
 Keep the base image's user, which has `sudo` for mountpoints such as
 `/data`.
 
+### mirage-fuse for mirage
+
+`mirage` needs [`mirage-fuse`](/home/setup/machine/overview#mirage), built
+for x86_64, and `fuse3` in the sandbox. Build a template with both, from the
+directory holding `mirage-fuse`, and name it as `template`:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from e2b import Template
+
+    Template.build(
+        Template()
+        .from_base_image()
+        .apt_install("fuse3")
+        .copy("mirage-fuse", "/usr/local/bin/mirage-fuse", user="root", mode=0o755),
+        "mirage-fuse",
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Template } from 'e2b'
+
+    await Template.build(
+      Template()
+        .fromBaseImage()
+        .aptInstall('fuse3')
+        .copy('mirage-fuse', '/usr/local/bin/mirage-fuse', { user: 'root', mode: 0o755 }),
+      'mirage-fuse',
+    )
+    ```
+  </Tab>
+</Tabs>
+
 ## A sandbox Mirage starts
 
 Without `sandbox_id`, the first program that needs the sandbox starts one
