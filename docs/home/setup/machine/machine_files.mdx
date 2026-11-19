@@ -1,14 +1,20 @@
 ---
-title: Machine files
+title: Machine Files
 icon: hard-drive
 description: A machine's own files at a prefix, so Mirage and the machine's programs share them.
+tag: "Experimental"
 ---
 
-When your agent's commands run on a machine (a container, a sandbox, a
-server over ssh), the programs there keep scratch files in `/tmp`. Mirage
-shows that same `/tmp` in the workspace, so a file the agent writes from
-Mirage's shell is the file the machine's programs read, and a file a
-program leaves behind is one the agent can open:
+<Note>
+  Machine Files is experimental: its config and behavior may still change.
+</Note>
+
+When an agent's commands run on a machine (a container, a sandbox, a
+server over ssh), the files those programs read and write live on the
+machine. A machine mount shows a folder of the machine in the workspace, so
+a file the agent writes from Mirage's shell is the file the machine's
+programs read, and a file a program leaves behind is one the agent can
+open. With the machine's `/tmp` mounted at `/tmp`:
 
 ```bash
 cat > /tmp/fix.py << 'EOF'
@@ -20,12 +26,12 @@ python3 /tmp/fix.py
 
 Mirage's `cat` writes `/tmp/fix.py` on the machine, and the machine's
 `python3` reads it there. Nothing is copied or synced: the file lives on the
-machine. `/dev/shm` works the same way.
+machine.
 
-## Set up
+## Set Up
 
-There is nothing to turn on. Give the workspace a machine and `/tmp` is that
-machine's:
+Mount `"@<machine>"` at a path to show the folder that machine has at the
+same path. Here `/tmp` is the `/tmp` of machine `sandbox`:
 
 <Tabs>
   <Tab title="YAML" icon="file-code">
@@ -35,7 +41,8 @@ machine's:
         provider: docker
         container: my-sandbox
 
-    mounts: {}
+    mounts:
+      /tmp: "@sandbox"
     ```
   </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -43,7 +50,7 @@ machine's:
     from mirage import MountMode, Workspace
 
     ws = Workspace(
-        {},
+        {"/tmp": "@sandbox"},
         mode=MountMode.WRITE,
         machines={"sandbox": {"provider": "docker", "container": "my-sandbox"}},
     )
@@ -59,7 +66,7 @@ machine's:
     import { MountMode, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
-      {},
+      { '/tmp': '@sandbox' },
       {
         mode: MountMode.WRITE,
         machines: { sandbox: { provider: 'docker', container: 'my-sandbox' } },
@@ -74,80 +81,60 @@ machine's:
   </Tab>
 </Tabs>
 
-A workspace without machines has no `/tmp` of its own. A mount you put at
-`/tmp` yourself (`/tmp: {vfs: ram}`) replaces the machine's.
+Any folder works the same way: `/home/user/project: "@sandbox"` shows the
+project the machine holds there. For a folder at another path, see
+[Mount Block](#mount-block).
 
-## Pick the machine
-
-With several machines, `/tmp` shows all of their `/tmp` files together (see
-[Several machines](#several-machines)). To show one machine's `/tmp`, name it
-with `@`:
-
-<Tabs>
-  <Tab title="YAML" icon="file-code">
-    ```yaml workspace.yaml
-    machines:
-      cpu:
-        provider: docker
-        container: my-sandbox
-      gpu:
-        provider: ssh
-        host: gpu.example.com
-
-    mounts:
-      /tmp: "@gpu"
-    ```
-  </Tab>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    ws = Workspace(
-        {"/tmp": "@gpu"},
-        mode=MountMode.WRITE,
-        machines={
-            "cpu": {"provider": "docker", "container": "my-sandbox"},
-            "gpu": {"provider": "ssh", "host": "gpu.example.com"},
-        },
-    )
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    const ws = new Workspace(
-      { '/tmp': '@gpu' },
-      {
-        mode: MountMode.WRITE,
-        machines: {
-          cpu: { provider: 'docker', container: 'my-sandbox' },
-          gpu: { provider: 'ssh', host: 'gpu.example.com' },
-        },
-      },
-    )
-    ```
-  </Tab>
-</Tabs>
-
-The name must be one under `machines:`, wherever that section sits in the
-file. Anything else stops the workspace from starting, with the names it
-knows:
+The name must be one under `machines:`. A typo such as `/tmp: "@sandbx"`
+stops the workspace from starting and lists the names it knows:
 
 ```text
-mount '/tmp': no machine 'gpus' (machines: 'cpu', 'gpu')
+mount '/tmp': no machine 'sandbx' (machines: 'sandbox')
 ```
 
-`"@gpu"` is short for a `machine` mount block, which also takes these fields:
+A workspace with a machine mounts `/tmp` and `/dev/shm` this way by itself,
+unless another mount claims them:
+
+| Workspace | `/tmp` and `/dev/shm` |
+| --- | --- |
+| No machine, no mount there | None: `ls /tmp` fails with `No such file or directory` |
+| A machine, no mount there | The machine's own, mounted by Mirage |
+| Another mount there, such as `/tmp: {vfs: ram}` | That mount; no machine's is shown |
+
+## Mount Block
+
+`"@sandbox"` is short for a `machine` mount block. Write the block out for
+what the short form cannot say: a folder at another path (`root`), some
+machines but not all (`machines`), or where a new file lands
+(`default_machine`). This shows machine `sandbox`'s `/home/user/project` at
+`/project`:
+
+```yaml workspace.yaml
+mounts:
+  /project:
+    vfs: machine
+    config:
+      machines: [sandbox]
+      root: /home/user/project
+```
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `machines` | every machine | Whose `/tmp` the mount shows |
+| `machines` | every machine | Whose files the mount shows |
 | `root` | `/` | The folder on each machine the mount shows |
-| `default_machine` | the machine running your programs, else the first | Where a new file lands when no program on a machine writes it |
+| `default_machine` | the machine running the program, else the first | Where a new file lands when no program on a machine writes it |
 
-## Where a command runs
+`"@sandbox"` at `/tmp` is the same as `machines: [sandbox]` with
+`root: /tmp`.
 
-A command that only touches `/tmp` runs on the machine itself, in one go,
-and prints exactly what the machine's own tools print. A command that also
-reaches the rest of the workspace runs in Mirage, which still reads and
-writes each `/tmp` file on its machine. With one machine and `/data` in RAM:
+## Where a Command Runs
+
+A command whose paths all sit on one machine runs on the machine itself, in
+one go, and prints exactly what the machine's own tools print. A command
+that also reaches the rest of the workspace runs in Mirage, which still
+reads and writes each machine file on its machine. With one machine, its
+`/tmp` mounted, and a `ram` mount at `/data`, whose files live in Mirage and
+not on the machine:
 
 ```mermaid
 flowchart LR
@@ -166,7 +153,10 @@ A restricted or read-only mount, a coded file policy and a program the
 machine lacks keep a command in Mirage too. `/dev` is Mirage's (`/dev/null`,
 `/dev/stdin`); only `/dev/shm` is the machine's.
 
-## Several machines
+## Several Machines
+
+With several machines, the `/tmp` Mirage mounts by itself shows all of their
+`/tmp` files together. `/tmp: "@gpu"` shows machine `gpu`'s only.
 
 ```mermaid
 flowchart LR
@@ -208,7 +198,7 @@ runs on one of them.
 - **Serving:** with `mount_type: ssh`, a path the machine holds itself is
   never served back to it; any other machine mount is served like any mount.
 
-## SDK guides
+## SDK Guides
 
 <CardGroup cols={2}>
   <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/machine">
