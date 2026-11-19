@@ -298,6 +298,15 @@ describe('gws api passthrough', () => {
     ])
   })
 
+  it('keeps a single page that fits the room exactly', async () => {
+    vi.mocked(client.googleGet).mockReset().mockResolvedValue({})
+    const result = await runWithMemory(new MemoryBudget(2, () => 0), () =>
+      runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context()),
+    )
+    if (result === null) throw new Error('expected result')
+    expect([result[1].exitCode, DEC.decode(result[0] as Uint8Array)]).toEqual([0, '{}'])
+  })
+
   it('multi-page output is newline-terminated NDJSON', async () => {
     vi.mocked(client.googleGet)
       .mockReset()

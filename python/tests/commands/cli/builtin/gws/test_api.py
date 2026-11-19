@@ -443,3 +443,18 @@ async def test_paging_stops_on_the_page_token_it_was_given():
         )
     assert get.await_count == 1
     assert (io.exit_code, io.stderr) == (1, b"gws: next page repeats t1\n")
+
+
+@pytest.mark.asyncio
+async def test_a_single_page_that_fits_the_room_exactly_is_kept():
+    method = METHODS[("drive", "files", "list")]
+    with patch(
+        "mirage.commands.cli.builtin.gws.api.google_get",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        out, io = await run_with_memory(
+            MemoryBudget(2, lambda: 0),
+            run_gws_method(method, GOOGLE, [], [], Context()),
+        )
+    assert (io.exit_code, await materialize(out)) == (0, b"{}")
