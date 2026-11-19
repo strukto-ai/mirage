@@ -151,6 +151,7 @@ struct State {
     bytes: usize,
     opens: HashMap<u64, Open>,
     dirs: HashMap<u64, Stream>,
+    revoked_dirs: HashSet<u64>,
     next_fh: u64,
     epoch: u64,
 }
@@ -374,8 +375,9 @@ impl Shared {
 
     /// A frame the host started: `inval` forgets what it names, `watch`
     /// forgets everything once a policy judges every call and refuses the
-    /// reads of opens the kernel may cache, and a `begin` barrier is
-    /// answered once every forget before it is done.
+    /// reads of opens the kernel may cache and of folder streams listed
+    /// before it, and a `begin` barrier is answered once every forget
+    /// before it is done.
     pub fn push(&self, frame: Frame) {
         if let Some(hid) = frame.u64("hid") {
             self.note(Note::Ack(hid));
@@ -383,11 +385,14 @@ impl Shared {
         }
         if frame.str("push") == Some("watch") {
             self.forget(&self.root.clone());
-            for open in locked(&self.state).opens.values_mut() {
+            let mut st = locked(&self.state);
+            for open in st.opens.values_mut() {
                 if open.cached {
                     open.revoked = true;
                 }
             }
+            let streams: Vec<u64> = st.dirs.keys().copied().collect();
+            st.revoked_dirs.extend(streams);
             return;
         }
         if frame.str("push") == Some("inval") {
@@ -1336,6 +1341,9 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
+        if self.st().revoked_dirs.contains(&fh.0) {
+            return reply.error(Errno::EACCES);
+        }
         let (rows, _) = self.rows(ino, fh, offset);
         for (next, name, ino, attrs) in rows {
             let kind = self.attr(ino, &attrs).kind;
@@ -1354,6 +1362,9 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectoryPlus,
     ) {
+        if self.st().revoked_dirs.contains(&fh.0) {
+            return reply.error(Errno::EACCES);
+        }
         let (rows, current) = self.rows(ino, fh, offset);
         for (next, name, ino, attrs) in rows {
             let attr = self.attr(ino, &attrs);
@@ -1373,7 +1384,9 @@ impl Filesystem for MirageFs {
         _flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
-        self.st().dirs.remove(&fh.0);
+        let mut st = self.st();
+        st.dirs.remove(&fh.0);
+        st.revoked_dirs.remove(&fh.0);
         reply.ok();
     }
 
@@ -1832,15 +1845,17 @@ mod tests {
     }
 
     #[test]
-    fn a_policy_that_comes_refuses_reads_the_kernel_may_cache() {
+    fn a_policy_that_comes_refuses_reads_the_kernel_may_cache_and_old_streams() {
         let (fs, _host) = hosted();
         let held = Some((Arc::new(b"plan".to_vec()), attrs(true)));
         let cached = fs.opened("/w/a", None, held, false, true);
         let direct = fs.opened("/w/b", Some(7), None, false, false);
+        fs.st().dirs.insert(9, ("/w".into(), 0, vec![]));
         fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
         let st = fs.st();
         assert!(st.opens[&cached].revoked);
         assert!(!st.opens[&direct].revoked);
+        assert!(st.revoked_dirs.contains(&9));
     }
 
     #[test]

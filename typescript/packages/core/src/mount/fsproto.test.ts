@@ -90,8 +90,15 @@ async function served(changes: RecentChanges | null = null) {
   return { ws, server, end, serving }
 }
 
-async function watched(watch: (sessionId: string) => Promise<boolean>) {
-  const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+class HeldRAM extends RAMVFS {
+  override readonly soleWriter: boolean = false
+}
+
+async function watched(
+  watch: (sessionId: string) => Promise<boolean>,
+  vfs: () => RAMVFS = () => new RAMVFS(),
+) {
+  const ws = new Workspace({ '/notes': vfs() }, { mode: MountMode.WRITE })
   await ws.vfs.write('/notes/plan.txt', 'plan')
   await ws.session('agent')
   const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
@@ -260,7 +267,7 @@ describe('FsprotoServer', () => {
       [false, true],
       [false, true],
     ])
-    expect(new Set(asked)).toEqual(new Set(['agent']))
+    expect(asked).toEqual(['agent', 'agent', 'agent'])
     end.close()
     await serving
   })
@@ -282,6 +289,23 @@ describe('FsprotoServer', () => {
     expect(end.pushes[0]?.head.op).toBe('begin')
     end.send({ hid: end.pushes[0]?.head.hid })
     expect(await again).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('drops answers held for a second too once a policy comes', async () => {
+    let on = false
+    const { server, end, serving } = await watched(
+      () => Promise.resolve(on),
+      () => new HeldRAM(),
+    )
+    expect((await end.call({ op: 'getattr', path: '/notes/plan.txt' })).head.k).toBe(false)
+    on = true
+    const barrier = server.begin()
+    await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
+    expect(end.pushes[0]?.head).toEqual({ push: 'watch' })
+    end.send({ hid: end.pushes.find((f) => f.head.op === 'begin')?.head.hid })
+    expect(await barrier).toBe(true)
     end.close()
     await serving
   })

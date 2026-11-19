@@ -398,7 +398,7 @@ class FsprotoServer:
             except Exception as err:
                 logger.debug("fsproto: answering %s failed: %r", rid, err)
 
-    async def _rows(
+    def _rows(
         self, folder: str, rows: list[tuple[str, MountAttrs]], kept: bool
     ) -> list[list[Any]]:
         """A listing on the wire: in a kept one, a folder another mount
@@ -413,37 +413,36 @@ class FsprotoServer:
         for name, a in rows:
             row = wire(a)
             if kept and stat.S_ISDIR(a.mode):
-                if not await self._kept(child(folder, name)):
+                if not self._kept(child(folder, name)):
                     row["k"] = False
             out.append([name, row])
         return out
 
-    async def _kept(self, path: str) -> bool:
-        """Whether the client may keep its answer about ``path``: only on
-        a sole writer's mount (``BaseVFS.sole_writer``), and never while a
-        policy judges the session's file calls, which must each reach it.
+    def _kept(self, path: str) -> bool:
+        """Whether the client may keep its answer about ``path`` until
+        told otherwise: only on a sole writer's mount
+        (``BaseVFS.sole_writer``).
 
         Args:
             path (str): a workspace path a reply is about.
         """
-        if await self._watched():
-            return False
         row = reader_of(self._core.files).owner(path)
-        kept = row is not None and row.sole_writer
-        self._keeping = self._keeping or kept
-        return kept
+        return row is not None and row.sole_writer
 
     async def _keep(self, path: str) -> Head:
         """The keep fields of a reply about ``path``: ``k``, and ``w`` while
         a policy judges the session's file calls, when neither the client
-        nor its kernel may keep the answer even for a moment.
+        nor its kernel may keep the answer even for a moment. The watch is
+        read once, and any other answer, kept or held for a second, marks
+        the client as holding one for the next ``begin`` to drop.
 
         Args:
             path (str): a workspace path a reply is about.
         """
         if await self._watched():
             return {"k": False, "w": True}
-        return {"k": await self._kept(path)}
+        self._keeping = True
+        return {"k": self._kept(path)}
 
     async def _watched(self) -> bool:
         served = self._served
@@ -512,7 +511,7 @@ class FsprotoServer:
         if op == "list":
             keep = await self._keep(path)
             rows = shown(await core.listing(path))
-            listed = await self._rows(path, rows, keep["k"])
+            listed = self._rows(path, rows, keep["k"])
             return {"e": listed, **keep}, EMPTY
         if op == "readall":
             attrs, data = await self._whole(path)

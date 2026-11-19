@@ -248,8 +248,8 @@ class Watch:
         return self.on
 
 
-async def watched(watch: Watch):
-    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+async def watched(watch: Watch, vfs: type[RAMVFS] = RAMVFS):
+    ws = Workspace({"/notes": vfs()}, mode=MountMode.WRITE)
     await ws.vfs.write("/notes/plan.txt", b"plan")
     await ws.session("agent")
     server = FsprotoServer(
@@ -274,7 +274,7 @@ async def test_while_a_policy_judges_file_calls_nothing_is_kept():
     assert [(r.head["k"], r.head["w"]) for r in (stat, listed, whole)] == [
         (False, True)
     ] * 3
-    assert set(watch.asked) == {"agent"}
+    assert watch.asked == ["agent"] * 3
     await end.end(serving)
 
 
@@ -474,4 +474,21 @@ async def test_a_handle_stats_truncates_and_flushes_the_file_it_is_open_on():
     assert cut.head["a"]["s"] == 2
     await end.call({"op": "release", "fh": fh})
     assert await ws.vfs.read("/notes/plan.txt") == b"fresh"
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_comes_drops_answers_held_for_a_second_too():
+    watch = Watch()
+    server, end, serving = await watched(watch, SharedRAM)
+    stat = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert stat.head["k"] is False
+    watch.on = True
+    barrier = asyncio.create_task(server.begin())
+    await end.until(
+        lambda: any(f.head.get("op") == "begin" for f in end.pushes)
+    )
+    assert end.pushes[0].head == {"push": "watch"}
+    end.send({"hid": end.pushes[-1].head["hid"]})
+    assert await barrier is True
     await end.end(serving)

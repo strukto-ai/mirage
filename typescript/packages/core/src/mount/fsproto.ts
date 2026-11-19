@@ -347,43 +347,34 @@ export class FsprotoServer {
    * A listing on the wire: in a kept one, a folder another mount serves
    * carries that mount's own `k`. Mirrors Python's `_rows`.
    */
-  private async rows(
-    folder: string,
-    rows: [string, MountAttrs][],
-    kept: boolean,
-  ): Promise<unknown[]> {
-    const out: unknown[] = []
-    for (const [name, a] of rows) {
+  private rows(folder: string, rows: [string, MountAttrs][], kept: boolean): unknown[] {
+    return rows.map(([name, a]) => {
       const row = wire(a)
-      if (kept && (a.mode & S_IFMT) === S_IFDIR && !(await this.kept(child(folder, name)))) {
-        row.k = false
-      }
-      out.push([name, row])
-    }
-    return out
+      if (kept && (a.mode & S_IFMT) === S_IFDIR && !this.kept(child(folder, name))) row.k = false
+      return [name, row]
+    })
   }
 
   /**
-   * Whether the client may keep its answer about `path`: only on a sole
-   * writer's mount (`BaseVFS.soleWriter`), and never while a policy judges
-   * the session's file calls, which must each reach it. Mirrors Python's
-   * `_kept`.
+   * Whether the client may keep its answer about `path` until told
+   * otherwise: only on a sole writer's mount (`BaseVFS.soleWriter`).
+   * Mirrors Python's `_kept`.
    */
-  private async kept(path: string): Promise<boolean> {
-    if (await this.watching()) return false
-    const kept = readerOf(this.core.files).owner(path)?.soleWriter === true
-    this.keeping = this.keeping || kept
-    return kept
+  private kept(path: string): boolean {
+    return readerOf(this.core.files).owner(path)?.soleWriter === true
   }
 
   /**
    * The keep fields of a reply about `path`: `k`, and `w` while a policy
    * judges the session's file calls, when neither the client nor its
-   * kernel may keep the answer even for a moment. Mirrors Python's `_keep`.
+   * kernel may keep the answer even for a moment. The watch is read once,
+   * and any other answer, kept or held for a second, marks the client as
+   * holding one for the next `begin` to drop. Mirrors Python's `_keep`.
    */
   private async keep(path: string): Promise<{ k: boolean; w?: true }> {
     if (await this.watching()) return { k: false, w: true }
-    return { k: await this.kept(path) }
+    this.keeping = true
+    return { k: this.kept(path) }
   }
 
   private async watching(): Promise<boolean> {
@@ -437,7 +428,7 @@ export class FsprotoServer {
       case 'list': {
         const keep = await this.keep(path)
         const rows = shown(await core.listing(path))
-        return [{ e: await this.rows(path, rows, keep.k), ...keep }, EMPTY]
+        return [{ e: this.rows(path, rows, keep.k), ...keep }, EMPTY]
       }
       case 'readall': {
         const [a, data] = await this.whole(path)
