@@ -269,8 +269,8 @@ async function paginate(
     const result = await googleGet(tm, url, params)
     const page = ENC.encode(JSON.stringify(result))
     pages.push(page)
-    held += page.byteLength + 1
-    checkMemory(held)
+    held += page.byteLength
+    checkMemory(held + (pages.length > 1 ? pages.length : 0))
     fetched += 1
     if (pageLimit !== null && fetched >= pageLimit) break
     const next =

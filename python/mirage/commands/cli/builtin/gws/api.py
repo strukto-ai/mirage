@@ -310,8 +310,8 @@ async def _paginate(
                 result, ensure_ascii=False, separators=(",", ":")
             ).encode()
         )
-        held += len(pages[-1]) + 1
-        check_memory(held)
+        held += len(pages[-1])
+        check_memory(held + (len(pages) if len(pages) > 1 else 0))
         fetched += 1
         if page_limit is not None and fetched >= page_limit:
             break
