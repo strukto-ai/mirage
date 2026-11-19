@@ -14,6 +14,9 @@ use crate::{Stream, StreamError, parse_config, task};
 
 /// The exit status of a refused option.
 const USAGE: i32 = 99;
+/// How much of the document each read gathers before the workspace is asked
+/// whether what is held so far still fits.
+const READ_WINDOW: u64 = 1 << 20;
 
 #[derive(Deserialize)]
 struct TextConfig {
@@ -109,7 +112,7 @@ async fn read(host: &Host, say: &Say<'_>, name: &[u8]) -> Result<Vec<u8>, i32> {
             .ask(Request::Read {
                 fd: 0,
                 open: open.take(),
-                least: u64::MAX,
+                least: READ_WINDOW,
             })
             .await;
         if failed(&reply) {

@@ -168,8 +168,6 @@ impl<'h> Book<'h> {
         let mut decoder = Decoder::new(&entry)?;
         let size = usize::try_from(entry.size).ok()?;
         let mut out = Vec::new();
-        out.try_reserve(size.min(packed.len().saturating_mul(1032).saturating_add(1024)))
-            .ok()?;
         let mut window = Vec::new();
         let mut at = 0;
         let mut tags = 0u64;

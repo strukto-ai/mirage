@@ -139,7 +139,7 @@ impl Doc {
         let content = self.contents(host, page, held).await;
         if let Some(resources) = resources {
             held += content.len() as u64;
-            let draws = drawn(&content);
+            let draws = drawn(&content, self.xobjects(&resources));
             self.measure_forms(host, resources, draws, &mut held, measured, &mut seen)
                 .await;
         }
@@ -321,9 +321,9 @@ impl Doc {
         }
     }
 
-    /// What a form decodes to on top of `held`, and the forms it draws:
-    /// a FlateDecode one with no parameters read for its `Do`s; any other
-    /// counted, and taken to draw every form its resources name.
+    /// What a form decodes to on top of `held`, and the forms it may draw:
+    /// a FlateDecode one with no parameters read for the names it uses;
+    /// any other counted, and taken to draw every form its resources name.
     async fn form(
         &self,
         host: &Host,
@@ -333,19 +333,23 @@ impl Doc {
         held: u64,
     ) -> (u64, Vec<String>) {
         if flate_only(dict) && !dict.contains_key("DecodeParms") {
-            let mut draws = Draws::default();
+            let mut draws = Draws::new(self.xobjects(resources));
             if let Some(size) = scan(host, data, held, &mut |window| draws.feed(window)).await {
                 return (size, draws.finish());
             }
         }
         let size = measure(host, dict, data, held).await;
-        let every = resources
+        (size, self.xobjects(resources).into_iter().collect())
+    }
+
+    /// The names of the XObjects `resources` holds.
+    fn xobjects(&self, resources: &Object) -> HashSet<String> {
+        resources
             .as_dict()
             .and_then(|d| d.get("XObject"))
             .and_then(|x| self.resolved(x))
             .and_then(|x| x.as_dict().map(|x| x.keys().cloned().collect()))
-            .unwrap_or_default();
-        (size, every)
+            .unwrap_or_default()
     }
 
     /// One stream's decoded size added to `held`: decoded once a
@@ -607,9 +611,9 @@ fn along(chars: &mut [TextChar]) {
     });
 }
 
-/// The names of the XObjects `content` draws.
-fn drawn(content: &[u8]) -> Vec<String> {
-    let mut draws = Draws::default();
+/// The XObjects of `known` that `content` names.
+fn drawn(content: &[u8], known: HashSet<String>) -> Vec<String> {
+    let mut draws = Draws::new(known);
     draws.feed(content);
     draws.finish()
 }
@@ -617,16 +621,25 @@ fn drawn(content: &[u8]) -> Vec<String> {
 /// The longest token kept between windows: a name runs at most 127 bytes.
 const TOKEN: usize = 512;
 
-/// The names of the XObjects a content stream draws, read a window at a
-/// time: each name the operand of a `Do` operator.
-#[derive(Default)]
+/// The XObjects a content stream may draw, read a window at a time: each
+/// one of `known` the stream names anywhere, once. Only a name the stream
+/// holds can draw a form, so a name in a comment, a string or an inline
+/// image counts too, and no form a `Do` draws is missed.
 struct Draws {
+    known: HashSet<String>,
     carry: Vec<u8>,
-    previous: Vec<u8>,
     names: Vec<String>,
 }
 
 impl Draws {
+    fn new(known: HashSet<String>) -> Draws {
+        Draws {
+            known,
+            carry: Vec::new(),
+            names: Vec::new(),
+        }
+    }
+
     fn feed(&mut self, bytes: &[u8]) {
         self.carry.extend_from_slice(bytes);
         if let Some(end) = self.carry.iter().rposition(|&b| boundary(b)) {
@@ -665,14 +678,12 @@ impl Draws {
     }
 
     fn token(&mut self, token: &[u8]) {
-        if token == b"Do" {
-            if let Some(raw) = self.previous.strip_prefix(b"/") {
-                self.names.push(name(raw));
+        if let Some(raw) = token.strip_prefix(b"/") {
+            let found = name(raw);
+            if self.known.remove(&found) {
+                self.names.push(found);
             }
         }
-        self.previous.clear();
-        self.previous
-            .extend_from_slice(&token[token.len().saturating_sub(TOKEN)..]);
     }
 
     fn finish(mut self) -> Vec<String> {
@@ -731,16 +742,17 @@ mod tests {
     use super::Draws;
 
     #[test]
-    fn a_do_split_across_windows_still_names_its_form() {
-        let mut draws = Draws::default();
+    fn each_known_form_the_content_names_counts_once() {
+        let known = ["X0", "Fm 1", "X3", "X4", "X5", "X6", "X7", "Unused"];
+        let mut draws = Draws::new(known.iter().map(|k| k.to_string()).collect());
         for window in [
-            &b"q /X0 D"[..],
-            b"o\n/Fm#201 Do",
-            b" Q /X2 Tf (Do) Tj /X3 Do%note\n[/X4/X5 Do]/X",
-            b"6 Do",
+            &b"q /X0 Do /X0 Do /Y Do /X"[..],
+            b"3 % note\n Do\n/Fm#201 Do (/X7) Tj",
+            b" Q /X2 Tf /X4/X5 Do%",
+            b"/X6\n",
         ] {
             draws.feed(window);
         }
-        assert_eq!(draws.finish(), ["X0", "Fm 1", "X3", "X5", "X6"]);
+        assert_eq!(draws.finish(), ["X0", "X3", "Fm 1", "X7", "X4", "X5", "X6"]);
     }
 }
