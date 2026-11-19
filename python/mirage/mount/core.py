@@ -617,7 +617,10 @@ class MountCore:
         every listing on the loop. A stat that fails ends the listing and
         cancels the ones still waiting. An entry that vanishes between
         the listing and its stat is left out, as ``ls`` leaves out a file
-        deleted mid-listing.
+        deleted mid-listing. ``..`` answers with the directory's own
+        attributes: the parent's store may be the client itself (a
+        machine at ``/`` that this directory is served back to), whose
+        stat would wait on this listing.
 
         Args:
             path (str): mount path of the directory.
@@ -635,10 +638,8 @@ class MountCore:
             slots = _STATS[loop] = asyncio.Semaphore(LISTING_CONCURRENCY)
 
         async def entry(name: str) -> tuple[str, MountAttrs] | None:
-            if name == ".":
+            if name in (".", ".."):
                 child = path
-            elif name == "..":
-                child = posixpath.dirname(path)
             else:
                 child = posixpath.join(path, name)
             async with slots:

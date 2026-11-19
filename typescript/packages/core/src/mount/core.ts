@@ -34,7 +34,7 @@ import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
 import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
-import { parent, posixNormpath } from '../utils/path.ts'
+import { posixNormpath } from '../utils/path.ts'
 import { sliceWindow } from '../utils/ranges.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
@@ -590,7 +590,10 @@ export class MountCore {
    * entry that vanishes between the listing and its stat is left out, as
    * `ls` leaves out a file deleted mid-listing. `names` are the entries to
    * stat, in the order they are answered; null takes `readdir`'s, `.` and
-   * `..` first. Mirrors Python's `listing`.
+   * `..` first. `..` answers with the directory's own attributes: the
+   * parent's store may be the client itself (a machine at `/` that this
+   * directory is served back to), whose stat would wait on this listing.
+   * Mirrors Python's `listing`.
    */
   async listing(
     path: string,
@@ -603,8 +606,7 @@ export class MountCore {
     const refused: { error?: unknown; failed: boolean } = { failed: false }
     const worker = async (): Promise<void> => {
       for (const [index, name] of todo) {
-        const child =
-          name === '.' ? path : name === '..' ? parent(path) : posixNormpath(`${path}/${name}`)
+        const child = name === '.' || name === '..' ? path : posixNormpath(`${path}/${name}`)
         const release = await STATS.acquire()
         try {
           // A listing that failed stats nothing more, a worker that was
