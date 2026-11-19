@@ -942,6 +942,7 @@ async function main(): Promise<void> {
           const { session_profiles: profiles, ...bound } = {
             ...bindMount(c, target.mounts[0]!.path),
             clear_cache: false,
+            explain: false,
           }
           let diffs: string[]
           let ran = false
