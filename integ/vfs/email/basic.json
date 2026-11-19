@@ -900,6 +900,19 @@
         "stdout": "grepw=1\nrgw=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "em_crlf_body_reads_as_lf",
+      "seq": 540258,
+      "targets": [
+        "email"
+      ],
+      "command": "printf 'From: a@example.com\\r\\nTo: integ@example.com\\r\\nSubject: Crlf lines\\r\\nDate: Thu, 08 Jan 2026 09:00:00 +0000\\r\\n\\r\\nfirst line\\r\\nsecond line\\r\\n' | himalaya message add -m Archive > /dev/null; cat /mail/Archive/2026-01-08/Crlf_lines__*.email.json | jq -c '[.body_text, .snippet]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"first line\\nsecond line\\n\",\"first line\\nsecond line\\n\"]\n",
+        "stderr": ""
+      }
     }
   ]
 }
