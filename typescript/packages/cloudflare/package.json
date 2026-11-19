@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-cloudflare",
-  "version": "0.0.9-alpha.2",
+  "version": "0.1.0-alpha.1",
   "description": "Mirage on Cloudflare Workers and Durable Objects",
   "keywords": [
     "bash",

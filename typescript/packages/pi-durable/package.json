@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-pi-durable",
-  "version": "0.0.9-alpha.2",
+  "version": "0.1.0-alpha.1",
   "description": "Run Pi Durable agents with their tools wired to a Mirage workspace",
   "keywords": [
     "mirage",
