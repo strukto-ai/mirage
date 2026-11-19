@@ -40,6 +40,7 @@ import {
   type ExecWorkspace,
 } from '../runners/typescript/execution.ts'
 import substitutionScope from '../bash/cmdsub/scope.json'
+import targetCatalog from '../targets.json'
 import assignmentRedirect from '../bash/assign/redirect.json'
 import unset from '../bash/builtin/unset.json'
 import substitutionStatus from '../bash/cmdsub/status.json'
@@ -140,6 +141,44 @@ function battery(): [string, Check][] {
   )
 }
 
+/** The files of each fixture folder the office and pdf cases seed `/docs` with. */
+const FIXTURE_FILES: Record<string, string[]> = {
+  'office/v1': ['deck.pptx', 'lines.xlsx', 'memo.docx'],
+  'office/hostile': ['orphan.docx', 'paras.docx'],
+  'pdf/v1': [
+    'cjk.pdf',
+    'far.pdf',
+    'locked.pdf',
+    'notes.pdf',
+    'report.pdf',
+    'scan.pdf',
+    'secret.pdf',
+  ],
+  'pdf/hostile': ['form.pdf'],
+}
+
+interface DocsTarget {
+  id: string
+  max_memory?: number
+  mounts: { path: string; fixture?: string }[]
+}
+
+/**
+ * A case's workspace as its target sets it: the fixture `/docs` holds, its
+ * files, and the target's max_memory when it caps one.
+ */
+function docsOf(c: Case): { fixture: string; files: string[]; maxMemory?: number } {
+  const target = (targetCatalog.targets as DocsTarget[]).find((t) => c.targets.includes(t.id))
+  const fixture = target?.mounts.find((m) => m.path === '/docs')?.fixture ?? ''
+  const files = FIXTURE_FILES[fixture]
+  if (files === undefined) throw new Error(`${c.id}: no files listed for fixture ${fixture}`)
+  return {
+    fixture,
+    files,
+    ...(target?.max_memory !== undefined ? { maxMemory: target.max_memory } : {}),
+  }
+}
+
 /**
  * The office CLI's corpus cases, each on a workspace of its own with its
  * target's mounts and the Office files the page's server serves seeded.
@@ -148,15 +187,20 @@ function officeBattery(): [string, Check][] {
   return (officeCorpus.cases as unknown as Case[]).map((c): [string, Check] => [
     c.id,
     async () => {
+      const docs = docsOf(c)
       const ws = new Workspace(
         { '/scratch': new RAMVFS(), '/docs': new RAMVFS() },
-        { mode: MountMode.WRITE },
+        {
+          mode: MountMode.WRITE,
+          ...(docs.maxMemory !== undefined ? { maxMemory: docs.maxMemory } : {}),
+        },
       )
       try {
         ws.registerCli('office', OFFICE)
-        for (const name of ['deck.pptx', 'lines.xlsx', 'memo.docx']) {
-          const response = await fetch(`/office/${name}`)
-          if (!response.ok) throw new Error(`/office/${name} answered ${String(response.status)}`)
+        for (const name of docs.files) {
+          const response = await fetch(`/${docs.fixture}/${name}`)
+          if (!response.ok)
+            throw new Error(`/${docs.fixture}/${name} answered ${String(response.status)}`)
           const stdin = new Uint8Array(await response.arrayBuffer())
           equal(await shell(ws, `tee /docs/${name} > /dev/null`, { stdin }), [0, '', ''])
         }
@@ -178,24 +222,21 @@ function pdfBattery(): [string, Check][] {
   return (pdfCorpus.cases as unknown as Case[]).map((c): [string, Check] => [
     c.id,
     async () => {
+      const docs = docsOf(c)
       const ws = new Workspace(
         { '/scratch': new RAMVFS(), '/docs': new RAMVFS() },
-        { mode: MountMode.WRITE },
+        {
+          mode: MountMode.WRITE,
+          ...(docs.maxMemory !== undefined ? { maxMemory: docs.maxMemory } : {}),
+        },
       )
       try {
         ws.registerCli('pdftotext', PDFTOTEXT)
         ws.registerCli('pdfinfo', PDFINFO)
-        for (const name of [
-          'cjk.pdf',
-          'far.pdf',
-          'locked.pdf',
-          'notes.pdf',
-          'report.pdf',
-          'scan.pdf',
-          'secret.pdf',
-        ]) {
-          const response = await fetch(`/pdf/${name}`)
-          if (!response.ok) throw new Error(`/pdf/${name} answered ${String(response.status)}`)
+        for (const name of docs.files) {
+          const response = await fetch(`/${docs.fixture}/${name}`)
+          if (!response.ok)
+            throw new Error(`/${docs.fixture}/${name} answered ${String(response.status)}`)
           const stdin = new Uint8Array(await response.arrayBuffer())
           equal(await shell(ws, `tee /docs/${name} > /dev/null`, { stdin }), [0, '', ''])
         }
