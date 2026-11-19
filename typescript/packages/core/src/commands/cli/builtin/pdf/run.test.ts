@@ -260,8 +260,9 @@ function pages(each: [Uint8Array, string][], ...more: (string | Uint8Array)[]): 
     )
   })
   bodies.push(...more)
-  const out: Uint8Array[] = [ENC.encode('%PDF-1.4\n')]
-  let length = out[0].length
+  const head = ENC.encode('%PDF-1.4\n')
+  const out: Uint8Array[] = [head]
+  let length = head.length
   const offsets: number[] = []
   bodies.forEach((body, i) => {
     offsets.push(length)
@@ -334,22 +335,25 @@ async function capped(document: Uint8Array, line: string): Promise<[number, stri
 }
 
 describe('under max_memory', () => {
-  it.each(Object.keys(BOMBS).sort())('refuses a %s stream that inflates past it', async (site) => {
-    expect(await capped(BOMBS[site], 'pdftotext /w/d.pdf -')).toEqual([
-      1,
-      '',
-      'pdftotext: memory exhausted\n',
-    ])
-  })
+  it.each(Object.entries(BOMBS).sort(([a], [b]) => a.localeCompare(b)))(
+    'refuses a %s stream that inflates past it',
+    async (_, bomb) => {
+      expect(await capped(bomb, 'pdftotext /w/d.pdf -')).toEqual([
+        1,
+        '',
+        'pdftotext: memory exhausted\n',
+      ])
+    },
+  )
 
-  it.each(Object.keys(FILTERED).sort())(
+  it.each(Object.entries(FILTERED).sort(([a], [b]) => a.localeCompare(b)))(
     'refuses a character map past it through %s',
-    async (filters) => {
+    async (_, filtered) => {
       const page = onePage(
         flate(ENC.encode(HELLO)),
         FONT_ONLY,
         '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>',
-        FILTERED[filters],
+        filtered,
       )
       expect(await capped(page, 'pdftotext /w/d.pdf -')).toEqual([
         1,
@@ -361,7 +365,7 @@ describe('under max_memory', () => {
 
   it('counts each form a form behind a predictor names', async () => {
     const draws = ENC.encode('/X1 Do\n')
-    const sub = new Uint8Array([1, ...draws.map((b, i) => (b - (i > 0 ? draws[i - 1] : 0)) & 0xff)])
+    const sub = new Uint8Array([1, ...draws.map((b, i) => (b - (draws[i - 1] ?? 0)) & 0xff)])
     const page = onePage(
       flate(ENC.encode(HELLO + '/X0 Do\n')),
       '<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R >> >>',

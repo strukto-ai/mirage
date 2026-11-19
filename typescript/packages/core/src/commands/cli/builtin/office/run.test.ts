@@ -297,10 +297,9 @@ function word(body: string, extra: [string, Uint8Array][] = []): Uint8Array {
   ])
 }
 
-async function officeUnderCap(
-  document: Uint8Array,
-  ...lines: string[]
-): Promise<[number, Uint8Array, string][]> {
+type Ran = [number, Uint8Array, string]
+
+async function officeUnderCap(document: Uint8Array, ...lines: string[]): Promise<Ran[]> {
   const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE, maxMemory: '16MB' })
   try {
     ws.registerCli('office', OFFICE)
@@ -339,22 +338,22 @@ describe('office under max_memory', () => {
   })
 
   it('reads a document that fits', async () => {
-    const [[code]] = await officeUnderCap(
+    const got = await officeUnderCap(
       word('<w:p/>'.repeat(1_000)),
       'office get /w/d.docx /body/p[1000]',
     )
-    expect(code).toBe(0)
+    expect(got[0]?.[0]).toBe(0)
   })
 
   it('never inflates a part nothing links to, and keeps it', async () => {
     const junk = ENC.encode('<a>' + ' '.repeat(40 << 20) + '</a>')
-    const [got, changed, saved, raw] = await officeUnderCap(
+    const [got, changed, saved, raw] = (await officeUnderCap(
       word('<w:p><w:r><w:t>hi</w:t></w:r></w:p>', [['word/junk.xml', junk]]),
       'office get /w/d.docx /body/p[1]',
       'office set /w/d.docx /body/p[1] --prop text=bye',
       'office get /w/d.docx /body/p[1]',
       'cat /w/d.docx',
-    )
+    )) as [Ran, Ran, Ran, Ran]
     expect([got[0], changed[0], saved[0]]).toEqual([0, 0, 0])
     expect(DEC.decode(saved[1])).toContain('"bye"')
     const savedZip = Buffer.from(raw[1])
