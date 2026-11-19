@@ -272,9 +272,11 @@ return promises: await them, or a failure goes unseen.
 | `cwd()` | Returns the session's working directory |
 | `sessionId` | The session's ID |
 
-This continues the pager example:
+A `login` leaf for the pager CLI, declared in its spec and handlers like `ack`:
 
 ```typescript
+import { UsageError } from '@struktoai/mirage-node'
+
 async function login(
   accessor: NOOPAccessor,
   _paths: PathSpec[],

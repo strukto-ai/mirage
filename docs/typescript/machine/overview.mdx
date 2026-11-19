@@ -14,7 +14,7 @@ machine's page has its install and a runnable example.
 ## Declare machines
 
 Each entry in `new Workspace(mounts, { machines: {...} })` is a config object,
-a runtime object or a machine handle. The first machine whose `captures` names
+a runtime object or a machine handle. By default, the first machine whose `captures` names
 a program runs it:
 
 ```ts
@@ -38,9 +38,10 @@ the same keys in snake_case.
 
 ## Change them on a live workspace
 
-Provider machines such as docker can only be set in the constructor. On a
-running workspace, `addMachine(name, spec)` adds an in-process runtime,
-`removeMachine(name)` removes one, and `engines()` lists them:
+Machine providers such as docker and ssh can only be set in the
+constructor. On a running workspace, `addMachine(name, spec)` adds a runtime
+or a `host` or `remote` machine, `removeMachine(name)` removes one, and `engines()` lists
+them:
 
 ```ts
 await ws.removeMachine('py')

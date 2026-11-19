@@ -84,7 +84,7 @@ mounts:
 
 ## Behavior
 
-- **Files of unknown size.** API mounts (Slack, Linear, Trello, ...) report
+- **Files of unknown size.** API mounts (Slack, Trello, ...) report
   0 bytes until a file is opened. `ls -l`, `du` and `find -size` show 0, and
   `tar` and `rsync` copy such files empty. `cat`, `grep`, `cp` and `wc -c`
   read the full content through `fuse`, and read the file as empty through

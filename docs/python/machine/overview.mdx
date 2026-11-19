@@ -14,7 +14,7 @@ machine's page has its install and an example.
 ## Declare machines
 
 Each entry in `Workspace(machines={...})` is a config dict, a runtime object
-or a machine handle. The first machine whose `captures` names a program runs
+or a machine handle. By default, the first machine whose `captures` names a program runs
 it:
 
 ```python
@@ -33,9 +33,10 @@ await ws.shell("python3 -c 'print(1 + 1)'")
 
 ## Change them on a live workspace
 
-Provider machines such as docker can only be set in the constructor. On a
-running workspace, `add_machine(name, spec)` adds an in-process runtime or its
-config dict, `remove_machine(name)` removes one, and `engines()` lists them:
+Machine providers such as docker and ssh can only be set in the
+constructor. On a running workspace, `add_machine(name, spec)` adds a runtime
+or a `host` or `remote` machine, `remove_machine(name)` removes one, and `engines()` lists
+them:
 
 ```python
 from mirage.runtime.python import WasiRuntime
