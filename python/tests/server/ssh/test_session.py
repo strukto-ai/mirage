@@ -130,10 +130,13 @@ async def test_channel_session_is_closed_when_the_channel_ends(ssh):
 @pytest.mark.asyncio
 async def test_login_env_is_set_on_the_session(ssh):
     async with ssh.connect() as conn:
-        result = await conn.run(
-            'mkdir -p /root; echo "$HOME $USER $LOGNAME"; cd; pwd'
-        )
-    assert result.stdout == "/root demo demo\n/root\n"
+        fresh = await conn.run('echo "$HOME $USER $LOGNAME"; cd; pwd')
+        made = await conn.run("mkdir -p /root; cd; pwd")
+    assert (fresh.stdout, fresh.stderr) == (
+        "/root demo demo\n/\n",
+        "bash: line 1: cd: /root: No such file or directory\n",
+    )
+    assert made.stdout == "/root\n"
 
 
 @pytest.mark.asyncio

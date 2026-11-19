@@ -377,7 +377,8 @@ def lookup_machine(
     looks past functions to the file a run would exec (``which``,
     ``type -P``, ``type -a``). Any other name is the machine's that
     takes it by name, else the one taking ``@external``, as the line's
-    placement binds them (``ProgramLookup`` has the whole rule).
+    placement binds them (``ProgramLookup`` has the whole rule), unless
+    that machine refuses the session's runs (``refuses_session``).
 
     Args:
         name (str): the name looked up.
@@ -401,7 +402,9 @@ def lookup_machine(
     runtime = (
         bindings[name] if name in bindings else bindings.get(EXTERNAL_COMMANDS)
     )
-    return runtime if isinstance(runtime, RemoteRuntime) else None
+    if not isinstance(runtime, RemoteRuntime) or runtime.refuses_session():
+        return None
+    return runtime
 
 
 def bin_program(
@@ -445,27 +448,24 @@ def _lookup_line(command: str, letters: str, name: str) -> str:
     on this one name, after ``--`` where it starts with a dash, so the
     machine reads it as the name it is. ``type`` and ``command`` are
     bash's builtins, so they run in the machine's bash, its ``sh`` where
-    it has none.
+    it has none; dash's ``type`` takes no options, so there it gets the
+    name bare.
 
     Args:
         command (str): ``which``, ``type`` or ``command``.
         letters (str): the options the agent gave it.
         name (str): the name looked up.
     """
+    words = [command, *([f"-{letters}"] if letters else [])]
     line = shell_join(
-        [
-            command,
-            *([f"-{letters}"] if letters else []),
-            *(["--"] if name.startswith("-") else []),
-            name,
-        ]
+        [*words, *(["--"] if name.startswith("-") else []), name]
     )
     if command == "which":
         return line
-    quoted = shell_quote(line)
+    plain = shell_join([*words, name]) if command == "type" else line
     return (
-        f"if [ -x /bin/bash ]; then exec /bin/bash -c {quoted}; fi; "
-        f"exec /bin/sh -c {quoted}"
+        f"if [ -x /bin/bash ]; then exec /bin/bash -c {shell_quote(line)}; "
+        f"fi; exec /bin/sh -c {shell_quote(plain)}"
     )
 
 

@@ -84,13 +84,12 @@ export class BinViewVFS extends BaseVFS {
     return this.beneath(path.virtual)
   }
 
-  override async readdir(path: PathSpec): Promise<FileStat[]> {
+  override async readdir(path: PathSpec): Promise<readonly FileStat[] | DirListing> {
     const below = this.below(path)
     if (below !== null && stripSlash(path.mountPath) !== '') {
       const [vfs, spec] = below
       try {
-        const found = await vfs.readdir(spec)
-        return found instanceof DirListing ? [...found.entries] : [...found]
+        return await vfs.readdir(spec)
       } catch (err) {
         if (!isEnoent(err)) throw err
         console.debug(`${path.virtual}: none beneath`)
@@ -112,7 +111,9 @@ export class BinViewVFS extends BaseVFS {
     const kept = mine.filter((row) => !held.has(row.name))
     const named = new Set(kept.map((row) => row.name))
     const rows = [...kept, ...theirs.filter((row) => !named.has(row.name) && this.leaves(row.name))]
-    return rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    if (!(listed instanceof DirListing)) return rows
+    return new DirListing({ entries: rows, partial: listed.partial, window: listed.window })
   }
 
   override async read(path: PathSpec): Promise<ByteSource> {

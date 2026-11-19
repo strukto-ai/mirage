@@ -201,11 +201,8 @@ class Runtime(ABC, Generic[E]):
         release = self.admit()
         try:
             capture = self._binding.capture() if self._binding else None
-            if (
-                capture is not None
-                and self.reach != "workspace"
-                and capture.restricted_mounts
-                and not self._serves_session(capture.restricted_mounts)
+            if capture is not None and self._refuses(
+                capture.restricted_mounts
             ):
                 return await refused_run(
                     self.refusal_name,
@@ -503,6 +500,28 @@ class Runtime(ABC, Generic[E]):
             if self._engine_task is opening:
                 self._engine_task = None
             raise
+
+    def refuses_session(self) -> bool:
+        """Whether the calling session's runs are refused here before they
+        start: the runtime reaches past the workspace and cannot serve
+        every mount the session restricts through its gate. A lookup
+        asks such a machine nothing, as a run there would not start.
+        """
+        capture = self._binding.capture() if self._binding else None
+        return capture is not None and self._refuses(capture.restricted_mounts)
+
+    def _refuses(self, restricted_mounts: tuple[str, ...]) -> bool:
+        """Whether a session restricting these mounts is refused here.
+
+        Args:
+            restricted_mounts (tuple[str, ...]): the mounts the session
+                restricts.
+        """
+        return (
+            self.reach != "workspace"
+            and bool(restricted_mounts)
+            and not self._serves_session(restricted_mounts)
+        )
 
     def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
         """Whether every restricted mount is served through this caller's gate.

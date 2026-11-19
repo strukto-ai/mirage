@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { DirListing, type FileStat, MountMode, PathSpec } from '../../types.ts'
 import { backendCommands } from '../../workspace/mount/backends.ts'
 import { MountEntry } from '../../workspace/mount/mount.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -111,7 +111,7 @@ describe('BinViewVFS', () => {
     const rows = await view.readdir(
       new PathSpec({ virtual: '/usr/bin', directory: '/usr', vfsPath: '' }),
     )
-    expect(rows.map((row) => row.name)).toEqual(['ls', 'perl', 'python3'])
+    expect(entriesOf(rows).map((row) => row.name)).toEqual(['ls', 'perl', 'python3'])
     const perl = new PathSpec({ virtual: '/usr/bin/perl', directory: '/usr/bin', vfsPath: 'perl' })
     expect((await view.stat(perl)).size).toBe('#!perl\n'.length)
     expect(DEC.decode((await view.read(perl)) as Uint8Array)).toBe('#!perl\n')
@@ -122,6 +122,25 @@ describe('BinViewVFS', () => {
     })
     expect(DEC.decode((await view.read(python)) as Uint8Array)).toContain('python3')
     expect(view.leaves('perl') && !view.leaves('ls')).toBe(true)
+  })
+
+  it('keeps a partial listing beneath the view partial', async () => {
+    const beneath = await rootHolding({ '/usr/bin/perl': '#!perl\n' })
+    const partial = Object.assign(Object.create(beneath) as RAMVFS, {
+      readdir: async (spec: PathSpec) =>
+        new DirListing({ entries: entriesOf(await beneath.readdir(spec)), partial: true }),
+    })
+    const view = new BinViewVFS(
+      () => ['ls'],
+      (n) => (n === 'ls' ? n : null),
+      (n) => n !== 'ls',
+      (v) => [partial, PathSpec.fromStrPath(v)],
+    )
+    const listed = await view.readdir(
+      new PathSpec({ virtual: '/usr/bin', directory: '/usr', vfsPath: '' }),
+    )
+    expect(listed instanceof DirListing && listed.partial).toBe(true)
+    expect(entriesOf(listed).map((row) => row.name)).toEqual(['ls', 'perl'])
   })
 
   it('opens a folder beneath the view with all under it', async () => {
@@ -144,6 +163,10 @@ describe('BinViewVFS', () => {
     }
   })
 })
+
+function entriesOf(listed: readonly FileStat[] | DirListing): readonly FileStat[] {
+  return listed instanceof DirListing ? listed.entries : listed
+}
 
 async function rootHolding(files: Record<string, string>): Promise<RAMVFS> {
   const ram = new RAMVFS()

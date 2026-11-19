@@ -395,12 +395,27 @@ async def test_a_function_shadows_the_machine_for_type_but_not_for_which():
 
 
 @pytest.mark.asyncio
+async def test_a_machine_that_refuses_the_session_s_runs_is_asked_nothing():
+    ws, dev = await lookup_ws({"perl": ["/usr/bin/perl"]})
+    ws.create_session(
+        "restricted", profile={"paths": {"hide": ["/data/secret"]}}
+    )
+    which = await ws.shell("which perl", session_id="restricted")
+    assert (await which.stdout_str(), which.exit_code) == ("", 1)
+    ran = await ws.shell("perl -v", session_id="restricted")
+    assert ran.exit_code == 126
+    assert looked_up(dev) == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_name_with_a_leading_dash_reaches_the_machine_after_dashes():
     ws, dev = await lookup_ws({"-tool": ["/usr/local/bin/-tool"]})
     assert await out(ws, "which -- -tool") == "/usr/bin/-tool\n"
     assert await out(ws, "type -t -- -tool") == "file\n"
     assert looked_up(dev)[0] == "which -- -tool"
-    assert "type -t -- -tool" in looked_up(dev)[1]
+    assert "bash -c 'type -t -- -tool'; fi" in looked_up(dev)[1]
+    assert looked_up(dev)[1].endswith("exec /bin/sh -c 'type -t -tool'")
     await ws.close()
 
 

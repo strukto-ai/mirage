@@ -394,12 +394,23 @@ describe('program lookups', () => {
     await ws.close()
   })
 
+  it("asks nothing of a machine that refuses the session's runs", async () => {
+    const [ws, dev] = lookupWs({ perl: ['/usr/bin/perl'] })
+    ws.createSession('restricted', { profile: { paths: { hide: ['/data/secret'] } } })
+    const which = await ws.shell('which perl', { sessionId: 'restricted' })
+    expect([DEC.decode(which.stdout), which.exitCode]).toEqual(['', 1])
+    expect((await ws.shell('perl -v', { sessionId: 'restricted' })).exitCode).toBe(126)
+    expect(lookedUp(dev)).toEqual([])
+    await ws.close()
+  })
+
   it('hands the machine a name with a leading dash after --', async () => {
     const [ws, dev] = lookupWs({ '-tool': ['/usr/local/bin/-tool'] })
     expect(await out(ws, 'which -- -tool')).toBe('/usr/bin/-tool\n')
     expect(await out(ws, 'type -t -- -tool')).toBe('file\n')
     expect(lookedUp(dev)[0]).toBe('which -- -tool')
-    expect(lookedUp(dev)[1]).toContain('type -t -- -tool')
+    expect(lookedUp(dev)[1]).toContain("bash -c 'type -t -- -tool'; fi")
+    expect(lookedUp(dev)[1]).toMatch(/exec \/bin\/sh -c 'type -t -tool'$/)
     await ws.close()
   })
 

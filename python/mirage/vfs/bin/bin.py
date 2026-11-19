@@ -92,18 +92,14 @@ class BinViewVFS(BaseVFS):
             return None
         return self._beneath(path.virtual)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         below = self._below(path)
         if below is not None and path.mount_path.strip("/"):
             vfs, spec = below
             try:
-                found = await vfs.readdir(spec)
+                return await vfs.readdir(spec)
             except FileNotFoundError:
                 logger.debug("%s: none beneath", path.virtual)
-            else:
-                return (
-                    found.entries if isinstance(found, DirListing) else found
-                )
         mine = await _readdir(self.accessor, path)
         if below is None:
             return mine
@@ -122,7 +118,10 @@ class BinViewVFS(BaseVFS):
             for row in theirs
             if row.name not in named and self.leaves(row.name)
         ]
-        return sorted(rows, key=lambda row: row.name)
+        rows.sort(key=lambda row: row.name)
+        if not isinstance(listed, DirListing):
+            return rows
+        return DirListing(rows, partial=listed.partial, window=listed.window)
 
     async def read(self, path: PathSpec) -> ByteSource:
         below = self._below(path)

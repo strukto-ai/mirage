@@ -1209,6 +1209,11 @@ function bashAnswer(command: string, stdin: string | undefined): Promise<Expect>
         reject(error instanceof Error ? error : new Error(String(error)))
       }
     })
+    // A line that exits before reading all its input closes the pipe; its
+    // close still reports the answer.
+    child.stdin?.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') reject(error)
+    })
     if (stdin !== undefined) child.stdin?.end(stdin)
   })
 }

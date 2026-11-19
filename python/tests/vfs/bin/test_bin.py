@@ -17,7 +17,7 @@ import errno
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.types import PathSpec
+from mirage.types import DirListing, PathSpec
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.mount_commands import mount_commands
@@ -143,3 +143,27 @@ async def test_a_folder_beneath_the_view_opens_with_all_under_it():
     missing = await ws.shell("ls /usr/bin/grep/x")
     assert missing.exit_code == 2
     await ws.close()
+
+
+class PartialRAM(RAMVFS):
+    """A RAM folder whose listings say they are partial."""
+
+    async def readdir(self, path: PathSpec) -> DirListing:
+        return DirListing(list(await super().readdir(path)), partial=True)
+
+
+@pytest.mark.asyncio
+async def test_a_partial_listing_beneath_the_view_stays_partial():
+    beneath = PartialRAM()
+    await beneath.mkdir(PathSpec.from_str_path("/usr/bin"), parents=True)
+    await beneath.write(PathSpec.from_str_path("/usr/bin/perl"), b"#!perl\n")
+    view = BinViewVFS(
+        lambda: ["ls"],
+        lambda n: n if n == "ls" else None,
+        leaves=lambda n: n != "ls",
+        beneath=lambda v: (beneath, PathSpec.from_str_path(v)),
+    )
+    spec = PathSpec(virtual="/usr/bin", directory="/usr", vfs_path="")
+    listed = await view.readdir(spec)
+    assert isinstance(listed, DirListing) and listed.partial
+    assert [row.name for row in listed.entries] == ["ls", "perl"]

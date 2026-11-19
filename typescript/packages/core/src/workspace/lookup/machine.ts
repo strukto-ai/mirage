@@ -329,7 +329,8 @@ export async function linkMachine(
  * past functions to the file a run would exec (`which`, `type -P`,
  * `type -a`). Any other name is the machine's that takes it by name, else
  * the one taking `@external`, as the line's placement binds them
- * (`ProgramLookup` has the whole rule). Mirrors Python's `lookup_machine`.
+ * (`ProgramLookup` has the whole rule), unless that machine refuses the
+ * session's runs (`refusesSession`). Mirrors Python's `lookup_machine`.
  *
  * @param name the name looked up.
  * @param session the session it is looked up in.
@@ -354,7 +355,8 @@ export function lookupMachine(
   const bindings: Readonly<Record<string, Runtime | null | undefined>> =
     routing?.bindings ?? registry.runtimeBindings
   const runtime = Object.hasOwn(bindings, name) ? bindings[name] : bindings[EXTERNAL_COMMANDS]
-  return runtime instanceof RemoteRuntime ? runtime : null
+  if (!(runtime instanceof RemoteRuntime) || runtime.refusesSession()) return null
+  return runtime
 }
 
 /**
@@ -397,22 +399,19 @@ export function binProgram(
  * The line a machine runs for a lookup: the command the agent typed, on this
  * one name, after `--` where it starts with a dash, so the machine reads it
  * as the name it is. `type` and `command` are bash's builtins, so they run
- * in the machine's bash, its `sh` where it has none.
+ * in the machine's bash, its `sh` where it has none; dash's `type` takes no
+ * options, so there it gets the name bare.
  *
  * @param command `which`, `type` or `command`.
  * @param letters the options the agent gave it.
  * @param name the name looked up.
  */
 function lookupLine(command: string, letters: string, name: string): string {
-  const line = shellJoin([
-    command,
-    ...(letters !== '' ? [`-${letters}`] : []),
-    ...(name.startsWith('-') ? ['--'] : []),
-    name,
-  ])
+  const words = [command, ...(letters !== '' ? [`-${letters}`] : [])]
+  const line = shellJoin([...words, ...(name.startsWith('-') ? ['--'] : []), name])
   if (command === 'which') return line
-  const quoted = shellQuote(line)
-  return `if [ -x /bin/bash ]; then exec /bin/bash -c ${quoted}; fi; exec /bin/sh -c ${quoted}`
+  const plain = command === 'type' ? shellJoin([...words, name]) : line
+  return `if [ -x /bin/bash ]; then exec /bin/bash -c ${shellQuote(line)}; fi; exec /bin/sh -c ${shellQuote(plain)}`
 }
 
 /**

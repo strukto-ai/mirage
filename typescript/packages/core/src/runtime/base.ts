@@ -176,8 +176,7 @@ export abstract class Runtime<E = unknown> {
     try {
       const kind = opts.kind ?? 'code'
       const capture = this.binding?.capture()
-      const restricted = capture?.restrictedMounts ?? []
-      if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
+      if (capture !== undefined && this.refuses(capture.restrictedMounts ?? []))
         return await refusedRun(
           this.refusalName,
           "runtime cannot enforce this session's file restrictions",
@@ -404,6 +403,30 @@ export abstract class Runtime<E = unknown> {
       if (this.opening === opening) this.opening = null
       throw err
     })
+  }
+
+  /**
+   * Whether the calling session's runs are refused here before they start:
+   * the runtime reaches past the workspace and cannot serve every mount the
+   * session restricts through its gate. A lookup asks such a machine nothing,
+   * as a run there would not start. Mirrors Python's `refuses_session`.
+   */
+  refusesSession(): boolean {
+    const capture = this.binding?.capture()
+    return capture !== undefined && this.refuses(capture.restrictedMounts ?? [])
+  }
+
+  /**
+   * Whether a session restricting these mounts is refused here.
+   *
+   * @param restrictedMounts the mounts the session restricts.
+   */
+  private refuses(restrictedMounts: readonly string[]): boolean {
+    return (
+      this.reach !== 'workspace' &&
+      restrictedMounts.length > 0 &&
+      !this.servesSession(restrictedMounts)
+    )
   }
 
   /**
