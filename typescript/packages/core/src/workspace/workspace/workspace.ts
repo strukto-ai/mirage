@@ -65,7 +65,7 @@ import {
 import { unreadNames } from '../../policy/match/grammar.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import {
-  type AdmissionRules,
+  AdmissionRules,
   DryRun,
   type Grammar,
   Outcome,
@@ -1486,7 +1486,7 @@ export class Workspace {
     const unread = unreadNames(rules.trees, this.grammars())
     const held = rules.unread ?? new Set<string>()
     const same = unread.size === held.size && [...unread].every((name) => held.has(name))
-    return same ? rules : { ...rules, unread }
+    return same ? rules : new AdmissionRules(rules.trees, unread)
   }
 
   /**

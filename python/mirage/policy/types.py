@@ -15,7 +15,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Literal, Protocol
+from typing import Any, ClassVar, Literal, NoReturn, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -33,6 +33,42 @@ from mirage.types import (
 )
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
+
+T = TypeVar("T")
+
+
+class _SealedMap(dict[str, Any]):
+    """A tree node's mapping that refuses every write, so a rule set
+    reads the same for as long as it lives. A dict, so it serializes,
+    copies and pickles as one. Only ``_sealed`` builds one.
+    """
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise TypeError("a rule set cannot change in place; build a new one")
+
+    __setitem__ = __delitem__ = __ior__ = _refuse
+    clear = pop = popitem = setdefault = update = _refuse
+
+    def __reduce__(self) -> tuple[type["_SealedMap"], tuple[dict[str, Any]]]:
+        return (_SealedMap, (dict(self),))
+
+
+_EMPTY: Mapping[str, Any] = _SealedMap()
+
+
+def _sealed(held: Mapping[str, T]) -> Mapping[str, T]:
+    """A tree node's mapping as one nobody can change in place, so the
+    matcher compiled for its rule set stays its matcher. A mapping this
+    already sealed is kept; any other is copied, since a caller may
+    still hold what backs it. An empty mapping is the one shared empty,
+    since most nodes hold three.
+
+    Args:
+        held (Mapping[str, T]): the mapping as built.
+    """
+    if isinstance(held, _SealedMap):
+        return held
+    return _SealedMap(held) if held else _EMPTY
 
 
 class MountRootQuery(Protocol):
@@ -579,6 +615,9 @@ class ValueRule:
     decision: tuple[RuleLeaf, ...] = ()
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _sealed(self.options))
+
     def __hash__(self) -> int:
         return hash((self.decision, frozenset(self.options.items())))
 
@@ -599,6 +638,10 @@ class OptionRule:
     decision: tuple[RuleLeaf, ...] = ()
     values: Mapping[str, ValueRule] = field(default_factory=dict)
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", _sealed(self.values))
+        object.__setattr__(self, "options", _sealed(self.options))
 
     def __hash__(self) -> int:
         return hash(
@@ -637,6 +680,11 @@ class CommandNode:
     options: Mapping[str, OptionRule] = field(default_factory=dict)
     other_options: tuple[RuleLeaf, ...] = ()
     operands: Mapping[str, "CommandNode"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subcommands", _sealed(self.subcommands))
+        object.__setattr__(self, "options", _sealed(self.options))
+        object.__setattr__(self, "operands", _sealed(self.operands))
 
     def __hash__(self) -> int:
         return hash(

@@ -3,7 +3,7 @@ import { admissionMatcher } from '@struktoai/mirage-core/rs/policy'
 import { Policies } from '@struktoai/mirage-core/policy/policies'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { commandTree } from '@struktoai/mirage-core/policy/profile'
-import type { AdmissionRules, CommandContext } from '@struktoai/mirage-core/policy/types'
+import { AdmissionRules, type CommandContext } from '@struktoai/mirage-core/policy/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 function check(condition: boolean): asserts condition {
@@ -14,7 +14,7 @@ function benchRules(size: number): AdmissionRules {
   const tree: Record<string, unknown> = {}
   for (let i = 0; i < size - 1; i++) tree[`blocked${i}`] = { decision: 'deny', reason: `rule ${i}` }
   tree.cat = { decision: 'deny', reason: 'protected path', paths: ['/private/*'] }
-  return { trees: [{ tree: commandTree(tree), mount: '', inline: false }] }
+  return new AdmissionRules([{ tree: commandTree(tree), mount: '', inline: false }])
 }
 
 export async function run(factory: (policy: Policy) => Workspace) {

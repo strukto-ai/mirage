@@ -661,11 +661,12 @@ async function runRedirected(
         false,
         sink,
         expand,
-        redirectGate(context, registry, namespace),
+        undefined,
         '',
         [],
         forked,
         followLinks,
+        redirectGate(context, registry, namespace),
       )
     }
     if (simple && context.frame.diagnostics.length > 0) {

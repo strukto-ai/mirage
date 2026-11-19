@@ -973,6 +973,30 @@ describe('a redirect no command owns', () => {
     expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'top\n'])
   })
 
+  it.each([
+    ['{ cat; } < /data/a/f', []],
+    ['if true; then cat; fi < /data/a/f', []],
+    ['cat < /data/a/f', ['/data/a/f']],
+  ])('stats its input only when a command owns it: %s', async (line, stats) => {
+    const vfs = new RAMVFS()
+    const w = new Workspace(
+      { '/data': vfs },
+      { mode: MountMode.WRITE, profiles: { sealed: SEALED } },
+    )
+    open.push(w)
+    await w.shell('mkdir /data/a; echo top > /data/a/f')
+    w.createSession('s', { profile: 'sealed' })
+    const seen: string[] = []
+    const stat = vfs.stat.bind(vfs)
+    vfs.stat = (path: PathSpec) => {
+      seen.push(path.virtual)
+      return stat(path)
+    }
+    const io = await w.shell(line, { sessionId: 's' })
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'top\n'])
+    expect(seen).toEqual(stats)
+  })
+
   it('is judged by admitLine', async () => {
     const w = ws(SEALED)
     const session = w.sessionManager.get(w.sessionManager.defaultId)

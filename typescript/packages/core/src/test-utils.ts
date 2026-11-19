@@ -37,7 +37,12 @@ import type { DispatchFn } from './runtime/types.ts'
 import type { RAMAccessor } from './accessor/ram.ts'
 import type { StorageUsage } from './vfs/capacity.ts'
 import { commandTree } from './policy/profile.ts'
-import type { AdmissionRules, CommandContext, CommandNode, ScopedTree } from './policy/types.ts'
+import {
+  AdmissionRules,
+  type CommandContext,
+  type CommandNode,
+  type ScopedTree,
+} from './policy/types.ts'
 import { readLine } from './workspace/executor/command/reading.ts'
 import { lineFacts } from './workspace/lookup/constants.ts'
 import { MountRegistry } from './workspace/mount/registry.ts'
@@ -398,7 +403,7 @@ export function trees(
   for (const [prefix, block] of Object.entries(mounts))
     out.push({ tree: tree(block), mount: prefix, inline: false })
   if (inline !== null) out.push({ tree: tree(inline), mount: '', inline: true })
-  return { trees: out }
+  return new AdmissionRules(out)
 }
 
 /** A resolved path as the classifier gives one. */

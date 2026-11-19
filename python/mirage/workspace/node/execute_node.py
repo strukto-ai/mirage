@@ -798,7 +798,7 @@ async def _run_redirected(
                 call_stack,
                 sink=sink,
                 expand=expand,
-                guard=_redirect_gate(context, registry, namespace),
+                gate=_redirect_gate(context, registry, namespace),
                 forked=forked,
                 follow=namespace.session_links(context.session).follow,
             )

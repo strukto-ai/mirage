@@ -282,7 +282,10 @@ impl AdmissionMatcher {
     }
 
     /// A line's walk through every tree, which the host keeps for the
-    /// files the line reaches (`io_reach`, `io_refusal`).
+    /// files the line reaches (`io_reach`, `io_refusal`). A tree whose
+    /// walk holds no deny and no ask is left out, since it can refuse no
+    /// file: a line every tree allows walks nothing, and the host asks
+    /// nothing for the files it reaches.
     pub fn naming(&self, tokens: &[Text], reading: Option<&Reading>, tool: bool) -> Vec<Walked> {
         let read = Read::new(tokens, reading);
         let line = read.line(tool);
@@ -292,6 +295,10 @@ impl AdmissionMatcher {
             .map(|(tree, scoped)| Walked {
                 tree,
                 branches: scoped.tree.walk(&line),
+            })
+            .filter(|walked| {
+                Self::walked_ids(std::slice::from_ref(walked))
+                    .any(|id| self.rules[id].decision != Outcome::Allow)
             })
             .collect()
     }
@@ -682,6 +689,26 @@ mod tests {
         );
         let refused = m.io_refusal(&walked, &text("/data/src/secret/key.pem"), &[]);
         assert_eq!(m.rules()[refused.unwrap()].decision, Deny);
+    }
+
+    #[test]
+    fn a_walk_that_can_refuse_no_file_is_left_out() {
+        let m = matcher(
+            json!({
+                "*": "allow",
+                "rm": "deny",
+                "cp": {"decision": "allow", "paths": ["/data/*"]},
+            }),
+            &[("/repo", json!({"git": "deny"}))],
+        );
+        assert!(m.naming(&[text("echo"), text("hi")], None, true).is_empty());
+        let cp = m.naming(&[text("cp")], None, true);
+        assert!(cp.is_empty());
+        assert!(!m.io_reach(&cp, &text("/data")));
+        assert_eq!(m.io_refusal(&cp, &text("/data/x"), &[]), None);
+        let git = m.naming(&[text("git"), text("status")], None, true);
+        assert_eq!(git.iter().map(|w| w.tree).collect::<Vec<_>>(), [1]);
+        assert_eq!(m.naming(&[text("rm")], None, true).len(), 1);
     }
 
     #[test]

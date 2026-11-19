@@ -1088,6 +1088,9 @@ def _path_mode_under(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
+    shown = sess.visibility.shown if sess.visibility is not None else None
+    if cap is None and shown is None:
+        return mount_mode
     return MountMode(
         visibility_matcher(sess.visibility).ask(
             "effective_mode",
@@ -1117,6 +1120,9 @@ def strongest_under_session(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
+    shown = sess.visibility.shown if sess.visibility is not None else None
+    if cap is None and shown is None:
+        return mount_mode
     return MountMode(
         visibility_matcher(sess.visibility).ask(
             "strongest_mode",
@@ -1193,7 +1199,11 @@ def _readonly_below_under(
     mount_prefix: str,
     mount_mode: MountMode,
 ) -> str | None:
-    if sess is None:
+    if (
+        sess is None
+        or sess.visibility is None
+        or sess.visibility.shown is None
+    ):
         return None
     prefix = norm(mount_prefix)
     cap = (

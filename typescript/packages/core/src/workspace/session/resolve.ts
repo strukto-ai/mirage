@@ -21,14 +21,14 @@ import {
   type ProfileMount,
   type SessionProfile,
 } from '../../policy/profile.ts'
-import type {
+import {
   AdmissionRules,
-  Grammar,
-  HideReason,
-  ProfileScript,
-  ProfileScripts,
-  ScopedTree,
-  ScriptMethod,
+  type Grammar,
+  type HideReason,
+  type ProfileScript,
+  type ProfileScripts,
+  type ScopedTree,
+  type ScriptMethod,
 } from '../../policy/types.ts'
 import {
   layerProcesses,
@@ -291,8 +291,7 @@ export function commandRules(
     }
   }
   if (trees.length === 0) return null
-  const unread = unreadNames(trees, grammars)
-  return unread.size > 0 ? { trees, unread } : { trees }
+  return new AdmissionRules(trees, unreadNames(trees, grammars))
 }
 
 /**
