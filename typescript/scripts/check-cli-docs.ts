@@ -38,7 +38,11 @@ const specs = Object.values(Node).filter(
 )
 assert.ok(specs.length > 0, 'No bundled CLI specs were loaded')
 const pages = readdirSync(DOCS)
-  .filter((name) => name.endsWith('.mdx') && !['index.mdx', 'new.mdx', 'new-reference.mdx', 'mcp.mdx'].includes(name))
+  .filter(
+    (name) =>
+      name.endsWith('.mdx') &&
+      !['index.mdx', 'new.mdx', 'new-reference.mdx', 'mcp.mdx'].includes(name),
+  )
   .map((name) => name.slice(0, -4))
 assert.deepEqual(
   pages.sort(compareCodePoints),
