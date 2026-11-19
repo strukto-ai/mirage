@@ -390,6 +390,61 @@ async def test_a_function_shadows_the_machine_for_type_but_not_for_which():
     assert await out(ws, "which perl") == "/usr/bin/perl\n"
     assert await out(ws, "type -P perl") == "/usr/bin/perl\n"
     assert (await out(ws, "type -at perl")) == "function\nfile\n"
+    assert await out(ws, "type -f perl") == "perl is /usr/bin/perl\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_with_a_leading_dash_reaches_the_machine_after_dashes():
+    ws, dev = await lookup_ws({"-tool": ["/usr/local/bin/-tool"]})
+    assert await out(ws, "which -- -tool") == "/usr/bin/-tool\n"
+    assert await out(ws, "type -t -- -tool") == "file\n"
+    assert looked_up(dev)[0] == "which -- -tool"
+    assert "type -t -- -tool" in looked_up(dev)[1]
+    await ws.close()
+
+
+class Exported(ScriptedMachine):
+    """A machine that keeps the environment each lookup ran in."""
+
+    def __init__(self, name: str, answer) -> None:
+        super().__init__(name, answer)
+        self.envs: list[dict[str, str]] = []
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if argv[-1].startswith("which "):
+            self.envs.append({**env, "cwd": cwd})
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_runs_in_the_environment_a_program_run_gets():
+    dev = Exported("dev", asking(FakeFiles(), {"tool": ["/opt/tools/tool"]}))
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"dev": dev}
+    )
+    await ws.shell("export PATH=/opt/tools:$PATH TOOLS=on")
+    assert await out(ws, "which tool") == "/usr/bin/tool\n"
+    seen = dev.envs[0]
+    assert seen["PATH"].startswith("/opt/tools:")
+    assert (seen["TOOLS"], seen["cwd"]) == ("on", "/")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_answer_that_prints_nothing_still_finds_the_name():
+    def answer(line: str, data: bytes | None) -> RunAnswer:
+        if _bash_line(line) == "type -p kill":
+            return ok(b"")
+        return FakeFiles().answer(line, data)
+
+    dev = ScriptedMachine("dev", answer)
+    dev.config = replace(dev.config, captures=("kill", "@external"))
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"dev": dev}
+    )
+    io = await ws.shell("type -p kill")
+    assert (await io.stdout_str(), io.exit_code) == ("", 0)
     await ws.close()
 
 
@@ -414,6 +469,8 @@ async def test_a_path_shown_as_the_machine_s_own_is_kept_others_run_by_name():
     assert await out(ws, "which tool") == "/tmp/bin/tool\n"
     assert await out(ws, "which ldconfig") == "/usr/bin/ldconfig\n"
     assert await out(ws, "type ldconfig") == "ldconfig is /usr/bin/ldconfig\n"
+    assert await out(ws, "$(which ldconfig) -p") == "ran\n"
+    assert files.ran[-1] == "ldconfig -p"
     await ws.close()
 
 
@@ -471,6 +528,11 @@ async def test_xargs_counts_a_program_that_ran_and_exited_127_as_a_failure():
     )
     io = await ws.shell("echo x | xargs tool")
     assert io.exit_code == 123
+    nested = await ws.shell("echo x | xargs xargs nosuch")
+    assert (await nested.stderr_str(), nested.exit_code) == (
+        "xargs: nosuch: No such file or directory\n",
+        123,
+    )
     await ws.close()
 
 

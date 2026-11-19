@@ -65,7 +65,8 @@ async def asked_machines(
         option (str): the option whose ``PROGRAM_LOOKUPS`` row it is,
             "" for none.
         past_functions (bool): it finds the program a function or alias
-            of the same name shadows (``which``, ``type -P``, ``-a``).
+            of the same name shadows (``which``, ``type -P``, ``-a``,
+            ``-f``).
     """
     session = call.context.session
     names = [
@@ -148,11 +149,13 @@ def handle_type(
             continue
         kinds = locations(name, session, registry, all_mode, hidden)
         machine: tuple[str, ...] = ()
+        answered = False
         if answer is not None:
             kinds = [kind for kind in kinds if kind is not NameKind.FILE]
-            if (all_mode or not kinds) and answer.found:
+            answered = (all_mode or not kinds) and answer.found
+            if answered:
                 machine = answer.lines
-        if not kinds and not machine:
+        if not kinds and not answered:
             all_found = False
             if mode is None:
                 pieces.append(
@@ -251,7 +254,7 @@ async def type_builtin(call: BuiltinCall) -> Result:
         every = "a" in scan.letters
         option = f"-{mode}" if mode else ("-a" if every else "")
         answers = await asked_machines(
-            call, scan, option, mode == "P" or every
+            call, scan, option, mode == "P" or every or "f" in scan.letters
         )
     return handle_type(args, call.context.session, call.registry, answers)
 

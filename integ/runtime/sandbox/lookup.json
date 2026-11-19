@@ -146,6 +146,28 @@
       ]
     },
     {
+      "id": "a_looked_up_path_runs_where_mirage_shows_no_machine_file",
+      "note": "Without the machine's disk in Mirage, a lookup prints /usr/bin/NAME for the program it finds, and that path runs NAME on the machine that answered, so $(which ldconfig) runs the machine's /usr/sbin/ldconfig. A /usr/bin path no machine runs a program for is reported as bash reports a missing file.",
+      "runtimes": [
+        "docker"
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "which ldconfig; $(which ldconfig) -p >/dev/null; echo rc=$?; /usr/bin/nosuch; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/ldconfig\nrc=0\nrc=127\n",
+            "stderr": "bash: line 1: /usr/bin/nosuch: No such file or directory\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_machine_that_takes_a_name_answers_its_lookup",
       "note": "Of two machines, the one that takes a name by name answers its lookup, not the one taking @external: sshfs is on the first machine only, and the second takes it, so it is not found. A machine that takes which itself runs every which, Mirage's own programs included.",
       "runtimes": [

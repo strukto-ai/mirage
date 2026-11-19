@@ -1188,27 +1188,35 @@ async def _run_parallel(
     return [problem for problems in results for problem in problems]
 
 
-async def _bash_answer(command: str) -> dict[str, Any]:
-    """What plain bash on the docker machine answers ``command``: a
-    ``same_as_bash`` step expects exactly this, so it fails on any
-    difference between Mirage and the machine's own bash.
+async def _bash_answer(command: str, stdin: str | None) -> dict[str, Any]:
+    """What plain bash on the docker machine answers ``command``, reading
+    the step's stdin: a ``same_as_bash`` step expects exactly this, so it
+    fails on any difference between Mirage and the machine's own bash.
 
     Args:
         command (str): the step's line.
+        stdin (str | None): what the line reads; None for an empty input.
     """
     container = os.environ["MIRAGE_INTEG_DOCKER_CONTAINER"]
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "exec",
+        *(["-i"] if stdin is not None else []),
         container,
         "bash",
         "-c",
         command,
-        stdin=asyncio.subprocess.DEVNULL,
+        stdin=(
+            asyncio.subprocess.DEVNULL
+            if stdin is None
+            else asyncio.subprocess.PIPE
+        ),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    out, err = await proc.communicate()
+    out, err = await proc.communicate(
+        None if stdin is None else stdin.encode()
+    )
     return {
         "exit": proc.returncode,
         "stdout": out.decode(),
@@ -1225,7 +1233,10 @@ async def _run_step(
     handles: RetainedHandles | None = None,
 ) -> list[str]:
     if step.get("same_as_bash"):
-        step = {**step, "expect": await _bash_answer(step["command"])}
+        step = {
+            **step,
+            "expect": await _bash_answer(step["command"], step.get("stdin")),
+        }
     before = _backend_reads(ws)
     native_before = len(_native_calls(ws))
     problems = await _perform_step(

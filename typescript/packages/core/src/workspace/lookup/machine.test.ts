@@ -304,6 +304,23 @@ function lookupWs(
   return [ws, dev]
 }
 
+/** A machine that keeps the environment each lookup ran in. */
+class Exported extends ScriptedMachine {
+  readonly envs: Record<string, string>[] = []
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    if ((argv[argv.length - 1] ?? '').startsWith('which ')) this.envs.push({ ...env, cwd })
+    return super.execArgv(argv, stdin, env, cwd, output, errors)
+  }
+}
+
 /** A machine that reports a program it has no file for in the words the run
  * hands its wrapper (`PROGRAM_CHECK`), with status 127. */
 class Reporting extends ScriptedMachine {
@@ -373,6 +390,39 @@ describe('program lookups', () => {
     expect(await out(ws, 'which perl')).toBe('/usr/bin/perl\n')
     expect(await out(ws, 'type -P perl')).toBe('/usr/bin/perl\n')
     expect(await out(ws, 'type -at perl')).toBe('function\nfile\n')
+    expect(await out(ws, 'type -f perl')).toBe('perl is /usr/bin/perl\n')
+    await ws.close()
+  })
+
+  it('hands the machine a name with a leading dash after --', async () => {
+    const [ws, dev] = lookupWs({ '-tool': ['/usr/local/bin/-tool'] })
+    expect(await out(ws, 'which -- -tool')).toBe('/usr/bin/-tool\n')
+    expect(await out(ws, 'type -t -- -tool')).toBe('file\n')
+    expect(lookedUp(dev)[0]).toBe('which -- -tool')
+    expect(lookedUp(dev)[1]).toContain('type -t -- -tool')
+    await ws.close()
+  })
+
+  it('runs a lookup in the environment a program run gets', async () => {
+    const dev = new Exported('dev', asking(new FakeFiles(), { tool: ['/opt/tools/tool'] }))
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, ...on(dev) })
+    await ws.shell('export PATH=/opt/tools:$PATH TOOLS=on')
+    expect(await out(ws, 'which tool')).toBe('/usr/bin/tool\n')
+    const seen = dev.envs[0] ?? {}
+    expect(seen.PATH?.startsWith('/opt/tools:')).toBe(true)
+    expect([seen.TOOLS, seen.cwd]).toEqual(['on', '/'])
+    await ws.close()
+  })
+
+  it('finds a name whose machine answer prints nothing', async () => {
+    const files = new FakeFiles()
+    const dev = new ScriptedMachine('dev', (line, data) =>
+      bashLine(line) === 'type -p kill' ? ok('') : files.answer(line, data),
+    )
+    captured(dev, ['kill', '@external'])
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, ...on(dev) })
+    const io = await ws.shell('type -p kill')
+    expect([DEC.decode(io.stdout), io.exitCode]).toEqual(['', 0])
     await ws.close()
   })
 
@@ -394,6 +444,8 @@ describe('program lookups', () => {
     expect(await out(ws, 'which tool')).toBe('/tmp/bin/tool\n')
     expect(await out(ws, 'which ldconfig')).toBe('/usr/bin/ldconfig\n')
     expect(await out(ws, 'type ldconfig')).toBe('ldconfig is /usr/bin/ldconfig\n')
+    expect(await out(ws, '$(which ldconfig) -p')).toBe('ran\n')
+    expect(files.ran[files.ran.length - 1]).toBe('ldconfig -p')
     await ws.close()
   })
 
@@ -422,6 +474,11 @@ describe('program lookups', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, ...on(dev) })
     const io = await ws.shell('echo x | xargs tool')
     expect(io.exitCode).toBe(123)
+    const nested = await ws.shell('echo x | xargs xargs nosuch')
+    expect([DEC.decode(nested.stderr), nested.exitCode]).toEqual([
+      'xargs: nosuch: No such file or directory\n',
+      123,
+    ])
     await ws.close()
   })
 

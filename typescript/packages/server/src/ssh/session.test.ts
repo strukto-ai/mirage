@@ -209,7 +209,6 @@ describe('loginEnv', () => {
       local: { address: '10.0.0.1', port: 2222 },
     }
     expect(loginEnv(request)).toEqual({
-      HOME: '/',
       USER: 'demo',
       LOGNAME: 'demo',
       SSH_CLIENT: '10.0.0.5 40000 2222',
@@ -267,9 +266,9 @@ describe('command channels', () => {
 
   it('carry the login environment', async () => {
     const client = await connect(await startHarness())
-    expect((await exec(client, 'echo "$HOME $USER $LOGNAME"; cd; pwd')).stdout).toBe(
-      '/ demo demo\n/\n',
-    )
+    expect(
+      (await exec(client, 'mkdir -p /root; echo "$HOME $USER $LOGNAME"; cd; pwd')).stdout,
+    ).toBe('/root demo demo\n/root\n')
   })
 
   it('keep a value the profile set over the login default', async () => {

@@ -123,6 +123,26 @@ describe('BinViewVFS', () => {
     expect(DEC.decode((await view.read(python)) as Uint8Array)).toContain('python3')
     expect(view.leaves('perl') && !view.leaves('ls')).toBe(true)
   })
+
+  it('opens a folder beneath the view with all under it', async () => {
+    const root = await rootHolding({})
+    await root.mkdir(PathSpec.fromStrPath('/usr/bin/helpers'))
+    await root.write(
+      PathSpec.fromStrPath('/usr/bin/helpers/tool'),
+      new TextEncoder().encode('#!tool\n'),
+    )
+    const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        'ls /usr/bin | grep -x helpers; ls /usr/bin/helpers; ' +
+          'cat /usr/bin/helpers/tool; test -d /usr/bin/helpers && echo dir',
+      )
+      expect(DEC.decode(io.stdout)).toBe('helpers\ntool\n#!tool\ndir\n')
+      expect((await ws.shell('ls /usr/bin/grep/x')).exitCode).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 async function rootHolding(files: Record<string, string>): Promise<RAMVFS> {

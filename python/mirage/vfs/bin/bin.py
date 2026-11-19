@@ -36,10 +36,11 @@ class BinViewVFS(BaseVFS):
     Lists one executable file per program Mirage runs, rendered from the
     workspace's command lookup on every call; holds no storage of its
     own. A name it leaves to what lies under it (one a machine runs, or
-    none of Mirage's) is the file the mount beneath shows at that path:
-    with a machine's disk at ``/``, ``/usr/bin/python3`` is the
-    machine's own file and ``/usr/bin/grep`` Mirage's. Where nothing
-    lies beneath, a program a machine runs keeps its file here.
+    none of Mirage's) is the file or folder the mount beneath shows at
+    that path, with all under it: with a machine's disk at ``/``,
+    ``/usr/bin/python3`` is the machine's own file and ``/usr/bin/grep``
+    Mirage's. Where nothing lies beneath, a program a machine runs keeps
+    its file here.
 
     Args:
         programs (Callable[[], list[str]]): every program name the
@@ -85,13 +86,25 @@ class BinViewVFS(BaseVFS):
 
     def _below(self, path: PathSpec) -> tuple[BaseVFS, PathSpec] | None:
         key = path.mount_path.strip("/")
-        if self._beneath is None or (key and not self.leaves(key)):
+        if self._beneath is None or (
+            key and not self.leaves(key.split("/")[0])
+        ):
             return None
         return self._beneath(path.virtual)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
-        mine = await _readdir(self.accessor, path)
         below = self._below(path)
+        if below is not None and path.mount_path.strip("/"):
+            vfs, spec = below
+            try:
+                found = await vfs.readdir(spec)
+            except FileNotFoundError:
+                logger.debug("%s: none beneath", path.virtual)
+            else:
+                return (
+                    found.entries if isinstance(found, DirListing) else found
+                )
+        mine = await _readdir(self.accessor, path)
         if below is None:
             return mine
         vfs, spec = below

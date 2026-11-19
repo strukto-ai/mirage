@@ -43,7 +43,7 @@ import { NameKind } from './types.ts'
  * @param scan its options and operands, a valid scan.
  * @param option the option whose `PROGRAM_LOOKUPS` row it is, "" for none.
  * @param pastFunctions it finds the program a function or alias of the same
- *   name shadows (`which`, `type -P`, `-a`).
+ *   name shadows (`which`, `type -P`, `-a`, `-f`).
  */
 export async function askedMachines(
   call: BuiltinCall,
@@ -129,11 +129,13 @@ export function handleType(
     }
     let kinds = locations(name, session, registry, allMode, hidden)
     let machine: readonly string[] = []
+    let answered = false
     if (answer !== undefined) {
       kinds = kinds.filter((kind) => kind !== NameKind.FILE)
-      if ((allMode || kinds.length === 0) && answer.found) machine = answer.lines
+      answered = (allMode || kinds.length === 0) && answer.found
+      if (answered) machine = answer.lines
     }
-    if (kinds.length === 0 && machine.length === 0) {
+    if (kinds.length === 0 && !answered) {
       allFound = false
       if (mode === null) pieces.push([true, `${shellVoice()}type: ${name}: not found\n`])
       continue
@@ -223,7 +225,12 @@ export async function typeBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     const mode = lastOf(scan.letters, 'tpP')
     const every = scan.letters.includes('a')
     const option = mode !== null ? `-${mode}` : every ? '-a' : ''
-    answers = await askedMachines(call, scan, option, mode === 'P' || every)
+    answers = await askedMachines(
+      call,
+      scan,
+      option,
+      mode === 'P' || every || scan.letters.includes('f'),
+    )
   }
   return handleType(args, call.context.session, call.registry, call.parser, answers)
 }

@@ -924,21 +924,18 @@ export function xargsMissing(name: string): string {
 
 /**
  * Whether a command came back as one xargs could not run at all: a machine
- * reports a program it has no file for in xargs's own words and 127, which
- * stops xargs with GNU's 127 as an exec failure does, where a program that
- * ran and exited 127 counts as a failed command. Mirrors Python's `_not_run`.
+ * reports a program it has no file for in the words xargs handed the run
+ * for that command (`xargs: NAME: No such file or directory`) and 127,
+ * which stops xargs with GNU's 127 as an exec failure does. A program that
+ * ran and exited 127 counts as a failed command, a nested xargs reporting
+ * its own command included. Mirrors Python's `_not_run`.
  *
+ * @param name the command word xargs ran.
  * @param status the command's status.
  * @param said what it wrote on stderr.
  */
-function notRun(status: number, said: Uint8Array): boolean {
-  if (status !== NOT_FOUND_STATUS) return false
-  const text = decodeText(said)
-  return (
-    text.startsWith('xargs: ') &&
-    text.endsWith(': No such file or directory\n') &&
-    text.split('\n').length === 2
-  )
+function notRun(name: string, status: number, said: Uint8Array): boolean {
+  return status === NOT_FOUND_STATUS && decodeText(said) === xargsMissing(name)
 }
 
 /**
@@ -1117,7 +1114,7 @@ async function* runLines(
       try {
         await run(words, io, pipe, signal)
         const said = await io.materializeStderr()
-        if (!stopped() && notRun(io.exitCode, said)) {
+        if (!stopped() && notRun(name, io.exitCode, said)) {
           stop = NOT_FOUND_STATUS
           stopping.abort()
         }
@@ -1323,7 +1320,9 @@ export async function handleXargs(
     async function record(io: IOResult): Promise<boolean> {
       const said = await materialize(io.stderr)
       if (io.exitCode === 255 && stopped === null) stopped = 124
-      if (stopped === null && notRun(io.exitCode, said)) stopped = NOT_FOUND_STATUS
+      if (stopped === null && notRun(command[0] ?? '', io.exitCode, said)) {
+        stopped = NOT_FOUND_STATUS
+      }
       pending.push(said)
       return io.exitCode !== 0
     }

@@ -32,7 +32,7 @@ from mirage.shell.join import shell_join
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import unmark_globs
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import CycleError, norm, parent
+from mirage.utils.path import CycleError, norm, parent, resolve_path
 from mirage.utils.quote import shell_quote
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.machine.machine import MachineVFS
@@ -47,7 +47,7 @@ from mirage.workspace.lookup.types import (
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState, env_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -404,17 +404,62 @@ def lookup_machine(
     return runtime if isinstance(runtime, RemoteRuntime) else None
 
 
+def bin_program(
+    path: str,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> str | None:
+    """The program a ``/usr/bin/NAME`` path runs by name, for a path no
+    file of Mirage's or of a machine Mirage shows is at: NAME, where a
+    machine runs it on this line (``lookup_machine``), since a lookup
+    prints that path for a program whose own file Mirage does not show;
+    None for any other path.
+
+    Args:
+        path (str): the head word, as typed.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+        routing (RouteDecision | None): the line's placement.
+    """
+    try:
+        target = links.follow(resolve_path(path, session.cwd))
+    except CycleError:
+        logger.debug("%s: a link loop names no program", path, exc_info=True)
+        return None
+    entry = registry.try_mount_for(target)
+    if entry is None or not isinstance(entry.vfs, BinViewVFS):
+        return None
+    name = mount_key(target, entry.prefix).strip("/")
+    if not name or "/" in name:
+        return None
+    if lookup_machine(name, session, registry, routing, True) is None:
+        return None
+    return name
+
+
 def _lookup_line(command: str, letters: str, name: str) -> str:
     """The line a machine runs for a lookup: the command the agent typed,
-    on this one name. ``type`` and ``command`` are bash's builtins, so
-    they run in the machine's bash, its ``sh`` where it has none.
+    on this one name, after ``--`` where it starts with a dash, so the
+    machine reads it as the name it is. ``type`` and ``command`` are
+    bash's builtins, so they run in the machine's bash, its ``sh`` where
+    it has none.
 
     Args:
         command (str): ``which``, ``type`` or ``command``.
         letters (str): the options the agent gave it.
         name (str): the name looked up.
     """
-    line = shell_join([command, *([f"-{letters}"] if letters else []), name])
+    line = shell_join(
+        [
+            command,
+            *([f"-{letters}"] if letters else []),
+            *(["--"] if name.startswith("-") else []),
+            name,
+        ]
+    )
     if command == "which":
         return line
     quoted = shell_quote(line)
@@ -451,9 +496,10 @@ async def _answer(
     registry: MountRegistry,
     links: NamespaceReader,
 ) -> MachineAnswer:
-    """What ``runtime``'s machine answers the lookup of one name, each
-    path it prints kept only where Mirage shows that same path as the
-    machine's own file, the name's ``/usr/bin`` file otherwise.
+    """What ``runtime``'s machine answers the lookup of one name, in the
+    environment a program run there gets, each path it prints kept only
+    where Mirage shows that same path as the machine's own file, the
+    name's ``/usr/bin`` file otherwise.
 
     Args:
         command (str): ``which``, ``type`` or ``command``.
@@ -465,7 +511,9 @@ async def _answer(
         registry (MountRegistry): the workspace's mounts and machines.
         links (NamespaceReader): the session's link table.
     """
-    done = await runtime.handle().look_up(_lookup_line(command, letters, name))
+    done = await runtime.handle().look_up(
+        _lookup_line(command, letters, name), env_snapshot(session)
+    )
     lines: list[str] = []
     for line in decode_text(done.stdout).splitlines():
         path = _path_in(line, name, kind)

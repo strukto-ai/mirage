@@ -58,6 +58,15 @@
         {
           "command": "echo \"$PATH\"; echo \"$HOME\"; cd; pwd",
           "same_as_bash": true
+        },
+        {
+          "command": "xargs which; echo rc=$?",
+          "stdin": "perl\nnosuch\n",
+          "same_as_bash": true
+        },
+        {
+          "command": "/usr/bin/nosuch; echo rc=$?; perl() { :; }; type -f perl; type -t -- -nosuch; echo rc=$?; echo x | xargs xargs nosuch; echo rc=$?",
+          "same_as_bash": true
         }
       ]
     }

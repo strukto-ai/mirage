@@ -37,6 +37,7 @@ from mirage.context import (
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
+    set_program_invocation,
     set_redirect_paths,
 )
 from mirage.context.session_context import (
@@ -159,6 +160,7 @@ from mirage.workspace.lookup.lookup import (
     runs_wrapper,
 )
 from mirage.workspace.lookup.machine import (
+    bin_program,
     link_machine,
     operand_machine,
     program_machine,
@@ -1685,9 +1687,29 @@ async def _route_argv(
             unread = _unreadable(name, session)
             if unread is not None:
                 return _refused(" ".join([name, *argv.args]), unread)
-            return await run_external(
-                argv, stdin, session, registry, placed, sink
+            program = bin_program(
+                name,
+                session,
+                registry,
+                namespace.session_links(session),
+                placed,
             )
+            if program is None:
+                return await run_external(
+                    argv, stdin, session, registry, placed, sink
+                )
+            marked = set_program_invocation(session, f"{shell_voice()}{name}")
+            try:
+                return await run_external(
+                    dataclasses.replace(argv, name=program, prefix=()),
+                    stdin,
+                    session,
+                    registry,
+                    placed,
+                    sink,
+                )
+            finally:
+                reset_caller(marked)
 
         external = (
             placed is not None

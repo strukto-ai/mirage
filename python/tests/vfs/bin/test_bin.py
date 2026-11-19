@@ -125,3 +125,21 @@ async def test_a_view_leaving_names_keeps_its_own_file_where_none_lies_beneath()
     )
     assert b"python3" in await view.read(python)
     assert view.leaves("perl") and not view.leaves("ls")
+
+
+@pytest.mark.asyncio
+async def test_a_folder_beneath_the_view_opens_with_all_under_it():
+    root = await root_holding({})
+    await root.mkdir(PathSpec.from_str_path("/usr/bin/helpers"))
+    await root.write(
+        PathSpec.from_str_path("/usr/bin/helpers/tool"), b"#!tool\n"
+    )
+    ws = Workspace({"/": root}, mode=MountMode.WRITE)
+    io = await ws.shell(
+        "ls /usr/bin | grep -x helpers; ls /usr/bin/helpers; "
+        "cat /usr/bin/helpers/tool; test -d /usr/bin/helpers && echo dir"
+    )
+    assert await io.stdout_str() == "helpers\ntool\n#!tool\ndir\n"
+    missing = await ws.shell("ls /usr/bin/grep/x")
+    assert missing.exit_code == 2
+    await ws.close()

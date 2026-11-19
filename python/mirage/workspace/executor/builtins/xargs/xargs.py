@@ -919,21 +919,21 @@ def xargs_missing(name: str) -> str:
     return f"xargs: {name}: No such file or directory\n"
 
 
-def _not_run(status: int, said: bytes) -> bool:
+def _not_run(name: str, status: int, said: bytes) -> bool:
     """Whether a command came back as one xargs could not run at all: a
-    machine reports a program it has no file for in xargs's own words
-    and 127, which stops xargs with GNU's 127 as an exec failure does,
-    where a program that ran and exited 127 counts as a failed command.
+    machine reports a program it has no file for in the words xargs
+    handed the run for that command (``xargs: NAME: No such file or
+    directory``) and 127, which stops xargs with GNU's 127 as an exec
+    failure does. A program that ran and exited 127 counts as a failed
+    command, a nested xargs reporting its own command included.
 
     Args:
+        name (str): the command word xargs ran.
         status (int): the command's status.
         said (bytes): what it wrote on stderr.
     """
-    return (
-        status == NOT_FOUND_STATUS
-        and said.startswith(b"xargs: ")
-        and said.endswith(b": No such file or directory\n")
-        and said.count(b"\n") == 1
+    return status == NOT_FOUND_STATUS and said == encode_text(
+        xargs_missing(name)
     )
 
 
@@ -1112,7 +1112,9 @@ async def _run_lines(
             try:
                 await run(words, io, pipe)
                 io.stderr = await materialize(io.stderr)
-                if stop is None and _not_run(io.exit_code, io.stderr):
+                if stop is None and _not_run(
+                    words[0], io.exit_code, io.stderr
+                ):
                     stop = NOT_FOUND_STATUS
                     stopping.set()
                 if io.exit_code == 255 and stop is None:
@@ -1325,7 +1327,9 @@ async def handle_xargs(
             said = await materialize(io.stderr)
             if io.exit_code == 255 and stop is None:
                 stop = 124
-            if stop is None and _not_run(io.exit_code, said):
+            if stop is None and _not_run(
+                decode_text(base[0]), io.exit_code, said
+            ):
                 stop = NOT_FOUND_STATUS
             pending.append(said)
 

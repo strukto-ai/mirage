@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from importlib import import_module
 from time import monotonic
@@ -993,17 +993,20 @@ class MachineHandle:
             known = self._programs[name] = done.exit_code == 0
         return known
 
-    async def look_up(self, line: str) -> RunAnswer:
+    async def look_up(self, line: str, env: Mapping[str, str]) -> RunAnswer:
         """Run a lookup the agent typed (``which perl``) as the machine
-        answers it: in the machine's own environment at ``/``, connecting
-        first. Asked anew each time, so a program installed since the
-        last one is found.
+        answers it: in the environment a program run there gets (``env``
+        over the machine's own), at ``/``, connecting first. Asked anew
+        each time, so a program installed since the last one is found.
 
         Args:
             line (str): the lookup's shell line.
+            env (Mapping[str, str]): the session's exported variables.
         """
         await self.ensure_connected()
-        return await self._setup(line)
+        return await self.exec_line(
+            line, None, {**self.config.env, **env}, "/"
+        )
 
     def _disconnected(self) -> None:
         """Let the next run connect again, and read the machine's mounts

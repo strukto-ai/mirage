@@ -29,7 +29,7 @@ import { shellJoin } from '../../shell/join.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { unmarkGlobs } from '../../utils/glob_walk.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { CycleError, norm, parent } from '../../utils/path.ts'
+import { CycleError, norm, parent, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { MachineVFS } from '../../vfs/machine/machine.ts'
@@ -38,6 +38,7 @@ import type { Argv } from '../expand/argv.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
+import { envSnapshot } from '../session/state.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { KEYWORDS } from './constants.ts'
 import { lookupAll } from './lookup.ts'
@@ -357,16 +358,58 @@ export function lookupMachine(
 }
 
 /**
+ * The program a `/usr/bin/NAME` path runs by name, for a path no file of
+ * Mirage's or of a machine Mirage shows is at: NAME, where a machine runs it
+ * on this line (`lookupMachine`), since a lookup prints that path for a
+ * program whose own file Mirage does not show; null for any other path.
+ * Mirrors Python's `bin_program`.
+ *
+ * @param path the head word, as typed.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ * @param routing the line's placement.
+ */
+export function binProgram(
+  path: string,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+  routing: RouteDecision<Runtime> | undefined,
+): string | null {
+  let target: string
+  try {
+    target = links.follow(resolvePath(path, session.cwd))
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug(`${path}: a link loop names no program`)
+    return null
+  }
+  const entry = registry.tryMountFor(target)
+  if (entry === null || !(entry.vfs instanceof BinViewVFS)) return null
+  const name = mountKey(target, entry.prefix).replace(/^\/+|\/+$/g, '')
+  if (name === '' || name.includes('/')) return null
+  if (lookupMachine(name, session, registry, routing, true) === null) return null
+  return name
+}
+
+/**
  * The line a machine runs for a lookup: the command the agent typed, on this
- * one name. `type` and `command` are bash's builtins, so they run in the
- * machine's bash, its `sh` where it has none.
+ * one name, after `--` where it starts with a dash, so the machine reads it
+ * as the name it is. `type` and `command` are bash's builtins, so they run
+ * in the machine's bash, its `sh` where it has none.
  *
  * @param command `which`, `type` or `command`.
  * @param letters the options the agent gave it.
  * @param name the name looked up.
  */
 function lookupLine(command: string, letters: string, name: string): string {
-  const line = shellJoin([command, ...(letters !== '' ? [`-${letters}`] : []), name])
+  const line = shellJoin([
+    command,
+    ...(letters !== '' ? [`-${letters}`] : []),
+    ...(name.startsWith('-') ? ['--'] : []),
+    name,
+  ])
   if (command === 'which') return line
   const quoted = shellQuote(line)
   return `if [ -x /bin/bash ]; then exec /bin/bash -c ${quoted}; fi; exec /bin/sh -c ${quoted}`
@@ -388,9 +431,10 @@ function pathIn(line: string, name: string, kind: ProgramLookup): string | null 
 }
 
 /**
- * What `runtime`'s machine answers the lookup of one name, each path it
- * prints kept only where Mirage shows that same path as the machine's own
- * file, the name's `/usr/bin` file otherwise.
+ * What `runtime`'s machine answers the lookup of one name, in the
+ * environment a program run there gets, each path it prints kept only where
+ * Mirage shows that same path as the machine's own file, the name's
+ * `/usr/bin` file otherwise.
  *
  * @param command `which`, `type` or `command`.
  * @param letters the options the agent gave it.
@@ -411,7 +455,9 @@ async function answer(
   registry: MountRegistry,
   links: NamespaceReader,
 ): Promise<MachineAnswer> {
-  const done = await runtime.handle().lookUp(lookupLine(command, letters, name))
+  const done = await runtime
+    .handle()
+    .lookUp(lookupLine(command, letters, name), envSnapshot(session))
   const lines: string[] = []
   for (const said of splitLines(decodeText(done.stdout))) {
     let line = said

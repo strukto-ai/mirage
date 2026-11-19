@@ -1179,28 +1179,37 @@ async function runParallel(
 }
 
 /**
- * What plain bash on the docker machine answers `command`: a `same_as_bash`
- * step expects exactly this, so it fails on any difference between Mirage and
- * the machine's own bash.
+ * What plain bash on the docker machine answers `command`, reading the step's
+ * stdin: a `same_as_bash` step expects exactly this, so it fails on any
+ * difference between Mirage and the machine's own bash. A stream that is not
+ * UTF-8 fails the case.
  */
-function bashAnswer(command: string): Promise<Expect> {
+function bashAnswer(command: string, stdin: string | undefined): Promise<Expect> {
   const container = process.env.MIRAGE_INTEG_DOCKER_CONTAINER ?? ''
+  const strict = new TextDecoder('utf-8', { fatal: true })
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', container, 'bash', '-c', command], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const child = spawn(
+      'docker',
+      ['exec', ...(stdin !== undefined ? ['-i'] : []), container, 'bash', '-c', command],
+      { stdio: [stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] },
+    )
     const out: Buffer[] = []
     const err: Buffer[] = []
-    child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
-    child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
+    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk))
+    child.stderr?.on('data', (chunk: Buffer) => err.push(chunk))
     child.on('error', reject)
     child.on('close', (code) => {
-      resolve({
-        exit: code ?? 1,
-        stdout: Buffer.concat(out).toString(),
-        stderr: Buffer.concat(err).toString(),
-      })
+      try {
+        resolve({
+          exit: code ?? 1,
+          stdout: strict.decode(Buffer.concat(out)),
+          stderr: strict.decode(Buffer.concat(err)),
+        })
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
     })
+    if (stdin !== undefined) child.stdin?.end(stdin)
   })
 }
 
@@ -1214,7 +1223,7 @@ async function runStep(
 ): Promise<string[]> {
   const step =
     given.same_as_bash === true && typeof given.command === 'string'
-      ? { ...given, expect: await bashAnswer(given.command) }
+      ? { ...given, expect: await bashAnswer(given.command, given.stdin) }
       : given
   const before = backendReads(ws)
   const nativeBefore = nativeCalls(ws).length

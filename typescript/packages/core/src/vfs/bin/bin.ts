@@ -31,10 +31,10 @@ import { type VFSStateBase } from '../types.ts'
  * file per program Mirage runs, rendered from the workspace's command
  * lookup on every call; holds no storage of its own. A name it leaves to
  * what lies under it (one a machine runs, or none of Mirage's) is the file
- * the mount beneath shows at that path: with a machine's disk at `/`,
- * `/usr/bin/python3` is the machine's own file and `/usr/bin/grep`
- * Mirage's. Where nothing lies beneath, a program a machine runs keeps its
- * file here.
+ * or folder the mount beneath shows at that path, with all under it: with a
+ * machine's disk at `/`, `/usr/bin/python3` is the machine's own file and
+ * `/usr/bin/grep` Mirage's. Where nothing lies beneath, a program a machine
+ * runs keeps its file here.
  */
 export class BinViewVFS extends BaseVFS {
   override readonly name = VFSName.BIN
@@ -78,13 +78,25 @@ export class BinViewVFS extends BaseVFS {
 
   private below(path: PathSpec): readonly [BaseVFS, PathSpec] | null {
     const key = stripSlash(path.mountPath)
-    if (this.beneath === null || (key !== '' && !this.leaves(key))) return null
+    if (this.beneath === null || (key !== '' && !this.leaves(key.split('/')[0] ?? ''))) {
+      return null
+    }
     return this.beneath(path.virtual)
   }
 
   override async readdir(path: PathSpec): Promise<FileStat[]> {
-    const mine = await binReaddir(this.accessor, path)
     const below = this.below(path)
+    if (below !== null && stripSlash(path.mountPath) !== '') {
+      const [vfs, spec] = below
+      try {
+        const found = await vfs.readdir(spec)
+        return found instanceof DirListing ? [...found.entries] : [...found]
+      } catch (err) {
+        if (!isEnoent(err)) throw err
+        console.debug(`${path.virtual}: none beneath`)
+      }
+    }
+    const mine = await binReaddir(this.accessor, path)
     if (below === null) return mine
     const [vfs, spec] = below
     let listed: readonly FileStat[] | DirListing
