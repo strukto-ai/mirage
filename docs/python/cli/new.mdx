@@ -247,6 +247,9 @@ coroutines: await them, or they never happen.
 | `cwd()` | Returns the session's working directory |
 | `session_id` | The session's ID |
 
+A `login` leaf for the pager CLI. Add `CommandSpec(name="login")` to its
+`subcommands` and `"login": CLIHandler(fn=login)` to its `handlers`:
+
 ```python
 async def login(accessor: NOOPAccessor, paths: list[PathSpec],
                 texts: list[str], ctx: Context) -> tuple[None, IOResult]:

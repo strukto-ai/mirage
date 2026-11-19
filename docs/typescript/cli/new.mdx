@@ -272,7 +272,8 @@ return promises: await them, or a failure goes unseen.
 | `cwd()` | Returns the session's working directory |
 | `sessionId` | The session's ID |
 
-A `login` leaf for the pager CLI, declared in its spec and handlers like `ack`:
+A `login` leaf for the pager CLI. Add `new CommandSpec({ name: 'login' })` to its
+`subcommands` and `login: new CLIHandler({ fn: login })` to its `handlers`:
 
 ```typescript
 import { UsageError } from '@struktoai/mirage-node'
