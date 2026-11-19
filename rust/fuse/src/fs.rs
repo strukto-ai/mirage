@@ -28,9 +28,10 @@ const WHOLE_FILE: u64 = 8 << 20;
 const FILLS: u32 = 3;
 const ROOT: u64 = 1;
 
-/// One answer about a path: its attributes and whether the host said to
+/// One answer about a path: its attributes, whether the host said to
 /// keep them, which it says only of a backend nothing but the workspace
-/// changes.
+/// changes, and whether a policy judges every call the session makes, so
+/// neither the client nor the kernel keeps the answer at all.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attrs {
     pub mode: u32,
@@ -41,15 +42,17 @@ pub struct Attrs {
     pub nlink: u32,
     pub rdev: u32,
     pub kept: bool,
+    pub watched: bool,
 }
 
 impl Attrs {
     /// The attributes in a reply's `a` (or a listing row), kept when the
     /// reply's `k` says so and the row's own `k`, which a folder another
-    /// mount serves carries, does not say otherwise.
-    pub fn parse(value: &Value, kept: bool) -> Option<Attrs> {
+    /// mount serves carries, does not say otherwise; watched when the
+    /// reply's `w` says a policy judges every call.
+    pub fn parse(value: &Value, kept: bool, watched: bool) -> Option<Attrs> {
         let f = |key: &str| value.get(key).and_then(Value::as_f64);
-        let kept = kept && value.get("k").and_then(Value::as_bool) != Some(false);
+        let kept = !watched && kept && value.get("k").and_then(Value::as_bool) != Some(false);
         Some(Attrs {
             mode: f("m")? as u32,
             size: f("s").unwrap_or(0.0) as u64,
@@ -59,6 +62,7 @@ impl Attrs {
             nlink: f("n").unwrap_or(1.0) as u32,
             rdev: f("r").unwrap_or(0.0) as u32,
             kept,
+            watched,
         })
     }
 
@@ -87,7 +91,7 @@ type Stream = (String, u64, Vec<(String, Attrs)>);
 
 impl Known {
     fn fresh(&self) -> bool {
-        self.attrs.kept || self.at.elapsed() < SHORT
+        self.attrs.kept || (!self.attrs.watched && self.at.elapsed() < SHORT)
     }
 }
 
@@ -95,12 +99,13 @@ struct Listing {
     rows: Vec<(String, Attrs)>,
     names: HashSet<String>,
     kept: bool,
+    watched: bool,
     at: Instant,
 }
 
 impl Listing {
     fn fresh(&self) -> bool {
-        self.kept || self.at.elapsed() < SHORT
+        self.kept || (!self.watched && self.at.elapsed() < SHORT)
     }
 }
 
@@ -109,6 +114,10 @@ struct Content {
     data: Arc<Vec<u8>>,
 }
 
+/// A file open on this machine: through a host handle, or on bytes the
+/// client holds. `cached` when the kernel may keep its pages, so a read
+/// may never reach the client; `revoked` once a policy came to judge every
+/// call, which such an open can no longer let it.
 #[derive(Clone)]
 struct Open {
     path: String,
@@ -117,6 +126,8 @@ struct Open {
     attrs: Option<Attrs>,
     writes: bool,
     detached: bool,
+    cached: bool,
+    revoked: bool,
 }
 
 /// What the kernel must forget, and the host's barriers, in the order they
@@ -135,35 +146,40 @@ struct State {
     next_ino: u64,
     known: HashMap<String, Known>,
     listings: HashMap<String, Listing>,
-    covered: HashSet<String>,
     content: HashMap<String, Content>,
     order: VecDeque<String>,
     bytes: usize,
-    fetched: HashSet<String>,
     opens: HashMap<u64, Open>,
     dirs: HashMap<u64, Stream>,
+    revoked_dirs: HashSet<u64>,
     next_fh: u64,
     epoch: u64,
 }
 
 /// A listing's rows from its JSON: `[[name, attrs], ...]`.
-fn entries(rows: Option<&Value>, kept: bool) -> Vec<(String, Attrs)> {
+fn entries(rows: Option<&Value>, kept: bool, watched: bool) -> Vec<(String, Attrs)> {
     rows.and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(|row| {
             Some((
                 row.get(0)?.as_str()?.to_string(),
-                Attrs::parse(row.get(1)?, kept)?,
+                Attrs::parse(row.get(1)?, kept, watched)?,
             ))
         })
         .collect()
 }
 
 impl State {
-    /// Keep `dir`'s listing and each entry's attributes; a folder a tree
-    /// answer listed counts as covered, so it is listed alone after.
-    fn listed(&mut self, dir: &str, rows: &[(String, Attrs)], kept: bool, at: Instant) {
+    /// Keep `dir`'s listing and each entry's attributes.
+    fn listed(
+        &mut self,
+        dir: &str,
+        rows: &[(String, Attrs)],
+        kept: bool,
+        watched: bool,
+        at: Instant,
+    ) {
         for (name, attrs) in rows {
             self.known.insert(
                 child(dir, name),
@@ -173,13 +189,13 @@ impl State {
                 },
             );
         }
-        self.covered.insert(dir.to_string());
         self.listings.insert(
             dir.to_string(),
             Listing {
                 names: rows.iter().map(|(n, _)| n.clone()).collect(),
                 rows: rows.to_vec(),
                 kept,
+                watched,
                 at,
             },
         );
@@ -305,7 +321,20 @@ fn ms(when: TimeOrNow) -> Value {
 }
 
 fn ttl(attrs: &Attrs) -> Duration {
-    if attrs.kept { LONG } else { SHORT }
+    if attrs.kept {
+        LONG
+    } else if attrs.watched {
+        Duration::ZERO
+    } else {
+        SHORT
+    }
+}
+
+/// Whether a reply says the client may keep it (`k`), and whether a policy
+/// judges every call, so nothing is kept at all (`w`).
+fn keep_of(frame: &Frame) -> (bool, bool) {
+    let flag = |key: &str| frame.head.get(key).and_then(Value::as_bool) == Some(true);
+    (flag("k"), flag("w"))
 }
 
 /// The client's side of fsproto: a workspace prefix served by the host,
@@ -344,11 +373,26 @@ impl Shared {
         let _ = locked(&self.notes).send(note);
     }
 
-    /// A frame the host started: `inval` forgets what it names, and a
-    /// `begin` barrier is answered once every forget before it is done.
+    /// A frame the host started: `inval` forgets what it names, `watch`
+    /// forgets everything once a policy judges every call and refuses the
+    /// reads of opens the kernel may cache and of folder streams listed
+    /// before it, and a `begin` barrier is answered once every forget
+    /// before it is done.
     pub fn push(&self, frame: Frame) {
         if let Some(hid) = frame.u64("hid") {
             self.note(Note::Ack(hid));
+            return;
+        }
+        if frame.str("push") == Some("watch") {
+            self.forget(&self.root.clone());
+            let mut st = locked(&self.state);
+            for open in st.opens.values_mut() {
+                if open.cached {
+                    open.revoked = true;
+                }
+            }
+            let streams: Vec<u64> = st.dirs.keys().copied().collect();
+            st.revoked_dirs.extend(streams);
             return;
         }
         if frame.str("push") == Some("inval") {
@@ -382,7 +426,6 @@ impl Shared {
             let hit = |p: &str| everything || reaches(changed, p);
             st.known.retain(|p, _| !hit(p));
             st.listings.retain(|p, _| !hit(p));
-            st.fetched.retain(|p| !hit(p));
             let gone: Vec<String> = st.content.keys().filter(|p| hit(p)).cloned().collect();
             for p in gone {
                 if let Some(c) = st.content.remove(&p) {
@@ -392,7 +435,6 @@ impl Shared {
             st.order.retain(|p| !hit(p));
             if let Some((dir, _)) = split(changed) {
                 st.listings.remove(&dir);
-                st.fetched.remove(&dir);
                 if let Some(&ino) = st.inodes.get(&dir) {
                     notes.push(Note::Inode(ino));
                 }
@@ -518,7 +560,6 @@ impl MirageFs {
         }
         if let Some((dir, _)) = split(path) {
             st.listings.remove(&dir);
-            st.fetched.remove(&dir);
             st.known.remove(&dir);
             for (folder, listed, _) in st.dirs.values_mut() {
                 if *folder == dir {
@@ -567,12 +608,8 @@ impl MirageFs {
     }
 
     fn reply_attrs(&self, frame: &Frame) -> Option<Attrs> {
-        let kept = frame
-            .head
-            .get("k")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        Attrs::parse(frame.head.get("a")?, kept)
+        let (kept, watched) = keep_of(frame);
+        Attrs::parse(frame.head.get("a")?, kept, watched)
     }
 
     /// `path`'s attributes, from what the client keeps or the host; an
@@ -620,47 +657,26 @@ impl MirageFs {
     }
 
     /// `dir`'s entries with their attributes, from a kept listing or the
-    /// host, and the epoch they hold at. The first listing of a folder
-    /// asks for its tree: a kept mount answers the folders under it too, so
-    /// a walk costs a few round trips, not one per folder. A folder a tree
-    /// answer covered is listed alone after. An answer a forget crossed is
-    /// used once and not kept.
+    /// host, and the epoch they hold at. Only the folder a program lists
+    /// is asked for, so the host's policies see each listing a program
+    /// makes and no other. An answer a forget crossed is used once and not
+    /// kept.
     fn list(&self, dir: &str) -> Result<(Vec<(String, Attrs)>, u64), Errno> {
-        let (deep, asked) = {
+        let asked = {
             let st = self.st();
             if let Some(listing) = st.listings.get(dir).filter(|l| l.fresh()) {
                 return Ok((listing.rows.clone(), st.epoch));
             }
-            (!st.covered.contains(dir), st.epoch)
+            st.epoch
         };
-        let frame = self.call("list", json!({ "path": dir, "deep": deep }), &[])?;
-        let kept = frame
-            .head
-            .get("k")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let rows = entries(frame.head.get("e"), kept);
+        let frame = self.call("list", json!({ "path": dir }), &[])?;
+        let (kept, watched) = keep_of(&frame);
+        let rows = entries(frame.head.get("e"), kept, watched);
         let mut st = self.st();
         if st.epoch != asked {
             return Ok((rows, asked));
         }
-        let now = Instant::now();
-        st.listed(dir, &rows, kept, now);
-        for folder in frame
-            .head
-            .get("d")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(path) = folder.get(0).and_then(Value::as_str) {
-                let below = entries(folder.get(1), kept);
-                st.listed(path, &below, kept, now);
-            }
-        }
-        if deep {
-            st.covered.insert(dir.to_string());
-        }
+        st.listed(dir, &rows, kept, watched, Instant::now());
         Ok((rows, asked))
     }
 
@@ -685,10 +701,12 @@ impl MirageFs {
     fn whole(&self, path: &str, attrs: Attrs) -> Result<(Arc<Vec<u8>>, Attrs), Errno> {
         let asked = self.st().epoch;
         let frame = self.call("readall", json!({ "path": path }), &[])?;
-        let now = self.reply_attrs(&frame).unwrap_or(attrs);
+        let mut now = self.reply_attrs(&frame).unwrap_or(attrs);
         let data = Arc::new(frame.body);
         let mut st = self.st();
-        if st.epoch == asked {
+        if st.epoch != asked {
+            now.kept = false;
+        } else {
             st.store(path, now.version(), data.clone());
             st.known.insert(
                 path.to_string(),
@@ -701,65 +719,13 @@ impl MirageFs {
         Ok((data, now))
     }
 
-    /// Bring the small files of `dir` into the cache in one request, once
-    /// until a change reaches the folder; an answer a forget crossed is
-    /// dropped, for a later open to ask again.
-    fn prefetch(&self, dir: &str) {
-        let asked = {
-            let mut st = self.st();
-            if !st.fetched.insert(dir.to_string()) {
-                return;
-            }
-            st.epoch
-        };
-        let Ok(frame) = self.call("fetchdir", json!({ "path": dir }), &[]) else {
-            return;
-        };
-        let kept = frame
-            .head
-            .get("k")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if !kept {
-            return;
-        }
-        let mut st = self.st();
-        if st.epoch != asked {
-            st.fetched.remove(dir);
-            return;
-        }
-        let now = Instant::now();
-        let mut at = 0usize;
-        for row in frame
-            .head
-            .get("f")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let (Some(name), Some(attrs)) = (
-                row.get(0).and_then(Value::as_str),
-                row.get(1).and_then(|a| Attrs::parse(a, true)),
-            ) else {
-                return;
-            };
-            let end = at + attrs.size as usize;
-            let Some(bytes) = frame.body.get(at..end) else {
-                return;
-            };
-            let path = child(dir, name);
-            st.store(&path, attrs.version(), Arc::new(bytes.to_vec()));
-            st.known.insert(path, Known { attrs, at: now });
-            at = end;
-        }
-    }
-
     fn opened(
         &self,
         path: &str,
         host: Option<u64>,
         data: Option<(Arc<Vec<u8>>, Attrs)>,
         writes: bool,
+        cached: bool,
     ) -> u64 {
         let mut st = self.st();
         let fh = st.next_fh;
@@ -774,6 +740,8 @@ impl MirageFs {
                 attrs,
                 writes,
                 detached: false,
+                cached,
+                revoked: false,
             },
         );
         fh
@@ -812,6 +780,7 @@ impl MirageFs {
                 nlink: 2,
                 rdev: 0,
                 kept: false,
+                watched: false,
             });
             let parent = match split(&dir) {
                 Some((up, _)) if dir != self.shared.root => self.ino(&up),
@@ -867,6 +836,7 @@ impl Filesystem for MirageFs {
                     nlink: 0,
                     rdev: 0,
                     kept: true,
+                    watched: false,
                 };
                 return reply.entry(&LONG, &self.attr(0, &gone), Generation(0));
             }
@@ -1176,22 +1146,17 @@ impl Filesystem for MirageFs {
             && attrs.size <= WHOLE_FILE
         {
             if let Some(data) = self.cached(&path, &attrs) {
-                let fh = self.opened(&path, None, Some((data, attrs)), false);
+                let fh = self.opened(&path, None, Some((data, attrs)), false, true);
                 return reply.opened(FileHandle(fh), FopenFlags::FOPEN_KEEP_CACHE);
             }
-            if let Some((dir, _)) = split(&path) {
-                self.prefetch(&dir);
-            }
-            let held = match self.cached(&path, &attrs) {
-                Some(data) => Some((data, attrs)),
-                None => match self.whole(&path, attrs) {
-                    Ok(held) => Some(held),
-                    Err(err) if err == Errno::EFBIG => None,
-                    Err(err) => return reply.error(err),
-                },
+            let held = match self.whole(&path, attrs) {
+                Ok((data, now)) if now.kept => Some((data, now)),
+                Ok(_) => None,
+                Err(err) if err == Errno::EFBIG => None,
+                Err(err) => return reply.error(err),
             };
             if let Some(held) = held {
-                let fh = self.opened(&path, None, Some(held), false);
+                let fh = self.opened(&path, None, Some(held), false, true);
                 return reply.opened(FileHandle(fh), FopenFlags::empty());
             }
         }
@@ -1210,12 +1175,8 @@ impl Filesystem for MirageFs {
                 let Some(host) = frame.u64("fh") else {
                     return reply.error(Errno::EIO);
                 };
-                let kept = frame
-                    .head
-                    .get("k")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let fh = self.opened(&path, Some(host), None, writes);
+                let (kept, _) = keep_of(&frame);
+                let fh = self.opened(&path, Some(host), None, writes, kept && !writes);
                 let mode = if kept && !writes {
                     FopenFlags::empty()
                 } else {
@@ -1241,6 +1202,9 @@ impl Filesystem for MirageFs {
         let Some(open) = self.st().opens.get(&fh.0).cloned() else {
             return reply.error(Errno::EBADF);
         };
+        if open.revoked {
+            return reply.error(Errno::EACCES);
+        }
         let Some(host) = open.host else {
             let data = match (open.data, open.attrs) {
                 (Some(data), _) => data,
@@ -1377,6 +1341,9 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
+        if self.st().revoked_dirs.contains(&fh.0) {
+            return reply.error(Errno::EACCES);
+        }
         let (rows, _) = self.rows(ino, fh, offset);
         for (next, name, ino, attrs) in rows {
             let kind = self.attr(ino, &attrs).kind;
@@ -1395,6 +1362,9 @@ impl Filesystem for MirageFs {
         offset: u64,
         mut reply: ReplyDirectoryPlus,
     ) {
+        if self.st().revoked_dirs.contains(&fh.0) {
+            return reply.error(Errno::EACCES);
+        }
         let (rows, current) = self.rows(ino, fh, offset);
         for (next, name, ino, attrs) in rows {
             let attr = self.attr(ino, &attrs);
@@ -1414,7 +1384,9 @@ impl Filesystem for MirageFs {
         _flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
-        self.st().dirs.remove(&fh.0);
+        let mut st = self.st();
+        st.dirs.remove(&fh.0);
+        st.revoked_dirs.remove(&fh.0);
         reply.ok();
     }
 
@@ -1549,7 +1521,7 @@ impl Filesystem for MirageFs {
                     return reply.error(Errno::EIO);
                 };
                 let ino = self.ino(&path);
-                let fh = self.opened(&path, Some(host), None, true);
+                let fh = self.opened(&path, Some(host), None, true, false);
                 reply.created(
                     &ttl(&attrs),
                     &self.attr(ino, &attrs),
@@ -1571,7 +1543,7 @@ mod tests {
     use std::sync::mpsc::channel;
 
     fn attrs(kept: bool) -> Attrs {
-        Attrs::parse(&json!({"m": 0o100644, "s": 3, "t": 1000.0}), kept).unwrap()
+        Attrs::parse(&json!({"m": 0o100644, "s": 3, "t": 1000.0}), kept, false).unwrap()
     }
 
     /// The host end of a client's pipe, played by the test: each request
@@ -1643,9 +1615,9 @@ mod tests {
     fn a_reader_of_a_removed_name_keeps_its_bytes_when_the_name_is_rewritten() {
         let (fs, _host) = hosted();
         let held = |bytes: &[u8]| Some((Arc::new(bytes.to_vec()), attrs(true)));
-        let old = fs.opened("/w/a", None, held(b"old"), false);
+        let old = fs.opened("/w/a", None, held(b"old"), false, true);
         MirageFs::detach(&mut fs.st(), "/w/a");
-        let new = fs.opened("/w/a", None, held(b"new"), false);
+        let new = fs.opened("/w/a", None, held(b"new"), false, true);
         fs.rewritten("/w/a");
         let st = fs.st();
         assert_eq!(
@@ -1748,6 +1720,7 @@ mod tests {
                     rows: vec![],
                     names: HashSet::new(),
                     kept: true,
+                    watched: false,
                     at: Instant::now(),
                 },
             );
@@ -1792,18 +1765,18 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_answer_keeps_each_folder_listed_and_covered() {
+    fn a_listing_keeps_each_entry_it_names() {
         let rows = entries(
             Some(&json!([["a.txt", {"m": 0o100644, "s": 1}], ["sub", {"m": 0o040755}], ["bad"]])),
             true,
+            false,
         );
         assert_eq!(
             rows.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
             ["a.txt", "sub"]
         );
         let mut st = State::default();
-        st.listed("/w/sub", &rows, true, Instant::now());
-        assert!(st.covered.contains("/w/sub"));
+        st.listed("/w/sub", &rows, true, false, Instant::now());
         assert!(st.listings["/w/sub"].names.contains("a.txt"));
         assert_eq!(st.known["/w/sub/a.txt"].attrs.size, 1);
     }
@@ -1813,6 +1786,7 @@ mod tests {
         let rows = entries(
             Some(&json!([["a", {"m": 0o100644}], ["disk", {"m": 0o040755, "k": false}]])),
             true,
+            false,
         );
         assert_eq!(
             rows.iter().map(|(_, a)| a.kept).collect::<Vec<_>>(),
@@ -1826,5 +1800,77 @@ mod tests {
         let mut later = kept.clone();
         later.mtime = 2000.0;
         assert_ne!(kept.version(), later.version());
+    }
+
+    #[test]
+    fn a_watched_answer_is_kept_by_neither_the_client_nor_the_kernel() {
+        let watched = Attrs::parse(&json!({"m": 0o100644, "s": 3}), true, true).unwrap();
+        assert!(!watched.kept);
+        assert_eq!(ttl(&watched), Duration::ZERO);
+        assert_eq!(ttl(&attrs(false)), SHORT);
+        let known = Known {
+            attrs: watched.clone(),
+            at: Instant::now(),
+        };
+        assert!(!known.fresh());
+        let mut st = State::default();
+        st.listed("/w", &[("a".into(), watched)], false, true, Instant::now());
+        assert!(!st.listings["/w"].fresh());
+        st.listed(
+            "/w",
+            &[("a".into(), attrs(false))],
+            false,
+            false,
+            Instant::now(),
+        );
+        assert!(st.listings["/w"].fresh());
+    }
+
+    #[test]
+    fn a_watched_listing_is_asked_for_each_time() {
+        let (fs, mut host) = hosted();
+        for _ in 0..2 {
+            let asking = {
+                let fs = fs.clone();
+                std::thread::spawn(move || fs.list("/w"))
+            };
+            let asked = host.next();
+            assert_eq!(asked.str("op"), Some("list"));
+            host.send(
+                json!({"id": asked.u64("id"), "e": [["a", {"m": 0o100644}]], "k": false, "w": true}),
+                b"",
+            );
+            assert_eq!(asking.join().unwrap().unwrap().0.len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_policy_that_comes_refuses_reads_the_kernel_may_cache_and_old_streams() {
+        let (fs, _host) = hosted();
+        let held = Some((Arc::new(b"plan".to_vec()), attrs(true)));
+        let cached = fs.opened("/w/a", None, held, false, true);
+        let direct = fs.opened("/w/b", Some(7), None, false, false);
+        fs.st().dirs.insert(9, ("/w".into(), 0, vec![]));
+        fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
+        let st = fs.st();
+        assert!(st.opens[&cached].revoked);
+        assert!(!st.opens[&direct].revoked);
+        assert!(st.revoked_dirs.contains(&9));
+    }
+
+    #[test]
+    fn a_whole_read_a_forget_crossed_is_reported_unkept() {
+        let (fs, mut host) = hosted();
+        let asking = {
+            let fs = fs.clone();
+            std::thread::spawn(move || fs.whole("/w/a", attrs(true)))
+        };
+        let first = host.next();
+        host.send(json!({"push": "inval", "paths": ["/w/a"]}), b"");
+        host.send(
+            json!({"id": first.u64("id"), "a": {"m": 0o100644, "s": 3, "t": 1.0}, "k": true}),
+            b"old",
+        );
+        assert!(!asking.join().unwrap().unwrap().1.kept);
     }
 }

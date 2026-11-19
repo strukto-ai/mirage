@@ -19,17 +19,13 @@ import logging
 import posixpath
 import stat
 import struct
-from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.errors.fs import eacces, ebadf, eexist, efbig, enoent
 from mirage.mount.constants import (
-    FSPROTO_FETCH_DIR_BYTES,
-    FSPROTO_FETCH_FILE_BYTES,
     FSPROTO_FRAME_BYTES,
-    FSPROTO_TREE_ENTRIES,
     FSPROTO_VERSION,
     FSPROTO_WHOLE_BYTES,
 )
@@ -82,9 +78,8 @@ def encode_frame(head: Head, body: bytes = EMPTY) -> bytes:
 def bounded(
     head: Head, body: bytes = EMPTY, limit: int = FSPROTO_FRAME_BYTES
 ) -> bytes:
-    """A reply as a frame the client accepts: one past ``limit`` goes
-    without the folders a tree answer adds (``d``), and is refused as
-    ``EFBIG`` when it is still too large, so the pipe stays usable.
+    """A reply as a frame the client accepts: one past ``limit`` is
+    refused as ``EFBIG``, so the pipe stays usable.
 
     Args:
         head (dict[str, Any]): the reply's header, its ``id`` included.
@@ -94,9 +89,6 @@ def bounded(
     frame = encode_frame(head, body)
     if len(frame) - 4 <= limit:
         return frame
-    if "d" in head:
-        rest = {k: v for k, v in head.items() if k != "d"}
-        return bounded(rest, body, limit)
     return encode_frame({"id": head.get("id"), "errno": "EFBIG"})
 
 
@@ -229,7 +221,8 @@ class FsprotoServer:
     told otherwise (``k``): only for a backend nothing but the workspace
     changes (``BaseVFS.sole_writer``), whose every change this server pushes to
     the client as it is noted, and ``begin`` waits until the client has
-    applied them all.
+    applied them all. While a policy judges the session's file calls, no
+    answer is kept, so every call a program makes reaches it.
 
     Args:
         files (Files): the workspace's ``ws.vfs``.
@@ -251,6 +244,7 @@ class FsprotoServer:
         served: ServedPrefix | None = None,
     ) -> None:
         self._core = MountCore(files, session=session)
+        self._session_id = session.session_id
         self._run = run
         self._served = served
         self._writer: PipeWriter | None = None
@@ -262,6 +256,7 @@ class FsprotoServer:
         self._flushing = False
         self._hid = 0
         self._ended = False
+        self._keeping = False
 
     async def serve(self, reader: ByteReader, writer: PipeWriter) -> None:
         """Answer the client's requests until it closes the pipe.
@@ -299,7 +294,10 @@ class FsprotoServer:
 
     async def begin(self) -> bool:
         """Wait until the client has applied every change noted so far:
-        the barrier a line passes before its program starts.
+        the barrier a line passes before its program starts. Once a
+        policy judges the session's file calls, the client first forgets
+        all it kept and refuses reads through opens its kernel may cache
+        (``watch``), so each call the program makes reaches that policy.
 
         Returns:
             bool: False when the client did not answer within
@@ -308,6 +306,10 @@ class FsprotoServer:
         """
         if self._ended or self._writer is None:
             return True
+        served = self._served
+        if served is not None and self._keeping and await self._watched():
+            self._keeping = False
+            self._send({"push": "watch"})
         self._flush()
         self._hid += 1
         hid = self._hid
@@ -417,8 +419,36 @@ class FsprotoServer:
         return out
 
     def _kept(self, path: str) -> bool:
+        """Whether the client may keep its answer about ``path`` until
+        told otherwise: only on a sole writer's mount
+        (``BaseVFS.sole_writer``).
+
+        Args:
+            path (str): a workspace path a reply is about.
+        """
         row = reader_of(self._core.files).owner(path)
         return row is not None and row.sole_writer
+
+    async def _keep(self, path: str) -> Head:
+        """The keep fields of a reply about ``path``: ``k``, and ``w`` while
+        a policy judges the session's file calls, when neither the client
+        nor its kernel may keep the answer even for a moment. The watch is
+        read once, and any other answer, kept or held for a second, marks
+        the client as holding one for the next ``begin`` to drop.
+
+        Args:
+            path (str): a workspace path a reply is about.
+        """
+        if await self._watched():
+            return {"k": False, "w": True}
+        self._keeping = True
+        return {"k": self._kept(path)}
+
+    async def _watched(self) -> bool:
+        served = self._served
+        if served is None or served.watched is None:
+            return False
+        return await served.watched(self._session_id)
 
     def _path_of(self, fh: int) -> str:
         handle = self._core.handles.get(fh)
@@ -472,24 +502,20 @@ class FsprotoServer:
                 held = self._path_of(int(fh))
                 return {
                     "a": wire(await core.fgetattr(held, int(fh))),
-                    "k": self._kept(held),
+                    **await self._keep(held),
                 }, EMPTY
             return {
                 "a": wire(await core.getattr(path)),
-                "k": self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "list":
-            kept = self._kept(path)
+            keep = await self._keep(path)
             rows = shown(await core.listing(path))
-            head: Head = {"e": self._rows(path, rows, kept), "k": kept}
-            if h.get("deep") is True and kept:
-                head["d"] = await self._tree(path, rows)
-            return head, EMPTY
-        if op == "fetchdir":
-            return await self._fetchdir(path)
+            listed = self._rows(path, rows, keep["k"])
+            return {"e": listed, **keep}, EMPTY
         if op == "readall":
             attrs, data = await self._whole(path)
-            return {"a": wire(attrs), "k": self._kept(path)}, data
+            return {"a": wire(attrs), **await self._keep(path)}, data
         if op == "readlink":
             return {"target": await core.readlink(path)}, EMPTY
         if op == "open":
@@ -503,7 +529,7 @@ class FsprotoServer:
                 binary=True,
             )
             fh = await core.open(path, mode)
-            return {"fh": fh, "k": self._kept(path)}, EMPTY
+            return {"fh": fh, **await self._keep(path)}, EMPTY
         if op == "create":
             mode = OpenMode(
                 readable=True,
@@ -521,7 +547,7 @@ class FsprotoServer:
             return {
                 "fh": fh,
                 "a": wire(await core.fgetattr(path, fh)),
-                "k": self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "read":
             fh = whole(h.get("fh"), -1)
@@ -560,7 +586,7 @@ class FsprotoServer:
             await core.mkdir(path, None if perm is None else int(perm))
             return {
                 "a": wire(await core.getattr(path)),
-                "k": self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "unlink":
             await core.unlink(path)
@@ -573,7 +599,7 @@ class FsprotoServer:
             await core.symlink(path, target if isinstance(target, str) else "")
             return {
                 "a": wire(await core.getattr(path)),
-                "k": self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "rename":
             old = self._inside(workspace_path(h.get("from")))
@@ -615,72 +641,6 @@ class FsprotoServer:
             return {}, EMPTY
         raise ValueError(f"fsproto: no such request {op!r}")
 
-    async def _tree(
-        self, root: str, rows: list[tuple[str, MountAttrs]]
-    ) -> list[list[Any]]:
-        """The listings of the kept folders under ``root``, breadth first,
-        each whole and only while they fit in FSPROTO_TREE_ENTRIES
-        entries.
-
-        Args:
-            root (str): the folder whose listing is answered.
-            rows (list[tuple[str, MountAttrs]]): its entries.
-        """
-        folders: list[list[Any]] = []
-        count = len(rows)
-        queue = deque(
-            child(root, name) for name, a in rows if stat.S_ISDIR(a.mode)
-        )
-        while queue and count < FSPROTO_TREE_ENTRIES:
-            folder = queue.popleft()
-            if not self._kept(folder):
-                continue
-            try:
-                below = shown(await self._core.listing(folder))
-            except Exception as err:
-                logger.debug("fsproto: listing %s failed: %r", folder, err)
-                continue
-            if count + len(below) > FSPROTO_TREE_ENTRIES:
-                continue
-            folders.append([folder, self._rows(folder, below, True)])
-            count += len(below)
-            queue.extend(
-                child(folder, name)
-                for name, a in below
-                if stat.S_ISDIR(a.mode)
-            )
-        return folders
-
-    async def _fetchdir(self, path: str) -> tuple[Head, bytes]:
-        if not self._kept(path):
-            return {"k": False, "f": []}, EMPTY
-        files: list[list[Any]] = []
-        parts: list[bytes] = []
-        total = 0
-        for name, a in await self._core.listing(path):
-            if not stat.S_ISREG(a.mode) or a.size > FSPROTO_FETCH_FILE_BYTES:
-                continue
-            if total + a.size > FSPROTO_FETCH_DIR_BYTES:
-                continue
-            try:
-                attrs, data = await self._whole(child(path, name))
-            except Exception as err:
-                logger.debug(
-                    "fsproto: prefetching %s failed: %r",
-                    child(path, name),
-                    err,
-                )
-                continue
-            if (
-                len(data) > FSPROTO_FETCH_FILE_BYTES
-                or total + len(data) > FSPROTO_FETCH_DIR_BYTES
-            ):
-                continue
-            files.append([name, wire(attrs)])
-            parts.append(data)
-            total += len(data)
-        return {"k": True, "f": files}, b"".join(parts)
-
     async def _setattr(self, path: str, h: Head) -> tuple[Head, bytes]:
         core = self._core
         fh = num(h.get("fh"))
@@ -711,7 +671,7 @@ class FsprotoServer:
             if fh is None
             else await core.fgetattr(path, int(fh))
         )
-        return {"a": wire(attrs), "k": self._kept(path)}, EMPTY
+        return {"a": wire(attrs), **await self._keep(path)}, EMPTY
 
     async def _exists(self, path: str) -> bool:
         try:

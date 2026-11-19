@@ -97,4 +97,9 @@ export interface ServedPrefix {
   machine: string
   /** The workspace's changes, which reach a client that keeps answers. */
   changes: RecentChanges | null
+  /**
+   * Whether a policy judges a session's file calls, by its id; the client
+   * then keeps no answer, so every call it makes reaches them.
+   */
+  watched?: ((sessionId: string) => Promise<boolean>) | null
 }

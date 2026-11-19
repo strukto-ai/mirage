@@ -284,6 +284,26 @@ machine serves, and rules that depend on which program opens a file.
   before its next program starts.
 - Every other mount behaves as under `ssh`: the machine keeps an answer for
   a second.
+- While a policy judges the session's file calls (`pre_vfs` or `post_vfs`),
+  neither `mirage-fuse` nor the machine's kernel keeps an answer, not even
+  for a second, so each call a program makes reaches it. A policy added
+  later drops what the machine kept before the next program starts, and a
+  file a program opened from the cache before then can no longer be read
+  (`Permission denied`). The machine asks only for what a program opens or
+  lists, never ahead of it.
+
+Mirage's releases do not ship `mirage-fuse` yet. Build it from the
+repository for the machine's architecture; it runs on Linux with glibc 2.36
+or newer, as Debian 12 has:
+
+```bash
+docker run --rm --platform linux/amd64 -v "$PWD/rust:/src" -w /src \
+  rust:1-bookworm cargo build --release -p mirage-fuse
+```
+
+The binary is `rust/target/release/mirage-fuse`; `--platform linux/arm64`
+builds it for arm64. Copy it to the machine's `PATH` or to
+`~/.mirage/bin/mirage-fuse`. `mirage-fuse --version` ends with `fsproto 1`.
 - Sessions, restarts, refused writes and the paths left unserved work as
   under `ssh`.
 

@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
+import type { Action } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RecentChanges, SERVED_BY } from './changes.ts'
@@ -89,6 +90,28 @@ async function served(changes: RecentChanges | null = null) {
   return { ws, server, end, serving }
 }
 
+class HeldRAM extends RAMVFS {
+  override readonly soleWriter: boolean = false
+}
+
+async function watched(
+  watch: (sessionId: string) => Promise<boolean>,
+  vfs: () => RAMVFS = () => new RAMVFS(),
+) {
+  const ws = new Workspace({ '/notes': vfs() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/notes/plan.txt', 'plan')
+  await ws.session('agent')
+  const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
+    prefix: '/notes',
+    machine: 'dev',
+    changes: new RecentChanges(new ManualClock(0), 1),
+    watched: watch,
+  })
+  const end = client()
+  const serving = server.serve(end.reader, end.writer)
+  return { server, end, serving }
+}
+
 describe('encodeFrame', () => {
   // The bytes mirage-fuse's and Python's tests check too.
   it('has the shared layout', () => {
@@ -99,13 +122,13 @@ describe('encodeFrame', () => {
 })
 
 describe('bounded', () => {
-  it('drops a tree past the frame limit, then refuses the reply', () => {
+  it('refuses a reply past the frame limit', () => {
     const head = (frame: Uint8Array): unknown => {
       const length = new DataView(frame.buffer, frame.byteOffset).getUint32(4)
       return JSON.parse(DEC.decode(frame.subarray(8, 8 + length)))
     }
-    const tree = { id: 1, e: [], k: true, d: [['/w/a', [['x'.repeat(80), {}]]]] }
-    expect(head(bounded(tree, new Uint8Array(), 64))).toEqual({ id: 1, e: [], k: true })
+    const small = { id: 1, e: [], k: true }
+    expect(head(bounded(small, new Uint8Array(), 64))).toEqual(small)
     const big = { id: 2, e: [['x'.repeat(80), {}]], k: true }
     expect(head(bounded(big, new Uint8Array(), 64))).toEqual({ id: 2, errno: 'EFBIG' })
   })
@@ -146,24 +169,16 @@ describe('FsprotoServer', () => {
     await serving
   })
 
-  it('carries the folders under a folder in its deep listing', async () => {
+  it('answers a listing for only the folder asked for', async () => {
     const { ws, end, serving } = await served()
     await ws.vfs.mkdir('/notes/sub')
-    await ws.vfs.mkdir('/notes/sub/deeper')
     await ws.vfs.write('/notes/sub/a.txt', 'a')
-    await ws.vfs.write('/notes/sub/deeper/b.txt', 'b')
-    const deep = await end.call({ op: 'list', path: '/notes', deep: true })
-    expect((deep.head.e as [string, unknown][]).map(([name]) => name)).toEqual(['plan.txt', 'sub'])
-    expect(
-      (deep.head.d as [string, [string, unknown][]][]).map(([folder, rows]) => [
-        folder,
-        rows.map(([name]) => name),
-      ]),
-    ).toEqual([
-      ['/notes/sub', ['a.txt', 'deeper']],
-      ['/notes/sub/deeper', ['b.txt']],
+    const listed = await end.call({ op: 'list', path: '/notes', deep: true })
+    expect((listed.head.e as [string, unknown][]).map(([name]) => name)).toEqual([
+      'plan.txt',
+      'sub',
     ])
-    expect((await end.call({ op: 'list', path: '/notes' })).head.d).toBeUndefined()
+    expect(listed.head.d).toBeUndefined()
     end.close()
     await serving
   })
@@ -229,18 +244,81 @@ describe('FsprotoServer', () => {
     await serving
   })
 
-  it('prefetches a folder of small files in one reply', async () => {
-    const { ws, end, serving } = await served()
-    await ws.vfs.write('/notes/b.txt', 'bee')
+  it('reads nothing ahead of the program', async () => {
+    const { end, serving } = await served()
     const fetched = await end.call({ op: 'fetchdir', path: '/notes' })
-    const files = fetched.head.f as [string, { s: number }][]
-    expect(files.map(([name, a]) => [name, a.s])).toEqual([
-      ['b.txt', 3],
-      ['plan.txt', 4],
-    ])
-    expect(DEC.decode(fetched.body)).toBe('beeplan')
+    expect(fetched.head.errno).toBeDefined()
+    expect(fetched.body.byteLength).toBe(0)
     end.close()
     await serving
+  })
+
+  it('keeps nothing while a policy judges file calls', async () => {
+    const asked: string[] = []
+    const { end, serving } = await watched((sessionId) => {
+      asked.push(sessionId)
+      return Promise.resolve(true)
+    })
+    const stat = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
+    const listed = await end.call({ op: 'list', path: '/notes' })
+    const whole = await end.call({ op: 'readall', path: '/notes/plan.txt' })
+    expect([stat, listed, whole].map((r) => [r.head.k, r.head.w])).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+    ])
+    expect(asked).toEqual(['agent', 'agent', 'agent'])
+    end.close()
+    await serving
+  })
+
+  it('drops all the client kept before a barrier once a policy comes', async () => {
+    let on = false
+    const { server, end, serving } = await watched(() => Promise.resolve(on))
+    const stat = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
+    expect([stat.head.k, stat.head.w]).toEqual([true, undefined])
+    on = true
+    const barrier = server.begin()
+    await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
+    expect(end.pushes[0]?.head).toEqual({ push: 'watch' })
+    end.send({ hid: end.pushes.find((f) => f.head.op === 'begin')?.head.hid })
+    expect(await barrier).toBe(true)
+    end.pushes.splice(0)
+    const again = server.begin()
+    await end.until(() => end.pushes.length > 0)
+    expect(end.pushes[0]?.head.op).toBe('begin')
+    end.send({ hid: end.pushes[0]?.head.hid })
+    expect(await again).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('drops answers held for a second too once a policy comes', async () => {
+    let on = false
+    const { server, end, serving } = await watched(
+      () => Promise.resolve(on),
+      () => new HeldRAM(),
+    )
+    expect((await end.call({ op: 'getattr', path: '/notes/plan.txt' })).head.k).toBe(false)
+    on = true
+    const barrier = server.begin()
+    await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
+    expect(end.pushes[0]?.head).toEqual({ push: 'watch' })
+    end.send({ hid: end.pushes.find((f) => f.head.op === 'begin')?.head.hid })
+    expect(await barrier).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('tells whether a policy judges file calls', async () => {
+    const plain = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    const judged = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    judged.policies.add({ preVfs: (): Action | null => null })
+    interface Watching {
+      watched(sessionId: string): Promise<boolean>
+    }
+    expect(await (plain as unknown as Watching).watched('')).toBe(false)
+    expect(await (judged as unknown as Watching).watched('')).toBe(true)
   })
 
   it("pushes another's change and passes a barrier once the client answers", async () => {

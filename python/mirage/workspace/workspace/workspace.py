@@ -709,6 +709,7 @@ class Workspace:
             self.process_table,
             self._registry.changes,
             self._local_prefixes,
+            self._watched,
         )
         self.machine_table = MachineTable(
             handles,
@@ -1576,6 +1577,18 @@ class Workspace:
             if isinstance(entry.vfs, MachineVFS)
             and entry.vfs.shows_own(machine, entry.prefix)
         ]
+
+    async def _watched(self, session_id: str) -> bool:
+        """Whether a policy judges ``session_id``'s file calls
+        (``pre_vfs`` or ``post_vfs``), so a machine keeps none of them.
+
+        Args:
+            session_id (str): the session a machine is served as.
+        """
+        policies = self._registry.policies
+        return await policies.wants_for(
+            "pre_vfs", session_id
+        ) or await policies.wants_for("post_vfs", session_id)
 
     def _sandbox_mounts(self) -> list[str]:
         """The mount prefixes a sandboxed runtime may be told of, read live.

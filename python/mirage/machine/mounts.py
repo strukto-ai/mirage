@@ -940,7 +940,10 @@ class MachineMounts:
                             session,
                             self._lend,
                             ServedPrefix(
-                                prefix, self._machine, binding.changes
+                                prefix,
+                                self._machine,
+                                binding.changes,
+                                binding.watched,
                             ),
                         ),
                         prefix,

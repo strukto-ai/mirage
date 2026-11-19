@@ -795,6 +795,7 @@ export class MachineMounts {
               prefix,
               machine: this.machine,
               changes: binding.changes ?? null,
+              watched: binding.watched,
             }),
             prefix,
             present,
