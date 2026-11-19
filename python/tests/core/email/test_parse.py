@@ -108,3 +108,40 @@ def test_parse_cc():
     result = parse_rfc822(raw)
     assert len(result["cc"]) == 2
     assert result["cc"][0]["email"] == "charlie@example.com"
+
+
+def test_parse_crlf_body_reads_as_lf():
+    raw = (
+        b"From: Alice <alice@example.com>\r\n"
+        b"Subject: Lines\r\n"
+        b"\r\n"
+        b"line one\r\nline two\r\n"
+    )
+    result = parse_rfc822(raw)
+    assert result["body_text"] == "line one\nline two\n"
+    assert result["snippet"] == "line one\nline two\n"
+
+
+def test_parse_crlf_parts_read_as_lf():
+    raw = (
+        b'Content-Type: multipart/alternative; boundary="b"\r\n'
+        b"\r\n"
+        b"--b\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"Content-Transfer-Encoding: base64\r\n"
+        b"\r\n"
+        b"b25lDQp0d28NCg==\r\n"
+        b"--b\r\n"
+        b"Content-Type: text/html\r\n"
+        b"\r\n"
+        b"<p>x</p>\r\n<p>y</p>\r\n"
+        b"--b--\r\n"
+    )
+    result = parse_rfc822(raw)
+    assert result["body_text"] == "one\ntwo\n"
+    assert result["body_html"] == "<p>x</p>\n<p>y</p>"
+
+
+def test_parse_lone_cr_kept():
+    result = parse_rfc822(b"Subject: l\r\n\r\na\rb\n")
+    assert result["body_text"] == "a\rb\n"

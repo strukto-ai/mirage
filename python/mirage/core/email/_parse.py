@@ -63,6 +63,9 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
         else:
             body_text = decoded
 
+    # The TypeScript host's mailparser reads CRLF line ends as LF.
+    body_text = body_text.replace("\r\n", "\n")
+    body_html = body_html.replace("\r\n", "\n")
     return {
         "from": _parse_address(msg.get("From", "")),
         "reply_to": _parse_address_list(msg.get("Reply-To", "")),
