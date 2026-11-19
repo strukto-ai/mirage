@@ -2399,6 +2399,24 @@ SUMMARIES = [
         Outcome.DENY,
         "sort is not allowed",
     ),
+    (
+        SUMMARY_CLOSED,
+        "(sort() { ls /data; }); sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "! ls /data && sort() { ls /data; }; sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "outer() { inner; }; inner() { ls /data; }; outer",
+        Outcome.ALLOW,
+        "",
+    ),
     (SUMMARY_CLOSED, "sort /data/x", Outcome.DENY, "sort is not allowed"),
     (
         SUMMARY_CLOSED,

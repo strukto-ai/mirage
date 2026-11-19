@@ -409,6 +409,30 @@ class Opened:
     occurrence: Occurrence
 
 
+@dataclass(frozen=True, slots=True)
+class Traced:
+    """What a line does as :func:`_line_status` follows it.
+
+    Args:
+        exit_code (int): what the line would return.
+        ran (tuple[Judgment, ...]): the refusals it would print, in
+            order.
+        calls (frozenset[tuple[int, int, int]]): the judgments, by span
+            and place among their span's, of the commands that call a
+            function the shell has defined when they run.
+        reached (frozenset[tuple[int, int, int]]): the judgments the
+            fold reached, run or skipped.
+        defined (frozenset[str]): every function a definition the line
+            runs defines, wherever it stands.
+    """
+
+    exit_code: int
+    ran: tuple[Judgment, ...]
+    calls: frozenset[tuple[int, int, int]]
+    reached: frozenset[tuple[int, int, int]]
+    defined: frozenset[str]
+
+
 def _unread_paths(
     words: Sequence[Word],
     kinds: Sequence[str | PathSpec],
@@ -2250,26 +2274,37 @@ def explained_line(
             line=line, node=node, outcome=outcome, reason=reason, source=source
         )
     tree = parse(line, aliases)
-    functions = _defined_functions(tree)
-    parts = _in_line_order(judged, opened, functions)
-    strictest = max(
-        (_verdict_of(part)[0] for part in parts),
-        key=STRICTNESS.__getitem__,
-        default=Outcome.ALLOW,
-    )
     commands: dict[tuple[int, int], list[Judgment]] = {}
+    keys: list[tuple[int, int, int] | None] = []
     for one in judged:
         at = one.occurrence
-        if at.parent is None and not _calls_function(one, functions):
-            commands.setdefault((at.start, at.end), []).append(one.judgment)
+        if at.parent is None:
+            listed = commands.setdefault((at.start, at.end), [])
+            keys.append((at.start, at.end, len(listed)))
+            listed.append(one.judgment)
+        else:
+            keys.append(None)
     redirects: dict[tuple[int, int], list[Judgment]] = {}
     for open_ in opened:
         at = open_.occurrence
         if at.parent is None:
             redirects.setdefault((at.start, at.end), []).append(open_.judgment)
+    traced = _line_status(tree, commands, redirects, pipefail)
+    calling = [
+        _calls_function(one.judgment, key, traced)
+        for one, key in zip(judged, keys, strict=True)
+    ]
+    parts = _in_line_order(
+        [one for one, call in zip(judged, calling, strict=True) if not call],
+        opened,
+    )
+    strictest = max(
+        (_verdict_of(part)[0] for part in parts),
+        key=STRICTNESS.__getitem__,
+        default=Outcome.ALLOW,
+    )
     if strictest is Outcome.ALLOW:
         return ShellExplanation(line=line, node=node)
-    code, ran = _line_status(tree, commands, redirects, pipefail)
     first = next(part for part in parts if _verdict_of(part)[0] is strictest)
     outcome, reason, source = _verdict_of(first)
     return ShellExplanation(
@@ -2279,79 +2314,50 @@ def explained_line(
         reason=reason,
         source=source,
         decision=first.decision,
-        exit_code=code,
-        stderr="".join(part.stderr for part in ran),
+        exit_code=traced.exit_code,
+        stderr="".join(part.stderr for part in traced.ran),
     )
 
 
-def _defined_functions(tree: Any) -> dict[str, int]:
-    """The functions a line defines, each with where its first
-    definition ends on the line.
+def _calls_function(
+    judgment: Judgment, key: tuple[int, int, int] | None, traced: Traced
+) -> bool:
+    """Whether a judgment is a tree root's own decision about a command
+    that calls a function, which no root's own decision speaks for
+    (``is_tool``); a rule that names the function still does. The walk
+    reads the line before any definition runs, so it judges every such
+    call as a tool. A command the fold reached is a call when the
+    function was defined where it stands (:class:`Traced`); one it did
+    not reach, in a function body, a substitution or a job, when any
+    definition the line runs names it.
 
     Args:
-        tree (Any): the line, parsed.
+        judgment (Judgment): one command's judgment.
+        key (tuple[int, int, int] | None): its span and place on the
+            typed line, None for one a nested line runs.
+        traced (Traced): what the line does.
     """
-    names: dict[str, int] = {}
-    stack = [tree]
-    while stack:
-        current = stack.pop()
-        stack.extend(current.named_children)
-        if current.type != NodeType.FUNCTION_DEFINITION:
-            continue
-        name = next(
-            (c for c in current.named_children if c.type == NodeType.WORD),
-            None,
-        )
-        if name is not None:
-            ends = names.get(get_text(name), current.end_byte)
-            names[get_text(name)] = min(ends, current.end_byte)
-    return names
-
-
-def _calls_function(one: Judged, functions: Mapping[str, int]) -> bool:
-    """Whether a judgment is a tree root's own decision about a call to
-    a function the line defined before it. The walk reads the line
-    before the definition runs, so it judges the call as a tool, but
-    the run calls the function, which no root's own decision speaks for
-    (``is_tool``); a rule that names the function still does. A command
-    of that name before the definition is no call and keeps its answer.
-
-    Args:
-        one (Judged): one command's judgment and place.
-        functions (Mapping[str, int]): the functions the line defines,
-            each with where its first definition ends.
-    """
-    defined = functions.get(one.judgment.command)
-    return (
-        defined is not None
-        and _line_start(one.occurrence) >= defined
-        and _by_default(one.judgment)
-    )
+    if key is not None and key in traced.reached:
+        return key in traced.calls
+    return judgment.command in traced.defined and _by_default(judgment)
 
 
 def _in_line_order(
-    judged: Sequence[Judged],
-    opened: Sequence[Opened],
-    functions: Mapping[str, int],
+    judged: Sequence[Judged], opened: Sequence[Opened]
 ) -> list[Judgment]:
     """Every command's judgment and every unowned redirect's, in the
     order the line reaches them: a command where its statement starts
     on the typed line (one a nested line runs, where the command that
     runs it does), a redirect where the statement it opens for starts,
-    since the shell opens it before the statement runs. A call to a
-    function the line defined is left out (:func:`_calls_function`).
+    since the shell opens it before the statement runs.
 
     Args:
         judged (Sequence[Judged]): the line's command judgments, in the
             order the gate reads them.
         opened (Sequence[Opened]): the line's unowned redirects.
-        functions (Mapping[str, int]): the functions the line defines,
-            each with where its first definition ends.
     """
     placed = [
-        (_line_start(one.occurrence), one.judgment)
-        for one in judged
-        if not _calls_function(one, functions)
+        (_line_start(one.occurrence), one.judgment) for one in judged
     ] + [(_line_start(open_.occurrence), open_.judgment) for open_ in opened]
     placed.sort(key=lambda pair: pair[0])
     return [judgment for _, judgment in placed]
@@ -2374,7 +2380,7 @@ def _line_status(
     commands: Mapping[tuple[int, int], Sequence[Judgment]],
     redirects: Mapping[tuple[int, int], Sequence[Judgment]],
     pipefail: bool,
-) -> tuple[int, list[Judgment]]:
+) -> Traced:
     """The exit code a line would return and the refusals it would print
     on the way, read off the line's control flow with every command let
     through taken to succeed: a list returns its last statement's
@@ -2383,10 +2389,15 @@ def _line_status(
     inverts a command or a whole pipeline, an ``if`` runs the branch its
     condition picks, a loop its body once when its condition lets it in,
     and a node whose redirect no command owns is refused fails with 1
-    without running. A case
-    statement, a function definition, a call to a function the line
-    defines and the lines a command runs in turn (``$( )``, ``bash -c``,
-    ``eval``) answer 0.
+    without running. A case statement, a function definition, a call
+    to a function and the lines a command runs in turn (``$( )``,
+    ``bash -c``, ``eval``) answer 0.
+
+    The fold also follows which functions the shell has defined: a
+    definition counts once it runs, one in a subshell or a pipeline
+    stage is gone when that child shell ends, and one on a branch the
+    line skips never counts. A tree root's own decision about a command
+    that calls such a function is no refusal (``is_tool``).
 
     Args:
         tree (Any): the line, parsed.
@@ -2398,44 +2409,66 @@ def _line_status(
         pipefail (bool): whether the session's ``pipefail`` is set.
     """
     ran: list[Judgment] = []
+    calls: set[tuple[int, int, int]] = set()
+    reached: set[tuple[int, int, int]] = set()
+    defined: set[str] = set()
+    every: set[str] = set()
 
-    def refused(judgments: Sequence[Judgment]) -> int:
+    def refused(judgments: Sequence[Judgment], runs: bool) -> int:
         first = next((j for j in judgments if j.exit_code), None)
-        if first is None:
+        if first is None or not runs:
             return 0
         ran.append(first)
         return first.exit_code
 
-    def statements(nodes: Sequence[Any]) -> int:
+    def forked(nodes: Sequence[Any], runs: bool) -> int:
+        kept = set(defined)
+        code = statements(nodes, runs)
+        defined.clear()
+        defined.update(kept)
+        return code
+
+    def statements(nodes: Sequence[Any], runs: bool) -> int:
         code = 0
         for node in nodes:
             if node.is_named and node.type not in INERT:
-                code = status(node)
+                code = status(node, runs)
         return code
 
-    def status(node: Any) -> int:
+    def command(span: tuple[int, int], runs: bool) -> int:
+        kept: list[Judgment] = []
+        for place, judgment in enumerate(commands.get(span, ())):
+            key = (*span, place)
+            reached.add(key)
+            if judgment.command in defined and _by_default(judgment):
+                calls.add(key)
+            else:
+                kept.append(judgment)
+        return refused(kept, runs)
+
+    def status(node: Any, runs: bool) -> int:
         kind = node.type
         span = (node.start_byte, node.end_byte)
-        code = refused(redirects.get(span, ()))
+        code = refused(redirects.get(span, ()), runs)
         if code:
             return code
         if kind in (NodeType.COMMAND, NodeType.TEST_COMMAND):
-            return refused(commands.get(span, ()))
+            return command(span, runs)
         if kind == NodeType.REDIRECTED_STATEMENT:
             body = node.named_children[:1]
             if not body or body[0].type in REDIRECT_TYPES:
                 return 0
-            return status(body[0])
+            return status(body[0], runs)
         if kind == NodeType.LIST:
             left, op, right = (
                 node.children[0],
                 node.children[1],
                 node.children[-1],
             )
-            code = status(left)
-            if (op.type == NodeType.AND) == (code == 0):
-                return status(right)
-            return code
+            code = status(left, runs)
+            goes = (op.type == NodeType.AND) == (code == 0)
+            later = status(right, runs and goes)
+            return later if goes else code
         if kind == NodeType.PIPELINE:
             stages = list(node.named_children)
             negated = (
@@ -2443,45 +2476,72 @@ def _line_status(
             )
             if negated:
                 stages[0] = stages[0].named_children[-1]
-            codes = [status(stage) for stage in stages]
+            codes = [forked([stage], runs) for stage in stages]
             if pipefail:
                 code = next((c for c in reversed(codes) if c), 0)
             else:
                 code = codes[-1] if codes else 0
             return (0 if code else 1) if negated else code
         if kind == NodeType.NEGATED_COMMAND:
-            return 0 if statements(node.children) else 1
+            return 0 if statements(node.children, runs) else 1
+        if kind == NodeType.SUBSHELL:
+            return forked(node.children, runs)
         if kind == NodeType.IF_STATEMENT:
-            head, body = _clause(node)
-            if not statements(head):
-                return statements(body)
+            branches = [_clause(node)] + [
+                _clause(c)
+                for c in node.named_children
+                if c.type == NodeType.ELIF_CLAUSE
+            ]
+            code = 0
+            taken = False
+            for head, body in branches:
+                live = runs and not taken
+                hit = statements(head, live) == 0 and live
+                result = statements(body, hit)
+                if hit:
+                    code, taken = result, True
             for child in node.named_children:
-                if child.type == NodeType.ELIF_CLAUSE:
-                    head, body = _clause(child)
-                    if not statements(head):
-                        return statements(body)
-                elif child.type == NodeType.ELSE_CLAUSE:
-                    return statements(child.children)
-            return 0
+                if child.type == NodeType.ELSE_CLAUSE:
+                    live = runs and not taken
+                    result = statements(child.children, live)
+                    if live:
+                        code = result
+            return code
         if kind == NodeType.WHILE_STATEMENT:
             loop = [
                 c for c in node.named_children if c.type == NodeType.DO_GROUP
             ]
             head = [c for c in node.children if c.type != NodeType.DO_GROUP]
-            entered = statements(head) == 0
-            if entered == (node.children[0].type == NodeType.UNTIL):
-                return 0
-            return statements(loop)
-        if kind in (NodeType.FUNCTION_DEFINITION, NodeType.CASE_STATEMENT):
+            until = node.children[0].type == NodeType.UNTIL
+            entered = runs and (statements(head, runs) == 0) != until
+            code = statements(loop, entered)
+            return code if entered else 0
+        if kind == NodeType.FUNCTION_DEFINITION:
+            name = next(
+                (c for c in node.named_children if c.type == NodeType.WORD),
+                None,
+            )
+            if runs and name is not None:
+                defined.add(get_text(name))
+                every.add(get_text(name))
+            return 0
+        if kind == NodeType.CASE_STATEMENT:
             return 0
         if kind in (NodeType.FOR_STATEMENT, NodeType.C_STYLE_FOR_STATEMENT):
             loop = [
                 c for c in node.named_children if c.type == NodeType.DO_GROUP
             ]
-            return statements(loop)
-        return statements(_backgrounded(node.children))
+            return statements(loop, runs)
+        return statements(_backgrounded(node.children), runs)
 
-    return status(tree), ran
+    code = status(tree, True)
+    return Traced(
+        code,
+        tuple(ran),
+        frozenset(calls),
+        frozenset(reached),
+        frozenset(every),
+    )
 
 
 def _clause(node: Any) -> tuple[list[Any], list[Any]]:

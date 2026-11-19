@@ -1757,19 +1757,17 @@ export function explainedLine(
     }
   }
   const tree = reparse(line)
-  const functions = definedFunctions(tree)
-  const parts = inLineOrder(judged, opened, functions)
-  let strictest = Outcome.ALLOW
-  for (const part of parts) {
-    const [said] = verdictOf(part)
-    if ((STRICTNESS.get(said) ?? 0) > (STRICTNESS.get(strictest) ?? 0)) strictest = said
-  }
   const commands = new Map<string, Judgment[]>()
+  const keys: (string | null)[] = []
   for (const one of judged) {
     const at = one.occurrence
-    if (at.parent !== null || callsFunction(one, functions)) continue
+    if (at.parent !== null) {
+      keys.push(null)
+      continue
+    }
     const span = `${String(at.start)}:${String(at.end)}`
     const list = commands.get(span) ?? []
+    keys.push(`${span}:${String(list.length)}`)
     list.push(one.judgment)
     commands.set(span, list)
   }
@@ -1781,6 +1779,16 @@ export function explainedLine(
     const list = redirects.get(span) ?? []
     list.push(open.judgment)
     redirects.set(span, list)
+  }
+  const traced = lineStatus(tree, commands, redirects, pipefail)
+  const parts = inLineOrder(
+    judged.filter((one, i) => !callsFunction(one.judgment, keys[i] ?? null, traced)),
+    opened,
+  )
+  let strictest = Outcome.ALLOW
+  for (const part of parts) {
+    const [said] = verdictOf(part)
+    if ((STRICTNESS.get(said) ?? 0) > (STRICTNESS.get(strictest) ?? 0)) strictest = said
   }
   const first =
     strictest === Outcome.ALLOW ? undefined : parts.find((part) => verdictOf(part)[0] === strictest)
@@ -1797,7 +1805,6 @@ export function explainedLine(
       stderr: '',
     }
   }
-  const [exitCode, ran] = lineStatus(tree, commands, redirects, pipefail)
   const [outcome, reason, source] = verdictOf(first)
   return {
     line,
@@ -1807,41 +1814,40 @@ export function explainedLine(
     source,
     answers: [],
     decision: first.decision,
-    exitCode,
-    stderr: ran.map((part) => part.stderr).join(''),
+    exitCode: traced.exitCode,
+    stderr: traced.ran.map((part) => part.stderr).join(''),
   }
 }
 
 /**
- * The functions a line defines, each with where its first definition ends
- * on the line. Mirrors the Python `_defined_functions`.
+ * What a line does as `lineStatus` follows it: its exit code, the
+ * refusals it would print in order, the judgments (by span and place among
+ * their span's) of the commands that call a function the shell has
+ * defined when they run, the judgments the fold reached, run or skipped,
+ * and every function a definition the line runs defines. Mirrors the
+ * Python Traced.
  */
-function definedFunctions(tree: TSNodeLike): ReadonlyMap<string, number> {
-  const names = new Map<string, number>()
-  const stack = [tree]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    stack.push(...current.namedChildren)
-    if (current.type !== NodeType.FUNCTION_DEFINITION) continue
-    const name = current.namedChildren.find((c) => c.type === NodeType.WORD)
-    if (name === undefined) continue
-    const end = current.endIndex ?? 0
-    names.set(getText(name), Math.min(names.get(getText(name)) ?? end, end))
-  }
-  return names
+interface Traced {
+  readonly exitCode: number
+  readonly ran: readonly Judgment[]
+  readonly calls: ReadonlySet<string>
+  readonly reached: ReadonlySet<string>
+  readonly defined: ReadonlySet<string>
 }
 
 /**
- * Whether a judgment is a tree root's own decision about a call to a
- * function the line defined before it. The walk reads the line before the
- * definition runs, so it judges the call as a tool, but the run calls the
- * function, which no root's own decision speaks for (`isTool`); a rule
- * that names the function still does. A command of that name before the
- * definition is no call and keeps its answer. Mirrors the Python
- * `_calls_function`.
+ * Whether a judgment is a tree root's own decision about a command that
+ * calls a function, which no root's own decision speaks for (`isTool`); a
+ * rule that names the function still does. The walk reads the line before
+ * any definition runs, so it judges every such call as a tool. A command
+ * the fold reached (`key`, its span and place on the typed line) is a call
+ * when the function was defined where it stands; one it did not reach, in
+ * a function body, a substitution or a job, when any definition the line
+ * runs names it. Mirrors the Python `_calls_function`.
  */
-function callsFunction(one: Judged, functions: ReadonlyMap<string, number>): boolean {
-  const defined = functions.get(one.judgment.command)
-  return defined !== undefined && lineStart(one.occurrence) >= defined && byDefault(one.judgment)
+function callsFunction(judgment: Judgment, key: string | null, traced: Traced): boolean {
+  if (key !== null && traced.reached.has(key)) return traced.calls.has(key)
+  return traced.defined.has(judgment.command) && byDefault(judgment)
 }
 
 /**
@@ -1849,18 +1855,11 @@ function callsFunction(one: Judged, functions: ReadonlyMap<string, number>): boo
  * line reaches them: a command where its statement starts on the typed
  * line (one a nested line runs, where the command that runs it does), a
  * redirect where the statement it opens for starts, since the shell opens
- * it before the statement runs. A call to a function the line defined is
- * left out (`callsFunction`). Mirrors the Python `_in_line_order`.
+ * it before the statement runs. Mirrors the Python `_in_line_order`.
  */
-function inLineOrder(
-  judged: readonly Judged[],
-  opened: readonly Opened[],
-  functions: ReadonlyMap<string, number>,
-): Judgment[] {
+function inLineOrder(judged: readonly Judged[], opened: readonly Opened[]): Judgment[] {
   const placed: [number, Judgment][] = [
-    ...judged
-      .filter((one) => !callsFunction(one, functions))
-      .map((one): [number, Judgment] => [lineStart(one.occurrence), one.judgment]),
+    ...judged.map((one): [number, Judgment] => [lineStart(one.occurrence), one.judgment]),
     ...opened.map((open): [number, Judgment] => [lineStart(open.occurrence), open.judgment]),
   ]
   placed.sort((a, b) => a[0] - b[0])
@@ -1884,58 +1883,82 @@ function lineStart(at: Occurrence): number {
  * through taken to succeed: a list returns its last statement's status,
  * `&&` and `||` skip what bash skips, a pipeline returns its last stage's
  * (its last failing one under `pipefail`), `!` inverts a command or a whole
- * pipeline, an `if` runs the
- * branch its condition picks, a loop its body once when its condition
- * lets it in, and a node whose redirect no command owns is refused fails
- * with 1 without running. A case statement, a function definition, a call to a
- * function the line defines and the lines a command runs in turn (`$( )`,
- * `bash -c`, `eval`) answer 0. `commands` holds each command's judgments
- * on the typed line, and `redirects` those of the redirects no command
- * owns, by the span of the node they open for. Mirrors the Python `_line_status`.
+ * pipeline, an `if` runs the branch its condition picks, a loop its body
+ * once when its condition lets it in, and a node whose redirect no command
+ * owns is refused fails with 1 without running. A case statement, a
+ * function definition, a call to a function and the lines a command runs
+ * in turn (`$( )`, `bash -c`, `eval`) answer 0. The fold also follows
+ * which functions the shell has defined: a definition counts once it runs,
+ * one in a subshell or a pipeline stage is gone when that child shell
+ * ends, and one on a branch the line skips never counts; a tree root's own
+ * decision about a command that calls such a function is no refusal.
+ * `commands` holds each command's judgments on the typed line, and
+ * `redirects` those of the redirects no command owns, by the span of the
+ * node they open for. Mirrors the Python `_line_status`.
  */
 function lineStatus(
   tree: TSNodeLike,
   commands: ReadonlyMap<string, readonly Judgment[]>,
   redirects: ReadonlyMap<string, readonly Judgment[]>,
   pipefail: boolean,
-): [number, Judgment[]] {
+): Traced {
   const ran: Judgment[] = []
+  const calls = new Set<string>()
+  const reached = new Set<string>()
+  const defined = new Set<string>()
+  const every = new Set<string>()
   const spanOf = (node: TSNodeLike): string =>
     `${String(node.startIndex ?? 0)}:${String(node.endIndex ?? 0)}`
-  const refused = (judgments: readonly Judgment[]): number => {
+  const refused = (judgments: readonly Judgment[], runs: boolean): number => {
     const first = judgments.find((j) => j.exitCode !== 0)
-    if (first === undefined) return 0
+    if (first === undefined || !runs) return 0
     ran.push(first)
     return first.exitCode
   }
-  const statements = (nodes: readonly TSNodeLike[]): number => {
+  const forked = (nodes: readonly TSNodeLike[], runs: boolean): number => {
+    const kept = new Set(defined)
+    const code = statements(nodes, runs)
+    defined.clear()
+    for (const name of kept) defined.add(name)
+    return code
+  }
+  const statements = (nodes: readonly TSNodeLike[], runs: boolean): number => {
     let code = 0
     for (const node of nodes) {
-      if (node.isNamed === true && !INERT.has(node.type)) code = status(node)
+      if (node.isNamed === true && !INERT.has(node.type)) code = status(node, runs)
     }
     return code
   }
-  const status = (node: TSNodeLike): number => {
+  const command = (span: string, runs: boolean): number => {
+    const kept: Judgment[] = []
+    for (const [place, judgment] of (commands.get(span) ?? []).entries()) {
+      const key = `${span}:${String(place)}`
+      reached.add(key)
+      if (defined.has(judgment.command) && byDefault(judgment)) calls.add(key)
+      else kept.push(judgment)
+    }
+    return refused(kept, runs)
+  }
+  const status = (node: TSNodeLike, runs: boolean): number => {
     const kind = node.type
     const span = spanOf(node)
-    const code = refused(redirects.get(span) ?? [])
+    const code = refused(redirects.get(span) ?? [], runs)
     if (code !== 0) return code
-    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) {
-      return refused(commands.get(span) ?? [])
-    }
+    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) return command(span, runs)
     if (kind === NodeType.REDIRECTED_STATEMENT) {
       const body = node.namedChildren[0]
       if (body === undefined || REDIRECT_TYPES.has(body.type)) return 0
-      return status(body)
+      return status(body, runs)
     }
     if (kind === NodeType.LIST) {
       const left = node.children[0]
       const op = node.children[1]
       const right = node.children[node.children.length - 1]
       if (left === undefined || op === undefined || right === undefined) return 0
-      const code = status(left)
-      if ((op.type === NodeType.AND) === (code === 0)) return status(right)
-      return code
+      const code = status(left, runs)
+      const goes = (op.type === NodeType.AND) === (code === 0)
+      const later = status(right, runs && goes)
+      return goes ? later : code
     }
     if (kind === NodeType.PIPELINE) {
       const stages = [...node.namedChildren]
@@ -1945,40 +1968,65 @@ function lineStatus(
         const inner = first.namedChildren[first.namedChildren.length - 1]
         if (inner !== undefined) stages[0] = inner
       }
-      const codes = stages.map((stage) => status(stage))
+      const codes = stages.map((stage) => forked([stage], runs))
       const last = pipefail
         ? ([...codes].reverse().find((c) => c !== 0) ?? 0)
         : (codes[codes.length - 1] ?? 0)
       return negated ? (last !== 0 ? 0 : 1) : last
     }
-    if (kind === NodeType.NEGATED_COMMAND) return statements(node.children) !== 0 ? 0 : 1
+    if (kind === NodeType.NEGATED_COMMAND) return statements(node.children, runs) !== 0 ? 0 : 1
+    if (kind === NodeType.SUBSHELL) return forked(node.children, runs)
     if (kind === NodeType.IF_STATEMENT) {
-      const [head, body] = clause(node)
-      if (statements(head) === 0) return statements(body)
-      for (const child of node.namedChildren) {
-        if (child.type === NodeType.ELIF_CLAUSE) {
-          const [elifHead, elifBody] = clause(child)
-          if (statements(elifHead) === 0) return statements(elifBody)
-        } else if (child.type === NodeType.ELSE_CLAUSE) {
-          return statements(child.children)
+      const branches = [
+        clause(node),
+        ...node.namedChildren.filter((c) => c.type === NodeType.ELIF_CLAUSE).map(clause),
+      ]
+      let code = 0
+      let taken = false
+      for (const [head, body] of branches) {
+        const live = runs && !taken
+        const hit = statements(head, live) === 0 && live
+        const result = statements(body, hit)
+        if (hit) {
+          code = result
+          taken = true
         }
       }
-      return 0
+      for (const child of node.namedChildren) {
+        if (child.type !== NodeType.ELSE_CLAUSE) continue
+        const live = runs && !taken
+        const result = statements(child.children, live)
+        if (live) code = result
+      }
+      return code
     }
     if (kind === NodeType.WHILE_STATEMENT) {
       const loop = node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP)
       const head = node.children.filter((c) => c.type !== NodeType.DO_GROUP)
-      const entered = statements(head) === 0
-      if (entered === (node.children[0]?.type === NodeType.UNTIL)) return 0
-      return statements(loop)
+      const until = node.children[0]?.type === NodeType.UNTIL
+      const entered = runs && (statements(head, runs) === 0) !== until
+      const code = statements(loop, entered)
+      return entered ? code : 0
     }
-    if (kind === NodeType.FUNCTION_DEFINITION || kind === NodeType.CASE_STATEMENT) return 0
+    if (kind === NodeType.FUNCTION_DEFINITION) {
+      const name = node.namedChildren.find((c) => c.type === NodeType.WORD)
+      if (runs && name !== undefined) {
+        defined.add(getText(name))
+        every.add(getText(name))
+      }
+      return 0
+    }
+    if (kind === NodeType.CASE_STATEMENT) return 0
     if (kind === NodeType.FOR_STATEMENT || kind === NodeType.C_STYLE_FOR_STATEMENT) {
-      return statements(node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP))
+      return statements(
+        node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP),
+        runs,
+      )
     }
-    return statements(backgrounded(node.children))
+    return statements(backgrounded(node.children), runs)
   }
-  return [status(tree), ran]
+  const exitCode = status(tree, true)
+  return { exitCode, ran, calls, reached, defined: every }
 }
 
 /**
