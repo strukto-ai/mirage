@@ -95,7 +95,7 @@ holds the full record: `memory`, `categories`, `metadata`, `created_at`,
 ### Search
 
 The `search` CLI runs Mem0's semantic search in the
-same scope. Register it on the workspace:
+same scope. Register it on the workspace before `ws.close()`:
 
 ```ts
 import { SEARCH } from '@struktoai/mirage-node'
