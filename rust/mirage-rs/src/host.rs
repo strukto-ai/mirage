@@ -483,6 +483,7 @@ impl Host {
                 (json!({"status": status}), Vec::new())
             }
             "clock" => (json!({}), b"[1795147261,0]".to_vec()),
+            "memory" => (json!({}), Vec::new()),
             "walls" => {
                 let times = request["times"].as_array().cloned().unwrap_or_default();
                 let walls: Vec<i64> = times

@@ -1,10 +1,11 @@
 mod doc;
+mod inflate;
 mod info;
 mod text;
 
 use serde::Deserialize;
 
-use self::doc::{Doc, Refused};
+use self::doc::{Doc, Measured, Refused};
 use self::text::Mode;
 use crate::jq::time::Zone;
 use crate::request::{Opening, Request, failed, failure_text};
@@ -13,6 +14,9 @@ use crate::{Stream, StreamError, parse_config, task};
 
 /// The exit status of a refused option.
 const USAGE: i32 = 99;
+/// How much of the document each read gathers before the workspace is asked
+/// whether what is held so far still fits.
+const READ_WINDOW: u64 = 1 << 20;
 
 #[derive(Deserialize)]
 struct TextConfig {
@@ -108,7 +112,7 @@ async fn read(host: &Host, say: &Say<'_>, name: &[u8]) -> Result<Vec<u8>, i32> {
             .ask(Request::Read {
                 fd: 0,
                 open: open.take(),
-                least: u64::MAX,
+                least: READ_WINDOW,
             })
             .await;
         if failed(&reply) {
@@ -128,6 +132,8 @@ async fn read(host: &Host, say: &Say<'_>, name: &[u8]) -> Result<Vec<u8>, i32> {
         } else {
             data.append(&mut chunk);
         }
+        let size = data.len() as u64;
+        host.ask(Request::Memory { size }).await;
         if reply.end {
             return Ok(data);
         }
@@ -269,8 +275,10 @@ async fn pdftotext(host: Host, config: TextConfig) -> i32 {
         Mode::Reading
     };
     let mut file = (output != b"-").then(|| File::new(output.clone()));
+    let mut measured = Measured::default();
     for page in first..=last {
-        let glyphs = doc.glyphs(page - 1, mode == Mode::Raw);
+        let content = doc.content(&host, page - 1, &mut measured).await;
+        let glyphs = doc.glyphs(page - 1, mode == Mode::Raw, content);
         let mut out = text::page(&glyphs, mode, config.nodiag);
         if !config.nopgbrk {
             out.push('\x0c');

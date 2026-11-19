@@ -41,6 +41,7 @@ from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, OperationNotSupportedError
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import CHUNK_SIZE, chunks
+from mirage.io.memory import check_memory
 from mirage.io.spool import ByteSpool, spooled_pair
 from mirage.io.stream import drain
 from mirage.io.types import ByteSource, IOResult
@@ -347,6 +348,9 @@ class StreamHost:
             return await self._run(request)
         if op == "clock":
             return Served({}, clock_reply())
+        if op == "memory":
+            check_memory(int(str(request["size"])))
+            return Served({})
         if op == "walls":
             times = request.get("times")
             return Served(

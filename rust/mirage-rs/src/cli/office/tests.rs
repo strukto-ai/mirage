@@ -1,3 +1,4 @@
+use super::book::opening_tags;
 use super::read::{Grid, comments};
 use super::sheet::{Edits, Styles, Val, cell_ref, date_serial, notes, rewrite, without_shape};
 use super::{Target, number, target};
@@ -1400,4 +1401,11 @@ fn slide_text_set_keeps_formatting_written_in_the_default_namespace() {
     let get = serde_json::json!({"command": "get", "path": "/slide[1]/shape[1]", "depth": 0});
     let out = cmd(&mut host, "d.pptx", get).0;
     assert!(out.contains("size=24pt bold=true italic=true"), "{out}");
+}
+
+#[test]
+fn only_element_openings_count() {
+    assert_eq!(opening_tags(b"<?xml?><!-- x --><a><b/>text</a>"), 2);
+    assert_eq!(opening_tags(b"<!DOCTYPE a><a></a><"), 1);
+    assert_eq!(opening_tags(b""), 0);
 }

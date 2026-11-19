@@ -11,6 +11,8 @@ from mirage.commands.constants import ROOT_CWD
 from mirage.errors.fs import enotsup
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import IOResult, OpReport, materialize
 from mirage.types import (
     FileStat,
@@ -453,3 +455,17 @@ async def test_it_reads_times_on_the_session_wall_clock():
     )
     request: dict[str, JsonValue] = {"op": "walls", "times": [1_000_000_000]}
     assert (await host.serve(request, b"")).reply == {"walls": [1_000_032_400]}
+
+
+@pytest.mark.asyncio
+async def test_a_stream_asks_whether_an_object_fits_the_workspace() -> None:
+    host = _host({})
+
+    async def ask(size: int) -> dict[str, JsonValue]:
+        return (await host.serve({"op": "memory", "size": size}, b"")).reply
+
+    budget = MemoryBudget(10, lambda: 4)
+    assert await run_with_memory(budget, ask(6)) == {}
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(budget, ask(7))
+    await host.close()

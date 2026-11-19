@@ -14,8 +14,10 @@
 
 import hashlib
 import pathlib
+import zlib
 
 OUT = pathlib.Path(__file__).resolve().parent / "v1"
+HOSTILE = OUT.parent / "hostile"
 
 # The predefined CMaps and character collections a CJK font names, and
 # the codec its codes are written in.
@@ -312,6 +314,44 @@ FAR = {
 }
 
 
+def form_bomb() -> bytes:
+    """One page that draws a form whose content inflates to 20 MiB of
+    spaces from a few kilobytes, past a 16 MiB workspace."""
+    text = b"BT /F1 12 Tf 72 720 Td (hello) Tj ET\n"
+
+    def flate(data: bytes, extra: bytes = b"") -> bytes:
+        packed = zlib.compress(data, 9)
+        return b"<< /Length %d /Filter /FlateDecode %s>>\nstream\n%s\nendstream" % (
+            len(packed),
+            extra,
+            packed,
+        )
+
+    bodies = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> /XObject << /X0 6 0 R >> >> >>",
+        flate(text + b"/X0 Do\n"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        flate(
+            text + b" " * (20 << 20),
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 5 0 R >> >> ",
+        ),
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(bodies, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(bodies) + 1)
+    out += b"".join(b"%010d 00000 n \n" % at for at in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\n" % (len(bodies) + 1)
+    return out + b"startxref\n%d\n%%%%EOF\n" % xref
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     (OUT / "report.pdf").write_bytes(build(REPORT))
@@ -323,6 +363,8 @@ def main() -> None:
     )
     (OUT / "notes.pdf").write_bytes(b"These are plain notes, not a PDF.\n")
     (OUT / "far.pdf").write_bytes(build(FAR))
+    HOSTILE.mkdir(exist_ok=True)
+    (HOSTILE / "form.pdf").write_bytes(form_bomb())
 
 
 if __name__ == "__main__":

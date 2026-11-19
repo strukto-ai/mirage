@@ -23,6 +23,16 @@ pub(super) enum Refusal {
     Host(Vec<u8>),
 }
 
+/// How many elements `bytes` opens: each `<` that starts no end tag,
+/// declaration or comment, a `<` at its end counted once what follows it
+/// is known.
+pub(super) fn opening_tags(bytes: &[u8]) -> u64 {
+    bytes
+        .windows(2)
+        .filter(|w| w[0] == b'<' && !matches!(w[1], b'/' | b'?' | b'!'))
+        .count() as u64
+}
+
 pub(super) struct Book<'h> {
     spool: Spool<'h>,
     entries: Vec<Entry>,
@@ -34,6 +44,10 @@ pub(super) struct Book<'h> {
     /// Where the central directory starts, so the last member's bytes are
     /// known.
     directory_at: u64,
+    /// What the parts kept so far hold, charged before the next one.
+    pub(super) held: u64,
+    /// What each element a kept part opens costs once parsed.
+    pub(super) tag_cost: u64,
 }
 
 /// A book's changes at one point.
@@ -85,6 +99,8 @@ impl<'h> Book<'h> {
             dropped: HashSet::new(),
             added: Vec::new(),
             directory_at: 0,
+            held: 0,
+            tag_cost: 0,
         };
         book.directory_at = book
             .directory_start()
@@ -124,11 +140,27 @@ impl<'h> Book<'h> {
     /// when its data inflates past the size the directory gives it or past
     /// what memory can hold.
     pub(super) async fn part(&mut self, name: &str) -> Option<Vec<u8>> {
+        self.inflate(name).await.map(|(data, _)| data)
+    }
+
+    /// A part's bytes, kept: what they and the elements they open cost is
+    /// added to what the book holds.
+    pub(super) async fn keep(&mut self, name: &str) -> Option<Vec<u8>> {
+        let (data, cost) = self.inflate(name).await?;
+        self.held += cost;
+        Some(data)
+    }
+
+    /// A part's bytes and what holding them costs, each window charged to
+    /// the workspace with what the book already holds, so a part that
+    /// would not fit is refused before it is whole.
+    async fn inflate(&mut self, name: &str) -> Option<(Vec<u8>, u64)> {
         if self.dropped.contains(&key(name)) {
             return None;
         }
         if let Some(data) = self.changed.get(&key(name)) {
-            return Some(data.clone());
+            let cost = data.len() as u64;
+            return Some((data.clone(), cost));
         }
         let entry = self.entry(name)?.clone();
         let start = self.spool.data_start(&entry).await.ok()??;
@@ -136,23 +168,27 @@ impl<'h> Book<'h> {
         let mut decoder = Decoder::new(&entry)?;
         let size = usize::try_from(entry.size).ok()?;
         let mut out = Vec::new();
-        out.try_reserve(size.min(packed.len().saturating_mul(1032).saturating_add(1024)))
-            .ok()?;
         let mut window = Vec::new();
         let mut at = 0;
+        let mut tags = 0u64;
         while at < packed.len() || decoder.pending() {
             let used = decoder.step(&packed[at..], &mut window);
             if out.len() + window.len() > size {
                 return None;
             }
             out.try_reserve(window.len()).ok()?;
+            let from = out.len().saturating_sub(1);
             out.extend_from_slice(&window);
+            tags += opening_tags(&out[from..]);
+            let size = self.held + out.len() as u64 + tags * self.tag_cost;
+            self.spool.host.ask(Request::Memory { size }).await;
             if used == 0 && window.is_empty() {
                 break;
             }
             at += used;
         }
-        Some(out)
+        let cost = out.len() as u64 + tags * self.tag_cost;
+        Some((out, cost))
     }
 
     pub(super) fn put(&mut self, name: &str, data: Vec<u8>) {

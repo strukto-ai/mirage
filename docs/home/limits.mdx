@@ -179,8 +179,9 @@ seconds unless set; `0` or `null` lifts it.
 
 A workspace's `max_memory`, a [size](/home/configuration/workspace#sizes),
 bounds the files in its RAM mounts and each object a command builds while it
-runs: a `$( )` capture, a `read` value, a file read whole, a `jq -s` input, or
-a Monty, Pyodide or QuickJS program's memory. Such an object must fit in what
+runs: a `$( )` capture, a `read` value, a file read whole, a `jq -s` input,
+the parts an `office` document links to (and, in a Word document or a deck,
+their parsed elements), a stream `pdftotext` decodes, or a Monty, Pyodide or QuickJS program's memory. Such an object must fit in what
 the RAM files leave. It is 96 MB unless set; `null` lifts it. Commands running
 at once can each take close to what is left, so it bounds each object, not
 their sum. The read cache has its own [limit](/home/infrastructure/file-cache).

@@ -1,8 +1,8 @@
 // Adapted from OfficeCLI 1.0.161.
 // https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
 // Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
-//! office on a Word document or a PowerPoint deck: the package as its
-//! XML parts, each parsed into a tree the first time a command reads it,
+//! office on a Word document or a PowerPoint deck: the package as the
+//! XML parts its relationships reach, each parsed into a tree the first time a command reads it,
 //! and the `get`, `query`, `set`, `remove` and `batch` commands over them,
 //! answered as OfficeCLI 1.0.161 answers them. A save rewrites only the
 //! parts a command changed and copies every other part as it stands.
@@ -35,6 +35,9 @@ struct Slot {
 }
 
 const CONTENT_TYPES: &str = "/[Content_Types].xml";
+/// What one parsed element costs, as measured on a document of empty
+/// paragraphs, rounded up.
+const TAG_COST: u64 = 300;
 
 fn key(name: &str) -> String {
     name.trim_start_matches('/').to_ascii_lowercase()
@@ -72,8 +75,9 @@ pub(super) fn resolve_target(owner: &str, target: &str) -> String {
     }
 }
 
-/// An opened package: its XML parts fetched whole, each parsed on first
-/// read; every other part left in the host's spool.
+/// An opened package: its content types part and the XML parts its
+/// relationships reach, fetched whole, each parsed on first read; every
+/// other part left in the host's spool.
 pub(super) struct Pkg<'h> {
     book: Book<'h>,
     slots: HashMap<String, Slot>,
@@ -96,7 +100,8 @@ pub(super) struct Snapshot {
 }
 
 impl<'h> Pkg<'h> {
-    /// The package `typed` names, its XML parts read.
+    /// The package `config.file` names, its content types part and the XML
+    /// parts its relationships reach read.
     pub(super) async fn open(host: &'h Host, config: &Config) -> Result<Pkg<'h>, Fail> {
         let mut book = match Book::open(host, &config.file).await {
             Ok(book) => book,
@@ -110,32 +115,17 @@ impl<'h> Pkg<'h> {
             Err(Refusal::Host(why)) => return Err(Fail::of(text(&why))),
         };
         let names: Vec<String> = book.names().into_iter().map(|n| format!("/{n}")).collect();
-        let mut slots = HashMap::new();
-        for name in &names {
-            let lower = name.to_ascii_lowercase();
-            if !(lower.ends_with(".xml") || lower.ends_with(".rels")) {
-                continue;
-            }
-            if let Some(bytes) = book.part(name).await {
-                slots.insert(
-                    key(name),
-                    Slot {
-                        name: name.clone(),
-                        bytes,
-                        tree: OnceCell::new(),
-                    },
-                );
-            }
-        }
+        book.tag_cost = TAG_COST;
         let mut pkg = Pkg {
             book,
-            slots,
+            slots: HashMap::new(),
             names,
             changed: HashSet::new(),
             dropped: HashSet::new(),
             binaries: Vec::new(),
             main: String::new(),
         };
+        pkg.load_reachable().await;
         if !pkg.slots.contains_key(&key(CONTENT_TYPES)) {
             return Err(Fail::of(format!(
                 "Not a document 'office' reads: {} (no-content-types)",
@@ -163,6 +153,59 @@ impl<'h> Pkg<'h> {
         };
         pkg.main = resolve_target("/", &main.target);
         Ok(pkg)
+    }
+
+    /// The content types part, every relationships part, and every XML part
+    /// a relationship reaches from the package root, each kept as it
+    /// inflates: a part nothing links to stays in the spool and is copied
+    /// as it stands on save, while its relationships still keep what it
+    /// links to when another part is removed.
+    async fn load_reachable(&mut self) {
+        let stored: HashMap<String, String> =
+            self.names.iter().map(|n| (key(n), n.clone())).collect();
+        self.load(&stored, CONTENT_TYPES).await;
+        for rels in stored
+            .keys()
+            .filter(|k| k.ends_with(".rels"))
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.load(&stored, &rels).await;
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut owners = vec!["/".to_string()];
+        while let Some(owner) = owners.pop() {
+            self.load(&stored, &rels_name(&owner)).await;
+            for r in self.rels(&owner).into_iter().filter(|r| !r.external) {
+                let target = resolve_target(&owner, &r.target);
+                if seen.insert(key(&target)) {
+                    self.load(&stored, &target).await;
+                    owners.push(target);
+                }
+            }
+        }
+    }
+
+    /// The part `name` inflated into its slot when it is XML the package
+    /// holds, `stored` giving each part's name as the archive spells it.
+    async fn load(&mut self, stored: &HashMap<String, String>, name: &str) {
+        let k = key(name);
+        if !(k.ends_with(".xml") || k.ends_with(".rels")) || self.slots.contains_key(&k) {
+            return;
+        }
+        let Some(stored) = stored.get(&k).cloned() else {
+            return;
+        };
+        if let Some(bytes) = self.book.keep(&stored).await {
+            self.slots.insert(
+                k,
+                Slot {
+                    name: stored,
+                    bytes,
+                    tree: OnceCell::new(),
+                },
+            );
+        }
     }
 
     pub(super) fn has(&self, name: &str) -> bool {
@@ -442,7 +485,8 @@ impl<'h> Pkg<'h> {
         self.book.size(name)
     }
 
-    /// The part's tree, or none when it is absent or not XML.
+    /// The part's tree, or none when it is absent, not XML, or not reached
+    /// from the package root.
     pub(super) fn xml(&self, name: &str) -> Option<&Tree> {
         if self.dropped.contains(&key(name)) {
             return None;

@@ -16,6 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { enotsup } from '../../../errors/fs.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { CHUNK_SIZE } from '../../../io/cooperative.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -51,6 +53,14 @@ function host(
 }
 
 describe('StreamHost', () => {
+  it('asks whether an object fits the workspace', async () => {
+    const h = host({})
+    const ask = (size: number) => () => h.serve({ op: 'memory', size }, new Uint8Array())
+    const budget = new MemoryBudget(10, () => 4)
+    expect(await runWithMemory(budget, ask(6))).toEqual({ reply: {} })
+    await expect(runWithMemory(budget, ask(7))).rejects.toBeInstanceOf(MemoryExhausted)
+  })
+
   it('reads an operand as typed through the mount', async () => {
     const h = host({ '/a.txt': 'one\n' })
     const first = await h.serve({ op: 'read', fd: 1, path: '/a.txt', operand: 1 }, new Uint8Array())

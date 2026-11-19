@@ -754,6 +754,21 @@
         "stderr": ""
       },
       "conformance_skip": "poppler drops a glyph outside the page box; mirage places it past a narrowed gutter"
+    },
+    {
+      "id": "pdf_text_refuses_a_form_past_max_memory",
+      "seq": 13650058,
+      "targets": [
+        "cli-pdf-capped"
+      ],
+      "note": "The page's form inflates to 20 MiB; it is measured a window at a time before the reader decodes it, so the 16 MiB workspace refuses it.",
+      "command": "pdftotext /docs/form.pdf -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "pdftotext: memory exhausted\n"
+      },
+      "conformance_skip": "poppler runs under no workspace memory cap"
     }
   ]
 }

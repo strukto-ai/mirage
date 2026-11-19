@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { crc32, deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { OFFICE } from './index.ts'
 
+const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 // Each line and what OfficeCLI 1.0.161 answers it with: exit code, stdout,
@@ -224,5 +226,139 @@ describe('office', () => {
       .map(([path]) => path)
       .sort()
     expect(writers).toEqual(['add', 'batch', 'create', 'move', 'remove', 'set', 'swap'])
+  })
+})
+
+const TYPES =
+  '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+  '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+  '<Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ' +
+  'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+const ROOT_RELS =
+  '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" ' +
+  'Target="word/document.xml"/></Relationships>'
+
+/** A zip of `parts`, each deflated. */
+function zip(parts: [string, Uint8Array][]): Uint8Array {
+  const locals: Buffer[] = []
+  const centrals: Buffer[] = []
+  let at = 0
+  for (const [name, data] of parts) {
+    const packed = deflateRawSync(data)
+    const fields = (sig: number, size: number): Buffer => {
+      const head = Buffer.alloc(size)
+      head.writeUInt32LE(sig, 0)
+      return head
+    }
+    const local = fields(0x04034b50, 30)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(8, 8)
+    local.writeUInt32LE(crc32(data), 14)
+    local.writeUInt32LE(packed.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(Buffer.byteLength(name), 26)
+    const central = fields(0x02014b50, 46)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(8, 10)
+    central.writeUInt32LE(crc32(data), 16)
+    central.writeUInt32LE(packed.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(Buffer.byteLength(name), 28)
+    central.writeUInt32LE(at, 42)
+    const entry = Buffer.concat([local, Buffer.from(name), packed])
+    locals.push(entry)
+    centrals.push(Buffer.concat([central, Buffer.from(name)]))
+    at += entry.length
+  }
+  const directory = Buffer.concat(centrals)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(parts.length, 8)
+  end.writeUInt16LE(parts.length, 10)
+  end.writeUInt32LE(directory.length, 12)
+  end.writeUInt32LE(at, 16)
+  return new Uint8Array(Buffer.concat([...locals, directory, end]))
+}
+
+/** A Word document whose body is `body`, with `extra` parts no relationship names. */
+function word(body: string, extra: [string, Uint8Array][] = []): Uint8Array {
+  return zip([
+    ['[Content_Types].xml', ENC.encode(TYPES)],
+    ['_rels/.rels', ENC.encode(ROOT_RELS)],
+    [
+      'word/document.xml',
+      ENC.encode(
+        `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
+      ),
+    ],
+    ...extra,
+  ])
+}
+
+type Ran = [number, Uint8Array, string]
+
+async function officeUnderCap(document: Uint8Array, ...lines: string[]): Promise<Ran[]> {
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE, maxMemory: '16MB' })
+  try {
+    ws.registerCli('office', OFFICE)
+    await ws.shell('tee /w/d.docx > /dev/null', { stdin: document })
+    const results: [number, Uint8Array, string][] = []
+    for (const line of lines) {
+      const r = await ws.shell(line)
+      results.push([r.exitCode, r.stdout, DEC.decode(r.stderr)])
+    }
+    return results
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('office under max_memory', () => {
+  it('refuses a document that parses past max_memory', async () => {
+    const got = await officeUnderCap(word('<w:p/>'.repeat(100_000)), 'office get /w/d.docx')
+    expect(got).toEqual([[1, new Uint8Array(), 'office get: memory exhausted\n']])
+  })
+
+  it('refuses parts that fit one at a time together', async () => {
+    const pad = ' '.repeat(10 << 20)
+    const rels =
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+    const styles = `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${pad}</w:styles>`
+    const got = await officeUnderCap(
+      word('<w:p/>' + pad, [
+        ['word/_rels/document.xml.rels', ENC.encode(rels)],
+        ['word/styles.xml', ENC.encode(styles)],
+      ]),
+      'office get /w/d.docx',
+    )
+    expect(got).toEqual([[1, new Uint8Array(), 'office get: memory exhausted\n']])
+  })
+
+  it('reads a document that fits', async () => {
+    const got = await officeUnderCap(
+      word('<w:p/>'.repeat(1_000)),
+      'office get /w/d.docx /body/p[1000]',
+    )
+    expect(got[0]?.[0]).toBe(0)
+  })
+
+  it('never inflates a part nothing links to, and keeps it', async () => {
+    const junk = ENC.encode('<a>' + ' '.repeat(40 << 20) + '</a>')
+    const [got, changed, saved, raw] = (await officeUnderCap(
+      word('<w:p><w:r><w:t>hi</w:t></w:r></w:p>', [['word/junk.xml', junk]]),
+      'office get /w/d.docx /body/p[1]',
+      'office set /w/d.docx /body/p[1] --prop text=bye',
+      'office get /w/d.docx /body/p[1]',
+      'cat /w/d.docx',
+    )) as [Ran, Ran, Ran, Ran]
+    expect([got[0], changed[0], saved[0]]).toEqual([0, 0, 0])
+    expect(DEC.decode(saved[1])).toContain('"bye"')
+    const savedZip = Buffer.from(raw[1])
+    const central = savedZip.lastIndexOf('word/junk.xml') - 46
+    expect(savedZip.readUInt32LE(central)).toBe(0x02014b50)
+    expect(savedZip.readUInt32LE(central + 16)).toBe(crc32(junk))
   })
 })

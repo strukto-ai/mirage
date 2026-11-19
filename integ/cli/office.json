@@ -562,6 +562,36 @@
         "stderr": "Error: Cannot remove sheet 'Sheet1': a workbook must keep at least one visible sheet, or Excel refuses to open the file. Unhide another sheet first.\nError: Cannot move '/body/tbl[1]' into one of its own descendants ('/body/tbl[1]/tr[1]').\n"
       },
       "conformance_skip": "OfficeCLI 1.0.161 renames OtherData! with Data!, drops a hide set with a rename, leaves no visible sheet, joins a list from its end and overflows its stack moving a table into its row"
+    },
+    {
+      "id": "office_refuses_a_document_that_parses_past_max_memory",
+      "seq": 13600043,
+      "targets": [
+        "cli-office-capped"
+      ],
+      "note": "100,000 empty paragraphs pack into 2 KB; each parsed element is charged before parsing, so the 16 MiB workspace refuses the document.",
+      "command": "office get /docs/paras.docx",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "office get: memory exhausted\n"
+      },
+      "conformance_skip": "OfficeCLI runs under no workspace memory cap"
+    },
+    {
+      "id": "office_reads_past_a_part_nothing_links_to",
+      "seq": 13600044,
+      "targets": [
+        "cli-office-capped"
+      ],
+      "note": "A 20 MiB part no relationship names is never inflated, so the document reads in a 16 MiB workspace.",
+      "command": "office get /docs/orphan.docx /body/p[1]",
+      "expect": {
+        "exit": 0,
+        "stdout": "/body/p[1] (paragraph) \"Kept apart\" style=Normal\n/body/p[1]/r[1] (run) \"Kept apart\"\n",
+        "stderr": ""
+      },
+      "conformance_skip": "OfficeCLI runs under no workspace memory cap"
     }
   ]
 }

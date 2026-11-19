@@ -2783,6 +2783,44 @@
       ]
     },
     {
+      "id": "cli-office-capped",
+      "max_memory": 16777216,
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "office"
+      ],
+      "mounts": [
+        {
+          "path": "/docs",
+          "vfs": "ram",
+          "backend": "memory",
+          "fixture": "office/hostile"
+        }
+      ]
+    },
+    {
+      "id": "cli-pdf-capped",
+      "max_memory": 16777216,
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "pdftotext"
+      ],
+      "mounts": [
+        {
+          "path": "/docs",
+          "vfs": "ram",
+          "backend": "memory",
+          "fixture": "pdf/hostile"
+        }
+      ]
+    },
+    {
       "id": "cli-airtable",
       "hosts": [
         "python",

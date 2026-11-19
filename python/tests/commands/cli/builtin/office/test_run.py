@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import io
+import zipfile
+
 import pytest
 
 from mirage.commands.cli.builtin.office import OFFICE
@@ -312,3 +315,111 @@ def test_only_get_and_query_read():
     assert {
         path for path, handler in OFFICE.handlers.items() if handler.write
     } == {"create", "set", "add", "remove", "move", "swap", "batch"}
+
+
+TYPES = (
+    b'<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.'
+    b'openxmlformats.org/package/2006/content-types"><Default Extension="rels" '
+    b'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    b'<Default Extension="xml" ContentType="application/xml"/><Override '
+    b'PartName="/word/document.xml" ContentType="application/vnd.'
+    b'openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    b"</Types>"
+)
+ROOT_RELS = (
+    b'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://'
+    b'schemas.openxmlformats.org/package/2006/relationships"><Relationship '
+    b'Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+    b'relationships/officeDocument" Target="word/document.xml"/>'
+    b"</Relationships>"
+)
+
+
+def word(body: bytes, extra: dict[str, bytes] | None = None) -> bytes:
+    """A Word document whose body is `body`, with `extra` parts that no
+    relationship names."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", TYPES)
+        z.writestr("_rels/.rels", ROOT_RELS)
+        z.writestr(
+            "word/document.xml",
+            b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+            b'wordprocessingml/2006/main"><w:body>'
+            + body
+            + b"</w:body></w:document>",
+        )
+        for name, data in (extra or {}).items():
+            z.writestr(name, data)
+    return out.getvalue()
+
+
+async def office_under_cap(
+    document: bytes, *lines: str
+) -> list[tuple[int, bytes, bytes]]:
+    with Workspace(
+        {"/w/": RAMVFS()}, mode=MountMode.WRITE, max_memory="16MB"
+    ) as ws:
+        ws.register_cli("office", OFFICE)
+        await ws.shell("tee /w/d.docx > /dev/null", stdin=document)
+        results = []
+        for line in lines:
+            r = await ws.shell(line)
+            results.append((r.exit_code, r.stdout or b"", r.stderr or b""))
+        return results
+
+
+@pytest.mark.asyncio
+async def test_a_document_that_parses_past_max_memory_is_refused():
+    [got] = await office_under_cap(
+        word(b"<w:p/>" * 100_000), "office get /w/d.docx"
+    )
+    assert got == (1, b"", b"office get: memory exhausted\n")
+
+
+@pytest.mark.asyncio
+async def test_parts_that_fit_one_at_a_time_are_refused_together():
+    pad = b" " * (10 << 20)
+    rels = (
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/'
+        b'2006/relationships"><Relationship Id="rId1" Type="http://schemas.'
+        b'openxmlformats.org/officeDocument/2006/relationships/styles" '
+        b'Target="styles.xml"/></Relationships>'
+    )
+    styles = (
+        b'<w:styles xmlns:w="http://schemas.openxmlformats.org/'
+        b'wordprocessingml/2006/main">' + pad + b"</w:styles>"
+    )
+    document = word(
+        b"<w:p/>" + pad,
+        {"word/_rels/document.xml.rels": rels, "word/styles.xml": styles},
+    )
+    [got] = await office_under_cap(document, "office get /w/d.docx")
+    assert got == (1, b"", b"office get: memory exhausted\n")
+
+
+@pytest.mark.asyncio
+async def test_a_document_that_fits_max_memory_reads():
+    [got] = await office_under_cap(
+        word(b"<w:p/>" * 1_000), "office get /w/d.docx /body/p[1000]"
+    )
+    assert got[0] == 0, got
+
+
+@pytest.mark.asyncio
+async def test_a_part_nothing_links_to_is_never_inflated_and_kept():
+    junk = b"<a>" + b" " * (40 << 20) + b"</a>"
+    document = word(
+        b"<w:p><w:r><w:t>hi</w:t></w:r></w:p>", {"word/junk.xml": junk}
+    )
+    got, changed, saved, raw = await office_under_cap(
+        document,
+        "office get /w/d.docx /body/p[1]",
+        "office set /w/d.docx /body/p[1] --prop text=bye",
+        "office get /w/d.docx /body/p[1]",
+        "cat /w/d.docx",
+    )
+    assert (got[0], changed[0]) == (0, 0), (got, changed)
+    assert b'"bye"' in saved[1], saved
+    with zipfile.ZipFile(io.BytesIO(raw[1])) as z:
+        assert z.read("word/junk.xml") == junk

@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import os
+import zlib
+
 import pytest
 
 from mirage.commands.cli.builtin.pdf import PDFINFO, PDFTOTEXT
@@ -168,3 +172,400 @@ async def test_pdfinfo_prints_the_field_block():
     ]
     assert "Page    2 size:  612 x 792 pts (letter)" in out
     assert out.endswith("Optimized:       no\nPDF version:     1.4\n")
+
+
+FONT = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+HELLO = b"BT /F1 12 Tf 72 720 Td (hello) Tj ET\n"
+BIG = b" " * (40 << 20)
+# Mostly one letter: inflates under a hundred times its packed bytes, so
+# the reader keeps it.
+DENSE = os.urandom(20 << 20).translate(bytes([97] * 254 + [98] * 2))
+
+
+def stream(packed: bytes, extra: bytes = b"") -> bytes:
+    return b"<< /Length %d %s>>\nstream\n%s\nendstream" % (
+        len(packed),
+        extra,
+        packed,
+    )
+
+
+def flate(data: bytes, extra: bytes = b"") -> bytes:
+    return stream(zlib.compress(data, 9), b"/Filter /FlateDecode " + extra)
+
+
+def raw_deflate(data: bytes) -> bytes:
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    return packer.compress(data) + packer.flush()
+
+
+def lzw_run(longest: int) -> bytes:
+    """An LZW stream of spaces: each code one longer than the last until
+    the table fills, then the longest one `longest` times."""
+    codes = [256, 32, *range(258, 4096), *[4095] * longest, 257]
+    out, held, bits = bytearray(), 0, 0
+    width, following, previous = 9, 258, None
+    for code in codes:
+        if width < 12 and following + 1 == 1 << width:
+            width += 1
+        held, bits = held << width | code, bits + width
+        while bits >= 8:
+            bits -= 8
+            out.append(held >> bits & 0xFF)
+        held &= (1 << bits) - 1
+        if code == 256:
+            width, following, previous = 9, 258, None
+            continue
+        if previous is not None and following < 4096:
+            following += 1
+        previous = code
+    if bits:
+        out.append(held << (8 - bits) & 0xFF)
+    return bytes(out)
+
+
+# Each filter pdf_oxide decodes with no limit of its own, over 20 MiB of
+# spaces; Brotli's from Node's encoder, which Python's library lacks.
+FILTERED = {
+    "LZWDecode": stream(lzw_run(6000), b"/Filter /LZWDecode "),
+    "RunLengthDecode": stream(
+        bytes([129, 32]) * ((20 << 20) // 128) + bytes([128]),
+        b"/Filter /RunLengthDecode ",
+    ),
+    "ASCIIHexDecode then FlateDecode": stream(
+        zlib.compress(b" " * (20 << 20), 9).hex().encode() + b">",
+        b"/Filter [/ASCIIHexDecode /FlateDecode] ",
+    ),
+    "BrotliDecode": stream(
+        bytes.fromhex(
+            "cbffff3ff82540e2b14020f7fe8fffff7ff04b00c4611180eefd5ffeffffe097"
+            "0088c30200ddfb1f"
+        ),
+        b"/Filter /BrotliDecode ",
+    ),
+}
+
+
+def one_page(content: bytes, resources: bytes, *more: bytes) -> bytes:
+    """A one-page PDF: catalog 1, pages 2, page 3, content 4, then `more`."""
+    return pages([(content, resources)], *more)
+
+
+def pages(each: list[tuple[bytes, bytes]], *more: bytes) -> bytes:
+    """A PDF of pages, each a (content, resources) pair: catalog 1, pages
+    2, then each page and its content, then `more`."""
+    kids = [3 + 2 * at for at in range(len(each))]
+    bodies = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>"
+        % (b" ".join(b"%d 0 R" % kid for kid in kids), len(kids)),
+    ]
+    for kid, (content, resources) in zip(kids, each):
+        bodies.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents %d 0 R /Resources %s >>" % (kid + 1, resources)
+        )
+        bodies.append(content)
+    bodies.extend(more)
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(bodies, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(bodies) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\n" % (len(bodies) + 1)
+    return out + b"startxref\n%d\n%%%%EOF\n" % xref
+
+
+FONT_ONLY = b"<< /Font << /F1 5 0 R >> >>"
+BOMBS = {
+    "content": one_page(flate(HELLO + DENSE), FONT_ONLY, FONT),
+    "form": one_page(
+        flate(HELLO + b"/X0 Do\n"),
+        b"<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R >> >>",
+        FONT,
+        flate(
+            HELLO + BIG,
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 5 0 R >> >> ",
+        ),
+    ),
+    "cmap": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+        b"/ToUnicode 6 0 R >>",
+        flate(BIG),
+    ),
+    "descendant font file": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H "
+        b"/DescendantFonts [6 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo "
+        b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) "
+        b"/Supplement 0 >> /FontDescriptor 7 0 R >>",
+        b"<< /Type /FontDescriptor /FontName /Foo /Flags 32 "
+        b"/FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 "
+        b"/Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>",
+        flate(BIG),
+    ),
+    "descendant glyph map": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H "
+        b"/DescendantFonts [6 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo "
+        b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) "
+        b"/Supplement 0 >> /CIDToGIDMap 7 0 R >>",
+        flate(BIG),
+    ),
+    "content behind a broken zlib header": one_page(
+        stream(
+            b"\x78\x00" + raw_deflate(HELLO + BIG),
+            b"/Filter /FlateDecode ",
+        ),
+        FONT_ONLY,
+        FONT,
+    ),
+    "font file": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /TrueType /BaseFont /Foo /FirstChar 32 "
+        b"/LastChar 126 /FontDescriptor 6 0 R >>",
+        b"<< /Type /FontDescriptor /FontName /Foo /Flags 32 "
+        b"/FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 "
+        b"/Descent -200 /CapHeight 700 /StemV 80 /FontFile2 7 0 R >>",
+        flate(BIG),
+    ),
+}
+
+
+async def capped(document: bytes, line: str) -> tuple[int, str, str]:
+    with Workspace(
+        {"/w/": RAMVFS()}, mode=MountMode.WRITE, max_memory="16MB"
+    ) as ws:
+        ws.register_cli("pdftotext", PDFTOTEXT)
+        ws.register_cli("pdfinfo", PDFINFO)
+        await ws.shell("tee /w/d.pdf > /dev/null", stdin=document)
+        result = await ws.shell(line)
+        return (
+            result.exit_code,
+            (result.stdout or b"").decode(),
+            (result.stderr or b"").decode(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", sorted(BOMBS))
+async def test_a_stream_that_inflates_past_max_memory_is_refused(site):
+    assert await capped(BOMBS[site], "pdftotext /w/d.pdf -") == (
+        1,
+        "",
+        "pdftotext: memory exhausted\n",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filters", sorted(FILTERED))
+async def test_a_character_map_past_max_memory_is_refused_by_any_filter(
+    filters,
+):
+    page = one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+        b"/ToUnicode 6 0 R >>",
+        FILTERED[filters],
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        1,
+        "",
+        "pdftotext: memory exhausted\n",
+    )
+
+
+def png_sub(row: bytes) -> bytes:
+    """One row through the PNG Sub predictor: each byte less the one before."""
+    return bytes([1]) + bytes(
+        (b - (row[i - 1] if i else 0)) & 0xFF for i, b in enumerate(row)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_form_behind_a_predictor_counts_each_form_it_names():
+    draws = b"/X1 Do\n"
+    page = one_page(
+        flate(HELLO + b"/X0 Do\n"),
+        b"<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R >> >>",
+        FONT,
+        flate(
+            png_sub(draws),
+            b"/DecodeParms << /Predictor 12 /Columns %d >> "
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+            b"/Resources << /XObject << /X1 7 0 R >> >> " % len(draws),
+        ),
+        flate(BIG, b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "),
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        1,
+        "",
+        "pdftotext: memory exhausted\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_forms_that_fit_one_at_a_time_are_refused_together():
+    form = flate(
+        HELLO + b" " * (10 << 20),
+        b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] ",
+    )
+    page = one_page(
+        flate(HELLO + b"/X0 Do /X1 Do\n"),
+        b"<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R /X1 7 0 R >> >>",
+        FONT,
+        form,
+        form,
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        1,
+        "",
+        "pdftotext: memory exhausted\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_forms_held_on_earlier_pages_are_checked_again_together():
+    form = flate(
+        HELLO + b" " * (9 << 20),
+        b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << >> ",
+    )
+    shared = (
+        b"<< /Font << /F1 9 0 R >> /XObject << /X0 10 0 R /X1 11 0 R >> >>"
+    )
+    document = pages(
+        [
+            (flate(HELLO + b"/X0 Do\n"), shared),
+            (flate(HELLO + b"/X1 Do\n"), shared),
+            (flate(HELLO + b"/X0 Do /X1 Do\n"), shared),
+        ],
+        FONT,
+        form,
+        form,
+    )
+    first, _, _ = await capped(document, "pdftotext -l 2 /w/d.pdf -")
+    code, _, err = await capped(document, "pdftotext /w/d.pdf -")
+    assert (first, code, err) == (0, 1, "pdftotext: memory exhausted\n")
+
+
+@pytest.mark.asyncio
+async def test_a_form_without_resources_reads_each_pages_own():
+    page = flate(HELLO + b"/X0 Do\n")
+    document = pages(
+        [
+            (page, b"<< /Font << /F1 7 0 R >> /XObject << /X0 8 0 R >> >>"),
+            (
+                page,
+                b"<< /Font << /F1 7 0 R >> "
+                b"/XObject << /X0 8 0 R /Nested 9 0 R >> >>",
+            ),
+        ],
+        FONT,
+        flate(
+            b"/Nested Do\n",
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] ",
+        ),
+        flate(BIG, b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] "),
+    )
+    code, _, err = await capped(document, "pdftotext /w/d.pdf -")
+    assert (code, err) == (1, "pdftotext: memory exhausted\n")
+
+
+TYPE3 = (
+    b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] "
+    b"/FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << >> "
+    b"/Encoding << /Type /Encoding /Differences [] >> /FirstChar 32 "
+    b"/LastChar 32 /Widths [0] /Resources 10 0 R >>"
+)
+
+
+@pytest.mark.asyncio
+async def test_fonts_whose_resources_name_each_other_are_walked_once():
+    page = one_page(
+        flate(HELLO),
+        b"<< /Font << /F1 5 0 R /T1 6 0 R >> >>",
+        FONT,
+        TYPE3,
+        TYPE3,
+        TYPE3,
+        TYPE3,
+        b"<< /Font << /T1 6 0 R /T2 7 0 R /T3 8 0 R /T4 9 0 R >> >>",
+    )
+    code, out, _ = await asyncio.wait_for(
+        capped(page, "pdftotext /w/d.pdf -"), 30
+    )
+    assert (code, "hello" in out) == (0, True)
+
+
+@pytest.mark.asyncio
+async def test_a_form_the_page_never_draws_is_not_held():
+    page = one_page(
+        flate(HELLO),
+        b"<< /Font << /F1 5 0 R >> /XObject << /X0 6 0 R >> >>",
+        FONT,
+        flate(
+            HELLO + BIG,
+            b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] ",
+        ),
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        0,
+        "hello\n\n\f",
+        "",
+    )
+
+
+@pytest.mark.asyncio
+async def test_content_past_a_hundred_times_its_bytes_is_dropped_unheld():
+    page = one_page(flate(HELLO + BIG), FONT_ONLY, FONT)
+    assert await capped(page, "pdftotext /w/d.pdf -") == (0, "\f", "")
+
+
+@pytest.mark.asyncio
+async def test_content_behind_a_broken_zlib_header_that_fits_still_reads():
+    page = one_page(
+        stream(b"\x78\x00" + raw_deflate(HELLO), b"/Filter /FlateDecode "),
+        FONT_ONLY,
+        FONT,
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        0,
+        "hello\n\n\f",
+        "",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_compressed_page_under_max_memory_reads_whole():
+    page = one_page(flate(HELLO), FONT_ONLY, FONT)
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        0,
+        "hello\n\n\f",
+        "",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["pdfinfo -", "pdftotext - /w/out.txt"],
+)
+async def test_an_input_past_max_memory_is_refused_as_it_is_read(line):
+    command = line.split()[0]
+    assert await capped(b"", f"head -c 20000000 /dev/zero | {line}") == (
+        1,
+        "",
+        f"{command}: memory exhausted\n",
+    )
