@@ -4,9 +4,8 @@ icon: hard-drive
 description: Expose a Python workspace's mounts as real folders through FUSE, FSKit or NFS.
 ---
 
-A mount with a kernel `backend` also shows as a folder on the machine running
-Mirage, so editors, `git` and any other program read and write it like a local
-folder. The [FUSE overview](/home/setup/fuse) lists what each OS supports.
+Set `backend: fuse` on a mount and Mirage also shows it as a real folder on this
+computer, so editors, `git` and other programs can read and write it. The [FUSE overview](/home/setup/fuse) lists what each OS supports.
 
 ## Install
 
@@ -85,25 +84,22 @@ mounts:
 
 ## Behavior
 
-- **Files of unknown size.** Slack, Linear, Trello and other API-backed
-  mounts cannot size a file without fetching it, so it stats as 0 bytes until
-  something opens it, like a `/proc` file. Over `fuse`, `cat`, `grep`, `cp`
-  and `wc -c` read it in full; over `nfs` and `fskit` it reads as empty, so
-  Mirage warns when such a mount uses them. `ls -l`, `du` and `find -size` show 0 until it is opened,
-  and `tar` or `rsync` copy it empty. Mirage never fetches content during
-  `stat`, which would cost one API call per file on every `ls -l`. On
-  Windows, opening the file to stat it fetches it, so the size shows at once.
-- **Symlinks.** Links made with `ln -s`, in the Mirage Shell or in the
+- **Files of unknown size.** API mounts (Slack, Linear, Trello, ...) report
+  0 bytes until a file is opened. `ls -l`, `du` and `find -size` show 0, and
+  `tar` and `rsync` copy such files empty. `cat`, `grep`, `cp` and `wc -c`
+  read the full content through `fuse`, and read the file as empty through
+  `nfs` and `fskit`, which Mirage warns about. On Windows, `fuse` also shows
+  the size at once.
+- **Symlinks.** Links made with `ln -s`, in the shell or in the
   folder, show as real symlinks and resolve inside the folder.
 - **Permissions.** The mode bits `chmod` and `chown` set are for display.
   Mount modes and policy decide access, never the kernel.
 - **Extended attributes.** `getfattr` and `setfattr` in the folder read and
-  write the same attributes as the Mirage Shell, on every VFS.
+  write the same attributes as the shell, on every VFS.
 
 ## FSKit on macOS
 
-Apple is phasing out kernel extensions, and on Apple Silicon the macFUSE
-kext needs a reduced-security boot. With macFUSE 5 on macOS 15.4+,
+On Apple Silicon the macFUSE kernel extension needs a reduced-security boot. With macFUSE 5 on macOS 15.4+,
 `backend: fskit` serves the same folder through FSKit instead, with no kext:
 
 ```python

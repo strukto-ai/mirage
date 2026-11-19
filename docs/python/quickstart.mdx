@@ -13,15 +13,12 @@ Use Python 3.12 or newer. In a uv project, install Mirage with:
 uv add mirage-ai
 ```
 
-In another activated environment, install it with:
-
-```bash
-python -m pip install mirage-ai
-```
+For other environments and extras, see [Installation](/python/install).
 
 ## Create a Workspace
 
-Start with the RAM VFS, which needs no credentials.
+Start with the RAM VFS, an in-memory filesystem mounted at `/data` that needs
+no credentials.
 
 ```python quickstart.py
 import asyncio
@@ -50,17 +47,28 @@ asyncio.run(main())
 ```
 
 Run it with `uv run python quickstart.py`, or `python quickstart.py` in another
-activated environment. It lists `user.json`,
-prints `alice`, then prints the matching JSON document.
+activated environment. Output:
 
-Shell failures are returned in the result; check `exit_code` and `stderr_str()`
-when needed. See the [in-app API reference](/python/access/in-app#session-shell).
+```text
+user.json
+alice
+{"name": "alice"}
+```
+
+Mounts are read-only unless you set a mode. `MountMode.WRITE` lets the shell create and change files under `/data`.
+
+`ws.shell` does not raise when a command fails. Check `result.exit_code`, and
+read the message with `await result.stderr_str()`. See the
+[in-app API reference](/python/access/in-app#session-shell).
+
+Later pages show the body of an `async def main()`; run it with
+`asyncio.run(main())`, as here.
 
 ## Next steps
 
 <CardGroup cols={2}>
   <Card title="Virtualize data storage" icon="database" href="/python/vfs/index">
-    S3, Slack, Google Drive, Postgres and 60 more, as files.
+    S3, Slack, Google Drive, Postgres and 50+ more, as files.
   </Card>
   <Card title="Install CLIs" icon="wrench" href="/python/cli/index">
     `gh`, `git`, Linear, Office and PDF tools in the same shell.

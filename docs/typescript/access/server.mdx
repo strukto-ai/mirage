@@ -4,7 +4,7 @@ description: The Mirage server in TypeScript, a Fastify app that holds workspace
 icon: server
 ---
 
-The Mirage server is a Fastify app from `@struktoai/mirage-server`. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh), on its own port when `ssh_port` is set and through its HTTP port either way. The Python server speaks the same protocol, so a client of one works against the other. Every route, with its request and response, is in the [API Reference](/api/overview).
+The Mirage server is a Fastify app from `@struktoai/mirage-server` that holds workspaces. It serves them over [HTTP](/home/access/http), [MCP](/home/access/mcp), [RPC](/home/access/rpc) and [SSH](/home/access/ssh). SSH runs through the HTTP port, and on its own port too when you set `ssh_port`. The Python server speaks the same protocol. The [API Reference](/api/overview) lists every route.
 
 ## Install
 
@@ -15,6 +15,10 @@ npm install @struktoai/mirage-server
 
 ```bash with SSH
 npm install @struktoai/mirage-server ssh2
+```
+
+```bash with MCP over stdio
+npm install @struktoai/mirage-server @modelcontextprotocol/server
 ```
 </CodeGroup>
 
@@ -71,11 +75,14 @@ Options of `buildApp`. The Default column names the environment variable or `~/.
 
 ## Workers
 
-By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), it runs that many workers, each the whole server on a Unix socket of its own, and its own server passes each request to the worker holding the workspace. A new workspace goes to a worker at random. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
+By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), the daemon starts that many workers. Each worker is a full server on its own Unix socket. The daemon routes each request to the worker that holds the workspace. New workspaces go to a random worker. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
 
-`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
+`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. The default is `thread`.
 
-The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges their `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
+- The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges the workers' `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers.
+- A worker that exits stays gone, and so do its workspaces.
+- Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker.
+- The SSH port does not work with workers above 1.
 
 ## Started by the CLI
 
@@ -89,7 +96,7 @@ The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers can run over a t
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { createMirageMcpServer } from '@struktoai/mirage-server/mcp'
 
-const server = createMirageMcpServer(ws, { sessionId: 'agent' })
+const server = createMirageMcpServer(ws)
 await server.connect(new StdioServerTransport())
 ```
 
@@ -98,7 +105,7 @@ await server.connect(new StdioServerTransport())
 ```ts
 import { MirageRpcServer } from '@struktoai/mirage-server/rpc'
 
-const server = new MirageRpcServer(ws, { sessionId: 'agent' })
+const server = new MirageRpcServer(ws)
 const response = await server.handle({
   jsonrpc: '2.0',
   id: 1,

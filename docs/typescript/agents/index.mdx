@@ -4,15 +4,12 @@ description: Connect a coding agent or an agent framework to a Mirage workspace.
 icon: robot
 ---
 
-An agent reaches a workspace in one of three ways: a coding agent runs as it
-is on a workspace or loads Mirage as a plugin, an app hands the workspace to an
-agent SDK, or a provider runs the agent with the workspace as its environment.
-In each, the agent's file and shell calls go through Mirage's mounts, modes and
-policy.
+Connect an agent in one of three ways. Every file and shell call it makes goes
+through Mirage's mounts, modes and policy.
 
 ## Coding agents
 
-These run as they are, on a workspace the `mirage` CLI creates, whatever
+These run unchanged, on a workspace the `mirage` CLI creates, whatever
 language the app is in.
 
 | Agent | Connects through |

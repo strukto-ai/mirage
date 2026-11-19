@@ -6,7 +6,7 @@ icon: /images/supabase-logo.svg
 
 `SupabaseVFS` mounts one Supabase Storage bucket: every object becomes a file
 and every `/` in a key a folder. It reaches Supabase through the Storage S3 API.
-Credentials are set up on the [Supabase page](/home/setup/supabase).
+Create the bucket and credentials as in [Supabase setup](/home/setup/supabase).
 
 ## Install
 
@@ -117,8 +117,7 @@ in keys; Supabase stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/supabase/notes.md` is the key `users/42/notes.md`. A leading `/` is
-  dropped and a trailing `/` added.
+  so `/supabase/notes.md` is the key `users/42/notes.md`.
 - **Path style:** Supabase takes only path-style URLs, so `path_style` defaults
   to `True`.
 

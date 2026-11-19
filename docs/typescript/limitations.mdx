@@ -15,7 +15,7 @@ shares are on [Limits](/home/limits) and the [shell page](/home/core/shell#limit
 ### Node versions
 
 `@struktoai/mirage-node` needs Node `^22.20 || ^24.12 || >=25`. The core and
-browser packages, run under Node, need 20.18.1 or later.
+browser packages, run under Node, need 20.18.1+ on 20, or 22+.
 
 ### `patchNodeFs` misses ESM imports
 
@@ -24,8 +24,7 @@ swapping the functions on CommonJS `fs` and `fs.promises`. An ESM named
 import, `import { readFile } from 'node:fs/promises'`, is bound when the
 module loads, so it bypasses the patch and reaches the real filesystem.
 Synchronous calls (`readFileSync`) refuse a mounted path either way, since
-the workspace answers asynchronously. Python has no such split:
-`with Workspace() as ws:` patches `open` and `os` for every caller.
+the workspace answers asynchronously.
 
 Instead:
 
@@ -39,8 +38,7 @@ Instead:
 A synchronous call on the folder from the process that mounted it, such as
 `readFileSync` or `execFileSync('cat', ...)`, blocks the loop that must
 answer it, and the mount hangs. Use async `fs` calls and async child
-processes, or own the mount from a child process. Python serves its folder on
-a thread of its own. See [FUSE](/typescript/setup/fuse#mount-a-folder).
+processes, or own the mount from a child process. See [FUSE](/typescript/setup/fuse#mount-a-folder).
 
 ## Browser
 
@@ -64,24 +62,25 @@ no Node `fs`. Every command runs in-process, and `python3` runs on
   that run, so an outside edit shows on the next run. Without a worker and
   either `SharedArrayBuffer` or Mirage's service worker, `python3` exits 127;
   see [worker and browser setup](/typescript/runtime/pyodide#worker-and-browser-setup).
-- **VFS a page does not build.** SSH, Disk, SQL, GridFS, Nextcloud,
-  Hugging Face Buckets, LanceDB and Email need Node APIs or raw TCP. Jaeger,
-  Databricks Volumes, TiDB Cloud Filesystem and the Hugging Face Hub mounts
-  take their service token in the config, which a page would have to hold,
-  so only Node and Cloudflare build them; the browser's Slack, Discord, S3
-  and the like leave the token to a proxy or a presigned URL instead. A
-  config that names one fails with an error. Postgres runs over HTTP with
-  `NeonPgDriver`, and MongoDB with `HttpMongoDriver` through an HTTP proxy;
-  both need an endpoint that allows the page's origin.
+
+| VFS | In a browser |
+| --- | --- |
+| SSH, Disk, SQL, GridFS, Nextcloud, Hugging Face Buckets, LanceDB, Email | No: needs Node APIs or raw TCP |
+| Jaeger, Databricks Volumes, TiDB Cloud Filesystem, Hugging Face Hub mounts | No: the config would expose the token |
+| Slack, Discord | Yes, through `proxyUrl` |
+| S3 and the other object stores | Yes, with presigned URLs |
+| Postgres | Yes, with `NeonPgDriver` |
+| MongoDB | Yes, with `HttpMongoDriver` behind an HTTP proxy |
+
+Building an unsupported VFS throws an error.
 
 ## Cancellation
 
-`ws.shell(command, { signal })` cancels a call, as `cancel` does in Python.
-The two differ because a JavaScript promise cannot be cancelled:
+`ws.shell(command, { signal })` cancels a call. A JavaScript promise cannot
+be cancelled, so:
 
-- Python cancels the line's task and waits for it to unwind. TypeScript fires
-  the signal, gives the line 250 ms to settle, then rejects with an
-  `AbortError` whose `cause` is the signal's reason.
+- TypeScript fires the signal, gives the line 250 ms to settle, then rejects
+  with an `AbortError` whose `cause` is the signal's reason.
 - A step that ignores the signal, such as a custom handler or a backend call
   with no signal, can run on after that. Its output is dropped and it cannot
   change `$?`, but a write it completes still lands. Built-in commands check
@@ -90,6 +89,5 @@ The two differ because a JavaScript promise cannot be cancelled:
   running, but a single synchronous step, such as a large regex match, holds
   the thread until it returns. To stop arbitrary code hard, run the workspace
   in a worker or a separate process.
-- A command's `timeout` is the line's own result, exit 124, not a
-  cancellation, and a background job runs without the caller's signal: only
-  `kill` reaches it.
+- A command timeout is a normal result (exit 124), not a cancellation.
+- The signal does not reach background jobs. Stop them with `kill`.

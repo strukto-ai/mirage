@@ -37,6 +37,8 @@ commands and an in-memory filesystem, with no server and no credentials.
 
     void main()
     ```
+
+    Mounts are read-only unless you set a mode. `MountMode.WRITE` lets the shell create and change files under `/data`.
   </Step>
   <Step title="Run it">
     ```bash
@@ -52,9 +54,6 @@ commands and an in-memory filesystem, with no server and no credentials.
 <CardGroup cols={2}>
   <Card title="Keep files in the browser" icon="hard-drive" href="/typescript/setup/opfs">
     OPFS keeps a workspace's files across page loads.
-  </Card>
-  <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
-    The VFS table marks which mounts run in a browser.
   </Card>
   <Card title="Run python3 in the page" icon="python" href="/typescript/runtime/pyodide">
     Pyodide in a worker, with workspace files.

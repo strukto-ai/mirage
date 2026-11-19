@@ -11,7 +11,7 @@ Download Hugging Face Hub files into the workspace and upload files or directori
 
 ## Setup
 
-Create a token using [Hugging Face setup](/home/setup/hf_models). TypeScript imports `HF` from the Node package. The Hub API needs no Python extra; `hf-buckets` is a separate storage backend.
+Create a token using [Hugging Face setup](/home/setup/hf_models). Import `HF` from `@struktoai/mirage-node`. `hf-buckets` is a separate storage backend.
 
 ```typescript
 import { HF, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'

@@ -6,8 +6,7 @@ icon: /images/cloudflare-logo.svg
 
 `R2VFS` mounts one Cloudflare R2 bucket: every object becomes a file and every
 `/` in a key a folder. It reaches R2 through its S3-compatible API at
-`https://<account_id>.r2.cloudflarestorage.com`. Credentials are set up on the
-[R2 page](/home/setup/r2).
+`https://<account_id>.r2.cloudflarestorage.com`. Create the bucket and credentials as in [R2 setup](/home/setup/r2).
 
 ## Install
 
@@ -114,8 +113,7 @@ keys; R2 stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/r2/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped and
-  a trailing `/` added.
+  so `/r2/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

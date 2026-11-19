@@ -6,8 +6,7 @@ icon: /images/tencent-logo.svg
 
 `TencentVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at Tencent COS's
-endpoint, so commands behave as they do on S3. Credentials are set up on the
-[Tencent COS page](/home/setup/tencent).
+endpoint, so commands behave as they do on S3. Create the bucket and credentials as in [Tencent COS setup](/home/setup/tencent).
 
 ## Install
 
@@ -114,8 +113,7 @@ from the `/` in keys.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/cos/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/cos/notes.md` is the key `users/42/notes.md`.
 - **Bucket name:** a COS bucket name ends in the account's APPID, as in
   `my-bucket-1250000000`. `bucket` takes the full name, suffix included.
 

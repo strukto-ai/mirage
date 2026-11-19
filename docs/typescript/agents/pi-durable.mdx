@@ -69,7 +69,7 @@ harness.resume()
 
 ## Use a workspace on a Mirage server
 
-Give `MirageExecutionEnv` and `mirageExtension` where a [Mirage server](/typescript/access/server)'s workspace lives instead of a `Workspace`, and Pi's tools call it over HTTP: each file call goes to its VFS API, each command to its shell. The harness can then run where nothing is mounted, such as a Cloudflare Worker or Durable Object. Import from `@struktoai/mirage-pi-durable/remote` there, which leaves out the workspace code of this process:
+Give `MirageExecutionEnv` and `mirageExtension` where a [Mirage server](/typescript/access/server)'s workspace lives instead of a `Workspace`, and Pi's tools call it over HTTP: each file call goes to its VFS API, each command to its shell. The harness can then run where nothing is mounted, such as a Cloudflare Worker or Durable Object. Import from `@struktoai/mirage-pi-durable/remote` there, which leaves out the workspace code of this process. This continues the first example:
 
 ```ts
 import { MirageExecutionEnv, mirageExtension } from '@struktoai/mirage-pi-durable/remote'
@@ -77,8 +77,8 @@ import { MirageExecutionEnv, mirageExtension } from '@struktoai/mirage-pi-durabl
 const remote = { url: 'https://mirage.example.com', workspace: 'ws_123', token: process.env.MIRAGE_TOKEN }
 registry.install(mirageExtension(remote))
 const harness = await Harness.open(
-  storage,
-  { models, registry, env: ({ cwd }) => new MirageExecutionEnv(remote, { cwd: cwd ?? '/', sessionId: 'agent' }) },
+  new MemoryStorage(),
+  { models: builtinModels(), registry, env: ({ cwd }) => new MirageExecutionEnv(remote, { cwd: cwd ?? '/', sessionId: 'agent' }) },
   context,
 )
 ```

@@ -6,7 +6,7 @@ icon: /images/minio-logo.svg
 
 `MinIOVFS` mounts one bucket on a self-hosted MinIO server: every object becomes
 a file and every `/` in a key a folder. It reaches MinIO through its S3 API.
-Credentials are set up on the [MinIO page](/home/setup/minio).
+Create the bucket and credentials as in [MinIO setup](/home/setup/minio).
 
 ## Install
 
@@ -109,9 +109,7 @@ keys; MinIO stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/minio/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
-- **Path style:** requests are path-style; `path_style` defaults to `True`.
+  so `/minio/notes.md` is the key `users/42/notes.md`.
 - **Conditional writes:** MinIO ignores copy and delete conditions, so under
   `write: conditional` Mirage refuses a `cp` or `mv` within the mount, a `mv`
   out of it, `rm` and `find -delete` (`ENOTSUP`); a `cp` or `mv` into it from

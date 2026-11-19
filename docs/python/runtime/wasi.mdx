@@ -4,7 +4,18 @@ icon: /images/webassembly-logo.svg
 description: Run Python in WebAssembly with access to workspace files, in the Python SDK.
 ---
 
-What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [WASI](/home/setup/runtime/wasi), shared by both SDKs.
+Runs Python in WebAssembly inside Mirage, with access to workspace files. Settings and notes: [WASI](/home/setup/runtime/wasi).
+
+## Install
+
+```bash
+pip install "mirage-ai[wasi]"
+```
+
+Without it, `WasiRuntime(...)` raises `ImportError`. Download and unzip a
+release from
+[cpython-wasi-build](https://github.com/brettcannon/cpython-wasi-build/releases),
+then point `home`, or `MIRAGE_WASI_HOME`, at the unzipped directory.
 
 ## Usage
 
@@ -21,14 +32,6 @@ await ws.shell("python3 -c 'print(1 + 1)'")
 ```
 
 ## In the Python SDK
-
-Install the extra:
-
-```bash
-pip install "mirage-ai[wasi]"
-```
-
-Without it, `WasiRuntime(...)` raises `ImportError`.
 
 - A read-only mount, or a session narrowed to read, refuses a write at
   `open()` with `OSError`: errno 30 on the host and Monty, or preview1 errno 69 under WASI.

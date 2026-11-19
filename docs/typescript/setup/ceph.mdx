@@ -6,7 +6,7 @@ description: Virtualize a Ceph Rados Gateway bucket from Node or the browser.
 
 `CephVFS` mounts one bucket on a Ceph Rados Gateway (RGW): every object becomes
 a file and every `/` in a key a folder. It reaches the gateway through its S3
-API. Credentials are set up on the [Ceph page](/home/setup/ceph).
+API. Create the bucket and credentials as in [Ceph setup](/home/setup/ceph).
 
 ## Install
 
@@ -103,9 +103,7 @@ keys; Ceph stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/ceph/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
-- **Path style:** requests are path-style; `forcePathStyle` defaults to `true`.
+  so `/ceph/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
@@ -144,6 +142,8 @@ const ws = new Workspace({ '/ceph': ceph }, { mode: MountMode.READ })
 
 <AccordionGroup>
   <Accordion title="Signing server">
+
+An Express route that signs URLs:
 
 ```ts
 import {

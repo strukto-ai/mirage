@@ -6,8 +6,7 @@ icon: /images/wasabi-logo.svg
 
 `WasabiVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at Wasabi's
-endpoint, so commands behave as they do on S3. Credentials are set up on the
-[Wasabi page](/home/setup/wasabi).
+endpoint, so commands behave as they do on S3. Create the bucket and credentials as in [Wasabi setup](/home/setup/wasabi).
 
 ## Install
 
@@ -115,8 +114,7 @@ from the `/` in keys.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/wasabi/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/wasabi/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

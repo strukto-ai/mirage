@@ -6,8 +6,7 @@ description: Virtualize an IMAP mailbox from Node.
 
 `EmailVFS` mounts an IMAP mailbox as read-only files: each folder holds one
 folder per day of messages as JSON, with their attachments. The
-[`himalaya`](/typescript/cli/himalaya) CLI sends mail over SMTP. Credentials
-are set up on the [Email page](/home/setup/email).
+[`himalaya`](/typescript/cli/himalaya) CLI sends mail over SMTP. Set up the credentials as in [Email setup](/home/setup/email).
 
 ## Install
 
@@ -126,8 +125,9 @@ OAuth for IMAP, and the mount accepts only passwords.
 
 ## Behavior
 
-- **Read only:** list, read, send, reply and forward with the [`himalaya`](/typescript/cli/himalaya) CLI,
-  which uses the SMTP settings.
+- **Read only:** the mount cannot send or change mail. Use the
+  [`himalaya`](/typescript/cli/himalaya) CLI, which uses the SMTP settings, to
+  list, read, send, reply and forward.
 - **Newest messages:** each folder lists its newest `maxMessages` messages
   (200).
 - **TLS:** IMAP speaks TLS from the first byte (IMAPS) by default. `useSsl: false`

@@ -6,8 +6,7 @@ icon: /images/seaweedfs-logo.svg
 
 `SeaweedFSVFS` mounts one bucket on a SeaweedFS S3 gateway: every object becomes
 a file and every `/` in a key a folder. It reaches the gateway (port `8333` by
-default) through its S3 API. Credentials are set up on the
-[SeaweedFS page](/home/setup/seaweedfs).
+default) through its S3 API. Create the bucket and credentials as in [SeaweedFS setup](/home/setup/seaweedfs).
 
 ## Install
 
@@ -111,9 +110,7 @@ in keys; SeaweedFS stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/seaweedfs/notes.md` is the key `users/42/notes.md`. A leading `/` is
-  dropped and a trailing `/` added.
-- **Path style:** requests are path-style; `path_style` defaults to `True`.
+  so `/seaweedfs/notes.md` is the key `users/42/notes.md`.
 - **Blaxel Agent Drive:** a drive is backed by SeaweedFS. Set `endpoint_url` to
   the drive's `s3Url` and use a drive access token's credentials as the key
   pair.

@@ -6,8 +6,7 @@ icon: /images/gcs-logo.svg
 
 `GCSVFS` mounts one Google Cloud Storage bucket: every object becomes a file and
 every `/` in a key a folder. It reaches GCS through the S3-compatible XML API at
-`https://storage.googleapis.com`, signed with an HMAC key. Credentials are set
-up on the [GCS page](/home/setup/gcs).
+`https://storage.googleapis.com`, signed with an HMAC key. Create the bucket and credentials as in [GCS setup](/home/setup/gcs).
 
 ## Install
 
@@ -112,8 +111,7 @@ keys; GCS stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/gcs/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/gcs/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

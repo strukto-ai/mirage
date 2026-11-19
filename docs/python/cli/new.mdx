@@ -101,7 +101,7 @@ adds an incident service the handlers change.
 - Names and aliases are single words, and a group's children share one set
   of names. An option can't repeat in a parent and its child.
 - `CLI(...)` refuses a bad tree when you build it, and Mirage refuses a bad
-  line before the handler runs, so a handler never re-checks its flags.
+  line before the handler runs.
 - Read flags through `FlagView(ctx.flags, ctx.spec)`. Reading an option the
   spec doesn't declare raises an error, instead of looking like an omitted
   flag.

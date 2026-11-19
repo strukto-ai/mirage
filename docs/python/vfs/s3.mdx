@@ -6,7 +6,7 @@ icon: /images/s3-logo.svg
 
 `S3VFS` mounts one bucket: every object becomes a file and every `/` in a key a
 folder. It works with Amazon S3 and any S3-compatible server, such as MinIO,
-Ceph or SeaweedFS. Credentials are set up on the [S3 page](/home/setup/s3).
+Ceph or SeaweedFS. Create the bucket and credentials as in [S3 setup](/home/setup/s3).
 
 ## Install
 
@@ -115,10 +115,7 @@ keys; S3 stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/s3/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
-- **Content type:** written objects carry `default_content_type` when it is
-  set; otherwise the server picks its default.
+  so `/s3/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

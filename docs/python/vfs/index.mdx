@@ -5,12 +5,12 @@ description: Python VFS types you can mount in a Mirage workspace.
 ---
 
 VFS types are the storage systems and services you mount into a Mirage
-workspace. Open **Providers** in the sidebar to browse every Python-supported
-backend by category.
+workspace. Browse them by category under VFS in the sidebar, or see the
+[table of supported VFS](/home/setup/vfs#supported-vfs), which also shows where
+each one runs.
 
-Each provider page covers the required configuration, mounted tree, and
-VFS-specific behavior.
+Each VFS page covers the required configuration, mounted tree, and
+VFS-specific behavior. Its snippets are the body of an `async def main()` run
+with `asyncio.run(main())`, as in the [Quickstart](/python/quickstart).
 
-Provider setup spans local filesystems, object stores, cloud drives,
-collaboration tools, databases, vector stores, and agent memory systems. To
-implement another backend, see [Adding a New VFS](/python/vfs/new).
+To implement another VFS, see [Adding a New VFS](/python/vfs/new).

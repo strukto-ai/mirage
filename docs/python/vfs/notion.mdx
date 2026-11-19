@@ -6,8 +6,7 @@ description: Virtualize a Notion workspace from Python.
 
 `NotionVFS` mounts the Notion pages and databases shared with a connection as
 read-only JSON files: pages with their content as Markdown, and databases with
-their schema and rows. The token is set up on the
-[Notion page](/home/setup/notion).
+their schema and rows. Set up the token as in [Notion setup](/home/setup/notion).
 
 ## Install
 
@@ -110,8 +109,9 @@ cat "$DS/$(jq -r 'select(.title == "Write spec") | .path' "$DS/rows.jsonl")"
 
 ## Behavior
 
-- **Read only:** create, edit and trash pages, query data sources and reach
-  every other route through the [`ntn`](/python/cli/ntn) CLI, which takes the same token. Ids
+- **Read only:** the mount cannot change pages. Use the [`ntn`](/python/cli/ntn)
+  CLI, which takes the same token, to create, edit and trash pages, query data
+  sources and reach every other route. Ids
   are positional: use the `<page-id>`, `<database-id>` or `<data-source-id>`
   from a path segment.
 - **Rows in one file:** a query answers a hundred rows' cells in one call,

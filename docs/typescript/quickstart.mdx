@@ -7,17 +7,15 @@ keywords: ["Mirage TypeScript quickstart", "@struktoai/mirage-node", "virtual fi
 
 ## Installation
 
-Use a [supported Node release](/typescript/install#quick-install), then install the runtime:
+Install the Node package:
 
 ```bash
 pnpm add @struktoai/mirage-node
 pnpm add -D tsx typescript
 ```
 
-`npm install @struktoai/mirage-node` and `yarn add @struktoai/mirage-node` work too.
-
-The packages require ECMAScript modules (ESM). In the same directory,
-set `"type": "module"` in `package.json`:
+It needs a [supported Node release](/typescript/install#quick-install) and ES
+modules, so set `"type": "module"` in `package.json`:
 
 ```bash
 npm pkg set type=module
@@ -25,7 +23,7 @@ npm pkg set type=module
 
 ## Create a Workspace
 
-Start with the RAM VFS, which needs no credentials.
+Start with the RAM VFS, an in-memory filesystem mounted at `/data` that needs no credentials.
 
 ```ts quickstart.ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -49,15 +47,23 @@ async function main(): Promise<void> {
 main()
 ```
 
-Run it; it lists `user.json`, prints `alice`, then prints the matching JSON
-document:
+Mounts are read-only unless you set a mode. `MountMode.WRITE` lets the shell create and change files under `/data`.
+
+Run it:
 
 ```bash
 pnpm tsx quickstart.ts
 ```
 
-Shell failures are returned in the result; check `exitCode` and `stderrText`
-when needed. See the [in-app API reference](/typescript/access/in-app#session-shell).
+Output:
+
+```text
+user.json
+alice
+{"name": "alice"}
+```
+
+`ws.shell` does not throw when a command fails. Check `result.exitCode` and `result.stderrText`. See the [in-app API reference](/typescript/access/in-app#session-shell).
 
 ## Next steps
 
@@ -65,7 +71,7 @@ For a browser app, start from the [Browser Quickstart](/typescript/browser-quick
 
 <CardGroup cols={2}>
   <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
-    S3, Slack, Google Drive, Postgres and 60 more, as files.
+    S3, Slack, Google Drive, Postgres and 50+ more, as files.
   </Card>
   <Card title="Install CLIs" icon="wrench" href="/typescript/cli/index">
     `gh`, `git`, Linear, Office and PDF tools in the same shell.

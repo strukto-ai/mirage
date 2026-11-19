@@ -6,8 +6,7 @@ description: Virtualize an Oracle Cloud Infrastructure Object Storage bucket fro
 
 `OCIVFS` mounts one Oracle Cloud Infrastructure Object Storage bucket: every
 object becomes a file and every `/` in a key a folder. It reaches OCI through
-the Amazon S3 Compatibility API. Credentials are set up on the
-[OCI page](/home/setup/oci).
+the Amazon S3 Compatibility API. Create the bucket and credentials as in [OCI setup](/home/setup/oci).
 
 ## Install
 
@@ -112,8 +111,7 @@ keys; OCI stores no folder objects.
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/oci/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/oci/notes.md` is the key `users/42/notes.md`.
 - **Path style:** the S3 Compatibility API takes only path-style URLs, so
   `forcePathStyle` defaults to `true`.
 
@@ -155,6 +153,8 @@ const ws = new Workspace({ '/oci': oci }, { mode: MountMode.READ })
 
 <AccordionGroup>
   <Accordion title="Signing server">
+
+An Express route that signs URLs:
 
 ```ts
 import {
