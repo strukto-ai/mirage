@@ -2556,11 +2556,12 @@ async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
     [
         "outer() { sort /data/x; }; outer; sort() { ls /data; }",
         "(sort() { ls /data; }); outer() { sort /data/x; }; outer",
+        "outer() { inner /data/x; }; outer; inner() { ls /data; }",
     ],
 )
 async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
-    # `outer`'s body runs where no `sort` function is in scope, defined
-    # later or in a subshell, so the body's `sort` is the tool the closed
+    # `outer`'s body runs where the function it names is not in scope,
+    # defined later or in a subshell, so that name is the tool the closed
     # root refuses, as the run says.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:

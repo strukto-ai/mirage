@@ -2078,12 +2078,13 @@ it.each([
   },
 )
 
-// `outer`'s body runs where no `sort` function is in scope, defined later or
-// in a subshell, so the body's `sort` is the tool the closed root refuses, as
+// `outer`'s body runs where the function it names is not in scope, defined
+// later or in a subshell, so that name is the tool the closed root refuses, as
 // the run says.
 it.each([
   'outer() { sort /data/x; }; outer; sort() { ls /data; }',
   '(sort() { ls /data; }); outer() { sort /data/x; }; outer',
+  'outer() { inner /data/x; }; outer; inner() { ls /data; }',
 ])('lets a function body see the functions defined when it runs: %j', async (line) => {
   const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   open.push(w)
