@@ -653,6 +653,7 @@
                 ]
               },
               "python/cli/new",
+              "python/cli/new-reference",
               "python/cli/mcp"
             ]
           },
@@ -924,6 +925,7 @@
                 ]
               },
               "typescript/cli/new",
+              "typescript/cli/new-reference",
               "typescript/cli/mcp"
             ]
           },
