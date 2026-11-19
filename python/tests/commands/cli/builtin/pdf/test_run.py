@@ -455,8 +455,9 @@ async def test_forms_held_on_earlier_pages_are_checked_again_together():
         form,
         form,
     )
+    first, _, _ = await capped(document, "pdftotext -l 2 /w/d.pdf -")
     code, _, err = await capped(document, "pdftotext /w/d.pdf -")
-    assert (code, err) == (1, "pdftotext: memory exhausted\n")
+    assert (first, code, err) == (0, 1, "pdftotext: memory exhausted\n")
 
 
 @pytest.mark.asyncio
@@ -530,6 +531,20 @@ async def test_a_form_the_page_never_draws_is_not_held():
 async def test_content_past_a_hundred_times_its_bytes_is_dropped_unheld():
     page = one_page(flate(HELLO + BIG), FONT_ONLY, FONT)
     assert await capped(page, "pdftotext /w/d.pdf -") == (0, "\f", "")
+
+
+@pytest.mark.asyncio
+async def test_content_behind_a_broken_zlib_header_that_fits_still_reads():
+    page = one_page(
+        stream(b"\x78\x00" + raw_deflate(HELLO), b"/Filter /FlateDecode "),
+        FONT_ONLY,
+        FONT,
+    )
+    assert await capped(page, "pdftotext /w/d.pdf -") == (
+        0,
+        "hello\n\n\f",
+        "",
+    )
 
 
 @pytest.mark.asyncio

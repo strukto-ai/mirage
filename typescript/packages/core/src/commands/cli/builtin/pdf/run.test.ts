@@ -426,8 +426,9 @@ describe('under max_memory', () => {
       form,
       form,
     )
+    const [first] = await capped(document, 'pdftotext -l 2 /w/d.pdf -')
     const [code, , err] = await capped(document, 'pdftotext /w/d.pdf -')
-    expect([code, err]).toEqual([1, 'pdftotext: memory exhausted\n'])
+    expect([first, code, err]).toEqual([0, 1, 'pdftotext: memory exhausted\n'])
   })
 
   it("reads each page's resources for a form without its own", async () => {
@@ -477,6 +478,18 @@ describe('under max_memory', () => {
   it('drops content past a hundred times its bytes without holding it', async () => {
     const page = onePage(flate(joined(HELLO, BIG)), FONT_ONLY, FONT)
     expect(await capped(page, 'pdftotext /w/d.pdf -')).toEqual([0, '\f', ''])
+  })
+
+  it('still reads content behind a broken zlib header that fits', async () => {
+    const page = onePage(
+      stream(
+        joined(new Uint8Array([0x78, 0x00]), deflateRawSync(ENC.encode(HELLO))),
+        '/Filter /FlateDecode ',
+      ),
+      FONT_ONLY,
+      FONT,
+    )
+    expect(await capped(page, 'pdftotext /w/d.pdf -')).toEqual([0, 'hello\n\n\f', ''])
   })
 
   it('reads a compressed page that fits whole', async () => {

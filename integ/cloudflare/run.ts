@@ -889,6 +889,7 @@ async function main(): Promise<void> {
       if (Object.keys(profiles).length > 0) config.profiles = profiles
       if (target.profile !== undefined) config.profile = target.profile
       if (target.env !== undefined) config.env = target.env
+      if (target.max_memory !== undefined) config.max_memory = target.max_memory
       // The corpus's python3 cases run on Monty, named since no machine runs it by default.
       config.machines = { py: { provider: 'in_process', runtime: 'monty' } }
       const id = `integ-${target.id}-${runId()}`

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -147,7 +148,7 @@ pub(crate) async fn measure(
     held: u64,
 ) -> u64 {
     let chain = filters(dict);
-    let mut current = data.to_vec();
+    let mut current = Cow::Borrowed(data);
     for (at, filter) in chain.iter().enumerate() {
         let decoder: Box<dyn StreamDecoder + Send> = match filter.as_str() {
             "ASCIIHexDecode" => Box::new(AsciiHexDecoder),
@@ -192,7 +193,7 @@ pub(crate) async fn measure(
             })
             .await;
         }
-        current = decoded;
+        current = Cow::Owned(decoded);
     }
     host.ask(Request::Memory {
         size: held + current.len() as u64,
