@@ -346,7 +346,7 @@
         "langfuse"
       ],
       "clear_cache": true,
-      "command": "set -o pipefail; bytes=$(cat /lf/traces/*.json | wc -c) && total=$(du -s /lf/traces | cut -f1) && test \"$total\" -gt 0 && test \"$total\" = \"$bytes\" && echo same",
+      "command": "set -o pipefail; bytes=$(cat /lf/traces/*.json | wc -c) && total=$(du -sb /lf/traces | cut -f1) && test \"$total\" -gt 0 && test \"$total\" = \"$bytes\" && echo same",
       "expect": {
         "exit": 0,
         "stdout": "same\n",
