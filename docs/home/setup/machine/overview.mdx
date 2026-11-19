@@ -285,9 +285,11 @@ machine serves, and rules that depend on which program opens a file.
 - Every other mount behaves as under `ssh`: the machine keeps an answer for
   a second.
 - While a policy judges the session's file calls (`pre_vfs` or `post_vfs`),
-  the machine keeps nothing, so each call a program makes reaches it, as
-  under `ssh`. A policy added later drops what the machine kept before the
-  next program starts. The machine asks only for what a program opens or
+  neither `mirage-fuse` nor the machine's kernel keeps an answer, not even
+  for a second, so each call a program makes reaches it. A policy added
+  later drops what the machine kept before the next program starts, and a
+  file a program opened from the cache before then can no longer be read
+  (`Permission denied`). The machine asks only for what a program opens or
   lists, never ahead of it.
 
 Mirage's releases do not ship `mirage-fuse` yet. Build it from the

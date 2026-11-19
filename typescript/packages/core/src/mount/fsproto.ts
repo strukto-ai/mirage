@@ -244,8 +244,9 @@ export class FsprotoServer {
   /**
    * Wait until the client has applied every change noted so far: the
    * barrier a line passes before its program starts. Once a policy judges
-   * the session's file calls, the client first forgets all it kept, so
-   * each call the program makes reaches that policy.
+   * the session's file calls, the client first forgets all it kept and
+   * refuses reads through opens its kernel may cache (`watch`), so each
+   * call the program makes reaches that policy.
    *
    * @returns false when the client did not answer within
    *   BEGIN_WAIT_SECONDS or its pipe ended first, so the line must not run
@@ -256,7 +257,7 @@ export class FsprotoServer {
     const served = this.served
     if (served !== null && this.keeping && (await this.watching())) {
       this.keeping = false
-      this.invalid.add(served.prefix)
+      this.send({ push: 'watch' })
     }
     this.flush()
     this.hid += 1
@@ -375,6 +376,16 @@ export class FsprotoServer {
     return kept
   }
 
+  /**
+   * The keep fields of a reply about `path`: `k`, and `w` while a policy
+   * judges the session's file calls, when neither the client nor its
+   * kernel may keep the answer even for a moment. Mirrors Python's `_keep`.
+   */
+  private async keep(path: string): Promise<{ k: boolean; w?: true }> {
+    if (await this.watching()) return { k: false, w: true }
+    return { k: await this.kept(path) }
+  }
+
   private async watching(): Promise<boolean> {
     const watched = this.served?.watched
     if (watched === undefined || watched === null) return false
@@ -419,18 +430,18 @@ export class FsprotoServer {
       case 'getattr': {
         const fd = num(h.fh)
         if (fd === null)
-          return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
+          return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
         const held = this.pathOf(fd)
-        return [{ a: wire(await core.fgetattr(held, fd)), k: await this.kept(held) }, EMPTY]
+        return [{ a: wire(await core.fgetattr(held, fd)), ...(await this.keep(held)) }, EMPTY]
       }
       case 'list': {
-        const kept = await this.kept(path)
+        const keep = await this.keep(path)
         const rows = shown(await core.listing(path))
-        return [{ e: await this.rows(path, rows, kept), k: kept }, EMPTY]
+        return [{ e: await this.rows(path, rows, keep.k), ...keep }, EMPTY]
       }
       case 'readall': {
         const [a, data] = await this.whole(path)
-        return [{ a: wire(a), k: await this.kept(path) }, data]
+        return [{ a: wire(a), ...(await this.keep(path)) }, data]
       }
       case 'readlink':
         return [{ target: await core.readlink(path) }, EMPTY]
@@ -445,7 +456,7 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode)
-        return [{ fh: fd, k: await this.kept(path) }, EMPTY]
+        return [{ fh: fd, ...(await this.keep(path)) }, EMPTY]
       }
       case 'create': {
         const mode: OpenMode = {
@@ -458,7 +469,10 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode, num(h.mode))
-        return [{ fh: fd, a: wire(await core.fgetattr(path, fd)), k: await this.kept(path) }, EMPTY]
+        return [
+          { fh: fd, a: wire(await core.fgetattr(path, fd)), ...(await this.keep(path)) },
+          EMPTY,
+        ]
       }
       case 'read': {
         const fd = whole(h.fh, -1)
@@ -488,7 +502,7 @@ export class FsprotoServer {
       }
       case 'mkdir':
         await core.mkdir(path, num(h.mode))
-        return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
+        return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
       case 'unlink':
         await core.unlink(path)
         return [{}, EMPTY]
@@ -497,7 +511,7 @@ export class FsprotoServer {
         return [{}, EMPTY]
       case 'symlink':
         await core.symlink(typeof h.target === 'string' ? h.target : '', path)
-        return [{ a: wire(await core.getattr(path)), k: await this.kept(path) }, EMPTY]
+        return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
       case 'rename': {
         const from = this.inside(workspacePath(h.from))
         const to = this.inside(workspacePath(h.to))
@@ -529,7 +543,7 @@ export class FsprotoServer {
           )
         }
         const attrs = fd === null ? await core.getattr(path) : await core.fgetattr(target, fd)
-        return [{ a: wire(attrs), k: await this.kept(target) }, EMPTY]
+        return [{ a: wire(attrs), ...(await this.keep(target)) }, EMPTY]
       }
       case 'statfs': {
         const s = core.statfs()

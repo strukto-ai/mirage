@@ -255,7 +255,11 @@ describe('FsprotoServer', () => {
     const stat = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
     const listed = await end.call({ op: 'list', path: '/notes' })
     const whole = await end.call({ op: 'readall', path: '/notes/plan.txt' })
-    expect([stat.head.k, listed.head.k, whole.head.k]).toEqual([false, false, false])
+    expect([stat, listed, whole].map((r) => [r.head.k, r.head.w])).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+    ])
     expect(new Set(asked)).toEqual(new Set(['agent']))
     end.close()
     await serving
@@ -264,11 +268,12 @@ describe('FsprotoServer', () => {
   it('drops all the client kept before a barrier once a policy comes', async () => {
     let on = false
     const { server, end, serving } = await watched(() => Promise.resolve(on))
-    expect((await end.call({ op: 'getattr', path: '/notes/plan.txt' })).head.k).toBe(true)
+    const stat = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
+    expect([stat.head.k, stat.head.w]).toEqual([true, undefined])
     on = true
     const barrier = server.begin()
     await end.until(() => end.pushes.some((f) => f.head.op === 'begin'))
-    expect(end.pushes[0]?.head).toEqual({ push: 'inval', paths: ['/notes'] })
+    expect(end.pushes[0]?.head).toEqual({ push: 'watch' })
     end.send({ hid: end.pushes.find((f) => f.head.op === 'begin')?.head.hid })
     expect(await barrier).toBe(true)
     end.pushes.splice(0)

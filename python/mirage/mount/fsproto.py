@@ -296,7 +296,8 @@ class FsprotoServer:
         """Wait until the client has applied every change noted so far:
         the barrier a line passes before its program starts. Once a
         policy judges the session's file calls, the client first forgets
-        all it kept, so each call the program makes reaches that policy.
+        all it kept and refuses reads through opens its kernel may cache
+        (``watch``), so each call the program makes reaches that policy.
 
         Returns:
             bool: False when the client did not answer within
@@ -308,7 +309,7 @@ class FsprotoServer:
         served = self._served
         if served is not None and self._keeping and await self._watched():
             self._keeping = False
-            self._invalid[served.prefix] = None
+            self._send({"push": "watch"})
         self._flush()
         self._hid += 1
         hid = self._hid
@@ -432,6 +433,18 @@ class FsprotoServer:
         self._keeping = self._keeping or kept
         return kept
 
+    async def _keep(self, path: str) -> Head:
+        """The keep fields of a reply about ``path``: ``k``, and ``w`` while
+        a policy judges the session's file calls, when neither the client
+        nor its kernel may keep the answer even for a moment.
+
+        Args:
+            path (str): a workspace path a reply is about.
+        """
+        if await self._watched():
+            return {"k": False, "w": True}
+        return {"k": await self._kept(path)}
+
     async def _watched(self) -> bool:
         served = self._served
         if served is None or served.watched is None:
@@ -490,19 +503,20 @@ class FsprotoServer:
                 held = self._path_of(int(fh))
                 return {
                     "a": wire(await core.fgetattr(held, int(fh))),
-                    "k": await self._kept(held),
+                    **await self._keep(held),
                 }, EMPTY
             return {
                 "a": wire(await core.getattr(path)),
-                "k": await self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "list":
-            kept = await self._kept(path)
+            keep = await self._keep(path)
             rows = shown(await core.listing(path))
-            return {"e": await self._rows(path, rows, kept), "k": kept}, EMPTY
+            listed = await self._rows(path, rows, keep["k"])
+            return {"e": listed, **keep}, EMPTY
         if op == "readall":
             attrs, data = await self._whole(path)
-            return {"a": wire(attrs), "k": await self._kept(path)}, data
+            return {"a": wire(attrs), **await self._keep(path)}, data
         if op == "readlink":
             return {"target": await core.readlink(path)}, EMPTY
         if op == "open":
@@ -516,7 +530,7 @@ class FsprotoServer:
                 binary=True,
             )
             fh = await core.open(path, mode)
-            return {"fh": fh, "k": await self._kept(path)}, EMPTY
+            return {"fh": fh, **await self._keep(path)}, EMPTY
         if op == "create":
             mode = OpenMode(
                 readable=True,
@@ -534,7 +548,7 @@ class FsprotoServer:
             return {
                 "fh": fh,
                 "a": wire(await core.fgetattr(path, fh)),
-                "k": await self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "read":
             fh = whole(h.get("fh"), -1)
@@ -573,7 +587,7 @@ class FsprotoServer:
             await core.mkdir(path, None if perm is None else int(perm))
             return {
                 "a": wire(await core.getattr(path)),
-                "k": await self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "unlink":
             await core.unlink(path)
@@ -586,7 +600,7 @@ class FsprotoServer:
             await core.symlink(path, target if isinstance(target, str) else "")
             return {
                 "a": wire(await core.getattr(path)),
-                "k": await self._kept(path),
+                **await self._keep(path),
             }, EMPTY
         if op == "rename":
             old = self._inside(workspace_path(h.get("from")))
@@ -658,7 +672,7 @@ class FsprotoServer:
             if fh is None
             else await core.fgetattr(path, int(fh))
         )
-        return {"a": wire(attrs), "k": await self._kept(path)}, EMPTY
+        return {"a": wire(attrs), **await self._keep(path)}, EMPTY
 
     async def _exists(self, path: str) -> bool:
         try:

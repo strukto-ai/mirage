@@ -271,11 +271,9 @@ async def test_while_a_policy_judges_file_calls_nothing_is_kept():
     stat = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
     listed = await end.call({"op": "list", "path": "/notes"})
     whole = await end.call({"op": "readall", "path": "/notes/plan.txt"})
-    assert (stat.head["k"], listed.head["k"], whole.head["k"]) == (
-        False,
-        False,
-        False,
-    )
+    assert [(r.head["k"], r.head["w"]) for r in (stat, listed, whole)] == [
+        (False, True)
+    ] * 3
     assert set(watch.asked) == {"agent"}
     await end.end(serving)
 
@@ -286,12 +284,13 @@ async def test_a_policy_that_comes_drops_all_the_client_kept_first():
     server, end, serving = await watched(watch)
     stat = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
     assert stat.head["k"] is True
+    assert "w" not in stat.head
     watch.on = True
     barrier = asyncio.create_task(server.begin())
     await end.until(
         lambda: any(f.head.get("op") == "begin" for f in end.pushes)
     )
-    assert end.pushes[0].head == {"push": "inval", "paths": ["/notes"]}
+    assert end.pushes[0].head == {"push": "watch"}
     begin = next(f for f in end.pushes if f.head.get("op") == "begin")
     end.send({"hid": begin.head["hid"]})
     assert await barrier is True
