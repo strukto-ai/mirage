@@ -210,8 +210,9 @@ impl Doc {
     }
 
     /// The fonts `resources` names, which the reader loads whole for the
-    /// text: each one's character maps and programs, and a Type 3 font's
-    /// glyphs and the fonts of its own resources, counted into `held`.
+    /// text: each one's character maps, glyph maps and programs, and a Type
+    /// 3 font's glyphs and the fonts of its own resources, counted into
+    /// `held`, each font and each shared resources dictionary walked once.
     async fn measure_fonts(
         &self,
         host: &Host,
@@ -223,6 +224,9 @@ impl Doc {
         let mut pending = vec![(resources.clone(), 0)];
         while let Some((resources, depth)) = pending.pop() {
             for f in self.entries(resources.as_dict().and_then(|d| d.get("Font"))) {
+                if f.as_reference().is_some_and(|at| !seen.insert(at)) {
+                    continue;
+                }
                 let Some(font) = self.resolved(&f) else {
                     continue;
                 };
@@ -241,6 +245,7 @@ impl Doc {
                     fonts.extend(list.iter().filter_map(|d| self.resolved(d)));
                 }
                 for one in &fonts {
+                    streams.extend(one.as_dict().and_then(|d| d.get("CIDToGIDMap")).cloned());
                     let descriptor = one
                         .as_dict()
                         .and_then(|d| d.get("FontDescriptor"))
@@ -256,8 +261,12 @@ impl Doc {
                 for stream in &streams {
                     self.measure(host, stream, held, measured, seen).await;
                 }
+                let fresh = dict
+                    .get("Resources")
+                    .and_then(Object::as_reference)
+                    .is_none_or(|at| seen.insert(at));
                 let own = dict.get("Resources").and_then(|r| self.resolved(r));
-                if let Some(own) = own.filter(|_| depth < NESTING) {
+                if let Some(own) = own.filter(|_| fresh && depth < NESTING) {
                     pending.push((own, depth + 1));
                 }
             }

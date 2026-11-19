@@ -304,6 +304,13 @@ const BOMBS: Record<string, Uint8Array> = {
     '<< /Type /FontDescriptor /FontName /Foo /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>',
     flate(BIG),
   ),
+  'descendant glyph map': onePage(
+    flate(ENC.encode(HELLO)),
+    FONT_ONLY,
+    '<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H /DescendantFonts [6 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap 7 0 R >>',
+    flate(BIG),
+  ),
   'content behind a broken zlib header': onePage(
     stream(
       joined(new Uint8Array([0x78, 0x00]), deflateRawSync(joined(HELLO, BIG))),
@@ -436,6 +443,25 @@ describe('under max_memory', () => {
     )
     const [code, , err] = await capped(document, 'pdftotext /w/d.pdf -')
     expect([code, err]).toEqual([1, 'pdftotext: memory exhausted\n'])
+  })
+
+  it('walks fonts whose resources name each other once', async () => {
+    const type3 =
+      '<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] ' +
+      '/CharProcs << >> /Encoding << /Type /Encoding /Differences [] >> /FirstChar 32 /LastChar 32 ' +
+      '/Widths [0] /Resources 10 0 R >>'
+    const page = onePage(
+      flate(ENC.encode(HELLO)),
+      '<< /Font << /F1 5 0 R /T1 6 0 R >> >>',
+      FONT,
+      type3,
+      type3,
+      type3,
+      type3,
+      '<< /Font << /T1 6 0 R /T2 7 0 R /T3 8 0 R /T4 9 0 R >> >>',
+    )
+    const [code, out] = await capped(page, 'pdftotext /w/d.pdf -')
+    expect([code, out.includes('hello')]).toEqual([0, true])
   })
 
   it('holds no form the page never draws', async () => {

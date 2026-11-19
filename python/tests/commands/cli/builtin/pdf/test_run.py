@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import zlib
 
@@ -311,6 +312,16 @@ BOMBS = {
         b"/Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>",
         flate(BIG),
     ),
+    "descendant glyph map": one_page(
+        flate(HELLO),
+        FONT_ONLY,
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H "
+        b"/DescendantFonts [6 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo "
+        b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) "
+        b"/Supplement 0 >> /CIDToGIDMap 7 0 R >>",
+        flate(BIG),
+    ),
     "content behind a broken zlib header": one_page(
         stream(
             b"\x78\x00" + raw_deflate(HELLO + BIG),
@@ -469,6 +480,32 @@ async def test_a_form_without_resources_reads_each_pages_own():
     )
     code, _, err = await capped(document, "pdftotext /w/d.pdf -")
     assert (code, err) == (1, "pdftotext: memory exhausted\n")
+
+
+TYPE3 = (
+    b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] "
+    b"/FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << >> "
+    b"/Encoding << /Type /Encoding /Differences [] >> /FirstChar 32 "
+    b"/LastChar 32 /Widths [0] /Resources 10 0 R >>"
+)
+
+
+@pytest.mark.asyncio
+async def test_fonts_whose_resources_name_each_other_are_walked_once():
+    page = one_page(
+        flate(HELLO),
+        b"<< /Font << /F1 5 0 R /T1 6 0 R >> >>",
+        FONT,
+        TYPE3,
+        TYPE3,
+        TYPE3,
+        TYPE3,
+        b"<< /Font << /T1 6 0 R /T2 7 0 R /T3 8 0 R /T4 9 0 R >> >>",
+    )
+    code, out, _ = await asyncio.wait_for(
+        capped(page, "pdftotext /w/d.pdf -"), 30
+    )
+    assert (code, "hello" in out) == (0, True)
 
 
 @pytest.mark.asyncio
