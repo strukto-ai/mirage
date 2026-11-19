@@ -15,13 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { z, type util } from 'zod'
-import type { AdmissionRules, ScopedTree } from '../policy/types.ts'
+import { AdmissionRules, type ScopedTree } from '../policy/types.ts'
 import { tree } from '../test-utils.ts'
 import type { Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { StreamRefusal } from './errors.ts'
 import { units } from './document.ts'
-import { admissionMatcher, Encoded, request, visibilityMatcher } from './policy.ts'
+import { admissionMatcher, Encoded, request, ruleTable, visibilityMatcher } from './policy.ts'
 import { PosixRegex } from './regex.ts'
 import { openStream, openStreamSync } from './stream.ts'
 
@@ -102,6 +102,38 @@ describe('policy stream', () => {
     const rules: AdmissionRules = { trees: held }
     expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(true)
     held.push({ tree: tree({ rm: 'deny' }), mount: '', inline: false })
+    expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(false)
+  })
+
+  it('numbers a changed rule set by the matcher that answers for it', () => {
+    const held: ScopedTree[] = []
+    const rules: AdmissionRules = { trees: held }
+    expect(ruleTable(rules)).toEqual([])
+    held.push({ tree: tree({ rm: 'deny' }), mount: '', inline: false })
+    expect(ruleTable(rules).map((rule) => rule.at)).toEqual(['/rm/*'])
+  })
+
+  it('holds a built rule set as it was built, and finds its matcher by the object', () => {
+    const held: ScopedTree[] = [{ tree: tree({ rm: 'deny' }), mount: '', inline: false }]
+    const rules = new AdmissionRules(held)
+    const matcher = admissionMatcher(rules)
+    held.push({ tree: tree({ cat: 'deny' }), mount: '', inline: false })
+    ;(held[0]?.tree.subcommands as Map<string, unknown>).clear()
+    expect(rules.trees).toHaveLength(1)
+    expect(admissionMatcher(rules)).toBe(matcher)
+    expect(matcher.ask('runs', { name: units('rm') })).toBe(false)
+    expect(matcher.ask('runs', { name: units('cat') })).toBe(true)
+    expect(admissionMatcher(new AdmissionRules([...rules.trees]))).toBe(matcher)
+  })
+
+  it('refuses a change to a built rule set in place', () => {
+    const scoped: ScopedTree = { tree: tree({ rm: 'deny' }), mount: '', inline: false }
+    const rules = new AdmissionRules([scoped], new Set(['gh']))
+    const root = rules.trees[0]?.tree
+    expect(() => (rules.trees as ScopedTree[]).push(scoped)).toThrow(TypeError)
+    expect(() => (root?.subcommands as Map<string, unknown>).delete('rm')).toThrow(TypeError)
+    expect(() => (root?.subcommands as Map<string, unknown>).set('cat', root)).toThrow(TypeError)
+    expect(() => (rules.unread as Set<string>).add('git')).toThrow(TypeError)
     expect(admissionMatcher(rules).ask('runs', { name: units('rm') })).toBe(false)
   })
 

@@ -511,6 +511,48 @@ export interface ScopedTree {
   readonly inline: boolean
 }
 
+const WRITES: PropertyDescriptorMap = Object.fromEntries(
+  ['set', 'add', 'delete', 'clear'].map((write) => [
+    write,
+    {
+      value: (): never => {
+        throw new TypeError('a rule set cannot change in place; build a new one')
+      },
+    },
+  ]),
+)
+
+const EMPTY = Object.freeze({
+  list: Object.freeze([]),
+  map: Object.freeze(Object.defineProperties(new Map<never, never>(), WRITES)),
+  set: Object.freeze(Object.defineProperties(new Set<never>(), WRITES)),
+})
+
+/**
+ * A copy of a tree value that nobody can change in place: every object
+ * and list frozen, every map and set refusing a write. An empty list, map
+ * or set is the one shared empty, since most nodes hold three. Mirrors
+ * Python's `_sealed`.
+ */
+function sealed<T>(held: T): T {
+  if (typeof held !== 'object' || held === null) return held
+  if (Array.isArray(held))
+    return (held.length === 0 ? EMPTY.list : Object.freeze(held.map(sealed))) as T
+  if (held instanceof Map) {
+    if (held.size === 0) return EMPTY.map as T
+    const copy = new Map<unknown, unknown>()
+    for (const [key, value] of held) copy.set(key, sealed(value))
+    return Object.freeze(Object.defineProperties(copy, WRITES)) as T
+  }
+  if (held instanceof Set)
+    return (
+      held.size === 0 ? EMPTY.set : Object.freeze(Object.defineProperties(new Set(held), WRITES))
+    ) as T
+  const copy: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(held)) copy[key] = sealed(value)
+  return Object.freeze(copy) as T
+}
+
 /**
  * A session's command trees, compiled: the profile's top-level tree, each
  * of its mounts' trees, and the inline permissions' trees, in document
@@ -518,12 +560,22 @@ export interface ScopedTree {
  * a mount's tree or inline permissions only tighten. `unread` names the
  * commands a tree names options or subcommands of while no grammar reads
  * them yet, held as written for a CLI still to come; a line running one
- * is refused as the session's creation would have been. Mirrors the
- * Python `AdmissionRules`.
+ * is refused as the session's creation would have been.
+ *
+ * It holds its own copy of the trees, which nobody can change in place,
+ * so it reads the same for as long as it lives and the matcher compiled
+ * for it stays its matcher (`admissionMatcher`); a change is a new rule
+ * set. Mirrors the Python `AdmissionRules`.
  */
-export interface AdmissionRules {
+export class AdmissionRules {
   readonly trees: readonly ScopedTree[]
-  readonly unread?: ReadonlySet<string>
+  declare readonly unread?: ReadonlySet<string>
+
+  constructor(trees: readonly ScopedTree[], unread?: ReadonlySet<string>) {
+    this.trees = sealed(trees)
+    if (unread !== undefined && unread.size > 0) this.unread = sealed(unread)
+    Object.freeze(this)
+  }
 }
 
 /**

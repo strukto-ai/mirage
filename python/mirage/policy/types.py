@@ -15,7 +15,8 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Literal, Protocol
+from types import MappingProxyType
+from typing import Any, ClassVar, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -33,6 +34,24 @@ from mirage.types import (
 )
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
+
+T = TypeVar("T")
+
+_EMPTY: Mapping[str, Any] = MappingProxyType({})
+
+
+def _sealed(held: Mapping[str, T]) -> Mapping[str, T]:
+    """A tree node's mapping as one nobody can change in place, so a
+    rule set reads the same for as long as it lives and the matcher
+    compiled for it stays its matcher. An empty mapping is the one
+    shared empty, since most nodes hold three.
+
+    Args:
+        held (Mapping[str, T]): the mapping as built.
+    """
+    if isinstance(held, MappingProxyType):
+        return held
+    return MappingProxyType(dict(held)) if held else _EMPTY
 
 
 class MountRootQuery(Protocol):
@@ -579,6 +598,9 @@ class ValueRule:
     decision: tuple[RuleLeaf, ...] = ()
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _sealed(self.options))
+
     def __hash__(self) -> int:
         return hash((self.decision, frozenset(self.options.items())))
 
@@ -599,6 +621,10 @@ class OptionRule:
     decision: tuple[RuleLeaf, ...] = ()
     values: Mapping[str, ValueRule] = field(default_factory=dict)
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", _sealed(self.values))
+        object.__setattr__(self, "options", _sealed(self.options))
 
     def __hash__(self) -> int:
         return hash(
@@ -637,6 +663,11 @@ class CommandNode:
     options: Mapping[str, OptionRule] = field(default_factory=dict)
     other_options: tuple[RuleLeaf, ...] = ()
     operands: Mapping[str, "CommandNode"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subcommands", _sealed(self.subcommands))
+        object.__setattr__(self, "options", _sealed(self.options))
+        object.__setattr__(self, "operands", _sealed(self.operands))
 
     def __hash__(self) -> int:
         return hash(

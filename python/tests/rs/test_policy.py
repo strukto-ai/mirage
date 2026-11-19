@@ -222,3 +222,15 @@ def test_a_request_places_an_encoded_field_as_written():
     }
     with pytest.raises(TypeError, match="not JSON"):
         request("decide", {"facts": Path("/x")})
+
+
+def test_a_tree_node_refuses_a_change_in_place():
+    tree = command_tree({"rm": "deny"})
+    rules = AdmissionRules((ScopedTree(tree),))
+    matcher = admission_matcher(rules)
+    with pytest.raises(TypeError):
+        tree.subcommands["cat"] = tree  # type: ignore[index]
+    with pytest.raises(TypeError):
+        tree.subcommands["rm"].operands["x"] = tree  # type: ignore[index]
+    assert admission_matcher(rules) is matcher
+    assert matcher.ask("runs", name=units("rm")) is False

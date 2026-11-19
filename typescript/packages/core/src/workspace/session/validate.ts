@@ -18,7 +18,12 @@ import { SPECS } from '../../commands/spec/index.ts'
 import type { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { noGrammar, unreadNames } from '../../policy/match/grammar.ts'
-import type { AdmissionRules, CommandNode, Grammar, OptionRule } from '../../policy/types.ts'
+import {
+  AdmissionRules,
+  type CommandNode,
+  type Grammar,
+  type OptionRule,
+} from '../../policy/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { NOT_INSTALLABLE } from '../lookup/constants.ts'
 
@@ -276,6 +281,5 @@ export function renormalized(
     ...scoped,
     tree: normalizeTree(scoped.tree, grammars, 'commands', true),
   }))
-  const unread = unreadNames(trees, grammars)
-  return unread.size > 0 ? { trees, unread } : { trees }
+  return new AdmissionRules(trees, unreadNames(trees, grammars))
 }

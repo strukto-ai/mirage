@@ -1165,8 +1165,13 @@
    "typescript_only": {
     "byValue": "The compiled-matcher map behind admissionMatcher and visibilityMatcher, keyed by configuration; Python's functools.lru_cache holds the same entries.",
     "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value.",
-    "RuleRow": "Names one row of the stream's rule table, which TypeScript reads typed; Python reads the same JSON as mappings.",
-    "tables": "The rule table kept per session's trees behind ruleTable; Python's functools.lru_cache on rule_table holds the same entries."
+    "compiled": "The matcher found by a built rule set's own object behind admissionMatcher; Python's functools.lru_cache finds it by the rule set's cached hash.",
+    "RuleRow": "Names one row of the stream's rule table, which TypeScript reads typed; Python reads the same JSON as mappings."
+   }
+  },
+  "policy/types": {
+   "typescript_only": {
+    "WRITES": "The writes a built rule set's map or set refuses; Python's MappingProxyType refuses the same writes itself."
    }
   },
   "workspace/session/resolve": {

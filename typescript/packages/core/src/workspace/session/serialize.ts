@@ -15,7 +15,7 @@
 import { METHODS } from '../../policy/constants.ts'
 import { commandTree, treeDoc } from '../../policy/profile.ts'
 import {
-  type AdmissionRules,
+  AdmissionRules,
   type CommandRule,
   type Decision,
   Outcome,
@@ -95,13 +95,13 @@ export function commandsFromDict(
   flat?: unknown,
 ): AdmissionRules | null {
   if (data === undefined) return flat === undefined ? null : OLDER_FORMAT
-  return {
-    trees: data.map((entry) => ({
+  return new AdmissionRules(
+    data.map((entry) => ({
       tree: commandTree(entry.commands),
       mount: entry.mount,
       inline: entry.inline ?? false,
     })),
-  }
+  )
 }
 
 /** One of a session's policy programs as the record stores it (the Python spelling). */

@@ -15,7 +15,7 @@
 import type { util } from 'zod'
 import { DEFAULT_ASK_REASON } from '../policy/constants.ts'
 import {
-  type AdmissionRules,
+  AdmissionRules,
   type CommandNode,
   type CommandRule,
   type OptionRule,
@@ -86,9 +86,32 @@ export function request(
  */
 export class PolicyMatcher {
   private readonly stream: MovableStream
+  private table: readonly CommandRule[] | null = null
 
   constructor(config: Readonly<Wire>) {
     this.stream = open(config)
+  }
+
+  /**
+   * Every leaf of the compiled trees as the rule a ruling names, in the
+   * order the stream numbers them, read once. An ask with no reason reads
+   * as the default one; a deny's stays empty, since what its refusal names
+   * depends on the line (`reasonOf`).
+   */
+  rules(): readonly CommandRule[] {
+    this.table ??= Object.freeze(
+      (this.ask('rules') as readonly RuleRow[]).map((row): CommandRule => {
+        const reason = fromUnits(row.reason)
+        return {
+          reason: reason === '' && row.decision === Outcome.ASK ? DEFAULT_ASK_REASON : reason,
+          decision: row.decision,
+          at: fromUnits(row.at),
+          paths: row.paths.map(fromUnits),
+          mount: row.mount === null ? '' : fromUnits(row.mount),
+        }
+      }),
+    )
+    return this.table
   }
 
   /** The answer to one request, decoded from its JSON; text travels as code points. */
@@ -153,32 +176,14 @@ interface RuleRow {
   readonly mount: number[] | null
 }
 
-const tables = new WeakMap<AdmissionRules, readonly CommandRule[]>()
-
 /**
  * Every leaf of a session's trees as the rule a ruling names, in the
- * order the stream numbers them. An ask with no reason reads as the
- * default one; a deny's stays empty, since what its refusal names depends
- * on the line (`reasonOf`). Mirrors Python's rule_table.
+ * order the stream numbers them: the table of the matcher compiled for
+ * the rule set (`PolicyMatcher.rules`), so the two never disagree.
+ * Mirrors Python's rule_table.
  */
 export function ruleTable(rules: AdmissionRules): readonly CommandRule[] {
-  const held = tables.get(rules)
-  if (held !== undefined) return held
-  const rows = admissionMatcher(rules).ask('rules') as readonly RuleRow[]
-  const table = Object.freeze(
-    rows.map((row): CommandRule => {
-      const reason = fromUnits(row.reason)
-      return {
-        reason: reason === '' && row.decision === Outcome.ASK ? DEFAULT_ASK_REASON : reason,
-        decision: row.decision,
-        at: fromUnits(row.at),
-        paths: row.paths.map(fromUnits),
-        mount: row.mount === null ? '' : fromUnits(row.mount),
-      }
-    }),
-  )
-  tables.set(rules, table)
-  return table
+  return admissionMatcher(rules).rules()
 }
 
 /** A session's visibility in the stream's wire shape. Mirrors Python's visibility_wire. */
@@ -264,16 +269,25 @@ function cached(text: string, config: () => Wire): PolicyMatcher {
   return matcher
 }
 
+const compiled = new WeakMap<AdmissionRules, PolicyMatcher>()
+
 /**
  * The compiled matcher for a rule set, shared by every caller asking the
- * same; null answers the requests no profile scopes. Mirrors Python's
- * admission_matcher.
+ * same; null answers the requests no profile scopes. An `AdmissionRules`
+ * cannot change in place, so its matcher is found by the object itself
+ * and its trees are read once; a rule set written by hand may change, so
+ * it is read on every call and answered as it reads now. Mirrors
+ * Python's admission_matcher.
  */
 export function admissionMatcher(rules: AdmissionRules | null): PolicyMatcher {
+  const held = rules instanceof AdmissionRules ? compiled.get(rules) : undefined
+  if (held !== undefined) return held
   const key = JSON.stringify({ rules }, (_key, value: unknown) =>
     value instanceof Map ? [...(value as Map<unknown, unknown>)] : value,
   )
-  return cached(key, () => (rules === null ? {} : { rules: rulesWire(rules) }))
+  const matcher = cached(key, () => (rules === null ? {} : { rules: rulesWire(rules) }))
+  if (rules instanceof AdmissionRules) compiled.set(rules, matcher)
+  return matcher
 }
 
 /** The compiled matcher for a visibility, shared by every caller asking the same. Mirrors Python's visibility_matcher. */
