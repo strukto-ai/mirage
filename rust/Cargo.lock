@@ -956,6 +956,7 @@ name = "mirage-rs"
 version = "0.0.9-alpha.2"
 dependencies = [
  "blake2",
+ "brotli",
  "byteorder",
  "bzip2",
  "encoding_rs",

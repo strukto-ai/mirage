@@ -13,10 +13,11 @@ publish = false
 gh = []
 # pdftotext and pdfinfo, which the Python module and their own Wasm module
 # carry.
-pdf = ["dep:pdf_oxide"]
+pdf = ["dep:pdf_oxide", "dep:brotli"]
 
 [dependencies]
 blake2 = { version = "0.11", default-features = false }
+brotli = { version = "9.1.3", optional = true }
 byteorder = "1.5"
 bzip2 = "0.6.1"
 encoding_rs = "0.8.35"

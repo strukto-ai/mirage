@@ -208,7 +208,6 @@ pub(crate) enum Request {
     },
     /// Whether an object grown to `size` bytes still fits the workspace's
     /// memory, the host refusing it if not.
-    #[cfg(feature = "gh")]
     Memory {
         size: u64,
     },
@@ -491,7 +490,6 @@ impl Request {
                 put("op", "sleep".into());
                 put("seconds", (*seconds).into());
             }
-            #[cfg(feature = "gh")]
             Request::Memory { size } => {
                 put("op", "memory".into());
                 put("size", (*size).into());

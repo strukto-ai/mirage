@@ -35,6 +35,9 @@ struct Slot {
 }
 
 const CONTENT_TYPES: &str = "/[Content_Types].xml";
+/// What one parsed element costs, as measured on a document of empty
+/// paragraphs, rounded up.
+const TAG_COST: u64 = 300;
 
 fn key(name: &str) -> String {
     name.trim_start_matches('/').to_ascii_lowercase()
@@ -110,32 +113,17 @@ impl<'h> Pkg<'h> {
             Err(Refusal::Host(why)) => return Err(Fail::of(text(&why))),
         };
         let names: Vec<String> = book.names().into_iter().map(|n| format!("/{n}")).collect();
-        let mut slots = HashMap::new();
-        for name in &names {
-            let lower = name.to_ascii_lowercase();
-            if !(lower.ends_with(".xml") || lower.ends_with(".rels")) {
-                continue;
-            }
-            if let Some(bytes) = book.part(name).await {
-                slots.insert(
-                    key(name),
-                    Slot {
-                        name: name.clone(),
-                        bytes,
-                        tree: OnceCell::new(),
-                    },
-                );
-            }
-        }
+        book.tag_cost = TAG_COST;
         let mut pkg = Pkg {
             book,
-            slots,
+            slots: HashMap::new(),
             names,
             changed: HashSet::new(),
             dropped: HashSet::new(),
             binaries: Vec::new(),
             main: String::new(),
         };
+        pkg.load_reachable().await;
         if !pkg.slots.contains_key(&key(CONTENT_TYPES)) {
             return Err(Fail::of(format!(
                 "Not a document 'office' reads: {} (no-content-types)",
@@ -163,6 +151,46 @@ impl<'h> Pkg<'h> {
         };
         pkg.main = resolve_target("/", &main.target);
         Ok(pkg)
+    }
+
+    /// The content types part and every XML part a relationship reaches
+    /// from the package root, each kept as it inflates; a part nothing
+    /// links to stays in the spool and is copied as it stands on save.
+    async fn load_reachable(&mut self) {
+        self.load(CONTENT_TYPES).await;
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut owners = vec!["/".to_string()];
+        while let Some(owner) = owners.pop() {
+            self.load(&rels_name(&owner)).await;
+            for r in self.rels(&owner).into_iter().filter(|r| !r.external) {
+                let target = resolve_target(&owner, &r.target);
+                if seen.insert(key(&target)) {
+                    self.load(&target).await;
+                    owners.push(target);
+                }
+            }
+        }
+    }
+
+    /// The part `name` inflated into its slot when it is XML the package holds.
+    async fn load(&mut self, name: &str) {
+        let k = key(name);
+        if !(k.ends_with(".xml") || k.ends_with(".rels")) || self.slots.contains_key(&k) {
+            return;
+        }
+        let Some(stored) = self.names.iter().find(|n| key(n) == k).cloned() else {
+            return;
+        };
+        if let Some(bytes) = self.book.keep(&stored).await {
+            self.slots.insert(
+                k,
+                Slot {
+                    name: stored,
+                    bytes,
+                    tree: OnceCell::new(),
+                },
+            );
+        }
     }
 
     pub(super) fn has(&self, name: &str) -> bool {

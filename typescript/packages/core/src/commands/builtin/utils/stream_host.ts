@@ -28,6 +28,7 @@ import { eisdir, eloop, enoent, exdev, isWalkError, strerrorOf } from '../../../
 import { fsErrorLine } from '../../../errors/render.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { ByteSpool, spooledPair } from '../../../io/spool.ts'
 import { drain } from '../../../io/stream.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
@@ -291,6 +292,9 @@ export class StreamHost {
         return this.run(request)
       case 'clock':
         return { reply: {}, data: clockReply() }
+      case 'memory':
+        checkMemory(Number(request.size))
+        return { reply: {} }
       case 'walls': {
         const zone = zoneFromEnv(this.ctx.env)
         const times = Array.isArray(request.times) ? request.times : []
