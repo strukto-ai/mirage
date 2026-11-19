@@ -56,7 +56,7 @@ AI 에이전트는 터미널에서 일합니다. Mirage는 터미널 인터페�
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="세 개의 가상 파일시스템(S3, Slack, Google Drive), 세 개의 가상 CLI(gh, linear, deepwiki-mcp), 세 개의 VM(Monty, E2B 샌드박스, EC2 GPU) 위의 Mirage: grep 하나가 세 파일시스템을 모두 검색하고, 세 CLI의 출력이 하나의 grep으로 이어지며, 파이프라인 하나가 각 VM에서 한 단계씩 실행됩니다" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="세 개의 가상 파일시스템(S3, Slack, Google Drive), 세 개의 가상 CLI(gh, linear, deepwiki-mcp), 세 개의 VM(Monty, E2B 샌드박스, EC2 GPU), 정책 계층 위의 Mirage: grep 하나가 세 파일시스템을 모두 검색하고, 세 CLI의 출력이 하나의 grep으로 이어지며, 파이프라인 하나가 각 VM에서 한 단계씩 실행되고, 숨긴 .pem 키를 읽고, 읽기 전용 /s3 마운트에서 삭제하고, PR을 병합하는 한 줄은 정책이 거부합니다" width="100%">
   </picture>
 </p>
 
