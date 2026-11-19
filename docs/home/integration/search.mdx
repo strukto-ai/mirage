@@ -279,8 +279,9 @@ With this example, `diff -r /notes /backup` on a folder of 150 pages prints
 reads the file or [`lines_containing`](#lines_containing) answers it. A file
 [`files_containing`](#files_containing) rules out costs nothing. When
 `files_containing` returns `None`, the search goes through every file until
-it reaches the limit, then stops. Other commands that walk a folder, such as `find` and
-`cp -r`, stop at the same limit.
+it reaches the limit, then stops. A listing such as `find` also stops at the
+limit, and a copy such as `cp -r` of a folder over it is refused before it
+copies anything.
 
 ### Set it
 
