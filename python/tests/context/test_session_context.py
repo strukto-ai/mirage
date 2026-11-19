@@ -315,6 +315,7 @@ def test_a_mount_no_cap_or_show_entry_names_asks_no_matcher(monkeypatch):
         assert strongest_mode_under("/repo", MountMode.WRITE) == (
             MountMode.WRITE
         )
+        assert readonly_below("/capped/x", "/capped", MountMode.EXEC) is None
         assert asks == []
         assert (
             effective_path_mode("/capped/x", "/capped", MountMode.EXEC)

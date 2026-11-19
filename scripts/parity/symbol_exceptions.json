@@ -1171,6 +1171,7 @@
   },
   "policy/types": {
    "typescript_only": {
+    "SEALED": "The values sealed has already built, so a rule set rebuilt from another's trees is not copied twice; Python's MappingProxyType cannot be held weakly, so it copies.",
     "WRITES": "The writes a built rule set's map or set refuses; Python's MappingProxyType refuses the same writes itself."
    }
   },

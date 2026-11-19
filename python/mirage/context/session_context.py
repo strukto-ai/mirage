@@ -1199,7 +1199,11 @@ def _readonly_below_under(
     mount_prefix: str,
     mount_mode: MountMode,
 ) -> str | None:
-    if sess is None:
+    if (
+        sess is None
+        or sess.visibility is None
+        or sess.visibility.shown is None
+    ):
         return None
     prefix = norm(mount_prefix)
     cap = (

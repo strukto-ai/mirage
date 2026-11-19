@@ -528,29 +528,33 @@ const EMPTY = Object.freeze({
   set: Object.freeze(Object.defineProperties(new Set<never>(), WRITES)),
 })
 
+const SEALED = new WeakSet(Object.values(EMPTY))
+
 /**
  * A copy of a tree value that nobody can change in place: every object
  * and list frozen, every map and set refusing a write. An empty list, map
- * or set is the one shared empty, since most nodes hold three. Mirrors
- * Python's `_sealed`.
+ * or set is the one shared empty, since most nodes hold three. A value
+ * this already sealed is kept, not copied again. Mirrors Python's
+ * `_sealed`.
  */
 function sealed<T>(held: T): T {
-  if (typeof held !== 'object' || held === null) return held
-  if (Array.isArray(held))
-    return (held.length === 0 ? EMPTY.list : Object.freeze(held.map(sealed))) as T
-  if (held instanceof Map) {
-    if (held.size === 0) return EMPTY.map as T
-    const copy = new Map<unknown, unknown>()
-    for (const [key, value] of held) copy.set(key, sealed(value))
-    return Object.freeze(Object.defineProperties(copy, WRITES)) as T
-  }
-  if (held instanceof Set)
-    return (
+  if (typeof held !== 'object' || held === null || SEALED.has(held)) return held
+  let copy: object
+  if (Array.isArray(held)) copy = held.length === 0 ? EMPTY.list : Object.freeze(held.map(sealed))
+  else if (held instanceof Map) {
+    const entries = new Map<unknown, unknown>()
+    for (const [key, value] of held) entries.set(key, sealed(value))
+    copy = held.size === 0 ? EMPTY.map : Object.freeze(Object.defineProperties(entries, WRITES))
+  } else if (held instanceof Set)
+    copy =
       held.size === 0 ? EMPTY.set : Object.freeze(Object.defineProperties(new Set(held), WRITES))
-    ) as T
-  const copy: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(held)) copy[key] = sealed(value)
-  return Object.freeze(copy) as T
+  else {
+    const fields: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(held)) fields[key] = sealed(value)
+    copy = Object.freeze(fields)
+  }
+  SEALED.add(copy)
+  return copy as T
 }
 
 /**
