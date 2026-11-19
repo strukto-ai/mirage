@@ -1737,6 +1737,7 @@ async def _route_argv(
             registry,
             stdin,
             context.frame.routing,
+            sink,
         )
 
     consumer, routing = routed_consumer(

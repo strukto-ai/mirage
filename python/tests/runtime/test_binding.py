@@ -37,6 +37,8 @@ from mirage.context import (
 )
 from mirage.context.session_context import awaits_as, calls_as
 from mirage.io import IOResult
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.mount.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Policy
@@ -116,6 +118,25 @@ async def test_answer_of_keeps_what_a_run_wrote_whole():
         3, b"one two\n", b"warn\n"
     )
     assert await answer_of(_silent) == RunAnswer(0)
+
+
+@pytest.mark.asyncio
+async def test_a_bounded_answer_is_held_to_the_memory_budget():
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(8, lambda: 0),
+            answer_of(_outs_abcd_thrice, bounded=True),
+        )
+    answer = await run_with_memory(
+        MemoryBudget(8, lambda: 0), answer_of(_outs_abcd_thrice)
+    )
+    assert answer.stdout == b"abcd" * 3
+
+
+async def _outs_abcd_thrice(output, errors) -> RunResult:
+    for _ in range(3):
+        await output(b"abcd")
+    return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

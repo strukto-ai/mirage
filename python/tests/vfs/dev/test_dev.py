@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage import Mount, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.cache.index import IndexConfig
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
@@ -198,5 +198,18 @@ async def test_alternate_dev_mount_does_not_cache_session_descriptors(
         result = await ws.shell("ls /devices/fd", session_id="peer")
         assert "63" not in await result.stdout_str()
         assert result.exit_code != 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_files_under_dev_count_against_max_memory():
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.WRITE, max_memory="8MB")
+    try:
+        result = await ws.shell(
+            "for i in 1 2 3; do head -c 3000000 /dev/zero > /dev/f$i"
+            " || echo refused $i; done"
+        )
+        assert await result.stdout_str() == "refused 3\n"
     finally:
         await ws.close()

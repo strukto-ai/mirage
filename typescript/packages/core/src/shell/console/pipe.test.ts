@@ -14,7 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { MemoryExhausted } from '../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 import { PipeClosed } from '../errors.ts'
+import { JobConsole } from './job_console.ts'
 import { PipeConsole } from './pipe.ts'
 import { Channel } from './types.ts'
 
@@ -98,5 +101,22 @@ describe('PipeConsole', () => {
     const pipe = new PipeConsole()
     await pipe.emit(Channel.STDERR, enc('warning'))
     expect(dec(await pipe.snapshot(Channel.STDERR))).toBe('warning')
+  })
+
+  it('passes stderr on to the console it is given', async () => {
+    const errors = new JobConsole()
+    const pipe = new PipeConsole(false, undefined, null, errors)
+    await pipe.emit(Channel.STDERR, enc('e1\n'))
+    expect(dec(await errors.snapshot(Channel.STDERR))).toBe('e1\n')
+    expect(dec(await pipe.snapshot(Channel.STDERR))).toBe('')
+  })
+
+  it('counts the stderr it keeps against the memory budget', async () => {
+    const pipe = new PipeConsole()
+    await expect(
+      runWithMemory(new MemoryBudget(8, () => 0), async () => {
+        for (let i = 0; i < 3; i++) await pipe.emit(Channel.STDERR, enc('abcd'))
+      }),
+    ).rejects.toThrow(MemoryExhausted)
   })
 })

@@ -96,7 +96,12 @@ class MachineAccessor(Accessor):
         return self._machines.get(machine)
 
     async def run(
-        self, machine: str, command: str, stdin: ByteSource | None = None
+        self,
+        machine: str,
+        command: str,
+        stdin: ByteSource | None = None,
+        *,
+        bounded: bool = False,
     ) -> tuple[int | None, bytes, bytes]:
         """Run one shell line on a machine, at ``/`` in its environment:
         its exit status, output and error output. A machine whose exec
@@ -107,11 +112,13 @@ class MachineAccessor(Accessor):
             machine (str): the machine's name.
             command (str): the line, as ``/bin/sh -c`` reads it.
             stdin (ByteSource | None): the bytes fed to the line.
+            bounded (bool): hold its answer to the workspace's memory
+                room, for a line that reads a file's content.
         """
         handle = self.handle(machine)
         await handle.ensure_connected()
         done = await handle.exec_line(
-            command, stdin, dict(handle.config.env), "/"
+            command, stdin, dict(handle.config.env), "/", bounded=bounded
         )
         if handle.joins_streams and done.exit_code:
             return done.exit_code, b"", done.stdout

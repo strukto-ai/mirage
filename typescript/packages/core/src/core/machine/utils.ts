@@ -64,6 +64,8 @@ export function remote(accessor: MachineAccessor, path: PathSpec): string {
  * @param command the line.
  * @param path the path a failure names.
  * @param stdin the bytes fed to the line.
+ * @param bounded hold its output to the workspace's memory room, for a line
+ *   that reads a file's content.
  */
 export async function checked(
   accessor: MachineAccessor,
@@ -71,8 +73,9 @@ export async function checked(
   command: string,
   path: PathSpec,
   stdin: ByteSource | null = null,
+  bounded = false,
 ): Promise<Uint8Array> {
-  const [status, out, err] = await accessor.run(machine, command, stdin)
+  const [status, out, err] = await accessor.run(machine, command, stdin, bounded)
   if (status !== 0 || err.length > 0) throw refusal(path, err)
   return out
 }

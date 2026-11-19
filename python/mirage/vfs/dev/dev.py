@@ -50,6 +50,12 @@ class DevVFS(RAMVFS):
         self._store = store if store is not None else DevStore()
         self.accessor = RAMAccessor(self._store)
 
+    @property
+    def held(self) -> int:
+        """The bytes the files written under ``/dev`` hold, which count
+        against ``max_memory`` as a RAM mount's do."""
+        return self._store.files.state.files.held
+
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         """The RAM listing, each child as ``stat`` answers it, so a
         device or a live descriptor lists as one.

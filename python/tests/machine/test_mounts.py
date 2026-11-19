@@ -175,7 +175,9 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
 
-    async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
+    async def exec_line(
+        self, line, stdin, env, cwd, *, bounded=False
+    ) -> RunAnswer:
         self.commands.append(line)
         if line.startswith(FIND + " "):
             return RunAnswer(0, b"d 1777 4096 0 0 0 0 \0")
@@ -1793,7 +1795,7 @@ async def _refused_by_the_cli() -> str:
 @pytest.mark.asyncio
 async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
     class UnavailableMachine(FakeMachine):
-        async def exec_line(self, line, stdin, env, cwd):
+        async def exec_line(self, line, stdin, env, cwd, *, bounded=False):
             if self.pipes and line == "cat /proc/mounts":
                 raise RuntimeError("guest unavailable")
             return await super().exec_line(line, stdin, env, cwd)

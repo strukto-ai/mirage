@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from mirage.errors import FsCondition, classify
 from mirage.errors.posix import LINUX_ERRNO, posix_phrase
+from mirage.io.errors import MemoryExhausted
 
 
 class MontyUnavailableError(ImportError):
@@ -119,6 +120,8 @@ def as_guest_error(path: str, target: str | None = None) -> Iterator[None]:
         yield
     except CancelledError:
         raise
+    except MemoryExhausted as exc:
+        raise MemoryError(str(exc)) from exc
     except Exception as exc:
         condition = classify(exc) or FsCondition.EIO
         raise guest_error(condition, path, target) from exc

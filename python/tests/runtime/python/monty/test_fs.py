@@ -22,6 +22,8 @@ import mirage.runtime.python.monty.fs as monty_fs
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import materialize
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.python import MontyRuntime
@@ -518,3 +520,111 @@ def test_a_naive_now_reads_the_sessions_zone():
     assert round(shift.total_seconds() / 3600) == 9
     assert tokyo.answers_clock
     assert not monty_fs.MontyFs(None, {}).answers_clock
+
+
+def test_monty_refuses_a_file_past_the_memory_room_before_reading_it():
+    dispatch = FakeDispatch({"/s3/big.bin": b"x" * 2_000_000})
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/s3/"])))
+    result = asyncio.run(
+        run_with_memory(
+            MemoryBudget(1_000_000, lambda: 0),
+            _run(
+                runtime,
+                "try:\n"
+                "    open('/s3/big.bin', 'rb').read(1)\n"
+                "except MemoryError as exc:\n"
+                "    print('MemoryError', exc)",
+            ),
+        )
+    )
+    assert result.stdout == b"MemoryError memory exhausted\n", result.stderr
+    assert "read" not in dispatch.ops
+
+
+class UnsizedDispatch(FakeDispatch):
+    """A mount that does not know a file's size until it is read."""
+
+    async def __call__(self, op, path, **kwargs):
+        if op == "stat" and path.virtual in self.files:
+            return FileStat(name=path.virtual, type=FileType.FILE), None
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_refuses_an_unsized_file_past_the_memory_room_once_read():
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(
+            UnsizedDispatch({"/s3/big.bin": b"x" * 2_000_000}),
+            PrefixResolver(lambda: ["/s3/"]),
+        )
+    )
+    result = asyncio.run(
+        run_with_memory(
+            MemoryBudget(1_000_000, lambda: 0),
+            _run(
+                runtime,
+                "try:\n"
+                "    open('/s3/big.bin', 'rb').read(1)\n"
+                "except MemoryError as exc:\n"
+                "    print('MemoryError', exc)",
+            ),
+        )
+    )
+    assert result.stdout == b"MemoryError memory exhausted\n", result.stderr
+
+
+class RefusingReadDispatch(FakeDispatch):
+    """A mount whose read is refused for memory partway, as a bounded
+    machine read is."""
+
+    async def __call__(self, op, path, **kwargs):
+        if op == "read" and path.virtual in self.files:
+            raise MemoryExhausted()
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_a_read_refused_for_memory_is_a_guest_memory_error():
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(
+            RefusingReadDispatch({"/s3/a.bin": b"x"}),
+            PrefixResolver(lambda: ["/s3/"]),
+        )
+    )
+    result = asyncio.run(
+        _run(
+            runtime,
+            "try:\n"
+            "    open('/s3/a.bin', 'rb').read()\n"
+            "except MemoryError as exc:\n"
+            "    print('MemoryError', exc)",
+        )
+    )
+    assert result.stdout == b"MemoryError memory exhausted\n", result.stderr
+
+
+class StatlessDispatch(FakeDispatch):
+    """A mount that serves a file's bytes but answers no stat for it."""
+
+    async def __call__(self, op, path, **kwargs):
+        if op == "stat" and path.virtual in self.files:
+            raise OSError(errno.ENOTSUP, "stat not supported")
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_reads_a_file_whose_mount_answers_no_stat():
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(
+            StatlessDispatch({"/s3/a.txt": b"hi"}),
+            PrefixResolver(lambda: ["/s3/"]),
+        )
+    )
+    result = asyncio.run(
+        _run(
+            runtime,
+            "from pathlib import Path\nprint(Path('/s3/a.txt').read_text())",
+        )
+    )
+    assert result.stdout == b"hi\n", result.stderr

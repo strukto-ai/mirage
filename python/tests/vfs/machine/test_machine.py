@@ -17,6 +17,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
+from mirage.vfs.ram import RAMVFS
 from tests.fixtures.machine import ScriptedMachine
 from tests.fixtures.machine_files import FakeFiles
 
@@ -217,3 +218,29 @@ def test_storage_location_names_the_machines_and_the_root():
     )
     vfs = MachineVFS(MachineVFSConfig(machines=("a", "b"), root="/"))
     assert vfs.storage_location() == "machine:a,b:/"
+
+
+@pytest.mark.asyncio
+async def test_a_machine_file_past_the_memory_room_is_refused():
+    a = FakeFiles({"/tmp/big.bin": b"x" * 3_000_000})
+    ws = two(a, FakeFiles(), max_memory="2MB")
+    code, out, err = await run(ws, "cat /tmp/big.bin | wc -c")
+    await ws.close()
+    assert "memory exhausted" in err
+
+
+@pytest.mark.asyncio
+async def test_machine_listing_and_removal_still_work_at_the_memory_cap():
+    ram = RAMVFS()
+    a = FakeFiles({"/tmp/old.log": b"x"})
+    ws = two(
+        a,
+        FakeFiles(),
+        mounts={"/ram": ram},
+        max_memory="2MB",
+    )
+    assert (await run(ws, "head -c 2097152 /dev/zero > /ram/fill"))[0] == 0
+    assert await run(ws, "ls /tmp") == (0, "old.log\n", "")
+    assert await run(ws, "rm /tmp/old.log") == (0, "", "")
+    assert "/tmp/old.log" not in a.files
+    await ws.close()

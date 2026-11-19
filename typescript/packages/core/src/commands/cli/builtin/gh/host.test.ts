@@ -22,6 +22,8 @@ import {
   type GitHubTransport,
 } from '../../../../core/github/client.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
+import { MemoryExhausted } from '../../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../../io/memory.ts'
 import { materialize, type IOResult } from '../../../../io/types.ts'
 import type { Context } from '../../../config.ts'
 import { CommandSpec } from '../../../spec/types.ts'
@@ -50,6 +52,35 @@ class FakeTransport implements GitHubTransport {
       data: ENC.encode(JSON.stringify(this.reply)),
       status: 200,
       headers: { 'content-type': 'application/json' },
+    })
+  }
+}
+
+class PagingTransport implements GitHubTransport {
+  calls = 0
+
+  constructor(
+    private readonly next: (n: number) => string,
+    private readonly pad = 0,
+  ) {}
+
+  get(): Promise<unknown> {
+    return Promise.reject(new Error('expected a raw call'))
+  }
+
+  request(): Promise<unknown> {
+    return Promise.reject(new Error('expected a raw call'))
+  }
+
+  requestRaw(): Promise<ApiResponse> {
+    this.calls += 1
+    return Promise.resolve({
+      data: ENC.encode(JSON.stringify([{ n: this.calls, pad: 'x'.repeat(this.pad) }])),
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        link: `<https://api.github.com${this.next(this.calls)}>; rel="next"`,
+      },
     })
   }
 }
@@ -133,5 +164,73 @@ describe('runLeaf', () => {
     const [, io] = await run(transport, 'issue reopen', ['1'])
     expect(io.exitCode).toBe(0)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('! Issue o/r#1 (t) is already open\n')
+  })
+
+  it('stops --paginate on a next page it has already read', async () => {
+    const transport = new PagingTransport(() => '/items?page=2')
+    const [out, io] = await run(transport, 'api', ['/items'], { paginate: true })
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([
+      1,
+      'gh: next page repeats /items?page=2\n',
+    ])
+    expect(JSON.parse(out)).toEqual([
+      { n: 1, pad: '' },
+      { n: 2, pad: '' },
+    ])
+    expect(transport.calls).toBe(2)
+  })
+
+  it('holds --paginate pages to the workspace budget', async () => {
+    const transport = new PagingTransport((n) => `/items?page=${String(n + 1)}`, 200_000)
+    await expect(
+      runWithMemory(new MemoryBudget(2_000_000, () => 0), () =>
+        run(transport, 'api', ['/items'], { paginate: true }),
+      ),
+    ).rejects.toThrow(MemoryExhausted)
+    expect(transport.calls).toBeLessThan(20)
+  })
+
+  it('stops graphql --paginate on a cursor it has already read', async () => {
+    const transport = new FakeTransport({
+      data: { viewer: { pageInfo: { hasNextPage: true, endCursor: 'c1' } } },
+    })
+    const query = 'query($endCursor: String) { viewer { pageInfo { hasNextPage endCursor } } }'
+    const [, io] = await run(transport, 'api', ['graphql'], {
+      paginate: true,
+      raw_field: [`query=${query}`],
+    })
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([
+      1,
+      'gh: next page repeats c1\n',
+    ])
+    expect(transport.calls.length).toBe(2)
+  })
+
+  it('counts empty --paginate pages toward the workspace budget', async () => {
+    const transport = new PagingTransport(
+      (n) => `/items?page=${String(n + 1)}&pad=${'x'.repeat(200)}`,
+    )
+    await expect(
+      runWithMemory(new MemoryBudget(8192, () => 0), () =>
+        run(transport, 'api', ['/items'], { paginate: true }),
+      ),
+    ).rejects.toThrow(MemoryExhausted)
+    expect(transport.calls).toBeLessThan(200)
+  })
+
+  it('stops graphql --paginate on the cursor it was given', async () => {
+    const transport = new FakeTransport({
+      data: { viewer: { pageInfo: { hasNextPage: true, endCursor: 'c1' } } },
+    })
+    const query = 'query($endCursor: String) { viewer { pageInfo { hasNextPage endCursor } } }'
+    const [, io] = await run(transport, 'api', ['graphql'], {
+      paginate: true,
+      raw_field: ['endCursor=c1', `query=${query}`],
+    })
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([
+      1,
+      'gh: next page repeats c1\n',
+    ])
+    expect(transport.calls.length).toBe(1)
   })
 })

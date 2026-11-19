@@ -14,6 +14,8 @@
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
@@ -544,6 +546,56 @@ describe('MontyFs path operations', () => {
     const access = accessOn(dispatch)
     expect(await access.handle('Path.read_text', ['/ram/x'])).toBe('hi')
     expect(await access.handle('Path.read_bytes', ['/ram/x'])).toEqual(
+      new TextEncoder().encode('hi'),
+    )
+  })
+
+  it('refuses read_bytes of a file past the memory room before reading it', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) =>
+      op === 'stat'
+        ? Promise.resolve(new FileStat({ name: path, size: 2_000_000, type: FileType.FILE }))
+        : Promise.resolve(new Uint8Array(2_000_000)),
+    )
+    const access = accessOn(dispatch)
+    await expect(
+      runWithMemory(new MemoryBudget(1_000_000, () => 0), () =>
+        Promise.resolve(access.handle('Path.read_bytes', ['/ram/big.bin'])),
+      ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
+    expect(dispatch.mock.calls.map(([op]) => op)).not.toContain('read')
+  })
+
+  it('refuses an unsized file past the memory room once it is read', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) =>
+      op === 'stat'
+        ? Promise.resolve(new FileStat({ name: path, type: FileType.FILE }))
+        : Promise.resolve(new Uint8Array(2_000_000)),
+    )
+    await expect(
+      runWithMemory(new MemoryBudget(1_000_000, () => 0), () =>
+        Promise.resolve(accessOn(dispatch).handle('Path.read_bytes', ['/ram/big.bin'])),
+      ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
+  })
+
+  it('turns a read refused for memory into the guest MemoryError', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) =>
+      op === 'stat'
+        ? Promise.resolve(new FileStat({ name: path, size: 1, type: FileType.FILE }))
+        : Promise.reject(new MemoryExhausted()),
+    )
+    await expect(
+      Promise.resolve(accessOn(dispatch).handle('Path.read_bytes', ['/ram/a.bin'])),
+    ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
+  })
+
+  it('reads a file whose mount answers no stat', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op) =>
+      op === 'stat'
+        ? Promise.reject(Object.assign(new Error('stat not supported'), { code: 'ENOTSUP' }))
+        : Promise.resolve(new TextEncoder().encode('hi')),
+    )
+    expect(await accessOn(dispatch).handle('Path.read_bytes', ['/ram/a.txt'])).toEqual(
       new TextEncoder().encode('hi'),
     )
   })

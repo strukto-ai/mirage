@@ -181,7 +181,7 @@ function followOpts(abort: AbortController, extra: Record<string, string | boole
 }
 
 describe('tail -n', () => {
-  async function lastLines(parts: string[], lines: string): Promise<string[]> {
+  async function lastLines(parts: string[], lines: string, flag = 'lines'): Promise<string[]> {
     const encoder = new TextEncoder()
     async function* source(): AsyncIterable<Uint8Array> {
       for (const part of parts) {
@@ -189,7 +189,7 @@ describe('tail -n', () => {
         yield encoder.encode(part)
       }
     }
-    const ctx = { stdin: source(), flags: { lines }, cwd: PathSpec.fromStrPath('/') }
+    const ctx = { stdin: source(), flags: { [flag]: lines }, cwd: PathSpec.fromStrPath('/') }
     const result = await tailGeneric(
       [],
       [],
@@ -216,6 +216,13 @@ describe('tail -n', () => {
     expect(await runWithMemory(memory, () => lastLines(parts, '1'))).toEqual(['gh'])
     await expect(
       runWithMemory(memory, () => lastLines(['abcd', 'efgh', 'i'], '1')),
+    ).rejects.toThrow(MemoryExhausted)
+  })
+
+  it('counts a -c window against the memory budget', async () => {
+    const memory = new MemoryBudget(8, () => 0)
+    await expect(
+      runWithMemory(memory, () => lastLines(['abcd', 'efgh', 'i'], '100', 'bytes')),
     ).rejects.toThrow(MemoryExhausted)
   })
 })

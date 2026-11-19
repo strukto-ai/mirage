@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/index.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { isAborting } from '../../../errors/fs.ts'
 import { entryName } from '../../../utils/remnants.ts'
 import { normDir } from '../../../utils/path.ts'
@@ -251,9 +252,9 @@ export class MontyFs {
       case 'open':
         return this.open(path, typeof args[1] === 'string' ? args[1] : 'r', files)
       case 'Path.read_bytes':
-        return files.read(path)
+        return this.readWhole(path, files)
       case 'Path.read_text':
-        return files.read(path).then((b) => {
+        return this.readWhole(path, files).then((b) => {
           try {
             return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(b)
           } catch (cause) {
@@ -420,6 +421,22 @@ export class MontyFs {
         return false
       },
     )
+  }
+
+  /**
+   * A file's bytes for a guest, which Monty reads whole, read(1) included: one
+   * past the workspace's memory room is refused before it is fetched, as the
+   * guest's MemoryError. Mirrors Python's `path_read_bytes`.
+   */
+  private async readWhole(path: string, files: RuntimeFiles): Promise<Uint8Array> {
+    const row = await files.viewStat(path).catch((err: unknown) => {
+      console.debug(`monty read: ${path} did not stat: ${String(err)}`)
+      return null
+    })
+    checkMemory(row?.size ?? 0)
+    const data = await files.read(path)
+    checkMemory(data.byteLength)
+    return data
   }
 
   private async open(path: string, mode: string, files: RuntimeFiles): Promise<unknown> {

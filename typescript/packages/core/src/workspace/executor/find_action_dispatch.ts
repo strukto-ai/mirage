@@ -43,6 +43,7 @@ import type { OpenStream } from '../../rs/stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { Channel } from '../../shell/console/types.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
@@ -164,6 +165,8 @@ async function runExec(
   signal: AbortSignal | undefined,
   // Whether the line runs under a UTF-8 locale.
   utf8 = false,
+  // Where find's statement writes, which the run's stderr goes to in order.
+  sink?: JobConsole,
 ): Promise<IOResult> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
@@ -187,17 +190,21 @@ async function runExec(
   // find stays its process and forks each program as a child of it.
   const process = currentCaller().process
   if (process != null) process.oneCommand = false
-  const [stdout, io] = lineOutput((sink, stop) => {
-    const merged = mergeSignals(signal, stop)
-    const run = (): Promise<IOResult> =>
-      executeFn(`( ${line} )`, {
-        sessionId: session?.sessionId ?? '',
-        stdin,
-        sink,
-        ...(merged !== undefined ? { signal: merged } : {}),
-      })
-    return session === null ? run() : setProgramInvocation(session, run)
-  })
+  const [stdout, io] = lineOutput(
+    (relay, stop) => {
+      const merged = mergeSignals(signal, stop)
+      const run = (): Promise<IOResult> =>
+        executeFn(`( ${line} )`, {
+          sessionId: session?.sessionId ?? '',
+          stdin,
+          sink: relay,
+          ...(merged !== undefined ? { signal: merged } : {}),
+        })
+      return session === null ? run() : setProgramInvocation(session, run)
+    },
+    0,
+    sink,
+  )
   io.stdout = stdout
   return io
 }
@@ -420,6 +427,7 @@ export async function runListedFind(
   executeFn: ExecuteFn | null,
   sessionId: string,
   stdin: ByteSource | null,
+  sink?: JobConsole,
 ): Promise<IOResult> {
   const source = expr.files0From ?? '-'
   const typed = words.slice(0, expr.start).filter((w) => !LINK_OPTIONS.includes(w))
@@ -476,12 +484,19 @@ export async function runListedFind(
   const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
   const given = source === '-' ? null : stdin
   const execute = executeFn
+  const status = refused !== '' ? 1 : 0
+  let said = refused
+  if (said !== '' && sink !== undefined) {
+    await sink.emit(Channel.STDERR, encodeText(said))
+    said = ''
+  }
   const [stdout, io] = lineOutput(
-    (sink, signal) => execute(line, { sessionId, stdin: given, sink, signal }),
-    refused !== '' ? 1 : 0,
+    (relay, signal) => execute(line, { sessionId, stdin: given, sink: relay, signal }),
+    status,
+    sink,
   )
   io.stdout = stdout
-  if (refused !== '') io.stderr = encodeText(refused)
+  if (said !== '') io.stderr = encodeText(said)
   return io
 }
 
@@ -612,6 +627,8 @@ export async function applyFindActions(
     /** The start operands, whose rows GNU statted when it opened the
      * walk; empty means the working directory. */
     readonly starts?: readonly PathSpec[]
+    // Where find's statement writes, which each run's stderr goes to in order.
+    sink?: JobConsole
   } = {},
 ): Promise<ByteSource | null> {
   const warned = concat(expr.warnings.map((line) => encodeText(`${line}\n`)))
@@ -625,6 +642,12 @@ export async function applyFindActions(
   io.stderr = said.byteLength > 0 ? said : null
   const executeFn = options.executeFn
   const hasExec = expr.actions.some((a) => a.kind === 'exec')
+  // The walk ended before any -exec runs, so what it said goes out first,
+  // ahead of the runs that now write to the sink as they go.
+  if (options.sink !== undefined && hasExec && said.byteLength > 0) {
+    await options.sink.emit(Channel.STDERR, said)
+    io.stderr = null
+  }
   if (hasExec && executeFn === undefined) {
     refuse(io, encodeText('find: -exec: no shell to run the command\n'))
     return null
@@ -704,12 +727,14 @@ export async function applyFindActions(
   const heard = (): void => {
     for (const line of errors.splice(0)) put(Channel.STDERR, line)
   }
-  function* flushed(): Generator<Uint8Array> {
+  async function* flushed(): AsyncGenerator<Uint8Array> {
     const taken = held.splice(0)
     size = 0
     for (const [channel, parts] of taken) {
-      if (channel === Channel.STDERR) io.addStderr(concat(parts))
-      else yield concat(parts)
+      if (channel !== Channel.STDERR) yield concat(parts)
+      else if (options.sink !== undefined && hasExec)
+        await options.sink.emit(Channel.STDERR, concat(parts))
+      else io.addStderr(concat(parts))
     }
   }
   async function* ran(run: IOResult): AsyncGenerator<Uint8Array> {
@@ -761,6 +786,7 @@ export async function applyFindActions(
             where,
             signal,
             expr.utf8,
+            options.sink,
           )
           yield* ran(run)
           if (run.exitCode !== 0) break
@@ -818,6 +844,7 @@ export async function applyFindActions(
           where,
           signal,
           expr.utf8,
+          options.sink,
         )
         try {
           yield* ran(run)

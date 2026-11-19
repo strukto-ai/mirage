@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -207,3 +209,105 @@ async def test_a_memory_request_is_held_to_the_workspace_budget():
         await run_with_memory(
             budget, host.serve({"op": "memory", "size": 11}, b"")
         )
+
+
+class _Paging:
+    def __init__(self, nexts: Callable[[int], str], pad: int = 0) -> None:
+        self.nexts = nexts
+        self.pad = pad
+        self.calls = 0
+
+    async def __call__(
+        self, account, method, path, body=None, params=None, *, headers=None
+    ) -> ApiResponse:
+        self.calls += 1
+        link = f'<https://api.github.com{self.nexts(self.calls)}>; rel="next"'
+        return ApiResponse(
+            json.dumps([{"n": self.calls, "pad": "x" * self.pad}]).encode(),
+            200,
+            {"content-type": "application/json", "link": link},
+        )
+
+
+@pytest.mark.asyncio
+async def test_paginate_stops_on_a_next_page_it_has_already_read(monkeypatch):
+    github = _Paging(lambda n: "/items?page=2")
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace()
+    code, out, err = await asyncio.wait_for(
+        _line(ws, "gh api --paginate /items --jq '.[].n'"), 10
+    )
+    await ws.close()
+    assert (code, out, err) == (
+        1,
+        "1\n2\n",
+        "gh: next page repeats /items?page=2\n",
+    )
+    assert github.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_paginate_holds_its_pages_to_the_workspace_budget(monkeypatch):
+    github = _Paging(lambda n: f"/items?page={n + 1}", pad=200_000)
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace(max_memory="2MB")
+    code, _, err = await asyncio.wait_for(
+        _line(ws, "gh api --paginate /items | wc -c"), 10
+    )
+    await ws.close()
+    assert "memory exhausted" in err
+    assert github.calls < 20
+
+
+@pytest.mark.asyncio
+async def test_graphql_paginate_stops_on_a_cursor_it_has_already_read(
+    monkeypatch,
+):
+    info = {"hasNextPage": True, "endCursor": "c1"}
+    github = _Github({"data": {"viewer": {"pageInfo": info}}})
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace()
+    code, _, err = await asyncio.wait_for(
+        _line(
+            ws,
+            "gh api graphql --paginate -f query='query($endCursor: String)"
+            " { viewer { pageInfo { hasNextPage endCursor } } }'",
+        ),
+        10,
+    )
+    await ws.close()
+    assert (code, err) == (1, "gh: next page repeats c1\n")
+    assert len(github.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_paginate_counts_empty_pages_toward_the_budget(monkeypatch):
+    github = _Paging(lambda n: f"/items?page={n + 1}&pad={'x' * 200}")
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace(max_memory="8KB")
+    code, _, err = await asyncio.wait_for(
+        _line(ws, "gh api --paginate /items | wc -c"), 30
+    )
+    await ws.close()
+    assert "memory exhausted" in err
+    assert github.calls < 200
+
+
+@pytest.mark.asyncio
+async def test_graphql_paginate_stops_on_the_cursor_it_was_given(monkeypatch):
+    info = {"hasNextPage": True, "endCursor": "c1"}
+    github = _Github({"data": {"viewer": {"pageInfo": info}}})
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace()
+    code, _, err = await asyncio.wait_for(
+        _line(
+            ws,
+            "gh api graphql --paginate -f endCursor=c1 -f query='query("
+            "$endCursor: String) { viewer { pageInfo { hasNextPage endCursor"
+            " } } }'",
+        ),
+        10,
+    )
+    await ws.close()
+    assert (code, err) == (1, "gh: next page repeats c1\n")
+    assert len(github.calls) == 1

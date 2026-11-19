@@ -26,6 +26,7 @@ from mirage.context.session_context import (
     note_decision,
 )
 from mirage.execution.process.table import ProcessTable
+from mirage.io.memory import check_memory
 from mirage.mount.changes import RecentChanges
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, OutputFn, RunAnswer, RunResult
@@ -128,22 +129,31 @@ async def refused_run(name: str, reason: str, errors: OutputFn) -> RunResult:
 
 async def answer_of(
     run: Callable[[OutputFn, OutputFn], Awaitable[RunResult]],
+    *,
+    bounded: bool = False,
 ) -> RunAnswer:
     """What one of Mirage's own lines answered, kept whole: a probe's few
     lines, read once the line ends. A program's run never comes here; it
-    streams.
+    streams. A line that reads a file's content is ``bounded``: what it
+    keeps is checked against the workspace's memory as it arrives, while
+    a probe's answer is not, so listing and removing still work at the cap.
 
     Args:
         run (Callable[[OutputFn, OutputFn], Awaitable[RunResult]]): runs
             the line, given where it writes stdout and stderr.
+        bounded (bool): hold what it keeps to the workspace's memory room.
     """
     out, err = bytearray(), bytearray()
 
     async def keep_output(data: bytes) -> None:
         out.extend(data)
+        if bounded:
+            check_memory(len(out) + len(err))
 
     async def keep_errors(data: bytes) -> None:
         err.extend(data)
+        if bounded:
+            check_memory(len(out) + len(err))
 
     done = await run(keep_output, keep_errors)
     return RunAnswer(done.exit_code, bytes(out), bytes(err))

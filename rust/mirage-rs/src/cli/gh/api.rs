@@ -1,6 +1,6 @@
 // Follows gh 2.85.0's pkg/cmd/api (MIT; see licenses/third_party/gh.txt).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use super::accessor::{Flags, Out, jq_lines, read_cli_file};
 use super::args::wrong_count;
@@ -11,6 +11,7 @@ use crate::core::github::client::{
 use crate::core::github::json::{Json, Obj, quoted};
 use crate::core::github::placeholder::expand;
 use crate::core::github::repo::urlsplit;
+use crate::request::Request;
 
 /// One response as `gh api` prints it.
 struct Printed {
@@ -479,6 +480,16 @@ async fn failed(
     })
 }
 
+/// The pages read so far, and a failure naming the next page a server
+/// handed back again, which would page the same answers forever.
+async fn repeated(account: &Account, pages: &[Printed], flags: &Flags, next: &str) -> Result<Out> {
+    Ok(Out {
+        stdout: render_pages(account, pages, flags, None).await?,
+        stderr: format!("gh: next page repeats {next}\n").into_bytes(),
+        exit: 1,
+    })
+}
+
 fn printed(response: Response, head: String) -> Printed {
     let decoded = matches!(response.data, crate::core::github::client::Body::Json(_));
     Printed {
@@ -623,8 +634,16 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
     let include = flags.gh_bool("include");
     let headers = request_headers(flags)?;
     let mut pages: Vec<Printed> = Vec::new();
+    let mut held: u64 = 0;
+    let mut seen: HashSet<String> = HashSet::new();
+    if let Some(cursor) = fields.get("endCursor").as_str().filter(|_| graphql) {
+        seen.insert(cursor.to_owned());
+    }
     let mut current = Some(path);
     while let Some(target) = current.take() {
+        if !graphql {
+            seen.insert(target.clone());
+        }
         let answer = match &input {
             Some(bytes) => {
                 github_request_bytes(account, wire, &target, bytes, &params, &headers).await
@@ -650,6 +669,8 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
                     body: error.body.into_bytes(),
                     head,
                 };
+                let size = held + (failure.body.len() + failure.head.len()) as u64;
+                account.host.ask(Request::Memory { size }).await;
                 return failed(account, &pages, flags, failure, diagnostic).await;
             }
             Err(failure) => return Err(failure),
@@ -669,18 +690,28 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
                     body: page.raw,
                     head: page.head,
                 };
+                let size = held + (failure.body.len() + failure.head.len()) as u64;
+                account.host.ask(Request::Memory { size }).await;
                 return failed(account, &pages, flags, failure, diagnostic).await;
             }
         }
         let cursor = end_cursor(&page.data);
+        held += (page.raw.len() + page.head.len() + target.len()) as u64;
         pages.push(page);
         if !flags.gh_bool("paginate") {
             continue;
         }
+        account.host.ask(Request::Memory { size: held }).await;
         if !graphql {
             params.clear();
             current = next_path(link.as_deref(), account.base_url.as_deref());
+            if let Some(next) = current.as_ref().filter(|next| seen.contains(*next)) {
+                return repeated(account, &pages, flags, next).await;
+            }
         } else if let Some(cursor) = cursor {
+            if !seen.insert(cursor.clone()) {
+                return repeated(account, &pages, flags, &cursor).await;
+            }
             fields.set("endCursor", cursor);
             (params, body) = placed(&fields, in_query, graphql);
             current = Some(target);

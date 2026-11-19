@@ -11,6 +11,8 @@ from mirage.commands.builtin.generic.head import (
 )
 from mirage.commands.config import Context
 from mirage.errors.fs import eacces, efbig
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
@@ -322,3 +324,18 @@ async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
     assert first == header
     assert io.exit_code == 1
     assert await materialize(io.stderr) == stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kwargs", [{"n": -100}, {"c": -100}])
+async def test_head_minus_counts_its_window_against_the_memory_budget(kwargs):
+    memory = MemoryBudget(8, lambda: 0)
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            memory, _drain(head_stream(_four_lines(), **kwargs))
+        )
+
+
+async def _four_lines():
+    for part in (b"ab\n", b"cd\n", b"ef\n", b"gh\n"):
+        yield part

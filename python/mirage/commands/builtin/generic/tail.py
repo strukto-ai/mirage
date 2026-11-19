@@ -262,7 +262,7 @@ async def tail(
                     await budget.run()
                     if output := engine.drain():
                         yield output
-                if not forward and not byte_mode:
+                if not forward:
                     check_memory(progress(engine).retained)
         if output := engine.finish():
             yield output

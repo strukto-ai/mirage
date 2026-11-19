@@ -814,6 +814,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param env the merged environment.
    * @param cwd the working directory, passed through verbatim.
    * @param signal stops the line.
+   * @param bounded hold what it keeps to the workspace's memory room, for a
+   *   line that reads a file's content.
    */
   execLine(
     line: string,
@@ -821,10 +823,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
+    bounded = false,
   ): Promise<RunAnswer> {
     return this.busyWith(() =>
-      answerOf((output, errors) =>
-        this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
+      answerOf(
+        (output, errors) =>
+          this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
+        bounded,
       ),
     )
   }

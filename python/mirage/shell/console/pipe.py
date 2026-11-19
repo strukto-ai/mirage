@@ -14,29 +14,56 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.io.memory import check_memory
 from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel
 
 
 class PipeConsole(JobConsole):
-    """Route a shell's piped channels through the shared bounded byte pipe."""
+    """Route a shell's piped channels through the shared bounded byte pipe.
+
+    Stderr that is not piped goes on to ``errors`` as it is written, as a
+    pipeline stage's goes to the shell's own fd 2, or is kept here,
+    checked against the workspace's memory, when there is none.
+
+    Args:
+        pipe_stderr (bool): stderr goes into the pipe too (``|&``).
+        buffer_bytes (int): the pipe's capacity.
+        gate (Callable[[], Awaitable[None]] | None): awaited before a
+            write, to hold a paused job.
+        errors (JobConsole | None): where stderr that is not piped goes.
+    """
 
     def __init__(
         self,
         pipe_stderr: bool = False,
         buffer_bytes: int = CAPACITY,
         gate: Callable[[], Awaitable[None]] | None = None,
+        errors: JobConsole | None = None,
     ) -> None:
         super().__init__()
         self._pipe_stderr = pipe_stderr
         self._pipe = BytePipe(buffer_bytes, gate)
+        self._errors = errors
+        self._held = 0
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        if channel != Channel.STDOUT and not self._pipe_stderr:
-            await super().emit(channel, data)
-        else:
+        if channel == Channel.STDOUT or self._pipe_stderr:
             await self._pipe.write(data)
+        elif channel == Channel.STDERR and self._errors is not None:
+            if not self.finished and not self.store.closed:
+                await self._errors.emit(channel, data)
+        else:
+            if channel == Channel.STDERR:
+                self._held += len(data)
+                check_memory(self._held)
+            await super().emit(channel, data)
+
+    def quiet(self) -> None:
+        """Keep stderr here from now on, for a pipeline that is failing:
+        what its stages say after it fails goes with it, as before."""
+        self._errors = None
 
     def pipe_for(self, channel: Channel) -> BytePipe | None:
         return (

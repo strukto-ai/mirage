@@ -24,7 +24,9 @@ import {
   googleRequest,
 } from '../../../../core/google/client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
+import { checkMemory } from '../../../../io/memory.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 
@@ -219,8 +221,7 @@ export async function runGwsMethod(
     // page unless --page-all is passed: a truncated listing is
     // indistinguishable from a complete one, so mirage follows the token by
     // default and --page-limit is how you opt out.
-    const out = await paginate(tm, url, queryParams, pageLimit)
-    return [out, new IOResult()]
+    return paginate(tm, url, queryParams, pageLimit)
   }
   const deleting = method.http === 'DELETE'
   const result = await googleRequest(tm, method.http, url, {
@@ -253,17 +254,23 @@ async function paginate(
   url: string,
   query: Record<string, string>,
   pageLimit: number | null,
-): Promise<Uint8Array> {
-  const pages: string[] = []
+): Promise<[Uint8Array, IOResult]> {
+  const pages: Uint8Array[] = []
   let token: string | null = null
   let fetched = 0
+  let held = 0
+  const followed = new Set<string>(query.pageToken ? [query.pageToken] : [])
+  let io = new IOResult()
   for (;;) {
     // A fresh object per page: the callers keep the mapping they are handed,
     // so a mutated one would let a later token leak backwards.
     const params = { ...query }
     if (token !== null) params.pageToken = token
     const result = await googleGet(tm, url, params)
-    pages.push(JSON.stringify(result))
+    const page = ENC.encode(JSON.stringify(result))
+    pages.push(page)
+    held += page.byteLength
+    checkMemory(held + (pages.length > 1 ? pages.length : 0))
     fetched += 1
     if (pageLimit !== null && fetched >= pageLimit) break
     const next =
@@ -275,12 +282,19 @@ async function paginate(
     if (typeof next !== 'string' && typeof next !== 'number') break
     if (next === '') break
     token = String(next)
+    // A token handed back again would page the same answers forever.
+    if (followed.has(token)) {
+      io = new IOResult({ exitCode: 1, stderr: ENC.encode(`gws: next page repeats ${token}\n`) })
+      break
+    }
+    followed.add(token)
   }
   // A single response keeps the exact bytes an unpaginated call produced, so
   // every non-list GET is unchanged. Only a real multi-page stream is
   // newline-terminated, per the NDJSON convention.
-  const out = pages.join('\n')
-  return ENC.encode(pages.length > 1 ? out + '\n' : out)
+  const newline = ENC.encode('\n')
+  const out = concat(pages.flatMap((page, i) => (i === 0 ? [page] : [newline, page])))
+  return [pages.length > 1 ? concat([out, newline]) : out, io]
 }
 
 function methodLeaf(method: GwsMethod): CommandSpec {

@@ -584,11 +584,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
+    bounded = false,
   ): Promise<RunAnswer> {
-    if (env[PROCESS] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
+    if (env[PROCESS] !== undefined) return super.execLine(line, stdin, env, cwd, signal, bounded)
     const tag = crypto.randomUUID().replaceAll('-', '')
     try {
-      return await super.execLine(line, stdin, { ...env, [PROCESS]: tag }, cwd, signal)
+      return await super.execLine(line, stdin, { ...env, [PROCESS]: tag }, cwd, signal, bounded)
     } catch (error) {
       if (signal?.aborted === true) await this.stop(tag, 15)
       throw error

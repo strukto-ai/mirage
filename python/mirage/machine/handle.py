@@ -915,6 +915,8 @@ class MachineHandle:
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        *,
+        bounded: bool = False,
     ) -> RunAnswer:
         """Execute one of Mirage's own shell lines on the machine, as
         ``/bin/sh -c``, and keep its answer whole for the caller.
@@ -924,12 +926,15 @@ class MachineHandle:
             stdin (ByteSource | None): bytes piped into the line.
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
+            bounded (bool): hold what it keeps to the workspace's memory
+                room, for a line that reads a file's content.
         """
         async with self._at_work():
             return await answer_of(
                 lambda output, errors: self._exec_argv(
                     ("/bin/sh", "-c", line), stdin, env, cwd, output, errors
-                )
+                ),
+                bounded=bounded,
             )
 
     @asynccontextmanager

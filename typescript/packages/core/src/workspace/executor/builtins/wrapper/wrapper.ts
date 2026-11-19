@@ -29,7 +29,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import type { Runtime } from '../../../../runtime/base.ts'
 import type { RouteDecision } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { Channel } from '../../../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { SIGHUP } from '../../../../shell/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
@@ -54,7 +54,9 @@ import { ExecutionNode } from '../../../types.ts'
  * Run a wrapper's program in Mirage, as the program it execs, its output
  * handed over as it runs: the process it runs as, and all it starts, carry
  * what the wrapper changed. `warned` is what the wrapper says before it runs
- * the program. Mirrors Python's `_run_program`.
+ * the program; its stderr goes to `sink`, where the wrapper's statement
+ * writes, in order with its stdout, or lands on the result without one.
+ * Mirrors Python's `_run_program`.
  */
 function runProgram(
   executeFn: ExecuteFn,
@@ -64,27 +66,32 @@ function runProgram(
   stdin: ByteSource | null,
   traits: ProcessTraits,
   warned = '',
+  sink?: JobConsole,
 ): RedirectResult {
   const node = new ExecutionNode({ command: name })
-  const [stdout, io] = lineOutput(async (sink, signal) => {
-    if (warned !== '') await sink.emit(Channel.STDERR, encodeText(warned))
-    return setProgramInvocation(session, () =>
-      setTraits(traits, async () => {
-        const ran = await executeFn(line, {
-          sessionId: session.sessionId,
-          signal,
-          sink,
-          ...(stdin !== null ? { stdin } : {}),
-        })
-        for await (const chunk of chunks(ran.stdout ?? new Uint8Array()))
-          await sink.emit(Channel.STDOUT, chunk)
-        for await (const chunk of chunks(ran.stderr ?? new Uint8Array()))
-          await sink.emit(Channel.STDERR, chunk)
-        node.exitCode = ran.exitCode
-        return new IOResult({ exitCode: ran.exitCode })
-      }),
-    )
-  })
+  const [stdout, io] = lineOutput(
+    async (relay, signal) => {
+      if (warned !== '') await relay.emit(Channel.STDERR, encodeText(warned))
+      return setProgramInvocation(session, () =>
+        setTraits(traits, async () => {
+          const ran = await executeFn(line, {
+            sessionId: session.sessionId,
+            signal,
+            sink: relay,
+            ...(stdin !== null ? { stdin } : {}),
+          })
+          for await (const chunk of chunks(ran.stdout ?? new Uint8Array()))
+            await relay.emit(Channel.STDOUT, chunk)
+          for await (const chunk of chunks(ran.stderr ?? new Uint8Array()))
+            await relay.emit(Channel.STDERR, chunk)
+          node.exitCode = ran.exitCode
+          return new IOResult({ exitCode: ran.exitCode })
+        }),
+      )
+    },
+    0,
+    sink,
+  )
   return [stdout, io, node]
 }
 
@@ -105,6 +112,7 @@ export function handleWrapper(
   registry: MountRegistry,
   stdin: ByteSource | null,
   routing: RouteDecision<Runtime> | undefined,
+  sink?: JobConsole,
 ): RedirectResult {
   const caller = currentCaller()
   const answer = wrapperAnswer(name, args, session, registry, caller.traits.niceness)
@@ -124,7 +132,7 @@ export function handleWrapper(
   const program = args.slice(answer.runsFrom)
   const wrapped = caller.process?.wrap(traits, line, execs(program, session, registry, routing))
   const worn = wrapped === true ? { ...traits, leads: false } : traits
-  return runProgram(executeFn, name, line, session, stdin, worn, warned)
+  return runProgram(executeFn, name, line, session, stdin, worn, warned, sink)
 }
 
 /**

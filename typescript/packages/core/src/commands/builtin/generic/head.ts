@@ -22,6 +22,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { truncateStream } from '../utils/limit.ts'
@@ -118,6 +119,7 @@ async function* headStream(
         const paused = budget.run()
         if (paused !== undefined) await paused
       }
+      if (count < 0) checkMemory(progress(engine).retained)
       if (selected > 0) yield chunk.subarray(0, selected)
     }
     const tail = engine.finish()

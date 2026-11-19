@@ -52,6 +52,7 @@ async def read(
         machine,
         read_command(remote(accessor, path), offset, size),
         path,
+        bounded=True,
     )
     record("read", path.virtual, "machine", len(data), timer)
     return data
@@ -61,14 +62,18 @@ async def first_lines(
     accessor: MachineAccessor, machine: str, path: PathSpec, n: int
 ) -> bytes:
     target = single_quote(remote(accessor, path))
-    return await checked(accessor, machine, f"head -n {n} -- {target}", path)
+    return await checked(
+        accessor, machine, f"head -n {n} -- {target}", path, bounded=True
+    )
 
 
 async def last_lines(
     accessor: MachineAccessor, machine: str, path: PathSpec, n: int
 ) -> bytes:
     target = single_quote(remote(accessor, path))
-    return await checked(accessor, machine, f"tail -n {n} -- {target}", path)
+    return await checked(
+        accessor, machine, f"tail -n {n} -- {target}", path, bounded=True
+    )
 
 
 async def line_count(

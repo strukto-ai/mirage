@@ -107,7 +107,7 @@ export async function handlePipe(
   // the caller applies this pipeline's own negation after it finishes.
   session.errexitImmune = false
   const pipes = commands.map(
-    (_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes, whilePaused),
+    (_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes, whilePaused, sink),
   )
   const ios: IOResult[] = commands.map(() => new IOResult())
   // A stage the top shell forks for a simple command is that command's
@@ -233,7 +233,9 @@ export async function handlePipe(
         } else {
           // One a signal stopped closes its pipe as a killed child does: the
           // reader sees the end, not the stop.
-          output.end(stopped.signal.aborted && isAborting(error) ? undefined : error)
+          const killed = stopped.signal.aborted && isAborting(error)
+          if (!killed) for (const pipe of pipes) pipe.quiet()
+          output.end(killed ? undefined : error)
           throw error
         }
       } finally {

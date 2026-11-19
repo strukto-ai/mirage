@@ -200,3 +200,20 @@ async def test_a_stage_in_a_job_is_stopped_with_the_groups_signal():
         assert seen == [2]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stage_stderr_streams_as_it_is_written():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    execution = await ws.shell(
+        "{ echo e1 >&2; echo o1; } | cat; echo o2", stream=True
+    )
+    async with execution:
+        events = [(e.stream, e.data) async for e in execution.events]
+        await execution.wait()
+    await ws.close()
+    assert events == [
+        ("stderr", b"e1\n"),
+        ("stdout", b"o1\n"),
+        ("stdout", b"o2\n"),
+    ]

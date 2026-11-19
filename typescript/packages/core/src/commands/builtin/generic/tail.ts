@@ -415,7 +415,7 @@ async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<U
         const output = engine.drain()
         if (output.byteLength > 0) yield output
       }
-      if (!forward && !byteMode) checkMemory(progress(engine).retained)
+      if (!forward) checkMemory(progress(engine).retained)
     }
     const output = engine.finish()
     if (output.byteLength > 0) yield output

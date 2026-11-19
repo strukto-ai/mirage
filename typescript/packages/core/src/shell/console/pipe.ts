@@ -12,32 +12,53 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkMemory } from '../../io/memory.ts'
 import { BytePipe, CAPACITY } from '../../io/pipe.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel } from './types.ts'
 
-/** Route a shell's piped channels through the shared bounded byte pipe. */
+/**
+ * Route a shell's piped channels through the shared bounded byte pipe.
+ * Stderr that is not piped goes on to `errors` as it is written, as a
+ * pipeline stage's goes to the shell's own fd 2, or is kept here, checked
+ * against the workspace's memory, when there is none. Mirrors Python's
+ * `PipeConsole`.
+ */
 export class PipeConsole extends JobConsole {
   private readonly pipe: BytePipe
   private muted = false
+  private held = 0
 
   constructor(
     private readonly pipeStderr = false,
     bufferBytes = CAPACITY,
     gate: (() => Promise<void> | null) | null = null,
+    private errors?: JobConsole,
   ) {
     super()
     this.pipe = new BytePipe(bufferBytes, false, gate)
   }
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    if (channel !== Channel.STDOUT && !this.pipeStderr) await super.emit(channel, data)
-    else if (!this.muted) {
+    if (channel === Channel.STDERR && !this.pipeStderr && this.errors !== undefined) {
+      if (!this.finished && !this.store.closed) await this.errors.emit(channel, data)
+    } else if (channel !== Channel.STDOUT && !this.pipeStderr) {
+      if (channel === Channel.STDERR) {
+        this.held += data.byteLength
+        checkMemory(this.held)
+      }
+      await super.emit(channel, data)
+    } else if (!this.muted) {
       await this.pipe.write(data).catch((error: unknown) => {
         if (!this.muted) throw error
         console.debug(`console pipe: a muted write is dropped: ${String(error)}`)
       })
     }
+  }
+
+  /** Keep stderr here from now on, for a pipeline that is failing: what its stages say after it fails goes with it, as before. */
+  quiet(): void {
+    this.errors = undefined
   }
 
   override pipeFor(channel: Channel): BytePipe | null {

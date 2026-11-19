@@ -18,6 +18,7 @@ import { FakeFiles } from '../../../tests/fixtures/machine_files.ts'
 import { MountMode } from '../../types.ts'
 import type { MountSpec } from '../../workspace/workspace/types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../ram/ram.ts'
 import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
@@ -201,5 +202,43 @@ describe('MachineVFS', () => {
     expect(new MachineVFS({ machines: ['a', 'b'], root: '/' }).storageLocation()).toBe(
       'machine:a,b:/',
     )
+  })
+
+  it('refuses a machine file past the memory room', async () => {
+    const a = new FakeFiles({ '/tmp/big.bin': 'x'.repeat(3_000_000) })
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        maxMemory: '2MB',
+        machines: {
+          a: new ScriptedMachine('a', a.answer),
+          b: new ScriptedMachine('b', new FakeFiles().answer),
+        },
+      },
+    )
+    const [, , err] = await run(ws, 'cat /tmp/big.bin | wc -c')
+    await ws.close()
+    expect(err).toContain('memory exhausted')
+  })
+
+  it('still lists and removes machine files at the memory cap', async () => {
+    const a = new FakeFiles({ '/tmp/old.log': 'x' })
+    const ws = new Workspace(
+      { '/ram': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        maxMemory: '2MB',
+        machines: {
+          a: new ScriptedMachine('a', a.answer),
+          b: new ScriptedMachine('b', new FakeFiles().answer),
+        },
+      },
+    )
+    expect((await run(ws, 'head -c 2097152 /dev/zero > /ram/fill'))[0]).toBe(0)
+    expect(await run(ws, 'ls /tmp')).toEqual([0, 'old.log\n', ''])
+    expect(await run(ws, 'rm /tmp/old.log')).toEqual([0, '', ''])
+    expect(a.files.has('/tmp/old.log')).toBe(false)
+    await ws.close()
   })
 })

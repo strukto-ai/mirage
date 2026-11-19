@@ -64,6 +64,11 @@ export class DevVFS extends RAMVFS {
     this.accessor = new RAMAccessor(this.store)
   }
 
+  /** The bytes the files written under `/dev` hold, which count against `max_memory` as a RAM mount's do. Mirrors Python's `held`. */
+  override get held(): number {
+    return (this.store.files as DevFiles).state.files.held
+  }
+
   forSession(owner: string): DevVFS {
     return new DevVFS(this.devices.forSession(owner))
   }
