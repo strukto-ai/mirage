@@ -5,117 +5,369 @@ icon: magnifying-glass
 ---
 
 Search lets a VFS answer `grep` and `rg` from its service's search instead of
-reading every file. Override `files_containing` and `lines_containing` to make
-`grep` and `rg` cheaper.
+reading every file. Mirage still checks every line itself, so the output is
+the same as reading every file.
+[Built-in VFSs](/home/integration/overview#search) lists which VFSs support it.
 
-## Supported commands
+## VFS and Search Integration
 
-These commands ask the service where the text may be. Mirage still matches
-each line itself, so the output is the same as reading every file.
+A VFS overrides the methods its service can answer. A method that returns
+`None` (TypeScript: `null`) cannot answer, and Mirage reads the files instead.
+TypeScript names methods and arguments in camelCase (`files_containing` is
+`filesContaining`). The examples extend `NotesVFS` from
+[Adding a New VFS](/home/setup/vfs/new#write-one), mounted at `/notes`.
 
-| Command | What happens |
-| --- | --- |
-| `grep -r`, `grep -R`, `grep -d recurse`, `rg` on a folder | Asks the service which files may hold the text, and reads only those. A file named on the line is always read. |
-| `grep -rw`, `grep -rx`, `rg -w`, `rg -x` | Asks the same way, for the whole word. |
-| `grep -ri`, `rg -i`, `rg -S` with a lowercase pattern | Asks with case ignored, except in the cases below. |
-| `grep` or `rg` on one file, alone or with `-c`, `-l`, `-q`, `-o`, `-m N`, `-i`, `-w`, `-x`, `-F`, `-r` or `grep -L` | Asks the service for the lines that may hold the text and matches only those. The file is never read. |
-| `grep` or `rg` on one file with `-n`, `-b`, `-A N`, `-B N`, `-C N`, more than one pattern (`-e a -e b`, `'a\|b'`), `grep -z`, `rg --null-data`, `rg --column`, `rg --vimgrep` or `rg -U` | Asks for the lines, and reads the file only when they hold a match. |
-| `rg -i`, or `rg -S` with a lowercase pattern, when the text has a `k`, an `s` or a non-ASCII letter | Asks once per way to write its case, since `rg` also matches `k` to the Kelvin sign `K` and `s` to `ſ`. `rg -i café` asks for `café`, `CAFÉ` and 14 other spellings. Reads every file when there are more than 16. |
-| `grep -i` when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k` or `s` | Usually reads every file. If a recursive fixed-string pattern is printable ASCII, SQLite can use a substring that folds safely to rule out files. |
-| `-v` or `-f FILE` | Reads every file. |
-| A pattern with no plain text of 3 or more characters, other than a `-w` or `-x` word | Usually reads every file. SQLite can also check short fixed strings for recursive `grep`. On a mount that supports literal search, `grep -r 'refund.*2026' /work/reports` can ask the service for files in the reports directory that contain `refund`. |
-| `rg` with `--passthru`, `--files-without-match`, `--json`, `--stats`, `-z`, `-L`, `--pre COMMAND`, `-E ENCODING`, or `-c` or `--count-matches` with `--include-zero` | Reads every file. |
+### `files_containing`
 
-## Built-in VFSs
+Which files under a folder may contain a text.
 
-These VFSs answer `grep -r` and `rg` with their service's search.
+**Commands:** `grep -r` and `rg` on a folder, with any other flags.
+`grep -v`, `grep -f FILE`, and `rg` with `--passthru`, `--files-without-match`,
+`--json`, `--stats`, `-z`, `-L`, `--pre` or `-E` read every file without
+asking.
 
-| VFS | Searches | Can miss a match |
+<ParamField body="path" type="PathSpec" required>
+The folder the command searches, on this mount. Return only files inside it.
+</ParamField>
+
+<ParamField body="text" type="str" required>
+The text to look for, always plain text, never a regular expression. A command that looks for several texts calls once per text. One with no plain text of 3 or more characters does not call, and every file is read.
+</ParamField>
+
+<ParamField body="whole_word" type="bool" required>
+Whether `text` must match as a whole word.
+
+| Value | Commands | Return |
 | --- | --- | --- |
-| [SQL with SQLite](/python/vfs/sql) | Printable ASCII literals. Mirage checks candidate files with its usual matcher and falls back to a walk when the query returns more than 512 candidates. | No |
-| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/python/vfs/gdrive#integration) | Whole words (`-w`, `-x`) | Docs, Sheets and Slides JSON, office files, PDFs, archives, the end of large files, recent writes |
-| <img noZoom src="/images/gdocs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Docs](/python/vfs/gdocs#integration), <img noZoom src="/images/gsheets-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Sheets](/python/vfs/gsheets#integration), <img noZoom src="/images/gslides-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slides](/python/vfs/gslides#integration) | Whole words | Words only in non-text values (fonts, links, formulas) or split by styling |
-| <img noZoom src="/images/gcal-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Calendar](/python/vfs/gcal#integration) | Whole words | No |
-| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/python/vfs/dropbox#integration) | Whole words | Office files, PDFs, archives, the end of large files, recent writes; file contents below the Professional plan |
-| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/python/vfs/box#integration) | Whole words | Office files, PDFs, archives, the end of large files, recent writes |
-| <Icon icon="microsoft" size={14} /> [OneDrive](/python/vfs/onedrive#integration), <Icon icon="microsoft" size={14} /> [SharePoint](/python/vfs/sharepoint#integration) | Whole words; SharePoint within one document library | Office files, PDFs, archives, the end of large files, recent writes |
-| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/python/vfs/slack#integration) | Whole words, with a user token | Recent messages, words only in other fields (bot names, link previews) |
-| <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Trello](/python/vfs/trello#integration) | Whole words | Recent writes |
-| <img noZoom src="/images/linear-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Linear](/python/vfs/linear#integration) | Issues: whole words. Other files: any text | Recent issue writes |
-| <img noZoom src="/images/gmail-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gmail](/python/vfs/gmail#integration) | Any ASCII text | No |
-| <Icon icon="envelope" size={14} /> [Email (IMAP)](/python/vfs/email#integration) | Any text | On a server that searches words, not substrings |
-| <Icon icon="github" size={14} /> [GitHub](/python/vfs/github#integration) | Whole words, default branch, more than 100 files | Recent pushes |
-| <img noZoom src="/images/chroma-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Chroma](/python/vfs/chroma#integration) | Any text; `-i` reads every page | No |
-| <img noZoom src="/images/qdrant-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Qdrant](/python/vfs/qdrant#integration) | Any ASCII text | No |
-| <img noZoom src="/images/lancedb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[LanceDB](/python/vfs/lancedb#integration) | Any text; not tables with list, struct or bytes columns | No |
-| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | Any text, on servers that run commands | No |
-| <img noZoom src="/images/postgres-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[PostgreSQL](/python/vfs/postgres#integration), <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MongoDB](/python/vfs/mongodb#integration), <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Airtable](/python/vfs/airtable#integration) | Any text, as lines of one file | No |
+| `True` | `grep -rw`, `grep -rx`, `rg -w`, `rg -x` with a plain word | The files that contain `text` as a word. A service that only searches whole words, such as Google Drive, answers only here. |
+| `False` | Every other search | The files that contain `text` anywhere, also inside a longer word, or `None` if the service cannot. |
+</ParamField>
 
-- A pattern outside **Searches**, or a VFS not listed, reads every file.
-- A search that can miss a match leaves out a file that holds the text, so
-  `grep` does not print it.
-- On the VFSs from Google Drive to GitHub, a mount `walk_limit` of `-1` turns
-  the service's search off, so every file is read and no match is missed. See
-  [`walk_limit`](#walk_limit).
+<ParamField body="ignore_case" type="bool" required>
+Whether case is ignored.
+
+| Value | Commands | Return |
+| --- | --- | --- |
+| `True` | `grep -ri`, `rg -i`, `rg -S` with a lowercase pattern | The files that contain `text` in any case, or `None` if the service matches case exactly. |
+| `False` | A search without `-i` | The files that contain `text` as written. A service that ignores case anyway can return its results, since extra files are fine. |
+
+`rg -i` on a text with a `k`, an `s` or an accented letter calls once per spelling instead, each with `False`.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `text` | `whole_word` | `ignore_case` |
+| --- | --- | --- | --- | --- |
+| `grep -r invoice /notes` | `/notes` | `invoice` | `False` | `False` |
+| `grep -rw invoice /notes` | `/notes` | `invoice` | `True` | `False` |
+| `grep -ri invoice /notes` | `/notes` | `invoice` | `False` | `True` |
+| `grep -r 'invoice.*2026' /notes` | `/notes` | `invoice` | `False` | `False` |
+| `grep -r -e invoice -e receipt /notes` | `/notes` | `invoice`, then `receipt` in a second call | `False` | `False` |
+
+<ResponseField name="returns" type="list[PathSpec] | None">
+
+| Return | What happens |
+| --- | --- |
+| A list of files | Only these files are read. Extra files are fine, since Mirage checks every line. A file left out is a missed match. |
+| `[]` | No file under `path` holds the text. Nothing is read, and `grep` prints nothing. |
+| `None` | The service cannot answer. Every file under `path` is read. |
+
+</ResponseField>
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+    from mirage.utils.key_prefix import mounted_path
+
+    from notes import NotesVFS
+
+
+    class SearchableNotesVFS(NotesVFS):
+        async def files_containing(
+            self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+        ) -> list[PathSpec] | None:
+            if ignore_case:
+                return None
+            return [
+                mounted_path(path, "/" + name)
+                for name, page in self.pages.items()
+                if text in page
+            ]
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+    import { NotesVFS } from './notes.ts'
+
+    export class SearchableNotesVFS extends NotesVFS {
+      override async filesContaining(
+        path: PathSpec,
+        text: string,
+        opts: { wholeWord: boolean; ignoreCase: boolean },
+      ): Promise<PathSpec[] | null> {
+        if (opts.ignoreCase) return null
+        return Object.entries(this.pages)
+          .filter(([, page]) => page.includes(text))
+          .map(([name]) => mountedPath(path, `/${name}`))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+With this example, `grep -rn mirage /notes` reads only the pages that contain
+`mirage`. `mounted_path` turns a name below the mount into a path.
+
+### `lines_containing`
+
+Which lines of one file may contain a text.
+
+**Commands:** `grep` and `rg` on one file. `-v` and `-f FILE` read the file
+without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file the command searches, on this mount.
+</ParamField>
+
+<ParamField body="text" type="str" required>
+The text to look for, always plain text, as in [`files_containing`](#files_containing).
+</ParamField>
+
+<ParamField body="ignore_case" type="bool" required>
+Whether case is ignored.
+
+| Value | Commands | Return |
+| --- | --- | --- |
+| `True` | `grep -i`, `rg -i`, `rg -S` with a lowercase pattern | The lines that contain `text` in any case, or `None` if the service matches case exactly. |
+| `False` | A search without `-i` | The lines that contain `text` as written. |
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `text` | `ignore_case` |
+| --- | --- | --- | --- |
+| `grep invoice /notes/todo.txt` | `/notes/todo.txt` | `invoice` | `False` |
+| `grep -i invoice /notes/todo.txt` | `/notes/todo.txt` | `invoice` | `True` |
+
+<ResponseField name="returns" type="bytes | None">
+
+| Return | What happens |
+| --- | --- |
+| The lines, in file order, as bytes or a stream of byte chunks | Mirage matches only these lines. Plain `grep`, and `-c`, `-l`, `-q`, `-o`, `-m N`, `-w`, `-x`, `-F` or `grep -L`, never read the file. `-n`, `-b`, `-A`, `-B`, `-C`, several patterns, `grep -z`, `rg --column`, `rg --vimgrep` or `rg -U` read it only when these lines hold a match. |
+| `b""` | No line matches. Nothing is read. |
+| `None` | The file is read. Return `None` for a file that may hold a NUL byte. |
+
+</ResponseField>
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import io
+
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class LineSearchNotesVFS(NotesVFS):
+        async def lines_containing(
+            self, path: PathSpec, text: str, *, ignore_case: bool
+        ) -> bytes | None:
+            page = self.page(path)
+            if ignore_case or "\0" in page:
+                return None
+            lines = io.StringIO(page, newline="\n").readlines()
+            return "".join(line for line in lines if text in line).encode()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class LineSearchNotesVFS extends NotesVFS {
+      override async linesContaining(
+        path: PathSpec,
+        text: string,
+        opts: { ignoreCase: boolean },
+      ): Promise<Uint8Array | null> {
+        const page = this.page(path)
+        if (opts.ignoreCase || page.includes('\0')) return null
+        const lines = page.split(/(?<=\n)/).filter((line) => line.includes(text))
+        return new TextEncoder().encode(lines.join(''))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+With this example, `grep mirage /notes/todo.txt` and
+`grep -c mirage /notes/todo.txt` read nothing. `grep -n mirage /notes/todo.txt`
+reads the page, since it holds a match.
+
+### `before_full_walk`
+
+Whether a command may copy, compare, change or remove every file under a
+folder.
+
+**Commands:** `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`,
+`chgrp -R`, `gzip -r`, `diff -r` and `mv` to another mount, before they touch
+anything. Past the command's [`walk_limit`](#walk_limit), Mirage refuses
+without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The folder the command will copy, change or remove in full, on this mount.
+</ParamField>
+
+<ParamField body="files" type="int | None" default="None">
+How many files are inside `path`, or `None` when Mirage could not count them. TypeScript passes it as the second argument.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `files` |
+| --- | --- | --- |
+| `rm -r /notes/old`, with 2 files inside | `/notes/old` | `2` |
+
+<ResponseField name="returns" type="None">
+
+| Return | What happens |
+| --- | --- |
+| Nothing | The command runs. |
+| Raise `ValueError` (TypeScript: throw) | The command does not run. It prints `<command>: <message>` and exits 1. |
+
+</ResponseField>
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class GuardedNotesVFS(NotesVFS):
+        async def before_full_walk(self, path: PathSpec, *, files: int | None = None) -> None:
+            if files is not None and files > 100:
+                raise ValueError("more than 100 pages; narrow the path")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class GuardedNotesVFS extends NotesVFS {
+      override async beforeFullWalk(_path: PathSpec, files: number | null): Promise<void> {
+        if (files !== null && files > 100) throw new Error('more than 100 pages; narrow the path')
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+With this example, `diff -r /notes /backup` on a folder of 150 pages prints
+`diff: more than 100 pages; narrow the path` and exits 1.
 
 ## `walk_limit`
 
-`walk_limit` caps how many files one command walks under a folder
-(TypeScript: `walkLimit`). It is a field of
-[`command_limits`](/home/limits#command-output). A mount's `"@all"` entry, else
-the workspace's, sets the mount's own `walk_limit`. An entry named for one
-command, such as `find`, changes only how far that command walks.
+`walk_limit` caps how many files one `grep -r` or `rg` searches under a folder
+(TypeScript: `walkLimit`). A search counts each file it searches, whether it
+reads the file or [`lines_containing`](#lines_containing) answers it. A file
+[`files_containing`](#files_containing) rules out costs nothing. When
+`files_containing` returns `None`, the search goes through every file until
+it reaches the limit, then stops. A listing such as `find` also stops at the
+limit, and a copy such as `cp -r` of a folder over it is refused before it
+copies anything.
 
-| Value | Searches and listings | Globs, copies and removals |
-| --- | --- | --- |
-| `-1` | Walk every file | Never refused |
-| `0` | Read or list nothing under a folder | Always refused |
-| A positive number | Stop after that many files | Refused above that many files |
+### Set it
 
-It is 1000 unless the VFS starts at another value or a `command_limits` entry
-sets it. Built-in VFSs start at 1000, or 5000 on GitHub, where each file is one
-request, and 10000 on disk, RAM and OPFS.
+Set it per command in `command_limits`, on the workspace, a mount or a
+profile. Here `grep` on `/data` reads at most 100 files per folder, and every
+other command 2000:
 
-A review workspace can allow repo-wide searches while limiting file reads and
-output per search with this configuration.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Limit, MountMode, Workspace
+    from mirage.vfs.ram import RAMVFS
 
-```yaml
-command_limits:
-  grep: {walk_limit: 100, max_bytes: 65536, on_exceed: error}
-  rg: {walk_limit: 100, max_bytes: 65536, on_exceed: error}
-```
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE, {"grep": Limit(walk_limit=100)})},
+        mode=MountMode.WRITE,
+        command_limits={"@all": Limit(walk_limit=2000)},
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Limit, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-Each recursive directory operand has a budget of 100 files. Files named
-explicitly are exempt. The 64 KiB cap applies to printed output. A large input
-can still use more memory. When the walk limit is reached, search smaller subdirectories when available.
-For a flat directory, pass explicit file paths in batches or raise the command's
-`walk_limit` and rerun the search.
+    const ws = new Workspace(
+      { '/data': [new RAMVFS(), MountMode.WRITE, { grep: new Limit({ walkLimit: 100 }) }] },
+      { mode: MountMode.WRITE, commandLimits: { '@all': new Limit({ walkLimit: 2000 }) } },
+    )
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    command_limits:
+      "@all": {walk_limit: 2000}
+    mounts:
+      /data:
+        vfs: ram
+        mode: write
+        command_limits:
+          grep: {walk_limit: 100}
+    ```
+  </Tab>
+</Tabs>
 
-Each command does this past the limit:
+A VFS sets its own default with a `walk_limit` class attribute; see
+[Give a VFS its own default](#example-give-a-vfs-its-own-default).
 
-| Command | Past the limit |
+<ParamField body="key" type="str" required>
+Which commands the entry limits.
+
+| Key | Limits |
 | --- | --- |
-| `grep -r`, `rg` | Stops. It keeps what it printed, prints `grep: <folder>: stopped after <N> files (walk_limit); narrow the path` and exits 2. |
-| `git grep` | Stops. It keeps what it printed, prints `fatal: stopped after <N> files (walk_limit); narrow the pathspec` and exits 128. |
-| `find`, `ls -R`, `du`, `tree`, `getfattr -R` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
-| `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Refused before it changes anything. It prints `fatal: more than <N> files in the work tree (walk_limit)` and exits 128. `git add`, `git diff` and `git rm` given paths walk only those, and a file named outright costs nothing. |
-| A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (walk_limit); narrow the path`, and exits 126. |
-| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r`, `gzip -r` | Refused before it touches anything. It prints `tar: more than <N> files in scope (walk_limit); narrow the path` and exits 1. Within the limit, the VFS can still refuse through [`before_full_walk`](#before_full_walk). |
+| `"@all"` | Every command |
+| A command name, such as `grep` or `find` | That command only, with any flags. `grep` also covers `git grep`. |
+| A name with flags, such as `"grep -r"` | Nothing, since a key has no flags |
+</ParamField>
 
-- A search counts only the files it reads, so a file the service rules out
-  costs nothing. A listing counts every entry it lists, folders included.
-- A walk cut short exits as it does when some files could not be read, so a
-  script treats it as one with an error.
-- A glob, a copy and a removal are refused instead of cut short, since running
-  on part of what they name would look complete later. A glob in a `for` list
-  stops the line with
-  `bash: /notes/*: matches more than <N> files (walk_limit); narrow the path`.
-- A walk that crosses into another mount counts that mount's files against its
-  own limit, and names that mount's folder where it stops.
+<ParamField body="walk_limit" type="int" default="1000">
+How many files a search may search, or entries a listing may list, under a folder. A search counts each file it reads or `lines_containing` answers, and a listing counts folders too. The default is 5000 on GitHub, and 10000 on disk, RAM and OPFS.
+
+| Value | What happens |
+| --- | --- |
+| `-1` | No limit. On `"@all"`, a service search that can miss a match is also turned off, so every file is read. |
+| `0` | Nothing under a folder is read or listed. |
+| A number, such as `100` | Searches stop after that many files, and listings after that many entries. Globs, copies and removals over that many files do not run. |
+</ParamField>
+
+### At the limit
+
+| Kind | Commands | At the limit |
+| --- | --- | --- |
+| Searches | `grep -r`, `rg`, `git grep` | Stop, keep what they printed, and exit 2 (`git grep`: 128). |
+| Listings | `find`, `ls -R`, `du`, `tree`, `getfattr -R` | Stop, keep what they printed, and exit 1 (`tree`: 2). |
+| Globs | Any glob, such as `cat *.log` | Do not run, and exit 126. |
+| Copies and removals | `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `diff -r`, `gzip -r`, `mv` to another mount | Do not run, and exit 1. |
+| Git work tree | `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Do not run, and exit 128. |
+
+- A command that stops prints
+  `<command>: <folder>: stopped after <N> files (walk_limit); narrow the path`.
+  One that does not run prints `more than <N> files` and leaves that folder
+  untouched. `rm -r` takes its folders in order, so an earlier one may
+  already be removed.
 - Codex's `fs/walk` ([exec-server](/home/agents/codex#exec-server-forward))
-  lists the same way and returns `truncated: true` where it stops.
+  stops the same way and returns `truncated: true`.
 
-### Example: Raise the Limit on Slack
+### Example: Let a Slack mount read 5000 files
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -171,7 +423,10 @@ Each command does this past the limit:
 `refund` and reads only those. `grep -r refund /slack/channels/`, which Slack
 cannot narrow, reads the first 5000 days and stops there.
 
-### Example: Start a Custom VFS at 500
+### Example: Give a VFS its own default
+
+A VFS can set the limit its mounts use when no `command_limits` entry sets
+one. This VFS reads at most 500 files per folder:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -195,177 +450,3 @@ then prints the matches in the first 500 pages, and:
 ```text
 grep: /notes: stopped after 500 files (walk_limit); narrow the path
 ```
-
-## For VFS authors
-
-A custom VFS overrides the methods its service can answer. A method returns
-`None` (TypeScript: `null`) when it cannot answer, and Mirage reads the files.
-TypeScript names methods and arguments in camelCase (`files_containing` is
-`filesContaining`) and passes keyword arguments in an `opts` object. The
-examples extend `NotesVFS` from
-[Adding a New VFS](/home/setup/vfs/new#write-one).
-
-### `files_containing`
-
-Which files under a folder may contain a text. The folder searches in
-[Supported commands](#supported-commands) call it.
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    from mirage import PathSpec
-    from mirage.utils.key_prefix import mounted_path
-
-    from notes import NotesVFS
-
-
-    class SearchableNotesVFS(NotesVFS):
-        async def files_containing(
-            self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
-        ) -> list[PathSpec] | None:
-            if ignore_case:
-                return None
-            return [
-                mounted_path(path, "/" + name)
-                for name, page in self.pages.items()
-                if text in page
-            ]
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import type { PathSpec } from '@struktoai/mirage-node'
-    import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
-    import { NotesVFS } from './notes.ts'
-
-    export class SearchableNotesVFS extends NotesVFS {
-      override async filesContaining(
-        path: PathSpec,
-        text: string,
-        opts: { wholeWord: boolean; ignoreCase: boolean },
-      ): Promise<PathSpec[] | null> {
-        if (opts.ignoreCase) return null
-        return Object.entries(this.pages)
-          .filter(([, page]) => page.includes(text))
-          .map(([name]) => mountedPath(path, `/${name}`))
-      }
-    }
-    ```
-  </Tab>
-</Tabs>
-
-`path` is the folder the command walks. `text` is a text every match contains.
-It is asked once per text, so `grep -r -e refund -e order` asks twice.
-`whole_word` is `True` for `-w` or `-x`, when `text` must match as a whole
-word. `ignore_case` is `True` for `-i`, and for `rg -S` with a lowercase
-pattern. Under `rg -i`, a text with a `k`, an `s` or a non-ASCII letter is
-asked once per spelling with `ignore_case` `False`.
-
-Return the files that may contain `text`. Mirage reads only these, so include
-every file that could match. An empty list reads no file under `path`.
-`mounted_path` turns a name below the mount into a path. With this example,
-`grep -rn mirage /notes` reads only the pages that contain `mirage`.
-
-### `lines_containing`
-
-Which lines of one file may contain a text. The one-file searches in
-[Supported commands](#supported-commands) call it.
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    import io
-
-    from mirage import PathSpec
-
-    from notes import NotesVFS
-
-
-    class LineSearchNotesVFS(NotesVFS):
-        async def lines_containing(
-            self, path: PathSpec, text: str, *, ignore_case: bool
-        ) -> bytes | None:
-            page = self.page(path)
-            if ignore_case or "\0" in page:
-                return None
-            lines = io.StringIO(page, newline="\n").readlines()
-            return "".join(line for line in lines if text in line).encode()
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import type { PathSpec } from '@struktoai/mirage-node'
-    import { NotesVFS } from './notes.ts'
-
-    export class LineSearchNotesVFS extends NotesVFS {
-      override async linesContaining(
-        path: PathSpec,
-        text: string,
-        opts: { ignoreCase: boolean },
-      ): Promise<Uint8Array | null> {
-        const page = this.page(path)
-        if (opts.ignoreCase || page.includes('\0')) return null
-        const lines = page.split(/(?<=\n)/).filter((line) => line.includes(text))
-        return new TextEncoder().encode(lines.join(''))
-      }
-    }
-    ```
-  </Tab>
-</Tabs>
-
-`path` is the file the command would read. `text` is a text every match
-contains, asked once per text. `ignore_case` is `True` for `-i`, and for
-`rg -S` with a lowercase pattern.
-
-Return the lines that may contain `text`, in their order, as bytes or a stream
-of byte chunks. Empty bytes means no match, and the file is not read. Return
-`None` for a file that may hold a NUL byte. With this example,
-`grep mirage /notes/todo.txt` and `grep -c mirage /notes/todo.txt` read
-nothing. `grep -n mirage /notes/todo.txt` reads the page, since it holds a
-match.
-
-### `before_full_walk`
-
-Whether a command may copy, compare, change or remove every file under a
-folder. `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`,
-`chgrp -R`, `gzip -r`, `diff -r` and `mv` to another mount ask it before they
-touch anything.
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    from mirage import PathSpec
-
-    from notes import NotesVFS
-
-
-    class GuardedNotesVFS(NotesVFS):
-        async def before_full_walk(self, path: PathSpec, *, files: int | None = None) -> None:
-            if files is not None and files > 100:
-                raise ValueError("more than 100 pages; narrow the path")
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import type { PathSpec } from '@struktoai/mirage-node'
-    import { NotesVFS } from './notes.ts'
-
-    export class GuardedNotesVFS extends NotesVFS {
-      override async beforeFullWalk(_path: PathSpec, files: number | null): Promise<void> {
-        if (files !== null && files > 100) throw new Error('more than 100 pages; narrow the path')
-      }
-    }
-    ```
-  </Tab>
-</Tabs>
-
-`path` is the folder the command is about to read, change or remove in full.
-`files` is how many files the session sees under `path`, or `None` when Mirage
-could not count them. TypeScript passes it as the second argument.
-
-Return to let the command run. Raise `ValueError` (TypeScript: reject) to
-refuse it: the command prints `<command>: <message>` and exits 1. Mirage
-refuses more than the command's [`walk_limit`](#walk_limit) files before it
-asks, so the default lets the walk run. With this example,
-`diff -r /notes /backup` on a folder of 150 pages prints
-`diff: more than 100 pages; narrow the path` and exits 1.

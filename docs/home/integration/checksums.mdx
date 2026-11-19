@@ -5,32 +5,50 @@ icon: fingerprint
 ---
 
 Checksums lets a VFS answer hash commands from a hash its service already
-stores, without reading the file. Override `checksum` to make `md5sum`,
-`sha256sum` and the other hash commands cheaper.
+stores, without reading the file.
+[Built-in VFSs](/home/integration/overview#checksums) lists which VFSs support
+it.
 
-## Supported commands
+## VFS and Checksums Integration
 
-These commands ask the VFS for a stored hash. When the VFS has none for that
-hash, the command reads and hashes the file as usual.
-
-| Command | What happens |
-| --- | --- |
-| `md5sum`, `md5` | Asks for the `md5` hash. |
-| `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum` | Asks for the `sha1`, `sha224`, `sha256`, `sha384` or `sha512` hash. |
-| `b2sum` | Asks for the `blake2b` hash. |
-| `b2sum -l N` | Asks for the `blake2b-N` hash, BLAKE2b at N bits. |
-| Any of these with `-c`, which checks the hashes listed in a file | Reads the files. |
-
-## For VFS authors
-
-A custom VFS overrides `checksum` when its service stores hashes.
+A VFS overrides `checksum` when its service stores hashes. It returns `None`
+(TypeScript: `null`) when it has no stored hash, and Mirage reads and hashes
+the file instead. The example extends `NotesVFS` from
+[Adding a New VFS](/home/setup/vfs/new#write-one), mounted at `/notes`.
 
 ### `checksum`
 
-The hash of one file. A real service returns the hash it stores. This example
-extends `NotesVFS` from
-[Adding a New VFS](/home/setup/vfs/new#write-one), computes
-MD5 and leaves the others to Mirage.
+The stored hash of one file.
+
+**Commands:** `md5sum`, `md5`, `sha1sum`, `sha224sum`, `sha256sum`,
+`sha384sum`, `sha512sum` and `b2sum`. With `-c`, which checks the hashes
+listed in a file, they read the files without asking.
+
+<ParamField body="path" type="PathSpec" required>
+The file, on this mount.
+</ParamField>
+
+<ParamField body="algorithm" type="str" required>
+The hash to return: `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `blake2b`, or `blake2b-N` for BLAKE2b at N bits.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `algorithm` |
+| --- | --- | --- |
+| `md5sum /notes/hello.txt` | `/notes/hello.txt` | `md5` |
+| `sha256sum /notes/hello.txt` | `/notes/hello.txt` | `sha256` |
+| `b2sum /notes/hello.txt` | `/notes/hello.txt` | `blake2b` |
+| `b2sum -l 256 /notes/hello.txt` | `/notes/hello.txt` | `blake2b-256` |
+
+<ResponseField name="returns" type="str | None">
+
+| Return | What happens |
+| --- | --- |
+| The lowercase hex hash of exactly the bytes a read returns | The command prints it, and the file is not read. |
+| `None` | The file is read and hashed. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -65,11 +83,6 @@ MD5 and leaves the others to Mirage.
   </Tab>
 </Tabs>
 
-`path` is the file. `algorithm` is the hash name from
-[Supported commands](#supported-commands): `md5`, `sha1` to `sha512`,
-`blake2b` or `blake2b-N`.
-
-Return the lowercase hex hash of exactly the bytes a read returns. Mirage
-prints it and reads nothing. Return `None` (TypeScript: `null`) and Mirage
-reads and hashes the file. With this example, `md5sum /notes/hello.txt` reads
-nothing, and `sha256sum` still reads the page.
+A real service returns the hash it stores. This example computes MD5 and
+leaves the others to Mirage, so `md5sum /notes/hello.txt` reads nothing, and
+`sha256sum /notes/hello.txt` still reads the page.

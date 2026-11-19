@@ -5,39 +5,50 @@ icon: folder-tree
 ---
 
 Walks lets a VFS hand over a whole folder tree in one call, instead of one
-listing per folder. Override `read_tree` to make `find`, `du`, `ls -R` and
-`tree` cheaper.
+listing per folder. [Built-in VFSs](/home/integration/overview#walks) lists
+which VFSs support it.
 
-## Supported commands
+## VFS and Walks Integration
 
-These commands ask the VFS for the whole tree. The others list each folder as
-usual.
-
-| Command | What happens |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree`, `grep -r`, `rg` on a folder | Asks for the whole tree in one call. |
-| `cp -r` inside the mount, when the VFS overrides `copy` | Asks for the whole tree in one call. |
-| `find -maxdepth N`, `tree -L N`, `rg --max-depth N` | Lists each folder. |
-| `ls` without `-R` | Lists the folder. |
-| `cp -r` to another mount | Lists each folder. |
-
-Every walk stops at its command's
-[`walk_limit`](/home/integration/search#walk_limit) on the mount, whether the
-VFS handed over the tree or Mirage listed each folder.
-
-## For VFS authors
-
-A custom VFS overrides `read_tree` when its service can list a whole tree in
-one call. It returns `None` (TypeScript: `null`) when it cannot, and Mirage
-lists each folder with `readdir`. TypeScript names methods in camelCase
-(`readTree`).
+A VFS overrides `read_tree` when its service can list a whole tree in one
+call. It returns `None` (TypeScript: `null`) when it cannot, and Mirage lists
+each folder with `readdir` instead. TypeScript names methods in camelCase
+(`readTree`). The example extends `NotesVFS` from
+[Adding a New VFS](/home/setup/vfs/new#write-one), mounted at `/notes`.
 
 ### `read_tree`
 
-Every file and folder below one folder. This example extends `NotesVFS` from
-[Adding a New VFS](/home/setup/vfs/new#write-one). Its pages
-sit in one folder, so one `readdir` is the whole tree. A service with nested
-folders would return them all from one recursive call.
+Every file and folder below one folder.
+
+**Commands:** `find`, `du`, `ls -R`, `tree`, `grep -r` and `rg` on a folder,
+and `cp -r` inside the mount when the VFS overrides `copy`. `find -maxdepth N`,
+`tree -L N`, `rg --max-depth N` and `cp -r` to another mount list each folder
+without asking, and `ls` without `-R` lists one folder. Every walk stops at
+its command's [`walk_limit`](/home/integration/search#walk_limit).
+
+<ParamField body="path" type="PathSpec" required>
+The folder, on this mount. For a path that is not a folder, raise what `readdir` raises.
+</ParamField>
+
+<ParamField body="limit" type="int | None" default="None">
+The most entries worth returning, one more than the walk can still use, or `None` when nothing caps the walk. TypeScript passes it as `handed.limit`. `readdir` takes the same argument.
+</ParamField>
+
+**Examples:**
+
+| Command | `path` | `limit` |
+| --- | --- | --- |
+| `find /notes`, with a `walk_limit` of 1000 | `/notes` | `1001` |
+| `find /notes`, with a `walk_limit` of `-1` | `/notes` | `None` |
+
+<ResponseField name="returns" type="dict[str, FileStat] | None">
+
+| Return | What happens |
+| --- | --- |
+| Every file and folder below `path`, keyed by its path below it (`guides`, `guides/start.md`), each with the `FileStat` that `stat` gives | The command walks it without listing any folder. A tree past `limit` entries is cut to fit. |
+| `None` | Mirage lists each folder with `readdir`, and stops once `limit` is spent. Return `None` past `limit` entries, or for a folder too large to send in one call. |
+
+</ResponseField>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -66,19 +77,14 @@ folders would return them all from one recursive call.
   </Tab>
 </Tabs>
 
-`path` is the folder. For a path that is not a folder, raise what `readdir`
-raises.
+This example's pages sit in one folder, so one `readdir` is the whole tree. A
+service with nested folders would return them all from one recursive call.
+With this example, `find /notes`, `du -a /notes`, `ls -R /notes` and
+`tree /notes` call `read_tree` once, and `find /notes -maxdepth 1` lists the
+folder instead.
 
-Return every file and folder below `path`, keyed by its path below it
-(`guides`, `guides/start.md`), each with the `FileStat` that `stat` gives.
-Mirage walks it without listing any folder. With this example, `find /notes`,
-`du -a /notes`, `ls -R /notes` and `tree /notes` call `read_tree` once.
-`find /notes -maxdepth 1` lists the folder instead.
-
-### `walk_limit`
-
-To stop paging early, `read_tree` and `readdir` take `limit` (TypeScript:
-`handed.limit`):
+Past `limit` entries, `readdir` returns what it holds as a `DirListing` with
+`partial=True`, and Mirage does not keep it as the whole folder:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -94,14 +100,3 @@ To stop paging early, `read_tree` and `readdir` take `limit` (TypeScript:
     ```
   </Tab>
 </Tabs>
-
-`limit` is how many entries the walk can still use, or `None` (TypeScript:
-`undefined`) when nothing caps the walk.
-
-- Past `limit` entries, or for a folder too large to send in one call,
-  `read_tree` returns `None`. Mirage then lists each folder and stops calling
-  `readdir` once the limit is spent.
-- Past `limit` entries, `readdir` returns what it holds as a `DirListing` with
-  `partial=True`. Mirage does not keep it as the whole folder.
-- A `read_tree` that ignores `limit` returns the whole tree, and the command
-  keeps what fits.

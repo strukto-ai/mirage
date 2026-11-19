@@ -23,3 +23,101 @@ Built-in VFSs already implement these where their service allows. A
 [custom VFS](/home/setup/vfs/new) overrides the methods it can answer.
 Mirage still handles options and output, and reads or lists files whenever a
 method returns `None`.
+
+## Built-in VFSs
+
+These tables list which built-in VFSs answer each command from their service.
+A command or VFS not listed reads the files as usual.
+
+### Search
+
+A recursive `grep` or `rg` asks the service which files contain the text, and
+reads only those files.
+
+| VFS | Searches it speeds up | Files the search can miss |
+| --- | --- | --- |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/python/vfs/gdrive#integration) | Whole-word searches (`grep -rw`, `rg -w`) | Docs, Sheets and Slides files, Office files, PDFs, archives, the end of large files, recent edits |
+| <img noZoom src="/images/gdocs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Docs](/python/vfs/gdocs#integration), <img noZoom src="/images/gsheets-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Sheets](/python/vfs/gsheets#integration), <img noZoom src="/images/gslides-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slides](/python/vfs/gslides#integration) | Whole-word searches | Words only in fonts, links, formulas or titles; recent edits |
+| <img noZoom src="/images/gcal-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Calendar](/python/vfs/gcal#integration) | Whole-word searches | None |
+| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/python/vfs/dropbox#integration) | Whole-word searches | Office files, PDFs, archives, the end of large files, recent edits; every file's contents below the Professional plan |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/python/vfs/box#integration) | Whole-word searches | Office files, PDFs, archives, the end of large files, recent edits |
+| <Icon icon="microsoft" size={14} /> [OneDrive](/python/vfs/onedrive#integration), <Icon icon="microsoft" size={14} /> [SharePoint](/python/vfs/sharepoint#integration) | Whole-word searches | Office files, PDFs, archives, the end of large files, recent edits |
+| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/python/vfs/slack#integration) | Whole-word searches, with a user token | Recent messages; bot names and link previews |
+| <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Trello](/python/vfs/trello#integration) | Whole-word searches | Recent edits |
+| <img noZoom src="/images/linear-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Linear](/python/vfs/linear#integration) | Whole-word searches on issues; every search on other files | Recent issue edits |
+| <img noZoom src="/images/gmail-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gmail](/python/vfs/gmail#integration) | Every search for ASCII text in messages. Attachments are always read and searched. | None |
+| <Icon icon="envelope" size={14} /> [Email (IMAP)](/python/vfs/email#integration) | Every search for ASCII text in messages. Attachments are always read and searched. | Parts of words, on a server that indexes whole words |
+| <Icon icon="github" size={14} /> [GitHub](/python/vfs/github#integration) | Whole-word searches on the default branch | Recent pushes |
+| <img noZoom src="/images/chroma-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Chroma](/python/vfs/chroma#integration) | Every search, except with `-i` | None |
+| <img noZoom src="/images/qdrant-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Qdrant](/python/vfs/qdrant#integration) | Every search for ASCII text | None |
+| <img noZoom src="/images/lancedb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[LanceDB](/python/vfs/lancedb#integration) | Every search | None |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | Every search, on a server that runs commands | None |
+| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | Every search | None |
+| <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SQL with SQLite](/python/vfs/sql) | Every search for ASCII text | None |
+
+- A search a VFS does not speed up reads the files itself, up to the mount's
+  [`walk_limit`](/home/integration/search#walk_limit), and says so on stderr
+  when it stops there. It never leaves a file out silently. Some patterns and
+  flags always read every file; see
+  [Search](/home/integration/search#files_containing).
+- A file the service's search leaves out is not read, so `grep` does not
+  print a match in it. To read every file instead, set the mount's
+  [`walk_limit`](/home/integration/search#walk_limit) to `-1` on `"@all"`.
+
+### One-file search
+
+`grep` and `rg` on one table file fetch only the rows that may match, not the
+whole table. The output is the same as reading the file.
+
+| VFS | File | How |
+| --- | --- | --- |
+| <img noZoom src="/images/postgres-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[PostgreSQL](/python/vfs/postgres#integration) | `rows.jsonl` | A `LIKE` query |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MongoDB](/python/vfs/mongodb#integration) | `documents.jsonl` | A filter on the server |
+| <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Airtable](/python/vfs/airtable#integration) | `records.jsonl` | A `filterByFormula` query |
+
+### Lines
+
+`head`, `tail`, `wc -l` and `tail -f` ask the service for the lines or the
+count, without reading the whole file.
+
+| VFS | Commands | How |
+| --- | --- | --- |
+| <img noZoom src="/images/postgres-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[PostgreSQL](/python/vfs/postgres#integration) | `head -n`, `tail -n`, `wc -l`, `tail -f` | SQL queries (`LIMIT`, `COUNT(*)`); `tail -f` polls for new rows |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MongoDB](/python/vfs/mongodb#integration) | `tail -n`, `wc -l`, `tail -f` | Queries on the server; `tail -f` follows a change stream |
+| <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Airtable](/python/vfs/airtable#integration) | `head -n` | Fetches only the first records |
+| <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Notion](/python/vfs/notion#integration) | `head -n` | Renders only the first rows |
+| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/python/vfs/slack#integration), <img noZoom src="/images/discord-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Discord](/python/vfs/discord#integration) | `tail -f` | Each new message as it is posted |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | `wc -l`, `tail -f` | The same command on the server |
+| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | `head -n`, `tail -n`, `wc -l` | The same command on the machine |
+
+### Checksums
+
+Hash commands print the hash the service stores, without reading the file.
+Other files are hashed by reading them.
+
+| VFS | Commands | Where the hash comes from |
+| --- | --- | --- |
+| <img noZoom src="/images/s3-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[S3](/python/vfs/s3#integration), [Cloudflare R2](/python/vfs/r2#integration), [GCS](/python/vfs/gcs#integration), [MinIO](/python/vfs/minio#integration), [Ceph](/python/vfs/ceph#integration), [DigitalOcean Spaces](/python/vfs/digitalocean#integration), [Wasabi](/python/vfs/wasabi#integration) | `md5sum` | The object's ETag, for a single-part upload |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/python/vfs/gdrive#integration) | `md5sum`, `sha1sum`, `sha256sum` | Drive's stored hash; not for Docs, Sheets or Slides |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/python/vfs/box#integration) | `sha1sum` | Box's stored hash |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[HF Models](/python/vfs/hf_models#integration), <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Datasets](/python/vfs/hf_datasets#integration), <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Spaces](/python/vfs/hf_spaces#integration) | `sha256sum` | The LFS hash, for files in LFS |
+| <img noZoom src="/images/nextcloud-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Nextcloud](/python/vfs/nextcloud#integration) | `md5sum`, `sha1sum`, `sha256sum` | The hash the uploading client stored |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | `md5sum` and the `sha*sum` commands | The same command on the server |
+| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | `md5sum` and the `sha*sum` commands | The same command on the machine |
+
+### Walks
+
+`find`, `du`, `ls -R`, `tree`, `grep -r` and `rg` get the whole folder tree in
+one call, not one listing per folder.
+
+| VFS | How |
+| --- | --- |
+| <img noZoom src="/images/s3-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[S3](/python/vfs/s3#integration) and every S3-compatible store ([Cloudflare R2](/python/vfs/r2#integration), [GCS](/python/vfs/gcs#integration), [MinIO](/python/vfs/minio#integration), [Ceph](/python/vfs/ceph#integration), [DigitalOcean Spaces](/python/vfs/digitalocean#integration), [Wasabi](/python/vfs/wasabi#integration), [Alibaba OSS](/python/vfs/aliyun#integration), [Backblaze B2](/python/vfs/backblaze#integration), [OCI Object Storage](/python/vfs/oci#integration), [QingStor](/python/vfs/qingstor#integration), [Scaleway](/python/vfs/scaleway#integration), [SeaweedFS](/python/vfs/seaweedfs#integration), [Supabase Storage](/python/vfs/supabase#integration), [Tencent COS](/python/vfs/tencent#integration)) | One recursive listing |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/python/vfs/gdrive#integration) | One query per folder level |
+| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/python/vfs/dropbox#integration), <Icon icon="microsoft" size={14} /> [OneDrive](/python/vfs/onedrive#integration), <Icon icon="microsoft" size={14} /> [SharePoint](/python/vfs/sharepoint#integration), <img noZoom src="/images/nextcloud-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Nextcloud](/python/vfs/nextcloud#integration), <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[HF Buckets](/python/vfs/hf_buckets#integration) | One recursive listing |
+| <Icon icon="github" size={14} /> [GitHub](/python/vfs/github#integration) | One recursive tree listing |
+| <Icon icon="memory" size={14} /> [RAM](/python/vfs/ram#integration), <img noZoom src="/images/redis-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Redis](/python/vfs/redis#integration) | One scan of the store's keys |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GridFS](/python/vfs/gridfs#integration) | One `fs.files` query |
+| <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SQL](/python/vfs/sql) | One query |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/python/vfs/ssh#integration) | One `find` on the server |
+| <Icon icon="server" size={14} /> [Machine files](/python/vfs/machine#integration) | One `find` on the machine |
