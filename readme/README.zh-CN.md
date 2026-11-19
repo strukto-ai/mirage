@@ -56,7 +56,7 @@ AI Agent 在终端中工作。Mirage 是一个**虚拟终端**，它把终端接
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="Mirage 之上有三个虚拟文件系统（S3、Slack、Google Drive）、三个虚拟 CLI（gh、linear、deepwiki-mcp）和三台 VM（Monty、E2B 沙箱、EC2 GPU）：一条 grep 同时搜索三个文件系统，三个 CLI 的输出汇入一条 grep，一条管道在每台 VM 上各运行一个阶段" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage 之上有三个虚拟文件系统（S3、Slack、Google Drive）、三个虚拟 CLI（gh、linear、deepwiki-mcp）、三台 VM（Monty、E2B 沙箱、EC2 GPU）和一层策略：一条 grep 同时搜索三个文件系统，三个 CLI 的输出汇入一条 grep，一条管道在每台 VM 上各运行一个阶段，一行读取隐藏的 .pem 密钥、删除只读挂载 /s3 中的文件并合并 PR 的命令在到达任何服务之前被策略拒绝" width="100%">
   </picture>
 </p>
 

@@ -56,7 +56,7 @@ AI Agent làm việc trong terminal. Mirage là **một terminal ảo** tách ri
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
-    <img src="../assets/mirage-terminal-light.svg" alt="Mirage trên ba hệ thống tệp ảo (S3, Slack, Google Drive), ba CLI ảo (gh, linear, deepwiki-mcp) và ba VM (Monty, một sandbox E2B, một GPU EC2): một lệnh grep tìm trên cả ba hệ thống tệp, ba CLI cùng dẫn vào một grep, và một pipeline chạy mỗi bước trên một VM" width="100%">
+    <img src="../assets/mirage-terminal-light.svg" alt="Mirage trên ba hệ thống tệp ảo (S3, Slack, Google Drive), ba CLI ảo (gh, linear, deepwiki-mcp), ba VM (Monty, một sandbox E2B, một GPU EC2) và một lớp chính sách: một lệnh grep tìm trên cả ba hệ thống tệp, ba CLI cùng dẫn vào một grep, một pipeline chạy mỗi bước trên một VM, và một dòng lệnh đọc khóa .pem bị ẩn, xóa trên mount /s3 chỉ đọc và merge một PR bị chính sách từ chối trước khi chạm tới dịch vụ nào" width="100%">
   </picture>
 </p>
 
