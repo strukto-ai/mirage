@@ -3777,8 +3777,10 @@ export class Dispatcher {
 
   /**
    * Move the time of the folder a link is made in, removed from or renamed
-   * through, as a directory's moves when a name in it changes. A folder whose
-   * store keeps no time of its own keeps the time it has. Mirrors Python's
+   * through, as a directory's moves when a name in it changes. Only a store on
+   * this host dates the folder: the link is the namespace's alone, so it sends
+   * a machine or a service no command, and a folder whose store keeps no time
+   * of its own keeps the time it has. Mirrors Python's
    * Dispatcher._touch_folder.
    */
   private async touchFolder(link: string): Promise<void> {
@@ -3786,7 +3788,7 @@ export class Dispatcher {
     const cut = trimmed.lastIndexOf('/')
     const parent = cut > 0 ? trimmed.slice(0, cut) : '/'
     const mount = this.namespace.tryMountFor(parent)
-    if (!mount?.answers('setattr')) return
+    if (mount?.vfs.local !== true || !mount.answers('setattr')) return
     try {
       await mount.call('setattr', parent, [], { mtime: nowIso() }, this.access)
     } catch (err) {

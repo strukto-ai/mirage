@@ -3973,15 +3973,21 @@ class Dispatcher:
     async def _touch_folder(self, link: str) -> None:
         """Move the time of the folder a link is made in, removed from or
         renamed through, as a directory's moves when a name in it
-        changes. A folder whose store keeps no time of its own keeps the
-        time it has.
+        changes. Only a store on this host dates the folder: the link is
+        the namespace's alone, so it sends a machine or a service no
+        command, and a folder whose store keeps no time of its own keeps
+        the time it has.
 
         Args:
             link (str): the link's virtual path.
         """
         parent = posixpath.dirname(link.rstrip("/")) or "/"
         mount = self._namespace.try_mount_for(parent)
-        if mount is None or not mount.answers_at("setattr", parent):
+        if (
+            mount is None
+            or not mount.vfs.local
+            or not mount.answers_at("setattr", parent)
+        ):
             return
         try:
             await mount.call("setattr", parent, mtime=now_iso())
