@@ -1424,14 +1424,17 @@ class ShellExplanation(Explanation):
     """A line, explained: what the agent would read, where the line
     would run (its ``pre_execute`` answers) and every command in it.
 
-    The verdict is whether the line runs at all: a rule's refusal, or a
-    question still waiting on the host, refuses the whole line before
-    any of it runs, as does a placement's refusal; the first in the
-    order the gate reads them is the line's, byte-identical to the
-    refusal the run reports. A line that runs exits 0 here, and one an
-    approval lets run carries the ask it covers. A command refused
-    where it stands while the rest of the line runs (a word the allow
-    list leaves out, a policy refusing one path) says so on its own node.
+    A rule's refusal, or a question still waiting on the host, refuses
+    the whole line before any of it runs, as does a placement's refusal;
+    the first in the order the gate reads them is the line's,
+    byte-identical to the refusal the run reports. Otherwise the line
+    runs, and a command refused where it stands (a word the allow list
+    leaves out, a policy refusing one path) or a redirect no command
+    owns that a tree refuses fails while the rest goes on: the outcome
+    is the strictest of them, deny over ask over allow, an approval's
+    covered ask included, and the exit code and stderr are what the run
+    returns, with every command let through taken to succeed. Each
+    command also says what it meets on its own node.
 
     Args:
         answers (tuple[Deny | Ask | Route, ...]): every policy's
@@ -1439,9 +1442,9 @@ class ShellExplanation(Explanation):
             policy's first; empty when no policy answers it or a command
             refuses it first.
         line (str): the line as given.
-        exit_code (int): what the line is refused with, 0 when it runs.
-        stderr (str): what the agent would read then, empty when it
-            runs.
+        exit_code (int): what the line would exit with.
+        stderr (str): the refusals the agent would read, empty when
+            nothing is refused.
         node (ShellNode): the parsed line, of type ``line``.
     """
 

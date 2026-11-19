@@ -1,0 +1,204 @@
+{
+  "cases": [
+    {
+      "id": "explain_or_runs_the_allowed_side_after_a_refusal",
+      "seq": 960052,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "sort /ro/x || ls /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_pipeline_returns_its_refused_stage",
+      "seq": 960053,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "ls /ro | sort",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_if_runs_the_refused_branch",
+      "seq": 960054,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "if ls /ro; then sort /ro/x; fi",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_function_call_and_negation",
+      "seq": 960055,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "f() { ls /ro; }; f && ! sort /ro/x",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_case_runs_the_arm_its_word_matches",
+      "seq": 960056,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "case a in a) sort /ro/x;; *) ls /ro;; esac",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_for_body_is_refused",
+      "seq": 960057,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "for i in 1; do sort /ro/x; done",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_subshell_group_and_redirect_then_refusal",
+      "seq": 960058,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "(ls /ro) && { ls /ro; } > /dev/null && sort /ro/x",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_substitution_is_folded_before_its_command",
+      "seq": 960059,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "closed",
+      "session_profiles": {
+        "closed": {
+          "commands": {
+            "*": "deny",
+            "ls": "allow"
+          }
+        }
+      },
+      "explain": true,
+      "command": "ls $(sort /ro/x) /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "sort: Permission denied\n"
+      }
+    }
+  ]
+}

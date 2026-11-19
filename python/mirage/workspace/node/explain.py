@@ -25,6 +25,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.context.session_context import voice_name
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
     AdmissionRules,
@@ -53,6 +54,8 @@ from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
+    get_case_items,
+    get_case_word,
     get_parts,
     get_text,
     input_substitution_redirect,
@@ -76,7 +79,10 @@ from mirage.workspace.node.admission import (
     admit_redirect,
     classified_words,
     gate,
+    opened_by,
+    redirect_asked,
     redirect_paths,
+    redirect_refused,
     resolved,
     statement_redirects,
     statement_stdin,
@@ -145,6 +151,42 @@ REPEATED_SCOPES = frozenset(
         NodeType.C_STYLE_FOR_STATEMENT,
         NodeType.WHILE_STATEMENT,
         NodeType.FUNCTION_DEFINITION,
+    }
+)
+
+# How strict an outcome is, for a line's summary: the strictest part of
+# the line speaks for it.
+STRICTNESS = {Outcome.ALLOW: 0, Outcome.ASK: 1, Outcome.DENY: 2}
+
+# Nodes a list of statements holds that run nothing.
+INERT = frozenset({"comment", "heredoc_body"})
+
+# The nodes the shell may open a redirect for that no command owns
+# (``opened_by``): a bare redirect, the statements a redirect binds to
+# whole, and an assignment.
+OPENERS = frozenset(
+    {
+        NodeType.REDIRECTED_STATEMENT,
+        NodeType.COMPOUND_STATEMENT,
+        NodeType.SUBSHELL,
+        NodeType.IF_STATEMENT,
+        NodeType.WHILE_STATEMENT,
+        NodeType.FOR_STATEMENT,
+        NodeType.C_STYLE_FOR_STATEMENT,
+        NodeType.CASE_STATEMENT,
+        NodeType.VARIABLE_ASSIGNMENT,
+        NodeType.VARIABLE_ASSIGNMENTS,
+        NodeType.DECLARATION_COMMAND,
+        NodeType.UNSET_COMMAND,
+    }
+)
+
+# The redirects a redirected statement carries after its body.
+REDIRECT_TYPES = frozenset(
+    {
+        NodeType.FILE_REDIRECT,
+        NodeType.HEREDOC_REDIRECT,
+        NodeType.HERESTRING_REDIRECT,
     }
 )
 
@@ -352,6 +394,50 @@ class Judged:
     unread: frozenset[str] = frozenset()
     ctx: CommandContext | None = None
     session: SessionState | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Opened:
+    """A redirect no command owns (``{ cat; } < f``, ``> f``), as the dry
+    run judges it: what opening its target would do, and the statement
+    it redirects.
+
+    Args:
+        judgment (Judgment): what the open would do, ``command`` empty.
+        occurrence (Occurrence): where the redirected statement stands.
+    """
+
+    judgment: Judgment
+    occurrence: Occurrence
+
+
+@dataclass(frozen=True, slots=True)
+class Traced:
+    """What a line does as :func:`_line_status` follows it.
+
+    Args:
+        exit_code (int): what the line would return.
+        ran (tuple[Judgment, ...]): the refusals it would print, in
+            order.
+        calls (frozenset[tuple[int, int, int]]): the judgments, by span
+            and place among their span's, of the commands that call a
+            function the shell has defined when they run.
+        reached (frozenset[tuple[int, int, int]]): the judgments the
+            fold reached, run or skipped.
+        at (Mapping[int, frozenset[str]]): for each node the fold
+            enters, by where it starts, the functions defined when it
+            runs, which is what a line it runs in turn sees.
+        bodies (Mapping[int, frozenset[str]]): for each definition the
+            line runs, by where it starts, the functions defined at
+            every command that calls it, which is what its body sees.
+    """
+
+    exit_code: int
+    ran: tuple[Judgment, ...]
+    calls: frozenset[tuple[int, int, int]]
+    reached: frozenset[tuple[int, int, int]]
+    at: Mapping[int, frozenset[str]]
+    bodies: Mapping[int, frozenset[str]]
 
 
 def _unread_paths(
@@ -978,6 +1064,26 @@ def _walk_node(
     """
     if node.type == NodeType.FUNCTION_DEFINITION:
         frame = definition_frame(node, frame)
+    opened = (
+        opened_by(node, homes)
+        if node.type in OPENERS
+        or (
+            node.type == NodeType.COMMAND and get_text(node).startswith("exec")
+        )
+        else ()
+    )
+    if opened:
+        # The files the shell opens for no command as it reaches the
+        # node, where it stands: no command's words, so only a walk
+        # that asks for them sees them (``_walked_line``).
+        yield Walked(
+            [],
+            opened,
+            session,
+            occurrence_in(node, frame),
+            lost=lost,
+            elsewhere=elsewhere,
+        )
     if node.type == NodeType.TEST_COMMAND:
         # The shell's own test, judged as a command of its own name, a
         # test at a time as the gate admits it.
@@ -1194,6 +1300,7 @@ def _walked_line(
     session: SessionState,
     frame: Frame | None = None,
     lost: bool = False,
+    opens: bool = False,
 ) -> Iterator[Walked]:
     """Every command of a line with its redirect targets, the session
     it is judged in and its place on the line.
@@ -1212,10 +1319,15 @@ def _walked_line(
             reads ``ast`` as a line of its own.
         lost (bool): whether the line begins with its cwd lost, as a
             line a command runs after such a ``cd`` does.
+        opens (bool): also yield each statement's redirects no command
+            owns, as an item with no words, where the statement stands
+            (``explain_redirects``).
     """
     if frame is None:
         frame = root_frame(ast, None)
-    yield from _walk_node(ast, session, tilde_homes(session), frame, lost)
+    for item in _walk_node(ast, session, tilde_homes(session), frame, lost):
+        if item.words or opens:
+            yield item
 
 
 async def line_judgments(
@@ -1999,6 +2111,73 @@ async def explain_line(
     ]
 
 
+def explain_redirects(
+    ast: Any,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+) -> list[Opened]:
+    """Every redirect of a line no command owns that the session's trees
+    refuse or ask about, judged where its statement stands, a ``cd``
+    before it on the line included, as ``admit_redirect`` judges it when
+    the shell opens it, without asking anyone: an ask reads the session's
+    standing grants and stops there (``Decisions.held``), as a command's
+    does in :func:`_explained`. A target only the runtime can expand
+    (``> $f``), or a relative one after a ``cd`` the walk could not
+    follow, is left to the run.
+
+    Args:
+        ast (Any): the parsed root node.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the decision ledger.
+        namespace (Namespace | None): the link table.
+    """
+    out: list[Opened] = []
+    for item in _walked_line(ast, session, opens=True):
+        if item.words:
+            continue
+        at = item.occurrence
+        row = encode_text(at.source)[: at.start].count(b"\n") + 1
+        voice = f"{voice_name(item.session)}: line {row}: "
+        for word in item.redirects:
+            if item.lost and not word.value.startswith("/"):
+                continue
+            targets = redirect_paths([word], registry, item.session.cwd)
+            asked = redirect_asked(targets, item.session, namespace)
+            if asked is None:
+                continue
+            answer = asked.answer
+            action: Deny | Pending | None = (
+                registry.decisions.held(asked.question, answer)
+                if isinstance(answer, Ask)
+                else answer
+            )
+            rule = answer.rule
+            judgment = Judgment(
+                command="",
+                argv=asked.question.argv,
+                outcome=(
+                    Outcome.ASK if isinstance(answer, Ask) else Outcome.DENY
+                ),
+                rule=rule,
+                reason=answer.reason,
+                source="" if rule is None else source_of(rule),
+                matched_path=asked.named,
+                paths=asked.question.argv,
+                answers=(answer,),
+            )
+            if action is not None:
+                refusal = redirect_refused(targets, asked.named, action, voice)
+                judgment = dataclasses.replace(
+                    judgment,
+                    exit_code=refusal.exit_code,
+                    stderr=decode_text(refusal.stderr),
+                    decision=refusal.decision,
+                )
+            out.append(Opened(judgment, at))
+    return out
+
+
 def explained_line(
     line: str,
     judged: Sequence[Judged],
@@ -2006,19 +2185,30 @@ def explained_line(
     placed_of: Callable[[Judged], str],
     whole_line: bool = False,
     aliases: frozenset[str] = frozenset(),
+    opened: Sequence[Opened] = (),
+    pipefail: bool = False,
 ) -> ShellExplanation:
     """A line's public explanation: its verdict and its parse tree, with
     every command's explanation where the command stands.
 
-    The verdict is the first command, in the order the gate reads them,
-    whose refusal by the profile's rules holds the whole line
-    (:func:`holds`), as the run reports it; a line nothing holds runs,
-    carrying the first ask an approval lets through. A command refused
-    only where it stands, a policy's own ``pre_command`` refusal
-    included, keeps its refusal to its own node, since the rest of the
-    line still runs. A runtime that takes the line whole runs none of
-    it once any command is refused (:func:`admit_line`), so there every
-    refusal is the line's.
+    A line the profile's rules hold (:func:`holds`) runs none of it, so
+    its verdict is the first command, in the order the gate reads them,
+    whose refusal holds it, as the run reports it. A runtime that takes
+    the line whole runs none of it once any command is refused
+    (:func:`admit_line`), so there every refusal is the line's, and a
+    line it runs carries the first ask an approval lets through.
+
+    Otherwise the line runs, and a command refused where it stands (a
+    word a closed tree names nothing for, a policy's own
+    ``pre_command`` refusal) or a redirect no command owns that its tree
+    refuses (``opened``) fails while the rest goes on. The outcome is
+    then the strictest of every command and every such redirect, deny
+    over ask over allow; the reason, source and decision are the first
+    part's that gives it, in line order; the exit code and stderr are
+    the run's, read off the line's own control flow
+    (:func:`_line_status`), on the assumption that every command let
+    through succeeds. A line nothing refuses or asks about exits 0 here,
+    since what it returns then is its commands' own business.
 
     Every scope a command reads its words in (the typed line, a
     ``$( )`` body, a ``bash -c`` string) is parsed on its own, as the
@@ -2037,6 +2227,10 @@ def explained_line(
         whole_line (bool): whether a runtime takes the line whole.
         aliases (frozenset[str]): the alias names the session expands,
             which each scope is parsed with.
+        opened (Sequence[Opened]): the line's redirects no command owns
+            that its trees refuse or ask about (:func:`explain_redirects`).
+        pipefail (bool): whether the session's ``pipefail`` is set, so a
+            pipeline answers its last failing stage.
     """
     scopes: dict[tuple[Occurrence | None, str], list[Judged]] = {}
     for one in judged:
@@ -2070,21 +2264,390 @@ def explained_line(
             exit_code=judgment.exit_code,
             stderr=judgment.stderr,
         )
-    asked = next(
-        (
-            one
-            for one in verdicts
-            if not one.judgment.exit_code
-            and _verdict_of(one.judgment)[0] is Outcome.ASK
-        ),
-        None,
+    if whole_line:
+        asked = next(
+            (
+                one
+                for one in verdicts
+                if not one.judgment.exit_code
+                and _verdict_of(one.judgment)[0] is Outcome.ASK
+            ),
+            None,
+        )
+        if asked is None:
+            return ShellExplanation(line=line, node=node)
+        outcome, reason, source = _verdict_of(asked.judgment)
+        return ShellExplanation(
+            line=line, node=node, outcome=outcome, reason=reason, source=source
+        )
+    tree = parse(line, aliases)
+    commands: dict[tuple[int, int], list[Judgment]] = {}
+    keys: list[tuple[int, int, int] | None] = []
+    for one in judged:
+        at = one.occurrence
+        if at.parent is None:
+            listed = commands.setdefault((at.start, at.end), [])
+            keys.append((at.start, at.end, len(listed)))
+            listed.append(one.judgment)
+        else:
+            keys.append(None)
+    redirects: dict[tuple[int, int], list[Judgment]] = {}
+    for open_ in opened:
+        at = open_.occurrence
+        if at.parent is None:
+            redirects.setdefault((at.start, at.end), []).append(open_.judgment)
+    traced = _line_status(tree, commands, redirects, pipefail)
+    calling = [
+        _calls_function(one, key, traced)
+        for one, key in zip(judged, keys, strict=True)
+    ]
+    parts = _in_line_order(
+        [one for one, call in zip(judged, calling, strict=True) if not call],
+        opened,
     )
-    if asked is None:
+    strictest = max(
+        (_verdict_of(part)[0] for part in parts),
+        key=STRICTNESS.__getitem__,
+        default=Outcome.ALLOW,
+    )
+    if strictest is Outcome.ALLOW:
         return ShellExplanation(line=line, node=node)
-    outcome, reason, source = _verdict_of(asked.judgment)
+    first = next(part for part in parts if _verdict_of(part)[0] is strictest)
+    outcome, reason, source = _verdict_of(first)
     return ShellExplanation(
-        line=line, node=node, outcome=outcome, reason=reason, source=source
+        line=line,
+        node=node,
+        outcome=outcome,
+        reason=reason,
+        source=source,
+        decision=first.decision,
+        exit_code=traced.exit_code,
+        stderr="".join(part.stderr for part in traced.ran),
     )
+
+
+def _calls_function(
+    one: Judged, key: tuple[int, int, int] | None, traced: Traced
+) -> bool:
+    """Whether a judgment is a tree root's own decision about a command
+    that calls a function, which no root's own decision speaks for
+    (``is_tool``); a rule that names the function still does. The walk
+    reads the line before any definition runs, so it judges every such
+    call as a tool. A command the fold reached is a call when the
+    function was defined where it stands (:class:`Traced`); one in a
+    function's body when the function was defined at every call of that
+    body; any other, in a substitution or a line a command runs, when
+    the function was defined where that command stands.
+
+    Args:
+        one (Judged): one command's judgment and place.
+        key (tuple[int, int, int] | None): its span and place on the
+            typed line, None for one a nested line runs.
+        traced (Traced): what the line does.
+    """
+    if key is not None and key in traced.reached:
+        return key in traced.calls
+    judgment = one.judgment
+    start = _line_start(one.occurrence)
+    visible = traced.bodies.get(start, traced.at.get(start, frozenset()))
+    return judgment.command in visible and _by_default(judgment)
+
+
+def _in_line_order(
+    judged: Sequence[Judged], opened: Sequence[Opened]
+) -> list[Judgment]:
+    """Every command's judgment and every unowned redirect's, in the
+    order the line reaches them: a command where its statement starts
+    on the typed line (one a nested line runs, where the command that
+    runs it does), a redirect where the statement it opens for starts,
+    since the shell opens it before the statement runs.
+
+    Args:
+        judged (Sequence[Judged]): the line's command judgments, in the
+            order the gate reads them.
+        opened (Sequence[Opened]): the line's unowned redirects.
+    """
+    placed = [
+        (_line_start(one.occurrence), one.judgment) for one in judged
+    ] + [(_line_start(open_.occurrence), open_.judgment) for open_ in opened]
+    placed.sort(key=lambda pair: pair[0])
+    return [judgment for _, judgment in placed]
+
+
+def _line_start(at: Occurrence) -> int:
+    """Where on the typed line a part stands: its own start, or for a
+    part a nested line runs, the start of what runs that line.
+
+    Args:
+        at (Occurrence): the part's occurrence.
+    """
+    while at.parent is not None:
+        at = at.parent
+    return at.start
+
+
+def _line_status(
+    tree: Any,
+    commands: Mapping[tuple[int, int], Sequence[Judgment]],
+    redirects: Mapping[tuple[int, int], Sequence[Judgment]],
+    pipefail: bool,
+) -> Traced:
+    """The exit code a line would return and the refusals it would print
+    on the way, read off the line's control flow with every command let
+    through taken to succeed: a list returns its last statement's
+    status, ``&&`` and ``||`` skip what bash skips, a pipeline returns
+    its last stage's (its last failing one under ``pipefail``), ``!``
+    inverts a command or a whole pipeline, an ``if`` runs the branch its
+    condition picks, a loop its body once when its condition lets it in,
+    a ``case`` the arm its word certainly matches (an arm before it
+    whose pattern is a glob leaves it unknown, and none runs), a
+    statement sent to the background (``&``) 0, and a node whose
+    redirect no command owns is refused fails with 1 without running. A
+    function definition, a call to a function and the lines a command
+    runs in turn (``$( )``, ``bash -c``, ``eval``) answer 0.
+
+    The fold also follows which functions the shell has defined: a
+    definition counts once it runs, one in a subshell or a pipeline
+    stage or a substitution is gone when that child shell ends, and one
+    on a branch the line skips never counts; a function's body sees the
+    functions defined at every call of it, and a line a command runs in
+    turn the functions defined where that command stands, its own
+    substitutions folded as child shells before it. A tree root's own
+    decision about a command that calls such a function is no refusal
+    (``is_tool``).
+
+    Args:
+        tree (Any): the line, parsed.
+        commands (Mapping[tuple[int, int], Sequence[Judgment]]): each
+            command's judgments on the typed line, by span.
+        redirects (Mapping[tuple[int, int], Sequence[Judgment]]): the
+            judgments of the redirects no command owns, by the span of
+            the node they open for.
+        pipefail (bool): whether the session's ``pipefail`` is set.
+    """
+    ran: list[Judgment] = []
+    calls: set[tuple[int, int, int]] = set()
+    reached: set[tuple[int, int, int]] = set()
+    defined: set[str] = set()
+    at: dict[int, frozenset[str]] = {}
+    starts: dict[str, list[int]] = {}
+    seen: dict[str, set[str]] = {}
+
+    def refused(judgments: Sequence[Judgment], runs: bool) -> int:
+        first = next((j for j in judgments if j.exit_code), None)
+        if first is None or not runs:
+            return 0
+        ran.append(first)
+        return first.exit_code
+
+    def forked(nodes: Sequence[Any], runs: bool) -> int:
+        kept = set(defined)
+        code = statements(nodes, runs)
+        defined.clear()
+        defined.update(kept)
+        return code
+
+    def statements(nodes: Sequence[Any], runs: bool) -> int:
+        code = 0
+        for node, after in zip(nodes, [*nodes[1:], None], strict=False):
+            if not node.is_named or node.type in INERT:
+                continue
+            if after is not None and after.type == NodeType.BACKGROUND:
+                # A job: the shell does not wait on it, and it forks.
+                forked([node], False)
+                code = 0
+            else:
+                code = status(node, runs)
+        return code
+
+    def command(span: tuple[int, int], runs: bool) -> int:
+        kept: list[Judgment] = []
+        for place, judgment in enumerate(commands.get(span, ())):
+            key = (*span, place)
+            reached.add(key)
+            if judgment.command in defined and _by_default(judgment):
+                calls.add(key)
+                if judgment.command in seen:
+                    seen[judgment.command] &= defined
+                else:
+                    seen[judgment.command] = set(defined)
+            else:
+                kept.append(judgment)
+        return refused(kept, runs)
+
+    def status(node: Any, runs: bool) -> int:
+        kind = node.type
+        span = (node.start_byte, node.end_byte)
+        at.setdefault(node.start_byte, frozenset(defined))
+        code = refused(redirects.get(span, ()), runs)
+        if code:
+            return code
+        if kind in (NodeType.COMMAND, NodeType.TEST_COMMAND):
+            for sub in _substitutions(node.children):
+                status(sub, runs)
+            return command(span, runs)
+        if kind == NodeType.REDIRECTED_STATEMENT:
+            for sub in _substitutions(node.named_children[1:]):
+                status(sub, runs)
+            body = node.named_children[:1]
+            if not body or body[0].type in REDIRECT_TYPES:
+                return 0
+            return status(body[0], runs)
+        if kind == NodeType.LIST:
+            left, op, right = (
+                node.children[0],
+                node.children[1],
+                node.children[-1],
+            )
+            code = status(left, runs)
+            goes = (op.type == NodeType.AND) == (code == 0)
+            later = status(right, runs and goes)
+            return later if goes else code
+        if kind == NodeType.PIPELINE:
+            stages = list(node.named_children)
+            negated = (
+                bool(stages) and stages[0].type == NodeType.NEGATED_COMMAND
+            )
+            if negated:
+                stages[0] = stages[0].named_children[-1]
+            codes = [forked([stage], runs) for stage in stages]
+            if pipefail:
+                code = next((c for c in reversed(codes) if c), 0)
+            else:
+                code = codes[-1] if codes else 0
+            return (0 if code else 1) if negated else code
+        if kind == NodeType.NEGATED_COMMAND:
+            return 0 if statements(node.children, runs) else 1
+        if kind in FORK_SCOPES:
+            return forked(node.children, runs)
+        if kind == NodeType.IF_STATEMENT:
+            branches = [_clause(node)] + [
+                _clause(c)
+                for c in node.named_children
+                if c.type == NodeType.ELIF_CLAUSE
+            ]
+            code = 0
+            taken = False
+            for head, body in branches:
+                live = runs and not taken
+                hit = statements(head, live) == 0 and live
+                result = statements(body, hit)
+                if hit:
+                    code, taken = result, True
+            for child in node.named_children:
+                if child.type == NodeType.ELSE_CLAUSE:
+                    live = runs and not taken
+                    result = statements(child.children, live)
+                    if live:
+                        code = result
+            return code
+        if kind == NodeType.WHILE_STATEMENT:
+            loop = [
+                c for c in node.named_children if c.type == NodeType.DO_GROUP
+            ]
+            head = [c for c in node.children if c.type != NodeType.DO_GROUP]
+            until = node.children[0].type == NodeType.UNTIL
+            entered = runs and (statements(head, runs) == 0) != until
+            code = statements(loop, entered)
+            return code if entered else 0
+        if kind == NodeType.FUNCTION_DEFINITION:
+            name = next(
+                (c for c in node.named_children if c.type == NodeType.WORD),
+                None,
+            )
+            if runs and name is not None:
+                defined.add(get_text(name))
+                starts.setdefault(get_text(name), []).append(node.start_byte)
+            return 0
+        if kind == NodeType.CASE_STATEMENT:
+            arm = _case_arm(node)
+            code = 0
+            for index, (_, body, _) in enumerate(get_case_items(node)):
+                hit = runs and index == arm
+                result = statements(body, hit)
+                if hit:
+                    code = result
+            return code
+        if kind in (NodeType.FOR_STATEMENT, NodeType.C_STYLE_FOR_STATEMENT):
+            loop = [
+                c for c in node.named_children if c.type == NodeType.DO_GROUP
+            ]
+            return statements(loop, runs)
+        return statements(node.children, runs)
+
+    code = status(tree, True)
+    return Traced(
+        code,
+        tuple(ran),
+        frozenset(calls),
+        frozenset(reached),
+        at,
+        {
+            start: frozenset(seen.get(name, ()))
+            for name, places in starts.items()
+            for start in places
+        },
+    )
+
+
+def _substitutions(nodes: Sequence[Any]) -> list[Any]:
+    """The outermost substitutions (``$( )``, ``<( )``) among a command's
+    words or a statement's redirects, which run, each in a child shell,
+    before the command does.
+
+    Args:
+        nodes (Sequence[Any]): the words or redirects, parsed.
+    """
+    found: list[Any] = []
+    for node in nodes:
+        if node.type in (
+            NodeType.COMMAND_SUBSTITUTION,
+            NodeType.PROCESS_SUBSTITUTION,
+        ):
+            found.append(node)
+        else:
+            found.extend(_substitutions(node.children))
+    return found
+
+
+def _clause(node: Any) -> tuple[list[Any], list[Any]]:
+    """An ``if`` or ``elif``'s condition and the body it guards, as two
+    lists of parsed children; the branches after it are left out.
+
+    Args:
+        node (Any): the ``if_statement`` or ``elif_clause``.
+    """
+    head: list[Any] = []
+    body: list[Any] = []
+    into = head
+    for child in node.children:
+        if child.type == "then":
+            into = body
+        elif child.type not in (NodeType.ELIF_CLAUSE, NodeType.ELSE_CLAUSE):
+            into.append(child)
+    return head, body
+
+
+def _case_arm(node: Any) -> int | None:
+    """The arm of a ``case`` its word certainly matches: the first whose
+    pattern is the word itself or a bare ``*``, when the word is literal
+    and no arm before it holds a pattern only the shell's matcher can
+    decide (a glob, a quote, an expansion). None when no arm is certain.
+
+    Args:
+        node (Any): the ``case_statement``.
+    """
+    word = literal_word(get_case_word(node))
+    if word is None:
+        return None
+    for index, (patterns, _, _) in enumerate(get_case_items(node)):
+        for pattern in patterns:
+            text = get_text(pattern)
+            if text == "*" or text == word:
+                return index
+            if any(mark in text for mark in "*?[]\\'\"$`"):
+                return None
+    return None
 
 
 def _refusal(answers: tuple[Deny | Ask | Route, ...]) -> Deny | Ask | None:

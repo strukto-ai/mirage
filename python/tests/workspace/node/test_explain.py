@@ -264,15 +264,17 @@ async def test_explain_says_exactly_what_the_run_would_say(ws):
 @pytest.mark.asyncio
 async def test_only_a_verdict_refuses_the_whole_line(ws):
     # A word the closed root refuses fails where it stands and the
-    # rest of the line runs; a rule's refusal holds the whole line,
-    # whatever failed before it.
+    # rest of the line runs, so the line exits as its last command does
+    # while its outcome is the refusal; a rule's refusal holds the whole
+    # line, whatever failed before it.
     said = await ws.explain("gerp x; echo ok", "s")
     ran = await ws.shell("gerp x; echo ok", session_id="s")
     assert (ran.exit_code, said.outcome, said.exit_code) == (
         0,
-        Outcome.ALLOW,
+        Outcome.DENY,
         0,
     )
+    assert said.stderr == await ran.stderr_str()
     gerp, _ = said.node.children
     assert isinstance(gerp, CommandExplanation)
     assert (gerp.outcome, gerp.exit_code, gerp.stderr, gerp.source) == (
@@ -421,7 +423,7 @@ async def test_a_question_the_gate_asks_where_it_runs_holds_no_line():
     line = "find /data -name a.txt -exec cat /data/secret.txt \\;"
     said = await ws.explain(line, "s")
     ran = await ws.shell(line, session_id="s")
-    assert (said.exit_code, said.outcome) == (0, Outcome.ALLOW)
+    assert (said.exit_code, said.outcome) == (0, Outcome.ASK)
     assert (ran.exit_code, ran.stderr) == (0, b"cat: Permission denied\n")
     assert len(ws.decisions.pending()) == 1
     await ws.close()
@@ -2134,12 +2136,17 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
             Ask("sign-off", policy="_AskRm"),
             Deny("no", policy="_DenyRm"),
         )
-        # A policy's refusal is the command's: the line itself runs.
+        # A policy's refusal is the command's: the line itself runs,
+        # and exits as the refused command does.
         assert (rm.exit_code, rm.decision and rm.decision.reason) == (
             126,
             "no",
         )
-        assert (said.outcome, said.exit_code) == (Outcome.ALLOW, 0)
+        assert (said.outcome, said.reason, said.exit_code) == (
+            Outcome.DENY,
+            "no",
+            126,
+        )
         assert await Session(ws, None).explain.shell("rm /data/x") == said
     finally:
         await ws.close()
@@ -2364,5 +2371,218 @@ async def test_a_tilde_names_the_users_home_when_the_line_is_judged(operand):
         )
         assert ran.exit_code == 1
         assert "/data/marker" not in await ws.vfs.readdir("/data")
+    finally:
+        await ws.close()
+
+
+SUMMARY_SECRET = "/data/secret.txt"
+SUMMARY_CLOSED = {"*": "deny", "ls": "allow"}
+SUMMARY_SEALED = {
+    "*": [
+        "allow",
+        {"decision": "deny", "reason": "sealed", "paths": [SUMMARY_SECRET]},
+    ]
+}
+SUMMARY_NOD = {
+    "*": [
+        "allow",
+        {"decision": "ask", "reason": "nod", "paths": [SUMMARY_SECRET]},
+    ]
+}
+
+SUMMARIES = [
+    (SUMMARY_CLOSED, "ls /data", Outcome.ALLOW, ""),
+    (SUMMARY_CLOSED, "f() { ls /data; }; f", Outcome.ALLOW, ""),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x; sort() { ls /data; }",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "(sort() { ls /data; }); sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "! ls /data && sort() { ls /data; }; sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "outer() { inner; }; inner() { ls /data; }; outer",
+        Outcome.ALLOW,
+        "",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "x=$(sort() { ls /data; }); sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "sort() { ls /data; }; x=$(sort /data/x)",
+        Outcome.ALLOW,
+        "",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x; ls /data &",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "case x in a|x) sort /data/x;; *) ls /data;; esac",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "case y in x) sort /data/x;; esac",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (SUMMARY_CLOSED, "sort /data/x", Outcome.DENY, "sort is not allowed"),
+    (
+        SUMMARY_CLOSED,
+        "ls /data; sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x; ls /data",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (SUMMARY_CLOSED, "ls /data | sort", Outcome.DENY, "sort is not allowed"),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x && ls /data",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x || ls /data",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "if ls /data; then sort /data/x; fi",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (SUMMARY_SEALED, "{ cat; } < /data/secret.txt", Outcome.DENY, "sealed"),
+    (SUMMARY_SEALED, "> /data/secret.txt", Outcome.DENY, "sealed"),
+    (SUMMARY_SEALED, "(cat) < /data/secret.txt", Outcome.DENY, "sealed"),
+    (
+        SUMMARY_SEALED,
+        "while read l; do :; done < /data/secret.txt",
+        Outcome.DENY,
+        "sealed",
+    ),
+    (
+        SUMMARY_SEALED,
+        "if true; then cat; fi < /data/secret.txt",
+        Outcome.DENY,
+        "sealed",
+    ),
+    (SUMMARY_SEALED, "> /data/secret.txt; ls /data", Outcome.DENY, "sealed"),
+    (SUMMARY_SEALED, "ls /data && > /data/secret.txt", Outcome.DENY, "sealed"),
+    (SUMMARY_SEALED, "ls /data\n> /data/secret.txt", Outcome.DENY, "sealed"),
+    (
+        SUMMARY_SEALED,
+        "{ cat; } < /data/secret.txt; > /data/secret.txt",
+        Outcome.DENY,
+        "sealed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "! sort /data/x | ls /data",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (SUMMARY_SEALED, "cd /data && > secret.txt", Outcome.DENY, "sealed"),
+    (
+        SUMMARY_SEALED,
+        "cd /data && { cat; } < secret.txt",
+        Outcome.DENY,
+        "sealed",
+    ),
+    (
+        SUMMARY_SEALED,
+        "cd /data/d; (cat) < ../secret.txt",
+        Outcome.DENY,
+        "sealed",
+    ),
+    (SUMMARY_SEALED, "exec 3< /data/secret.txt", Outcome.DENY, "sealed"),
+    (SUMMARY_NOD, "{ cat; } < /data/secret.txt", Outcome.ASK, "nod"),
+    (SUMMARY_NOD, "{ cat; } < /data/secret.txt; ls /data", Outcome.ASK, "nod"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("commands", "line", "outcome", "reason"), SUMMARIES)
+async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
+    commands, line, outcome, reason
+):
+    # A command refused where it stands and a redirect no command owns
+    # both fail while the rest of the line runs: the summary names the
+    # strictest of them and exits as the run does, a `;` list with its
+    # last command's status.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "mkdir -p /data/d && printf 'b\\na\\n' > /data/x"
+            " && printf 's\\n' > /data/secret.txt"
+        )
+        ws.create_session("s", profile={"commands": commands})
+        said = await ws.explain(line, "s")
+        assert not ws.decisions.pending()
+        ran = await ws.shell(line, session_id="s")
+        assert (said.outcome, said.reason) == (outcome, reason)
+        assert (said.exit_code, said.stderr) == (
+            ran.exit_code,
+            await ran.stderr_str(),
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "outer() { sort /data/x; }; outer; sort() { ls /data; }",
+        "(sort() { ls /data; }); outer() { sort /data/x; }; outer",
+        "outer() { inner /data/x; }; outer; inner() { ls /data; }",
+        "outer() { sort /data/x; }; outer; sort() { ls /data; }; outer",
+        "outer() { inner /data/x; }; outer; inner() { ls /data; }; outer",
+        "(sort() { ls /data; }); ls $(sort /data/x)",
+    ],
+)
+async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
+    # The function a body or a substitution names is not in scope where
+    # it runs (defined later, in a subshell, or only after an earlier
+    # call), so that name is the tool the closed root refuses, as the run
+    # says.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf 'b\\na\\n' > /data/x")
+        ws.create_session("s", profile={"commands": SUMMARY_CLOSED})
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert ran.decision is not None
+        assert (said.outcome, said.reason) == (
+            Outcome.DENY,
+            ran.decision.reason,
+        )
     finally:
         await ws.close()

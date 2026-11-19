@@ -774,6 +774,105 @@ async def admit(
     return Refused(err, code, decision_of(action))
 
 
+@dataclass(frozen=True, slots=True)
+class RedirectAsked:
+    """What the session's trees answer about a redirect no command owns
+    when they do not simply let it open: the question the ledger reads a
+    grant against, the trees' answer and the path the rule named.
+
+    Args:
+        question (CommandContext): the redirect as the ledger reads it.
+        answer (Deny | Ask): the trees' answer.
+        named (str): the virtual path the answer is about.
+    """
+
+    question: CommandContext
+    answer: Deny | Ask
+    named: str
+
+
+def redirect_asked(
+    targets: Sequence[PathSpec],
+    session: SessionState,
+    namespace: Namespace | None,
+) -> RedirectAsked | None:
+    """The trees' answer about the files a redirect no command owns
+    opens, read without asking anyone: the half of ``admit_redirect``
+    the dry run shares. None when they let it open.
+
+    Args:
+        targets (Sequence[PathSpec]): the redirect's targets, expanded.
+        session (SessionState): the session running the line.
+        namespace (Namespace | None): the link table.
+    """
+    rules = session.commands
+    if rules is None or not targets:
+        return None
+    links = (
+        namespace.session_links(session)
+        if namespace is not None and namespace.nodes
+        else None
+    )
+    paths = list(targets)
+    if links is not None:
+        paths.extend(
+            p
+            for p in follow_paths(links, list(targets), True)
+            if isinstance(p, PathSpec)
+        )
+    seen = _seen(session, paths)
+    ruling = redirect_ruling(seen, rules)
+    if ruling.outcome is Outcome.ALLOW:
+        return None
+    rule = ruling.rule
+    assert rule is not None
+    named = ruling.matched_path or seen[0].virtual
+    question = CommandContext(
+        command="",
+        paths=seen,
+        argv=tuple(p.virtual for p in seen),
+        cwd=session.cwd,
+        session_id=session.session_id,
+    )
+    answer: Deny | Ask
+    if ruling.outcome is Outcome.ASK:
+        answer = Ask(
+            ruling.reason,
+            rule,
+            ruling.asks,
+            policy=PermissionsPolicy.__name__,
+        )
+    else:
+        answer = Deny(
+            ruling.reason,
+            path=named,
+            policy=PermissionsPolicy.__name__,
+            rule=rule,
+        )
+    return RedirectAsked(question, answer, named)
+
+
+def redirect_refused(
+    targets: Sequence[PathSpec],
+    named: str,
+    action: Deny | Pending,
+    voice: str,
+) -> Refused:
+    """A redirect's refusal in bash's voice for a file it could not open
+    (``bash: line 1: f: Permission denied``, exit 1), the decision on
+    the result.
+
+    Args:
+        targets (Sequence[PathSpec]): the redirect's targets.
+        named (str): the virtual path the refusal is about.
+        action (Deny | Pending): what refuses it.
+        voice (str): how the shell leads its diagnostic.
+    """
+    shown = next((p for p in targets if p.virtual == named), targets[0])
+    err = encode_text(f"{voice}{shown.raw_path}: Permission denied\n")
+    return Refused(err, 1, decision_of(action))
+
+
 async def admit_redirect(
     targets: Sequence[PathSpec],
     session: SessionState,
@@ -807,37 +906,12 @@ async def admit_redirect(
             opens them, None for targets no one redirect opens (a line
             judged whole).
     """
-    rules = session.commands
-    if rules is None or not targets:
+    asked = redirect_asked(targets, session, namespace)
+    if asked is None:
         return None
-    links = (
-        namespace.session_links(session)
-        if namespace is not None and namespace.nodes
-        else None
-    )
-    paths = list(targets)
-    if links is not None:
-        paths.extend(
-            p
-            for p in follow_paths(links, list(targets), True)
-            if isinstance(p, PathSpec)
-        )
-    seen = _seen(session, paths)
-    ruling = redirect_ruling(seen, rules)
-    if ruling.outcome is Outcome.ALLOW:
-        return None
-    rule = ruling.rule
-    assert rule is not None
-    named = ruling.matched_path or seen[0].virtual
-    question = CommandContext(
-        command="",
-        paths=seen,
-        argv=tuple(p.virtual for p in seen),
-        cwd=session.cwd,
-        session_id=session.session_id,
-    )
+    answer = asked.answer
     action: Deny | Pending | None
-    if ruling.outcome is Outcome.ASK:
+    if isinstance(answer, Ask):
         caller = current_caller()
         call = call_of(caller, registry.decisions, session.session_id)
         claimant = (
@@ -845,32 +919,19 @@ async def admit_redirect(
             if call is None
             else Claimant(
                 call,
-                Occurrence(None, named, 0, 0)
+                Occurrence(None, asked.named, 0, 0)
                 if at is None
                 else occurrence_of(at, call),
             )
         )
-        asked = Ask(
-            ruling.reason,
-            rule,
-            ruling.asks,
-            policy=PermissionsPolicy.__name__,
-        )
         action = await resolved(
-            question, asked, registry, caller.stop, claimant
+            asked.question, answer, registry, caller.stop, claimant
         )
         if action is None:
             return None
     else:
-        action = Deny(
-            ruling.reason,
-            path=named,
-            policy=PermissionsPolicy.__name__,
-            rule=rule,
-        )
-    shown = next((p for p in targets if p.virtual == named), targets[0])
-    err = encode_text(f"{shell_voice()}{shown.raw_path}: Permission denied\n")
-    return Refused(err, 1, decision_of(action))
+        action = answer
+    return redirect_refused(targets, asked.named, action, shell_voice())
 
 
 async def admit_test(
@@ -1046,8 +1107,17 @@ def statement_redirects_raw(node: Any) -> list[Redirect]:
     Args:
         node (Any): the command's parsed node.
     """
-    if is_bare_exec(node):
-        return []
+    return [] if is_bare_exec(node) else _bound_redirects(node)
+
+
+def _bound_redirects(node: Any) -> list[Redirect]:
+    """The redirects bound to a node along the last-command chain, as
+    bash binds them: ``a && { b; } < f`` opens ``f`` for the group, after
+    ``a`` ran.
+
+    Args:
+        node (Any): the parsed node.
+    """
     owner = node
     parent = owner.parent
     while parent is not None and parent.type in REDIRECT_CHAIN:
@@ -1128,6 +1198,36 @@ def unowned_redirects(
             if _opens_file(r)
         )
     return out
+
+
+def opened_by(node: Any, homes: Mapping[str, str] | None) -> tuple[Word, ...]:
+    """The literal targets of the redirects no command owns that the
+    shell opens as it reaches ``node``: a bare statement's (``> f``), or
+    a group's, a loop's, a subshell's, an ``if``'s, an assignment's or a
+    bare ``exec``'s, bound along the last-command chain. Empty for a
+    command that owns its redirects (``statement_redirects``) and for
+    any node no redirect binds to.
+
+    Args:
+        node (Any): the parsed node.
+        homes (Mapping[str, str] | None): the homes each ``~name``
+            names, ``""`` for a bare ``~``.
+    """
+    if node.type == NT.REDIRECTED_STATEMENT:
+        inner, redirects = get_redirects(node)
+        if inner is not None:
+            return ()
+    elif node.type in REDIRECT_CHAIN or (
+        node.type in REDIRECT_OWNERS and not is_bare_exec(node)
+    ):
+        return ()
+    else:
+        redirects = _bound_redirects(node)
+    return tuple(
+        Word(str(r.target), literal_word(r.target_node, homes))
+        for r in redirects
+        if _opens_file(r)
+    )
 
 
 def statement_stdin(node: Any) -> bytes | None:

@@ -177,6 +177,7 @@ import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import {
   explainedLine,
+  explainRedirects,
   explainLine,
   holds,
   lineJudgments,
@@ -1882,6 +1883,8 @@ export class Workspace {
         false,
         false,
       )
+      const opened = await explainRedirects(root, session, this.registry, this.namespace, reparse)
+      const pipefail = session.shellOptions.pipefail === true
       if (holds(verdicts.map((one) => one.judgment))) {
         // The run leaves a held line on its static bindings for the gate to
         // answer (`Router.decide`), whole when they take it whole.
@@ -1902,6 +1905,8 @@ export class Workspace {
           (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ''),
           reparse,
           wholeLine,
+          opened,
+          pipefail,
         )
       }
       const [answers, placed] = await this.router.placement(line, session, () =>
@@ -1946,6 +1951,8 @@ export class Workspace {
         this.router.placements(shown, placed),
         reparse,
         wholeLine,
+        opened,
+        pipefail,
       )
       if (wholeLine && said.outcome === Outcome.ALLOW) {
         // A command routed off the runtime that runs the line whole
