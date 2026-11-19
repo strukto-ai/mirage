@@ -636,6 +636,9 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
     let mut pages: Vec<Printed> = Vec::new();
     let mut held: u64 = 0;
     let mut seen: HashSet<String> = HashSet::new();
+    if let Some(cursor) = fields.get("endCursor").as_str().filter(|_| graphql) {
+        seen.insert(cursor.to_owned());
+    }
     let mut current = Some(path);
     while let Some(target) = current.take() {
         if !graphql {
@@ -666,6 +669,8 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
                     body: error.body.into_bytes(),
                     head,
                 };
+                let size = held + (failure.body.len() + failure.head.len()) as u64;
+                account.host.ask(Request::Memory { size }).await;
                 return failed(account, &pages, flags, failure, diagnostic).await;
             }
             Err(failure) => return Err(failure),
@@ -685,6 +690,8 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
                     body: page.raw,
                     head: page.head,
                 };
+                let size = held + (failure.body.len() + failure.head.len()) as u64;
+                account.host.ask(Request::Memory { size }).await;
                 return failed(account, &pages, flags, failure, diagnostic).await;
             }
         }

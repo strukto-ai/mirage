@@ -290,3 +290,23 @@ async def test_paginate_counts_empty_pages_toward_the_budget(monkeypatch):
     await ws.close()
     assert "memory exhausted" in err
     assert github.calls < 200
+
+
+@pytest.mark.asyncio
+async def test_graphql_paginate_stops_on_the_cursor_it_was_given(monkeypatch):
+    info = {"hasNextPage": True, "endCursor": "c1"}
+    github = _Github({"data": {"viewer": {"pageInfo": info}}})
+    monkeypatch.setattr(HOST, github)
+    ws = _workspace()
+    code, _, err = await asyncio.wait_for(
+        _line(
+            ws,
+            "gh api graphql --paginate -f endCursor=c1 -f query='query("
+            "$endCursor: String) { viewer { pageInfo { hasNextPage endCursor"
+            " } } }'",
+        ),
+        10,
+    )
+    await ws.close()
+    assert (code, err) == (1, "gh: next page repeats c1\n")
+    assert len(github.calls) == 1

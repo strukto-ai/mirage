@@ -217,4 +217,20 @@ describe('runLeaf', () => {
     ).rejects.toThrow(MemoryExhausted)
     expect(transport.calls).toBeLessThan(200)
   })
+
+  it('stops graphql --paginate on the cursor it was given', async () => {
+    const transport = new FakeTransport({
+      data: { viewer: { pageInfo: { hasNextPage: true, endCursor: 'c1' } } },
+    })
+    const query = 'query($endCursor: String) { viewer { pageInfo { hasNextPage endCursor } } }'
+    const [, io] = await run(transport, 'api', ['graphql'], {
+      paginate: true,
+      raw_field: ['endCursor=c1', `query=${query}`],
+    })
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([
+      1,
+      'gh: next page repeats c1\n',
+    ])
+    expect(transport.calls.length).toBe(1)
+  })
 })
