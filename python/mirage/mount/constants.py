@@ -69,12 +69,5 @@ FSPROTO_VERSION = 1
 # The largest fsproto frame either side accepts.
 FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
 
-# The largest file read whole for mirage-fuse's cache, and the files and
-# total a folder's prefetch carries.
+# The largest file read whole for mirage-fuse's cache.
 FSPROTO_WHOLE_BYTES = 8 * 1024 * 1024
-FSPROTO_FETCH_FILE_BYTES = 256 * 1024
-FSPROTO_FETCH_DIR_BYTES = 4 * 1024 * 1024
-
-# The entries a folder's first listing carries for the folders under it,
-# so mirage-fuse walks a kept tree in a few round trips.
-FSPROTO_TREE_ENTRIES = 20000

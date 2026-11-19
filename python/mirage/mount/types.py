@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from mirage.io.spool import ByteSlice, ByteSpool
@@ -112,8 +113,12 @@ class ServedPrefix:
             kernel already holds.
         changes (RecentChanges | None): the workspace's changes, which
             reach a client that keeps answers.
+        watched (Callable[[str], Awaitable[bool]] | None): whether a
+            policy judges a session's file calls, by its id; the client
+            then keeps no answer, so every call it makes reaches them.
     """
 
     prefix: str
     machine: str
     changes: RecentChanges | None
+    watched: Callable[[str], Awaitable[bool]] | None = None

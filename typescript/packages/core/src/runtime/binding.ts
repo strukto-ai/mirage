@@ -68,6 +68,8 @@ export class WorkspaceBinding {
    *   what it was served; null outside a workspace.
    * @param localPrefixes the prefixes a machine holds itself, by its name;
    *   null outside a workspace.
+   * @param watched whether a policy judges a session's file calls, by its
+   *   id; null outside a workspace.
    */
   constructor(
     readonly dispatch: DispatchFn | null,
@@ -80,6 +82,7 @@ export class WorkspaceBinding {
     readonly processes: ProcessTable | null = null,
     readonly changes: RecentChanges | null = null,
     private readonly localPrefixes: ((machine: string) => string[]) | null = null,
+    readonly watched: ((sessionId: string) => Promise<boolean>) | null = null,
   ) {}
 
   /**
