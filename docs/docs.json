@@ -752,7 +752,7 @@
                   "typescript/agents/vercel",
                   "typescript/agents/mastra",
                   "typescript/agents/claude-agent-sdk",
-                  "typescript/agents/openai",
+                  "typescript/agents/openai-agents",
                   "typescript/agents/langchain"
                 ]
               },
@@ -1494,6 +1494,10 @@
     {
       "source": "/typescript/setup/wasabi",
       "destination": "/typescript/vfs/wasabi"
+    },
+    {
+      "source": "/typescript/agents/openai",
+      "destination": "/typescript/agents/openai-agents"
     }
   ],
   "navbar": {
