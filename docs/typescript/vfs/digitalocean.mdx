@@ -1,12 +1,12 @@
 ---
-title: Tencent COS
-icon: /images/tencent-logo.svg
-description: Virtualize a Tencent COS bucket from Node or the browser.
+title: DigitalOcean Spaces
+icon: /images/digitalocean-logo.svg
+description: Virtualize a DigitalOcean Space from Node or the browser.
 ---
 
-`TencentVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Tencent COS's
-endpoint, so commands behave as they do on S3. Set up credentials as in [Tencent COS setup](/home/setup/tencent).
+`DigitalOceanVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at DigitalOcean Spaces's
+endpoint, so commands behave as they do on S3. Set up credentials as in [DigitalOcean Spaces setup](/home/setup/digitalocean).
 
 ## Install
 
@@ -17,28 +17,28 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-node'
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const cos = new TencentVFS({
-  bucket: process.env.COS_BUCKET!,
-  region: process.env.COS_REGION!,
-  accessKeyId: process.env.COS_SECRET_ID!,
-  secretAccessKey: process.env.COS_SECRET_KEY!,
+const spaces = new DigitalOceanVFS({
+  bucket: process.env.DO_SPACE!,
+  region: process.env.DO_REGION!,
+  accessKeyId: process.env.DO_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.DO_SECRET_ACCESS_KEY!,
 })
-const ws = new Workspace({ '/cos': cos }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/spaces': spaces }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /cos && find /cos -name '*.csv'")
+const result = await ws.shell("ls /spaces && find /spaces -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` also picks the endpoint, `https://cos.<region>.myqcloud.com`;
+`region` also picks the endpoint, `https://<region>.digitaloceanspaces.com`;
 `endpoint` replaces it.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table tencent start */}
+{/* generated: config-table digitalocean start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -74,7 +74,7 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table tencent end */}
+{/* generated: config-table digitalocean end */}
 
 ## Authentication
 
@@ -86,15 +86,15 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-`accessKeyId` takes the CAM SecretId and `secretAccessKey` the SecretKey. The
-sub-user needs a COS policy: read-only for a read mount, read and write
-for a write mount.
+The Spaces key needs **Limited Access** with **Read** on the Space, or
+**Read/Write/Delete** for a write mount. **Full Access** reaches every
+Space.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/cos/
+/spaces/
   README.md
   logs/
     app-2026-11-15.log
@@ -104,20 +104,18 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/cos/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/spaces/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/cos/notes.md` is the key `users/42/notes.md`.
-- **Bucket name:** a COS bucket name ends in the account's APPID, as in
-  `my-bucket-1250000000`. `bucket` takes the full name, suffix included.
+  so `/spaces/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
-The browser `TencentVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the Tencent COS keys, and the
+The browser `DigitalOceanVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the DigitalOcean Spaces keys, and the
 browser fetches it.
 
 ```bash
@@ -125,11 +123,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-browser'
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const cos = new TencentVFS({
-  bucket: 'my-bucket-1250000000',
-  region: 'ap-guangzhou',
+const spaces = new DigitalOceanVFS({
+  bucket: 'my-space',
+  region: 'nyc3',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -139,7 +137,7 @@ const cos = new TencentVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/cos': cos }, { mode: MountMode.READ })
+const ws = new Workspace({ '/spaces': spaces }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -167,14 +165,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.COS_REGION!
-const BUCKET = process.env.COS_BUCKET!
+const REGION = process.env.DO_REGION!
+const BUCKET = process.env.DO_SPACE!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://cos.${REGION}.myqcloud.com`,
+  endpoint: `https://${REGION}.digitaloceanspaces.com`,
   credentials: {
-    accessKeyId: process.env.COS_SECRET_ID!,
-    secretAccessKey: process.env.COS_SECRET_KEY!,
+    accessKeyId: process.env.DO_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.DO_SECRET_ACCESS_KEY!,
   },
 })
 
@@ -214,15 +212,20 @@ Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-Set the rules in the console: COS > the bucket > **Security Management** > **CORS**.
-Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
-`POST`, the headers `*`, and expose `ETag`, `Content-Length`,
-`Content-Type` and `Last-Modified`.
+Spaces takes the S3 `PutBucketCors` call, so the AWS CLI works against
+its endpoint. The control panel sets the same rules under the Space's
+**Settings** > **CORS Configurations**.
+
+```bash
+aws s3api put-bucket-cors --bucket "$DO_SPACE" \
+  --endpoint-url "https://$DO_REGION.digitaloceanspaces.com" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+```
 
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/tencent start */}
+{/* generated: config-table browser/digitalocean start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -246,27 +249,29 @@ Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/tencent end */}
+{/* generated: config-table browser/digitalocean end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-Tencent COS answers these commands through its own API, so fewer objects are
+DigitalOcean Spaces answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
 - `find`: one recursive listing.
 - `du`: one recursive listing.
 - `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Tencent COS mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with DigitalOcean Spaces mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md tencent start */}
+{/* generated: vfs-md digitalocean start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -328,4 +333,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md tencent end */}
+{/* generated: vfs-md digitalocean end */}

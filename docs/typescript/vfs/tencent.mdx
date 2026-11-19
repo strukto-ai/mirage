@@ -1,12 +1,12 @@
 ---
-title: Scaleway
-icon: /images/scaleway-logo.svg
-description: Virtualize a Scaleway Object Storage bucket from Node or the browser.
+title: Tencent COS
+icon: /images/tencent-logo.svg
+description: Virtualize a Tencent COS bucket from Node or the browser.
 ---
 
-`ScalewayVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Scaleway's
-endpoint, so commands behave as they do on S3. Set up credentials as in [Scaleway setup](/home/setup/scaleway).
+`TencentVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Tencent COS's
+endpoint, so commands behave as they do on S3. Set up credentials as in [Tencent COS setup](/home/setup/tencent).
 
 ## Install
 
@@ -17,28 +17,28 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-node'
 
-const scw = new ScalewayVFS({
-  bucket: process.env.SCW_BUCKET!,
-  region: process.env.SCW_REGION!,
-  accessKeyId: process.env.SCW_ACCESS_KEY!,
-  secretAccessKey: process.env.SCW_SECRET_KEY!,
+const cos = new TencentVFS({
+  bucket: process.env.COS_BUCKET!,
+  region: process.env.COS_REGION!,
+  accessKeyId: process.env.COS_SECRET_ID!,
+  secretAccessKey: process.env.COS_SECRET_KEY!,
 })
-const ws = new Workspace({ '/scw': scw }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/cos': cos }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /scw && find /scw -name '*.csv'")
+const result = await ws.shell("ls /cos && find /cos -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` also picks the endpoint, `https://s3.<region>.scw.cloud`;
+`region` also picks the endpoint, `https://cos.<region>.myqcloud.com`;
 `endpoint` replaces it.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table scaleway start */}
+{/* generated: config-table tencent start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -74,7 +74,7 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table scaleway end */}
+{/* generated: config-table tencent end */}
 
 ## Authentication
 
@@ -86,15 +86,15 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-The API key's bearer needs `ObjectStorageReadOnly`, or
-`ObjectStorageFullAccess` for a write mount, on the bucket's Project. The
-key reaches Object Storage in its preferred Project only.
+`accessKeyId` takes the CAM SecretId and `secretAccessKey` the SecretKey. The
+sub-user needs a COS policy: read-only for a read mount, read and write
+for a write mount.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/scw/
+/cos/
   README.md
   logs/
     app-2026-11-15.log
@@ -104,18 +104,20 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/scw/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/cos/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/scw/notes.md` is the key `users/42/notes.md`.
+  so `/cos/notes.md` is the key `users/42/notes.md`.
+- **Bucket name:** a COS bucket name ends in the account's APPID, as in
+  `my-bucket-1250000000`. `bucket` takes the full name, suffix included.
 
 ## Browser
 
-The browser `ScalewayVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the Scaleway keys, and the
+The browser `TencentVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the Tencent COS keys, and the
 browser fetches it.
 
 ```bash
@@ -123,11 +125,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-browser'
 
-const scw = new ScalewayVFS({
-  bucket: 'my-bucket',
-  region: 'fr-par',
+const cos = new TencentVFS({
+  bucket: 'my-bucket-1250000000',
+  region: 'ap-guangzhou',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -137,7 +139,7 @@ const scw = new ScalewayVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/scw': scw }, { mode: MountMode.READ })
+const ws = new Workspace({ '/cos': cos }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -165,14 +167,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.SCW_REGION!
-const BUCKET = process.env.SCW_BUCKET!
+const REGION = process.env.COS_REGION!
+const BUCKET = process.env.COS_BUCKET!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://s3.${REGION}.scw.cloud`,
+  endpoint: `https://cos.${REGION}.myqcloud.com`,
   credentials: {
-    accessKeyId: process.env.SCW_ACCESS_KEY!,
-    secretAccessKey: process.env.SCW_SECRET_KEY!,
+    accessKeyId: process.env.COS_SECRET_ID!,
+    secretAccessKey: process.env.COS_SECRET_KEY!,
   },
 })
 
@@ -212,19 +214,15 @@ Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-Scaleway takes the S3 `PutBucketCors` call, so the AWS CLI works against
-its endpoint:
-
-```bash
-aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
-  --endpoint-url "https://s3.$SCW_REGION.scw.cloud" \
-  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
-```
+Set the rules in the console: COS > the bucket > **Security Management** > **CORS**.
+Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
+`POST`, the headers `*`, and expose `ETag`, `Content-Length`,
+`Content-Type` and `Last-Modified`.
 
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/scaleway start */}
+{/* generated: config-table browser/tencent start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -248,14 +246,14 @@ aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/scaleway end */}
+{/* generated: config-table browser/tencent end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-Scaleway answers these commands through its own API, so fewer objects are
+Tencent COS answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
 - `find`: one recursive listing.
@@ -264,11 +262,11 @@ read. See [Integration](/home/integration/overview).
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Tencent COS mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md scaleway start */}
+{/* generated: vfs-md tencent start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -330,4 +328,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md scaleway end */}
+{/* generated: vfs-md tencent end */}

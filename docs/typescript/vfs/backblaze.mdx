@@ -1,12 +1,12 @@
 ---
-title: Wasabi
-icon: /images/wasabi-logo.svg
-description: Virtualize a Wasabi bucket from Node or the browser.
+title: Backblaze B2
+icon: /images/backblaze-logo.svg
+description: Virtualize a Backblaze B2 bucket from Node or the browser.
 ---
 
-`WasabiVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Wasabi's
-endpoint, so commands behave as they do on S3. Set up credentials as in [Wasabi setup](/home/setup/wasabi).
+`BackblazeVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Backblaze B2's
+endpoint, so commands behave as they do on S3. Set up credentials as in [Backblaze B2 setup](/home/setup/backblaze).
 
 ## Install
 
@@ -17,29 +17,29 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-node'
+import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const wasabi = new WasabiVFS({
-  bucket: process.env.WASABI_BUCKET!,
-  region: process.env.WASABI_REGION!,
-  accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY!,
+const b2 = new BackblazeVFS({
+  bucket: process.env.B2_BUCKET!,
+  region: process.env.B2_REGION!,
+  accessKeyId: process.env.B2_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
 })
-const ws = new Workspace({ '/wasabi': wasabi }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/b2': b2 }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /wasabi && find /wasabi -name '*.csv'")
+const result = await ws.shell("ls /b2 && find /b2 -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` also picks the endpoint, `https://s3.<region>.wasabisys.com`,
-or `https://s3.wasabisys.com` for `us-east-1`, the default; `endpoint`
+`region` also picks the endpoint, `https://s3.<region>.backblazeb2.com`,
+as the bucket's **Endpoint** shows it in the Backblaze console; `endpoint`
 replaces it.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table wasabi start */}
+{/* generated: config-table backblaze start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -67,15 +67,15 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 <ResponseField name="proxy" type={"string"} post={["secret"]}>
   Proxy URL for every HTTP and HTTPS request to the endpoint.
 </ResponseField>
-<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
-  Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.
+<ResponseField name="region" type={"string"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.
 </ResponseField>
 <ResponseField name="endpoint" type={"string"}>
   Endpoint URL that replaces the one the provider derives.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table wasabi end */}
+{/* generated: config-table backblaze end */}
 
 ## Authentication
 
@@ -87,15 +87,17 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-The key needs read access to the bucket, and write and delete access for a
-write mount. A sub-user whose policy covers only the bucket is the safer
-choice.
+`accessKeyId` takes the application key's keyID and `secretAccessKey` its applicationKey.
+The key needs **Read Only** on the bucket, or **Read and Write** for a
+write mount, with **Allow List All Bucket Names** ticked. The master
+application key does not work with the S3-compatible API, and neither
+does a key created before May 4, 2020.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/wasabi/
+/b2/
   README.md
   logs/
     app-2026-11-15.log
@@ -105,18 +107,18 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/wasabi/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/b2/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/wasabi/notes.md` is the key `users/42/notes.md`.
+  so `/b2/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
-The browser `WasabiVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the Wasabi keys, and the
+The browser `BackblazeVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the Backblaze B2 keys, and the
 browser fetches it.
 
 ```bash
@@ -124,11 +126,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-browser'
+import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const wasabi = new WasabiVFS({
+const b2 = new BackblazeVFS({
   bucket: 'my-bucket',
-  region: 'us-east-2',
+  region: 'us-west-004',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -138,7 +140,7 @@ const wasabi = new WasabiVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/wasabi': wasabi }, { mode: MountMode.READ })
+const ws = new Workspace({ '/b2': b2 }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -166,14 +168,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.WASABI_REGION!
-const BUCKET = process.env.WASABI_BUCKET!
+const REGION = process.env.B2_REGION!
+const BUCKET = process.env.B2_BUCKET!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://s3.${REGION}.wasabisys.com`,
+  endpoint: `https://s3.${REGION}.backblazeb2.com`,
   credentials: {
-    accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.B2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
   },
 })
 
@@ -210,33 +212,30 @@ app.post('/presign', async (req, res) => {
 
 Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-For `us-east-1` the endpoint is `https://s3.wasabisys.com`, with no
-region in it.
-
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-Wasabi takes the S3 `PutBucketCors` call, so the AWS CLI works against
-its endpoint:
+B2 sets CORS through its native API, not the S3 `PutBucketCors` call. Set
+the rules in the Backblaze console (**Bucket Settings** > **CORS Rules**)
+or with the `b2` CLI:
 
 ```bash
-aws s3api put-bucket-cors --bucket "$WASABI_BUCKET" \
-  --endpoint-url "https://s3.$WASABI_REGION.wasabisys.com" \
-  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+b2 bucket update my-bucket \
+  --cors-rules '[{"corsRuleName":"mirage","allowedOrigins":["http://localhost:5173","https://app.example.com"],"allowedOperations":["s3_get","s3_put","s3_head","s3_delete","s3_post"],"allowedHeaders":["*"],"exposeHeaders":["etag","content-length","content-type","last-modified"],"maxAgeSeconds":3000}]'
 ```
 
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/wasabi start */}
+{/* generated: config-table browser/backblaze start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
 <ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
 </ResponseField>
-<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
-  Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
 </ResponseField>
 <ResponseField name="endpoint" type={"string"}>
   Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
@@ -252,29 +251,27 @@ aws s3api put-bucket-cors --bucket "$WASABI_BUCKET" \
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/wasabi end */}
+{/* generated: config-table browser/backblaze end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-Wasabi answers these commands through its own API, so fewer objects are
+Backblaze B2 answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
-- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
-  unencrypted or under SSE-S3).
 - `find`: one recursive listing.
 - `du`: one recursive listing.
 - `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Wasabi mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Backblaze B2 mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md wasabi start */}
+{/* generated: vfs-md backblaze start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -336,4 +333,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md wasabi end */}
+{/* generated: vfs-md backblaze end */}

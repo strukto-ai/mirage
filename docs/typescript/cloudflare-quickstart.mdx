@@ -127,7 +127,7 @@ so `codex exec-server forward` runs its tools in a workspace on the Worker.
 ## Keep files and sessions
 
 A Worker's memory goes with its isolate. To keep files and sessions, store
-them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's storage
+them in SQL: [`SqlVFS`](/typescript/vfs/sql) over a Durable Object's storage
 or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each
 session's directory, variables, functions, jobs and history.
 

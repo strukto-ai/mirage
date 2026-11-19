@@ -47,7 +47,7 @@ package. `capacity: '100MB'` caps the bytes the files hold; see
 ## Authentication
 
 The password goes in the URL, `redis://:<password>@<host>:6379/0`, or
-`rediss://` for TLS. An [Upstash](/typescript/setup/upstash) database works with
+`rediss://` for TLS. An [Upstash](/typescript/vfs/upstash) database works with
 the `rediss://` URL its console prints.
 
 ## Layout
@@ -77,7 +77,7 @@ the set `<prefix>dir`, and modified times in `<prefix>modified:<path>`.
 A page cannot open a socket, so `@struktoai/mirage-browser` reaches Redis
 through the [Upstash REST API](https://upstash.com/docs/redis/features/restapi).
 It takes the same redis URL the Upstash console prints: its password is also
-the REST token. [Upstash Redis](/typescript/setup/upstash) covers that database
+the REST token. [Upstash Redis](/typescript/vfs/upstash) covers that database
 on its own page.
 
 ```bash

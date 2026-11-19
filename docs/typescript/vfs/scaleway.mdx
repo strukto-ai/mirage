@@ -1,12 +1,12 @@
 ---
-title: Backblaze B2
-icon: /images/backblaze-logo.svg
-description: Virtualize a Backblaze B2 bucket from Node or the browser.
+title: Scaleway
+icon: /images/scaleway-logo.svg
+description: Virtualize a Scaleway Object Storage bucket from Node or the browser.
 ---
 
-`BackblazeVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Backblaze B2's
-endpoint, so commands behave as they do on S3. Set up credentials as in [Backblaze B2 setup](/home/setup/backblaze).
+`ScalewayVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Scaleway's
+endpoint, so commands behave as they do on S3. Set up credentials as in [Scaleway setup](/home/setup/scaleway).
 
 ## Install
 
@@ -17,29 +17,28 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-node'
 
-const b2 = new BackblazeVFS({
-  bucket: process.env.B2_BUCKET!,
-  region: process.env.B2_REGION!,
-  accessKeyId: process.env.B2_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
+const scw = new ScalewayVFS({
+  bucket: process.env.SCW_BUCKET!,
+  region: process.env.SCW_REGION!,
+  accessKeyId: process.env.SCW_ACCESS_KEY!,
+  secretAccessKey: process.env.SCW_SECRET_KEY!,
 })
-const ws = new Workspace({ '/b2': b2 }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/scw': scw }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /b2 && find /b2 -name '*.csv'")
+const result = await ws.shell("ls /scw && find /scw -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` also picks the endpoint, `https://s3.<region>.backblazeb2.com`,
-as the bucket's **Endpoint** shows it in the Backblaze console; `endpoint`
-replaces it.
+`region` also picks the endpoint, `https://s3.<region>.scw.cloud`;
+`endpoint` replaces it.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table backblaze start */}
+{/* generated: config-table scaleway start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -75,7 +74,7 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table backblaze end */}
+{/* generated: config-table scaleway end */}
 
 ## Authentication
 
@@ -87,17 +86,15 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-`accessKeyId` takes the application key's keyID and `secretAccessKey` its applicationKey.
-The key needs **Read Only** on the bucket, or **Read and Write** for a
-write mount, with **Allow List All Bucket Names** ticked. The master
-application key does not work with the S3-compatible API, and neither
-does a key created before May 4, 2020.
+The API key's bearer needs `ObjectStorageReadOnly`, or
+`ObjectStorageFullAccess` for a write mount, on the bucket's Project. The
+key reaches Object Storage in its preferred Project only.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/b2/
+/scw/
   README.md
   logs/
     app-2026-11-15.log
@@ -107,18 +104,18 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/b2/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/scw/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/b2/notes.md` is the key `users/42/notes.md`.
+  so `/scw/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
-The browser `BackblazeVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the Backblaze B2 keys, and the
+The browser `ScalewayVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the Scaleway keys, and the
 browser fetches it.
 
 ```bash
@@ -126,11 +123,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-browser'
 
-const b2 = new BackblazeVFS({
+const scw = new ScalewayVFS({
   bucket: 'my-bucket',
-  region: 'us-west-004',
+  region: 'fr-par',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -140,7 +137,7 @@ const b2 = new BackblazeVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/b2': b2 }, { mode: MountMode.READ })
+const ws = new Workspace({ '/scw': scw }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -168,14 +165,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.B2_REGION!
-const BUCKET = process.env.B2_BUCKET!
+const REGION = process.env.SCW_REGION!
+const BUCKET = process.env.SCW_BUCKET!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://s3.${REGION}.backblazeb2.com`,
+  endpoint: `https://s3.${REGION}.scw.cloud`,
   credentials: {
-    accessKeyId: process.env.B2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.SCW_ACCESS_KEY!,
+    secretAccessKey: process.env.SCW_SECRET_KEY!,
   },
 })
 
@@ -215,19 +212,19 @@ Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-B2 sets CORS through its native API, not the S3 `PutBucketCors` call. Set
-the rules in the Backblaze console (**Bucket Settings** > **CORS Rules**)
-or with the `b2` CLI:
+Scaleway takes the S3 `PutBucketCors` call, so the AWS CLI works against
+its endpoint:
 
 ```bash
-b2 bucket update my-bucket \
-  --cors-rules '[{"corsRuleName":"mirage","allowedOrigins":["http://localhost:5173","https://app.example.com"],"allowedOperations":["s3_get","s3_put","s3_head","s3_delete","s3_post"],"allowedHeaders":["*"],"exposeHeaders":["etag","content-length","content-type","last-modified"],"maxAgeSeconds":3000}]'
+aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
+  --endpoint-url "https://s3.$SCW_REGION.scw.cloud" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/backblaze start */}
+{/* generated: config-table browser/scaleway start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -251,14 +248,14 @@ b2 bucket update my-bucket \
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/backblaze end */}
+{/* generated: config-table browser/scaleway end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-Backblaze B2 answers these commands through its own API, so fewer objects are
+Scaleway answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
 - `find`: one recursive listing.
@@ -267,11 +264,11 @@ read. See [Integration](/home/integration/overview).
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Backblaze B2 mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md backblaze start */}
+{/* generated: vfs-md scaleway start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -333,4 +330,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md backblaze end */}
+{/* generated: vfs-md scaleway end */}

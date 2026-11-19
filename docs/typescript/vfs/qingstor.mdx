@@ -1,12 +1,12 @@
 ---
-title: Alibaba OSS
-icon: /images/aliyun-logo.svg
-description: Virtualize an Alibaba Cloud OSS bucket from Node or the browser.
+title: QingStor
+icon: cloud
+description: Virtualize a QingStor bucket from Node or the browser.
 ---
 
-`AliyunVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Alibaba OSS's
-endpoint, so commands behave as they do on S3. Set up credentials as in [Alibaba OSS setup](/home/setup/aliyun).
+`QingStorVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at QingStor's
+endpoint, so commands behave as they do on S3. Set up credentials as in [QingStor setup](/home/setup/qingstor).
 
 ## Install
 
@@ -17,29 +17,30 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { AliyunVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-node'
 
-const oss = new AliyunVFS({
-  bucket: process.env.OSS_BUCKET!,
-  region: process.env.OSS_REGION!,
-  accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.OSS_ACCESS_KEY_SECRET!,
+const qingstor = new QingStorVFS({
+  bucket: process.env.QINGSTOR_BUCKET!,
+  region: process.env.QINGSTOR_ZONE!,
+  accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.QINGSTOR_SECRET_ACCESS_KEY!,
 })
-const ws = new Workspace({ '/oss': oss }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/qingstor': qingstor }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /oss && find /oss -name '*.csv'")
+const result = await ws.shell("ls /qingstor && find /qingstor -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` also picks the endpoint, `https://s3.oss-<region>.aliyuncs.com`,
-the S3-compatible host, not the native `oss-<region>.aliyuncs.com`;
-`endpoint` replaces it.
+`region` takes the bucket's zone and picks the endpoint,
+`https://s3.<zone>.qingstor.com`, the S3-compatible host, not the native
+`<zone>.qingstor.com`. `endpoint` replaces it, for another host such as
+`https://s3.<zone>.qsstor.com`.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table aliyun start */}
+{/* generated: config-table qingstor start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -75,7 +76,7 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table aliyun end */}
+{/* generated: config-table qingstor end */}
 
 ## Authentication
 
@@ -87,14 +88,13 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-Use a RAM user's AccessKey pair, not the root account's. The user needs
-`AliyunOSSReadOnlyAccess`, or `AliyunOSSFullAccess` for a write mount.
+The key is a QingCloud API access key pair.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/oss/
+/qingstor/
   README.md
   logs/
     app-2026-11-15.log
@@ -104,18 +104,18 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/oss/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/qingstor/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/oss/notes.md` is the key `users/42/notes.md`.
+  so `/qingstor/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
-The browser `AliyunVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the Alibaba OSS keys, and the
+The browser `QingStorVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the QingStor keys, and the
 browser fetches it.
 
 ```bash
@@ -123,11 +123,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { AliyunVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-browser'
 
-const oss = new AliyunVFS({
+const qingstor = new QingStorVFS({
   bucket: 'my-bucket',
-  region: 'cn-hangzhou',
+  region: 'pek3a',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -137,7 +137,7 @@ const oss = new AliyunVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/oss': oss }, { mode: MountMode.READ })
+const ws = new Workspace({ '/qingstor': qingstor }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -165,14 +165,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.OSS_REGION!
-const BUCKET = process.env.OSS_BUCKET!
+const REGION = process.env.QINGSTOR_ZONE!
+const BUCKET = process.env.QINGSTOR_BUCKET!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://s3.oss-${REGION}.aliyuncs.com`,
+  endpoint: `https://s3.${REGION}.qingstor.com`,
   credentials: {
-    accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.OSS_ACCESS_KEY_SECRET!,
+    accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.QINGSTOR_SECRET_ACCESS_KEY!,
   },
 })
 
@@ -212,7 +212,7 @@ Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-Set the rules in the console: OSS > the bucket > **Content Security** > **CORS**.
+Set the rules in the console: QingStor > the bucket > **Basic Settings** > **CORS**.
 Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
 `POST`, the headers `*`, and expose `ETag`, `Content-Length`,
 `Content-Type` and `Last-Modified`.
@@ -220,7 +220,7 @@ Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/aliyun start */}
+{/* generated: config-table browser/qingstor start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -244,14 +244,14 @@ Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/aliyun end */}
+{/* generated: config-table browser/qingstor end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-Alibaba OSS answers these commands through its own API, so fewer objects are
+QingStor answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
 - `find`: one recursive listing.
@@ -260,11 +260,11 @@ read. See [Integration](/home/integration/overview).
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Alibaba OSS mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with QingStor mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md aliyun start */}
+{/* generated: vfs-md qingstor start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -326,4 +326,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md aliyun end */}
+{/* generated: vfs-md qingstor end */}

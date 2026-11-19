@@ -117,7 +117,7 @@ nested folder costs one request per level, and keeps the result.
   stores, so `cat notes.boxnote | jq .` works. `.gdoc`, `.gsheet` and
   `.gslides` come back as the Office zips Box stores (`docx`, `xlsx`,
   `pptx`). Mirage does not convert them; for an editable view of Google
-  files, mount [Google Drive](/typescript/setup/gdrive) instead.
+  files, mount [Google Drive](/typescript/vfs/gdrive) instead.
 - **`read: fresh`:** a cached file is checked against the SHA-1 Box keeps,
   with one request. A file Box reports without a SHA-1 cannot be checked, so
   each fresh read downloads it again. Listings are fetched again once per

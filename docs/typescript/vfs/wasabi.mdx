@@ -1,12 +1,12 @@
 ---
-title: QingStor
-icon: cloud
-description: Virtualize a QingStor bucket from Node or the browser.
+title: Wasabi
+icon: /images/wasabi-logo.svg
+description: Virtualize a Wasabi bucket from Node or the browser.
 ---
 
-`QingStorVFS` mounts one bucket: every object becomes a file and every `/` in a key
-a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at QingStor's
-endpoint, so commands behave as they do on S3. Set up credentials as in [QingStor setup](/home/setup/qingstor).
+`WasabiVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/vfs/s3) pointed at Wasabi's
+endpoint, so commands behave as they do on S3. Set up credentials as in [Wasabi setup](/home/setup/wasabi).
 
 ## Install
 
@@ -17,30 +17,29 @@ npm install @struktoai/mirage-node
 ## Configure
 
 ```ts
-import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-node'
 
-const qingstor = new QingStorVFS({
-  bucket: process.env.QINGSTOR_BUCKET!,
-  region: process.env.QINGSTOR_ZONE!,
-  accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.QINGSTOR_SECRET_ACCESS_KEY!,
+const wasabi = new WasabiVFS({
+  bucket: process.env.WASABI_BUCKET!,
+  region: process.env.WASABI_REGION!,
+  accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY!,
 })
-const ws = new Workspace({ '/qingstor': qingstor }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/wasabi': wasabi }, { mode: MountMode.WRITE })
 
-const result = await ws.shell("ls /qingstor && find /qingstor -name '*.csv'")
+const result = await ws.shell("ls /wasabi && find /wasabi -name '*.csv'")
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`region` takes the bucket's zone and picks the endpoint,
-`https://s3.<zone>.qingstor.com`, the S3-compatible host, not the native
-`<zone>.qingstor.com`. `endpoint` replaces it, for another host such as
-`https://s3.<zone>.qsstor.com`.
+`region` also picks the endpoint, `https://s3.<region>.wasabisys.com`,
+or `https://s3.wasabisys.com` for `us-east-1`, the default; `endpoint`
+replaces it.
 A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 
 ### Fields
 
-{/* generated: config-table qingstor start */}
+{/* generated: config-table wasabi start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
@@ -68,15 +67,15 @@ A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
 <ResponseField name="proxy" type={"string"} post={["secret"]}>
   Proxy URL for every HTTP and HTTPS request to the endpoint.
 </ResponseField>
-<ResponseField name="region" type={"string"} required>
-  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.
+<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
+  Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.
 </ResponseField>
 <ResponseField name="endpoint" type={"string"}>
   Endpoint URL that replaces the one the provider derives.
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table qingstor end */}
+{/* generated: config-table wasabi end */}
 
 ## Authentication
 
@@ -88,13 +87,15 @@ Credentials come from the first of:
 3. The AWS SDK credential chain: environment variables, then the instance or
    container role.
 
-The key is a QingCloud API access key pair.
+The key needs read access to the bucket, and write and delete access for a
+write mount. A sub-user whose policy covers only the bucket is the safer
+choice.
 An object the key may not read or change answers `Permission denied`.
 
 ## Layout
 
 ```text
-/qingstor/
+/wasabi/
   README.md
   logs/
     app-2026-11-15.log
@@ -104,18 +105,18 @@ An object the key may not read or change answers `Permission denied`.
     2026-q4.csv
 ```
 
-`/qingstor/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+`/wasabi/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
 from the `/` in keys.
 
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/qingstor/notes.md` is the key `users/42/notes.md`.
+  so `/wasabi/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
-The browser `QingStorVFS` from `@struktoai/mirage-browser` keeps the keys off the
-page: a server signs a URL for each S3 call with the QingStor keys, and the
+The browser `WasabiVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the Wasabi keys, and the
 browser fetches it.
 
 ```bash
@@ -123,11 +124,11 @@ npm install @struktoai/mirage-browser
 ```
 
 ```ts
-import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-browser'
 
-const qingstor = new QingStorVFS({
+const wasabi = new WasabiVFS({
   bucket: 'my-bucket',
-  region: 'pek3a',
+  region: 'us-east-2',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
       method: 'POST',
@@ -137,7 +138,7 @@ const qingstor = new QingStorVFS({
     return ((await r.json()) as { url: string }).url
   },
 })
-const ws = new Workspace({ '/qingstor': qingstor }, { mode: MountMode.READ })
+const ws = new Workspace({ '/wasabi': wasabi }, { mode: MountMode.READ })
 ```
 
 - Requests go to the host each signed URL names; `region` and `endpoint` only
@@ -165,14 +166,14 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-const REGION = process.env.QINGSTOR_ZONE!
-const BUCKET = process.env.QINGSTOR_BUCKET!
+const REGION = process.env.WASABI_REGION!
+const BUCKET = process.env.WASABI_BUCKET!
 const client = new S3Client({
   region: REGION,
-  endpoint: `https://s3.${REGION}.qingstor.com`,
+  endpoint: `https://s3.${REGION}.wasabisys.com`,
   credentials: {
-    accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.QINGSTOR_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY!,
   },
 })
 
@@ -209,26 +210,33 @@ app.post('/presign', async (req, res) => {
 
 Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
+For `us-east-1` the endpoint is `https://s3.wasabisys.com`, with no
+region in it.
+
   </Accordion>
   <Accordion title="Bucket CORS rules">
 
-Set the rules in the console: QingStor > the bucket > **Basic Settings** > **CORS**.
-Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
-`POST`, the headers `*`, and expose `ETag`, `Content-Length`,
-`Content-Type` and `Last-Modified`.
+Wasabi takes the S3 `PutBucketCors` call, so the AWS CLI works against
+its endpoint:
+
+```bash
+aws s3api put-bucket-cors --bucket "$WASABI_BUCKET" \
+  --endpoint-url "https://s3.$WASABI_REGION.wasabisys.com" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+```
 
   </Accordion>
   <Accordion title="Browser fields">
 
-{/* generated: config-table browser/qingstor start */}
+{/* generated: config-table browser/wasabi start */}
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
 <ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
 </ResponseField>
-<ResponseField name="region" type={"string"}>
-  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
+  Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.
 </ResponseField>
 <ResponseField name="endpoint" type={"string"}>
   Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
@@ -244,27 +252,29 @@ Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
 </ResponseField>
 
 Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/qingstor end */}
+{/* generated: config-table browser/wasabi end */}
 
   </Accordion>
 </AccordionGroup>
 
 ## Integration
 
-QingStor answers these commands through its own API, so fewer objects are
+Wasabi answers these commands through its own API, so fewer objects are
 read. See [Integration](/home/integration/overview).
 
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
 - `find`: one recursive listing.
 - `du`: one recursive listing.
 - `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with QingStor mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Wasabi mounted at `/<path>`.
 `<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
 those of a `write` mount.
 
-{/* generated: vfs-md qingstor start */}
+{/* generated: vfs-md wasabi start */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
@@ -326,4 +336,4 @@ those of a `write` mount.
   </Tab>
 </Tabs>
 </div>
-{/* generated: vfs-md qingstor end */}
+{/* generated: vfs-md wasabi end */}

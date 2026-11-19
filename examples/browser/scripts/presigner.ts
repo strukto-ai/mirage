@@ -35,7 +35,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 // R2 intentionally excluded from the demo until its bucket-level CORS is
-// configured via the Cloudflare dashboard. See docs/typescript/setup/r2.mdx
+// configured via the Cloudflare dashboard. See docs/typescript/vfs/r2.mdx
 // for the setup steps; to re-enable, add 'r2' to BackendName and to the
 // configured[] list in handlePresign.
 export type BackendName = 's3' | 'gcs' | 'oci'
