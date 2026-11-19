@@ -134,7 +134,7 @@ async function loadFuse(): Promise<FuseConstructor> {
     {
       feature: 'FUSE support',
       packageName: '@zkochan/fuse-native',
-      docsUrl: 'https://mirage.dev/typescript/setup/fuse',
+      docsUrl: 'https://docs.mirage.strukto.ai/typescript/setup/fuse',
       // fuse-native dlopens its binding against libfuse as it loads, so a
       // machine with the package and no driver fails here, not at
       // resolution (ERR_DLOPEN_FAILED, or no prebuild for the platform).

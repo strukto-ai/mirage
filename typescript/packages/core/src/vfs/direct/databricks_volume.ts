@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { z } from 'zod'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { VFSName } from '../../types.ts'
 import { DatabricksVolumeVFS as CoreDatabricksVolumeVFS } from '../databricks_volume/databricks_volume.ts'
-import type { RedactedSchema } from '../secrets.ts'
+import { parseConfigWithSchema, type RedactedSchema } from '../secrets.ts'
 import type { ConfigState } from '../types.ts'
 import { DatabricksVolumeConfig } from '../databricks_volume/config.ts'
 
@@ -35,7 +36,8 @@ export class DatabricksVolumeVFS extends CoreDatabricksVolumeVFS {
     this.accessor = accessor
   }
 
-  static create(config: DatabricksVolumeConfig): Promise<DatabricksVolumeVFS> {
+  static create(input: z.input<typeof DatabricksVolumeConfig>): Promise<DatabricksVolumeVFS> {
+    const config = parseConfigWithSchema(DatabricksVolumeConfig, input)
     const accessor = new DatabricksVolumeAccessor(config)
     return Promise.resolve(new DatabricksVolumeVFS(config, accessor))
   }

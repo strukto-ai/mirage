@@ -18,7 +18,7 @@ import { BaseVFS } from '../base.ts'
 import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { EmailAccessor } from '../../accessor/email.ts'
-import { EmailConfig } from '../../core/email/config.ts'
+import { buildEmailConfig, EmailConfig, type EmailConfigInput } from '../../core/email/config.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
@@ -59,10 +59,10 @@ export class EmailVFS extends BaseVFS {
   readonly config: EmailConfig
   override readonly accessor: EmailAccessor
 
-  constructor(config: EmailConfig) {
+  constructor(input: EmailConfigInput) {
     super()
-    this.config = config
-    this.accessor = new EmailAccessor(config)
+    this.config = buildEmailConfig(input)
+    this.accessor = new EmailAccessor(this.config)
   }
 
   override async close(): Promise<void> {

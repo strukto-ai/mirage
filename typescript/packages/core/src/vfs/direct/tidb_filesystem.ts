@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { z } from 'zod'
 import { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { VFSName } from '../../types.ts'
-import type { RedactedSchema } from '../secrets.ts'
+import { parseConfigWithSchema, type RedactedSchema } from '../secrets.ts'
 import { TiDBFilesystemVFS as CoreTiDBFilesystemVFS } from '../tidb_filesystem/tidb_filesystem.ts'
 import type { ConfigState } from '../types.ts'
 import { TiDBFilesystemConfig } from '../tidb_filesystem/config.ts'
@@ -34,7 +35,8 @@ export class TiDBFilesystemVFS extends CoreTiDBFilesystemVFS {
     this.accessor = accessor
   }
 
-  static create(config: TiDBFilesystemConfig): Promise<TiDBFilesystemVFS> {
+  static create(input: z.input<typeof TiDBFilesystemConfig>): Promise<TiDBFilesystemVFS> {
+    const config = parseConfigWithSchema(TiDBFilesystemConfig, input)
     const accessor = new TiDBFilesystemAccessor(config)
     return Promise.resolve(new TiDBFilesystemVFS(config, accessor))
   }

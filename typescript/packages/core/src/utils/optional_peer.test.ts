@@ -18,7 +18,7 @@ import { loadOptionalPeer, missingPeer } from './optional_peer.ts'
 const CONFIG = {
   feature: 'FUSE support',
   packageName: '@zkochan/fuse-native',
-  docsUrl: 'https://mirage.dev/typescript/setup/fuse',
+  docsUrl: 'https://docs.mirage.strukto.ai/typescript/setup/fuse',
 }
 
 const HINT = 'FUSE also needs an OS driver: macFUSE on macOS.'

@@ -2431,7 +2431,13 @@ const ARG_ERROR_VFS: Record<string, () => BaseVFS | Promise<BaseVFS>> = {
   // Through `create`, as any host builds one: its constructor is private,
   // and a VFS built past it has no accessor for the mount to govern.
   databricks: () =>
-    DatabricksVolumeVFS.create({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+    DatabricksVolumeVFS.create({
+      catalog: 'c',
+      schema: 's',
+      volume: 'v',
+      host: 'http://databricks.invalid',
+      token: 't',
+    }),
   discord: () => new DiscordVFS({ token: 'x' }),
   email: () =>
     new EmailVFS({

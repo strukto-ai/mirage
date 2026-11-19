@@ -151,7 +151,7 @@ def load_fuse() -> Any:
             "FUSE support requires the 'fuse' extra: install "
             '"mirage-ai[fuse]" plus the OS driver (macFUSE, fuse3, or '
             "WinFsp). Setup and support matrix: "
-            "https://mirage.dev/home/setup/fuse"
+            "https://docs.mirage.strukto.ai/home/setup/fuse"
         ) from err
     install_macfuse_extensions(fuse)
     # utimens_fuse_3 delegates to utimens_fuse_2, so this covers both.
