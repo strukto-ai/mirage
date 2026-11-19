@@ -31,6 +31,7 @@ from mirage.policy.types import (
     Scope,
 )
 from mirage.runtime.types import ScriptSource
+from mirage.shell.constants import DEFAULT_PATH
 from mirage.shell.variable import ShellVar, with_value
 from mirage.types import (
     HiddenPaths,
@@ -81,11 +82,12 @@ def test_manager_default_cwd():
 
 def test_manager_default_env():
     mgr = SessionManager("default")
-    # A fresh session carries the seeded `$PWD`, `$PATH`, `$IFS`, `$OPTIND`
-    # and `$OPTERR`, nothing else.
+    # A fresh session carries the seeded `$PWD`, `$PATH`, `$HOME`,
+    # `$IFS`, `$OPTIND` and `$OPTERR`, nothing else.
     assert mgr.env == {
         "PWD": "/",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
+        "HOME": "/root",
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -190,7 +192,7 @@ async def test_manager_hydrates_from_store():
     assert s.env == {
         "K": "v",
         "PWD": "/w",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -277,7 +279,7 @@ async def test_manager_default_adopts_stored_fields():
     assert mgr.env == {
         "A": "1",
         "PWD": "/w",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",

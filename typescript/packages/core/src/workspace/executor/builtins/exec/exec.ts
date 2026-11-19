@@ -140,12 +140,16 @@ export async function handleExecCommand(
   const line =
     (scan.letters.includes('c') ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
   clearTraps(session)
-  const io = await setProgramInvocation(session, () =>
-    executeFn(line, {
-      sessionId: session.sessionId,
-      stdin,
-      ...(sink !== null ? { sink } : {}),
-    }),
+  const io = await setProgramInvocation(
+    session,
+    () =>
+      executeFn(line, {
+        sessionId: session.sessionId,
+        stdin,
+        ...(sink !== null ? { sink } : {}),
+      }),
+    `${shellVoice()}exec: ${head}`,
+    'not found',
   )
   const replaced = new ExitSignal(io.exitCode, await io.materializeStderr(), io.stdout)
   replaced.replaced = head

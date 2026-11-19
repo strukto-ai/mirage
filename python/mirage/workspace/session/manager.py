@@ -48,7 +48,7 @@ from mirage.workspace.session.session import (
     vars_from_entries,
     vars_from_env,
 )
-from mirage.workspace.session.shell_dirs import set_cwd
+from mirage.workspace.session.shell_dirs import seed_home, set_cwd
 
 # What a flush compares a session against: a fork of its shell as its
 # variables were saved, which shares their records rather than copying
@@ -185,6 +185,7 @@ class SessionManager(SessionOwner):
             created_at=self._clock.now(),
             ids=self._ids,
         )
+        seed_home(self._sessions[default_session_id])
         self._locks[default_session_id] = asyncio.Lock()
         self._loaded = False
         self._load_lock = asyncio.Lock()
@@ -262,6 +263,10 @@ class SessionManager(SessionOwner):
         if compiled is not None:
             default = self._sessions[self._default_id]
             apply_profile(default, compiled)
+            if "HOME" not in self._seed_vars and "HOME" not in (
+                compiled.setup.env or {}
+            ):
+                seed_home(default, again=True)
             self._has_managed = self._has_managed or _holds_managed(default)
 
     def _read_back(
@@ -681,6 +686,7 @@ class SessionManager(SessionOwner):
         )
         if profile is not None:
             apply_profile(session, profile)
+        seed_home(session)
         check_env_fits(session, self.max_env)
         self._has_managed = self._has_managed or _holds_managed(session)
         self._sessions[session_id] = session

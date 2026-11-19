@@ -100,3 +100,48 @@ export class WrapperAnswer {
     this.runsFrom = init.runsFrom ?? null
   }
 }
+
+/**
+ * What a command asks about a program it names: `PROGRAM_LOOKUPS` marks
+ * each command and option that asks one.
+ *
+ * PATH prints the program's file (`which perl`, `type -P perl`,
+ * `command -v perl`). KIND says what the name is (`type perl`,
+ * `type -t perl`, `command -V perl`). EXISTS checks that the program can
+ * run before running it, so a missing one gets the command's own error
+ * (`timeout 5 perl`, `xargs perl`, `exec perl`).
+ *
+ * Whatever would run the name on the line answers. Mirage answers a name
+ * it runs itself (`grep`, a CLI, a builtin, a function), with its file
+ * under `/usr/bin`. Any other name is asked of the one machine that would
+ * run it: a machine that takes the name by name, else the first that
+ * takes `@external`, as the line places it. That machine runs the command
+ * the agent typed (`which perl`; a `type` or `command` in its bash, whose
+ * builtins they are) and its answer is printed. With no machine to run
+ * the name, it is not found and no machine is asked. A path the machine
+ * prints is kept where Mirage shows that same path as that machine's own
+ * file; any other becomes the name's `/usr/bin` file, which runs the name
+ * on that machine all the same, so `$(which NAME)` runs what `NAME` runs.
+ */
+export const ProgramLookup = Object.freeze({
+  PATH: 'path',
+  KIND: 'kind',
+  EXISTS: 'exists',
+} as const)
+
+export type ProgramLookup = (typeof ProgramLookup)[keyof typeof ProgramLookup]
+
+/** What the machine that runs a name answered a lookup of it. Mirrors
+ * Python's `MachineAnswer`. */
+export class MachineAnswer {
+  /** The machine found the name. */
+  readonly found: boolean
+  /** What it printed, a line each, with a path Mirage does not show at
+   * that same path already turned into the name's `/usr/bin` file. */
+  readonly lines: readonly string[]
+
+  constructor(found: boolean, lines: readonly string[] = []) {
+    this.found = found
+    this.lines = lines
+  }
+}

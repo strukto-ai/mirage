@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 
 import { SessionState } from '../session/session.ts'
 import { commandName, forkForCall } from './utils.ts'
+import { DEFAULT_PATH } from '../../shell/constants.ts'
 
 describe('commandName', () => {
   it.each([
@@ -56,7 +57,7 @@ describe('forkForCall', () => {
       B: '9',
       C: '3',
       PWD: '/home',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -67,7 +68,7 @@ describe('forkForCall', () => {
       A: '1',
       B: '2',
       PWD: '/home',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',

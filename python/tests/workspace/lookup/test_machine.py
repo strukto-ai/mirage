@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+import shlex
+from dataclasses import replace
+
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.machine.constants import RUN_PROGRAM_AT, is_run
 from mirage.policy import Deny
 from mirage.policy.base import Policy
-from tests.fixtures.machine import ScriptedMachine
+from mirage.runtime.types import RunAnswer, RunResult
+from tests.fixtures.machine import ScriptedMachine, failed, ok
 from tests.fixtures.machine_files import FakeFiles
 
 TOOLS = ("ls", "cat", "grep", "wc")
@@ -277,4 +283,202 @@ async def test_find_exec_naming_another_mount_s_file_stays_with_mirage():
     line = r"find /tmp/d -maxdepth 0 -exec cat /data/x \;"
     assert await out(ws, line) == "y\n"
     assert files.ran == []
+    await ws.close()
+
+
+def _bash_line(line: str) -> str | None:
+    """The command a lookup runs in the machine's bash, None for a line
+    the machine runs as it is."""
+    found = re.search(r"exec /bin/bash -c ('[^']*'|\S+); fi", line)
+    return None if found is None else shlex.split(found.group(1))[0]
+
+
+def asking(files: FakeFiles, found: dict[str, list[str]]):
+    """A machine whose `which` and bash `type`/`command` find each name of
+    ``found`` at its paths, first first, and whose files are ``files``."""
+
+    def answer(line: str, data: bytes | None) -> RunAnswer:
+        inner = _bash_line(line)
+        words = shlex.split(line if inner is None else inner)
+        if words[0] not in ("which", "type", "command"):
+            return files.answer(line, data)
+        letters = words[1][1:] if words[1].startswith("-") else ""
+        name = words[-1]
+        paths = found.get(name, [])
+        if not paths:
+            return failed(b"", 1)
+        if "a" not in letters:
+            paths = paths[:1]
+        if words[0] == "type" and "t" in letters:
+            text = "file\n" * len(paths)
+        elif (words[0] == "type" and not set(letters) & set("pP")) or (
+            words[0] == "command" and "V" in letters
+        ):
+            text = "".join(f"{name} is {path}\n" for path in paths)
+        else:
+            text = "".join(f"{path}\n" for path in paths)
+        return ok(text.encode())
+
+    return answer
+
+
+def looked_up(machine: ScriptedMachine) -> list[str]:
+    return [
+        line
+        for line in machine.lines
+        if line.startswith("which ") or _bash_line(line) is not None
+    ]
+
+
+async def lookup_ws(found, captures=None, files=None) -> tuple:
+    files = files or FakeFiles()
+    dev = ScriptedMachine("dev", asking(files, found))
+    if captures is not None:
+        dev.config = replace(dev.config, captures=tuple(captures))
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines={"dev": dev},
+    )
+    return ws, dev
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_of_a_name_mirage_lacks_asks_the_machine_that_runs_it():
+    ws, dev = await lookup_ws({"perl": ["/usr/bin/perl", "/bin/perl"]})
+    assert await out(ws, "which perl") == "/usr/bin/perl\n"
+    assert await out(ws, "type perl") == "perl is /usr/bin/perl\n"
+    assert await out(ws, "type -t perl") == "file\n"
+    assert await out(ws, "command -v perl") == "/usr/bin/perl\n"
+    assert await out(ws, "command -V perl") == "perl is /usr/bin/perl\n"
+    # Without the machine's disk in Mirage, both of its paths run perl
+    # by name, through the one /usr/bin file.
+    assert await out(ws, "type -a perl") == "perl is /usr/bin/perl\n"
+    assert looked_up(dev)[0] == "which perl"
+    assert "exec /bin/bash -c 'type perl'" in looked_up(dev)[1]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_mirage_runs_is_mirage_s_to_answer_and_asks_no_machine():
+    ws, dev = await lookup_ws({"grep": ["/usr/bin/grep"]})
+    assert await out(ws, "which grep") == "/usr/bin/grep\n"
+    assert await out(ws, "type cd") == "cd is a shell builtin\n"
+    assert looked_up(dev) == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_the_machine_lacks_is_not_found():
+    ws, _ = await lookup_ws({})
+    which = await ws.shell("which nosuch")
+    assert (await which.stdout_str(), which.exit_code) == ("", 1)
+    typed = await ws.shell("type nosuch")
+    assert typed.exit_code == 1
+    assert (
+        await typed.stderr_str() == "bash: line 1: type: nosuch: not found\n"
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_function_shadows_the_machine_for_type_but_not_for_which():
+    ws, dev = await lookup_ws({"perl": ["/usr/bin/perl"]})
+    await ws.shell("perl() { :; }")
+    assert (await out(ws, "type -t perl")) == "function\n"
+    assert looked_up(dev) == []
+    assert await out(ws, "which perl") == "/usr/bin/perl\n"
+    assert await out(ws, "type -P perl") == "/usr/bin/perl\n"
+    assert (await out(ws, "type -at perl")) == "function\nfile\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_with_no_machine_to_run_a_name_no_machine_is_asked():
+    ws, dev = await lookup_ws(
+        {"perl": ["/usr/bin/perl"]}, captures=["@python"]
+    )
+    which = await ws.shell("which perl")
+    assert (await which.stdout_str(), which.exit_code) == ("", 1)
+    assert looked_up(dev) == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_shown_as_the_machine_s_own_is_kept_others_run_by_name():
+    files = FakeFiles({"/tmp/bin/tool": b"\x7fELF"})
+    ws, _ = await lookup_ws(
+        {"tool": ["/tmp/bin/tool"], "ldconfig": ["/usr/sbin/ldconfig"]},
+        files=files,
+    )
+    assert await out(ws, "which tool") == "/tmp/bin/tool\n"
+    assert await out(ws, "which ldconfig") == "/usr/bin/ldconfig\n"
+    assert await out(ws, "type ldconfig") == "ldconfig is /usr/bin/ldconfig\n"
+    await ws.close()
+
+
+class Reporting(ScriptedMachine):
+    """A machine that reports a program it has no file for in the words
+    the run hands its wrapper (``PROGRAM_CHECK``), with status 127."""
+
+    def __init__(self, name: str, answer, programs: set[str]) -> None:
+        super().__init__(name, answer)
+        self.programs = programs
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv) and argv[RUN_PROGRAM_AT] not in self.programs:
+            lead, reason = argv[5], argv[6]
+            await errors(f"{lead}{reason}\n".encode())
+            return RunResult(127)
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,said,status",
+    [
+        ("env nosuch", "env: 'nosuch': No such file or directory\n", 127),
+        ("(exec nosuch)", "bash: line 1: exec: nosuch: not found\n", 127),
+        (
+            "xargs nosuch </dev/null",
+            "xargs: nosuch: No such file or directory\n",
+            127,
+        ),
+        (
+            "timeout 5 nosuch",
+            "timeout: failed to run command 'nosuch': No such file or directory\n",
+            127,
+        ),
+    ],
+)
+async def test_a_program_the_machine_lacks_is_reported_in_its_runner_s_words(
+    line, said, status
+):
+    dev = Reporting("dev", FakeFiles().answer, set())
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"dev": dev}
+    )
+    io = await ws.shell(line)
+    assert (await io.stderr_str(), io.exit_code) == (said, status)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_xargs_counts_a_program_that_ran_and_exited_127_as_a_failure():
+    dev = Reporting("dev", lambda line, data: failed(b"", 127), {"tool"})
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"dev": dev}
+    )
+    io = await ws.shell("echo x | xargs tool")
+    assert io.exit_code == 123
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_that_captures_which_answers_every_which():
+    ws, dev = await lookup_ws(
+        {"grep": ["/bin/grep"]}, captures=["which", "@external"]
+    )
+    assert await out(ws, "which grep") == "/bin/grep\n"
+    assert "which grep" in dev.lines
     await ws.close()

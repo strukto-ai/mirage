@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import posixpath
 from collections.abc import Sequence
@@ -22,14 +23,28 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
 from mirage.rs.find import find_layout
 from mirage.runtime.binding import restricted_mounts_for
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.machine import RemoteRuntime
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
+from mirage.shell.bytes import decode_text
+from mirage.shell.constants import BIN_PREFIX
+from mirage.shell.join import shell_join
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import unmark_globs
+from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, parent
+from mirage.utils.quote import shell_quote
+from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
+from mirage.workspace.lookup.constants import KEYWORDS
+from mirage.workspace.lookup.lookup import lookup_all
+from mirage.workspace.lookup.types import (
+    Consumer,
+    MachineAnswer,
+    ProgramLookup,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
@@ -44,7 +59,9 @@ def _local_mount(
     machines, with no other mount and no link of Mirage's own under the
     path; None for any other path, for one a write may not reach, and
     for one that walks through a link of Mirage's own, which the machine
-    does not have.
+    does not have. A name the ``/usr/bin`` view leaves to the mount
+    beneath it is read from that mount, so ``/usr/bin/python3`` is the
+    machine's own file where the machine's disk lies under the view.
 
     Args:
         registry (MountRegistry): the workspace's mounts.
@@ -61,6 +78,13 @@ def _local_mount(
         logger.debug("%s: a link loop keeps it here", path, exc_info=True)
         return None
     entry = registry.try_mount_for(path)
+    if (
+        entry is not None
+        and not writes
+        and isinstance(entry.vfs, BinViewVFS)
+        and entry.vfs.leaves(mount_key(path, entry.prefix))
+    ):
+        entry = registry.mount_beneath(entry, path)
     if entry is None or not isinstance(entry.vfs, MachineVFS):
         return None
     if norm(entry.vfs.config.root) != norm(entry.prefix):
@@ -127,9 +151,9 @@ async def _machine_holding(
     candidates: list[str] | None = None
     for (path, _), entry in zip(scopes, mounts):
         assert isinstance(entry.vfs, MachineVFS)
-        _, key, _ = registry.resolve(path)
         held = await holders(
-            entry.vfs.accessor, PathSpec.from_str_path(path, key.strip("/"))
+            entry.vfs.accessor,
+            PathSpec.from_str_path(path, mount_key(path, entry.prefix)),
         )
         candidates = (
             held
@@ -335,3 +359,176 @@ async def link_machine(
     if runtime is None or not await runtime.handle().has_program("ln"):
         return None
     return runtime
+
+
+def lookup_machine(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    past_functions: bool,
+) -> RemoteRuntime | None:
+    """The machine a lookup of ``name`` asks: the one that would run it
+    as a program on this line; None when Mirage answers for it, or no
+    machine would run it.
+
+    Mirage answers a name it holds in any layer: a builtin, a namespace
+    command, a CLI, a mount command, and a function unless the lookup
+    looks past functions to the file a run would exec (``which``,
+    ``type -P``, ``type -a``). Any other name is the machine's that
+    takes it by name, else the one taking ``@external``, as the line's
+    placement binds them (``ProgramLookup`` has the whole rule).
+
+    Args:
+        name (str): the name looked up.
+        session (SessionState): the session it is looked up in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement; None for
+            the workspace's own bindings.
+        past_functions (bool): the lookup finds the program a function
+            of the same name shadows.
+    """
+    if "/" in name or name in KEYWORDS:
+        return None
+    for consumer in lookup_all(name, session, registry, routing):
+        if consumer is Consumer.FUNCTION and past_functions:
+            continue
+        if consumer is not Consumer.EXTERNAL:
+            return None
+    bindings = (
+        routing.bindings if routing is not None else registry.runtime_bindings
+    )
+    runtime = (
+        bindings[name] if name in bindings else bindings.get(EXTERNAL_COMMANDS)
+    )
+    return runtime if isinstance(runtime, RemoteRuntime) else None
+
+
+def _lookup_line(command: str, letters: str, name: str) -> str:
+    """The line a machine runs for a lookup: the command the agent typed,
+    on this one name. ``type`` and ``command`` are bash's builtins, so
+    they run in the machine's bash, its ``sh`` where it has none.
+
+    Args:
+        command (str): ``which``, ``type`` or ``command``.
+        letters (str): the options the agent gave it.
+        name (str): the name looked up.
+    """
+    line = shell_join([command, *([f"-{letters}"] if letters else []), name])
+    if command == "which":
+        return line
+    quoted = shell_quote(line)
+    return (
+        f"if [ -x /bin/bash ]; then exec /bin/bash -c {quoted}; fi; "
+        f"exec /bin/sh -c {quoted}"
+    )
+
+
+def _path_in(line: str, name: str, kind: ProgramLookup) -> str | None:
+    """The path a line of a machine's answer names, None for none: a
+    PATH answer is the path, a KIND one names it after ``NAME is``.
+
+    Args:
+        line (str): one line of the answer.
+        name (str): the name looked up.
+        kind (ProgramLookup): what the lookup asks.
+    """
+    if kind is ProgramLookup.PATH:
+        return line if line.startswith("/") else None
+    lead = f"{name} is "
+    if kind is ProgramLookup.KIND and line.startswith(lead + "/"):
+        return line[len(lead) :]
+    return None
+
+
+async def _answer(
+    command: str,
+    letters: str,
+    name: str,
+    kind: ProgramLookup,
+    runtime: RemoteRuntime,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+) -> MachineAnswer:
+    """What ``runtime``'s machine answers the lookup of one name, each
+    path it prints kept only where Mirage shows that same path as the
+    machine's own file, the name's ``/usr/bin`` file otherwise.
+
+    Args:
+        command (str): ``which``, ``type`` or ``command``.
+        letters (str): the options the agent gave it.
+        name (str): the name looked up.
+        kind (ProgramLookup): what the lookup asks.
+        runtime (RemoteRuntime): the machine that runs the name.
+        session (SessionState): the session it is looked up in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+    """
+    done = await runtime.handle().look_up(_lookup_line(command, letters, name))
+    lines: list[str] = []
+    for line in decode_text(done.stdout).splitlines():
+        path = _path_in(line, name, kind)
+        if path is not None:
+            held = await _machine_holding(
+                [(path, False)], session, registry, links, None
+            )
+            if held is None or held.default_machine != runtime.default_machine:
+                line = line[: len(line) - len(path)] + f"{BIN_PREFIX}/{name}"
+        if line not in lines:
+            lines.append(line)
+    return MachineAnswer(done.exit_code == 0, tuple(lines))
+
+
+async def machine_answers(
+    command: str,
+    letters: str,
+    names: Sequence[str],
+    kind: ProgramLookup,
+    past_functions: bool,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> dict[str, MachineAnswer]:
+    """What the machine that runs each name answered the lookup the agent
+    typed, for each name a machine runs (``lookup_machine``); a name
+    Mirage answers for, or none runs, has no entry. Every machine is
+    asked at once.
+
+    Args:
+        command (str): ``which``, ``type`` or ``command``.
+        letters (str): the options the agent gave it.
+        names (Sequence[str]): the names looked up.
+        kind (ProgramLookup): what the lookup asks, by its
+            ``PROGRAM_LOOKUPS`` row.
+        past_functions (bool): the lookup finds the program a function
+            of the same name shadows.
+        session (SessionState): the session they are looked up in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+        routing (RouteDecision | None): the line's placement.
+    """
+    asked: dict[str, RemoteRuntime] = {}
+    for name in dict.fromkeys(names):
+        runtime = lookup_machine(
+            name, session, registry, routing, past_functions
+        )
+        if runtime is not None:
+            asked[name] = runtime
+    found = await asyncio.gather(
+        *(
+            _answer(
+                command,
+                letters,
+                name,
+                kind,
+                runtime,
+                session,
+                registry,
+                links,
+            )
+            for name, runtime in asked.items()
+        )
+    )
+    return dict(zip(asked, found, strict=True))

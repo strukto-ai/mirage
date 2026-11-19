@@ -920,3 +920,12 @@ def test_held_in_memory_sums_the_ram_mounts():
     reg.mount("/two/", two, MountMode.WRITE)
     reg.mount("/disk/", DiskVFS(root="/tmp"), MountMode.READ)
     assert reg.held_in_memory() == 6
+
+
+def test_the_mount_beneath_is_the_one_a_path_reaches_past_the_top_mount():
+    reg = MountRegistry()
+    root = reg.mount("/", RAMVFS(), MountMode.READ)
+    view = reg.mount("/usr/bin/", RAMVFS(), MountMode.READ)
+    assert reg.try_mount_for("/usr/bin/perl") is view
+    assert reg.mount_beneath(view, "/usr/bin/perl") is root
+    assert reg.mount_beneath(root, "/x") is None

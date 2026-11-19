@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.shell.constants import DEFAULT_PATH
 from mirage.workspace.session.session import SessionState, vars_from_env
 from mirage.workspace.workspace.utils import command_name, fork_for_call
 
@@ -59,7 +60,7 @@ def test_env_override_layers_on_top_of_the_session_env():
         "B": "9",
         "C": "3",
         "PWD": "/home",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",
@@ -70,7 +71,7 @@ def test_env_override_layers_on_top_of_the_session_env():
         "A": "1",
         "B": "2",
         "PWD": "/home",
-        "PATH": "/usr/bin",
+        "PATH": DEFAULT_PATH,
         "IFS": " \t\n",
         "OPTIND": "1",
         "OPTERR": "1",

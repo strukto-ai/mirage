@@ -147,7 +147,8 @@ import {
 import { pathVisible } from '../../utils/hidden.ts'
 import { checkName, type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { parseLimit } from '../../utils/size.ts'
-import { normDir } from '../../utils/path.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { normDir, parent } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
@@ -167,6 +168,7 @@ import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
 import { Files, withCaller, WorkspaceFiles } from '../files.ts'
 import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
+import { lookupMachine } from '../lookup/machine.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WritePolicyError } from '../mount/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -868,12 +870,16 @@ export class Workspace {
       { write: WritePolicy.UNCONDITIONAL },
     )
     // One file per program, where PATH finds it: the same lookup which,
-    // type and command -v answer from.
+    // type and command -v answer from. A program a machine runs is the file
+    // the mount beneath shows, the machine's own where its disk lies under
+    // the view.
     this.registry.mount(
       BIN_PREFIX,
       new BinViewVFS(
         () => programs(this.callSession(), this.registry),
         (name) => programNote(name, this.callSession(), this.registry),
+        (name) => this.binLeaves(name),
+        (virtual) => this.binBeneath(virtual),
       ),
       MountMode.READ,
       DEFAULT_READ_SPEC,
@@ -1065,6 +1071,41 @@ export class Workspace {
     )
     const keep = last === undefined ? HISTFILESIZE : Math.min(last, HISTFILESIZE)
     return picked.slice(Math.max(0, picked.length - keep))
+  }
+
+  /**
+   * Whether the `/usr/bin` view leaves `name` to the mount beneath it: a
+   * program a machine runs, or a name none of Mirage's layers runs as a
+   * program.
+   *
+   * @param name a name under the view.
+   */
+  private binLeaves(name: string): boolean {
+    const session = this.callSession()
+    return (
+      lookupMachine(name, session, this.registry, undefined, true) !== null ||
+      program(name, session, this.registry) === null
+    )
+  }
+
+  /**
+   * The mount beneath the `/usr/bin` view and the path in it, for a virtual
+   * path under the view; null when nothing lies there.
+   *
+   * @param virtual an absolute virtual path under the view.
+   */
+  private binBeneath(virtual: string): readonly [BaseVFS, PathSpec] | null {
+    const view = this.registry.tryMountForPrefix(BIN_PREFIX)
+    const entry = view === null ? null : this.registry.mountBeneath(view, virtual)
+    if (entry === null) return null
+    return [
+      entry.vfs,
+      new PathSpec({
+        virtual,
+        directory: parent(virtual),
+        vfsPath: mountKey(virtual, entry.prefix),
+      }),
+    ]
   }
 
   /** The session an op runs under: the bound one, else the default. */

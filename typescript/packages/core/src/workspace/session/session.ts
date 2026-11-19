@@ -26,7 +26,7 @@ import { ShellVars } from '../../rs/session.ts'
 import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
 import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
-import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
+import { DEFAULT_PATH, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../execution/job/index.ts'
 import type { Hold } from '../../execution/job/waits.ts'
@@ -678,11 +678,10 @@ export class SessionState {
     // what keeps it in `env` now that the process view is the exported set
     // rather than every string.
     if (!this.vars.has('PWD')) this.vars.set('PWD', makeVar(this.cwd, new Set([VarAttr.Export])))
-    // bash starts with a PATH when the environment gives it none, and does
+    // A session starts with the PATH a machine's login hands root, and does
     // not export it: `env` does not list it and a child process, such as a
-    // host interpreter, keeps its own. The one directory here is where
-    // every program's file is.
-    if (!this.vars.has('PATH')) this.vars.set('PATH', makeVar(BIN_PREFIX, new Set()))
+    // host interpreter or a program on a machine, keeps its own.
+    if (!this.vars.has('PATH')) this.vars.set('PATH', makeVar(DEFAULT_PATH, new Set()))
     // bash sets IFS at startup and never exports it, so a fresh shell reads
     // `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the default
     // back rather than an empty IFS that splits nothing.
@@ -882,11 +881,17 @@ export class SessionState {
    * still ends at `false`) and the startup variables, which bash never reads
    * from its environment: IFS is dropped and `STARTUP_VALUES` restart. A
    * managed variable not yet fetched crosses as its pointer, which the
-   * nested shell fetches through. Mirrors Python.
+   * nested shell fetches through. `HOME` crosses as a machine's login exports
+   * it, though the session holds it unexported so a program keeps the home
+   * its own machine gives it. Mirrors Python.
    */
   newShell(): SessionState {
     const vars = ownRecord<ShellVar>()
     for (const [name, v] of this.vars.records()) {
+      if (name === 'HOME' && typeof v.value === 'string') {
+        vars[name] = makeVar(v.value, new Set(v.attrs.has(VarAttr.Export) ? [VarAttr.Export] : []))
+        continue
+      }
       if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
       if (typeof v.value !== 'string' && v.managed === undefined) continue
       const start = sessionEntry(STARTUP_VALUES, name)

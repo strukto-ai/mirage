@@ -1188,6 +1188,34 @@ async def _run_parallel(
     return [problem for problems in results for problem in problems]
 
 
+async def _bash_answer(command: str) -> dict[str, Any]:
+    """What plain bash on the docker machine answers ``command``: a
+    ``same_as_bash`` step expects exactly this, so it fails on any
+    difference between Mirage and the machine's own bash.
+
+    Args:
+        command (str): the step's line.
+    """
+    container = os.environ["MIRAGE_INTEG_DOCKER_CONTAINER"]
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "exec",
+        container,
+        "bash",
+        "-c",
+        command,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    return {
+        "exit": proc.returncode,
+        "stdout": out.decode(),
+        "stderr": err.decode(),
+    }
+
+
 async def _run_step(
     ws: Workspace,
     case_id: str,
@@ -1196,6 +1224,8 @@ async def _run_step(
     session_id: str | None = None,
     handles: RetainedHandles | None = None,
 ) -> list[str]:
+    if step.get("same_as_bash"):
+        step = {**step, "expect": await _bash_answer(step["command"])}
     before = _backend_reads(ws)
     native_before = len(_native_calls(ws))
     problems = await _perform_step(

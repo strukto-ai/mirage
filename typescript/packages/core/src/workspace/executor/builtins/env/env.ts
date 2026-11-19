@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { quoteText } from '../../../../commands/quote.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation, setProgramInvocation } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -190,9 +191,11 @@ export async function handleEnv(
   session.exportedFunctions = ignoreEnv ? new Set() : new Set(exported)
   try {
     // env execs its command, so a builtin that is also a program answers as
-    // the program.
-    const io = await setProgramInvocation(session, () =>
-      executeFn(shellJoin(command), { sessionId: session.sessionId, stdin }),
+    // the program, and one it cannot run is reported in env's words.
+    const io = await setProgramInvocation(
+      session,
+      () => executeFn(shellJoin(command), { sessionId: session.sessionId, stdin }),
+      `env: '${quoteText(command[0] ?? '')}'`,
     )
     return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]
   } finally {

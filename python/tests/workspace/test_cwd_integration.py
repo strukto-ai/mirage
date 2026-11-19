@@ -99,9 +99,18 @@ async def test_a_per_call_cwd_or_env_keeps_the_session_user():
 @pytest.mark.asyncio
 async def test_cd_no_args_unset_home_errors():
     ws = _make_ws()
-    r = await ws.shell("cd /ram/subdir && cd")
+    r = await ws.shell("unset HOME; cd /ram/subdir && cd")
     assert r.exit_code == 1
     assert "HOME not set" in await r.stderr_str()
+
+
+@pytest.mark.asyncio
+async def test_a_session_starts_with_its_users_home_unexported():
+    ws = _make_ws()
+    r = await ws.shell(
+        'echo "$HOME"; env | grep -c ^HOME=; bash -c \'echo "$HOME"\''
+    )
+    assert await r.stdout_str() == "/root\n0\n/root\n"
 
 
 @pytest.mark.asyncio
@@ -198,6 +207,7 @@ async def test_echo_pwd_tracks_cwd():
 @pytest.mark.asyncio
 async def test_echo_home_unset_is_empty():
     ws = _make_ws()
+    await ws.shell("unset HOME")
     r = await ws.shell('echo "[$HOME]"')
     assert (await r.stdout_str()).strip() == "[]"
 

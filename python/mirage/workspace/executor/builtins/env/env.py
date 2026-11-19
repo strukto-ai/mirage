@@ -15,6 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.commands.quote import quote_text
 from mirage.context import (
     is_program_invocation,
     reset_caller,
@@ -192,8 +193,8 @@ async def handle_env(
     exported = session.exported_functions
     session.exported_functions = set() if ignore_env else set(exported)
     # env execs its command, so a builtin that is also a program answers
-    # as the program.
-    token = set_program_invocation(session)
+    # as the program, and one it cannot run is reported in env's words.
+    token = set_program_invocation(session, f"env: '{quote_text(command[0])}'")
     try:
         io = await execute_fn(
             shell_join(command), session_id=session.session_id, stdin=stdin

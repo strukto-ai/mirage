@@ -12,17 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { splitLines } from '../../commands/builtin/utils/lines.ts'
 import { SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { holders } from '../../core/machine/place.ts'
 import { findLayout } from '../../rs/find.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { restrictedMountsFor } from '../../runtime/binding.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
+import { decodeText } from '../../shell/bytes.ts'
+import { BIN_PREFIX } from '../../shell/constants.ts'
+import { shellJoin } from '../../shell/join.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { unmarkGlobs } from '../../utils/glob_walk.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { CycleError, norm, parent } from '../../utils/path.ts'
+import { shellQuote } from '../../utils/quote.ts'
+import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { MachineVFS } from '../../vfs/machine/machine.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Argv } from '../expand/argv.ts'
@@ -30,12 +39,18 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { KEYWORDS } from './constants.ts'
+import { lookupAll } from './lookup.ts'
+import { Consumer, MachineAnswer, ProgramLookup } from './types.ts'
 
 /**
  * The machine mount showing `path` at the same path on its machines, with no
  * other mount and no link of Mirage's own under the path; null for any other
  * path, for one a write may not reach, and for one that walks through a link
- * of Mirage's own, which the machine does not have.
+ * of Mirage's own, which the machine does not have. A name the `/usr/bin`
+ * view leaves to the mount beneath it is read from that mount, so
+ * `/usr/bin/python3` is the machine's own file where the machine's disk lies
+ * under the view.
  */
 function localMount(
   registry: MountRegistry,
@@ -54,7 +69,14 @@ function localMount(
     console.debug(`${path}: a link loop keeps it here: ${String(err)}`)
     return null
   }
-  const entry = registry.tryMountFor(path)
+  let entry = registry.tryMountFor(path)
+  if (
+    entry !== null &&
+    !writes &&
+    entry.vfs instanceof BinViewVFS &&
+    entry.vfs.leaves(mountKey(path, entry.prefix))
+  )
+    entry = registry.mountBeneath(entry, path)
   if (entry === null || !(entry.vfs instanceof MachineVFS)) return null
   if (norm(entry.vfs.config.root ?? '/') !== norm(entry.prefix)) return null
   if (writes && entry.mode === MountMode.READ) return null
@@ -106,10 +128,12 @@ async function machineHolding(
   if (await registry.policies.wantsFor('preVfs', session.sessionId)) return null
   let candidates: string[] | null = null
   for (const [at, [path]] of scopes.entries()) {
-    const vfs = mounts[at]?.vfs
-    if (!(vfs instanceof MachineVFS)) return null
-    const [, spec] = registry.resolve(path)
-    const held = await holders(vfs.accessor, spec)
+    const entry = mounts[at]
+    if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return null
+    const held = await holders(
+      entry.vfs.accessor,
+      PathSpec.fromStrPath(path, mountKey(path, entry.prefix)),
+    )
     candidates = candidates === null ? held : candidates.filter((m) => held.includes(m))
   }
   if (candidates?.length !== 1) return null
@@ -292,4 +316,157 @@ export async function linkMachine(
   const runtime = await machineHolding([...scopes.values()], session, registry, links, null)
   if (runtime === null || !(await runtime.handle().hasProgram('ln'))) return null
   return runtime
+}
+
+/**
+ * The machine a lookup of `name` asks: the one that would run it as a
+ * program on this line; null when Mirage answers for it, or no machine would
+ * run it.
+ *
+ * Mirage answers a name it holds in any layer: a builtin, a namespace
+ * command, a CLI, a mount command, and a function unless the lookup looks
+ * past functions to the file a run would exec (`which`, `type -P`,
+ * `type -a`). Any other name is the machine's that takes it by name, else
+ * the one taking `@external`, as the line's placement binds them
+ * (`ProgramLookup` has the whole rule). Mirrors Python's `lookup_machine`.
+ *
+ * @param name the name looked up.
+ * @param session the session it is looked up in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement; undefined for the workspace's own
+ *   bindings.
+ * @param pastFunctions the lookup finds the program a function of the same
+ *   name shadows.
+ */
+export function lookupMachine(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  pastFunctions: boolean,
+): RemoteRuntime | null {
+  if (name.includes('/') || KEYWORDS.has(name)) return null
+  for (const consumer of lookupAll(name, session, registry, routing)) {
+    if (consumer === Consumer.FUNCTION && pastFunctions) continue
+    if (consumer !== Consumer.EXTERNAL) return null
+  }
+  const bindings: Readonly<Record<string, Runtime | null | undefined>> =
+    routing?.bindings ?? registry.runtimeBindings
+  const runtime = Object.hasOwn(bindings, name) ? bindings[name] : bindings[EXTERNAL_COMMANDS]
+  return runtime instanceof RemoteRuntime ? runtime : null
+}
+
+/**
+ * The line a machine runs for a lookup: the command the agent typed, on this
+ * one name. `type` and `command` are bash's builtins, so they run in the
+ * machine's bash, its `sh` where it has none.
+ *
+ * @param command `which`, `type` or `command`.
+ * @param letters the options the agent gave it.
+ * @param name the name looked up.
+ */
+function lookupLine(command: string, letters: string, name: string): string {
+  const line = shellJoin([command, ...(letters !== '' ? [`-${letters}`] : []), name])
+  if (command === 'which') return line
+  const quoted = shellQuote(line)
+  return `if [ -x /bin/bash ]; then exec /bin/bash -c ${quoted}; fi; exec /bin/sh -c ${quoted}`
+}
+
+/**
+ * The path a line of a machine's answer names, null for none: a PATH answer
+ * is the path, a KIND one names it after `NAME is`.
+ *
+ * @param line one line of the answer.
+ * @param name the name looked up.
+ * @param kind what the lookup asks.
+ */
+function pathIn(line: string, name: string, kind: ProgramLookup): string | null {
+  if (kind === ProgramLookup.PATH) return line.startsWith('/') ? line : null
+  const lead = `${name} is `
+  if (kind === ProgramLookup.KIND && line.startsWith(`${lead}/`)) return line.slice(lead.length)
+  return null
+}
+
+/**
+ * What `runtime`'s machine answers the lookup of one name, each path it
+ * prints kept only where Mirage shows that same path as the machine's own
+ * file, the name's `/usr/bin` file otherwise.
+ *
+ * @param command `which`, `type` or `command`.
+ * @param letters the options the agent gave it.
+ * @param name the name looked up.
+ * @param kind what the lookup asks.
+ * @param runtime the machine that runs the name.
+ * @param session the session it is looked up in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ */
+async function answer(
+  command: string,
+  letters: string,
+  name: string,
+  kind: ProgramLookup,
+  runtime: RemoteRuntime,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+): Promise<MachineAnswer> {
+  const done = await runtime.handle().lookUp(lookupLine(command, letters, name))
+  const lines: string[] = []
+  for (const said of splitLines(decodeText(done.stdout))) {
+    let line = said
+    const path = pathIn(line, name, kind)
+    if (path !== null) {
+      const held = await machineHolding([[path, false]], session, registry, links, null)
+      if (held?.defaultMachine !== runtime.defaultMachine)
+        line = `${line.slice(0, line.length - path.length)}${BIN_PREFIX}/${name}`
+    }
+    if (!lines.includes(line)) lines.push(line)
+  }
+  return new MachineAnswer(done.exitCode === 0, lines)
+}
+
+/**
+ * What the machine that runs each name answered the lookup the agent typed,
+ * for each name a machine runs (`lookupMachine`); a name Mirage answers for,
+ * or none runs, has no entry. Every machine is asked at once. Mirrors
+ * Python's `machine_answers`.
+ *
+ * @param command `which`, `type` or `command`.
+ * @param letters the options the agent gave it.
+ * @param names the names looked up.
+ * @param kind what the lookup asks, by its `PROGRAM_LOOKUPS` row.
+ * @param pastFunctions the lookup finds the program a function of the same
+ *   name shadows.
+ * @param session the session they are looked up in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ * @param routing the line's placement.
+ */
+export async function machineAnswers(
+  command: string,
+  letters: string,
+  names: readonly string[],
+  kind: ProgramLookup,
+  pastFunctions: boolean,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+  routing: RouteDecision<Runtime> | undefined,
+): Promise<Map<string, MachineAnswer>> {
+  const asked = new Map<string, RemoteRuntime>()
+  for (const name of new Set(names)) {
+    const runtime = lookupMachine(name, session, registry, routing, pastFunctions)
+    if (runtime !== null) asked.set(name, runtime)
+  }
+  const found = await Promise.all(
+    [...asked].map(
+      async ([name, runtime]) =>
+        [
+          name,
+          await answer(command, letters, name, kind, runtime, session, registry, links),
+        ] as const,
+    ),
+  )
+  return new Map(found)
 }

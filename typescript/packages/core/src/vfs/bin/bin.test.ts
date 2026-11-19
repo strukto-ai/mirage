@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import { backendCommands } from '../../workspace/mount/backends.ts'
 import { MountEntry } from '../../workspace/mount/mount.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -83,4 +83,52 @@ describe('BinViewVFS', () => {
       await ws.close()
     }
   })
+
+  it('reads a name Mirage does not run from the file beneath the view', async () => {
+    const root = await rootHolding({ '/usr/bin/perl': '#!perl\n', '/usr/bin/grep': 'theirs\n' })
+    const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE })
+    try {
+      expect(DEC.decode((await ws.shell('cat /usr/bin/perl')).stdout)).toBe('#!perl\n')
+      const listed = await ws.shell('ls /usr/bin | grep -x -e perl -e grep')
+      expect(DEC.decode(listed.stdout)).toBe('grep\nperl\n')
+      const grep = DEC.decode((await ws.shell('cat /usr/bin/grep')).stdout)
+      expect(grep).not.toBe('theirs\n')
+      expect(grep).toContain('grep')
+      expect((await ws.shell('cat /usr/bin/nosuch')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps its own file for a name it leaves where none lies beneath', async () => {
+    const beneath = await rootHolding({ '/usr/bin/perl': '#!perl\n' })
+    const view = new BinViewVFS(
+      () => ['ls', 'python3'],
+      (n) => (n === 'ls' || n === 'python3' ? n : null),
+      (n) => n !== 'ls',
+      (v) => [beneath, PathSpec.fromStrPath(v)],
+    )
+    const rows = await view.readdir(
+      new PathSpec({ virtual: '/usr/bin', directory: '/usr', vfsPath: '' }),
+    )
+    expect(rows.map((row) => row.name)).toEqual(['ls', 'perl', 'python3'])
+    const perl = new PathSpec({ virtual: '/usr/bin/perl', directory: '/usr/bin', vfsPath: 'perl' })
+    expect((await view.stat(perl)).size).toBe('#!perl\n'.length)
+    expect(DEC.decode((await view.read(perl)) as Uint8Array)).toBe('#!perl\n')
+    const python = new PathSpec({
+      virtual: '/usr/bin/python3',
+      directory: '/usr/bin',
+      vfsPath: 'python3',
+    })
+    expect(DEC.decode((await view.read(python)) as Uint8Array)).toContain('python3')
+    expect(view.leaves('perl') && !view.leaves('ls')).toBe(true)
+  })
 })
+
+async function rootHolding(files: Record<string, string>): Promise<RAMVFS> {
+  const ram = new RAMVFS()
+  await ram.mkdir(PathSpec.fromStrPath('/usr/bin'), true)
+  for (const [path, data] of Object.entries(files))
+    await ram.write(PathSpec.fromStrPath(path), new TextEncoder().encode(data))
+  return ram
+}

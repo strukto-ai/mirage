@@ -12,9 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
+
 from mirage.shell.bytes import encode_text
 from mirage.shell.voice import shell_voice
-from mirage.workspace.executor.builtins.getopt import last_of, scan_options
+from mirage.workspace.executor.builtins.alias.alias import aliases_on
+from mirage.workspace.executor.builtins.getopt import (
+    OptionScan,
+    last_of,
+    scan_options,
+)
 from mirage.workspace.executor.builtins.lookup.classify import (
     describe,
     locations,
@@ -33,14 +40,61 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup import program
+from mirage.workspace.lookup.constants import PROGRAM_LOOKUPS
+from mirage.workspace.lookup.machine import machine_answers
+from mirage.workspace.lookup.types import MachineAnswer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
+
+
+async def asked_machines(
+    call: BuiltinCall,
+    scan: OptionScan,
+    option: str,
+    past_functions: bool,
+) -> dict[str, MachineAnswer]:
+    """What the machines that run a lookup's names answered it, by name:
+    the lookup builtin hands these to its renderer, which prints a
+    machine's answer where Mirage holds no layer of the name it reports
+    (``ProgramLookup`` has the rule). An alias the line would expand is
+    Mirage's to report, unless the lookup looks past it.
+
+    Args:
+        call (BuiltinCall): the lookup's invocation.
+        scan (OptionScan): its options and operands, a valid scan.
+        option (str): the option whose ``PROGRAM_LOOKUPS`` row it is,
+            "" for none.
+        past_functions (bool): it finds the program a function or alias
+            of the same name shadows (``which``, ``type -P``, ``-a``).
+    """
+    session = call.context.session
+    names = [
+        name
+        for name in scan.operands
+        if past_functions
+        or not (aliases_on(session) and name in session.aliases)
+    ]
+    if not names:
+        return {}
+    command = call.argv.name
+    return await machine_answers(
+        command,
+        "".join(scan.letters),
+        names,
+        PROGRAM_LOOKUPS[command, option],
+        past_functions,
+        session,
+        call.registry,
+        call.namespace.session_links(session),
+        call.context.frame.routing,
+    )
 
 
 def handle_type(
     args: list[str],
     session: SessionState,
     registry: MountRegistry,
+    answers: Mapping[str, MachineAnswer] | None = None,
 ) -> Result:
     """Run the ``type`` builtin (``type [-afptP] name [name ...]``).
 
@@ -55,10 +109,17 @@ def handle_type(
     warns on stderr unless a word-only mode (``-t``/``-p``/``-P``) is
     active. Pinned against bash 5.2 on debian:stable-slim.
 
+    A name a machine runs (``asked_machines``) is reported by the
+    machine's own ``type`` wherever Mirage holds no layer of it to report
+    first: Mirage's function, alias or builtin lines come ahead of the
+    machine's file lines under ``-a``.
+
     Args:
         args (list[str]): words after the ``type`` name.
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
+        answers (Mapping[str, MachineAnswer] | None): what the machine
+            that runs each name answered, by name; None for none.
     """
     scan = scan_options(args, TYPE_OPTIONS)
     if scan.bad is not None:
@@ -73,15 +134,25 @@ def handle_type(
     hidden = NameKind.FUNCTION if "f" in scan.letters else None
     pieces: list[tuple[bool, str]] = []
     all_found = True
+    asked = answers or {}
     for name in scan.operands:
+        answer = asked.get(name)
         if mode == "P":
-            if program(name, session, registry) is None:
+            if answer is not None:
+                all_found = all_found and answer.found
+                pieces.extend((False, f"{line}\n") for line in answer.lines)
+            elif program(name, session, registry) is None:
                 all_found = False
             else:
                 pieces.append((False, f"{program_file(name)}\n"))
             continue
         kinds = locations(name, session, registry, all_mode, hidden)
-        if not kinds:
+        machine: tuple[str, ...] = ()
+        if answer is not None:
+            kinds = [kind for kind in kinds if kind is not NameKind.FILE]
+            if (all_mode or not kinds) and answer.found:
+                machine = answer.lines
+        if not kinds and not machine:
             all_found = False
             if mode is None:
                 pieces.append(
@@ -100,6 +171,7 @@ def handle_type(
             pieces.extend(
                 (False, f"{describe(name, kind, session)}\n") for kind in kinds
             )
+        pieces.extend((False, f"{line}\n") for line in machine)
     # One call, so the diagnostics never ride on the status: a partial
     # miss both warns and reports through the exit code.
     code = 0 if (not scan.operands or all_found) else 1
@@ -110,6 +182,7 @@ def handle_which(
     args: list[str],
     session: SessionState,
     registry: MountRegistry,
+    answers: Mapping[str, MachineAnswer] | None = None,
 ) -> Result:
     """Run the ``which`` builtin (``which [-as] name [name ...]``).
 
@@ -125,10 +198,15 @@ def handle_which(
     dispatch does. The refusal for an unknown option is bash's shape,
     not the C tool's ``Illegal option``, because this is a builtin.
 
+    A name a machine runs (``asked_machines``) is the machine's own
+    ``which`` to answer, as Mirage asked it.
+
     Args:
         args (list[str]): words after the ``which`` name.
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
+        answers (Mapping[str, MachineAnswer] | None): what the machine
+            that runs each name answered, by name; None for none.
     """
     scan = scan_options(args, WHICH_OPTIONS)
     if scan.bad is not None:
@@ -140,7 +218,14 @@ def handle_which(
     silent = "s" in scan.letters
     out_lines: list[str] = []
     all_found = True
+    asked = answers or {}
     for name in scan.operands:
+        answer = asked.get(name)
+        if answer is not None:
+            all_found = all_found and answer.found
+            if not silent:
+                out_lines.extend(f"{line}\n" for line in answer.lines)
+            continue
         if program(name, session, registry) is None:
             all_found = False
             continue
@@ -152,22 +237,35 @@ def handle_which(
 
 
 async def type_builtin(call: BuiltinCall) -> Result:
-    """The ``type`` arm.
+    """The ``type`` arm: the machines that run its names are asked
+    first, then ``handle_type`` reports.
 
     Args:
         call (BuiltinCall): the invocation.
     """
-    return handle_type(
-        list(call.argv.args), call.context.session, call.registry
-    )
+    args = list(call.argv.args)
+    scan = scan_options(args, TYPE_OPTIONS)
+    answers: dict[str, MachineAnswer] = {}
+    if scan.bad is None:
+        mode = last_of(scan.letters, "tpP")
+        every = "a" in scan.letters
+        option = f"-{mode}" if mode else ("-a" if every else "")
+        answers = await asked_machines(
+            call, scan, option, mode == "P" or every
+        )
+    return handle_type(args, call.context.session, call.registry, answers)
 
 
 async def which_builtin(call: BuiltinCall) -> Result:
-    """The ``which`` arm.
+    """The ``which`` arm: the machines that run its names are asked
+    first, then ``handle_which`` reports.
 
     Args:
         call (BuiltinCall): the invocation.
     """
-    return handle_which(
-        list(call.argv.args), call.context.session, call.registry
-    )
+    args = list(call.argv.args)
+    scan = scan_options(args, WHICH_OPTIONS)
+    answers: dict[str, MachineAnswer] = {}
+    if scan.bad is None:
+        answers = await asked_machines(call, scan, "", True)
+    return handle_which(args, call.context.session, call.registry, answers)

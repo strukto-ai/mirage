@@ -38,6 +38,22 @@ def tilde_homes(session: SessionState) -> dict[str, str]:
     }
 
 
+def seed_home(session: SessionState, again: bool = False) -> None:
+    """Give a session the ``HOME`` a machine's login hands bash: its
+    user's home, set but not exported, as ``PATH`` is, so a program
+    keeps the home its own machine gives it. Seeded as the session is
+    made or its profile applied and never after, so a line's ``unset
+    HOME`` stays unset; one the environment hands in wins.
+
+    Args:
+        session (SessionState): the session.
+        again (bool): seed over the home seeded before, as a profile
+            applied to a session already made moves it to its user.
+    """
+    if again or "HOME" not in session.vars:
+        seed_var(session, "HOME", home_of(Identity(profile=session.profile)))
+
+
 def home_dir(session: SessionState) -> str | None:
     """Return the session home directory a bare ``cd`` goes to.
 

@@ -634,3 +634,24 @@ def test_two_readers_of_a_line_share_one_frozen_reading():
     assert line_facts("sort", list(words), "/") is facts
     with pytest.raises(dataclasses.FrozenInstanceError):
         facts.writes = False  # type: ignore[misc]
+
+
+def test_each_program_lookup_row_names_a_command_and_its_question():
+    rows = constants.PROGRAM_LOOKUPS
+    asks = constants.ProgramLookup
+    assert rows["which", ""] is asks.PATH
+    assert rows["type", "-P"] is asks.PATH
+    assert rows["command", "-v"] is asks.PATH
+    assert rows["type", ""] is asks.KIND
+    assert rows["command", "-V"] is asks.KIND
+    assert {
+        command for command, _ in rows if rows[command, _] is asks.EXISTS
+    } == {
+        "exec",
+        "find",
+        "xargs",
+        "timeout",
+        "env",
+        *constants.PROGRAM_WRAPPERS,
+    }
+    assert "which" in constants.CAPTURABLE_BUILTINS

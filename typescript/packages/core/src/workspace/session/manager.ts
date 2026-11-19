@@ -15,7 +15,7 @@
 import { releaseInputs } from '../../io/async_line_iterator.ts'
 import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
-import { setCwd } from './shell_dirs.ts'
+import { seedHome, setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import type { Shell } from '../../rs/shell.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
@@ -160,6 +160,7 @@ export class SessionManager extends SessionOwner {
       createdAt: this.clock.now(),
     })
     dflt.ids = this.ids
+    seedHome(dflt)
     this.sessions.set(defaultSessionId, dflt)
   }
 
@@ -216,6 +217,11 @@ export class SessionManager extends SessionOwner {
     if (compiled === null) return
     const session = this.defaultSession()
     applyProfile(session, compiled)
+    if (
+      !Object.hasOwn(this.seedVarsInternal, 'HOME') &&
+      !Object.hasOwn(compiled.setup.env ?? {}, 'HOME')
+    )
+      seedHome(session, true)
     this.hasManaged = this.hasManaged || holdsManaged(session)
   }
 
@@ -568,6 +574,7 @@ export class SessionManager extends SessionOwner {
     })
     session.ids = this.ids
     if (options.profile !== undefined) applyProfile(session, options.profile)
+    seedHome(session)
     checkEnvFits(session, this.maxEnv)
     this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)

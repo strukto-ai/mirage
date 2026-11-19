@@ -30,10 +30,12 @@ import { ExecutionNode } from '../../../types.ts'
 import { aliasesOn } from '../alias/alias.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
+import { askedMachines } from '../lookup/lookup.ts'
 import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
 import { BASH_BUILTINS, KEYWORDS, SHELL_ONLY_BUILTINS } from '../../../lookup/constants.ts'
 import { withoutCapture } from '../../../lookup/lookup.ts'
+import type { MachineAnswer } from '../../../lookup/types.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 
@@ -45,19 +47,36 @@ import type { ExecuteFn } from '../../../expand/types.ts'
  * unlike `type`'s all-found rule). `-v` prints a program's file and any
  * other resolvable name bare (a builtin, a function); `-V` prints a
  * verbose line. Not-found names are silent under `-v` and warn on stderr
- * under `-V`.
+ * under `-V`. A name a machine runs is the machine's own `command` to
+ * report, wherever Mirage holds no alias, function or builtin of it first.
+ *
+ * @param mode `"v"` or `"V"`.
+ * @param rest operand words to classify.
+ * @param session shell session state.
+ * @param registry mount registry.
+ * @param answers what the machine that runs each name answered, by name.
+ * @param parser the scope a function's body is printed under.
  */
 function probe(
   mode: string,
   rest: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  answers: ReadonlyMap<string, MachineAnswer>,
   parser?: ParseScope,
 ): RedirectResult {
   const pieces: [boolean, string][] = []
   let anyFound = false
   for (const name of rest) {
     const kind = classify(name, session, registry)
+    const answer = answers.get(name)
+    if (answer !== undefined && (kind === null || kind === NameKind.FILE)) {
+      if (answer.found) {
+        anyFound = true
+        for (const line of answer.lines) pieces.push([false, `${line}\n`])
+      } else if (mode === 'V') pieces.push([true, `${shellVoice()}command: ${name}: not found\n`])
+      continue
+    }
     if (kind === null) {
       if (mode === 'V') pieces.push([true, `${shellVoice()}command: ${name}: not found\n`])
       continue
@@ -92,7 +111,8 @@ function probe(
  * operands are re-joined with shellJoin so they survive re-parsing as one
  * token each; the pipe stdin flows to the inner command. `-p` is accepted
  * but inert (the default PATH is the one PATH there is) and the last of
- * `-v`/`-V` wins.
+ * `-v`/`-V` wins. `answers` holds, under `-v` or `-V`, what the machine that
+ * runs each name answered, by name.
  */
 export async function handleCommandBuiltin(
   executeFn: ExecuteFn,
@@ -105,6 +125,7 @@ export async function handleCommandBuiltin(
   // Null runs the target as a line of its own.
   callStack: CallStack | null = null,
   parser?: ParseScope,
+  answers: ReadonlyMap<string, MachineAnswer> = new Map(),
 ): Promise<RedirectResult> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
@@ -119,7 +140,7 @@ export async function handleCommandBuiltin(
   }
   const mode = lastOf(scan.letters, 'vV')
   const rest = scan.operands
-  if (mode !== null) return probe(mode, rest, session, registry, parser)
+  if (mode !== null) return probe(mode, rest, session, registry, answers, parser)
   if (rest.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: 'command', exitCode: 0 })]
   }
@@ -230,15 +251,24 @@ export async function builtinBuiltin(call: BuiltinCall): Promise<RedirectResult>
   )
 }
 
-/** The `command` arm. */
+/** The `command` arm: under `-v` or `-V` the machines that run its names are
+ * asked first. */
 export async function commandBuiltin(call: BuiltinCall): Promise<RedirectResult> {
+  const args = [...call.argv.args]
+  const scan = scanOptions(args, 'pvV')
+  const mode = scan.bad === null ? lastOf(scan.letters, 'vV') : null
+  const answers =
+    mode !== null
+      ? await askedMachines(call, scan, `-${mode}`, false)
+      : new Map<string, MachineAnswer>()
   return handleCommandBuiltin(
     call.executeFn,
-    [...call.argv.args],
+    args,
     call.context.session,
     call.registry,
     call.stdin,
     call.callStack,
     call.parser,
+    answers,
   )
 }

@@ -899,6 +899,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
+   * Run a lookup the agent typed (`which perl`) as the machine answers it:
+   * in the machine's own environment at `/`, connecting first. Asked anew
+   * each time, so a program installed since the last one is found.
+   *
+   * @param line the lookup's shell line.
+   */
+  async lookUp(line: string): Promise<RunAnswer> {
+    await this.ensureConnected()
+    return this.setup(line)
+  }
+
+  /**
    * Unmount what the machine was served; the machine itself is the user's.
    * The next run connects again, so a workspace that takes the handle after
    * this one reaches the machine anew. On a machine that pauses, a connect

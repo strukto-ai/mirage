@@ -167,7 +167,9 @@ async def handle_exec_command(
         )
     line = ("command " if shadowed else "") + shell_join(words)
     clear_traps(session)
-    token = set_program_invocation(session)
+    token = set_program_invocation(
+        session, f"{shell_voice()}exec: {head}", "not found"
+    )
     try:
         io = await execute_fn(
             ("env -i " if "c" in scan.letters else "") + line,

@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo \"[$HOME]\")",
+      "command": "(unset HOME; echo \"[$HOME]\")",
       "expect": {
         "exit": 0,
         "stdout": "[]\n",

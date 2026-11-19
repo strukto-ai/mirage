@@ -29,6 +29,7 @@ import type { RecordFields } from '../record/types.ts'
 import { VarAttr, withValue, type ShellVar } from '../../shell/variable.ts'
 import { trees } from '../../test-utils.ts'
 import { OLDER_FORMAT } from './constants.ts'
+import { DEFAULT_PATH } from '../../shell/constants.ts'
 
 /** An empty compiled profile with the given parts filled in. */
 function compiled(
@@ -78,6 +79,17 @@ describe('SessionManager', () => {
     m.adoptDefault('stored')
     expect(m.defaultId).toBe('stored')
     expect(m.list()).toHaveLength(1)
+  })
+
+  it('starts the default session with the seeded PWD, PATH, HOME, IFS, OPTIND and OPTERR', () => {
+    expect(new SessionManager('def').env).toEqual({
+      PWD: '/',
+      PATH: DEFAULT_PATH,
+      HOME: '/root',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
   })
 
   it('exposes cwd and env for the default session', () => {
@@ -145,7 +157,7 @@ describe('SessionManager with a session table', () => {
     expect(s.env).toEqual({
       K: 'v',
       PWD: '/w',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -213,7 +225,7 @@ describe('SessionManager with a session table', () => {
     expect(m.env).toEqual({
       A: '1',
       PWD: '/w',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',

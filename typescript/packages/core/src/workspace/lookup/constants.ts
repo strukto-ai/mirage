@@ -21,7 +21,7 @@ import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
 import { Follow, LineFacts, type PathSpec } from '../../types.ts'
-import type { WrapperOptions } from './types.ts'
+import { ProgramLookup, type WrapperOptions } from './types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -140,8 +140,10 @@ export const MACHINE_ONLY_BUILTINS: ReadonlySet<string> = new Set(['uptime', 'to
 export const MACHINE_VIEW = 'lscpu'
 
 // Shell words a remote runtime's captures can take from the session: the
-// interpreters, and the process tools whose host programs see that
-// runtime's own processes rather than mirage's managed runners.
+// interpreters, the process tools whose host programs see that runtime's
+// own processes rather than mirage's managed runners, and `which`, a
+// program on a machine that searches that machine's PATH (it then knows
+// none of Mirage's own programs, which is what capturing it asks for).
 export const CAPTURABLE_BUILTINS: ReadonlySet<string> = new Set([
   ...INTERPRETER_NAMES,
   'ps',
@@ -150,6 +152,7 @@ export const CAPTURABLE_BUILTINS: ReadonlySet<string> = new Set([
   'pkill',
   'pidof',
   'killall',
+  'which',
   ...MACHINE_BUILTINS,
 ])
 
@@ -366,6 +369,56 @@ export const PROGRAM_WRAPPERS: ReadonlyMap<string, WrapperOptions> = new Map([
       missing: 'setsid: failed to execute {}: No such file or directory\n',
     },
   ],
+])
+
+// Every command and option that looks a program up by its name, and what it
+// asks (`ProgramLookup`, whose docstring holds the rule they all answer by),
+// by command, then by the option that decides the question, "" for the
+// command with none. `which`, `type` and `command` read a machine's answer
+// by their row: a PATH answer is a path a line, a KIND one names the path
+// after `NAME is `. Pinned against bash 5.2, debianutils `which`, GNU
+// coreutils 9.7, findutils 4.10 and util-linux 2.41 on debian:stable-slim.
+export const PROGRAM_LOOKUPS: ReadonlyMap<string, ReadonlyMap<string, ProgramLookup>> = new Map([
+  [
+    'which',
+    new Map([
+      ['', ProgramLookup.PATH],
+      ['-a', ProgramLookup.PATH],
+      ['-s', ProgramLookup.PATH],
+    ]),
+  ],
+  [
+    'type',
+    new Map([
+      ['-p', ProgramLookup.PATH],
+      ['-P', ProgramLookup.PATH],
+      ['', ProgramLookup.KIND],
+      ['-t', ProgramLookup.KIND],
+      ['-a', ProgramLookup.KIND],
+    ]),
+  ],
+  [
+    'command',
+    new Map([
+      ['-v', ProgramLookup.PATH],
+      ['-V', ProgramLookup.KIND],
+    ]),
+  ],
+  ['exec', new Map([['', ProgramLookup.EXISTS]])],
+  [
+    'find',
+    new Map([
+      ['-exec', ProgramLookup.EXISTS],
+      ['-execdir', ProgramLookup.EXISTS],
+    ]),
+  ],
+  ['xargs', new Map([['', ProgramLookup.EXISTS]])],
+  ['timeout', new Map([['', ProgramLookup.EXISTS]])],
+  ['env', new Map([['', ProgramLookup.EXISTS]])],
+  ...[...PROGRAM_WRAPPERS.keys()].map((name): [string, ReadonlyMap<string, ProgramLookup>] => [
+    name,
+    new Map([['', ProgramLookup.EXISTS]]),
+  ]),
 ])
 
 const SIZE = /^\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?$/

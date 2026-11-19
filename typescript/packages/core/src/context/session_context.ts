@@ -132,6 +132,9 @@ export interface Caller {
   // words of the program that execs it (`timeout: failed to run command
   // 'x'`); null for the shell's own.
   readonly execFailure: string | null
+  // Why, in those words: execvp's reason, or `not found` for the shell's
+  // `exec`.
+  readonly execReason: string
   readonly stop: AbortController | null
   readonly writeHeld: boolean
   readonly versionReads: boolean
@@ -183,6 +186,10 @@ export type CallerDispatchFn = (
   caller?: Caller,
 ) => Promise<[unknown, IOResult]>
 
+// Why execvp could not run a program it found no file for, as a program that
+// execs one reports it.
+export const ENOENT_REASON = 'No such file or directory'
+
 const UNBOUND: Caller = {
   session: null,
   owner: null,
@@ -196,6 +203,7 @@ const UNBOUND: Caller = {
   redirects: null,
   program: null,
   execFailure: null,
+  execReason: ENOENT_REASON,
   call: null,
   stop: null,
   writeHeld: false,
@@ -933,21 +941,23 @@ export function sessionCaller(session: SessionState, owner?: SessionOwner): Call
  * (`-exec sh -c ...`), so that shell's builtins are its own. `failure` leads
  * the report of a program the line cannot run, in the words of the program
  * that execs it (`timeout: failed to run command 'x'`); null keeps the
- * shell's.
+ * shell's. `reason` says why, in those words: execvp's `No such file or
+ * directory`, or `not found` for the shell's `exec`.
  */
 export function setProgramInvocation<T>(
   session: SessionState,
   fn: () => Promise<T>,
   failure: string | null = null,
+  reason: string = ENOENT_REASON,
 ): Promise<T> {
-  return bindChanges({ program: session, execFailure: failure }, fn)
+  return bindChanges({ program: session, execFailure: failure, execReason: reason }, fn)
 }
 
 /** Run a nested shell's script as the shell's own again: a nested shell
  * is a program, and the builtins it runs are its builtins, `printf -v`
  * included. */
 export function clearProgramInvocation<T>(fn: () => Promise<T>): Promise<T> {
-  return bindChanges({ program: null, execFailure: null }, fn)
+  return bindChanges({ program: null, execFailure: null, execReason: ENOENT_REASON }, fn)
 }
 
 /**
@@ -959,12 +969,13 @@ export function clearProgramInvocation<T>(fn: () => Promise<T>): Promise<T> {
  * execvp's reason. Mirrors Python's `missing_program`.
  */
 export function missingProgram(name: string): [string, string, string] {
-  const failure = currentCaller().execFailure
+  const caller = currentCaller()
+  const failure = caller.execFailure
   if (failure === null) {
     const voice = shellVoice()
     return [`${voice}${name}`, 'command not found', voice]
   }
-  return [failure, 'No such file or directory', '']
+  return [failure, caller.execReason, '']
 }
 
 /** Whether the line running in this session is a program run. */

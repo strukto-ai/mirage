@@ -62,6 +62,7 @@ import { RAMWorkspaceStateStore } from './store/ram.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { SessionProfile } from '../policy/profile.ts'
+import { DEFAULT_PATH } from '../shell/constants.ts'
 
 let tempDir: string
 
@@ -589,7 +590,8 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(workerSnap?.env).toEqual({
       ROLE: 'bg',
       PWD: '/data',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
+      HOME: '/root',
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',
@@ -609,7 +611,8 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(w2.env).toEqual({
       ROLE: 'bg',
       PWD: '/data',
-      PATH: '/usr/bin',
+      PATH: DEFAULT_PATH,
+      HOME: '/root',
       IFS: ' \t\n',
       OPTIND: '1',
       OPTERR: '1',

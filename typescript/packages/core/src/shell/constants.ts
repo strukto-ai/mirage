@@ -99,6 +99,10 @@ export const SHELL_ARGV0 = 'mirage'
 // report.
 export const BIN_PREFIX = '/usr/bin'
 
+// The PATH a session starts with: the one Debian's login, Docker images and
+// E2B hand root, so `echo "$PATH"` reads as it does on a machine.
+export const DEFAULT_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
 // The IFS a shell starts with, what an unset IFS splits on, and the
 // characters of any IFS that count as its whitespace.
 export const IFS_DEFAULT = ' \t\n'

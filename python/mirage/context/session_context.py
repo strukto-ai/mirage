@@ -71,6 +71,10 @@ from mirage.workspace.types import ExecutionNode, StatusWriter
 
 T = TypeVar("T")
 
+# Why execvp could not run a program it found no file for, as a program
+# that execs one reports it.
+ENOENT_REASON = "No such file or directory"
+
 
 class SessionOwner(ABC):
     """Whoever binds sessions: one per workspace, compared by identity."""
@@ -144,6 +148,8 @@ class Caller:
             program line cannot run, in the words of the program that
             execs it (``timeout: failed to run command 'x'``); None for
             the shell's own.
+        exec_reason (str): why, in those words: execvp's reason, or
+            ``not found`` for the shell's ``exec``.
         call (tuple[DecisionOwner, HandOff, str] | None): the call an
             op-level answer covers: its ledger, hand-off and session.
         policy_read (bool): whether the call is a policy program's own
@@ -214,6 +220,7 @@ class Caller:
     ) = None
     program: SessionState | None = None
     exec_failure: str | None = None
+    exec_reason: str = ENOENT_REASON
     call: tuple[DecisionOwner, HandOff, str] | None = None
     policy_read: bool = False
     version_reads: bool = True
@@ -932,7 +939,9 @@ def redirect_runner_for(node_id: int) -> RedirectRunner | None:
 
 
 def set_program_invocation(
-    session: SessionState, failure: str | None = None
+    session: SessionState,
+    failure: str | None = None,
+    reason: str = ENOENT_REASON,
 ) -> CallerToken:
     """Mark the line about to run in a session as a program run.
 
@@ -949,15 +958,21 @@ def set_program_invocation(
             line cannot run, in the words of the program that execs it
             (``timeout: failed to run command 'x'``); None keeps the
             shell's.
+        reason (str): why, in those words: execvp's ``No such file or
+            directory``, or ``not found`` for the shell's ``exec``.
     """
-    return _bind_changes(program=session, exec_failure=failure)
+    return _bind_changes(
+        program=session, exec_failure=failure, exec_reason=reason
+    )
 
 
 def clear_program_invocation() -> CallerToken:
     """Mark the line about to run as a shell's own again: a nested shell
     (``-exec sh -c ...``) is a program, and the builtins it runs are its
     builtins, ``printf -v`` included."""
-    return _bind_changes(program=None, exec_failure=None)
+    return _bind_changes(
+        program=None, exec_failure=None, exec_reason=ENOENT_REASON
+    )
 
 
 def missing_program(name: str) -> tuple[str, str, str]:
@@ -971,11 +986,12 @@ def missing_program(name: str) -> tuple[str, str, str]:
     Args:
         name (str): the program's word.
     """
-    failure = current_caller().exec_failure
+    caller = current_caller()
+    failure = caller.exec_failure
     if failure is None:
         voice = shell_voice()
         return f"{voice}{name}", "command not found", voice
-    return failure, "No such file or directory", ""
+    return failure, caller.exec_reason, ""
 
 
 def is_program_invocation(session: SessionState) -> bool:

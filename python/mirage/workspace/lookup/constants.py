@@ -25,7 +25,7 @@ from mirage.commands.spec.types import FlagValue, WordKind
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
 from mirage.types import Follow, LineFacts, PathSpec
-from mirage.workspace.lookup.types import WrapperOptions
+from mirage.workspace.lookup.types import ProgramLookup, WrapperOptions
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -261,11 +261,13 @@ INTERPRETER_NAMES = frozenset(
 )
 
 # Shell words a remote runtime's captures can take from the session: the
-# interpreters, and the process tools whose host programs see that
-# runtime's own processes rather than mirage's managed runners.
+# interpreters, the process tools whose host programs see that runtime's
+# own processes rather than mirage's managed runners, and `which`, a
+# program on a machine that searches that machine's PATH (it then knows
+# none of Mirage's own programs, which is what capturing it asks for).
 CAPTURABLE_BUILTINS = (
     INTERPRETER_NAMES
-    | frozenset({"ps", "kill", "pgrep", "pkill", "pidof", "killall"})
+    | frozenset({"ps", "kill", "pgrep", "pkill", "pidof", "killall", "which"})
     | MACHINE_BUILTINS
 )
 
@@ -419,6 +421,34 @@ PROGRAM_WRAPPERS: dict[str, WrapperOptions] = {
         1,
         "setsid: failed to execute {}: No such file or directory\n",
     ),
+}
+
+# Every command and option that looks a program up by its name, and what
+# it asks (``ProgramLookup``, whose docstring holds the rule they all
+# answer by), keyed by the option that decides the question, "" for the
+# command with none. `which`, `type` and `command` read a machine's
+# answer by their row: a PATH answer is a path a line, a KIND one names
+# the path after `NAME is `. Pinned against bash 5.2, debianutils
+# `which`, GNU coreutils 9.7, findutils 4.10 and util-linux 2.41 on
+# debian:stable-slim.
+PROGRAM_LOOKUPS: dict[tuple[str, str], ProgramLookup] = {
+    ("which", ""): ProgramLookup.PATH,
+    ("which", "-a"): ProgramLookup.PATH,
+    ("which", "-s"): ProgramLookup.PATH,
+    ("type", "-p"): ProgramLookup.PATH,
+    ("type", "-P"): ProgramLookup.PATH,
+    ("command", "-v"): ProgramLookup.PATH,
+    ("type", ""): ProgramLookup.KIND,
+    ("type", "-t"): ProgramLookup.KIND,
+    ("type", "-a"): ProgramLookup.KIND,
+    ("command", "-V"): ProgramLookup.KIND,
+    ("exec", ""): ProgramLookup.EXISTS,
+    ("find", "-exec"): ProgramLookup.EXISTS,
+    ("find", "-execdir"): ProgramLookup.EXISTS,
+    ("xargs", ""): ProgramLookup.EXISTS,
+    ("timeout", ""): ProgramLookup.EXISTS,
+    ("env", ""): ProgramLookup.EXISTS,
+    **{(name, ""): ProgramLookup.EXISTS for name in PROGRAM_WRAPPERS},
 }
 
 # The wrappers that answer for themselves with no program left to run:

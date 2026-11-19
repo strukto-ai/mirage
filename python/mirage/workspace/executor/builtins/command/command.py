@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from mirage.io.types import ByteSource
@@ -28,6 +28,7 @@ from mirage.workspace.executor.builtins.lookup import (
     describe,
     program_file,
 )
+from mirage.workspace.executor.builtins.lookup.lookup import asked_machines
 from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
@@ -42,6 +43,7 @@ from mirage.workspace.lookup.constants import (
     SHELL_ONLY_BUILTINS,
 )
 from mirage.workspace.lookup.lookup import without_capture
+from mirage.workspace.lookup.types import MachineAnswer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -52,6 +54,7 @@ def _probe(
     rest: Sequence[str],
     session: SessionState,
     registry: MountRegistry,
+    answers: Mapping[str, MachineAnswer],
 ) -> Result:
     """Run the ``-v``/``-V`` introspection modes.
 
@@ -61,17 +64,31 @@ def _probe(
     file and any other resolvable name bare (a builtin, a function);
     ``-V`` prints a verbose line.
     Not-found names are silent under ``-v`` and warn on stderr under ``-V``.
+    A name a machine runs is the machine's own ``command`` to report,
+    wherever Mirage holds no alias, function or builtin of it first.
 
     Args:
         mode (str): ``"v"`` or ``"V"``.
         rest (Sequence[str]): operand words to classify.
         session (SessionState): shell session state.
         registry (MountRegistry): mount registry.
+        answers (Mapping[str, MachineAnswer]): what the machine that
+            runs each name answered, by name.
     """
     pieces: list[tuple[bool, str]] = []
     any_found = False
     for name in rest:
         kind = classify(name, session, registry)
+        answer = answers.get(name)
+        if answer is not None and kind in (None, NameKind.FILE):
+            if answer.found:
+                any_found = True
+                pieces.extend((False, f"{line}\n") for line in answer.lines)
+            elif mode == "V":
+                pieces.append(
+                    (True, f"{shell_voice()}command: {name}: not found\n")
+                )
+            continue
         if kind is None:
             if mode == "V":
                 pieces.append(
@@ -104,6 +121,7 @@ async def handle_command_builtin(
     registry: MountRegistry,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    answers: Mapping[str, MachineAnswer] | None = None,
 ) -> Result:
     """Run the ``command`` builtin (``command [-pVv] name [arg ...]``).
 
@@ -126,6 +144,9 @@ async def handle_command_builtin(
         stdin (ByteSource | None): piped input for the inner run.
         call_stack (CallStack | None): the caller's frames; None runs
             the target as a line of its own.
+        answers (Mapping[str, MachineAnswer] | None): under ``-v`` or
+            ``-V``, what the machine that runs each name answered, by
+            name; None for none.
     """
     scan = scan_options(args, "pvV")
     if scan.bad is not None:
@@ -138,7 +159,7 @@ async def handle_command_builtin(
     mode = last_of(scan.letters, "vV")
     rest = scan.operands
     if mode is not None:
-        return _probe(mode, rest, session, registry)
+        return _probe(mode, rest, session, registry, answers or {})
     if not rest:
         return ok("command")
 
@@ -288,16 +309,26 @@ async def builtin_builtin(call: BuiltinCall) -> Result:
 
 
 async def command_builtin(call: BuiltinCall) -> Result:
-    """The ``command`` arm.
+    """The ``command`` arm: under ``-v`` or ``-V`` the machines that
+    run its names are asked first.
 
     Args:
         call (BuiltinCall): the invocation.
     """
+    args = list(call.argv.args)
+    scan = scan_options(args, "pvV")
+    mode = last_of(scan.letters, "vV") if scan.bad is None else None
+    answers = (
+        await asked_machines(call, scan, f"-{mode}", False)
+        if mode is not None
+        else None
+    )
     return await handle_command_builtin(
         call.execute_fn,
-        list(call.argv.args),
+        args,
         call.context.session,
         call.registry,
         call.stdin,
         call.call_stack,
+        answers,
     )

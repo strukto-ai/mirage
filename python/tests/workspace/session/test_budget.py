@@ -5,6 +5,7 @@ from mirage.shell.array import ShellArray
 from mirage.shell.constants import (
     BASH_VERSINFO,
     BASH_VERSION,
+    DEFAULT_PATH,
     SHLVL,
     VERSION_PARTS,
     VERSION_TEXT,
@@ -15,13 +16,16 @@ from mirage.workspace import Workspace
 from mirage.workspace.session.budget import args_bytes, entry_bytes
 from mirage.workspace.session.constants import MAX_ENV
 
-# The max_env these lines run under: 200 bytes for what each line grows,
-# past the variables every shell starts with (``seed_shell``).
+# The max_env these lines run under: 188 bytes for what each line grows,
+# past the variables every shell starts with (``seed_shell``, and the
+# PATH and HOME a session is made with).
 LIMIT = (
-    200
+    188
     + entry_bytes(BASH_VERSION, VERSION_TEXT)
     + entry_bytes(BASH_VERSINFO, ShellArray(dict(enumerate(VERSION_PARTS))))
     + entry_bytes(SHLVL, "1")
+    + entry_bytes("PATH", DEFAULT_PATH)
+    + entry_bytes("HOME", "/root")
 )
 
 

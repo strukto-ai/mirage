@@ -1,0 +1,197 @@
+{
+  "cases": [
+    {
+      "id": "a_lookup_asks_the_machine_that_runs_the_name",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "With the machine's disk at /, a name Mirage does not run is the machine's to look up: which, type and command run on it as the agent typed them, each path it prints shown as the machine's own. A name Mirage runs (grep) and a builtin stay Mirage's, and a name the machine lacks is not found. Pinned against bash 5.2 and debianutils which on debian:trixie-slim.",
+      "runtimes": [
+        "docker"
+      ],
+      "world": {
+        "mounts": {
+          "/": {
+            "vfs": "machine",
+            "config": {
+              "root": "/"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "which perl; which -a perl; type perl; type -t perl; type -a perl; command -v perl; command -V perl; type -P ldconfig",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/perl\n/usr/bin/perl\n/bin/perl\nperl is /usr/bin/perl\nfile\nperl is /usr/bin/perl\nperl is /bin/perl\n/usr/bin/perl\nperl is /usr/bin/perl\n/usr/sbin/ldconfig\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "which grep; type -t grep; type cd; which nosuch; echo rc=$?; type nosuch; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/grep\nfile\ncd is a shell builtin\nrc=1\nrc=1\n",
+            "stderr": "bash: line 1: type: nosuch: not found\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "usr_bin_shows_the_machine_s_file_for_a_name_it_runs",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "/usr/bin holds Mirage's file for each program Mirage runs and leaves every other name to the machine's disk beneath it: /usr/bin/perl is the machine's own binary, listed, executable and run there, while /usr/bin/grep stays Mirage's.",
+      "runtimes": [
+        "docker"
+      ],
+      "world": {
+        "mounts": {
+          "/": {
+            "vfs": "machine",
+            "config": {
+              "root": "/"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "[ -x /usr/bin/perl ] && echo runs; head -c 4 /usr/bin/perl | tail -c 3; echo; /usr/bin/perl -e 'print 1+1, qq(\\n)'; ls /usr/bin | grep -x -e perl -e grep; grep -q ELF /usr/bin/grep || echo mirage-file",
+          "expect": {
+            "exit": 0,
+            "stdout": "runs\nELF\n2\ngrep\nperl\nmirage-file\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_program_installed_since_the_last_lookup_is_found",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "Mirage asks the machine anew on every lookup, so a program the machine gains between two lines is found by the second. Each run names its program apart, since the drivers share one machine.",
+      "runtimes": [
+        "docker"
+      ],
+      "world": {
+        "mounts": {
+          "/": {
+            "vfs": "machine",
+            "config": {
+              "root": "/"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "n=mlookup-new-$$-$RANDOM; which $n; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "perl -e 'open F, \">\", $ARGV[0] or die; print F \"#!/bin/sh\\necho new\\n\"; close F; chmod 0755, $ARGV[0]' /usr/local/bin/$n && which $n | sed \"s/$n/NEW/\" && $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/local/bin/NEW\nnew\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm /usr/local/bin/$n; which $n; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_program_the_machine_lacks_gets_its_runner_s_error",
+      "note": "A program a wrapper runs on the machine and the machine has no file for is reported in that wrapper's words, with 127, as GNU env, timeout and xargs and bash's exec report it.",
+      "runtimes": [
+        "docker"
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "env nosuch; echo rc=$?; (exec nosuch); echo rc=$?; echo x | xargs nosuch; echo rc=$?; timeout 5 nosuch; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=127\nrc=127\nrc=127\nrc=127\n",
+            "stderr": "env: 'nosuch': No such file or directory\nbash: line 1: exec: nosuch: not found\nxargs: nosuch: No such file or directory\ntimeout: failed to run command 'nosuch': No such file or directory\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_machine_that_takes_a_name_answers_its_lookup",
+      "note": "Of two machines, the one that takes a name by name answers its lookup, not the one taking @external: sshfs is on the first machine only, and the second takes it, so it is not found. A machine that takes which itself runs every which, Mirage's own programs included.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "sshfs",
+            "which"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "type -t sshfs; echo rc=$?; type -t perl",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\nfile\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "which -a grep",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/grep\n/bin/grep\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}
