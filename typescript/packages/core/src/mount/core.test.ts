@@ -343,6 +343,16 @@ describe('MountCore', () => {
     expect(entries).toContain('sub')
   })
 
+  it("answers a listing's .. with the directory's own attributes, never its parent's", async () => {
+    // The parent's store may be the client itself; its stat would wait on this listing.
+    const core = await mkCore()
+    const getattr = vi.spyOn(core, 'getattr')
+    const rows = new Map(await core.listing('/data/sub'))
+    expect(getattr.mock.calls.map(([path]) => path)).not.toContain('/data')
+    expect(rows.get('.')).toBeDefined()
+    expect(rows.get('..')).toEqual(rows.get('.'))
+  })
+
   it('slices reads', async () => {
     const core = await mkCore()
     const fh = await core.open('/data/greeting.txt')

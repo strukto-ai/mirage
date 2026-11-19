@@ -77,6 +77,22 @@ async def test_getattr_dir(seeded):
 
 
 @pytest.mark.asyncio
+async def test_listing_answers_dotdot_with_the_directorys_own_attrs(seeded):
+    # The parent's store may be the client itself; its stat would wait on this listing.
+    asked = []
+    getattr_ = seeded.getattr
+
+    async def recording(path, follow=False, ctx=None):
+        asked.append(path)
+        return await getattr_(path, follow, ctx)
+
+    seeded.getattr = recording
+    rows = dict(await seeded.listing("/sub"))
+    assert "/" not in asked
+    assert rows[".."] == rows["."]
+
+
+@pytest.mark.asyncio
 async def test_getattr_missing_raises_native_exception(seeded):
     # Native exception, not FuseOSError: an adapter classifies it, the core
     # does not know what a FUSE error code is.
