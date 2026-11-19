@@ -30,6 +30,7 @@ from mirage.context import (
     is_program_invocation,
     readonly_below,
     reset_caller,
+    session_context,
     session_visibility,
     set_current_evaluation,
     set_current_session,
@@ -283,6 +284,46 @@ def test_effective_path_mode_is_the_anchor_depth_rule():
             effective_path_mode("/repo/tools/go.py", "/repo", MountMode.READ)
             == MountMode.READ
         )
+    finally:
+        reset_caller(token)
+
+
+def test_a_mount_no_cap_or_show_entry_names_asks_no_matcher(monkeypatch):
+    asks = []
+    built = session_context.visibility_matcher
+
+    class Counted:
+        def __init__(self, visibility):
+            self.matcher = built(visibility)
+
+        def ask(self, op, **fields):
+            asks.append(op)
+            return self.matcher.ask(op, **fields)
+
+    monkeypatch.setattr(session_context, "visibility_matcher", Counted)
+    sess = SessionState(
+        session_id="agent",
+        mount_modes={"/capped": MountMode.READ},
+        visibility=Visibility(paths=HiddenPaths(paths=("/repo/.env",))),
+    )
+    token = set_current_session(sess)
+    try:
+        assert (
+            effective_path_mode("/repo/x", "/repo", MountMode.EXEC)
+            == MountMode.EXEC
+        )
+        assert strongest_mode_under("/repo", MountMode.WRITE) == (
+            MountMode.WRITE
+        )
+        assert asks == []
+        assert (
+            effective_path_mode("/capped/x", "/capped", MountMode.EXEC)
+            == MountMode.READ
+        )
+        assert strongest_mode_under("/capped", MountMode.EXEC) == (
+            MountMode.READ
+        )
+        assert asks == ["effective_mode", "strongest_mode"]
     finally:
         reset_caller(token)
 
