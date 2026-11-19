@@ -60,6 +60,11 @@ class PipeConsole(JobConsole):
                 check_memory(self._held)
             await super().emit(channel, data)
 
+    def quiet(self) -> None:
+        """Keep stderr here from now on, for a pipeline that is failing:
+        what its stages say after it fails goes with it, as before."""
+        self._errors = None
+
     def pipe_for(self, channel: Channel) -> BytePipe | None:
         return (
             self._pipe

@@ -33,7 +33,7 @@ export class PipeConsole extends JobConsole {
     private readonly pipeStderr = false,
     bufferBytes = CAPACITY,
     gate: (() => Promise<void> | null) | null = null,
-    private readonly errors?: JobConsole,
+    private errors?: JobConsole,
   ) {
     super()
     this.pipe = new BytePipe(bufferBytes, false, gate)
@@ -54,6 +54,11 @@ export class PipeConsole extends JobConsole {
         console.debug(`console pipe: a muted write is dropped: ${String(error)}`)
       })
     }
+  }
+
+  /** Keep stderr here from now on, for a pipeline that is failing: what its stages say after it fails goes with it, as before. */
+  quiet(): void {
+    this.errors = undefined
   }
 
   override pipeFor(channel: Channel): BytePipe | null {

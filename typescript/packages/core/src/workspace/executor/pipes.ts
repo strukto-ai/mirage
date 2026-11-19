@@ -233,7 +233,9 @@ export async function handlePipe(
         } else {
           // One a signal stopped closes its pipe as a killed child does: the
           // reader sees the end, not the stop.
-          output.end(stopped.signal.aborted && isAborting(error) ? undefined : error)
+          const killed = stopped.signal.aborted && isAborting(error)
+          if (!killed) for (const pipe of pipes) pipe.quiet()
+          output.end(killed ? undefined : error)
           throw error
         }
       } finally {

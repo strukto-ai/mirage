@@ -275,6 +275,9 @@ async def handle_pipe(
                 and process is not None
                 and process.signal is not None
             )
+            if not stopped:
+                for pipe in pipes:
+                    pipe.quiet()
             output.end(None if stopped else error)
             raise
         finally:
