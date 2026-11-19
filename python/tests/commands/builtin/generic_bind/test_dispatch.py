@@ -110,7 +110,7 @@ async def test_du_walk_charges_each_mount_its_own_limit():
     )
     install(ws.mount("/a/b"), [_unmeasured_du])
     try:
-        result = await ws.shell("du -a /a")
+        result = await ws.shell("du -a -b /a")
         rows = (await result.materialize_stdout()).decode().splitlines()
         assert [r for r in rows if "/a/f" in r] == [
             f"1\t/a/f{i}" for i in range(4)
@@ -138,7 +138,7 @@ async def test_du_x_never_lists_a_mount_below_the_operand():
         await ws.shell("echo aa > /a/f; echo ccc > /a/b/g; echo d > /c/h")
         install(ws.mount("/a/b"), [refusing])
         result = await ws.shell("du -x /a /c")
-        assert await result.materialize_stdout() == b"3\t/a\n2\t/c\n"
+        assert await result.materialize_stdout() == b"8\t/a\n8\t/c\n"
         assert not result.stderr
         assert result.exit_code == 0
     finally:
@@ -322,8 +322,8 @@ async def test_a_walk_reads_the_tree_in_one_call_and_prints_the_same():
         ),
         (
             "du -a /repo",
-            b"4\t/repo/dev/x.txt\n4\t/repo/dev\n4\t/repo/main/x.txt\n"
-            b"4\t/repo/main\n8\t/repo\n",
+            b"4\t/repo/dev/x.txt\n8\t/repo/dev\n4\t/repo/main/x.txt\n"
+            b"8\t/repo/main\n20\t/repo\n",
         ),
     ],
 )
@@ -364,8 +364,8 @@ async def test_a_walk_following_a_link_onto_a_mount_without_read_tree_walks_it()
         await ws.shell("ln -s /data/dev /repo/a")
         r = await ws.shell("du -aL /repo")
         assert (r.stdout, r.stderr or b"", r.exit_code) == (
-            b"0\t/repo/a/sub\n0\t/repo/a\n4\t/repo/main/x.txt\n"
-            b"4\t/repo/main\n4\t/repo\n",
+            b"4\t/repo/a/sub\n8\t/repo/a\n4\t/repo/main/x.txt\n"
+            b"8\t/repo/main\n20\t/repo\n",
             b"",
             0,
         )

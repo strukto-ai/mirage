@@ -47,7 +47,7 @@ from mirage.commands.spec.usage import (
     word_refusal_error,
 )
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.context import session_umask
+from mirage.context import DEFAULT_UMASK, session_umask
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
@@ -79,6 +79,7 @@ from mirage.types import (
     StatFn,
 )
 from mirage.utils.dates import iso_timestamp
+from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE
 from mirage.utils.path import CycleError, parent, resolve_path
 from mirage.utils.quote import shell_quote_always
 from mirage.view.namespace_view import followed_stat
@@ -215,8 +216,9 @@ class TransferPolicy:
 
 @dataclass(slots=True)
 class Keeper:
-    """What ``-p``, ``-a`` and ``--preserve`` carry from a source to its
-    copy, set through the dispatcher from the source's stat.
+    """What a copy carries from its source, set through the dispatcher
+    from the source's stat: what ``-p``, ``-a`` and ``--preserve`` keep
+    and, where no mode is kept, the mode a new copy is made with.
 
     A file's attributes are set once its copy is made. A directory's
     wait for the end of the line and go the deepest first, so the copies
@@ -226,28 +228,100 @@ class Keeper:
     has it, and one the destination refuses is logged and the copy
     kept.
 
+    Without a kept mode, a file or directory the copy makes takes the
+    source's permission bits under the umask, as ``open`` and ``mkdir``
+    make it, and one that stood there keeps its own. Only a mode that
+    differs from what a new one shows costs a call.
+
     Args:
         keep (frozenset[str]): ``mode``, ``ownership``, ``timestamps``
             and ``xattr``, those asked for.
         stat (StatFn): the sources' stat.
         dispatch (DispatchFn): sets the attributes.
+        umask (int | None): the creation mask a new copy's mode is
+            under; None leaves every new copy as its store makes it.
         dirs (list[tuple[PathSpec, PathSpec]]): each directory made or
             merged into and its source, in the order met.
+        fresh (dict[str, int]): the mode each new copy is owed, by its
+            path.
     """
 
     keep: frozenset[str]
     stat: StatFn
     dispatch: DispatchFn
+    umask: int | None = None
     dirs: list[tuple[PathSpec, PathSpec]] = field(default_factory=list)
+    fresh: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def per_entry(self) -> bool:
+        """Whether a copy must go entry by entry: for what this keeps, or
+        for a umask other than the default, which a store's one-call tree
+        copy, made under its own, would not apply."""
+        return bool(self.keep) or (
+            self.umask is not None and self.umask != DEFAULT_UMASK
+        )
+
+    async def prepare(
+        self, src: PathSpec, dst: PathSpec, made: bool = False
+    ) -> None:
+        """Note the mode a copy about to be made is owed: its source's
+        under the umask, where that is not what a new one shows and
+        nothing stands at the destination yet.
+
+        Args:
+            src (PathSpec): the source.
+            dst (PathSpec): where its copy goes.
+            made (bool): the copy is a directory known to be new.
+        """
+        if self.umask is None or "mode" in self.keep:
+            return
+        try:
+            info = await self.stat(src)
+            if info.mode is None:
+                return
+            mode = info.mode & 0o777 & ~self.umask
+            shown = (
+                DEFAULT_DIR_MODE
+                if info.type == FileType.DIRECTORY
+                else DEFAULT_FILE_MODE
+            )
+            if mode == shown or (
+                not made and await path_exists(self.stat, dst)
+            ):
+                return
+        except FS_ERRORS as exc:
+            _logger.debug("cp: mode of %s not read: %s", src.virtual, exc)
+            return
+        self.fresh[dst.virtual] = mode
+
+    async def made_dir(self, src: PathSpec, dst: PathSpec) -> None:
+        """Note a directory the copy made, whose attributes are set on
+        the way out of it.
+
+        Args:
+            src (PathSpec): the source directory.
+            dst (PathSpec): the directory made.
+        """
+        await self.prepare(src, dst, made=True)
+        self.dirs.append((src, dst))
 
     async def copied(self, src: PathSpec, dst: PathSpec) -> None:
-        """Set a copy's kept attributes from its source.
+        """Set a copy's kept attributes from its source, or the mode a
+        new one is owed.
 
         Args:
             src (PathSpec): the source.
             dst (PathSpec): its copy.
         """
+        owed = self.fresh.pop(dst.virtual, None)
+        if not self.keep and owed is None:
+            return
         try:
+            if owed is not None:
+                await self.dispatch("setattr", dst, mode=owed)
+            if not self.keep:
+                return
             info = await self.stat(src)
             fields: dict[str, Any] = {}
             if "mode" in self.keep and info.mode is not None:
@@ -316,29 +390,19 @@ async def _made_empty(
 async def _empty_copy(
     stat: StatFn,
     dispatch: DispatchFn,
-    umask: int,
     src: PathSpec,
     dst: PathSpec,
 ) -> None:
-    """A copy under ``--attributes-only``: a file it makes takes the
-    source's mode under the umask, as any new copy does, set only where
-    that differs from a new file's own.
+    """A copy under ``--attributes-only``, which makes an empty file
+    where none stands; its mode is the keeper's, as any new copy's is.
 
     Args:
-        stat (StatFn): stats the source and the destination.
-        dispatch (DispatchFn): writes the empty file and sets its mode.
-        umask (int): the session's creation mask.
+        stat (StatFn): stats the destination.
+        dispatch (DispatchFn): writes the empty file.
         src (PathSpec): the source, never read.
         dst (PathSpec): the destination.
     """
-    if not await _made_empty(stat, dispatch, dst):
-        return
-    info = await stat(src)
-    if info.mode is None:
-        return
-    mode = info.mode & 0o777 & ~umask
-    if mode != 0o666 & ~umask:
-        await dispatch("setattr", dst, mode=mode)
+    await _made_empty(stat, dispatch, dst)
 
 
 async def _empty_write(
@@ -360,18 +424,18 @@ async def _empty_write(
 
 @overload
 def attributes_only(
-    strategy: PrimitiveCopy, stat: StatFn, dispatch: DispatchFn, umask: int
+    strategy: PrimitiveCopy, stat: StatFn, dispatch: DispatchFn
 ) -> PrimitiveCopy: ...
 
 
 @overload
 def attributes_only(
-    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn, umask: int
+    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn
 ) -> CopyStrategy: ...
 
 
 def attributes_only(
-    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn, umask: int
+    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn
 ) -> CopyStrategy:
     """The copy ``--attributes-only`` makes: no bytes are read or moved,
     a destination file that is not there is made empty with the mode a
@@ -382,10 +446,9 @@ def attributes_only(
     Args:
         strategy (CopyStrategy): the copy it stands in for.
         stat (StatFn): stats a source or a destination.
-        dispatch (DispatchFn): writes an empty file and sets its mode.
-        umask (int): the session's creation mask.
+        dispatch (DispatchFn): writes an empty file.
     """
-    copy = partial(_empty_copy, stat, dispatch, umask)
+    copy = partial(_empty_copy, stat, dispatch)
     if isinstance(strategy, PrimitiveCopy):
         return replace(
             strategy,
@@ -835,6 +898,7 @@ async def copy_tree_links(
     seen: tuple[str, ...] = (),
     blocked: Sequence[str] = (),
     refuse_link: Callable[[PathSpec, PathSpec], Awaitable[bool]] | None = None,
+    keeper: Keeper | None = None,
 ) -> None:
     """Recreate the links below a copied directory, which its copy could
     not see.
@@ -861,6 +925,8 @@ async def copy_tree_links(
             left out, so their links are left out too.
         refuse_link (Callable | None): refuses a ``-l`` link, of a link
             or of what it leads to, that would leave its mount.
+        keeper (Keeper | None): sets what each copy of a followed link
+            carries from what it leads to.
     """
     base = src.virtual.rstrip("/") or "/"
     dst_base = target.virtual.rstrip("/")
@@ -928,6 +994,7 @@ async def copy_tree_links(
                 copies=copies,
                 aside=aside,
                 refuse_link=refuse_link,
+                keeper=keeper,
             )
             continue
         inside = resolved.rstrip("/") or "/"
@@ -961,6 +1028,7 @@ async def copy_tree_links(
             blocked=roots,
             aside=aside,
             refuse_link=refuse_link,
+            keeper=keeper,
         )
         await copy_tree_links(
             copies,
@@ -973,6 +1041,7 @@ async def copy_tree_links(
             (*seen, base),
             roots,
             refuse_link,
+            keeper,
         )
 
 
@@ -1929,7 +1998,7 @@ async def made_parents(
                 PathSpec.from_str_path(resolve_path(typed, cwd)),
                 raw_path=typed,
             )
-            keeper.dirs.append((source, made))
+            await keeper.made_dir(source, made)
     return True
 
 
@@ -2375,7 +2444,7 @@ async def _mirror_dirs(
             if free:
                 made.add(dst_mount)
                 if keeper is not None:
-                    keeper.dirs.append((entry, entry_dst))
+                    await keeper.made_dir(entry, entry_dst)
                 if lines is not None:
                     lines.append(
                         f"'{entry.raw_path}' -> '{entry_dst.raw_path}'"
@@ -2563,7 +2632,7 @@ async def copy_entries(
                 if free:
                     made.add(entry_dst.virtual)
                     if keeper is not None:
-                        keeper.dirs.append((entry, entry_dst))
+                        await keeper.made_dir(entry, entry_dst)
                     if lines is not None:
                         lines.append(
                             f"created directory '{entry_dst.raw_path}'"
@@ -2645,6 +2714,8 @@ async def copy_entries(
             continue
         if lines is not None:
             lines.append(transfer_line(entry, entry_dst, backup, cmd_name))
+        if keeper is not None:
+            await keeper.prepare(entry, entry_dst)
         if not await transfer_file(
             strategy, entry, entry_dst, cmd_name, errors
         ):
@@ -2705,9 +2776,8 @@ async def cp_generic(
         dispatch (DispatchFn | None): the command's dispatcher, which
             lets a source's mount refuse a tree copied file by file;
             None outside a workspace.
-        umask (int | None): the session's creation mask, which a file
-            ``--attributes-only`` makes is under; the current session's
-            when None.
+        umask (int | None): the session's creation mask, which a new
+            copy's mode is under; the current session's when None.
         cwd (str): the working directory a typed ``--parents`` prefix
             resolves against.
         device_of (Callable[[str], str] | None): the mount a path lives
@@ -2749,18 +2819,21 @@ async def cp_generic(
         readdir = strategy.readdir
     kept = flags.preserve & {"mode", "ownership", "timestamps", "xattr"}
     keeper = (
-        Keeper(kept, stat, dispatch) if kept and dispatch is not None else None
+        Keeper(
+            kept, stat, dispatch, session_umask() if umask is None else umask
+        )
+        if dispatch is not None
+        else None
     )
     if flags.attributes_only and dispatch is not None:
-        mask = session_umask() if umask is None else umask
-        strategy = attributes_only(strategy, stat, dispatch, mask)
+        strategy = attributes_only(strategy, stat, dispatch)
         if copies is not None:
             # What the relay copies where a link leads off the copy's
             # mount moves no bytes either; a backup still copies them.
             copies = replace(
                 copies,
                 content=attributes_only(
-                    copies.relay, copies.relay_stat, dispatch, mask
+                    copies.relay, copies.relay_stat, dispatch
                 ),
             )
     # A backup under --attributes-only renames the destination aside, so
@@ -2795,7 +2868,7 @@ async def cp_generic(
         or flags.interactive
         or update_gates(flags.update)
         or backup_displaces(flags.backup)
-        or keeper is not None
+        or (keeper is not None and keeper.per_entry)
         or unlink is not None
     )
     lines: list[str] = []
@@ -3128,6 +3201,7 @@ async def cp_generic(
                         policy,
                         blocked=left_out,
                         refuse_link=refuse_link,
+                        keeper=keeper,
                     )
                 continue
             # A whole-tree copy cannot honor a merge's per-entry rules (a
@@ -3169,6 +3243,7 @@ async def cp_generic(
                             lines if flags.verbose else None,
                             policy,
                             refuse_link=refuse_link,
+                            keeper=keeper,
                         )
                     continue
             # Per-entry policy forfeits dir_copy, as does a tree copy the
@@ -3248,6 +3323,8 @@ async def cp_generic(
                     continue
                 if flags.verbose:
                     lines.append(transfer_line(entry, entry_dst, backup))
+                if keeper is not None:
+                    await keeper.prepare(entry, entry_dst)
                 try:
                     await _copy_entry(strategy, copies, entry, entry_dst)
                 except FS_ERRORS as exc:
@@ -3270,6 +3347,7 @@ async def cp_generic(
                         for root in blocked
                     ],
                     refuse_link=refuse_link,
+                    keeper=keeper,
                 )
             continue
         if guards_created and key_of(target) in created:
@@ -3320,6 +3398,8 @@ async def cp_generic(
             continue
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
+        if keeper is not None:
+            await keeper.prepare(src, target)
         if isinstance(copier, PrimitiveCopy):
             if not await transfer_file(copier, src, target, "cp", errors):
                 continue

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { nowIso } from '../../utils/dates.ts'
 import { sortedPrefix } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
@@ -29,26 +30,49 @@ class KeyIndex {
   }
 }
 
+function parentKey(key: string): string {
+  return key.slice(0, key.lastIndexOf('/')) || '/'
+}
+
+/**
+ * A RAM store's folder keys, with each folder's count of subfolders kept
+ * as they change, which is what its link count reads. Mirrors Python's
+ * `RAMDirs`.
+ */
 export class RAMDirs extends Set<string> {
   readonly index = new KeyIndex()
+  readonly subdirs = new Map<string, number>()
 
   constructor(keys: Iterable<string> = ['/']) {
     super()
-    for (const key of keys) super.add(key)
+    for (const key of keys) this.add(key)
   }
 
   override add(key: string): this {
-    if (!this.has(key)) this.index.ordered = null
+    if (this.has(key)) return this
+    this.index.ordered = null
+    if (key !== '/') {
+      const parent = parentKey(key)
+      this.subdirs.set(parent, (this.subdirs.get(parent) ?? 0) + 1)
+    }
     return super.add(key)
   }
 
   override delete(key: string): boolean {
-    if (this.has(key)) this.index.ordered = null
+    if (!this.has(key)) return false
+    this.index.ordered = null
+    if (key !== '/') {
+      const parent = parentKey(key)
+      const left = (this.subdirs.get(parent) ?? 0) - 1
+      if (left > 0) this.subdirs.set(parent, left)
+      else this.subdirs.delete(parent)
+    }
     return super.delete(key)
   }
 
   override clear(): void {
     this.index.ordered = null
+    this.subdirs.clear()
     super.clear()
   }
 }
@@ -142,6 +166,9 @@ export class RAMStore {
   readonly dirs: Set<string> = new RAMDirs()
   readonly modified = new Map<string, string>()
   readonly attrs = new Map<string, RAMAttrs>()
+  /** When the store was made: the time of a folder no write dated (its
+   * root) and of a device it serves. */
+  readonly made = nowIso()
 
   /** `usage` is the store's capacity and counted bytes, null when uncapped. */
   constructor(readonly usage: StorageUsage | null = null) {

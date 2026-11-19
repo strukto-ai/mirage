@@ -98,13 +98,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "stat /data | head -3",
+      "command": "stat /data | head -2",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /data\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 42358,2210976247\tInode: ?           Links: ?\n",
+        "stdout": "  File: /data\n  Size: 4096      \tBlocks: 8          IO Block: 4096   directory\n",
         "stderr": ""
       },
-      "note": "A VFS keeps no device, inode, block or link counts, so those fields are `?` in GNU's layout; a directory's size is 4096 as `%s` prints it."
+      "note": "A directory's size is 4096 as `%s` prints it, one ext4 block, so it takes 8 512-byte blocks; the device, inode and link lines depend on the backend and are pinned in stat/links.json."
     },
     {
       "id": "disp_stat_default_symlink_layout",

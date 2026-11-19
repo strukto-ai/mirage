@@ -27,6 +27,14 @@ struct Slot {
 #[derive(Clone, Default)]
 pub(crate) struct Host(Arc<Mutex<Slot>>);
 
+/// When a path last changed, in UTC and as the session's wall clock reads
+/// it, each where the host keeps one.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Stamp {
+    pub(crate) utc: Option<i64>,
+    pub(crate) wall: Option<i64>,
+}
+
 impl Host {
     fn slot(&self) -> MutexGuard<'_, Slot> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
@@ -74,10 +82,18 @@ impl Host {
     }
 
     /// What stands at a path and when it last changed.
-    pub(crate) async fn stat_time(&self, path: &[u8]) -> Option<(String, Option<i64>)> {
+    pub(crate) async fn stat_time(&self, path: &[u8]) -> Option<(String, Stamp)> {
         let path = path.to_vec();
         let (reply, _) = self.ask(Request::Stat { path }).await;
-        reply.kind.map(|kind| (kind, reply.mtime))
+        reply.kind.map(|kind| {
+            (
+                kind,
+                Stamp {
+                    utc: reply.mtime,
+                    wall: reply.wall,
+                },
+            )
+        })
     }
 
     /// Make a directory's chain top-down, each level once a run, skipping

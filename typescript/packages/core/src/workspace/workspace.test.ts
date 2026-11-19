@@ -930,7 +930,7 @@ describe('ls injects child mounts as virtual subdirectories', () => {
   it('du on the implied parent of a nested mount does not report absence', async () => {
     const ws = makeWs({ '/': new RAMVFS(), '/empty/hole': new RAMVFS() })
     const result = await ws.shell('du /empty')
-    expect(result.stdoutText).toBe('0\t/empty/hole\n0\t/empty\n')
+    expect(result.stdoutText).toBe('4\t/empty/hole\n8\t/empty\n')
     expect(result.stderrText).toBe('')
     expect(result.exitCode).toBe(0)
     await ws.close()
@@ -939,7 +939,7 @@ describe('ls injects child mounts as virtual subdirectories', () => {
   it('du -s on the implied parent of a nested mount does not report absence', async () => {
     const ws = makeWs({ '/': new RAMVFS(), '/empty/hole': new RAMVFS() })
     const result = await ws.shell('du -s /empty')
-    expect(result.stdoutText).toBe('0\t/empty\n')
+    expect(result.stdoutText).toBe('8\t/empty\n')
     expect(result.stderrText).toBe('')
     expect(result.exitCode).toBe(0)
     await ws.close()

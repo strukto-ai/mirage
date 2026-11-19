@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from itertools import islice
 from typing import Protocol, TypedDict, TypeVar, overload
 
+from mirage.utils.dates import now_iso
 from mirage.utils.key_prefix import sorted_prefix
 from mirage.vfs.capacity import StorageUsage
 
@@ -86,10 +87,20 @@ class _KeyIndex:
         yield from sorted_prefix(ordered, prefix)
 
 
+def _parent_key(key: str) -> str:
+    return key.rsplit("/", 1)[0] or "/"
+
+
 class RAMDirs(MutableSet[str]):
+    """A RAM store's folder keys, with each folder's count of subfolders
+    kept as they change, which is what its link count reads.
+    """
+
     def __init__(self, keys: Iterable[str] = ("/",)) -> None:
-        self._keys = set(keys)
+        self._keys: set[str] = set()
+        self.subdirs: dict[str, int] = {}
         self.index = _KeyIndex()
+        self.update(keys)
 
     def __contains__(self, key: _T) -> bool:
         return key in self._keys
@@ -105,12 +116,22 @@ class RAMDirs(MutableSet[str]):
             if key not in self._keys:
                 self.index.ordered = None
                 self._keys.add(key)
+                if key != "/":
+                    parent = _parent_key(key)
+                    self.subdirs[parent] = self.subdirs.get(parent, 0) + 1
 
     def discard(self, key: str) -> None:
         with self.index.lock:
             if key in self._keys:
                 self.index.ordered = None
                 self._keys.discard(key)
+                if key != "/":
+                    parent = _parent_key(key)
+                    left = self.subdirs.get(parent, 0) - 1
+                    if left > 0:
+                        self.subdirs[parent] = left
+                    else:
+                        self.subdirs.pop(parent, None)
 
     def update(self, keys: Iterable[str]) -> None:
         for key in keys:
@@ -244,6 +265,9 @@ class RAMStore:
     attrs: dict[str, RAMAttrs] = field(default_factory=dict)
     # The store's capacity and counted bytes, None when uncapped.
     usage: StorageUsage | None = None
+    # When the store was made: the time of a folder no write dated (its
+    # root) and of a device it serves.
+    made: str = field(default_factory=now_iso)
 
     @property
     def lock(self) -> AbstractContextManager[bool | None]:

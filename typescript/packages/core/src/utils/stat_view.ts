@@ -71,6 +71,11 @@ export const DIR_SIZE = 4096
 export const BLKSIZE = 4096
 export const BLOCK_UNIT = 512
 
+// The longest target ext4 keeps inside a symlink's inode, which takes no
+// block of its own (a "fast" symlink); a longer one takes blocks as a
+// file of that size does.
+export const FAST_LINK_MAX = 59
+
 // The bits chmod sets: permissions plus setuid, setgid and sticky,
 // everything but the file type.
 export const ALL_MODE_BITS = 0o7777
@@ -218,6 +223,35 @@ export function contentSize(st: FileStat): number {
  * `DIR_SIZE` and a FIFO, which stores nothing, 0 (as GNU's `stat` and `ls -l`
  * do); any other entry its rendered length. Mirrors python's size_unknown.
  */
+/**
+ * The link count a stat consumer should report: the backend's, else 1,
+ * what a file system that counts no links (btrfs for a directory) reports.
+ */
+export function linkCount(st: FileStat): number {
+  return st.nlink ?? 1
+}
+
+/**
+ * The 512-byte blocks a stat consumer should report: the backend's, else
+ * what ext4 allocates for the entry, whole `BLKSIZE` blocks for its bytes,
+ * none for an empty file, a FIFO, a device or a symlink short enough to
+ * sit in its inode; null for a file whose size is unknown, whose blocks
+ * are unknown with it.
+ */
+export function blockCount(st: FileStat): number | null {
+  if (st.blocks !== null) return st.blocks
+  if (st.type === FileType.FILE && st.size === null) return null
+  let size: number
+  if (st.type === FileType.FILE || st.type === FileType.DIRECTORY) {
+    size = contentSize(st)
+  } else if (isLink(st) && (st.size ?? 0) > FAST_LINK_MAX) {
+    size = st.size ?? 0
+  } else {
+    return 0
+  }
+  return Math.ceil(size / BLKSIZE) * (BLKSIZE / BLOCK_UNIT)
+}
+
 export function sizeUnknown(st: FileStat): boolean {
   return st.size === null && !isDir(st) && !isFifo(st)
 }

@@ -56,12 +56,15 @@ function ctx(flags: Record<string, string | boolean> = {}): Context {
   } as unknown as Context
 }
 
+// The fake backends below report each file's bytes, so a directory counts
+// nothing of its own, as under --apparent-size.
 function flags(over: Partial<DuFlags> = {}): DuFlags {
   return {
     s: false,
     a: false,
     h: false,
     blockSize: null,
+    apparent: true,
     c: false,
     S: false,
     maxDepth: null,
@@ -173,7 +176,10 @@ describe('du', () => {
 
   it('keeps the stamp nanoseconds in a time format', async () => {
     const [size, entries] = backend({ '/dir/f': 1 })
-    const parsed = parseFlags({ ...ctx({ time: true }), env: { TIME_STYLE: '+%s.%N' } })
+    const parsed = parseFlags({
+      ...ctx({ time: true, apparent_size: true }),
+      env: { TIME_STYLE: '+%s.%N' },
+    })
     if (parsed instanceof IOResult) throw new Error('du refused --time')
     const out = await du(
       [spec('/dir', 'dir')],
@@ -194,10 +200,35 @@ describe('du', () => {
 
   it('compares a threshold past 2^53 exactly', async () => {
     const [size, entries] = backend({ '/dir/f': 9007199254740992 })
-    const parsed = parseFlags(ctx({ threshold: '9007199254740993' }))
+    const parsed = parseFlags(ctx({ threshold: '9007199254740993', apparent_size: true }))
     if (parsed instanceof IOResult) throw new Error('du refused the threshold')
     const out = await du([spec('/dir', 'dir')], parsed, size, entries)
     expect(DEC.decode(out.stdout)).toBe('')
+  })
+
+  it('counts a block for each directory beside the blocks its files hold', async () => {
+    const [size, entries] = backend({ '/dir/a': 4096, '/dir/s/b': 8192 })
+    const directories = (): readonly string[] => ['/dir', '/dir/s']
+    const blocks = flags({
+      apparent: false,
+      blockSize: { divisor: 1024n, suffix: '', humanBase: null },
+    })
+    const run = (over: Partial<DuFlags>) =>
+      du(
+        [spec('/dir', 'dir')],
+        { ...blocks, ...over },
+        size,
+        entries,
+        [],
+        undefined,
+        null,
+        undefined,
+        directories,
+      )
+    expect(DEC.decode((await run({})).stdout)).toBe('12\t/dir/s\n20\t/dir\n')
+    expect(DEC.decode((await run({ S: true })).stdout)).toBe('12\t/dir/s\n8\t/dir\n')
+    expect(DEC.decode((await run({ s: true })).stdout)).toBe('20\t/dir\n')
+    expect(DEC.decode((await run({ apparent: true })).stdout)).toBe('8\t/dir/s\n12\t/dir\n')
   })
 
   it('counts each directory under --inodes, and under -S its own files', () => {
@@ -324,21 +355,22 @@ describe('du parseFlags', () => {
 })
 
 it.each([
+  ['', '4'],
   ['-b', '6'],
   ['--bytes', '6'],
-  ['--apparent-size', '6'],
-  ['-k', '1'],
+  ['--apparent-size', '1'],
+  ['-k', '4'],
   ['-m', '1'],
-  ['-B1', '6'],
-  ['--block-size=K', '1K'],
-  ['-BKB', '1kB'],
-  ['-BKiB', '1KiB'],
+  ['-B1', '4096'],
+  ['--block-size=K', '4K'],
+  ['-BKB', '5kB'],
+  ['-BKiB', '4KiB'],
   ['-b -k', '1'],
   ['-k -b', '6'],
   ['-k -b -k', '1'],
   ['-bkb', '6'],
-  ['-B1 -h -B1024', '1'],
-  ['-k --human-readable', '6'],
+  ['-B1 -h -B1024', '4'],
+  ['-k --human-readable', '4.0K'],
   ['--summarize --bytes', '6'],
   ['--dereference --no-dereference --bytes', '6'],
 ])('du GNU units and long aliases %s', async (options, expected) => {
@@ -358,16 +390,20 @@ it('du rounds rows after summing', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('mkdir /data/d; printf a > /data/d/a; printf b > /data/d/b')
-    const result = await ws.shell('du --all --total -B4 /data/d')
+    const result = await ws.shell('du --all --total -B4 --apparent-size /data/d')
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('1\t/data/d/a\n1\t/data/d/b\n1\t/data/d\n1\ttotal\n')
+    const blocks = await ws.shell('du --all --total -B4 /data/d')
+    expect(DEC.decode(blocks.stdout)).toBe(
+      '1024\t/data/d/a\n1024\t/data/d/b\n3072\t/data/d\n3072\ttotal\n',
+    )
     for (const [size, count] of [
       [0, 0],
       [1024, 1],
       [1025, 2],
     ] satisfies [number, number][]) {
       await ws.shell(size ? `printf '%${String(size)}s' x > /data/f` : ': > /data/f')
-      const row = await ws.shell('du -k /data/f')
+      const row = await ws.shell('du -k --apparent-size /data/f')
       expect(DEC.decode(row.stdout)).toBe(`${String(count)}\t/data/f\n`)
     }
   } finally {
@@ -385,7 +421,7 @@ it('du orders human units and validates each block size', async () => {
       ['-B0x10', '65'],
       ['-B010', '129'],
     ] satisfies [string, string][]) {
-      const result = await ws.shell(`du ${options} /data/f`)
+      const result = await ws.shell(`du --apparent-size ${options} /data/f`)
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe(`${expected}\t/data/f\n`)
     }
@@ -421,7 +457,7 @@ it.each([
 ])('du large byte totals keep exact units %s', async (unit, expected) => {
   const total = 18014398509481984
   const [size, entries] = backend({ '/dir/f': total })
-  const parsed = parseFlags(ctx({ block_size: unit, all: true, total: true }))
+  const parsed = parseFlags(ctx({ block_size: unit, all: true, total: true, apparent_size: true }))
   if (parsed instanceof IOResult) throw new Error('du refused a block size')
   const out = await du([spec('/dir', 'dir')], parsed, size, entries)
   expect(DEC.decode(out.stdout)).toBe(

@@ -31,7 +31,7 @@
       "command": "du -b /data/a.txt; du --bytes /data/a.txt; du --apparent-size /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n24\t/data/a.txt\n24\t/data/a.txt\n",
+        "stdout": "24\t/data/a.txt\n24\t/data/a.txt\n1\t/data/a.txt\n",
         "stderr": ""
       },
       "flags": [
@@ -110,7 +110,7 @@
       "command": "du -B1 /data/a.txt; du --block-size=10 /data/a.txt; du -BK /data/a.txt; du -BKB /data/a.txt; du -BKiB /data/a.txt; du -m /data/a.txt; du -Bhuman-readable /data/a.txt; du -Bsi /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n3\t/data/a.txt\n1K\t/data/a.txt\n1kB\t/data/a.txt\n1KiB\t/data/a.txt\n1\t/data/a.txt\n24\t/data/a.txt\n24\t/data/a.txt\n",
+        "stdout": "4096\t/data/a.txt\n410\t/data/a.txt\n4K\t/data/a.txt\n5kB\t/data/a.txt\n4KiB\t/data/a.txt\n1\t/data/a.txt\n4.0K\t/data/a.txt\n4.1k\t/data/a.txt\n",
         "stderr": ""
       },
       "flags": [
@@ -147,7 +147,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "du --total -k /data/sub/nested.txt /data/sub/deep/deeper.txt",
+      "command": "du --total -k --apparent-size /data/sub/nested.txt /data/sub/deep/deeper.txt",
       "expect": {
         "exit": 0,
         "stdout": "1\t/data/sub/nested.txt\n1\t/data/sub/deep/deeper.txt\n1\ttotal\n",
@@ -270,7 +270,7 @@
       "command": "du --exclude=x /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n",
+        "stdout": "4\t/data/a.txt\n",
         "stderr": ""
       },
       "flags": [
@@ -347,7 +347,7 @@
       "command": "du -B010 /data/a.txt; du -B0x10 /data/a.txt; du -B0b10 /data/a.txt; du -B0B10K /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "3\t/data/a.txt\n2\t/data/a.txt\n12\t/data/a.txt\n1\t/data/a.txt\n",
+        "stdout": "512\t/data/a.txt\n256\t/data/a.txt\n2048\t/data/a.txt\n2\t/data/a.txt\n",
         "stderr": ""
       },
       "flags": [
@@ -429,6 +429,50 @@
       "flags": [
         "B"
       ]
+    },
+    {
+      "id": "du_counts_disk_blocks_and_a_block_for_each_folder",
+      "seq": 110000208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dub/s && printf x > /data/dub/a && head -c 5000 /dev/zero > /data/dub/s/b && : > /data/dub/e && ln -s a /data/dub/l && cd /data && du dub; du -a dub; du -S dub; du -b dub; du --apparent-size dub; du -h dub; du --inodes dub; rm -r /data/dub",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\tdub/s\n20\tdub\n4\tdub/a\n0\tdub/e\n0\tdub/l\n8\tdub/s/b\n12\tdub/s\n20\tdub\n12\tdub/s\n8\tdub\n5000\tdub/s\n5002\tdub\n5\tdub/s\n5\tdub\n12K\tdub/s\n20K\tdub\n2\tdub/s\n6\tdub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a",
+        "S",
+        "b",
+        "apparent-size",
+        "h",
+        "inodes"
+      ],
+      "note": "By default du counts the 1024-byte blocks each file holds, whole 4 KiB blocks for its bytes and none when empty or a short symlink, and a block for each folder; -b and --apparent-size count bytes and a folder as nothing (debian:stable-slim on ext4)."
     }
   ]
 }

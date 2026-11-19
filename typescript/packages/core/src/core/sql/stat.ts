@@ -14,10 +14,12 @@
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { inodeStat } from './inode.ts'
+import { inodeStat, subdirCounts } from './inode.ts'
 import { found, walk } from './path.ts'
 
 export async function stat(accessor: SqlAccessor, path: PathSpec): Promise<FileStat> {
   const w = await walk(accessor, path)
-  return inodeStat(w.p, found(w, path))
+  const node = found(w, path)
+  const counts = await subdirCounts(accessor, [node])
+  return inodeStat(w.p, node, counts.get(node.ino) ?? 0)
 }

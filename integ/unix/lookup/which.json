@@ -265,11 +265,11 @@
         "ram",
         "opfs"
       ],
-      "note": "Virtual stubs have the same size contract as a regular script; stat and wc agree (GNU pinned on debian:stable-slim).",
-      "command": "stat -c %s /usr/bin/ls; wc -c < /usr/bin/ls; find /usr/bin/ls -size 0c",
+      "note": "Virtual stubs have the same size contract as a regular script; stat and wc agree (GNU pinned on debian:stable-slim). A stub and its folder count links and blocks as a file and a folder on disk do, and every synthetic entry carries a time.",
+      "command": "stat -c %s /usr/bin/ls; wc -c < /usr/bin/ls; find /usr/bin/ls -size 0c; stat -c '%h %b' /usr/bin/ls /usr/bin; for p in /usr/bin/ls /usr/bin /usr /.bash_history; do [ \"$(stat -c %Y $p)\" -gt 0 ] && echo \"$p dated\"; done",
       "expect": {
         "exit": 0,
-        "stdout": "69\n69\n",
+        "stdout": "69\n69\n1 8\n2 8\n/usr/bin/ls dated\n/usr/bin dated\n/usr dated\n/.bash_history dated\n",
         "stderr": ""
       }
     },

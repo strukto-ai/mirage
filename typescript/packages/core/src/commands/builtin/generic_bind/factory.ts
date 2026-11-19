@@ -28,6 +28,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { FactsFn, GenericCommand } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { type Reading, withReading } from './files.ts'
+import { virtualFlags, virtualKey } from '../utils/paths.ts'
 
 function bind(b: GenericCommand, vfs: string | null, stream: Reading['stream']): Command[] {
   // The builder reads its files under the command tier's guards: what it
@@ -44,6 +45,10 @@ function bind(b: GenericCommand, vfs: string | null, stream: Reading['stream']):
     }
     const run: Context = {
       ...ctx,
+      // The builder reaches every path through its files, so each is keyed
+      // by its whole virtual path, as mirage's own commands are handed them,
+      // even where a VFS registers this copy as its own.
+      flags: virtualFlags(ctx.flags),
       // A builder that gives back what it leaves of a shared input cuts it
       // itself, so what it hands back takes the rest of the chunk it stopped
       // in.
@@ -52,7 +57,7 @@ function bind(b: GenericCommand, vfs: string | null, stream: Reading['stream']):
           ? ctx.stdin
           : chunks(ctx.stdin, ctx.signal, reading.split),
     }
-    return b.fn(accessor, paths, texts, withReading(run, reading))
+    return b.fn(accessor, paths.map(virtualKey), texts, withReading(run, reading))
   }
   return command({
     name: b.name,

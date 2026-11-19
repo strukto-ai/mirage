@@ -33,7 +33,7 @@ from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, SetAttrFields
 
 
 async def tar(
@@ -50,8 +50,8 @@ async def tar(
     dispatch = dispatch_of(ctx)
     walk = walk_of(files, dispatch, "tar")
 
-    async def chmod(path: PathSpec, mode: int) -> None:
-        await files.set_attrs(path, {"mode": mode})
+    async def set_attrs(path: PathSpec, fields: SetAttrFields) -> None:
+        await files.set_attrs(path, fields)
 
     if dispatch is not None and not parsed.sources:
         # -t reads and -x writes wherever cwd or -C says, which needs
@@ -70,7 +70,7 @@ async def tar(
             walk,
             relay_is_dir_of(dispatch),
             relay=True,
-            chmod=chmod,
+            set_attrs=set_attrs,
         )
     return await tar_generic(
         parsed,
@@ -81,7 +81,7 @@ async def tar(
         files.stat,
         walk,
         is_dir_of(files),
-        chmod=chmod,
+        set_attrs=set_attrs,
     )
 
 

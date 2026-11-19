@@ -16,7 +16,7 @@ import type { HistoryAccessor } from '../../accessor/history.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import type { PathSpec } from '../../types.ts'
+import type { JsonObject, PathSpec } from '../../types.ts'
 import { renderBashHistory } from './render.ts'
 
 export const VIEW_NAME = '.bash_history'
@@ -32,6 +32,12 @@ export const VIEW_KEYS = ['', VIEW_NAME]
  * session must be the same one, so a concurrent session's commands never
  * show. */
 export async function read(accessor: HistoryAccessor, path: PathSpec): Promise<Uint8Array> {
+  return new TextEncoder().encode(renderBashHistory(await viewEvents(accessor, path)))
+}
+
+/** The command events the histfile shows, filtered as `read` describes.
+ * Mirrors Python's `view_events`. */
+export async function viewEvents(accessor: HistoryAccessor, path: PathSpec): Promise<JsonObject[]> {
   const key = path.mountPath
   if (!VIEW_KEYS.includes(stripSlash(key))) {
     throw enoent(path)
@@ -47,5 +53,5 @@ export async function read(accessor: HistoryAccessor, path: PathSpec): Promise<U
       (e) => live.size === 1 && typeof e.session === 'string' && live.has(e.session),
     )
   }
-  return new TextEncoder().encode(renderBashHistory(events))
+  return events
 }

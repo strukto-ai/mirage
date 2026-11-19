@@ -28,7 +28,7 @@ FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 @pytest.mark.parametrize(
     "attrs,modified,expected",
     [
-        ({}, None, (0o600, None, None, None, None)),
+        ({}, None, (0o600, None, None, None, "made")),
         (
             {
                 "mode": 0o640,
@@ -49,4 +49,7 @@ async def test_fifo_reports_its_stored_attrs(attrs, modified, expected):
         store.modified["/fd/63"] = modified
     s = await stat(RAMAccessor(store), FD)
     assert (s.name, s.type, s.size) == ("63", FileType.FIFO, None)
-    assert (s.mode, s.uid, s.gid, s.atime, s.modified) == expected
+    made = {"made": store.made}
+    assert (s.mode, s.uid, s.gid, s.atime, s.modified) == tuple(
+        made.get(v, v) if isinstance(v, str) else v for v in expected
+    )

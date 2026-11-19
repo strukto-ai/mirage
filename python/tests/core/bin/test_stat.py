@@ -24,6 +24,7 @@ def _accessor() -> BinAccessor:
     return BinAccessor(
         lambda: ["ls"],
         lambda n: "ls is built into mirage." if n == "ls" else None,
+        "2026-11-18T10:00:00Z",
     )
 
 
@@ -39,12 +40,15 @@ async def test_stat_a_program_is_an_executable_file_sized_to_its_stub():
     assert st.type is FileType.FILE
     assert st.mode == 0o755
     assert st.size == len(render_stub("ls", "ls is built into mirage."))
+    assert st.modified == "2026-11-18T10:00:00Z"
+    assert st.nlink == 1
 
 
 @pytest.mark.asyncio
 async def test_stat_the_view_root_is_a_directory_and_a_miss_is_enoent():
-    assert (
-        await stat(_accessor(), _spec("/usr/bin"))
-    ).type is FileType.DIRECTORY
+    root = await stat(_accessor(), _spec("/usr/bin"))
+    assert root.type is FileType.DIRECTORY
+    assert root.modified == "2026-11-18T10:00:00Z"
+    assert root.nlink == 2
     with pytest.raises(FileNotFoundError):
         await stat(_accessor(), _spec("/usr/bin/cd"))

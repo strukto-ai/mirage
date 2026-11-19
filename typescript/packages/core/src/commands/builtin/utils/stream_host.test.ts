@@ -271,6 +271,18 @@ describe('StreamHost', () => {
     await h.close()
   })
 
+  it('reads times on the session wall clock', async () => {
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      env: { TZ: 'Asia/Tokyo' },
+    } as unknown as Context
+    const h = new StreamHost([], () => parts(), ctx)
+    const walls = await h.serve({ op: 'walls', times: [1_000_000_000] }, new Uint8Array())
+    expect(walls.reply).toEqual({ walls: [1_000_032_400] })
+  })
+
   it('stats a time and reaches the mount for a mode or an rmdir', async () => {
     const calls: string[] = []
     const modes = new Map<string, number>()
@@ -284,7 +296,8 @@ describe('StreamHost', () => {
       calls.push(`${op} ${p.virtual}`)
       if (op === 'stat') {
         const modified = '2001-09-09T01:46:40+00:00'
-        return [new FileStat({ name: 'f', type: FileType.FILE, modified }), new IOResult()]
+        const row = new FileStat({ name: 'f', type: FileType.FILE, modified, mode: 0o750 })
+        return [row, new IOResult()]
       }
       if (op === 'setattr') modes.set(p.virtual, kwargs.mode as number)
       return [null, new IOResult()]
@@ -297,12 +310,45 @@ describe('StreamHost', () => {
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     const stat = await h.serve({ op: 'stat', path: '/f' }, new Uint8Array())
-    expect(stat.reply).toEqual({ kind: 'file', mtime: 1_000_000_000 })
+    expect(stat.reply).toEqual({
+      kind: 'file',
+      mode: 0o750,
+      mtime: 1_000_000_000,
+      wall: 1_000_000_000,
+    })
     const chmod = await h.serve({ op: 'chmod', path: '/f', mode: 416 }, new Uint8Array())
     expect(chmod.reply).toEqual({})
     expect(modes.get('/f')).toBe(416)
     expect((await h.serve({ op: 'rmdir', path: '/d' }, new Uint8Array())).reply).toEqual({})
     expect(calls).toContain('rmdir /d')
+    await h.close()
+  })
+
+  it('sets a utime, a local one read in the session zone', async () => {
+    const set: Record<string, unknown>[] = []
+    const dispatch = async (
+      op: string,
+      _p: PathSpec,
+      _args: readonly unknown[] = [],
+      kwargs: Record<string, unknown> = {},
+    ): Promise<[unknown, IOResult]> => {
+      await Promise.resolve()
+      if (op === 'setattr') set.push(kwargs)
+      return [null, new IOResult()]
+    }
+    const ctx = {
+      stdin: null,
+      flags: {},
+      env: { TZ: 'UTC-8' },
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    } as unknown as Context
+    const h = new StreamHost([], () => parts(), ctx)
+    const utc = { op: 'utime', path: '/f', mtime: 0 }
+    expect((await h.serve(utc, new Uint8Array())).reply).toEqual({})
+    expect((await h.serve({ ...utc, local: true }, new Uint8Array())).reply).toEqual({})
+    expect(set.map((f) => f.mtime)).toEqual(['1970-01-01T00:00:00Z', '1969-12-31T16:00:00Z'])
+    expect(set.every((f) => typeof f.atime === 'string')).toBe(true)
     await h.close()
   })
 })

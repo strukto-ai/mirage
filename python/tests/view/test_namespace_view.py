@@ -16,6 +16,7 @@ from mirage.types import FileType, HiddenPaths, Visibility
 from mirage.view.namespace_view import (
     child_mount_names,
     merge_readdir,
+    namespace_folders,
     namespace_listing,
     namespace_names,
     namespace_stat,
@@ -184,3 +185,14 @@ def test_link_names_withhold_a_hidden_links_only_ancestor():
     # the synthesized ancestor with it.
     links = _Links({"/ghost/deep/lk": "/data/x.txt"})
     assert namespace_names(BLIND, [], links, "/") == []
+
+
+def test_namespace_folders_are_the_mounts_and_folders_above_links():
+    links = _Links({"/base/lnk": "/other", "/base/up/deep/l": "/other"})
+    assert namespace_folders(None, PREFIXES, links, "/base") == {
+        "inner",
+        "up",
+    }
+    assert namespace_folders(SCOPED, PREFIXES, None, "/") == {"base"}
+    st = namespace_stat(None, PREFIXES, links, "/base")
+    assert st is not None and st.nlink == 4

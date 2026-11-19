@@ -383,7 +383,7 @@ async def plan_create(
             ):
                 notices.append(f"tar: {name}: {constants.SELF_DUMP}")
                 continue
-            mtime, mode = await recorded_stamp(stat, read)
+            mtime, mode = await recorded_stamp(stat, read or entry.stamped)
             if entry.kind == "link":
                 mtime = link_time(links, entry.name_path)
             members.append(

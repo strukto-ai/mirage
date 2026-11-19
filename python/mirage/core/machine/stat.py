@@ -59,6 +59,8 @@ def row_stat(name: str, row: TreeRow) -> FileStat:
         uid=row.uid,
         gid=row.gid,
         atime=ms_to_rfc3339(row.atime_ms),
+        nlink=row.nlink,
+        blocks=row.blocks,
     )
 
 

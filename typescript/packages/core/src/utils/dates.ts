@@ -94,6 +94,28 @@ export function epochToIso(seconds: number): string {
   return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
 }
 
+/** The wall clock an instant reads in `zone`, counted in seconds as an
+ * epoch is: the time a DOS stamp stores. Mirrors Python's `local_seconds`. */
+export function localSeconds(epoch: number, zone: Zone): number {
+  return epoch + zone.parts(new Date(epoch * 1000)).offsetSec
+}
+
+/** The instant whose wall clock in `zone` reads `seconds`, counted as an
+ * epoch is: a DOS stamp read back. Mirrors Python's `epoch_of_local`. */
+export function epochOfLocal(seconds: number, zone: Zone): number {
+  const wall = new Date(seconds * 1000)
+  const at = zone.fromWall({
+    year: wall.getUTCFullYear(),
+    month: wall.getUTCMonth(),
+    day: wall.getUTCDate(),
+    hour: wall.getUTCHours(),
+    minute: wall.getUTCMinutes(),
+    second: wall.getUTCSeconds(),
+    ms: 0,
+  })
+  return Math.floor(at.getTime() / 1000)
+}
+
 // Inverse of epochToIso; a naive stamp (no Z/offset, e.g. a `touch -t`
 // overlay time) is read as UTC so this matches the Python isoToEpoch. JS
 // interprets an offset-less date-time as local, so append Z when absent.

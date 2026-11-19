@@ -14,7 +14,7 @@
 
 import logging
 import posixpath
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial
 
@@ -218,13 +218,13 @@ def virtual_key(path: PathSpec) -> PathSpec:
     return replace(path, vfs_path=path.virtual.strip("/"))
 
 
-def virtual_flags(flags: dict[str, FlagValue]) -> dict[str, FlagValue]:
+def virtual_flags(flags: Mapping[str, FlagValue]) -> dict[str, FlagValue]:
     """A command's flags with every path value keyed by its whole virtual
     path (``virtual_key``): a single path (awk -f) or a list of them
     (repeated grep -f). Everything else passes through unchanged.
 
     Args:
-        flags (dict[str, FlagValue]): the parsed flags.
+        flags (Mapping[str, FlagValue]): the parsed flags.
     """
     keyed: dict[str, FlagValue] = FlagBag(flags)
     for key, value in keyed.items():

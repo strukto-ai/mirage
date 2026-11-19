@@ -156,7 +156,7 @@ const ACCESS: &[(&[u8], u8)] = &[
 ];
 const TYPES: &[u8] = b"bcdpfls";
 const TIME_LETTERS: &[u8] = b"@+aAbBcCdDeFgGhHIjklmMnpPrRsStTuUVwWxXyYzZ";
-const DIRECTIVES: &[u8] = b"pPfhdsyYuUgGmM";
+const DIRECTIVES: &[u8] = b"pPfhdsyYuUgGmMnbk";
 const PLACEHOLDER: &[u8] = b"{}";
 const MAX_NESTING: usize = 100;
 const POSITIONAL: &str = "under -o, ! or parentheses";
@@ -341,7 +341,7 @@ impl Action {
                 "format": byte_text(format),
                 "parts": parts.iter().map(part_json).collect::<Vec<_>>(),
                 "stat": parts.iter().any(|part| match part {
-                    Part::Dir(code) => b"syYmMuUgG".contains(code),
+                    Part::Dir(code) => b"syYmMuUgGnbk".contains(code),
                     Part::Time(_) => true,
                     Part::Lit(_) => false,
                 }),
@@ -2324,6 +2324,9 @@ mod tests {
             json!(false)
         );
         assert_eq!(read["warnings"], json!([]));
+        let counts = parse(&["-printf", "%n %b %k"]);
+        assert_eq!(counts["actions"][0]["stat"], json!(true));
+        assert_eq!(counts["warnings"], json!([]));
     }
 
     #[test]

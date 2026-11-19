@@ -31,7 +31,7 @@ export function keyStat(accessor: RAMAccessor, key: string): FileStat | null {
     return new FileStat({
       name: gnuBasename(key),
       size: null,
-      modified: accessor.store.modified.get(key) ?? null,
+      modified: accessor.store.modified.get(key) ?? accessor.store.made,
       type: FileType.FIFO,
       mode: attrs.mode ?? FIFO_MODE & 0o7777,
       uid: attrs.uid ?? null,
@@ -45,7 +45,7 @@ export function keyStat(accessor: RAMAccessor, key: string): FileStat | null {
   return new FileStat({
     name: gnuBasename(key),
     size: null,
-    modified: accessor.store.modified.get(key) ?? null,
+    modified: accessor.store.modified.get(key) ?? accessor.store.made,
     type: FileType.CHAR_DEVICE,
     mode: attrs.mode ?? null,
     uid: attrs.uid ?? null,

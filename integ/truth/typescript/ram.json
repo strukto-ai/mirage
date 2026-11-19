@@ -34,9 +34,9 @@
     "=== stat /data/hello.txt ===",
     "  File: /data/hello.txt",
     {
-      "re": "  Size: \\d+ +\\tBlocks: \\? +IO Block: \\? +regular file"
+      "re": "  Size: \\d+ +\\tBlocks: \\d+ +IO Block: 4096 +regular file"
     },
-    "Device: 42358,2210976247\tInode: ?           Links: ?",
+    "Device: 42358,2210976247\tInode: ?           Links: 1",
     {
       "re": "Access: \\(0[0-7]{3}/[-rwxstST]{10}\\)  Uid: \\(.*\\)   Gid: \\(.*\\)"
     },
@@ -107,8 +107,8 @@
     "user.json",
     "",
     "=== du /data/ ===",
-    "24\t/data/reports",
-    "65\t/data/",
+    "8\t/data/reports",
+    "20\t/data/",
     "",
     "=== sed ===",
     "goodbye world",

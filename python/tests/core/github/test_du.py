@@ -79,6 +79,7 @@ async def test_du_sums_the_tree_it_reads_once(
         "du",
         Answers(readdir=_unlisted, stat=_tree_stat, read_tree=read_tree),
         [PathSpec.from_str_path(operand)],
+        bytes=True,
         **flags,
     )
     assert (

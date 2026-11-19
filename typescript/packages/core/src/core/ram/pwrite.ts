@@ -19,7 +19,7 @@ import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 import { activeDevice, activePipe, refuseTty } from '../dev/device.ts'
-import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkWriteTarget, touchParent } from './dest.ts'
 
 /**
  * Write bytes at an offset of one key. A live pipe has no offset: its bytes
@@ -48,6 +48,7 @@ export async function pwrite(
   checkWriteTarget(accessor, path, p)
   const device = activeDevice(accessor, p)
   refuseTty(device, path.virtual)
+  const made = device === null && !accessor.store.files.has(p)
   if (device === null) {
     const size = accessor.store.files.get(p)?.byteLength ?? 0
     if (data.byteLength > 0) {
@@ -56,6 +57,8 @@ export async function pwrite(
     }
     accessor.store.files.splice(p, offset, data)
   }
-  accessor.store.modified.set(p, nowIso())
+  const now = nowIso()
+  accessor.store.modified.set(p, now)
+  if (made) touchParent(accessor.store, p, now)
   record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)
 }

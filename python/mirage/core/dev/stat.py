@@ -37,7 +37,7 @@ def key_stat(accessor: RAMAccessor, p: str) -> FileStat | None:
         return FileStat(
             name=p.rsplit("/", 1)[-1],
             size=None,
-            modified=store.modified.get(p),
+            modified=store.modified.get(p, store.made),
             type=FileType.FIFO,
             mode=FIFO_MODE & 0o7777 if mode is None else mode,
             uid=attrs.get("uid"),
@@ -51,7 +51,7 @@ def key_stat(accessor: RAMAccessor, p: str) -> FileStat | None:
     return FileStat(
         name=p.rsplit("/", 1)[-1],
         size=None,
-        modified=store.modified.get(p),
+        modified=store.modified.get(p, store.made),
         type=FileType.CHAR_DEVICE,
         content=None,
         mode=attrs.get("mode"),

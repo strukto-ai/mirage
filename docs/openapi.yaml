@@ -3027,6 +3027,8 @@ paths:
                       ctime: null
                       birthtime: null
                       dev: 192842459547137
+                      nlink: 1
+                      blocks: null
                 explain:
                   summary: Explain
                   value:
@@ -8672,6 +8674,18 @@ components:
             - type: integer
             - type: 'null'
           description: ID of the mount the path is on.
+        nlink:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          description: Number of names the entry has, `null` when the backend
+            does not count them.
+        blocks:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          description: Space the entry takes, in 512-byte blocks, `null` when the
+            backend does not report it.
       required:
         - name
         - size
@@ -8687,6 +8701,8 @@ components:
         - ctime
         - birthtime
         - dev
+        - nlink
+        - blocks
     SecretPointer:
       type: object
       properties:

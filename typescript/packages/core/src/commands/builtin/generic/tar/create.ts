@@ -294,7 +294,7 @@ export async function planCreate(
         notices.push(`tar: ${name}: ${SELF_DUMP}`)
         continue
       }
-      const [recorded, mode] = await recordedStamp(deps.stat, read)
+      const [recorded, mode] = await recordedStamp(deps.stat, read ?? entry.stamped ?? null)
       const mtime = entry.kind === 'link' ? linkTime(deps.links ?? null, entry.namePath) : recorded
       members.push({
         name,

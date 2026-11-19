@@ -120,7 +120,7 @@
       "command": "du -a /data/rfu",
       "expect": {
         "exit": 1,
-        "stdout": "2\t/data/rfu/a/f\n2\t/data/rfu/a\n0\t/data/rfu/unlistable\n2\t/data/rfu\n",
+        "stdout": "4\t/data/rfu/a/f\n8\t/data/rfu/a\n4\t/data/rfu/unlistable\n16\t/data/rfu\n",
         "stderr": "du: cannot read directory '/data/rfu/unlistable': Permission denied\n"
       },
       "note": "GNU du names the directory it may not open, still prints its row (0 bytes under -ab, since it could count nothing below it), totals the rest and exits 1."
@@ -134,7 +134,7 @@
       "command": "echo before; du -s /data/rfu 2>/dev/null; echo after=$?",
       "expect": {
         "exit": 0,
-        "stdout": "before\n2\t/data/rfu\nafter=1\n",
+        "stdout": "before\n16\t/data/rfu\nafter=1\n",
         "stderr": ""
       }
     },

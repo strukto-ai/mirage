@@ -46,6 +46,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, LsTimeKind, PathSpec, ReaddirFn
 from mirage.utils.key_prefix import under_path
 from mirage.utils.path import CycleError, respell_one
+from mirage.utils.stat_view import BLOCK_UNIT, block_count
 from mirage.view.types import LinkView, MountView
 
 
@@ -89,6 +90,8 @@ class DuTally:
             once a line (an operand already counted prints nothing);
             None under ``-l``, and under ``-L``, which counts by the
             file a link reaches.
+        apparent (bool): a file counts its bytes, where otherwise it
+            counts the blocks it holds.
     """
 
     mounts: MountView | None = None
@@ -100,6 +103,18 @@ class DuTally:
     clock: LsTimeKind | None = None
     times: dict[str, str] = field(default_factory=dict)
     counted: set[str] | None = None
+    apparent: bool = False
+
+    def measure(self, info: FileStat) -> int:
+        """What a file the walk met counts: its bytes for an apparent
+        size, else the blocks it holds, as ``stat %b`` reports them.
+
+        Args:
+            info (FileStat): the file's stat.
+        """
+        if self.apparent:
+            return info.size or 0
+        return (block_count(info) or 0) * BLOCK_UNIT
 
     def repeated(self, path: PathSpec) -> bool:
         """Whether an earlier operand's walk already counted this one.
@@ -291,7 +306,7 @@ async def _du_walk(
         if stamp is not None:
             tally.times[path.virtual] = stamp
     if info.type != FileType.DIRECTORY:
-        size = info.size or 0
+        size = tally.measure(info)
         if entries is not None:
             entries.append(("/" + path.virtual.strip("/"), size))
         return size
@@ -434,7 +449,12 @@ async def du(
         return b"", flags
     fl = FlagView(ctx.flags, spec=SPECS["du"])
     mounts = mounts_of(ctx)
-    tally = DuTally(mounts=mounts, excludes=flags.excludes, clock=flags.time)
+    tally = DuTally(
+        mounts=mounts,
+        excludes=flags.excludes,
+        clock=flags.time,
+        apparent=flags.apparent,
+    )
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
     # Those names would count toward a cut listing the walk then finds

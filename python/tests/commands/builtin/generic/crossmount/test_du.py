@@ -95,10 +95,10 @@ async def _workspace(fn) -> Workspace:
 @pytest.mark.parametrize(
     "line,expected",
     [
-        ("du /a", "5\t/a/d\n1000\t/a/n\n1005\t/a\n"),
-        ("du -s /a", "1005\t/a\n"),
-        ("du -c -d 0 /a /b", "1005\t/a\n2\t/b\n1007\ttotal\n"),
-        ("du -a /a/n /b", "1000\t/a/n/big\n1000\t/a/n\n2\t/b/h\n2\t/b\n"),
+        ("du -b /a", "5\t/a/d\n1000\t/a/n\n1005\t/a\n"),
+        ("du -b -s /a", "1005\t/a\n"),
+        ("du -b -c -d 0 /a /b", "1005\t/a\n2\t/b\n1007\ttotal\n"),
+        ("du -b -a /a/n /b", "1000\t/a/n/big\n1000\t/a/n\n2\t/b/h\n2\t/b\n"),
     ],
 )
 async def test_each_mount_measures_its_own_part(line, expected):
@@ -112,7 +112,7 @@ async def test_each_mount_measures_its_own_part(line, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["du -c /a", "du -c /a/n /b"])
+@pytest.mark.parametrize("line", ["du -b -c /a", "du -b -c /a/n /b"])
 async def test_a_du_without_a_measurement_keeps_the_one_walk(line):
     ws = await _workspace(_unmeasured)
     try:
@@ -138,7 +138,7 @@ async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
     ws = await _workspace(_measured)
     install(ws.mount("/a"), fns)
     try:
-        result = await ws.shell("du -s /a")
+        result = await ws.shell("du -b -s /a")
         assert (await result.materialize_stdout()).decode() == expected
         assert result.exit_code == 1
     finally:
@@ -150,7 +150,7 @@ async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
 async def test_a_mount_under_an_excluded_path_is_not_measured(fn):
     ws = await _workspace(fn)
     try:
-        result = await ws.shell("du --exclude=n /a")
+        result = await ws.shell("du -b --exclude=n /a")
         assert (await result.materialize_stdout()).decode() == (
             "5\t/a/d\n5\t/a\n"
         )
@@ -163,7 +163,7 @@ async def test_a_mount_under_an_excluded_path_is_not_measured(fn):
 async def test_the_one_walk_keeps_the_patterns_read_from_stdin():
     ws = await _workspace(_unmeasured)
     try:
-        result = await ws.shell("printf 'f\\n' | du -c -X - /a")
+        result = await ws.shell("printf 'f\\n' | du -b -c -X - /a")
         rows = (await result.materialize_stdout()).decode()
         assert "777" not in rows
         assert "0\t/a/d\n" in rows
@@ -176,7 +176,9 @@ async def test_the_one_walk_keeps_the_patterns_read_from_stdin():
 async def test_time_style_reaches_a_line_across_mounts():
     ws = await _workspace(_measured)
     try:
-        result = await ws.shell("export TIME_STYLE=+%Y; du --time -s /a/d /b")
+        result = await ws.shell(
+            "export TIME_STYLE=+%Y; du -b --time -s /a/d /b"
+        )
         rows = (await result.materialize_stdout()).decode().splitlines()
         assert [row.split("\t")[::2] for row in rows] == [
             ["5", "/a/d"],

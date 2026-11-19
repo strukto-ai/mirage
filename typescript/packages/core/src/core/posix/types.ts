@@ -38,6 +38,10 @@ export interface TreeRow {
   readonly uid: number
   /** The group's gid. */
   readonly gid: number
+  /** The link count. */
+  readonly nlink: number
+  /** The 512-byte blocks it takes. */
+  readonly blocks: number
   /** The path under the listed scope, empty for the scope. */
   readonly rel: string
 }

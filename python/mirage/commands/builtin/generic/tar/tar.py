@@ -43,6 +43,7 @@ from mirage.types import (
     LineFacts,
     PathSpec,
     ReadStreamFn,
+    SetAttrFields,
     StatFn,
 )
 from mirage.utils.dates import parse_date_expr_async, stat_epoch
@@ -72,6 +73,7 @@ class TarFlags:
     auto_compress: bool = False
     absolute: bool = False
     preserve: bool = False
+    touch: bool = False
     numeric: bool = False
     mtime: str | None = None
     files_from: tuple[PathSpec, ...] = ()
@@ -204,6 +206,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
         auto_compress=fl.as_bool("auto_compress"),
         absolute=fl.as_bool("absolute_names"),
         preserve=fl.as_bool("preserve_permissions"),
+        touch=fl.as_bool("touch"),
         numeric=fl.as_bool("numeric_owner"),
         mtime=fl.as_str("mtime"),
         files_from=tuple(fl.as_paths("files_from")),
@@ -413,7 +416,8 @@ async def tar(
     links: LinkView | None = None,
     mounts: MountView | None = None,
     relay: bool = False,
-    chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
+    set_attrs: Callable[[PathSpec, SetAttrFields], Awaitable[None]]
+    | None = None,
     zone: tzinfo = timezone.utc,
     umask: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -440,8 +444,9 @@ async def tar(
         links (LinkView | None): the namespace's symlink facts.
         mounts (MountView | None): where the mount boundaries are.
         relay (bool): the reads route by full virtual path.
-        chmod (Callable[[PathSpec, int], Awaitable[None]] | None): sets
-            the mode ``-p`` restores, or ``-x`` gives under ``umask``.
+        set_attrs (Callable[[PathSpec, SetAttrFields], Awaitable[None]]
+            | None): sets the mode ``-p`` restores, or ``-x`` gives under
+            ``umask``, and each member's time.
         zone (tzinfo): the zone ``--mtime`` is read in.
         umask (int | None): the session's file creation mask: without
             ``-p`` an extracted entry takes its member's permission bits
@@ -607,7 +612,8 @@ async def tar(
             "wildcards": flags.wildcards,
             "unanchored": flags.unanchored,
             "preserve": flags.preserve,
-            "umask": umask if chmod is not None else None,
+            "umask": umask if set_attrs is not None else None,
+            "touch": flags.touch,
             "to_stdout": flags.to_stdout,
             "base": byte_view(extract_dest(dest, cwd).rstrip("/")),
             "refusal": [byte_view(line) for line in refusal],
@@ -619,7 +625,7 @@ async def tar(
             dispatch,
             cwd,
             dash=False,
-            chmod=chmod,
+            set_attrs=set_attrs,
             links=links,
         )
     io = IOResult()
@@ -646,7 +652,8 @@ async def tar_generic(
     walk: WalkFn,
     is_dir: DirProbe,
     relay: bool = False,
-    chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
+    set_attrs: Callable[[PathSpec, SetAttrFields], Awaitable[None]]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     return await tar(
         paths,
@@ -662,7 +669,7 @@ async def tar_generic(
         links=links_of(ctx),
         mounts=mount_view(ctx.vfs),
         relay=relay,
-        chmod=chmod,
+        set_attrs=set_attrs,
         zone=zone_from_env(ctx.env),
         umask=session_umask(
             ctx.session.access() if ctx.session is not None else None

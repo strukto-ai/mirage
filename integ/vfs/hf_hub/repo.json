@@ -65,7 +65,7 @@
       "seq": 960009,
       "targets": ["hf-hub"],
       "command": "du -s /repo/sub",
-      "expect": { "exit": 0, "stdout": "20\t/repo/sub\n", "stderr": "" }
+      "expect": { "exit": 0, "stdout": "16\t/repo/sub\n", "stderr": "" }
     },
     {
       "id": "hf_hub_grep_r_scans_the_tree",

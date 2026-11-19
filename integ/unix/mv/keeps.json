@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "id": "mv_across_mounts_keeps_mode_and_times",
+      "seq": 110000205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "printf z > /data/mvkeep.txt && chmod 600 /data/mvkeep.txt && touch -d '2020-01-02 03:04:05' /data/mvkeep.txt && mv /data/mvkeep.txt /data2/mvkeep.txt && stat -c '%a %y %n' /data2/mvkeep.txt; mkdir -p /data/mvkeep/s && printf w > /data/mvkeep/s/f && chmod 700 /data/mvkeep/s && touch -d '2020-01-02 03:04:05' /data/mvkeep/s/f /data/mvkeep/s /data/mvkeep && mv /data/mvkeep /data2/mvkeep && stat -c '%a %y %n' /data2/mvkeep /data2/mvkeep/s /data2/mvkeep/s/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "600 2020-01-02 03:04:05.000000000 +0000 /data2/mvkeep.txt\n755 2020-01-02 03:04:05.000000000 +0000 /data2/mvkeep\n700 2020-01-02 03:04:05.000000000 +0000 /data2/mvkeep/s\n644 2020-01-02 03:04:05.000000000 +0000 /data2/mvkeep/s/f\n",
+        "stderr": ""
+      },
+      "flags": [],
+      "note": "Across mounts mv copies and removes, and keeps each entry's mode and times as a rename would."
+    }
+  ]
+}

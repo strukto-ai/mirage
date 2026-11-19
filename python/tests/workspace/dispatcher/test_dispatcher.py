@@ -899,8 +899,9 @@ async def test_a_link_made_under_a_linked_directory_lands_in_its_target():
 async def test_a_link_in_a_listed_directory_costs_only_the_occupancy_probes():
     # The parent check rides on the probes the occupancy check already
     # makes: a parent whose listing answered with entries is a directory,
-    # so a link made there asks the backend nothing more. The walk is for
-    # an empty or silent parent, which is the refusal path nearly always.
+    # so a link made there asks the backend nothing more; the one other
+    # call dates the folder the new name lands in. The walk is for an
+    # empty or silent parent, which is the refusal path nearly always.
     with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("mkdir /ram/d; echo hi > /ram/d/a.txt")
         mount = ws.namespace.mount_for("/ram/d")
@@ -915,7 +916,11 @@ async def test_a_link_in_a_listed_directory_costs_only_the_occupancy_probes():
         await ws.dispatch(
             "symlink", PathSpec.from_str_path("/ram/d/x"), target="t"
         )
-        assert seen == [("stat", "/ram/d/x"), ("readdir", "/ram/d")]
+        assert seen == [
+            ("stat", "/ram/d/x"),
+            ("readdir", "/ram/d"),
+            ("setattr", "/ram/d"),
+        ]
 
 
 @pytest.mark.asyncio
@@ -3042,7 +3047,11 @@ async def test_a_search_past_the_walk_limit_stops_there(cls):
             "/ram/d\n|-- a0.txt\n`-- a1.txt\n\n1 directory, 2 files\n",
             2,
         ),
-        ("du -a /ram/d", "2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n", 1),
+        (
+            "du -a /ram/d",
+            "4\t/ram/d/a0.txt\n4\t/ram/d/a1.txt\n12\t/ram/d\n",
+            1,
+        ),
     ],
 )
 async def test_a_listing_past_the_walk_limit_stops_there(cls, line, out, code):
@@ -4311,5 +4320,52 @@ async def test_a_write_through_a_link_is_waited_out_where_it_lands():
         await ws.vfs.write("/alias", b"x")
         await ws.registry.changes.wait_out({"/data": 0.0}, "box")
         assert clock.monotonic() == 2.0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_point_is_one_folder_of_the_directory_it_sits_in():
+    outer = RAMVFS()
+    outer.load_state({"files": {}, "dirs": ["/", "/held", "/s"]})
+    ws = Workspace(
+        {
+            "/d": outer,
+            "/d/m": RAMVFS(),
+            "/d/held": RAMVFS(),
+            "/d/x/y": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    )
+    try:
+        result = await ws.shell(
+            "stat -c '%h %n' /d /d/x /d/m;"
+            " find /d -maxdepth 1 -type d -printf '%n %p\\n'"
+        )
+        assert await result.stdout_str() == (
+            "6 /d\n3 /d/x\n2 /d/m\n6 /d\n2 /d/held\n2 /d/m\n2 /d/s\n3 /d/x\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_link_made_removed_or_renamed_moves_its_folders_time():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    old = "touch -d '2000-01-01 00:00:00' /d/f; "
+    year = "stat -c '%y' /d/f | cut -c1-4"
+    try:
+        await ws.shell("mkdir /d/f")
+        out = []
+        for change in (
+            "ln -s /x /d/f/l",
+            "rm /d/f/l",
+            "ln -s /x /d/f/m && touch -d '2000-01-01 00:00:00' /d/f"
+            " && mv /d/f/m /d/f/n",
+        ):
+            result = await ws.shell(f"{old}{change} && {year}")
+            out.append(await result.stdout_str())
+        assert len(out) == 3 and all(out)
+        assert "2000\n" not in out
     finally:
         await ws.close()

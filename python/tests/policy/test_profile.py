@@ -1310,7 +1310,7 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
         )
         assert await _line(ws, "du -x -a /a/b") == (
             0,
-            "2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n",
+            "4\t/a/b/f\n4\t/a/b/m\n12\t/a/b\n",
             "",
         )
         # Nor does one naming the directory by an attached -t, one whose
@@ -2185,9 +2185,10 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         )
         code, out, err = await _line(ws, "du -a /data/t", "g")
         assert code == 1
-        assert "2\t/data/t/locked/y\n" in out
-        # GNU still prints the row of a directory it may not open, at 0.
-        assert "0\t/data/t/sealed\n" in out and "/data/t/sealed/" not in out
+        assert "4\t/data/t/locked/y\n" in out
+        # GNU still prints the row of a directory it may not open, at the
+        # block it holds of its own.
+        assert "4\t/data/t/sealed\n" in out and "/data/t/sealed/" not in out
         assert err == (
             "du: cannot read directory '/data/t/sealed': Permission denied\n"
             "policy denied: sealed\n"

@@ -229,7 +229,7 @@ class TestStatShape:
         st = patched.stat("/data/dir/a.txt")
         assert st.st_mtime_ns == int(st.st_mtime * 1_000_000_000)
         assert st.st_blksize == 4096
-        assert st.st_blocks == 1
+        assert st.st_blocks == 8
         for field in ("st_flags", "st_gen", "st_birthtime"):
             if hasattr(os.stat("/tmp"), field):
                 assert getattr(st, field) is not None, field

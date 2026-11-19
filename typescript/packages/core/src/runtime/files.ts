@@ -17,6 +17,7 @@ import { classify } from '../errors/index.ts'
 import { ebadf, einval, eloop, exdev, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
+  blockCount,
   contentSize,
   DIR_MODE,
   deviceRdev,
@@ -74,6 +75,7 @@ function listed(raw: string, links: ReadonlySet<string>): VFSEntry {
 function statRow(st: FileStat): VFSStat {
   const mtime = mtimeMs(st)
   const atime = atimeMs(st)
+  const blocks = blockCount(st)
   return {
     size: contentSize(st),
     isDir: isDir(st),
@@ -84,6 +86,8 @@ function statRow(st: FileStat): VFSStat {
     ...(atime !== null ? { atimeMs: atime } : {}),
     ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
     ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
+    ...(st.nlink !== null ? { nlink: st.nlink } : {}),
+    ...(blocks !== null ? { blocks } : {}),
     source: st,
   }
 }

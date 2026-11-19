@@ -43,6 +43,8 @@ export async function runTar(
   // The symlinks and mount boundaries the create scan merges into each walk.
   vfs?: Files,
   stdin: ByteSource | null = null,
+  // The session's environment, whose TZ --mtime is read in.
+  env?: Record<string, string>,
 ): Promise<CrossResult> {
   const links = linkView(vfs)
   const tree =
@@ -67,6 +69,7 @@ export async function runTar(
       cwd: PathSpec.fromStrPath(cwd),
       stdin,
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
+      ...(env !== undefined ? { env } : {}),
     },
     {
       stream: fileStreamOp(dispatch),

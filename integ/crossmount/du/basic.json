@@ -31,7 +31,7 @@
       "command": "du /data/b.txt /data2/xm.txt",
       "expect": {
         "exit": 0,
-        "stdout": "6\t/data/b.txt\n6\t/data2/xm.txt\n",
+        "stdout": "4\t/data/b.txt\n4\t/data2/xm.txt\n",
         "stderr": ""
       }
     }

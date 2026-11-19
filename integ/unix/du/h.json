@@ -31,7 +31,7 @@
       "command": "du -h /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\t/data/a.txt\n",
+        "stdout": "4.0K\t/data/a.txt\n",
         "stderr": ""
       },
       "flags": [

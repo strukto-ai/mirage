@@ -192,6 +192,16 @@ export function clearUnder(ino: number): string[] {
   ]
 }
 
+/** How many folders sit directly in each of a batch of folders, one row per
+ * folder that holds any. */
+export function subdirsOf(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT d.parent_ino, COUNT(*) AS subdirs
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN (${slots}) AND i.mode = ${String(DIR)}
+    GROUP BY d.parent_ino`
+}
+
 /** Direct children of a bounded batch of parents, with their inode rows. */
 export function childrenOf(count: number): string {
   const slots = Array<string>(count).fill('?').join(', ')

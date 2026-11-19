@@ -31,7 +31,7 @@
       "command": "du -S /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/sub/deep\n15\t/data/sub\n",
+        "stdout": "8\t/data/sub/deep\n8\t/data/sub\n",
         "stderr": ""
       },
       "flags": [
@@ -69,7 +69,7 @@
       "command": "du --separate-dirs /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/sub/deep\n15\t/data/sub\n",
+        "stdout": "8\t/data/sub/deep\n8\t/data/sub\n",
         "stderr": ""
       },
       "flags": [
@@ -107,7 +107,7 @@
       "command": "du -Ss /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "15\t/data/sub\n",
+        "stdout": "8\t/data/sub\n",
         "stderr": ""
       },
       "flags": [
@@ -145,7 +145,7 @@
       "command": "du -Sa /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n15\t/data/sub\n",
+        "stdout": "4\t/data/sub/deep/deeper.txt\n8\t/data/sub/deep\n4\t/data/sub/nested.txt\n8\t/data/sub\n",
         "stderr": ""
       },
       "flags": [
@@ -183,7 +183,7 @@
       "command": "mkdir -p /data/dusd/sub/deep && printf 'deep\\n' > /data/dusd/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dusd/sub/nested.txt && du -Sc /data/dusd/sub; du -Ssc /data/dusd/sub; du -Sc /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/dusd/sub/deep\n15\t/data/dusd/sub\n20\ttotal\n15\t/data/dusd/sub\n20\ttotal\n24\t/data/a.txt\n24\ttotal\n",
+        "stdout": "8\t/data/dusd/sub/deep\n8\t/data/dusd/sub\n16\ttotal\n8\t/data/dusd/sub\n16\ttotal\n4\t/data/a.txt\n4\ttotal\n",
         "stderr": ""
       },
       "flags": [
@@ -192,7 +192,7 @@
       ]
     },
     {
-      "id": "du_S_prints_a_directory_of_directories_at_zero",
+      "id": "du_S_prints_a_directory_of_directories_at_its_own_block",
       "seq": 15800004,
       "targets": [
         "ram",
@@ -222,7 +222,7 @@
       "command": "mkdir -p /data/crS/a/b && echo x > /data/crS/a/b/f && du -S /data/crS; du -Sa /data/crS",
       "expect": {
         "exit": 0,
-        "stdout": "2\t/data/crS/a/b\n0\t/data/crS/a\n0\t/data/crS\n2\t/data/crS/a/b/f\n2\t/data/crS/a/b\n0\t/data/crS/a\n0\t/data/crS\n",
+        "stdout": "8\t/data/crS/a/b\n4\t/data/crS/a\n4\t/data/crS\n4\t/data/crS/a/b/f\n8\t/data/crS/a/b\n4\t/data/crS/a\n4\t/data/crS\n",
         "stderr": ""
       },
       "flags": [

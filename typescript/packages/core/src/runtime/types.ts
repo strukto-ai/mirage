@@ -347,6 +347,10 @@ export interface VFSStat {
   // Numeric owner and group, absent when unknown or stored as a name.
   uid?: number
   gid?: number
+  // The link count, absent when the backend counts none.
+  nlink?: number
+  // The 512-byte blocks the entry takes.
+  blocks?: number
   /** Original row, preserving unknown size and backend metadata for retained stats. */
   source?: FileStat
   /** The path the row's file has once the links are followed, which names

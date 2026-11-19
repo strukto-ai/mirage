@@ -76,7 +76,8 @@ import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import { classify } from '../../../errors/classify.ts'
-import { sessionUmask } from '../../../context/session_context.ts'
+import { DEFAULT_UMASK, sessionUmask } from '../../../context/session_context.ts'
+import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE } from '../../../utils/mode.ts'
 
 const ENC = new TextEncoder()
 
@@ -203,29 +204,80 @@ export interface TransferPolicy {
  * since it is no failure. Mirrors Python's prompter.
  */
 /**
- * What -p, -a and --preserve carry from a source to its copy, set through the
- * dispatcher from the source's stat. A file's attributes are set once its copy
+ * What a copy carries from its source, set through the dispatcher from the
+ * source's stat: what -p, -a and --preserve keep and, where no mode is kept,
+ * the mode a new copy is made with. A file's attributes are set once its copy
  * is made. A directory's wait for the end of the line and go the deepest
  * first, so the copies made into it do not move its times again, set on the
  * way out of the directory. A field the source does not report is
  * left as the copy has it, and one the destination refuses is left too.
- * Mirrors Python's `Keeper`.
+ * Without a kept mode, a file or directory the copy makes takes the source's
+ * permission bits under the umask, as open and mkdir make it, and one that
+ * stood there keeps its own; only a mode that differs from what a new one
+ * shows costs a call. Mirrors Python's `Keeper`.
  */
 export class Keeper {
   // Each directory made or merged into and its source, in the order met.
   readonly dirs: [PathSpec, PathSpec][] = []
+  // The mode each new copy is owed, by its path.
+  readonly fresh = new Map<string, number>()
 
   // `keep`: mode, ownership, timestamps and xattr, those asked for; `stat`,
-  // the sources' stat; `dispatch`, which sets the attributes.
+  // the sources' stat; `dispatch`, which sets the attributes; `umask`, the
+  // creation mask a new copy's mode is under, null to leave every new copy
+  // as its store makes it.
   constructor(
     readonly keep: ReadonlySet<string>,
     readonly stat: StatFn,
     readonly dispatch: DispatchFn,
+    readonly umask: number | null = null,
   ) {}
 
-  /** Set a copy's kept attributes from its source. */
-  async copied(src: PathSpec, dst: PathSpec): Promise<void> {
+  /**
+   * Whether a copy must go entry by entry: for what this keeps, or for a
+   * umask other than the default, which a store's one-call tree copy, made
+   * under its own, would not apply.
+   */
+  get perEntry(): boolean {
+    return this.keep.size > 0 || (this.umask !== null && this.umask !== DEFAULT_UMASK)
+  }
+
+  /** Note the mode a copy about to be made is owed: its source's under the
+   * umask, where that is not what a new one shows and nothing stands at the
+   * destination yet; `made` says the copy is a directory known to be new. */
+  async prepare(src: PathSpec, dst: PathSpec, made = false): Promise<void> {
+    if (this.umask === null || this.keep.has('mode')) return
+    let mode: number
     try {
+      const info = await this.stat(src)
+      if (info.mode === null) return
+      mode = info.mode & 0o777 & ~this.umask
+      const shown = info.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE
+      if (mode === shown || (!made && (await pathExists(this.stat, dst)))) return
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`cp: mode of ${src.virtual} not read: ${String(err)}`)
+      return
+    }
+    this.fresh.set(dst.virtual, mode)
+  }
+
+  /** Note a directory the copy made, whose attributes are set on the way out
+   * of it. */
+  async madeDir(src: PathSpec, dst: PathSpec): Promise<void> {
+    await this.prepare(src, dst, true)
+    this.dirs.push([src, dst])
+  }
+
+  /** Set a copy's kept attributes from its source, or the mode a new one is
+   * owed. */
+  async copied(src: PathSpec, dst: PathSpec): Promise<void> {
+    const owed = this.fresh.get(dst.virtual)
+    this.fresh.delete(dst.virtual)
+    if (this.keep.size === 0 && owed === undefined) return
+    try {
+      if (owed !== undefined) await this.dispatch('setattr', dst, [], { mode: owed })
+      if (this.keep.size === 0) return
       const info = await this.stat(src)
       const fields: Record<string, unknown> = {}
       if (this.keep.has('mode') && info.mode !== null) fields.mode = info.mode & 0o7777
@@ -285,21 +337,16 @@ async function madeEmpty(stat: StatFn, dispatch: DispatchFn, dst: PathSpec): Pro
   return true
 }
 
-// A copy under --attributes-only: a file it makes takes the source's mode
-// under the umask, as any new copy does, set only where that differs from a
-// new file's own. Mirrors Python's `_empty_copy`.
+// A copy under --attributes-only, which makes an empty file where none
+// stands; its mode is the keeper's, as any new copy's is. Mirrors Python's
+// `_empty_copy`.
 async function emptyCopy(
   stat: StatFn,
   dispatch: DispatchFn,
-  umask: number,
-  src: PathSpec,
+  _src: PathSpec,
   dst: PathSpec,
 ): Promise<void> {
-  if (!(await madeEmpty(stat, dispatch, dst))) return
-  const info = await stat(src)
-  if (info.mode === null) return
-  const mode = info.mode & 0o777 & ~umask
-  if (mode !== (0o666 & ~umask)) await dispatch('setattr', dst, [], { mode })
+  await madeEmpty(stat, dispatch, dst)
 }
 
 // A primitive write under --attributes-only.
@@ -318,22 +365,18 @@ export function attributesOnly(
   strategy: PrimitiveCopy,
   stat: StatFn,
   dispatch: DispatchFn,
-  umask: number,
 ): PrimitiveCopy
 export function attributesOnly(
   strategy: CopyStrategy,
   stat: StatFn,
   dispatch: DispatchFn,
-  umask: number,
 ): CopyStrategy
 export function attributesOnly(
   strategy: CopyStrategy,
   stat: StatFn,
   dispatch: DispatchFn,
-  umask: number,
 ): CopyStrategy {
-  const copy = (src: PathSpec, dst: PathSpec): Promise<void> =>
-    emptyCopy(stat, dispatch, umask, src, dst)
+  const copy = (src: PathSpec, dst: PathSpec): Promise<void> => emptyCopy(stat, dispatch, src, dst)
   if (isPrimitiveCopy(strategy)) {
     return {
       read: nothing,
@@ -402,7 +445,7 @@ export async function madeParents(
       return false
     }
     lines?.push(`${typed} -> ${named}`)
-    keeper?.dirs.push([respelled(PathSpec.fromStrPath(resolvePath(typed, cwd)), typed), made])
+    await keeper?.madeDir(respelled(PathSpec.fromStrPath(resolvePath(typed, cwd)), typed), made)
   }
   return true
 }
@@ -911,6 +954,7 @@ export async function copyTreeLinks(
   seen: readonly string[] = [],
   blocked: readonly string[] = [],
   refuseLink: ((src: PathSpec, dst: PathSpec) => Promise<boolean>) | null = null,
+  keeper: Keeper | null = null,
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
   const dstBase = rstripSlash(target.virtual)
@@ -968,7 +1012,7 @@ export async function copyTreeLinks(
         placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
-        { policy, lines, copies, ...(aside === null ? {} : { aside }), refuseLink },
+        { policy, lines, copies, ...(aside === null ? {} : { aside }), refuseLink, keeper },
       )
       continue
     }
@@ -1002,6 +1046,7 @@ export async function copyTreeLinks(
         blocked: roots,
         ...(aside === null ? {} : { aside }),
         refuseLink,
+        keeper,
       },
     )
     await copyTreeLinks(
@@ -1015,6 +1060,7 @@ export async function copyTreeLinks(
       [...seen, base],
       roots,
       refuseLink,
+      keeper,
     )
   }
 }
@@ -1678,7 +1724,7 @@ async function mirrorDirs(
       ) {
         await strategy.mkdir(entryDst)
         made.add(dstMount)
-        keeper?.dirs.push([entry, entryDst])
+        await keeper?.madeDir(entry, entryDst)
         if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
         continue
       }
@@ -1822,7 +1868,7 @@ export async function copyEntries(
         if (free) {
           await strategy.mkdir(entryDstSpec)
           made.add(entryDstSpec.virtual)
-          opts.keeper?.dirs.push([entrySpec, entryDstSpec])
+          await opts.keeper?.madeDir(entrySpec, entryDstSpec)
           opts.lines?.push(
             cmdName === 'mv'
               ? `created directory '${entryDstSpec.rawPath}'`
@@ -1916,6 +1962,7 @@ export async function copyEntries(
       continue
     }
     opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
+    await opts.keeper?.prepare(entrySpec, entryDstSpec)
     if (!(await transferFile(strategy, entrySpec, entryDstSpec, cmdName, errors))) {
       copiedAll = false
       continue
@@ -2021,8 +2068,8 @@ export async function cpGeneric(
   // The command's dispatcher, which lets a source's mount refuse a tree
   // copied file by file; undefined outside a workspace.
   dispatch?: DispatchFn,
-  // The session's creation mask, which a file --attributes-only makes is
-  // under; the live sessions' when undefined.
+  // The session's creation mask, which a new copy's mode is under; the live
+  // session's when undefined.
   umask?: number,
   // The working directory a typed --parents prefix resolves against.
   cwd = '/',
@@ -2072,16 +2119,16 @@ export async function cpGeneric(
       ['mode', 'ownership', 'timestamps', 'xattr'].includes(word),
     ),
   )
-  const keeper = kept.size > 0 && dispatch !== undefined ? new Keeper(kept, stat, dispatch) : null
+  const keeper =
+    dispatch !== undefined ? new Keeper(kept, stat, dispatch, umask ?? sessionUmask()) : null
   if (flags.attributesOnly && dispatch !== undefined) {
-    const mask = umask ?? sessionUmask()
-    strategy = attributesOnly(strategy, stat, dispatch, mask)
+    strategy = attributesOnly(strategy, stat, dispatch)
     // What the relay copies where a link leads off the copy's mount moves no
     // bytes either; a backup still copies them.
     if (copies !== undefined) {
       copies = {
         ...copies,
-        content: attributesOnly(copies.relay, copies.relayStat, dispatch, mask),
+        content: attributesOnly(copies.relay, copies.relayStat, dispatch),
       }
     }
   }
@@ -2111,7 +2158,7 @@ export async function cpGeneric(
     flags.interactive ||
     updateGates(flags.update) ||
     backupDisplaces(flags.backup) ||
-    keeper !== null ||
+    keeper?.perEntry === true ||
     unlink !== null
   const lines: string[] = []
   const refuseLink =
@@ -2391,6 +2438,7 @@ export async function cpGeneric(
             [],
             leftOut,
             refuseLink,
+            keeper,
           )
         }
         continue
@@ -2432,6 +2480,7 @@ export async function cpGeneric(
               [],
               [],
               refuseLink,
+              keeper,
             )
           }
           continue
@@ -2499,6 +2548,7 @@ export async function cpGeneric(
           continue
         }
         if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
+        await keeper?.prepare(entry, entryDst)
         try {
           await copyEntry(strategy, copies, entry, entryDst)
         } catch (err) {
@@ -2521,6 +2571,7 @@ export async function cpGeneric(
           [],
           mirrored.blocked.map((root) => PathSpec.fromStrPath(root).virtual),
           refuseLink,
+          keeper,
         )
       }
       continue
@@ -2567,6 +2618,7 @@ export async function cpGeneric(
       continue
     }
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
+    await keeper?.prepare(src, target)
     if (isPrimitiveCopy(copier)) {
       if (!(await transferFile(copier, src, target, 'cp', errors))) continue
     } else {

@@ -126,9 +126,9 @@ describe('find action layer', () => {
     it("renders find's own layout per match", async () => {
       // GNU findutils 4.10 `-ls` is not `ls -l`: inode and 1K blocks
       // lead, and every column has a fixed width (inode 9, blocks 6,
-      // links 3, owner and group 8 left-aligned, size 8). A VFS has
-      // neither an inode nor a block allocation, so those two columns
-      // carry `?`, the answer `stat %i` and `%b` already give.
+      // links 3, owner and group 8 left-aligned, size 8). A VFS has no
+      // inode, so that column carries `?`, the answer `stat %i` gives; the
+      // blocks are what ext4 allocates for the size, as `%k` says.
       const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -ls", { sessionId: 's' })
@@ -136,7 +136,7 @@ describe('find action layer', () => {
       expect(lines.length).toBeGreaterThanOrEqual(2)
       for (const line of lines) {
         expect(line).toMatch(
-          /^ {8}\? {6}\? -rw-r--r-- {3}1 root {5}root {5} {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \/.*\.html$/,
+          /^ {8}\? {6}\d -rw-r--r-- {3}1 root {5}root {5} {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \/.*\.html$/,
         )
       }
     })

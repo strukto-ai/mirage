@@ -28,10 +28,13 @@ pub(crate) struct Host {
     pub(crate) directories: Vec<String>,
     /// The permission bits a `chmod` request set.
     pub(crate) modes: HashMap<String, u32>,
-    /// The modification times a `stat` request reports, in seconds.
+    /// The modification times a `stat` request reports and a `utime`
+    /// request sets, in seconds.
     pub(crate) mtimes: HashMap<String, i64>,
     /// Links by name and what each holds, which reads and writes follow.
     pub(crate) links: HashMap<String, String>,
+    /// How far the session's wall clock runs ahead of UTC, in seconds.
+    pub(crate) offset: i64,
     /// Standard input, and once a run ends what it left unread.
     pub(crate) stdin: Vec<u8>,
     stdin_fd: Option<u64>,
@@ -310,6 +313,7 @@ impl Host {
                 };
                 if let Some(mtime) = self.mtimes.get(&path) {
                     kind["mtime"] = json!(mtime);
+                    kind["wall"] = json!(mtime + self.offset);
                 }
                 (kind, Vec::new())
             }
@@ -334,6 +338,15 @@ impl Host {
                 self.modes.insert(path, mode);
                 (json!({}), Vec::new())
             }
+            "utime" => {
+                let path = text(&request["path"]);
+                if !self.files.contains_key(&path) && !self.directories.contains(&path) {
+                    return (failure("ENOENT", "No such file or directory"), Vec::new());
+                }
+                let mtime = request["mtime"].as_i64().unwrap_or_default();
+                self.mtimes.insert(path, mtime);
+                (json!({}), Vec::new())
+            }
             "unlink" => {
                 let path = text(&request["path"]);
                 if self.links.remove(&path).is_some() || self.files.remove(&path).is_some() {
@@ -348,7 +361,11 @@ impl Host {
                 }
                 if let Some(target) = self.links.get(&path) {
                     let mtime = self.mtimes.get(&path);
-                    return (json!({"target": target, "mtime": mtime}), Vec::new());
+                    let wall = mtime.map(|mtime| mtime + self.offset);
+                    return (
+                        json!({"target": target, "mtime": mtime, "wall": wall}),
+                        Vec::new(),
+                    );
                 }
                 if self.files.contains_key(&path) || self.directories.contains(&path) {
                     return (json!({}), Vec::new());
@@ -466,6 +483,14 @@ impl Host {
                 (json!({"status": status}), Vec::new())
             }
             "clock" => (json!({}), b"[1795147261,0]".to_vec()),
+            "walls" => {
+                let times = request["times"].as_array().cloned().unwrap_or_default();
+                let walls: Vec<i64> = times
+                    .iter()
+                    .map(|at| at.as_i64().unwrap_or_default() + self.offset)
+                    .collect();
+                (json!({"walls": walls}), Vec::new())
+            }
             op => panic!("unknown request {op}"),
         }
     }

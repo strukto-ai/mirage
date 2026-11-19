@@ -24,7 +24,22 @@ const PROGRAM_MODE = 0o755
 /** Stat the view root, or one program's file sized to its stub. */
 export async function stat(accessor: BinAccessor, path: PathSpec): Promise<FileStat> {
   const key = stripSlash(path.mountPath)
-  if (key === '') return new FileStat({ name: 'bin', type: FileType.DIRECTORY, mode: PROGRAM_MODE })
+  if (key === '') {
+    return new FileStat({
+      name: 'bin',
+      type: FileType.DIRECTORY,
+      mode: PROGRAM_MODE,
+      modified: accessor.made,
+      nlink: 2,
+    })
+  }
   const data = await read(accessor, path)
-  return new FileStat({ name: key, size: data.byteLength, type: FileType.FILE, mode: PROGRAM_MODE })
+  return new FileStat({
+    name: key,
+    size: data.byteLength,
+    type: FileType.FILE,
+    mode: PROGRAM_MODE,
+    modified: accessor.made,
+    nlink: 1,
+  })
 }

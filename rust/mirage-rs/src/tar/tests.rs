@@ -79,6 +79,25 @@ fn an_archive_round_trips_through_the_host() {
 }
 
 #[test]
+fn an_extracted_entry_takes_its_members_time_unless_touched() {
+    let mut host = Host::with(&[("d/f", "x\n")], "");
+    let members = json!([
+        {"name": "d/", "kind": "dir", "mtime": 1_755_079_200},
+        dated("d/f", 1_755_079_201),
+    ]);
+    let config = json!({"archive": "a.tar", "output": "a.tar", "members": members});
+    assert_eq!(run(&mut host, config), (0, String::new(), String::new()));
+    let tar = host.files["a.tar"].clone();
+    assert_eq!(read(&mut host, &tar, json!({"mode": "extract"})).0, 0);
+    assert_eq!(host.mtimes["/out/d"], 1_755_079_200);
+    assert_eq!(host.mtimes["/out/d/f"], 1_755_079_201);
+    let mut touched = Host::default();
+    let options = json!({"mode": "extract", "touch": true});
+    assert_eq!(read(&mut touched, &tar, options).0, 0);
+    assert!(touched.mtimes.is_empty());
+}
+
+#[test]
 fn numeric_fields_are_read_as_gnu_reads_them() {
     let row = |patch| {
         read(

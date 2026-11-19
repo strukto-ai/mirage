@@ -1912,7 +1912,7 @@
       "command": "mkdir -p /data/fy/d && printf AB > /data/fy/d/a.txt && cd /data/fy && find d -name a.txt -ls | cut -c1-31; find d -name a.txt -ls | awk '{print NF, $7, $NF}'; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "        ?      ? -rw-r--r--   1\n11 2 d/a.txt\n",
+        "stdout": "        ?      4 -rw-r--r--   1\n11 2 d/a.txt\n",
         "stderr": ""
       }
     },

@@ -180,7 +180,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
     ) -> RunAnswer:
         self.commands.append(line)
         if line.startswith(FIND + " "):
-            return RunAnswer(0, b"d 1777 4096 0 0 0 0 \0")
+            return RunAnswer(0, b"d 1777 4096 0 0 0 0 2 8 \0")
         if line == "cat /proc/mounts" and self.fail_table:
             return RunAnswer(1, b"", b"gone\n")
         if line == "cat /proc/mounts":

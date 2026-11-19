@@ -94,10 +94,13 @@ export async function runRelay(
   if (cmdName === 'mv') {
     return runMv(scopes, flagKwargs, dispatch, storageKey, vfs, stdin, checkUnlink)
   }
-  if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, cwd, vfs, stdin)
+  if (cmdName === 'tar')
+    return runTar(scopes, textArgs, flagKwargs, dispatch, cwd, vfs, stdin, sessionView?.snapshot())
   if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin, storageKey)
-  if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch, cwd)
-  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs, cwd, stdin)
+  if (cmdName === 'unzip')
+    return runUnzip(scopes, textArgs, flagKwargs, dispatch, cwd, sessionView?.snapshot())
+  if (cmdName === 'zip')
+    return runZip(scopes, flagKwargs, dispatch, vfs, cwd, stdin, sessionView?.snapshot())
   const builder = DISPATCH_BUILDERS.get(cmdName)
   if (builder !== undefined) {
     return runDispatch(

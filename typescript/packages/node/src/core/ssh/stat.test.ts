@@ -111,7 +111,7 @@ describe('attrsToFileStat', () => {
 })
 
 const ENC = new TextEncoder()
-const TOP = 'd 755 4096 1700000000.5 1700000001.0 1000 1000 \0'
+const TOP = 'd 755 4096 1700000000.5 1700000001.0 1000 1000 3 8 \0'
 
 function bytes(text: string): Uint8Array {
   return ENC.encode(text)
@@ -126,9 +126,9 @@ describe('tree', () => {
   it('renders each entry as stat does', async () => {
     const out =
       TOP +
-      'f 644 5 1700000000.9 1700000002.0 1000 1000 a.txt\0' +
-      'd 700 4096 1700000003.0 1700000003.0 1000 1000 sub\0' +
-      'f 4600 0 1700000004.2 1700000004.0 1000 1000 sub/b b.md\0'
+      'f 644 5 1700000000.9 1700000002.0 1000 1000 1 8 a.txt\0' +
+      'd 700 4096 1700000003.0 1700000003.0 1000 1000 2 8 sub\0' +
+      'f 4600 0 1700000004.2 1700000004.0 1000 1000 1 0 sub/b b.md\0'
     const accessor = new RunAccessor('data', [0, ENC.encode(out), new Uint8Array()])
     const rows = await tree(accessor, scope('in'))
     expect(accessor.sent).toEqual([treeCommand('data/in')])
@@ -155,9 +155,9 @@ describe('tree', () => {
   it.each<[string, RunAnswer]>([
     ['a failed find', [1, bytes(TOP), new Uint8Array()]],
     ['stderr', [0, bytes(TOP), bytes("find: 'x': Permission denied\n")]],
-    ['a broken link', [0, bytes(`${TOP}l 777 7 1.0 1.0 0 0 gone\0`), new Uint8Array()]],
-    ['a fifo', [0, bytes(`${TOP}p 644 0 1.0 1.0 0 0 fifo\0`), new Uint8Array()]],
-    ['a file at the scope', [0, bytes('f 644 5 1.0 1.0 0 0 \0'), new Uint8Array()]],
+    ['a broken link', [0, bytes(`${TOP}l 777 7 1.0 1.0 0 0 1 0 gone\0`), new Uint8Array()]],
+    ['a fifo', [0, bytes(`${TOP}p 644 0 1.0 1.0 0 0 1 0 fifo\0`), new Uint8Array()]],
+    ['a file at the scope', [0, bytes('f 644 5 1.0 1.0 0 0 1 0 \0'), new Uint8Array()]],
     ['a short record', [0, bytes(`${TOP}f 644 5 1.0\0`), new Uint8Array()]],
     ['no closing NUL', [0, bytes(TOP.slice(0, -1)), new Uint8Array()]],
     [

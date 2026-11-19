@@ -109,6 +109,7 @@ import {
 import { abortable } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { runWithSystemClock, systemNow } from '../../utils/clock.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import {
   hiddenUnder,
@@ -136,7 +137,12 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
+import {
+  mergeReaddir,
+  namespaceFolders,
+  namespaceListing,
+  namespaceStat,
+} from '../../view/namespace_view.ts'
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -693,7 +699,9 @@ export class Dispatcher {
   // Who makes the op, when the entry point said so; null reads the
   // async context's, which on the fallback storage folds every live one.
   private caller: Caller | null = null
-  private state = { writers: new KeyLock() }
+  // `made` is when the namespace was made, the time of a folder only it
+  // holds; the views a session binds share it.
+  private state = { writers: new KeyLock(), made: nowIso() }
   private static readonly stores = new WeakMap<BaseVFS, number>()
   private static storeCount = 0
   readonly reconciler: Reconciler
@@ -781,7 +789,13 @@ export class Dispatcher {
       return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     if (name === 'stat') {
-      return namespaceStat(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
+      return namespaceStat(
+        vis,
+        this.namespace.mountPrefixes(),
+        this.namespace,
+        virtual,
+        this.state.made,
+      )
     }
     return null
   }
@@ -2686,7 +2700,8 @@ export class Dispatcher {
             result instanceof FileStat ? result : null,
           )
         }
-        if (name === 'stat') result = await sized(mount, p, result)
+        if (name === 'stat')
+          result = await this.withFolders(call, mount, await sized(mount, p, result))
         else if (name === 'read_tree' && result instanceof Map) {
           result = await sizedTree(mount, p, result as Map<string, FileStat>)
         }
@@ -2849,7 +2864,11 @@ export class Dispatcher {
         call.path.virtual,
         this.overlaid(
           call.path,
-          this.withLinks(call.path, result as Map<string, FileStat>, call.vis),
+          this.treeFolders(
+            call.path,
+            this.withLinks(call.path, result as Map<string, FileStat>, call.vis),
+            call.vis,
+          ),
         ),
       )
     }
@@ -2915,6 +2934,79 @@ export class Dispatcher {
    * holds at its name and below it, as a stat of the name answers the link.
    * Mirrors Python's Dispatcher._with_links.
    */
+  /**
+   * A directory's stat with a link for each folder the namespace adds to it
+   * that its own store holds none of: a mount point is a folder of the
+   * directory it sits in, as on Linux, and so is a folder above a deeper link.
+   * A store that counts no links keeps its count unknown, and a folder its
+   * store cannot be asked about is left to the store's count. Mirrors
+   * Python's Dispatcher._with_folders.
+   */
+  private async withFolders(call: Call, mount: MountEntry, row: unknown): Promise<unknown> {
+    if (!(row instanceof FileStat) || row.type !== FileType.DIRECTORY || row.nlink === null) {
+      return row
+    }
+    const folders = namespaceFolders(
+      call.vis,
+      this.namespace.mountPrefixes(),
+      this.namespace,
+      call.path.virtual,
+    )
+    const base = rstripSlash(call.path.virtual)
+    let added = 0
+    for (const name of [...folders].sort(compareCodePoints)) {
+      try {
+        const held = (await mount.call('stat', `${base}/${name}`)) as FileStat
+        if (held.type !== FileType.DIRECTORY) added += 1
+      } catch (err) {
+        // Nothing there is the answer: the folder is the namespace's.
+        if (isMissError(err)) {
+          added += 1
+          continue
+        }
+        if (!isFsError(err)) throw err
+        console.debug(`${base}/${name} not checked: ${String(err)}`)
+      }
+    }
+    return added > 0 ? row.with({ nlink: row.nlink + added }) : row
+  }
+
+  /**
+   * A subtree read with a link for each mount point a directory in it holds
+   * that the read does not, as `withFolders` counts one for a stat. Mirrors
+   * Python's Dispatcher._tree_folders.
+   */
+  private treeFolders(
+    path: PathSpec,
+    tree: Map<string, FileStat>,
+    vis: Visibility | null,
+  ): Map<string, FileStat> {
+    const base = rstripSlash(path.virtual)
+    const folders = new Set<string>()
+    for (const prefix of this.namespace.mountPrefixes()) {
+      const point = rstripSlash(prefix)
+      if (!point.startsWith(`${base}/`) || !pathVisible(vis, prefix)) continue
+      const parts = point.slice(base.length + 1).split('/')
+      for (let depth = 1; depth < parts.length; depth++) {
+        folders.add(parts.slice(0, depth + 1).join('/'))
+      }
+    }
+    const added = new Map<string, number>()
+    for (const folder of folders) {
+      if (tree.has(folder)) continue
+      const parent = folder.slice(0, folder.lastIndexOf('/'))
+      added.set(parent, (added.get(parent) ?? 0) + 1)
+    }
+    if (added.size === 0) return tree
+    const merged = new Map(tree)
+    for (const [rel, count] of added) {
+      const row = merged.get(rel)
+      if (row !== undefined && row.nlink !== null)
+        merged.set(rel, row.with({ nlink: row.nlink + count }))
+    }
+    return merged
+  }
+
   /** A subtree read with the attributes the overlay holds for each entry, the
    * ones a stat of that entry carries. */
   private overlaid(path: PathSpec, tree: Map<string, FileStat>): Map<string, FileStat> {
@@ -3628,6 +3720,7 @@ export class Dispatcher {
     if (name === 'unlink') {
       target = this.namespace.readlink(path.virtual) ?? ''
       await this.namespace.unlink(path.virtual)
+      await this.touchFolder(path.virtual)
     } else if (name === 'rename') {
       target = this.namespace.readlink(path.virtual) ?? ''
       const dst = args[0]
@@ -3651,6 +3744,8 @@ export class Dispatcher {
       }
       await this.namespace.unlink(dst.virtual)
       await this.namespace.rename(path.virtual, dst.virtual)
+      await this.touchFolder(path.virtual)
+      await this.touchFolder(dst.virtual)
     } else if (name === 'symlink') {
       target = String(kwargs.target)
       // symlink(2) refuses an occupied name and a name its parent cannot
@@ -3663,6 +3758,7 @@ export class Dispatcher {
       const refusal = await this.symlinkRefusal(path, issuer)
       if (refusal !== null) throw refusal
       await this.namespace.symlink(path.virtual, target, systemNow())
+      await this.touchFolder(path.virtual)
     } else if (name === 'stat') {
       const row = this.namespace.linkStatAt(path.virtual)
       if (row === null) throw enoent(path)
@@ -3677,6 +3773,30 @@ export class Dispatcher {
     record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
     return (await boundary.complete(mark, path, write, result, issuer)) as string | FileStat | null
+  }
+
+  /**
+   * Move the time of the folder a link is made in, removed from or renamed
+   * through, as a directory's moves when a name in it changes. Only a store on
+   * this host dates the folder: the link is the namespace's alone, so it sends
+   * a machine or a service no command, and a folder whose store keeps no time
+   * of its own keeps the time it has. Mirrors Python's
+   * Dispatcher._touch_folder.
+   */
+  private async touchFolder(link: string): Promise<void> {
+    const trimmed = rstripSlash(link)
+    const cut = trimmed.lastIndexOf('/')
+    const parent = cut > 0 ? trimmed.slice(0, cut) : '/'
+    const mount = this.namespace.tryMountFor(parent)
+    if (mount?.vfs.local !== true || !mount.answers('setattr')) return
+    try {
+      await mount.call('setattr', parent, [], { mtime: nowIso() }, this.access)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`${parent} keeps its time: ${String(err)}`)
+      return
+    }
+    await this.changed(parent, FileChangeKind.UPDATE, null, { times: false })
   }
 
   /**

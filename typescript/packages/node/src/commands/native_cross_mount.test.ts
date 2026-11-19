@@ -152,7 +152,7 @@ describe.each(CROSS_MOUNT_PAIRS)('native cross mount (%s -> %s)', (p1, p2) => {
     try {
       env.createFile(1, 'a.txt', ENC.encode('hello\n'))
       env.createFile(2, 'b.txt', ENC.encode('world!!\n'))
-      const out = await env.run('du -c /m1/a.txt /m2/b.txt')
+      const out = await env.run('du -b -c /m1/a.txt /m2/b.txt')
       expect(out).toContain('6\t/m1/a.txt')
       expect(out).toContain('8\t/m2/b.txt')
       expect(out).toContain('14\ttotal')

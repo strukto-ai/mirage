@@ -533,6 +533,39 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
         assert used["dir_copy"], flags
 
 
+@pytest.mark.parametrize("umask, whole", [(0o022, True), (0o077, False)])
+@pytest.mark.asyncio
+async def test_a_set_umask_copies_a_tree_entry_by_entry(umask, whole):
+    # A store's one-call tree copy makes each copy under its own umask, so
+    # a session umask other than the default sends the copy entry by entry,
+    # where each new copy takes its mode under the session's.
+    files = {"/t/f.txt": b"F"}
+    dirs = {"/t", "/t/empt"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+    used = {"dir_copy": False}
+
+    async def dir_copy(src, dst) -> None:
+        used["dir_copy"] = True
+        dirs.add(_key(dst))
+
+    async def dispatch(op, path, **kwargs):
+        return None, IOResult()
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True),
+        dispatch=dispatch,
+        umask=umask,
+    )
+    assert io.exit_code == 0
+    assert used["dir_copy"] is whole
+    assert "/c" in dirs
+
+
 @pytest.mark.parametrize("refuse", [walk_declined, enotsup])
 @pytest.mark.asyncio
 async def test_a_declined_dir_copy_copies_entry_by_entry(refuse):
@@ -1085,5 +1118,44 @@ async def test_cp_p_keeps_the_mode_and_times(tmp_path, backend):
         )
         assert source == copy
         assert source.startswith("640 ")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "disk"])
+@pytest.mark.parametrize(
+    "line, out",
+    [
+        ("chmod 750 f; cp f g; stat -c '%a' g", "750\n"),
+        ("chmod 4777 f; cp f g; stat -c '%a' g", "755\n"),
+        ("chmod 750 f; umask 077; cp f g; stat -c '%a' g", "700\n"),
+        (
+            "printf x > g; chmod 600 g; chmod 755 f; cp f g; stat -c '%a' g",
+            "600\n",
+        ),
+        (
+            "mkdir -m 700 s; mkdir -m 750 s/t; cp -r s u; stat -c '%a' u u/t",
+            "700\n750\n",
+        ),
+        (
+            "mkdir -m 777 s u; mkdir -m 700 u/s; cp -r s u; stat -c '%a' u/s",
+            "700\n",
+        ),
+        (
+            "chmod 750 f; cp --attributes-only f h; stat -c '%a %s' h",
+            "750 0\n",
+        ),
+    ],
+)
+async def test_cp_makes_a_new_copy_with_the_source_mode_under_the_umask(
+    tmp_path, backend, line, out
+):
+    vfs = RAMVFS() if backend == "ram" else DiskVFS(root=str(tmp_path))
+    ws = Workspace({"/d": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(_CP_SETUP + line)
+        assert (await result.materialize_stdout()).decode() == out
+        assert result.exit_code == 0
     finally:
         await ws.close()

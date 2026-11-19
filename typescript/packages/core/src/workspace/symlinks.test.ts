@@ -667,9 +667,10 @@ describe('symlinks (namespace-backed)', () => {
     expect(listed).toContain('/data/dangle')
     expect(listed).toContain('/data/dlink')
     expect(listed).toContain('/data/link.txt')
-    // GNU du reports the link itself without -L; mirage sizes it by the
-    // target length because du counts bytes, not blocks.
-    const one = dec((await ws.shell('du /data/link.txt')).stdout)
+    // GNU du reports the link itself without -L: a short link holds no
+    // block (a fast symlink), and its apparent size is its target's length.
+    expect(dec((await ws.shell('du /data/link.txt')).stdout)).toBe('0\t/data/link.txt\n')
+    const one = dec((await ws.shell('du -b /data/link.txt')).stdout)
       .trim()
       .split('\t')
     expect(one[1]).toBe('/data/link.txt')
@@ -824,7 +825,7 @@ describe('trailing slash (POSIX pathname resolution)', () => {
   it('resolves the link prefix for a no-follow command', async () => {
     const ws = await slashWorkspace()
     expect(dec((await ws.shell("stat -c '%F' /data/base/dlink/f2")).stdout)).toBe('regular file\n')
-    expect(dec((await ws.shell('du /data/base/dlink/f2')).stdout)).toBe('7\t/data/base/dlink/f2\n')
+    expect(dec((await ws.shell('du /data/base/dlink/f2')).stdout)).toBe('4\t/data/base/dlink/f2\n')
     expect(dec((await ws.shell('find /data/base/dlink/f2')).stdout)).toBe('/data/base/dlink/f2\n')
     expect(dec((await ws.shell('readlink /data/base/dlink/l2')).stdout)).toBe('12345678901234\n')
     const r = await ws.shell('rmdir /data/base/dlink/f2')
@@ -837,10 +838,10 @@ describe('trailing slash (POSIX pathname resolution)', () => {
     const ws = await slashWorkspace()
     expect(dec((await ws.shell("stat -c '%F' /data/base/dlink")).stdout)).toBe('symbolic link\n')
     expect(dec((await ws.shell("stat -c '%F' /data/base/dlink/")).stdout)).toBe('directory\n')
-    // The link's own target-string length, then the target's contents.
-    expect(dec((await ws.shell('du /data/base/dlink')).stdout)).toBe('3\t/data/base/dlink\n')
+    // The link itself, which holds no block, then the target's contents.
+    expect(dec((await ws.shell('du /data/base/dlink')).stdout)).toBe('0\t/data/base/dlink\n')
     expect(dec((await ws.shell('du /data/base/dlink/')).stdout)).toBe(
-      '0\t/data/base/dlink/emptydir\n21\t/data/base/dlink/\n',
+      '4\t/data/base/dlink/emptydir\n12\t/data/base/dlink/\n',
     )
     expect(dec((await ws.shell('file /data/base/dlink/')).stdout)).toBe(
       '/data/base/dlink/: directory\n',
@@ -1434,7 +1435,7 @@ it.each([
   [
     'du -aL /data/d',
     1,
-    '2\t/data/d/a\n2\t/data/d\n',
+    '4\t/data/d/a\n8\t/data/d\n',
     "du: cannot access '/data/d/ld': Permission denied\n" +
       "du: cannot access '/data/d/lf': Permission denied\n",
   ],

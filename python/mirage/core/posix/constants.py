@@ -19,10 +19,10 @@ from mirage.errors.types import FsCondition
 # bytes compare as Mirage reads them, under any login shell.
 
 # Every entry under a scope, links followed, one NUL-ended record each:
-# find's type letter, mode, size, times, owner and group names (numbers
-# when they have none) and relative path.
+# find's type letter, mode, size, times, owner and group ids, link
+# count, 512-byte blocks and relative path.
 FIND = "env LC_ALL=C find -L"
-TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
+TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %n %b %P\\0"
 
 WC = "env LC_ALL=C wc -l"
 

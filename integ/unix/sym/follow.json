@@ -276,7 +276,7 @@
       "command": "du -aL /data/symx",
       "expect": {
         "exit": 0,
-        "stdout": "6\t/data/symx/sub/inner.txt\n6\t/data/symx/sub\n6\t/data/symx\n",
+        "stdout": "4\t/data/symx/sub/inner.txt\n8\t/data/symx/sub\n12\t/data/symx\n",
         "stderr": ""
       }
     },

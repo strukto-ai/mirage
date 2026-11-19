@@ -44,6 +44,7 @@ from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
 from mirage.utils.quote import shell_quote, shell_quote_always
+from mirage.utils.stat_view import DIR_SIZE
 from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import MountView, StatPath
 
@@ -69,7 +70,11 @@ class DuFlags:
         s (bool): -s, one total per operand and no subtree lines.
         a (bool): -a, list files as well as directories.
         h (bool): -h, human-readable sizes.
-        block_size (BlockSize | None): explicit unit, or None for bytes/-h.
+        block_size (BlockSize | None): the unit, 1024-byte blocks unless
+            another was typed; None under a last ``-h``.
+        apparent (bool): ``--apparent-size`` or ``-b``: a file counts its
+            bytes and a directory nothing, where otherwise each counts
+            the blocks it holds.
         c (bool): -c, append a grand total.
         S (bool): -S/--separate-dirs, directories exclude subdirectory sizes.
         max_depth (int | None): --max-depth/-d, deepest level to print.
@@ -95,6 +100,7 @@ class DuFlags:
     a: bool = False
     h: bool = False
     block_size: BlockSize | None = None
+    apparent: bool = False
     c: bool = False
     S: bool = False
     max_depth: int | None = None
@@ -191,6 +197,7 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
         a=fl.as_bool("all"),
         h=fl.as_bool("human_readable"),
         block_size=block_size_of(values["block_size"]),
+        apparent=values["apparent"] is True,
         c=fl.as_bool("total"),
         S=fl.as_bool("separate_dirs"),
         max_depth=depth,
@@ -716,6 +723,29 @@ def separate_total(entries: Sequence[tuple[str, int]], root: str) -> int:
     )
 
 
+def folders_under(
+    entries: Sequence[tuple[str, int]], root: str, dirs: Sequence[str]
+) -> set[str]:
+    """Every directory strictly under the operand that ``rollup`` gives a
+    row: each one above a leaf and each one a walk met, with the
+    directories above it, the namespace's own included.
+
+    Args:
+        entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
+        root (str): the operand's absolute virtual path.
+        dirs (Sequence[str]): the directories a walk met.
+    """
+    root_key = _norm(root)
+    prefix = root_key if root_key.endswith("/") else root_key + "/"
+    found: set[str] = set()
+    starts = [_parent_of(_norm(leaf)) for leaf, _ in entries]
+    for node in [*starts, *(_norm(d) for d in dirs)]:
+        while node != root_key and node.startswith(prefix):
+            found.add(node)
+            node = _parent_of(node)
+    return found
+
+
 def rollup(
     entries: Sequence[tuple[str, int]],
     root: str,
@@ -725,6 +755,7 @@ def rollup(
     dirs: Sequence[str] = (),
     separate_dirs: bool = False,
     inodes: bool = False,
+    usage: int = 0,
 ) -> list[tuple[str, int]]:
     """Derive GNU's per-directory lines from a flat list of leaf files.
 
@@ -755,6 +786,8 @@ def rollup(
         inodes (bool): --inodes, each directory counts itself too, and
             under ``-S`` itself alone of the directories in it; the
             leaves come in as one each.
+        usage (int): the bytes a directory holds of its own, which it
+            counts as it counts itself under ``--inodes``.
 
     Returns:
         list[tuple[str, int]]: (virtual path, size) in GNU's print order.
@@ -788,10 +821,10 @@ def rollup(
         while node != root_key and node.startswith(prefix):
             sizes.setdefault(node, 0)
             node = _parent_of(node)
-    if inodes:
+    if inodes or usage:
         # Deepest first, so each directory's count of the directories
         # in its tree is complete before it is added to its parent's.
-        own = dict.fromkeys(sizes, 1)
+        own = dict.fromkeys(sizes, 1 if inodes else usage)
         for node in sorted(sizes, key=lambda n: n.count("/"), reverse=True):
             parent = _parent_of(node)
             if not separate_dirs and parent in own:
@@ -890,13 +923,18 @@ async def _du_one(
 ) -> tuple[list[str], int, list[PathRecord] | None, Newest | None]:
     label = path.raw_path
     root_key = _norm(path.virtual)
+    under = root_key.rstrip("/") + "/"
     roots = mounts.descendants(path.virtual) if mounts is not None else []
     timed = times is not None and flags.time is not None
+    # A directory holds one block of its own, which it counts beside
+    # what is in it; an apparent size counts it as nothing.
+    usage = 0 if flags.apparent or flags.inodes else DIR_SIZE
 
     if (
         flags.s
         and not flags.S
         and not flags.inodes
+        and not usage
         and not roots
         and not paths_scoped([path])
     ):
@@ -905,7 +943,9 @@ async def _du_one(
         # would be counted into a total their names never justify, so
         # that session takes the entries walk below instead; a path
         # rule likewise, since the walk is where a refused directory is
-        # reported. Per operand: a hide elsewhere keeps this total.
+        # reported. Per operand: a hide elsewhere keeps this total. A
+        # count of blocks takes the walk too, which names the folders
+        # whose blocks it adds.
         total = await compute_size(path)
         newest = (
             newest_under(times(), path.virtual).get(root_key)
@@ -918,7 +958,6 @@ async def _du_one(
     raw = times() if times is not None and timed else {}
     stamps = newest_under(raw, path.virtual) if raw else {}
     newest = stamps.get(root_key)
-    under = root_key.rstrip("/") + "/"
     met = drop_shadowed(
         [
             PathRecord(PathSpec.from_str_path(d), run, modified=raw.get(d))
@@ -959,6 +998,13 @@ async def _du_one(
     if len(kept) != len(counted) or roots:
         total = sum(size for _, size in virtual)
     dirs = [r.path.virtual for r in met]
+    folders = folders_under(virtual, path.virtual, dirs)
+    is_dir = (
+        walked
+        or bool(folders)
+        or any(_norm(leaf) != root_key for leaf, _ in virtual)
+    )
+    total += usage * (len(folders) + int(is_dir))
     records = [own_record, *kept, *met]
     if flags.inodes:
         total = inode_count(virtual, path.virtual, dirs)
@@ -974,7 +1020,9 @@ async def _du_one(
     # contributes to -c: GNU's grand total stays recursive (coreutils
     # 9.7, `du -bSc dir` prints `3 dir` then `6 total`).
     own = (
-        separate_total(counts, path.virtual) + int(flags.inodes)
+        separate_total(counts, path.virtual)
+        + int(flags.inodes)
+        + usage * int(is_dir)
         if flags.S
         else total
     )
@@ -989,6 +1037,7 @@ async def _du_one(
         dirs=dirs,
         separate_dirs=flags.S,
         inodes=flags.inodes,
+        usage=usage,
     )
     shown = respell_raw([node for node, _ in rows], path.virtual, label)
     lines = [
@@ -1190,15 +1239,12 @@ async def du_generic(
 
     The walks meet links as entries of their own; under -L they follow
     them instead, which the operand's own was already, at dispatch.
-    Deliberate divergence: a link counts as its target string's length,
-    the size ``ls -l`` prints, where GNU counts the disk blocks it holds
-    (0 for a target short enough to live in the inode); mirage counts
-    bytes throughout.
-
-    ``--apparent-size`` preserves the existing apparent-byte measurement;
-    only explicit unit options change its scale. ``-l`` counts a file
-    once per hard link to it, and no backend here has hard links, so it
-    changes nothing.
+    A file counts the blocks it holds, as ``stat %b`` reports them (the
+    backend's own count, else whole 4 KiB blocks, none for a link short
+    enough to live in its inode), and a directory one block of its own;
+    ``--apparent-size`` and ``-b`` count a file's bytes and a directory
+    as nothing. ``-l`` counts a file once per hard link to it, and no
+    backend here has hard links, so it changes nothing.
 
     Args:
         flags (DuFlags): The options, read before the operands were.

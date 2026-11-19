@@ -14,7 +14,13 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import drop_inodes, is_dir
+from mirage.core.sql.inode import (
+    by_ino,
+    drop_inodes,
+    is_dir,
+    now_stamp,
+    touched,
+)
 from mirage.core.sql.path import found, leaf, parent_of, walk
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
@@ -36,5 +42,10 @@ async def unlink(accessor: SqlAccessor, path: PathSpec) -> None:
                 (parent.ino if parent is not None else None, leaf(w)),
             ),
             *drop_inodes([node.ino]),
+            *(
+                [touched(by_ino(parent.ino), now_stamp())]
+                if parent is not None
+                else []
+            ),
         ]
     )

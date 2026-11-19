@@ -22,13 +22,15 @@ export type MemberKind = 'file' | 'dir' | 'link'
 // One thing found under an operand, before it is named or filtered.
 // `namePath` and `read` are two different paths whenever a link is being
 // followed: the member keeps the link's own name while its bytes come
-// from the target.
+// from the target. `stamped` is where a directory's time and mode come
+// from.
 export interface Entry {
   namePath: string
   kind: MemberKind
   target?: string
   read?: PathSpec | null
   size?: number | null
+  stamped?: PathSpec | null
 }
 
 // One thing the scan could not archive, in the order it was met.

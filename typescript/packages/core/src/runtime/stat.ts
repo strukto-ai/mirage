@@ -20,7 +20,8 @@ import type { VFSStat } from './types.ts'
  * every runtime that answers a guest's stat (the host entry points,
  * QuickJS) reads and spells in its own shape, so a link count, an owner,
  * a block count or an inode is the same number whichever one is asked.
- * `nlink` is 2 for a directory and 1 otherwise; the access time is the
+ * `nlink` is the row's count, else 2 for a directory and 1 otherwise;
+ * `blocks` the row's, else its bytes in 512-byte units. The access time is the
  * modification time when the row has none, and the change time always
  * is. Mirrors Python's `runtime/stat.PosixStat`.
  */
@@ -58,7 +59,7 @@ export function posixStat(
     mode: row.mode,
     ino: ident(row.name ?? path),
     dev: ident(prefix),
-    nlink: row.isDir ? 2 : 1,
+    nlink: row.nlink ?? (row.isDir ? 2 : 1),
     uid: row.uid ?? fallback.uid ?? 0,
     gid: row.gid ?? fallback.gid ?? 0,
     rdev: row.rdev ?? 0,
@@ -67,6 +68,6 @@ export function posixStat(
     mtimeMs: mtime,
     ctimeMs: mtime,
     blksize: BLKSIZE,
-    blocks: Math.ceil(row.size / BLOCK_UNIT),
+    blocks: row.blocks ?? Math.ceil(row.size / BLOCK_UNIT),
   }
 }

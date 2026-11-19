@@ -19,7 +19,7 @@ import { inMtimeWindow, isoTimestamp } from '../../utils/dates.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { DIR_SIZE, TYPE_CHARS, idNumber, posixMode } from '../../utils/stat_view.ts'
+import { DIR_SIZE, TYPE_CHARS, idNumber, linkCount, posixMode } from '../../utils/stat_view.ts'
 import type {
   Effects,
   FindEntry,
@@ -80,9 +80,7 @@ function ownerId(value: number | string | null, group: boolean, ids: Ids): numbe
 function count(st: FileStat, field: 'links' | 'uid' | 'gid' | 'inum', ids: Ids): number | null {
   // No backend here numbers its files, as `stat %i` says.
   if (field === 'inum') return null
-  // One name per entry, as ls -l counts it: mirage has no hard links, and a
-  // directory's own entries are not counted.
-  if (field === 'links') return 1
+  if (field === 'links') return linkCount(st)
   const group = field === 'gid'
   return ownerId(group ? st.gid : st.uid, group, ids)
 }

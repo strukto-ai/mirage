@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.inode import inode_stat
+from mirage.core.sql.inode import inode_stat, subdir_counts
 from mirage.core.sql.path import found, walk
 from mirage.types import FileStat, PathSpec
 
 
 async def stat(accessor: SqlAccessor, path: PathSpec) -> FileStat:
     w = await walk(accessor, path)
-    return inode_stat(w.p, found(w, path))
+    node = found(w, path)
+    counts = await subdir_counts(accessor, [node])
+    return inode_stat(w.p, node, counts.get(node.ino, 0))

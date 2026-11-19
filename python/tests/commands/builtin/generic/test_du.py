@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from mirage import MountMode, Workspace
@@ -13,6 +15,7 @@ from mirage.commands.builtin.generic.du import (
     rollup,
     to_virtual,
 )
+from mirage.commands.builtin.utils.formatting import BlockSize
 from mirage.commands.config import Context
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -22,6 +25,16 @@ from mirage.view.types import MountView
 
 async def _ok(value):
     return value
+
+
+def _flags(**fields) -> DuFlags:
+    """Flags for the fake backends below, which report each file's bytes,
+    so a directory counts nothing of its own, as under --apparent-size.
+
+    Args:
+        **fields: the fields that differ.
+    """
+    return DuFlags(**{"apparent": True, **fields})
 
 
 def _spec(virtual: str, vfs_path: str, raw_path: str | None = None):
@@ -117,7 +130,7 @@ async def test_a_walk_cut_short_says_where_and_exits_one(stopped, code, err):
         [_spec("/dir", "dir")],
         compute_size=compute_size,
         compute_entries=compute_entries,
-        flags=DuFlags(),
+        flags=_flags(),
         stopped=lambda: stopped,
     )
     assert out.stdout == b"2\t/dir\n"
@@ -135,7 +148,7 @@ async def test_du_reports_what_it_measured_unless_it_only_summed():
         paths,
         compute_size=compute_size,
         compute_entries=compute_entries,
-        flags=DuFlags(),
+        flags=_flags(),
         directories=lambda: ["/m/dir/e"],
     )
     assert [(r.path.virtual, r.run, r.size) for r in out.records] == [
@@ -148,7 +161,7 @@ async def test_du_reports_what_it_measured_unless_it_only_summed():
         paths,
         compute_size=compute_size,
         compute_entries=compute_entries,
-        flags=DuFlags(s=True),
+        flags=_flags(s=True),
     )
     assert out.records is None
 
@@ -186,7 +199,10 @@ def test_a_mount_under_an_excluded_directory_is_no_start():
 async def test_a_time_format_keeps_the_stamp_nanoseconds():
     compute_size, compute_entries = _make_backend({"/dir/f": 1})
     parsed = parse_flags(
-        Context(flags={"time": True}, env={"TIME_STYLE": "+%s.%N"})
+        Context(
+            flags={"time": True, "apparent_size": True},
+            env={"TIME_STYLE": "+%s.%N"},
+        )
     )
     assert isinstance(parsed, DuFlags)
     out = await du(
@@ -197,6 +213,29 @@ async def test_a_time_format_keeps_the_stamp_nanoseconds():
         times=lambda: {"/dir/f": "1970-01-01T00:00:01.123456789+00:00"},
     )
     assert out.stdout.decode() == "1\t1.123456789\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_counts_a_block_beside_the_blocks_its_files_hold():
+    compute_size, compute_entries = _make_backend(
+        {"/dir/a": 4096, "/dir/s/b": 8192}
+    )
+    blocks = _flags(apparent=False, block_size=BlockSize(1024, "", None))
+
+    async def run(**over) -> bytes:
+        out = await du(
+            [_spec("/dir", "dir")],
+            compute_size=compute_size,
+            compute_entries=compute_entries,
+            flags=replace(blocks, **over),
+            directories=lambda: ["/dir", "/dir/s"],
+        )
+        return out.stdout
+
+    assert await run() == b"12\t/dir/s\n20\t/dir\n"
+    assert await run(S=True) == b"12\t/dir/s\n8\t/dir\n"
+    assert await run(s=True) == b"20\t/dir\n"
+    assert await run(apparent=True) == b"8\t/dir/s\n12\t/dir\n"
 
 
 def test_inodes_count_each_directory_and_under_s_its_own_files():
@@ -261,20 +300,20 @@ def _mounts_view(descendants: tuple[str, ...]) -> MountView:
     [
         (
             {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(),
+            _flags(),
             b"10\t/base\n",
         ),
         (
             {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(a=True),
+            _flags(a=True),
             b"10\t/base/top.txt\n10\t/base\n",
         ),
         (
             {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(s=True),
+            _flags(s=True),
             b"10\t/base\n",
         ),
-        ({"/inner/leftover.txt": 1000}, DuFlags(), b"0\t/base\n"),
+        ({"/inner/leftover.txt": 1000}, _flags(), b"0\t/base\n"),
     ],
 )
 @pytest.mark.asyncio
@@ -300,7 +339,7 @@ async def test_without_a_mount_view_shadowed_keys_still_count():
         [_spec("/base", "")],
         compute_size=compute_size,
         compute_entries=compute_entries,
-        flags=DuFlags(),
+        flags=_flags(),
     )
     assert out.stdout == b"1000\t/base/inner\n1010\t/base\n"
 
@@ -337,7 +376,7 @@ async def test_du_names_a_directory_the_walk_could_not_open():
         [_spec("/d/t", "t", raw_path="t")],
         compute_size=compute_size,
         compute_entries=compute_entries,
-        flags=DuFlags(),
+        flags=_flags(),
         missing=(("gone", "No such file or directory", 0),),
         unreadable=lambda: ["/d/t/sealed"],
     )
@@ -353,21 +392,22 @@ async def test_du_names_a_directory_the_walk_could_not_open():
 @pytest.mark.parametrize(
     "options,expected",
     [
+        ("", "4"),
         ("-b", "6"),
         ("--bytes", "6"),
-        ("--apparent-size", "6"),
-        ("-k", "1"),
+        ("--apparent-size", "1"),
+        ("-k", "4"),
         ("-m", "1"),
-        ("-B1", "6"),
-        ("--block-size=K", "1K"),
-        ("-BKB", "1kB"),
-        ("-BKiB", "1KiB"),
+        ("-B1", "4096"),
+        ("--block-size=K", "4K"),
+        ("-BKB", "5kB"),
+        ("-BKiB", "4KiB"),
         ("-b -k", "1"),
         ("-k -b", "6"),
         ("-k -b -k", "1"),
         ("-bkb", "6"),
-        ("-B1 -h -B1024", "1"),
-        ("-k --human-readable", "6"),
+        ("-B1 -h -B1024", "4"),
+        ("-k --human-readable", "4.0K"),
         ("--summarize --bytes", "6"),
         ("--dereference --no-dereference --bytes", "6"),
     ],
@@ -391,16 +431,20 @@ async def test_du_rounds_rows_after_summing_and_keeps_byte_records():
         await ws.shell(
             "mkdir /data/d; printf a > /data/d/a; printf b > /data/d/b"
         )
-        result = await ws.shell("du --all --total -B4 /data/d")
+        result = await ws.shell("du --all --total -B4 --apparent-size /data/d")
         assert result.exit_code == 0
         assert await result.stdout_str() == (
             "1\t/data/d/a\n1\t/data/d/b\n1\t/data/d\n1\ttotal\n"
+        )
+        blocks = await ws.shell("du --all --total -B4 /data/d")
+        assert await blocks.stdout_str() == (
+            "1024\t/data/d/a\n1024\t/data/d/b\n3072\t/data/d\n3072\ttotal\n"
         )
         for size, count in [(0, 0), (1024, 1), (1025, 2)]:
             await ws.shell(
                 f"printf '%{size}s' x > /data/f" if size else ": > /data/f"
             )
-            result = await ws.shell("du -k /data/f")
+            result = await ws.shell("du -k --apparent-size /data/f")
             assert await result.stdout_str() == f"{count}\t/data/f\n"
     finally:
         await ws.close()
@@ -417,7 +461,7 @@ async def test_du_orders_human_units_and_validates_each_block_size():
             ("-B0x10", "65"),
             ("-B010", "129"),
         ]:
-            result = await ws.shell(f"du {options} /data/f")
+            result = await ws.shell(f"du --apparent-size {options} /data/f")
             assert result.exit_code == 0
             assert await result.stdout_str() == f"{expected}\t/data/f\n"
         result = await ws.shell("du -B0 -b /data/f")
@@ -455,7 +499,14 @@ async def test_du_large_byte_totals_keep_exact_units(unit, expected):
     total = 18014398509481984
     compute_size, compute_entries = _make_backend({"/dir/f": total})
     parsed = parse_flags(
-        Context(flags={"block_size": unit, "all": True, "total": True})
+        Context(
+            flags={
+                "block_size": unit,
+                "all": True,
+                "total": True,
+                "apparent_size": True,
+            }
+        )
     )
     assert isinstance(parsed, DuFlags)
     out = await du(

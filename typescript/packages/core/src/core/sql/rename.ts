@@ -17,7 +17,7 @@ import { ebusy, einval, eisdir, enotdir, enotempty } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { SQL } from './constants.ts'
-import { byIno, dropInodes, isDir } from './inode.ts'
+import { byIno, dropInodes, isDir, nowStamp, touched } from './inode.ts'
 import { checkDestParents, found, leaf, parentOf, target, walk } from './path.ts'
 
 /**
@@ -62,6 +62,9 @@ export async function rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec
     params: [toParent.ino, leaf(to), fromParent.ino, leaf(from)],
   })
   if (there !== null) statements.push(...dropInodes([there.ino]))
+  const now = nowStamp()
+  for (const ino of new Set([fromParent.ino, toParent.ino]))
+    statements.push(touched(byIno(ino), now))
   try {
     await accessor.batch(statements)
   } catch (err) {

@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-import { checkDestParents } from './dest.ts'
+import { checkDestParents, touchParent } from './dest.ts'
 
 export async function create(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   // Not a delegation to writeBytes: that recorded the op as 'write',
@@ -27,8 +27,11 @@ export async function create(accessor: RAMAccessor, path: PathSpec): Promise<voi
   const timer = startOp()
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
+  const made = !accessor.store.files.has(p)
+  const now = nowIso()
   accessor.store.files.set(p, new Uint8Array())
-  accessor.store.modified.set(p, nowIso())
+  accessor.store.modified.set(p, now)
+  if (made) touchParent(accessor.store, p, now)
   record('create', path.virtual, VFSName.RAM, 0, timer)
   return Promise.resolve()
 }

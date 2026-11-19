@@ -31,8 +31,8 @@ class PosixStat:
         mode (int): st_mode, type bits included.
         ino (int): the path's id.
         dev (int): the owning mount's id.
-        nlink (int): 2 for a directory, its parent's entry and its own
-            .; 1 for anything else.
+        nlink (int): the row's link count, else 2 for a directory, its
+            parent's entry and its own .; 1 for anything else.
         uid (int): the owner the row reports, else the fallback.
         gid (int): the group, read the same way.
         rdev (int): a device's numbers, 0 for anything else.
@@ -87,7 +87,7 @@ def posix_stat(
         mode=row.mode,
         ino=ident(row.name or path),
         dev=ident(prefix),
-        nlink=2 if row.is_dir else 1,
+        nlink=row.nlink if row.nlink is not None else 2 if row.is_dir else 1,
         uid=uid if row.uid is None else row.uid,
         gid=gid if row.gid is None else row.gid,
         rdev=row.rdev,
@@ -96,5 +96,7 @@ def posix_stat(
         mtime_ns=mtime,
         ctime_ns=mtime,
         blksize=BLKSIZE,
-        blocks=-(-row.size // BLOCK_UNIT),
+        blocks=(
+            -(-row.size // BLOCK_UNIT) if row.blocks is None else row.blocks
+        ),
     )

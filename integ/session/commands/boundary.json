@@ -148,7 +148,7 @@
       "command": "du -a /vault/d",
       "expect": {
         "exit": 0,
-        "stdout": "7\t/vault/d/sub/top.txt\n7\t/vault/d/sub\n7\t/vault/d\n",
+        "stdout": "4\t/vault/d/sub/top.txt\n8\t/vault/d/sub\n12\t/vault/d\n",
         "stderr": ""
       }
     },

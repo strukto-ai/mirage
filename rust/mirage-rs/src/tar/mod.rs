@@ -184,6 +184,8 @@ struct Config {
     absolute: bool,
     /// -p: an extracted file takes its member's permission bits.
     preserve: bool,
+    /// -m: an extracted entry keeps the time it lands at, not its member's.
+    touch: bool,
     /// The host's umask, which -x without -p applies to a member's mode.
     umask: Option<u32>,
     /// --numeric-owner: ids in a listing, none but ids in a new header.

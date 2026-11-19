@@ -513,10 +513,53 @@ async def test_a_restore_takes_fresh_inode_numbers(vfs: SqlVFS):
 
 
 @pytest.mark.asyncio
-async def test_it_keeps_no_attributes_so_the_namespace_keeps_them(
+async def test_a_folder_counts_its_subfolders_and_dates_its_changes(
     vfs: SqlVFS,
 ):
-    assert not vfs.supports("setattr")
+    old = "2000-01-01T00:00:00Z"
+    await vfs.mkdir(at("/d"))
+    await vfs.mkdir(at("/d/s"))
+    await vfs.write(at("/d/f"), b"x")
+    assert (
+        (await vfs.stat(at("/d"))).nlink,
+        (await vfs.stat(at("/d/f"))).nlink,
+    ) == (3, 1)
+    assert {e.name: e.nlink for e in await vfs.readdir(at("/d"))} == {
+        "f": 1,
+        "s": 2,
+    }
+    tree = await vfs.read_tree(at("/"))
+    assert tree is not None and tree["d"].nlink == 3
+    for change in (
+        lambda: vfs.write(at("/d/g"), b"y"),
+        lambda: vfs.unlink(at("/d/g")),
+        lambda: vfs.rename(at("/d/f"), at("/d/h")),
+        lambda: vfs.rmdir(at("/d/s")),
+    ):
+        await vfs.setattr(at("/d"), mtime=old)
+        await change()
+        assert (await vfs.stat(at("/d"))).modified != old
+    assert (await vfs.stat(at("/d"))).nlink == 2
+
+
+@pytest.mark.asyncio
+async def test_it_keeps_the_mtime_and_leaves_the_rest_to_the_namespace(
+    vfs: SqlVFS,
+):
+    await vfs.write(at("/f"), b"x")
+    rest = await vfs.setattr(
+        at("/f"),
+        mode=0o600,
+        uid=7,
+        atime="2025-01-02T03:04:05Z",
+        mtime="2025-08-13T10:00:00.123456789Z",
+    )
+    assert rest == {"mode": 0o600, "uid": 7, "atime": "2025-01-02T03:04:05Z"}
+    assert (await vfs.stat(at("/f"))).modified == (
+        "2025-08-13T10:00:00.123456Z"
+    )
+    await vfs.setattr(at("/f"), mtime="2025-08-13T10:00:00")
+    assert (await vfs.stat(at("/f"))).modified == "2025-08-13T10:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -891,7 +934,7 @@ async def test_the_shell_gets_root_and_workspace_on_one_database():
             " && ls /workspace && cat /workspace/a.txt && du -s /workspace"
         )
         assert await r.stderr_str() == ""
-        assert await r.stdout_str() == "a.txt\nhi2\t/workspace\n"
+        assert await r.stdout_str() == "a.txt\nhi8\t/workspace\n"
         assert await whole(SqlVFS(driver=driver), "/workspace/a.txt") == b"hi"
     finally:
         await ws.close()

@@ -42,7 +42,8 @@ import {
   type LsColumns,
   formatLsLong,
   lsName,
-  lsPrefix,
+  lsPrefixes,
+  lsTotal,
   timeOf,
 } from '../utils/formatting.ts'
 import { UsageError } from '../../errors.ts'
@@ -195,14 +196,19 @@ export function typeIndicator(entry: FileStat | null, style: LsIndicator): strin
   return ''
 }
 
-// Short rows: the name, the indicator style's mark, and -i/-Z's lead.
+// Short rows: the name, the indicator style's mark, and -i/-s/-Z's lead;
+// -h scales the -s column.
 function formatSimple(
-  s: FileStat,
+  stats: readonly FileStat[],
   indicator: LsIndicator,
   columns: LsColumns,
-  name?: string,
-): string {
-  return `${lsPrefix(columns)}${name ?? s.name}${typeIndicator(s, indicator)}`
+  names: readonly string[] | null | undefined,
+  human: boolean,
+): string[] {
+  const leads = lsPrefixes(stats, columns, human, true)
+  return stats.map(
+    (s, i) => `${leads[i] ?? ''}${names?.[i] ?? s.name}${typeIndicator(s, indicator)}`,
+  )
 }
 
 /**
@@ -451,7 +457,7 @@ async function renderGroup(
     }
     return
   }
-  const rows = stats.map((s, i) => formatSimple(s, render.indicator, render.columns, names?.[i]))
+  const rows = formatSimple(stats, render.indicator, render.columns, names, render.human)
   for (const line of await laidOut(rows, render.layout, render.width, render.tabsize)) {
     lines.push(line)
   }
@@ -1602,8 +1608,7 @@ export async function lsGeneric(
           render.lines.headers.add(lines.length)
           lines.push(`${quote === null ? header : quote(header)}:`)
         }
-        // ls prints allocated blocks; VFS has no allocation metadata.
-        if (long || flags.columns.blocks) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
+        if (long || flags.columns.blocks) lines.push(lsTotal(entries, flags.columns, human))
         const entryPaths = entries.map((e) => `${rstripSlash(dirSpec.virtual)}/${e.name}`)
         await renderGroup(
           entries,

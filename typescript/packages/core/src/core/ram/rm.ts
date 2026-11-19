@@ -16,10 +16,12 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { touchParent } from './dest.ts'
 
 export async function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
   const prefix = rstripSlash(p) + '/'
+  if (accessor.store.files.has(p) || accessor.store.dirs.has(p)) touchParent(accessor.store, p)
   for (const key of [...accessor.store.files.keys()]) {
     if (key === p || key.startsWith(prefix)) {
       accessor.store.files.delete(key)

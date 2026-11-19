@@ -42,11 +42,14 @@ import {
   shellQuoteAlways,
 } from '../../../utils/quote.ts'
 import {
+  BLKSIZE,
   BLOCK_UNIT,
   ALL_MODE_BITS,
+  blockCount,
   contentSize,
   deviceRdev,
   isCharDevice,
+  linkCount,
   posixMode,
   sizeUnknown,
 } from '../../../utils/stat_view.ts'
@@ -295,6 +298,9 @@ function directiveValue(
   if (spec === 'w') return statTime(s.birthtime)
   if (spec === 'W') return epoch(s.birthtime)
   if (spec === 'B') return String(BLOCK_UNIT)
+  if (spec === 'b') return String(blockCount(s) ?? '?')
+  if (spec === 'o') return String(BLKSIZE)
+  if (spec === 'h') return String(linkCount(s))
   if (spec === 'd') return s.dev === null ? '?' : String(s.dev)
   if (spec === 'D') return s.dev === null ? '?' : s.dev.toString(16)
   const device = s.extra[DEVICE_NUMBERS_KEY]
@@ -549,9 +555,9 @@ function statTime(value: string | null): string {
 }
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
- * rendered bytes, modes, logical owners and its mount's device, but no inode,
- * allocation blocks, IO block size or link count: those print '?'. An absent size
- * or time prints '-'. Each time is the one its directive
+ * rendered bytes, modes, logical owners and its mount's device, and the
+ * blocks, IO block size and link count `%b`, `%o` and `%h` print, but no
+ * inode: that prints '?'. An absent size or time prints '-'. Each time is the one its directive
  * prints (`%x %y %z %w`), the name is unquoted as GNU's default prints it,
  * and times are UTC. */
 function renderStat(s: FileStat, name: string, identity: Identity | null): string {
@@ -560,13 +566,16 @@ function renderStat(s: FileStat, name: string, identity: Identity | null): strin
   const gid = idText(groupId(s.gid, identity)).padStart(5)
   const owner = (ownerName(s.uid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
   const group = (groupName(s.gid, identity) ?? UNKNOWN_ID_NAME).padStart(8)
+  const count = directiveValue('h', s, name, identity)
   const links = isCharDevice(s)
-    ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
-    : 'Links: ?'
+    ? `Links: ${count.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
+    : `Links: ${count}`
+  const blocks = directiveValue('b', s, name, identity)
+  const ioBlock = directiveValue('o', s, name, identity)
   const device = s.dev === null ? '?' : deviceHalves(s.dev).join(',')
   return [
     `  File: ${nameParts(s, name, false).join(' -> ')}`,
-    `  Size: ${size.padEnd(10)}\tBlocks: ${'?'.padEnd(10)} IO Block: ${'?'.padEnd(6)} ${typeLabel(s)}`,
+    `  Size: ${size.padEnd(10)}\tBlocks: ${blocks.padEnd(10)} IO Block: ${ioBlock.padEnd(6)} ${typeLabel(s)}`,
     `Device: ${device}\tInode: ${'?'.padEnd(10)}  ${links}`,
     `Access: (${effectiveMode(s).toString(8).padStart(4, '0')}/${lsModeString(s)})  Uid: (${uid}/${owner})   Gid: (${gid}/${group})`,
     `Access: ${statTime(s.atime ?? s.modified)}`,

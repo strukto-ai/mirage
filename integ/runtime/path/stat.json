@@ -254,15 +254,15 @@
           "expect": {
             "python": {
               "exit": 0,
-              "stdout": "True True\n1 2 2 4096\n0o644 0o755\n"
+              "stdout": "True True\n1 2 8 4096\n0o644 0o755\n"
             },
             "js": {
               "exit": 0,
-              "stdout": "true true\n1 2 2\n644 755\n"
+              "stdout": "true true\n1 2 8\n644 755\n"
             },
             "node": {
               "exit": 0,
-              "stdout": "true true\n1 2 2 4096\n644 755\n"
+              "stdout": "true true\n1 2 8 4096\n644 755\n"
             }
           },
           "expect_on": {

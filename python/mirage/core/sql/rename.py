@@ -14,7 +14,13 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import by_ino, drop_inodes, is_dir
+from mirage.core.sql.inode import (
+    by_ino,
+    drop_inodes,
+    is_dir,
+    now_stamp,
+    touched,
+)
 from mirage.core.sql.path import (
     check_dest_parents,
     found,
@@ -83,6 +89,11 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
     )
     if there is not None:
         statements += drop_inodes([there.ino])
+    now = now_stamp()
+    statements += [
+        touched(by_ino(ino), now)
+        for ino in dict.fromkeys((from_parent.ino, to_parent.ino))
+    ]
     try:
         await accessor.batch(statements)
     except Exception:

@@ -60,6 +60,7 @@ from mirage.utils.stat_view import (
     TYPE_CHARS,
     PrintfKind,
     id_number,
+    link_count,
     posix_mode,
 )
 
@@ -194,9 +195,7 @@ def _count(st: FileStat, field: str, ids: Ids) -> int | None:
         # No backend here numbers its files, as `stat %i` says.
         return None
     if field == "links":
-        # One name per entry, as ls -l counts it: mirage has no hard
-        # links, and a directory's own entries are not counted.
-        return 1
+        return link_count(st)
     group = field == "gid"
     return _owner_id(st.gid if group else st.uid, group, ids)
 

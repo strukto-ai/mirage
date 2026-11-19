@@ -37,6 +37,7 @@ import { type CommandFiles, commandFiles } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { BLOCK_UNIT, blockCount } from '../../../../utils/stat_view.ts'
 import { linksOf, mountView, mountsOf } from '../../utils/links.ts'
 
 /**
@@ -75,13 +76,22 @@ export class DuTally {
   counted: Set<string> | null = null
 
   // The mount table the limits come from; the --exclude and -X patterns, an
-  // entry one matches neither stat'ed nor walked; and under --time the clock
-  // each entry's time is read from.
+  // entry one matches neither stat'ed nor walked; under --time the clock each
+  // entry's time is read from; and whether a file counts its bytes, where
+  // otherwise it counts the blocks it holds.
   constructor(
     readonly mounts: MountView | null = null,
     readonly excludes: readonly string[] = [],
     readonly clock: LsTimeKind | null = null,
+    readonly apparent = false,
   ) {}
+
+  /** What a file the walk met counts: its bytes for an apparent size, else
+   * the blocks it holds, as `stat %b` reports them. Mirrors Python's measure. */
+  measure(info: FileStat): number {
+    if (this.apparent) return info.size ?? 0
+    return (blockCount(info) ?? 0) * BLOCK_UNIT
+  }
 
   /** Whether an earlier operand's walk already counted this one. Mirrors Python's repeated. */
   repeated(path: PathSpec): boolean {
@@ -283,7 +293,7 @@ async function duWalk(
     if (stamp !== null) tally.times.set(path.virtual, stamp)
   }
   if (info.type !== FileType.DIRECTORY) {
-    const size = info.size ?? 0
+    const size = tally.measure(info)
     if (entries !== null) entries.push([`/${stripSlash(path.virtual)}`, size])
     return size
   }
@@ -376,7 +386,12 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const parsed = await readFlags(ctx, stdinStream(files.read, ctx.stdin))
   if (parsed instanceof IOResult) return [new Uint8Array(), parsed]
   const flags = new FlagView(ctx.flags, specOf('du'))
-  const tally = new DuTally(mountsOf(ctx) ?? null, parsed.excludes ?? [], parsed.time ?? null)
+  const tally = new DuTally(
+    mountsOf(ctx) ?? null,
+    parsed.excludes ?? [],
+    parsed.time ?? null,
+    parsed.apparent === true,
+  )
   // Kept on one filesystem, a listing leaves out the roots of the mounts
   // below it, which the walk must neither list nor stat. Those names would
   // count toward a cut listing the walk then finds short, so such a listing

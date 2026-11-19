@@ -49,6 +49,8 @@ export function rowStat(name: string, row: TreeRow): FileStat {
     uid: row.uid,
     gid: row.gid,
     atime: msToRfc3339(row.atimeMs),
+    nlink: row.nlink,
+    blocks: row.blocks,
   })
 }
 

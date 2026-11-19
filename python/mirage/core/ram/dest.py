@@ -23,9 +23,24 @@ from mirage.errors.fs import (
 )
 from mirage.io.memory import memory_room
 from mirage.types import PathSpec
+from mirage.utils.dates import now_iso
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 from mirage.vfs.ram.store import RAMStore
+
+
+def touch_parent(store: RAMStore, p: str, now: str | None = None) -> None:
+    """Move the time of the folder holding the key ``p`` to ``now``, as a
+    folder's moves when an entry in it is made, removed or renamed.
+
+    Args:
+        store (RAMStore): the mount's store.
+        p (str): the normalized key that changed.
+        now (str | None): the time, the clock's when None.
+    """
+    parent = p.rsplit("/", 1)[0] or "/"
+    if parent == "/" or parent in store.dirs:
+        store.modified[parent] = now or now_iso()
 
 
 def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:

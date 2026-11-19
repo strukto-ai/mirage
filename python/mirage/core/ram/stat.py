@@ -17,7 +17,26 @@ from mirage.core.ram.dest import lookup_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import norm
-from mirage.vfs.ram.store import RAMStore
+from mirage.vfs.ram.store import RAMDirs, RAMStore
+
+
+def subdir_count(store: RAMStore, p: str) -> int:
+    """How many folders sit directly in the folder at key ``p``.
+
+    Args:
+        store (RAMStore): the mount's store.
+        p (str): the folder's normalized key.
+    """
+    if isinstance(store.dirs, RAMDirs):
+        return store.dirs.subdirs.get(p, 0)
+    prefix = p.rstrip("/") + "/"
+    return sum(
+        1
+        for key in store.dirs
+        if key.startswith(prefix)
+        and key != p
+        and "/" not in key[len(prefix) :]
+    )
 
 
 def key_stat(store: RAMStore, p: str) -> FileStat | None:
@@ -33,12 +52,13 @@ def key_stat(store: RAMStore, p: str) -> FileStat | None:
         return FileStat(
             name=p.rsplit("/", 1)[-1] or "/",
             size=None,
-            modified=store.modified.get(p),
+            modified=store.modified.get(p, store.made),
             type=FileType.DIRECTORY,
             mode=attrs.get("mode"),
             uid=attrs.get("uid"),
             gid=attrs.get("gid"),
             atime=attrs.get("atime"),
+            nlink=2 + subdir_count(store, p),
         )
     if p in store.files:
         return FileStat(
@@ -51,6 +71,7 @@ def key_stat(store: RAMStore, p: str) -> FileStat | None:
             uid=attrs.get("uid"),
             gid=attrs.get("gid"),
             atime=attrs.get("atime"),
+            nlink=1,
         )
     return None
 

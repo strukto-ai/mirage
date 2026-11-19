@@ -22,6 +22,7 @@ describe('refuse', () => {
     const accessor = new BinAccessor(
       () => ['ls'],
       () => null,
+      '2026-11-18T10:00:00Z',
     )
     const path = new PathSpec({
       virtual: '/usr/bin/ls',

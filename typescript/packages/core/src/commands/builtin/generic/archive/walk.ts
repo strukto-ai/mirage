@@ -142,6 +142,7 @@ async function subtree(
       kind,
       target,
       read: kind === 'file' ? childSpec(virtual, root) : null,
+      stamped: kind === 'dir' ? childSpec(virtual, root) : null,
     })
   }
   entries.sort((a, b) => compareCodePoints(a.namePath, b.namePath))
@@ -183,10 +184,10 @@ async function follow(
   if (targetStat.type !== FileType.DIRECTORY) {
     return [[{ namePath: virtual, kind: 'file', read: spec, size: targetStat.size }], [], '', []]
   }
-  if (!deps.recurse) return [[{ namePath: virtual, kind: 'dir' }], [], '', []]
+  if (!deps.recurse) return [[{ namePath: virtual, kind: 'dir', stamped: spec }], [], '', []]
   const [entries, crossings, unreadable] = await subtree(root, target, virtual, deps)
   return [
-    [{ namePath: virtual, kind: 'dir' }, ...entries],
+    [{ namePath: virtual, kind: 'dir', stamped: spec }, ...entries],
     crossings.map(() => OTHER_FILESYSTEM),
     '',
     unreadable,
@@ -254,7 +255,7 @@ export async function scanOperand(path: PathSpec, deps: ScanOperandDeps): Promis
     if (rootStat.type !== FileType.DIRECTORY) {
       entries.push({ namePath: base, kind: 'file', read: path, size: rootStat.size })
     } else {
-      entries.push({ namePath: base, kind: 'dir' })
+      entries.push({ namePath: base, kind: 'dir', stamped: path })
       if (deps.recurse) {
         const [below, found, closed] = await subtree(path, base, base, deps)
         for (const item of below) entries.push(item)
@@ -292,9 +293,9 @@ export function linkTime(links: LinkView | null, name: string): number | null {
 }
 
 /**
- * What an archive records of a file from its stat: its modification time and
- * permission bits, none where the backend keeps neither. Mirrors Python's
- * `recorded_stamp`.
+ * What an archive records of a file or a directory from its stat: its
+ * modification time and permission bits, none where the backend keeps
+ * neither; `path` is null for a link. Mirrors Python's `recorded_stamp`.
  */
 export async function recordedStamp(
   stat: StatFn,

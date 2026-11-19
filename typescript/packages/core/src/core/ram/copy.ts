@@ -17,7 +17,13 @@ import type { PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { activePipe } from '../dev/device.ts'
-import { checkCapacity, checkDestParents, checkWriteTarget, lookupError } from './dest.ts'
+import {
+  checkCapacity,
+  checkDestParents,
+  checkWriteTarget,
+  lookupError,
+  touchParent,
+} from './dest.ts'
 
 import { makeAbortError } from '../../utils/abort.ts'
 
@@ -58,7 +64,10 @@ export async function copy(
     return
   }
   checkWriteTarget(accessor, dst, d)
+  const made = !accessor.store.files.has(d)
   checkCapacity(accessor, dst, d, data.byteLength)
   accessor.store.files.set(d, data)
-  accessor.store.modified.set(d, nowIso())
+  const now = nowIso()
+  accessor.store.modified.set(d, now)
+  if (made) touchParent(accessor.store, d, now)
 }

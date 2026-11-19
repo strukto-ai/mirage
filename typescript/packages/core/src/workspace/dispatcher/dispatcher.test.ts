@@ -3058,7 +3058,7 @@ describe('a hide filters a one-call read', () => {
           ['find /ram/d', '/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n', 1],
           ['ls -R /ram/d', '/ram/d:\na0.txt\na1.txt\n', 1],
           ['tree /ram/d', '/ram/d\n|-- a0.txt\n`-- a1.txt\n\n1 directory, 2 files\n', 2],
-          ['du -a /ram/d', '2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n', 1],
+          ['du -a /ram/d', '4\t/ram/d/a0.txt\n4\t/ram/d/a1.txt\n12\t/ram/d\n', 1],
         ] as const
       ).map(([line, out, code]) => [cls, line, out, code] as const),
     ),
@@ -4144,4 +4144,50 @@ it('has a write through a link waited out where it lands', async () => {
   } finally {
     await ws.close()
   }
+})
+
+describe('a mount point is a folder of the directory it sits in', () => {
+  it('counts one link for it, once whether the store above holds it or not', async () => {
+    const outer = new RAMVFS()
+    outer.loadState({ type: 'ram', files: {}, dirs: ['/', '/held', '/s'] })
+    const ws = new Workspace(
+      { '/d': outer, '/d/m': new RAMVFS(), '/d/held': new RAMVFS(), '/d/x/y': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const result = await ws.shell(
+        "stat -c '%h %n' /d /d/x /d/m; find /d -maxdepth 1 -type d -printf '%n %p\\n'",
+      )
+      expect(result.stdoutText).toBe(
+        '6 /d\n3 /d/x\n2 /d/m\n6 /d\n2 /d/held\n2 /d/m\n2 /d/s\n3 /d/x\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a link change moves the time of the folder it is in', () => {
+  it('moves it for a link made, removed or renamed', async () => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    const old = "touch -d '2000-01-01 00:00:00' /d/f; "
+    const year = "stat -c '%y' /d/f | cut -c1-4"
+    try {
+      await ws.shell('mkdir /d/f')
+      const out: string[] = []
+      for (const change of [
+        'ln -s /x /d/f/l',
+        'rm /d/f/l',
+        "ln -s /x /d/f/m && touch -d '2000-01-01 00:00:00' /d/f && mv /d/f/m /d/f/n",
+      ]) {
+        const result = await ws.shell(`${old}${change} && ${year}`)
+        out.push(result.stdoutText)
+      }
+      expect(out).toHaveLength(3)
+      expect(out.every((line) => line !== '')).toBe(true)
+      expect(out).not.toContain('2000\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })

@@ -396,6 +396,23 @@ fn at(spelled: &str, mtime: i64) -> Json {
 const YEAR_2001: i64 = 1_000_000_000;
 
 #[test]
+fn a_member_keeps_its_utc_time_for_a_listing_or_an_unzip_in_another_zone() {
+    let mut host = Host::with(&[("a.txt", "one\n")], "");
+    let mut found = at("a.txt", YEAR_2001 + 9 * 3600);
+    found["utc"] = json!(YEAR_2001);
+    assert_eq!(zip(&mut host, "z.zip", json!([found])).0, 0);
+    let listed = unzip(&mut host, "z.zip", json!({"l": true})).1;
+    assert!(listed.contains("2001-09-09 01:46"), "{listed}");
+    host.offset = 9 * 3600;
+    let listed = unzip(&mut host, "z.zip", json!({"l": true})).1;
+    assert!(listed.contains("2001-09-09 10:46"), "{listed}");
+    let info = unzip(&mut host, "z.zip", json!({"Z": true, "s": true})).1;
+    assert!(info.contains(" tx stor 01-Sep-09 10:46 a.txt"), "{info}");
+    assert_eq!(unzip(&mut host, "z.zip", json!({"base": "/out"})).0, 0);
+    assert_eq!(host.mtimes["/out/a.txt"], YEAR_2001);
+}
+
+#[test]
 fn a_delete_drops_the_members_its_patterns_match() {
     let mut host = sample();
     let config =
@@ -517,6 +534,39 @@ fn a_refresh_with_no_file_named_looks_at_what_the_archive_holds() {
     assert_eq!(run(&mut host, "zip", refresh).0, 0);
     let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["a.txt"]}));
     assert_eq!(piped.1, "NEW\n");
+}
+
+#[test]
+fn a_refresh_with_no_file_named_takes_each_files_mode_now() {
+    let mut host = Host::with(&[("e", "1\n")], "");
+    let mut program = at("e", YEAR_2001);
+    program["mode"] = json!(0o755);
+    assert_eq!(zip(&mut host, "z.zip", json!([program])).0, 0);
+    host.files.insert("e".into(), b"22\n".to_vec());
+    host.mtimes.insert("e".into(), YEAR_2001 + 100);
+    host.modes.insert("e".into(), 0o700);
+    let refresh =
+        json!({"archive": "z.zip", "output": "z.zip", "update": true, "refresh_all": true});
+    assert_eq!(run(&mut host, "zip", refresh).0, 0);
+    assert_eq!(unzip(&mut host, "z.zip", json!({"base": "/out"})).0, 0);
+    assert_eq!(host.modes["/out/e"], 0o700);
+}
+
+#[test]
+fn an_update_weighs_utc_times_when_the_archive_holds_them() {
+    let mut host = Host::with(&[("g", "1\n")], "");
+    let mut tokyo = at("g", YEAR_2001 + 9 * 3600);
+    tokyo["utc"] = json!(YEAR_2001);
+    assert_eq!(zip(&mut host, "z.zip", json!([tokyo])).0, 0);
+    host.files.insert("g".into(), b"22\n".to_vec());
+    let mut later = at("g", YEAR_2001 + 3600);
+    later["utc"] = json!(YEAR_2001 + 3600);
+    let update = |found: Json| json!({"archive": "z.zip", "output": "z.zip", "update": true, "found": [found]});
+    assert_eq!(run(&mut host, "zip", update(later.clone())).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["g"]}));
+    assert_eq!(piped.1, "22\n");
+    later["mtime"] = json!(YEAR_2001 + 10 * 3600);
+    assert_eq!(run(&mut host, "zip", update(later)).0, 12);
 }
 
 #[test]
@@ -644,4 +694,24 @@ fn a_refresh_under_y_weighs_what_stands_at_the_name() {
     assert_eq!(run(&mut host, "zip", refresh).0, 0);
     let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
     assert_eq!(piped.1, "real\n");
+}
+
+#[test]
+fn an_extraction_takes_each_entrys_mode_and_time() {
+    let mut host = Host::with(&[("a.txt", "a\n"), ("d/b.txt", "b\n")], "");
+    let mut setuid = at("a.txt", YEAR_2001);
+    setuid["mode"] = json!(0o4640);
+    let found = json!([
+        setuid,
+        {"spelled": "d", "kind": "dir", "mtime": YEAR_2001 + 4, "mode": 0o700},
+        at("d/b.txt", YEAR_2001 + 2),
+    ]);
+    assert_eq!(zip(&mut host, "z.zip", found).0, 0);
+    assert_eq!(unzip(&mut host, "z.zip", json!({"base": "/out"})).0, 0);
+    assert_eq!(host.modes["/out/a.txt"], 0o640);
+    assert_eq!(host.modes["/out/d"], 0o700);
+    assert_eq!(host.modes["/out/d/b.txt"], 0o644);
+    assert_eq!(host.mtimes["/out/a.txt"], YEAR_2001);
+    assert_eq!(host.mtimes["/out/d"], YEAR_2001 + 4);
+    assert_eq!(host.mtimes["/out/d/b.txt"], YEAR_2001 + 2);
 }

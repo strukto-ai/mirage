@@ -16,7 +16,13 @@ from collections import deque
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL, TREE_ENTRY_BYTES, children_of
-from mirage.core.sql.inode import Inode, inode_of, inode_stat, is_dir
+from mirage.core.sql.inode import (
+    Inode,
+    inode_of,
+    inode_stat,
+    is_dir,
+    subdir_counts,
+)
 from mirage.core.sql.path import not_listable, target, walk
 from mirage.io.memory import memory_room
 from mirage.types import FileStat, PathSpec
@@ -39,7 +45,33 @@ async def readdir(accessor: SqlAccessor, path: PathSpec) -> list[FileStat]:
         if child is not None:
             entries.append((str(row["name"]), child))
     entries.sort(key=lambda e: e[0])
-    return [inode_stat(_under(w.p) + name, child) for name, child in entries]
+    counts = await subdir_counts(accessor, [child for _, child in entries])
+    return [
+        inode_stat(_under(w.p) + name, child, counts.get(child.ino, 0))
+        for name, child in entries
+    ]
+
+
+def _tree_stats(
+    prefix: str, entries: list[tuple[str, Inode]]
+) -> dict[str, FileStat]:
+    """A whole subtree's rows by relative path, each folder's link count
+    read off the folders the rows hold under it.
+
+    Args:
+        prefix (str): the subtree's mount path, ending in a slash.
+        entries (list[tuple[str, Inode]]): every entry under it, by
+            relative path.
+    """
+    subdirs: dict[str, int] = {}
+    for rel, child in entries:
+        if is_dir(child):
+            up = rel.rpartition("/")[0]
+            subdirs[up] = subdirs.get(up, 0) + 1
+    return {
+        rel: inode_stat(prefix + rel, child, subdirs.get(rel, 0))
+        for rel, child in sorted(entries, key=lambda entry: entry[0])
+    }
 
 
 async def tree(
@@ -57,20 +89,17 @@ async def tree(
     ceiling = limit if limit is not None and limit >= 0 else None
     room = memory_room()
     if room is not None:
-        entries = room // TREE_ENTRY_BYTES
-        ceiling = entries if ceiling is None else min(ceiling, entries)
+        fits = room // TREE_ENTRY_BYTES
+        ceiling = fits if ceiling is None else min(ceiling, fits)
     if ceiling is not None:
         return await _bounded_tree(accessor, node, _under(w.p), ceiling)
     rows = await accessor.query(SQL["subtree"], (node.ino,))
-    rows.sort(key=lambda row: str(row["rel"]))
-    found: dict[str, FileStat] = {}
-    prefix = _under(w.p)
+    entries: list[tuple[str, Inode]] = []
     for row in rows:
         child = inode_of(row)
         if child is not None:
-            rel = str(row["rel"])
-            found[rel] = inode_stat(prefix + rel, child)
-    return found
+            entries.append((str(row["rel"]), child))
+    return _tree_stats(_under(w.p), entries)
 
 
 async def _bounded_tree(
@@ -80,7 +109,7 @@ async def _bounded_tree(
     fills a recursive SQL queue, and deep relative paths count against room
     before they enter the snapshot."""
     pending = deque([(root.ino, "")])
-    entries: list[tuple[str, FileStat]] = []
+    entries: list[tuple[str, Inode]] = []
     used = 0
     while pending:
         parents = dict(pending.popleft() for _ in range(min(len(pending), 64)))
@@ -103,7 +132,7 @@ async def _bounded_tree(
             used += TREE_ENTRY_BYTES + len(rel.encode())
             if room is not None and used > room:
                 return None
-            entries.append((rel, inode_stat(prefix + rel, child)))
+            entries.append((rel, child))
             if is_dir(child):
                 pending.append((child.ino, rel))
-    return dict(sorted(entries, key=lambda entry: entry[0]))
+    return _tree_stats(prefix, entries)

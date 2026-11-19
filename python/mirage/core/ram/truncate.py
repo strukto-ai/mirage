@@ -18,6 +18,7 @@ from mirage.core.ram.dest import (
     check_capacity,
     check_dest_parents,
     check_write_target,
+    touch_parent,
 )
 from mirage.errors.fs import einval
 from mirage.observe.context import record, start_op
@@ -52,6 +53,7 @@ async def truncate(
         raise einval(path)
     check_dest_parents(store, path, p)
     check_write_target(store, path, p)
+    made = p not in store.files
     with store.lock:
         if p in store.files:
             data = store.files[p]
@@ -61,5 +63,8 @@ async def truncate(
             data = b""
         check_capacity(store, path, p, length)
         store.files[p] = data[:length].ljust(length, b"\0")
-    store.modified[p] = now_iso()
+    now = now_iso()
+    store.modified[p] = now
+    if made:
+        touch_parent(store, p, now)
     record("truncate", path.virtual, "ram", 0, timer)

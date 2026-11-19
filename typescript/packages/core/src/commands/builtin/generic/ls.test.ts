@@ -878,23 +878,30 @@ describe('ls formats, quoting and ignore patterns', () => {
     expect(await laidOut(['a\udcffb'], 'vertical', null, 8)).toEqual(['a\udcffb'])
   })
 
-  const listing = (...names: string[]): [typeof readdir, typeof stat] => [
+  const listing = (
+    names: string[],
+    sizes: Record<string, number> = {},
+  ): [typeof readdir, typeof stat] => [
     (p: PathSpec) => Promise.resolve(key(p) === '/q' ? names.map((n) => `/q/${n}`) : []),
-    (p: PathSpec) =>
-      Promise.resolve(
+    (p: PathSpec) => {
+      const name = key(p).split('/').pop() ?? ''
+      return Promise.resolve(
         new FileStat({
-          name: key(p).split('/').pop() ?? '',
+          name,
           type: key(p) === '/q' ? FileType.DIRECTORY : FileType.FILE,
           modified: '2025-01-15T10:30:00Z',
+          size: sizes[name] ?? null,
         }),
-      ),
+      )
+    },
   ]
   const lines = async (
     names: string[],
     flags: Record<string, FlagValue>,
     env?: Record<string, string>,
+    sizes: Record<string, number> = {},
   ): Promise<string> => {
-    const [dir, entry] = listing(...names)
+    const [dir, entry] = listing(names, sizes)
     const context = { ...ctx({}), ...(env !== undefined ? { env } : {}) }
     const result = await lsGeneric([spec('/q')], context, dir, entry, null, read(flags, env))
     expect(result?.[1].exitCode).toBe(0)
@@ -934,18 +941,24 @@ describe('ls formats, quoting and ignore patterns', () => {
     expect(await lines(names, { all: true, hide: ['v'] })).toBe('.\n..\n.h\n.y~\nv\nw~\n')
   })
 
-  it('leads each row of -s with an unknown block count and a total', async () => {
-    expect(await lines(['a', 'b'], { size: true })).toBe('total ?\n? a\n? b\n')
-    expect(await lines(['a', 'b'], { size: true, inode: true })).toBe('total ?\n? ? a\n? ? b\n')
-    const long = await lines(['a', 'b'], { size: true, args_l: true, g: true, o: true })
-    expect(long.split('\n')[1]?.startsWith('? -rw')).toBe(true)
+  it('leads each row of -s with its blocks and a total', async () => {
+    const sizes = { a: 5, b: 5000 }
+    const of = (flags: Record<string, FlagValue>): Promise<string> =>
+      lines(['a', 'b'], flags, undefined, sizes)
+    expect(await of({ size: true })).toBe('total 12\n4 a\n8 b\n')
+    expect(await of({ size: true, inode: true })).toBe('total 12\n? 4 a\n? 8 b\n')
+    expect(await of({ size: true, human_readable: true })).toBe('total 12K\n4.0K a\n8.0K b\n')
+    expect(await of({ size: true, block_size: '512' })).toBe('total 24\n 8 a\n16 b\n')
+    const long = await of({ size: true, args_l: true, g: true, o: true })
+    expect(long.split('\n')[1]?.startsWith('4 -rw-r--r-- 1    5 ')).toBe(true)
+    expect(await lines(['a', 'b'], { size: true }, undefined, { a: 5 })).toBe('total ?\n4 a\n? b\n')
   })
 
   it('takes COLUMNS from the environment and leads stderr with its notices', async () => {
     expect(await lines(['aaaa', 'bbbb', 'cccc', 'dddd'], { C: true }, { COLUMNS: '22' })).toBe(
       'aaaa  cccc\nbbbb  dddd\n',
     )
-    const [dir, entry] = listing('a')
+    const [dir, entry] = listing(['a'])
     const env = { QUOTING_STYLE: 'bogus' }
     const result = await lsGeneric(
       [spec('/q'), spec('/nope')],

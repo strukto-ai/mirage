@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/empty1267; ls -la /data/empty1267 | awk 'NR==1 {print} NR>1 {print $NF}'",
+      "command": "mkdir -p /data/empty1267 /data/empty1267/e; ls -la /data/empty1267/e | awk 'NR==1 {print} NR>1 {print $NF}'; rmdir /data/empty1267/e",
       "expect": {
         "exit": 0,
-        "stdout": "total ?\n.\n..\n",
+        "stdout": "total 8\n.\n..\n",
         "stderr": ""
       }
     },

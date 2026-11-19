@@ -23,7 +23,13 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-import { checkCapacity, checkDestParents, checkRoom, checkWriteTarget } from './dest.ts'
+import {
+  checkCapacity,
+  checkDestParents,
+  checkRoom,
+  checkWriteTarget,
+  touchParent,
+} from './dest.ts'
 
 /**
  * Replace a file's bytes, or add them to its end. Bytes land at once, as does
@@ -75,6 +81,7 @@ export async function write(
     record(op, path.virtual, VFSName.RAM, size, timer)
     return
   }
+  const made = !files.has(p)
   if (data instanceof Uint8Array || atomic) {
     const whole = data instanceof Uint8Array ? data : await materialize(data)
     const current = append ? files.get(p) : undefined
@@ -82,13 +89,17 @@ export async function write(
     checkCapacity(accessor, path, p, (current?.byteLength ?? 0) + whole.byteLength)
     if (current === undefined) files.set(p, whole)
     else files.splice(p, current.byteLength, whole)
-    modified.set(p, nowIso())
+    const now = nowIso()
+    modified.set(p, now)
+    if (made) touchParent(accessor.store, p, now)
     record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
     return
   }
   if (!append || !files.has(p)) {
     files.set(p, append ? (files.get(p) ?? new Uint8Array()) : new Uint8Array())
-    modified.set(p, nowIso())
+    const now = nowIso()
+    modified.set(p, now)
+    if (made) touchParent(accessor.store, p, now)
   }
   let pending: Uint8Array[] = []
   let position = 0

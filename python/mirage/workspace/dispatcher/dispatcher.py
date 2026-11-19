@@ -53,7 +53,7 @@ from mirage.context.session_context import (
     effective_path_mode,
     session_access,
 )
-from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.constants import FS_ERRORS, MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
     eexist,
@@ -113,6 +113,7 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.clock import run_with_system_clock, system_now
+from mirage.utils.dates import now_iso
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import (
     hidden_under,
@@ -139,6 +140,7 @@ from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.view.namespace_view import (
     merge_readdir,
+    namespace_folders,
     namespace_listing,
     namespace_stat,
 )
@@ -895,6 +897,7 @@ class Dispatcher:
         self._drift = drift
         self._admit_write = admit_write
         self._writers = KeyLock()
+        self._made = now_iso()
 
     def _boundary(self, mount: MountEntry | None, caller: Caller) -> Boundary:
         """The policy boundary for an op on a path ``mount`` owns.
@@ -941,7 +944,9 @@ class Dispatcher:
         if name == "readdir":
             return namespace_listing(vis, prefixes, self._namespace, virtual)
         if name == "stat":
-            return namespace_stat(vis, prefixes, self._namespace, virtual)
+            return namespace_stat(
+                vis, prefixes, self._namespace, virtual, self._made
+            )
         return None
 
     async def _gated_namespace(
@@ -2691,7 +2696,9 @@ class Dispatcher:
                         mount, call.path.virtual, result
                     )
                 if call.name == "stat":
-                    result = await _sized(mount, call.path, result)
+                    result = await self._with_folders(
+                        call, mount, await _sized(mount, call.path, result)
+                    )
                 elif call.name == "read_tree" and isinstance(result, dict):
                     result = await _sized_tree(mount, call.path, result)
         except (FileNotFoundError, NotADirectoryError):
@@ -3204,7 +3211,12 @@ class Dispatcher:
                 call.name,
                 call.path.virtual,
                 self._overlaid(
-                    call.path, self._with_links(call.path, result, call.vis)
+                    call.path,
+                    self._tree_folders(
+                        call.path,
+                        self._with_links(call.path, result, call.vis),
+                        call.vis,
+                    ),
                 ),
             )
         # A tree read keys its entries below the path; a search names each
@@ -3323,6 +3335,86 @@ class Dispatcher:
                     if not key.startswith(below)
                 }
             merged[rel] = row
+        return merged
+
+    async def _with_folders(
+        self, call: _Call, mount: MountEntry, row: Any
+    ) -> Any:
+        """A directory's stat with a link for each folder the namespace
+        adds to it that its own store holds none of: a mount point is a
+        folder of the directory it sits in, as on Linux, and so is a
+        folder above a deeper link. A store that counts no links keeps
+        its count unknown, and a folder its store cannot be asked about
+        is left to the store's count.
+
+        Args:
+            call (_Call): the stat that ran.
+            mount (MountEntry): the mount whose store answered it.
+            row (Any): its answer.
+        """
+        if (
+            not isinstance(row, FileStat)
+            or row.type != FileType.DIRECTORY
+            or row.nlink is None
+        ):
+            return row
+        folders = namespace_folders(
+            call.vis,
+            [m.prefix for m in self._namespace.registry.visible_mounts()],
+            self._namespace,
+            call.path.virtual,
+        )
+        base = call.path.virtual.rstrip("/")
+        added = 0
+        for name in sorted(folders):
+            try:
+                held = await mount.call("stat", f"{base}/{name}")
+            except MISS_ERRORS as exc:
+                logger.debug("%s/%s is the namespace's: %s", base, name, exc)
+                added += 1
+                continue
+            except FS_ERRORS as exc:
+                logger.debug("%s/%s not checked: %s", base, name, exc)
+                continue
+            added += int(held.type != FileType.DIRECTORY)
+        return replace(row, nlink=row.nlink + added) if added else row
+
+    def _tree_folders(
+        self,
+        path: PathSpec,
+        tree: dict[str, FileStat],
+        vis: Visibility | None,
+    ) -> dict[str, FileStat]:
+        """A subtree read with a link for each mount point a directory in
+        it holds that the read does not, as ``_with_folders`` counts one
+        for a stat.
+
+        Args:
+            path (PathSpec): the directory the read answered for.
+            tree (dict[str, FileStat]): the answer, keyed below ``path``.
+            vis (Visibility | None): the session's view.
+        """
+        base = path.virtual.rstrip("/")
+        points = [
+            m.prefix.rstrip("/")[len(base) + 1 :]
+            for m in self._namespace.registry.visible_mounts()
+            if m.prefix.rstrip("/").startswith(base + "/")
+            and path_visible(vis, m.prefix)
+        ]
+        folders = {
+            "/".join(parts[: depth + 1])
+            for parts in (point.split("/") for point in points)
+            for depth in range(1, len(parts))
+        }
+        added: dict[str, int] = {}
+        for folder in folders - tree.keys():
+            parent = folder.rsplit("/", 1)[0]
+            added[parent] = added.get(parent, 0) + 1
+        merged = dict(tree)
+        for rel, count in added.items():
+            row = merged.get(rel)
+            if row is not None and row.nlink is not None:
+                merged[rel] = replace(row, nlink=row.nlink + count)
         return merged
 
     def _overlaid(
@@ -3812,6 +3904,7 @@ class Dispatcher:
         if name == "unlink":
             target = self._namespace.readlink(path.virtual) or ""
             await self._namespace.unlink(path.virtual)
+            await self._touch_folder(path.virtual)
         elif name == "rename":
             target = self._namespace.readlink(path.virtual) or ""
             dst = kwargs["dst"]
@@ -3838,6 +3931,8 @@ class Dispatcher:
                     await self.dispatch("unlink", dst, caller=caller)
             await self._namespace.unlink(dst.virtual)
             await self._namespace.rename(path.virtual, dst.virtual)
+            await self._touch_folder(path.virtual)
+            await self._touch_folder(dst.virtual)
         elif name == "symlink":
             target = str(kwargs["target"])
             # symlink(2) refuses an occupied name and a name its parent
@@ -3852,6 +3947,7 @@ class Dispatcher:
             if refusal is not None:
                 raise refusal
             await self._namespace.symlink(path.virtual, target, system_now())
+            await self._touch_folder(path.virtual)
         elif name == "stat":
             row = self._namespace.link_stat_at(path.virtual)
             if row is None:
@@ -3873,6 +3969,37 @@ class Dispatcher:
         )
         _memory_answered(report)
         return await boundary.complete(mark, path, write, result)
+
+    async def _touch_folder(self, link: str) -> None:
+        """Move the time of the folder a link is made in, removed from or
+        renamed through, as a directory's moves when a name in it
+        changes. Only a store on this host dates the folder: the link is
+        the namespace's alone, so it sends a machine or a service no
+        command, and a folder whose store keeps no time of its own keeps
+        the time it has.
+
+        Args:
+            link (str): the link's virtual path.
+        """
+        parent = posixpath.dirname(link.rstrip("/")) or "/"
+        mount = self._namespace.try_mount_for(parent)
+        if (
+            mount is None
+            or not mount.vfs.local
+            or not mount.answers_at("setattr", parent)
+        ):
+            return
+        try:
+            await mount.call("setattr", parent, mtime=now_iso())
+        except FS_ERRORS as exc:
+            logger.debug("%s keeps its time: %s", parent, exc)
+            return
+        await self._changed(
+            mount,
+            PathSpec.from_str_path(parent),
+            FileChangeKind.UPDATE,
+            times=False,
+        )
 
     async def _readlink_miss(self, path: PathSpec, caller: Caller) -> OSError:
         """The error a readlink of something that is not a link answers.

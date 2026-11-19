@@ -23,6 +23,7 @@ from mirage.core.ram.dest import (
     check_dest_parents,
     check_room,
     check_write_target,
+    touch_parent,
 )
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
@@ -93,6 +94,7 @@ async def write(
             store.modified[p] = now_iso()
         record(op, path_spec.virtual, "ram", size, timer)
         return
+    made = p not in store.files
     if isinstance(data, bytes) or atomic:
         whole = await materialize(data)
         with store.lock:
@@ -105,12 +107,18 @@ async def write(
             else:
                 check_capacity(store, path_spec, p, len(whole))
                 store.files[p] = whole
-        store.modified[p] = now_iso()
+        now = now_iso()
+        store.modified[p] = now
+        if made:
+            touch_parent(store, p, now)
         record(op, path_spec.virtual, "ram", len(whole), timer)
         return
     if not append or p not in store.files:
         store.files[p] = b""
-        store.modified[p] = now_iso()
+        now = now_iso()
+        store.modified[p] = now
+        if made:
+            touch_parent(store, p, now)
     pending: list[bytes] = []
     position = 0
     loop = asyncio.get_running_loop()

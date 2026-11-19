@@ -666,12 +666,21 @@ struct Run<'c, 'h> {
     failed: bool,
     rows: Rows,
     made: HashSet<Vec<u8>>,
-    /// Each directory member's path, mode and shown name, its mode given
-    /// once the run ends (`settle`).
-    dirs: Vec<(Vec<u8>, u32, Vec<u8>)>,
+    /// Each directory member, its mode and time given once the run ends
+    /// (`settle`).
+    dirs: Vec<Landed>,
     /// The files this run gave a mode other than `FRESH_FILE`, which a later
     /// member of the same name wanting `FRESH_FILE` must set back.
     moded: HashSet<Vec<u8>>,
+}
+
+/// A directory member extracted: where it landed, the mode and time it
+/// takes once the run ends, and its name as tar shows it.
+struct Landed {
+    path: Vec<u8>,
+    mode: Option<u32>,
+    mtime: i64,
+    shown: Vec<u8>,
 }
 
 impl Run<'_, '_> {
@@ -681,16 +690,23 @@ impl Run<'_, '_> {
     /// what goes in it, and a parent closed first the change of its child.
     async fn settle(&mut self) {
         let mut last = HashMap::new();
-        for (path, mode, shown) in std::mem::take(&mut self.dirs) {
-            last.insert(path, (mode, shown));
+        for dir in std::mem::take(&mut self.dirs) {
+            last.insert(dir.path.clone(), dir);
         }
-        let mut dirs: Vec<_> = last.into_iter().collect();
+        let mut dirs: Vec<Landed> = last.into_values().collect();
         let depth = |path: &[u8]| path.iter().filter(|&&b| b == b'/').count();
-        dirs.sort_by(|(a, _), (b, _)| depth(b).cmp(&depth(a)).then_with(|| a.cmp(b)));
-        for (path, (mode, shown)) in dirs {
-            if self.config.preserve || mode != FRESH_DIR {
-                self.chmod(&path, mode, &shown).await;
+        dirs.sort_by(|a, b| {
+            depth(&b.path)
+                .cmp(&depth(&a.path))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        for dir in dirs {
+            if let Some(mode) = dir.mode {
+                if self.config.preserve || mode != FRESH_DIR {
+                    self.chmod(&dir.path, mode, &dir.shown).await;
+                }
             }
+            self.utime(&dir.path, dir.mtime, &dir.shown).await;
         }
     }
 
@@ -713,6 +729,26 @@ impl Run<'_, '_> {
         if crate::request::failed(&reply) {
             let text = crate::request::failure_text(&reply);
             self.say([b"tar: ", shown, b": Cannot change mode: ", &text].concat());
+            self.failed = true;
+        }
+    }
+
+    /// Give an extracted path its member's modification time, unless -m
+    /// keeps the time it landed at.
+    async fn utime(&mut self, path: &[u8], mtime: i64, shown: &[u8]) {
+        if self.config.touch {
+            return;
+        }
+        let path = path.to_vec();
+        let request = Request::Utime {
+            path,
+            mtime,
+            local: false,
+        };
+        let (reply, _) = self.host.ask(request).await;
+        if crate::request::failed(&reply) {
+            let text = crate::request::failure_text(&reply);
+            self.say([b"tar: ", shown, b": Cannot utime: ", &text].concat());
             self.failed = true;
         }
     }
@@ -797,9 +833,12 @@ impl Run<'_, '_> {
             Kind::Dir if !config.to_stdout && !parts.is_empty() => {
                 match host.ensure(&mut self.made, &path).await {
                     Ok(()) => {
-                        if let Some(mode) = wanted(config, member.mode) {
-                            self.dirs.push((path.clone(), mode, shown.clone()));
-                        }
+                        self.dirs.push(Landed {
+                            path: path.clone(),
+                            mode: wanted(config, member.mode),
+                            mtime: member.mtime,
+                            shown: shown.clone(),
+                        });
                         if config.verbose {
                             host.print(&[&escaped(trimmed(&member.name))[..], b"/\n"].concat());
                         }
@@ -878,6 +917,9 @@ impl Run<'_, '_> {
                     } else {
                         self.moded.insert(path.clone());
                     }
+                }
+                if file.failed.is_none() {
+                    self.utime(&path, member.mtime, &shown).await;
                 }
                 match &file.failed {
                     Some(text) => {

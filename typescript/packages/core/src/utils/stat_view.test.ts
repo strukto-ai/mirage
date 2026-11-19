@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ContentType, FileStat, FileType } from '../types.ts'
 import {
+  blockCount,
   CHAR_MODE,
   contentSize,
   DIR_MODE,
@@ -27,6 +28,7 @@ import {
   isFifo,
   isLink,
   LINK_MODE,
+  linkCount,
   mtimeMs,
   modeType,
   posixMode,
@@ -202,5 +204,22 @@ describe('idNumber', () => {
     expect(idNumber('4294967295')).toBe(4294967295)
     expect(idNumber('4294967296')).toBeNull()
     expect(idNumber('99999999999')).toBeNull()
+  })
+})
+
+describe('linkCount and blockCount', () => {
+  it.each<[FileStat, number, number | null]>([
+    [new FileStat({ name: 'f', size: 5, type: FileType.FILE }), 1, 8],
+    [new FileStat({ name: 'f', size: 4097, type: FileType.FILE }), 1, 16],
+    [new FileStat({ name: 'e', size: 0, type: FileType.FILE }), 1, 0],
+    [new FileStat({ name: 'u', size: null, type: FileType.FILE }), 1, null],
+    [new FileStat({ name: 'd', type: FileType.DIRECTORY, nlink: 4 }), 4, 8],
+    [new FileStat({ name: 'l', size: 59, type: FileType.SYMLINK }), 1, 0],
+    [new FileStat({ name: 'l', size: 60, type: FileType.SYMLINK }), 1, 8],
+    [new FileStat({ name: 'z', type: FileType.CHAR_DEVICE }), 1, 0],
+    [new FileStat({ name: 'p', type: FileType.FIFO }), 1, 0],
+    [new FileStat({ name: 'b', size: 5, type: FileType.FILE, blocks: 24 }), 1, 24],
+  ])('counts %o', (st, links, blocks) => {
+    expect([linkCount(st), blockCount(st)]).toEqual([links, blocks])
   })
 })

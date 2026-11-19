@@ -35,7 +35,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.context import session_umask
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import PathSpec, SetAttrFields
+from mirage.utils.timezone import zone_from_env
 from mirage.workspace.files import Files
 
 
@@ -47,6 +48,7 @@ async def run_tar(
     vfs: Files | None,
     cwd: str,
     stdin: ByteSource | None = None,
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Run a tar whose archive, operands and -C destination span mounts.
 
@@ -67,14 +69,16 @@ async def run_tar(
         cwd (str): The session's working directory, which relative names
             and an extraction without -C resolve against.
         stdin (ByteSource | None): The archive input when ``-f -`` is used.
+        env (dict[str, str] | None): The session's environment, whose
+            ``TZ`` ``--mtime`` is read in.
     """
     parsed = parse_flags(flag_kwargs)
     if isinstance(parsed, IOResult):
         return None, parsed
 
-    async def chmod(path: PathSpec, mode: int) -> None:
+    async def set_attrs(path: PathSpec, fields: SetAttrFields) -> None:
         if vfs is not None:
-            await vfs.setattr(path, mode=mode)
+            await vfs.setattr(path, **fields)
 
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
@@ -108,6 +112,7 @@ async def run_tar(
         links=links,
         mounts=mount_view(vfs),
         relay=True,
-        chmod=chmod if vfs is not None else None,
+        set_attrs=set_attrs if vfs is not None else None,
+        zone=zone_from_env(env),
         umask=session_umask(),
     )

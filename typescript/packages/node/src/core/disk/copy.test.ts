@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -36,6 +36,21 @@ describe('core/disk/copy', () => {
     await copy(accessor, spec('/src'), spec('/dst'))
     expect(await readFile(join(root, 'dst'), 'utf-8')).toBe('CP')
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'leaves the mode to the copy, as an open of the destination does',
+    async () => {
+      await writeFile(join(root, 'src'), 'CP')
+      await chmod(join(root, 'src'), 0o750)
+      await writeFile(join(root, 'held'), 'old')
+      await chmod(join(root, 'held'), 0o600)
+      await copy(accessor, spec('/src'), spec('/held'))
+      await copy(accessor, spec('/src'), spec('/new'))
+      expect((await stat(join(root, 'held'))).mode & 0o7777).toBe(0o600)
+      expect((await stat(join(root, 'new'))).mode & 0o7777).toBe(0o644)
+      expect(await readFile(join(root, 'held'), 'utf-8')).toBe('CP')
+    },
+  )
   it('does not create parent directories for the destination', async () => {
     // cp is not `mkdir -p`: GNU reports ENOENT on the destination.
     await writeFile(join(root, 'src'), 'X')

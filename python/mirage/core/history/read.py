@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.history import HistoryAccessor
 from mirage.context.session_context import get_current_session
 from mirage.core.history.render import render_bash_history
@@ -40,6 +42,19 @@ async def read(
     Returns:
         bytes: Rendered histfile content, fresh on every call.
     """
+    return render_bash_history(await view_events(accessor, path)).encode()
+
+
+async def view_events(
+    accessor: HistoryAccessor, path: PathSpec | str
+) -> list[dict[str, Any]]:
+    """The command events the histfile shows: the bound session's, or
+    every session's with none bound.
+
+    Args:
+        accessor (HistoryAccessor): Accessor holding the recorder.
+        path (PathSpec | str): Virtual path; only the view file resolves.
+    """
     key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
         raise enoent(key)
@@ -47,4 +62,4 @@ async def read(
     session = get_current_session()
     if session is not None:
         events = [e for e in events if e.get("session") == session.session_id]
-    return render_bash_history(events).encode()
+    return events

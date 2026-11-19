@@ -48,6 +48,8 @@ function printfNeedsStat(fmt: string): boolean {
 describe('renderPrintf', () => {
   const stat = {
     size: 6,
+    links: 1,
+    blocks: 8,
     kind: 'f' as const,
     mtimeEpoch: 1786887930,
     mode: null,
@@ -97,10 +99,33 @@ describe('renderPrintf', () => {
         '%y %m\n',
         '/data/sub',
         '/data',
-        { size: 0, kind: 'd', mtimeEpoch: 0, mode: null, targetKind: null, uid: null, gid: null },
+        {
+          size: 0,
+          links: 2,
+          blocks: 8,
+          kind: 'd',
+          mtimeEpoch: 0,
+          mode: null,
+          targetKind: null,
+          uid: null,
+          gid: null,
+        },
         warnings,
       ),
     ).toBe('d 755\n')
+  })
+
+  it('prints links, 512-byte blocks and kilobytes', async () => {
+    const warnings: string[] = []
+    expect(
+      await expand(
+        '%n %b %k\n',
+        '/data/a.txt',
+        '/data',
+        { ...stat, links: 3, blocks: 9 },
+        warnings,
+      ),
+    ).toBe('3 9 5\n')
   })
 
   it('renders a reported mode over the per-kind default', async () => {
@@ -113,7 +138,17 @@ describe('renderPrintf', () => {
         '%m %M\n',
         '/data/sub',
         '/data',
-        { size: 0, kind: 'd', mtimeEpoch: 0, mode: 0o700, targetKind: null, uid: null, gid: null },
+        {
+          size: 0,
+          links: 2,
+          blocks: 8,
+          kind: 'd',
+          mtimeEpoch: 0,
+          mode: 0o700,
+          targetKind: null,
+          uid: null,
+          gid: null,
+        },
         warnings,
       ),
     ).toBe('700 drwx------\n')
@@ -123,6 +158,8 @@ describe('renderPrintf', () => {
     const warnings: string[] = []
     const link = {
       size: 5,
+      links: 1,
+      blocks: 0,
       kind: 'l' as const,
       mtimeEpoch: 0,
       mode: null,

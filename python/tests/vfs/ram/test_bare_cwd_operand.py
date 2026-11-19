@@ -57,22 +57,21 @@ async def test_tree_bare_renders_the_cwd(workspace):
 @pytest.mark.asyncio
 async def test_du_bare_measures_the_cwd_dot_spelled(workspace):
     seeded = await _seed(workspace)
-    # GNU du with no operand prints ./-spelled rows ending in `.`
-    # (sizes are bytes, mirage's documented divergence from blocks);
-    # the implicit /dev child mount rides along as ./dev, in its
-    # post-order position rather than appended, and keeps GNU's `0` row
-    # even though it holds nothing; the /usr/bin view rides along the
-    # same way, and /.bash_history counts toward `.` like any dotfile
-    # (unrecorded here, so it is still empty). Pinned on coreutils 9.7 with
-    # a tmpfs at ./dev: `0 ./dev`, `6 ./sub`, `12 .`, plus the program
-    # files' own total.
+    # GNU du with no operand prints ./-spelled rows ending in `.`, each
+    # directory a block of its own and each file the blocks it holds; the
+    # implicit /dev child mount rides along as ./dev, in its post-order
+    # position rather than appended, its devices holding nothing; the
+    # /usr/bin view rides along the same way under the ./usr it implies,
+    # and /.bash_history counts toward `.` like any dotfile (unrecorded
+    # here, so it is still empty). Pinned on coreutils 9.7 over ext4:
+    # `4 ./dev`, `8 ./sub`, `24 .`, plus the program files' own total.
     listed = await seeded.shell("du -s /usr/bin", record=False)
     programs = int((listed.stdout or b"0").split(b"\t")[0])
     io = await seeded.shell("du", cwd="/")
     assert io.exit_code == 0
     assert (io.stdout or b"") == (
-        f"0\t./dev\n6\t./sub\n{programs}\t./usr/bin\n"
-        f"{programs}\t./usr\n{12 + programs}\t.\n"
+        f"4\t./dev\n8\t./sub\n{programs}\t./usr/bin\n"
+        f"{programs + 4}\t./usr\n{programs + 24}\t.\n"
     ).encode()
 
 

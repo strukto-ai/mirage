@@ -853,9 +853,12 @@ async def test_du_without_a_omits_link_lines():
 
 @pytest.mark.asyncio
 async def test_du_sizes_a_link_by_its_target_length():
-    """Deliberate divergence: GNU counts blocks (0), mirage counts bytes."""
+    """A short link holds no block (GNU's fast symlink); its apparent
+    size is its target string's length."""
     ws = await _seeded()
     r = await ws.shell("du /data/link.txt")
+    assert r.stdout.decode() == "0\t/data/link.txt\n"
+    r = await ws.shell("du -b /data/link.txt")
     size, name = r.stdout.decode().strip().split("\t")
     assert name == "/data/link.txt"
     assert int(size) == len("/data/dir/real.txt")
@@ -875,6 +878,9 @@ async def test_du_does_not_follow_a_link_operand():
 async def test_du_totals_include_links():
     ws = await _seeded()
     r = await ws.shell("du -s /data")
+    # Two directories and one file a block each; a short link none.
+    assert r.stdout.decode() == "12\t/data\n"
+    r = await ws.shell("du -sb /data")
     total = int(r.stdout.decode().split("\t")[0])
     # hello\n plus both link targets.
     assert total == 6 + len("/data/dir/real.txt") + len("/data/dir")
@@ -958,7 +964,7 @@ async def test_link_prefix_resolves_for_no_follow_commands():
     r = await ws.shell("stat -c '%F' /data/base/dlink/f2")
     assert r.stdout.decode() == "regular file\n"
     r = await ws.shell("du /data/base/dlink/f2")
-    assert r.stdout.decode() == "7\t/data/base/dlink/f2\n"
+    assert r.stdout.decode() == "4\t/data/base/dlink/f2\n"
     r = await ws.shell("find /data/base/dlink/f2")
     assert r.stdout.decode() == "/data/base/dlink/f2\n"
     r = await ws.shell("readlink /data/base/dlink/l2")
@@ -977,12 +983,12 @@ async def test_trailing_slash_resolves_a_directory_link():
     assert r.stdout.decode() == "symbolic link\n"
     r = await ws.shell("stat -c '%F' /data/base/dlink/")
     assert r.stdout.decode() == "directory\n"
-    # The link's own target-string length, then the target's contents.
+    # The link itself, which holds no block, then the target's contents.
     r = await ws.shell("du /data/base/dlink")
-    assert r.stdout.decode() == "3\t/data/base/dlink\n"
+    assert r.stdout.decode() == "0\t/data/base/dlink\n"
     r = await ws.shell("du /data/base/dlink/")
     assert r.stdout.decode() == (
-        "0\t/data/base/dlink/emptydir\n21\t/data/base/dlink/\n"
+        "4\t/data/base/dlink/emptydir\n12\t/data/base/dlink/\n"
     )
     r = await ws.shell("file /data/base/dlink/")
     assert r.stdout.decode() == "/data/base/dlink/: directory\n"
@@ -1779,7 +1785,7 @@ class _SealedRAMVFS(RAMVFS):
         (
             "du -aL /data/d",
             1,
-            b"2\t/data/d/a\n2\t/data/d\n",
+            b"4\t/data/d/a\n8\t/data/d\n",
             b"du: cannot access '/data/d/ld': Permission denied\n"
             b"du: cannot access '/data/d/lf': Permission denied\n",
         ),

@@ -23,6 +23,8 @@ class Entry:
         kind (MemberKind): file, dir, or link.
         target (str): a symlink's target, verbatim as stored.
         read (PathSpec | None): where a file's bytes come from.
+        stamped (PathSpec | None): where a directory's time and mode come
+            from.
     """
 
     name_path: str
@@ -30,6 +32,7 @@ class Entry:
     target: str = ""
     read: PathSpec | None = None
     size: int | None = None
+    stamped: PathSpec | None = None
 
 
 @dataclass(frozen=True, slots=True)

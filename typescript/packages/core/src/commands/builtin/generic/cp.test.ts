@@ -49,6 +49,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { SPECS, parseCommand } from '../../spec/index.ts'
 import { parseToKwargs } from '../../spec/parser.ts'
 import { MountMode } from '../../../types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -645,6 +646,41 @@ describe('per-entry policy still materializes directories', () => {
     }
   })
 
+  it.each([
+    [0o022, true],
+    [0o077, false],
+  ])('copies a tree entry by entry under a set umask (%o)', async (umask, whole) => {
+    // A store's one-call tree copy makes each copy under its own umask, so a
+    // session umask other than the default sends the copy entry by entry,
+    // where each new copy takes its mode under the session's.
+    const files = new Map([['/t/f.txt', new Uint8Array([70])]])
+    const dirs = new Set(['/t', '/t/empt'])
+    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+    let used = false
+    const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> => {
+      used = true
+      dirs.add(key(dst))
+      return Promise.resolve()
+    }
+    const dispatch: DispatchFn = () => Promise.resolve([null, new IOResult()])
+    const [, io] = await cpGeneric(
+      ['/t', '/c'].map(spec),
+      stat,
+      { copy, find, dirCopy, mkdir },
+      cpFlags({ recursive: true }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      dispatch,
+      umask,
+    )
+    expect(io.exitCode).toBe(0)
+    expect(used).toBe(whole)
+    expect(dirs.has('/c')).toBe(true)
+  })
+
   it.each([walkDeclined, enotsup])(
     'copies entry by entry when the dirCopy is declined (%o)',
     async (refuse) => {
@@ -1157,6 +1193,25 @@ describe('the preserve, link, parent and attribute options', () => {
       const [source, copy] = stdoutStr(result).split('\n')
       expect(copy).toBe(source)
       expect(source?.startsWith('640 ')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ["chmod 750 f; cp f g; stat -c '%a' g", '750\n'],
+    ["chmod 4777 f; cp f g; stat -c '%a' g", '755\n'],
+    ["chmod 750 f; umask 077; cp f g; stat -c '%a' g", '700\n'],
+    ["printf x > g; chmod 600 g; chmod 755 f; cp f g; stat -c '%a' g", '600\n'],
+    ["mkdir -m 700 s; mkdir -m 750 s/t; cp -r s u; stat -c '%a' u u/t", '700\n750\n'],
+    ["mkdir -m 777 s u; mkdir -m 700 u/s; cp -r s u; stat -c '%a' u/s", '700\n'],
+    ["chmod 750 f; cp --attributes-only f h; stat -c '%a %s' h", '750 0\n'],
+  ])('makes a new copy with the source mode under the umask: %s', async (line, out) => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const result = await ws.shell(SETUP + line)
+      expect(stdoutStr(result)).toBe(out)
+      expect(result.exitCode).toBe(0)
     } finally {
       await ws.close()
     }

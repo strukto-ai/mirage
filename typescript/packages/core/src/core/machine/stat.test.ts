@@ -38,6 +38,8 @@ describe('rowStat', () => {
       atimeMs: 1700000001000,
       uid: 1000,
       gid: 50,
+      nlink: 1,
+      blocks: 8,
       rel: '',
     }
     const got = rowStat('x.py', row)
@@ -50,6 +52,7 @@ describe('rowStat', () => {
     ])
     expect(got.modified).toBe('2023-11-14T22:13:20.123Z')
     expect(got.atime).toBe('2023-11-14T22:13:21.000Z')
+    expect([got.nlink, got.blocks]).toEqual([1, 8])
   })
 
   it.each<[string, FileType, number | null]>([
@@ -69,6 +72,8 @@ describe('rowStat', () => {
       atimeMs: 0,
       uid: 0,
       gid: 0,
+      nlink: 1,
+      blocks: 0,
       rel: '',
     })
     expect([got.type, got.size]).toEqual([want, size])
@@ -81,7 +86,7 @@ describe('stat', () => {
     const got = await stat(bound([machine]), 'box', spec('/x.txt'))
     expect([got.name, got.size, got.uid]).toEqual(['x.txt', 3, 0])
     expect(machine.lines).toEqual([
-      "env LC_ALL=C find -L '/tmp/x.txt' -maxdepth 0 -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
+      "env LC_ALL=C find -L '/tmp/x.txt' -maxdepth 0 -printf '%y %m %s %T@ %A@ %U %G %n %b %P\\0'",
     ])
   })
 
@@ -97,8 +102,8 @@ describe('stat', () => {
 
 describe('tree', () => {
   it('merges every machine and leaves a failure to the walk', async () => {
-    const a = new ScriptedMachine('a', () => ok(joined(DIR, 'f 644 1 0 0 0 0 x\0')))
-    const b = new ScriptedMachine('b', () => ok(joined(DIR, 'f 644 2 0 0 0 0 y\0')))
+    const a = new ScriptedMachine('a', () => ok(joined(DIR, 'f 644 1 0 0 0 0 1 0 x\0')))
+    const b = new ScriptedMachine('b', () => ok(joined(DIR, 'f 644 2 0 0 0 0 1 0 y\0')))
     const rows = await tree(bound([a, b]), ['a', 'b'], spec('/d'))
     expect([...(rows?.keys() ?? [])].sort()).toEqual(['x', 'y'])
     const gone = new ScriptedMachine('gone', () => failed('find: lost\n'))

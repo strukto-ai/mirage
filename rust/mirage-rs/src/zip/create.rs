@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use super::format::{
     ARCHIVE, CENTRAL, END, END_SEARCH, END64, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
-    end_record, say, u16_at, u32_at, wildcard,
+    end_record, extended_time, say, u16_at, u32_at, wildcard,
 };
 use super::unzip;
 use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
@@ -51,6 +51,8 @@ fn dos_stamp(time: Option<i64>) -> u64 {
 }
 /// 1980-01-01 00:00 UTC.
 const DOS_EPOCH: i64 = 315_532_800;
+/// The extended timestamp extra field's ID ("UT").
+const UT_TAG: u64 = 0x5455;
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -75,8 +77,13 @@ struct Found {
     operand: usize,
     #[serde(deserialize_with = "crate::latin1")]
     target: Vec<u8>,
-    /// Its modification time, when the walk read one.
+    /// Its modification time as the session's wall clock reads it, which
+    /// the DOS stamp records, when the walk read one.
     mtime: Option<i64>,
+    /// The same time in UTC, which the extended timestamp field records.
+    utc: Option<i64>,
+    /// Its permission bits, when the walk read them.
+    mode: Option<u32>,
     /// The path it was found at, which `-m` removes; a link's own, not
     /// its target's.
     #[serde(deserialize_with = "crate::latin1_opt")]
@@ -243,6 +250,14 @@ struct Original {
     comment: Vec<u8>,
 }
 
+/// The UTC modification time a central record's extended timestamp holds,
+/// which `-u` and `-f` weigh a file's time against when it is there.
+fn central_utc(central: &[u8]) -> Option<i64> {
+    let start = 46 + usize::from(u16_at(central, 28));
+    let end = (start + usize::from(u16_at(central, 30))).min(central.len());
+    central.get(start..end).and_then(extended_time)
+}
+
 /// Whether an extra field is whole and holds no ZIP64 field.
 fn plain_extra(extra: &[u8]) -> bool {
     let mut at = 0;
@@ -351,6 +366,7 @@ struct Facts<'a> {
     size: u64,
     mode: u64,
     stamp: u64,
+    utc: Option<i64>,
     comment: &'a [u8],
     level: u32,
     text: bool,
@@ -366,17 +382,25 @@ fn encode(name: &[u8], member: &Facts<'_>) -> (Vec<u8>, Vec<u8>) {
         size,
         mode,
         stamp,
+        utc,
         comment,
         level,
         text,
     } = *member;
     let large = size.max(packed) >= ZIP32;
     let version = if large { 45 } else { 20 };
-    let extra = if large {
+    let mut extra = if large {
         fields(&[(1, 2), (16, 2), (size, 8), (packed, 8)])
     } else {
         Vec::new()
     };
+    // The time in UTC, so an unzip in another zone lands it where it was;
+    // after any ZIP64 field, which `placed` grows in place.
+    if let Some(utc) = utc.and_then(|utc| u32::try_from(utc).ok()) {
+        if i32::try_from(utc).is_ok() {
+            extra.extend(fields(&[(UT_TAG, 2), (5, 2), (1, 1), (u64::from(utc), 4)]));
+        }
+    }
     let (packed, size) = if large {
         (ZIP32, ZIP32)
     } else {
@@ -664,10 +688,15 @@ async fn add(
     if !packer.held.is_empty() {
         packer.send(host).await;
     }
+    let bits = |kind: u64| {
+        found
+            .mode
+            .map(|mode| (kind | u64::from(mode & 0o7777)) << 16)
+    };
     let (method, mode) = match found.kind {
-        Kind::Dir => (0, DIR_MODE),
+        Kind::Dir => (0, bits(0o40000).map_or(DIR_MODE, |mode| mode | 0x10)),
         Kind::Link => (8, LINK_MODE),
-        Kind::File => (8, FILE_MODE),
+        Kind::File => (8, bits(0o100000).unwrap_or(FILE_MODE)),
     };
     let method = if stored || plain { 0 } else { method };
     let (head, central) = encode(
@@ -679,6 +708,7 @@ async fn add(
             size: packer.size,
             mode,
             stamp: dos_stamp(found.mtime),
+            utc: found.utc,
             comment,
             level,
             text: packer.text,
@@ -803,19 +833,21 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     if config.delete {
         return delete(&host, &config, archive, old, &warnings).await;
     }
-    let held: HashMap<Vec<u8>, u64> = old.as_ref().map_or_else(HashMap::new, |old| {
-        old.records
-            .iter()
-            .map(|r| {
-                let stamp =
-                    (u64::from(u16_at(&r.central, 14)) << 16) | u64::from(u16_at(&r.central, 12));
-                (r.name.clone(), stamp)
-            })
-            .collect()
-    });
+    let held: HashMap<Vec<u8>, (u64, Option<i64>)> =
+        old.as_ref().map_or_else(HashMap::new, |old| {
+            old.records
+                .iter()
+                .map(|r| {
+                    let stamp = (u64::from(u16_at(&r.central, 14)) << 16)
+                        | u64::from(u16_at(&r.central, 12));
+                    (r.name.clone(), (stamp, central_utc(&r.central)))
+                })
+                .collect()
+        });
     if config.update || config.freshen {
         members.retain(|(name, found)| match held.get(name.as_slice()) {
-            Some(&stamp) => dos_stamp(found.mtime) > stamp,
+            Some(&(_, Some(utc))) if found.utc.is_some() => found.utc > Some(utc),
+            Some(&(stamp, _)) => dos_stamp(found.mtime) > stamp,
             None => config.update,
         });
     }
@@ -1005,21 +1037,24 @@ async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> V
                     spelled: record.name.clone(),
                     kind: Kind::Link,
                     target: bytes(&target),
-                    mtime: reply.mtime,
+                    mtime: reply.wall,
+                    utc: reply.mtime,
                     ..Found::default()
                 });
                 continue;
             }
         }
-        if let Some((kind, mtime)) = host.stat_time(&record.name).await {
-            if kind == "file" {
-                stored.push(Found {
-                    spelled: record.name.clone(),
-                    path: Some(record.name.clone()),
-                    mtime,
-                    ..Found::default()
-                });
-            }
+        let path = record.name.clone();
+        let (reply, _) = host.ask(Request::Stat { path }).await;
+        if reply.kind.as_deref() == Some("file") {
+            stored.push(Found {
+                spelled: record.name.clone(),
+                path: Some(record.name.clone()),
+                mtime: reply.wall,
+                utc: reply.mtime,
+                mode: reply.mode,
+                ..Found::default()
+            });
         }
     }
     stored

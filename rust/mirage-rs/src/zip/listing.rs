@@ -252,7 +252,25 @@ pub(super) fn ratio(uncompressed: i128, compressed: i128) -> i128 {
 
 /// One `ls -l`-shaped zipinfo line: `Medium` adds the percent saved (C's
 /// truncating `(ratio + 5) / 10`), `Long` the compressed size.
-pub(super) fn row(entry: &Entry, rows: Rows, out: &mut Vec<u8>) {
+/// When an entry last changed as a listing shows it: its extended timestamp
+/// on the session's wall clock where it has one, else its DOS stamp.
+fn shown_stamp(entry: &Entry, wall: Option<i64>) -> (u16, u16, u16, u16, u16, u16) {
+    let Some(wall) = wall else {
+        return entry.stamp();
+    };
+    let (year, month, day, hour, minute, second) = crate::calendar::fields(i128::from(wall));
+    let part = |value: i128| u16::try_from(value).unwrap_or(0);
+    (
+        part(year),
+        part(month),
+        part(day),
+        part(hour),
+        part(minute),
+        part(second),
+    )
+}
+
+pub(super) fn row(entry: &Entry, wall: Option<i64>, rows: Rows, out: &mut Vec<u8>) {
     let host = HOSTS[usize::from(entry.host()).min(HOSTS.len() - 1)];
     let mut line = format!(
         "{} {host} {:>8} {}",
@@ -268,7 +286,7 @@ pub(super) fn row(entry: &Entry, rows: Rows, out: &mut Vec<u8>) {
         Rows::Long => line += &format!(" {:>8}", entry.csize),
         _ => {}
     }
-    let (year, month, day, hour, minute, _) = entry.stamp();
+    let (year, month, day, hour, minute, _) = shown_stamp(entry, wall);
     let month = match month {
         1..=12 => MONTHS[usize::from(month) - 1].to_owned(),
         _ => format!("{month:03}"),
@@ -345,7 +363,13 @@ pub(super) fn comment(raw: &[u8], out: &mut Vec<u8>) {
 /// and name, `-v` adding the method, compressed size, percent saved and
 /// CRC-32, each with its comment, written as stored, and a totals line;
 /// `quiet` once drops the comments, twice the header and totals too.
-pub(super) fn list(entries: &[&Entry], quiet: u8, verbose: bool, out: &mut Vec<u8>) {
+pub(super) fn list(
+    entries: &[&Entry],
+    walls: &[Option<i64>],
+    quiet: u8,
+    verbose: bool,
+    out: &mut Vec<u8>,
+) {
     let header = if verbose {
         VERBOSE_HEADER
     } else {
@@ -354,8 +378,9 @@ pub(super) fn list(entries: &[&Entry], quiet: u8, verbose: bool, out: &mut Vec<u
     if quiet < 2 {
         out.extend_from_slice(header.as_bytes());
     }
-    for entry in entries {
-        let (year, month, day, hour, minute, _) = entry.stamp();
+    for (at, entry) in entries.iter().enumerate() {
+        let wall = walls.get(at).copied().flatten();
+        let (year, month, day, hour, minute, _) = shown_stamp(entry, wall);
         let stamp = format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}");
         let packed = compressed(entry);
         let row = if verbose {

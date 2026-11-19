@@ -22,6 +22,7 @@ function accessor(names: string[]): BinAccessor {
   return new BinAccessor(
     () => names,
     (name) => (names.includes(name) ? `${name} is built into mirage.` : null),
+    '2026-11-18T10:00:00Z',
   )
 }
 
@@ -40,10 +41,15 @@ describe('stat', () => {
     expect(st.type).toBe(FileType.FILE)
     expect(st.mode).toBe(0o755)
     expect(st.size).toBe(renderStub('ls', 'ls is built into mirage.').byteLength)
+    expect(st.modified).toBe('2026-11-18T10:00:00Z')
+    expect(st.nlink).toBe(1)
   })
 
   it('the view root is a directory and a miss is ENOENT', async () => {
-    expect((await stat(accessor(['ls']), spec('/usr/bin'))).type).toBe(FileType.DIRECTORY)
+    const root = await stat(accessor(['ls']), spec('/usr/bin'))
+    expect(root.type).toBe(FileType.DIRECTORY)
+    expect(root.modified).toBe('2026-11-18T10:00:00Z')
+    expect(root.nlink).toBe(2)
     await expect(stat(accessor(['ls']), spec('/usr/bin/cd'))).rejects.toMatchObject({
       code: 'ENOENT',
     })

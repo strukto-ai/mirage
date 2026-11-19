@@ -52,7 +52,8 @@ async def test_system_time_starts_date_file_times_and_jq():
         # ls shows the time, not the year, of a file stamped before now.
         clock.advance(60)
         assert " Mar  2 09:00 a\n" in await _out(ws, "ls -l /data")
-        assert await _out(ws, "find /data -mtime -1") == "/data/a\n"
+        # Making a moves its folder's time too, as on a disk.
+        assert await _out(ws, "find /data -mtime -1") == "/data\n/data/a\n"
         assert (
             await _out(ws, "echo '{}' | jq -r 'now|todate'")
             == "2026-03-02T09:01:00Z\n"

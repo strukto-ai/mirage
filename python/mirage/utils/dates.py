@@ -368,6 +368,30 @@ def epoch_to_iso(seconds: float) -> str:
     )
 
 
+def local_seconds(epoch: int, zone: tzinfo) -> int:
+    """The wall clock an instant reads in ``zone``, counted in seconds as
+    an epoch is: the time a DOS stamp stores.
+
+    Args:
+        epoch (int): unix epoch seconds.
+        zone (tzinfo): the session's zone.
+    """
+    offset = datetime.fromtimestamp(epoch, zone).utcoffset()
+    return epoch + (0 if offset is None else int(offset.total_seconds()))
+
+
+def epoch_of_local(seconds: int, zone: tzinfo) -> int:
+    """The instant whose wall clock in ``zone`` reads ``seconds``, counted
+    as an epoch is: a DOS stamp read back.
+
+    Args:
+        seconds (int): the wall clock, counted from 1970-01-01 00:00.
+        zone (tzinfo): the session's zone.
+    """
+    wall = datetime.fromtimestamp(seconds, timezone.utc).replace(tzinfo=zone)
+    return math.floor(wall.timestamp())
+
+
 def iso_to_epoch(iso: str) -> int:
     """Convert an ISO-8601 string to whole unix epoch seconds.
 

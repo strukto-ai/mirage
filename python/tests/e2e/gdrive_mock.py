@@ -406,6 +406,22 @@ class FakeDriveApi:
         self._fake.calls["create_folder"] += 1
         return self._fake.mkdir(parent_id, name)
 
+    async def patch_file(
+        self,
+        file_id: str,
+        body: dict[str, Any],
+        add_parents: str | None = None,
+        remove_parents: str | None = None,
+    ) -> dict:
+        if set(body) != {"modifiedTime"} or add_parents or remove_parents:
+            raise AssertionError(f"gdrive_mock does not answer {body!r}")
+        self._fake.calls["patch_file"] += 1
+        entry = self._fake._entry(file_id)
+        if entry is None:
+            raise FileNotFoundError(file_id)
+        entry["modifiedTime"] = body["modifiedTime"]
+        return self._fake.public(entry)
+
     def render(self, file_id: str) -> bytes:
         """A native file's rendering: its stored bytes, counted as the
         cost a warm native read avoids.

@@ -20,6 +20,7 @@ from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
 from mirage.observe.observer import Observer
 from mirage.types import FileStat, PathSpec
+from mirage.utils.dates import now_iso
 from mirage.vfs.base import BaseVFS
 
 HISTORY_PREFIX = "/.bash_history"
@@ -45,7 +46,7 @@ class HistoryViewVFS(BaseVFS):
     def __init__(self, observer: Observer) -> None:
         super().__init__()
         self.observer = observer
-        self.accessor = HistoryAccessor(observer)
+        self.accessor = HistoryAccessor(observer, now_iso())
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)

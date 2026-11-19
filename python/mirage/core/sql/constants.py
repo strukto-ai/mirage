@@ -201,6 +201,16 @@ def clear_under(ino: int) -> tuple[str, ...]:
     )
 
 
+def subdirs_of(count: int) -> str:
+    """How many folders sit directly in each of a batch of folders, one
+    row per folder that holds any."""
+    slots = ", ".join("?" for _ in range(count))
+    return f"""SELECT d.parent_ino, COUNT(*) AS subdirs
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino IN ({slots}) AND i.mode = {DIR}
+    GROUP BY d.parent_ino"""
+
+
 def children_of(count: int) -> str:
     """Direct children of a bounded batch of parents, with their inode rows."""
     slots = ", ".join("?" for _ in range(count))

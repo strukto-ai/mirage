@@ -32,8 +32,9 @@ async function rowOf(
   versioned: boolean,
 ): Promise<FileStat | null> {
   try {
-    const st = await lstat(nodePath.join(full, entry.name), { bigint: true })
-    return statOf(entry.name, st, nowNs, versioned)
+    const host = nodePath.join(full, entry.name)
+    const st = await lstat(host, { bigint: true })
+    return await statOf(entry.name, st, nowNs, versioned, host)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     console.debug(`${nodePath.join(full, entry.name)} left during the scan: ${String(err)}`)

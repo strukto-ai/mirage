@@ -16,7 +16,7 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { eisdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { SQL } from './constants.ts'
-import { dropInodes, isDir } from './inode.ts'
+import { byIno, dropInodes, isDir, nowStamp, touched } from './inode.ts'
 import { found, leaf, parentOf, walk } from './path.ts'
 
 /** Remove a file, its entry and its bytes. */
@@ -24,8 +24,10 @@ export async function unlink(accessor: SqlAccessor, path: PathSpec): Promise<voi
   const w = await walk(accessor, path)
   const node = found(w, path)
   if (isDir(node)) throw eisdir(path)
+  const parent = parentOf(w)
   await accessor.batch([
-    { sql: SQL.removeEntry, params: [parentOf(w)?.ino ?? null, leaf(w)] },
+    { sql: SQL.removeEntry, params: [parent?.ino ?? null, leaf(w)] },
     ...dropInodes([node.ino]),
+    ...(parent !== null ? [touched(byIno(parent.ino), nowStamp())] : []),
   ])
 }

@@ -19,7 +19,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import DIR, FILE, LAST_INO, MAX_PARAMS, SQL
+from mirage.core.sql.constants import (
+    DIR,
+    FILE,
+    LAST_INO,
+    MAX_PARAMS,
+    SQL,
+    subdirs_of,
+)
 from mirage.types import FileStat, FileType
 from mirage.utils.clock import system_date
 from mirage.utils.dates import to_iso_z
@@ -69,10 +76,11 @@ def now_stamp() -> Stamp:
 
 def stamp_of(iso: str) -> Stamp:
     """The stamp an ISO time names, to the nanosecond its fraction
-    gives."""
-    seconds = math.floor(
-        datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
-    )
+    gives; one with no offset is UTC."""
+    at = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    seconds = math.floor(at.timestamp())
     match = re.search(r"\.(\d+)", iso)
     fraction = match.group(1) if match else ""
     return seconds, int(fraction.ljust(9, "0")[:9])
@@ -84,13 +92,17 @@ def iso_of(seconds: int, nanoseconds: int) -> str:
     return to_iso_z(at.replace(microsecond=nanoseconds // 1000))
 
 
-def inode_stat(p: str, node: Inode) -> FileStat:
+def inode_stat(p: str, node: Inode, subdirs: int = 0) -> FileStat:
     """What ``stat`` answers for the inode at mount path ``p``: its type,
-    size and mtime. Mirrors TypeScript's ``inodeStat``."""
+    size, mtime and link count, a folder's being 2 and one per folder
+    ``subdirs`` says it holds. Mirrors TypeScript's ``inodeStat``."""
     modified = iso_of(node.mtime, node.mtime_nsec)
     if is_dir(node):
         return FileStat(
-            name=gnu_basename(p), modified=modified, type=FileType.DIRECTORY
+            name=gnu_basename(p),
+            modified=modified,
+            type=FileType.DIRECTORY,
+            nlink=2 + subdirs,
         )
     return FileStat(
         name=gnu_basename(p),
@@ -98,7 +110,22 @@ def inode_stat(p: str, node: Inode) -> FileStat:
         modified=modified,
         type=FileType.FILE,
         content=content_type_for_path(p),
+        nlink=1,
     )
+
+
+async def subdir_counts(
+    accessor: SqlAccessor, nodes: Sequence[Inode]
+) -> dict[int, int]:
+    """How many folders sit directly in each folder of ``nodes``, by
+    inode; a folder holding none is left out."""
+    inos = [node.ino for node in nodes if is_dir(node)]
+    counts: dict[int, int] = {}
+    for i in range(0, len(inos), MAX_PARAMS):
+        batch = inos[i : i + MAX_PARAMS]
+        for row in await accessor.query(subdirs_of(len(batch)), batch):
+            counts[int(row["parent_ino"] or 0)] = int(row["subdirs"] or 0)
+    return counts
 
 
 @dataclass(frozen=True)
@@ -139,7 +166,8 @@ def make_node(
     the entry takes the number the inode was just given. The parent is
     named through its inode, so a parent another writer removed since the
     lookup leaves the entry no parent, which its column refuses, and the
-    batch fails whole rather than strand it."""
+    batch fails whole rather than strand it. The parent's mtime moves to
+    ``stamp``, as a folder's does when an entry is made in it."""
     seconds, nanoseconds = stamp
     return [
         SqlStatement(SQL["new_inode"], (mode, size, seconds, nanoseconds)),
@@ -149,7 +177,18 @@ def make_node(
             f" {LAST_INO[accessor.driver.dialect]})",
             (name, *parent.params),
         ),
+        touched(parent, stamp),
     ]
+
+
+def touched(ino: InoRef, stamp: Stamp) -> SqlStatement:
+    """Set the inode's mtime to ``stamp``, as a folder's moves when an
+    entry in it is made, removed or renamed."""
+    seconds, nanoseconds = stamp
+    return SqlStatement(
+        f"UPDATE fs_inode SET mtime = ?, mtime_nsec = ? WHERE ino = {ino.sql}",
+        (seconds, nanoseconds, *ino.params),
+    )
 
 
 def resized(ino: InoRef, size: int, stamp: Stamp) -> SqlStatement:

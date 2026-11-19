@@ -136,7 +136,7 @@
       "command": "du -a /data | grep Plan.gdoc.json; ls -lR /data | grep Plan.gdoc.json | awk '{print $5}'; cat /data/Plan.gdoc.json | wc -c; du -a /data | grep Plan.gdoc.json; ls -lR /data | grep Plan.gdoc.json | awk '{print $5}'",
       "expect": {
         "exit": 0,
-        "stdout": "0\t/data/Plan.gdoc.json\n-\n539\n539\t/data/Plan.gdoc.json\n539\n",
+        "stdout": "0\t/data/Plan.gdoc.json\n-\n539\n4\t/data/Plan.gdoc.json\n539\n",
         "stderr": ""
       }
     },

@@ -104,6 +104,19 @@ class MirageSandboxSession(BaseSandboxSession):
     async def _prepare_backend_workspace(self) -> None:
         await self._mkdir_p(self.state.manifest.root)
 
+    def _workspace_resume_mount_skip_relpaths(self) -> set[Path]:
+        """What a resume leaves before it hydrates: the SDK's own mounts
+        and every workspace mount, whose root no ``rm`` can take and
+        whose content the snapshot restores."""
+        skip = super()._workspace_resume_mount_skip_relpaths()
+        root = self._workspace_root_path()
+        for mount in self._ws.mounts():
+            try:
+                skip.add(Path(mount.prefix).relative_to(root))
+            except ValueError:
+                continue
+        return skip
+
     def _prepare_exec_command(
         self,
         *command: str | Path,

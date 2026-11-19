@@ -626,9 +626,10 @@ def format_simple(
     indicator: LsIndicator = LsIndicator.NONE,
     columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
     names: list[str] | None = None,
+    human: bool = False,
 ) -> list[str]:
     """Short rows: the name, the indicator style's mark, and
-    ``-i``/``-Z``'s lead.
+    ``-i``/``-s``/``-Z``'s lead.
 
     Args:
         entries (list[FileStat]): the rows.
@@ -636,10 +637,11 @@ def format_simple(
         columns (formatting.LsColumns): the requested columns.
         names (list[str] | None): the name per row when the caller
             decorated it (``--hyperlink``), else the row's own.
+        human (bool): ``-h``, which scales the ``-s`` column.
     """
-    lead = formatting.ls_prefix(columns)
+    leads = formatting.ls_prefixes(entries, columns, human, context=True)
     return [
-        lead
+        leads[i]
         + (names[i] if names is not None else e.name)
         + type_indicator(e, indicator)
         for i, e in enumerate(entries)
@@ -1625,7 +1627,11 @@ def _render_group(
                 )
     else:
         rows = format_simple(
-            entries, indicator=indicator, columns=columns, names=names
+            entries,
+            indicator=indicator,
+            columns=columns,
+            names=names,
+            human=human,
         )
         results.extend(laid_out(rows, layout, width, tabsize))
 
@@ -1975,11 +1981,10 @@ async def ls(
                     results.append(
                         f"{header if quote is None else quote(header)}:"
                     )
-                # ls prints allocated blocks here; VFS has no allocation
-                # metadata, so report unknown instead of inventing a block
-                # count.
                 if long or columns.blocks:
-                    results.append("total ?" if entries else "total 0")
+                    results.append(
+                        formatting.ls_total(entries, columns, human)
+                    )
                 entry_paths = [
                     posixpath.join(dir_spec.virtual, e.name) for e in entries
                 ]

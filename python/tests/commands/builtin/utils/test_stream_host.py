@@ -1,6 +1,8 @@
 import errno
 from collections.abc import AsyncIterator
+from datetime import timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -10,7 +12,13 @@ from mirage.errors.fs import enotsup
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult, OpReport, materialize
-from mirage.types import FileStat, FileType, JsonValue, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    JsonValue,
+    PathSpec,
+    SetAttrFields,
+)
 
 
 def _spec(path: str) -> PathSpec:
@@ -360,7 +368,7 @@ async def _nothing(path: PathSpec) -> AsyncIterator[bytes]:
 @pytest.mark.asyncio
 async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
     calls: list[str] = []
-    changed: list[tuple[str, int]] = []
+    changed: list[tuple[str, SetAttrFields]] = []
 
     async def dispatch(
         name: str,
@@ -376,21 +384,29 @@ async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
                 name="f",
                 type=FileType.FILE,
                 modified="2001-09-09T01:46:40+00:00",
+                mode=0o750,
             )
             return row, IOResult()
         return None, IOResult()
 
-    async def chmod(path: PathSpec, mode: int) -> None:
+    async def set_attrs(path: PathSpec, fields: SetAttrFields) -> None:
         if path.virtual == "/gone":
             raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-        changed.append((path.virtual, mode))
+        changed.append((path.virtual, fields))
 
-    host = StreamHost([], _nothing, None, dispatch, ROOT_CWD, chmod=chmod)
+    host = StreamHost(
+        [], _nothing, None, dispatch, ROOT_CWD, set_attrs=set_attrs
+    )
     stat = await host.serve({"op": "stat", "path": "/f"}, b"")
-    assert stat.reply == {"kind": "file", "mtime": 1_000_000_000}
+    assert stat.reply == {
+        "kind": "file",
+        "mode": 0o750,
+        "mtime": 1_000_000_000,
+        "wall": 1_000_000_000,
+    }
     set_mode: dict[str, JsonValue] = {"op": "chmod", "path": "/f", "mode": 416}
     assert (await host.serve(set_mode, b"")).reply == {}
-    assert changed == [("/f", 416)]
+    assert changed == [("/f", {"mode": 416})]
     gone = await host.serve({**set_mode, "path": "/gone"}, b"")
     assert gone.reply == {
         "error": "No such file or directory",
@@ -402,3 +418,38 @@ async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
     assert (await bare.serve(set_mode, b"")).reply == {
         "fatal": "file output requires a workspace"
     }
+
+
+@pytest.mark.asyncio
+async def test_a_utime_sets_the_mtime_read_in_the_session_zone():
+    changed: list[tuple[str, SetAttrFields]] = []
+
+    async def set_attrs(path: PathSpec, fields: SetAttrFields) -> None:
+        changed.append((path.virtual, fields))
+
+    host = StreamHost(
+        [],
+        _nothing,
+        None,
+        None,
+        ROOT_CWD,
+        set_attrs=set_attrs,
+        zone=timezone(timedelta(hours=8)),
+    )
+    utc: dict[str, JsonValue] = {"op": "utime", "path": "/f", "mtime": 0}
+    assert (await host.serve(utc, b"")).reply == {}
+    assert (await host.serve({**utc, "local": True}, b"")).reply == {}
+    assert [(p, f.get("mtime")) for p, f in changed] == [
+        ("/f", "1970-01-01T00:00:00Z"),
+        ("/f", "1969-12-31T16:00:00Z"),
+    ]
+    assert all(f.get("atime") for _, f in changed)
+
+
+@pytest.mark.asyncio
+async def test_it_reads_times_on_the_session_wall_clock():
+    host = StreamHost(
+        [], _nothing, None, None, ROOT_CWD, zone=ZoneInfo("Asia/Tokyo")
+    )
+    request: dict[str, JsonValue] = {"op": "walls", "times": [1_000_000_000]}
+    assert (await host.serve(request, b"")).reply == {"walls": [1_000_032_400]}

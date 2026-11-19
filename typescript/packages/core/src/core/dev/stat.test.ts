@@ -23,7 +23,7 @@ import { stat } from './stat.ts'
 const FD = new PathSpec({ virtual: '/dev/fd/63', directory: '/dev/fd/', vfsPath: 'fd/63' })
 
 it.each([
-  [{}, null, [0o600, null, null, null, null]],
+  [{}, null, [0o600, null, null, null, 'made']],
   [
     { mode: 0o640, uid: 7, gid: 8, atime: '2020-01-02T03:04:05Z' },
     '2020-01-02T03:04:06Z',
@@ -36,5 +36,7 @@ it.each([
   if (modified !== null) devices.modified.set('/fd/63', modified)
   const s = await stat(new RAMAccessor(devices as unknown as RAMStore), FD)
   expect([s.name, s.type, s.size]).toEqual(['63', FileType.FIFO, null])
-  expect([s.mode, s.uid, s.gid, s.atime, s.modified]).toEqual(expected)
+  expect([s.mode, s.uid, s.gid, s.atime, s.modified]).toEqual(
+    expected.map((v) => (v === 'made' ? devices.made : v)),
+  )
 })

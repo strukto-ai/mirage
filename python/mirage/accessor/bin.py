@@ -29,12 +29,15 @@ class BinAccessor(Accessor):
         note (Callable[[str], str | None]): the line one program's file
             says about it, None when the name runs as no program, which
             is what gives it a file.
+        made (str): when the view was made, the time of each file in it.
     """
 
     def __init__(
         self,
         programs: Callable[[], list[str]],
         note: Callable[[str], str | None],
+        made: str,
     ) -> None:
         self.programs = programs
         self.note = note
+        self.made = made

@@ -306,8 +306,43 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect(dec.decode(await bytes(vfs, '/later'))).toBe('y')
   })
 
-  it('keeps no attributes, so the namespace keeps them', () => {
-    expect(vfs.supports('setattr')).toBe(false)
+  it("counts a folder's subfolders and dates its changes", async () => {
+    const old = '2000-01-01T00:00:00Z'
+    await ops(vfs).mkdir(at('/d'))
+    await ops(vfs).mkdir(at('/d/s'))
+    await ops(vfs).write(at('/d/f'), enc.encode('x'))
+    expect([
+      (await ops(vfs).stat(at('/d'))).nlink,
+      (await ops(vfs).stat(at('/d/f'))).nlink,
+    ]).toEqual([3, 1])
+    const listed = await vfs.readdir(at('/d'))
+    expect(Object.fromEntries(listed.map((e) => [e.name, e.nlink]))).toEqual({ f: 1, s: 2 })
+    expect((await vfs.readTree(at('/')))?.get('d')?.nlink).toBe(3)
+    for (const change of [
+      () => ops(vfs).write(at('/d/g'), enc.encode('y')),
+      () => ops(vfs).unlink(at('/d/g')),
+      () => ops(vfs).rename(at('/d/f'), at('/d/h')),
+      () => ops(vfs).rmdir(at('/d/s')),
+    ]) {
+      await vfs.setattr(at('/d'), { mtime: old })
+      await change()
+      expect((await ops(vfs).stat(at('/d'))).modified).not.toBe(old)
+    }
+    expect((await ops(vfs).stat(at('/d'))).nlink).toBe(2)
+  })
+
+  it('keeps the mtime and leaves the rest to the namespace', async () => {
+    await ops(vfs).write(at('/f'), enc.encode('x'))
+    const rest = await vfs.setattr(at('/f'), {
+      mode: 0o600,
+      uid: 7,
+      atime: '2025-01-02T03:04:05Z',
+      mtime: '2025-08-13T10:00:00.123456789Z',
+    })
+    expect(rest).toEqual({ mode: 0o600, uid: 7, atime: '2025-01-02T03:04:05Z' })
+    expect((await ops(vfs).stat(at('/f'))).modified).toBe('2025-08-13T10:00:00.123456Z')
+    await vfs.setattr(at('/f'), { mtime: '2025-08-13T10:00:00' })
+    expect((await ops(vfs).stat(at('/f'))).modified).toBe('2025-08-13T10:00:00Z')
   })
 }
 
@@ -589,7 +624,7 @@ describe('SqlVFS folders', () => {
         'printf hi > /workspace/a.txt && printf yo > /b.txt && ls /workspace && cat /workspace/a.txt && du -s /workspace',
       )
       expect(r.stderrText).toBe('')
-      expect(r.stdoutText).toBe('a.txt\nhi2\t/workspace\n')
+      expect(r.stdoutText).toBe('a.txt\nhi8\t/workspace\n')
       expect(dec.decode(await bytes(new SqlVFS({ driver }), '/workspace/a.txt'))).toBe('hi')
     } finally {
       await ws.close()

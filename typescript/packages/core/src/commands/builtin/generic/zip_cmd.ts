@@ -19,8 +19,10 @@ import type { util } from 'zod'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { byteView, decodeText } from '../../../shell/bytes.ts'
 import { Follow, LineFacts, PathSpec, type StatFn } from '../../../types.ts'
+import { localSeconds } from '../../../utils/dates.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { zoneFromEnv } from '../../../utils/timezone.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -126,6 +128,8 @@ export async function zipGeneric(
     return [null, new IOResult({ exitCode: 1, stderr })]
   }
   const reads: PathSpec[] = [archive]
+  // A member's DOS stamp records the session's local time.
+  const zone = zoneFromEnv(ctx.env)
   const found: util.JSONType[] = []
   const warnings: string[] = []
   const operands = paths.slice(1)
@@ -192,14 +196,17 @@ export async function zipGeneric(
       const read = entry.read ?? null
       // Info-ZIP never stores the archive it is writing.
       if (read !== null && read.virtual === archive.virtual) continue
+      const [mtime, mode] =
+        entry.kind === 'link'
+          ? [linkTime(links, entry.namePath), null]
+          : await recordedStamp(deps.stat, read ?? entry.stamped ?? null)
       const item: Record<string, util.JSONType> = {
         spelled: byteView(respellOne(entry.namePath, base, spelling)),
         kind: entry.kind,
         target: byteView(entry.target ?? ''),
-        mtime:
-          entry.kind === 'link'
-            ? linkTime(links, entry.namePath)
-            : (await recordedStamp(deps.stat, read))[0],
+        mtime: mtime === null ? null : localSeconds(mtime, zone),
+        utc: mtime,
+        mode,
         source: byteView(entry.namePath),
       }
       if (read !== null) {

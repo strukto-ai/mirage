@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.files import Reading, with_reading
+from mirage.commands.builtin.utils.paths import virtual_flags, virtual_key
 from mirage.commands.config import (
     Command,
     CommandCatalog,
@@ -80,8 +81,13 @@ def _bind(
             # close cuts short is its SIGPIPE, and a scan inside it splits
             # its own input.
             ctx = replace(ctx, stdin=chunks(ctx.stdin))
+        # The builder reaches every path through its files, so each is
+        # keyed by its whole virtual path, as mirage's own commands are
+        # handed them, even where a VFS registers this copy as its own.
+        keyed = [virtual_key(p) for p in paths]
+        ctx = replace(ctx, flags=virtual_flags(ctx.flags))
         with with_reading(ctx, reading) as run:
-            return await builder.fn(accessor, paths, texts, run)
+            return await builder.fn(accessor, keyed, texts, run)
 
     (registered,) = registered_commands(
         [

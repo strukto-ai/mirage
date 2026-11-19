@@ -14,17 +14,23 @@
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { msToRfc3339 } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
-import { read } from './read.ts'
+import { viewEvents } from './read.ts'
+import { renderBashHistory } from './render.ts'
 
-/** Stat the rendered histfile, sized to the current rendering. */
+/** Stat the rendered histfile, sized to the current rendering and dated by
+ * its last command. */
 export async function stat(accessor: HistoryAccessor, path: PathSpec): Promise<FileStat> {
-  const data = await read(accessor, path)
+  const events = await viewEvents(accessor, path)
+  const stamps = events.flatMap((e) => (typeof e.timestamp === 'number' ? [e.timestamp] : []))
   return new FileStat({
     name: '.bash_history',
-    size: data.byteLength,
-    modified: null,
+    size: new TextEncoder().encode(renderBashHistory(events)).byteLength,
+    modified:
+      stamps.length > 0 ? msToRfc3339(stamps.reduce((a, b) => Math.max(a, b))) : accessor.made,
     type: FileType.FILE,
     content: contentTypeForPath('.bash_history'),
+    nlink: 1,
   })
 }

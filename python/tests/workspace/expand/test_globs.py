@@ -302,7 +302,7 @@ def test_du_glob_rows_match_gnu():
     """Pinned against ``du -b base/*`` on GNU coreutils 9.7."""
     ws = _ws()
     _run(_seed(ws))
-    assert _out(ws, "du /base/*").splitlines() == [
+    assert _out(ws, "du -b /base/*").splitlines() == [
         "3\t/base/f1",
         "7\t/base/inner",
         "12\t/base/link",
@@ -453,7 +453,7 @@ def test_single_match_boundary_glob_is_installed():
     """
     ws = _ws()
     _run(_seed(ws))
-    assert _out(ws, "du /base/i*").splitlines() == ["7\t/base/inner"]
+    assert _out(ws, "du -b /base/i*").splitlines() == ["7\t/base/inner"]
     assert _out(ws, "ls -d /base/i*").split() == ["/base/inner"]
 
 

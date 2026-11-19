@@ -42,6 +42,8 @@ export async function runZip(
   cwd = '/',
   // What -@, -c and -z read.
   stdin: ByteSource | null = null,
+  // The session's environment, whose TZ a member's DOS time is written in.
+  env?: Record<string, string>,
 ): Promise<CrossResult> {
   const links = linkView(vfs)
   const tree =
@@ -60,6 +62,7 @@ export async function runZip(
       cwd: PathSpec.fromStrPath(cwd),
       stdin,
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
+      ...(env !== undefined ? { env } : {}),
     },
     {
       stream: fileStreamOp(dispatch),
