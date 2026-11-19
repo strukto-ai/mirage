@@ -90,7 +90,7 @@ By default the daemon is one process, and one thread holds every workspace. With
 
 ## MCP and RPC on their own
 
-The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers can run over a transport of your own, without the Mirage server. Both serve one session of a [workspace](/typescript/access/in-app).
+The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers can run over a transport of your own, without the Mirage server. Both serve one session of a [workspace](/typescript/access/in-app), where `ws` is a `Workspace`.
 
 ```ts
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
