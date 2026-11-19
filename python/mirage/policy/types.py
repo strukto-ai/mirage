@@ -15,8 +15,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from types import MappingProxyType
-from typing import Any, ClassVar, Literal, Protocol, TypeVar
+from typing import Any, ClassVar, Literal, NoReturn, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -37,22 +36,39 @@ from mirage.view.types import FileView, SessionView
 
 T = TypeVar("T")
 
-_EMPTY: Mapping[str, Any] = MappingProxyType({})
+
+class _SealedMap(dict[str, Any]):
+    """A tree node's mapping that refuses every write, so a rule set
+    reads the same for as long as it lives. A dict, so it serializes,
+    copies and pickles as one. Only ``_sealed`` builds one.
+    """
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise TypeError("a rule set cannot change in place; build a new one")
+
+    __setitem__ = __delitem__ = __ior__ = _refuse
+    clear = pop = popitem = setdefault = update = _refuse
+
+    def __reduce__(self) -> tuple[type["_SealedMap"], tuple[dict[str, Any]]]:
+        return (_SealedMap, (dict(self),))
+
+
+_EMPTY: Mapping[str, Any] = _SealedMap()
 
 
 def _sealed(held: Mapping[str, T]) -> Mapping[str, T]:
-    """A tree node's mapping as one nobody can change in place, so a
-    rule set reads the same for as long as it lives and the matcher
-    compiled for it stays its matcher. An empty mapping is the one
-    shared empty, since most nodes hold three. A mapping proxy is
-    copied too: it is a view, and its backing dict may still change.
+    """A tree node's mapping as one nobody can change in place, so the
+    matcher compiled for its rule set stays its matcher. A mapping this
+    already sealed is kept; any other is copied, since a caller may
+    still hold what backs it. An empty mapping is the one shared empty,
+    since most nodes hold three.
 
     Args:
         held (Mapping[str, T]): the mapping as built.
     """
-    if held is _EMPTY:
+    if isinstance(held, _SealedMap):
         return held
-    return MappingProxyType(dict(held)) if held else _EMPTY
+    return _SealedMap(held) if held else _EMPTY
 
 
 class MountRootQuery(Protocol):

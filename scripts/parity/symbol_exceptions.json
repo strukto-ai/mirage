@@ -1170,9 +1170,12 @@
    }
   },
   "policy/types": {
+   "python_only": {
+    "_SealedMap": "A dict that refuses writes, which a sealed tree node's mappings are; TypeScript's maps get the same refusals from WRITES."
+   },
    "typescript_only": {
-    "SEALED": "The values sealed has already built, so a rule set rebuilt from another's trees is not copied twice; Python's MappingProxyType cannot be held weakly, so it copies.",
-    "WRITES": "The writes a built rule set's map or set refuses; Python's MappingProxyType refuses the same writes itself."
+    "SEALED": "The values sealed has already built, so a rule set rebuilt from another's trees is not copied twice; Python's _SealedMap is its own type, so _sealed tells one by isinstance.",
+    "WRITES": "The writes a built rule set's map or set refuses; Python's _SealedMap refuses them as methods of its class."
    }
   },
   "workspace/session/resolve": {
