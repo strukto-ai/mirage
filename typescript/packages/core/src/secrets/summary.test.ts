@@ -103,9 +103,9 @@ describe('errorSummary', () => {
 
 describe('maskValues', () => {
   it('hides a value however it was quoted', () => {
-    const message = `e2b mountType must be one of ssh, fuse, both, not ${JSON.stringify('ab"cd')}`
+    const message = `e2b mountType must be one of ssh, mirage, own, both, not ${JSON.stringify('ab"cd')}`
     expect(maskValues(message, ['ab"cd'])).toBe(
-      'e2b mountType must be one of ssh, fuse, both, not "***"',
+      'e2b mountType must be one of ssh, mirage, own, both, not "***"',
     )
     expect(maskValues("not 'ab\"cd'", ['ab"cd'])).toBe("not '***'")
   })

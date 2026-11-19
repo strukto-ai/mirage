@@ -70,7 +70,7 @@ Add `@python` to run Python programs in the guest too.
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, install `mirage-ai[ssh]` on a Python
 host or `ssh2` on a Node host; the guest needs `sshfs` and access to
-`/dev/fuse`. With `fuse`, copy `sandbox.yaml` in and start Mirage in the
+`/dev/fuse`; with `mirage`, `mirage-fuse` and the same access. With `own`, copy `sandbox.yaml` in and start Mirage in the
 guest:
 
 ```bash
@@ -104,7 +104,7 @@ running unless the call names the machine. See
 ## Notes
 
 - Keep the sandbox running while Mirage uses it. Each line runs its own
-  `msb exec`, so a restart needs no reconnect. With `fuse` or `both`, start the
+  `msb exec`, so a restart needs no reconnect. With `own` or `both`, start the
   sandbox's Mirage again after a restart, or from its image's entrypoint;
   until then lines exit 126.
 - Stopping or closing the workspace leaves the sandbox running.

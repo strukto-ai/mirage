@@ -31,6 +31,8 @@ export interface MountRow {
   readonly calls?: ReadonlySet<string>
   readonly searchable?: readonly string[] | null
   readonly walkLimit?: number
+  /** Mirrors `BaseVFS.soleWriter`: mirage-fuse's client may keep the mount's answers until a change is pushed. */
+  readonly soleWriter?: boolean
   /** The mount's own command limits. */
   readonly commandLimits?: ReadonlyMap<string, Limit>
   /** The workspace's, which a command's walk resolves through beside the mount's. */

@@ -256,7 +256,7 @@ describe('entries router', () => {
     expect(ssh.host).toMatchObject({ type: 'string', required: true })
     expect(ssh.port).toMatchObject({ type: 'number', required: false })
     expect(ssh.timeout?.default).toBe(30)
-    expect(ssh.mount_type?.options).toEqual(['ssh', 'fuse', 'both'])
+    expect(ssh.mount_type?.options).toEqual(['ssh', 'mirage', 'own', 'both'])
     expect(ssh.private_key?.secret).toBe(true)
     expect(ssh.env).toBeUndefined()
     expect(ssh.on_pause).toBeUndefined()

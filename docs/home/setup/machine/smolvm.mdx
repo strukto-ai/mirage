@@ -70,7 +70,7 @@ Python in the machine too.
 
 ## Connecting the workspace
 
-Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the guest needs `sshfs`. With `fuse`,
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the guest needs `sshfs`; with `mirage`, `mirage-fuse`. With `own`,
 put `sandbox.yaml` in the machine, in its image or a directory passed with
 `--volume`, and start Mirage:
 

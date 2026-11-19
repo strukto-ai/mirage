@@ -39,10 +39,12 @@ let memories = 0
 export class SqliteDriver implements SqlDriver {
   readonly location: string
   readonly dialect = SqlDialect.SQLITE
+  readonly exclusive: boolean
   private db: Promise<DatabaseSync> | null = null
 
   constructor(readonly path = ':memory:') {
     this.location = path === ':memory:' ? `:memory:#${String(++memories)}` : resolve(path)
+    this.exclusive = path === ':memory:'
   }
 
   private open(): Promise<DatabaseSync> {

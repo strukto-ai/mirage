@@ -122,11 +122,11 @@ async def transport():
 
 
 async def mode_checks(mode):
-    prefix = GUEST if mode == "fuse" else HOST
+    prefix = GUEST if mode == "own" else HOST
     source, readonly = RAMVFS(), RAMVFS()
     await source.write(
         PathSpec.from_str_path("/seed.txt"),
-        b"host-only\n" if mode == "fuse" else b"seed\n",
+        b"host-only\n" if mode == "own" else b"seed\n",
     )
     await source.write(PathSpec.from_str_path("/secret.txt"), b"host secret\n")
     await readonly.write(PathSpec.from_str_path("/protected.txt"), b"locked\n")
@@ -148,7 +148,7 @@ async def mode_checks(mode):
         profiles={"hidden": {"paths": {"hide": [prefix + "/secret.txt"]}}},
     )
     agent = await ws.session(
-        "agent", profile=None if mode == "fuse" else "hidden"
+        "agent", profile=None if mode == "own" else "hidden"
     )
 
     async def probe(operation, extra=""):
@@ -236,7 +236,7 @@ async def mode_checks(mode):
                 "sha256": hashlib.sha256(bytes(range(256)) * 4096).hexdigest(),
                 "bytes": 1048576,
             }
-            if mode == "fuse":
+            if mode == "own":
                 receipt = await raw(
                     "mirage shell -w e2e -c 'cat /e2e-guest/receipt.txt'"
                 )
@@ -259,11 +259,11 @@ async def mode_checks(mode):
         )
         await check(
             mode + "_symlinks_relative_absolute_dangling",
-            lambda: probe("symlinks", " scoped" if mode == "fuse" else ""),
+            lambda: probe("symlinks", " scoped" if mode == "own" else ""),
         )
         await check(mode + "_threads", lambda: probe("threads"))
         await check(mode + "_readonly", lambda: probe("readonly"))
-        if mode != "fuse":
+        if mode != "own":
             await check(mode + "_hidden_file", lambda: probe("hidden"))
 
             async def freshness():
@@ -291,13 +291,13 @@ async def mode_checks(mode):
 
         async def session():
             other = await ws.session(
-                "other", profile="hidden" if mode == "fuse" else None
+                "other", profile="hidden" if mode == "own" else None
             )
             result = await other.shell("python3 -c 'print(\"must not run\")'")
             assert result.exit_code == 1
             assert (
                 b"out of reach" in result.stderr
-                if mode == "fuse"
+                if mode == "own"
                 else b"session agent's view" in result.stderr
             )
 
@@ -320,7 +320,7 @@ async def mode_checks(mode):
     async def cleanup():
         result = await raw("mountpoint -q " + shlex.quote(prefix))
         assert (
-            result.exit_code == 0 if mode == "fuse" else result.exit_code != 0
+            result.exit_code == 0 if mode == "own" else result.exit_code != 0
         )
         assert (await raw("mountpoint -q /e2e-guest")).exit_code == 0
         assert (await raw("pgrep -x sshfs")).exit_code == 1
@@ -646,7 +646,7 @@ async def main():
         "guest FUSE setup missing"
     )
     await check("raw_4MiB_stdin_argv_env_cwd_large_output", transport)
-    for mode in ("fuse", "ssh", "both"):
+    for mode in ("own", "ssh", "both"):
         await mode_checks(mode)
     await check("three_mount_close_cycles", cycles)
     await lifecycle_checks()

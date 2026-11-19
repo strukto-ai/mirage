@@ -30,9 +30,10 @@ export interface MachineConfig extends RuntimeConfig {
   env?: Record<string, string>
   /**
    * How the machine sees the workspace: `ssh` serves every prefix the
-   * session sees from the host over SFTP (the image needs sshfs), `fuse`
-   * leaves them to a mirage in the machine, `both` serves from the host
-   * what the machine does not mount itself. Unset serves nothing.
+   * session sees from the host over SFTP (the image needs sshfs), `mirage`
+   * serves them over fsproto (the image needs mirage-fuse), `own` leaves
+   * them to a mirage in the machine, `both` serves over fsproto what the
+   * machine does not mount itself. Unset serves nothing.
    */
   mountType?: MountType
   /**
@@ -48,7 +49,7 @@ export const MachineConfig = {
   captures: { type: 'list' },
 } satisfies ConfigFields<MachineConfig>
 
-/** Fail loud on a `mountType` other than ssh, fuse or both; unset serves nothing. */
+/** Fail loud on a `mountType` other than ssh, mirage, own or both; unset serves nothing. */
 export function checkMountType(runtime: string, mountType: unknown): MountType | null {
   if (mountType === undefined || mountType === null) return null
   if (!MOUNT_TYPES.includes(mountType as MountType)) {

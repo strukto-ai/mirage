@@ -102,13 +102,13 @@ async function transport() {
   await runtime.close()
 }
 
-async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
-  const prefix = mountType === 'fuse' ? guest : host
+async function modeChecks(mountType: 'ssh' | 'own' | 'both') {
+  const prefix = mountType === 'own' ? guest : host
   const source = new RAMVFS()
   const readonly = new RAMVFS()
   await source.write(
     PathSpec.fromStrPath('/seed.txt'),
-    enc.encode(mountType === 'fuse' ? 'host-only\n' : 'seed\n'),
+    enc.encode(mountType === 'own' ? 'host-only\n' : 'seed\n'),
   )
   await source.write(PathSpec.fromStrPath('/secret.txt'), enc.encode('host secret\n'))
   await readonly.write(PathSpec.fromStrPath('/protected.txt'), enc.encode('locked\n'))
@@ -127,7 +127,7 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
     machines: { msb: runtime },
     profiles: { hidden: { paths: { hide: [prefix + '/secret.txt'] } } },
   })
-  const agent = await ws.session('agent', mountType === 'fuse' ? {} : { profile: 'hidden' })
+  const agent = await ws.session('agent', mountType === 'own' ? {} : { profile: 'hidden' })
 
   async function probe(operation: string, extra = '') {
     const result = await agent.shell(
@@ -203,7 +203,7 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
           sha256: hash(payload.slice(0, 1048576)),
           bytes: 1048576,
         })
-        if (mountType === 'fuse') {
+        if (mountType === 'own') {
           const receipt = await raw("mirage shell -w e2e -c 'cat /e2e-guest/receipt.txt'")
           assert.equal(receipt.exitCode, 0, dec.decode(receipt.stderr ?? undefined))
           assert.equal(dec.decode(receipt.stdout), 'guest-filesystem-verified\n')
@@ -217,11 +217,11 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
       },
     )
     await check(mountType + '_symlinks_relative_absolute_dangling', () =>
-      probe('symlinks', mountType === 'fuse' ? ' scoped' : ''),
+      probe('symlinks', mountType === 'own' ? ' scoped' : ''),
     )
     await check(mountType + '_threads', () => probe('threads'))
     await check(mountType + '_readonly', () => probe('readonly'))
-    if (mountType !== 'fuse') {
+    if (mountType !== 'own') {
       await check(mountType + '_hidden_file', () => probe('hidden'))
       await check(mountType + '_host_change_visible', async () => {
         assert.deepEqual(await probe('seed'), { seed: 'seed\n' })
@@ -240,11 +240,11 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
       assert.equal(result.exitCode, 7)
     })
     await check(mountType + '_session_policy', async () => {
-      const other = await ws.session('other', mountType === 'fuse' ? { profile: 'hidden' } : {})
+      const other = await ws.session('other', mountType === 'own' ? { profile: 'hidden' } : {})
       const result = await other.shell(`python3 -c 'print("must not run")'`)
       assert.equal(result.exitCode, 1)
       assert.ok(
-        result.stderrText.includes(mountType === 'fuse' ? 'out of reach' : "session agent's view"),
+        result.stderrText.includes(mountType === 'own' ? 'out of reach' : "session agent's view"),
       )
     })
     if (mountType === 'both') {
@@ -261,7 +261,7 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
   }
   await check(mountType + '_mount_and_process_cleanup', async () => {
     const result = await raw('mountpoint -q ' + singleQuote(prefix))
-    if (mountType === 'fuse') assert.equal(result.exitCode, 0)
+    if (mountType === 'own') assert.equal(result.exitCode, 0)
     else assert.notEqual(result.exitCode, 0)
     assert.equal((await raw('mountpoint -q /e2e-guest')).exitCode, 0)
     assert.equal((await raw('pgrep -x sshfs')).exitCode, 1)
@@ -575,7 +575,7 @@ if (process.env.MIRAGE_E2E_AGENTD) {
 }
 assert.equal((await raw('mountpoint -q /e2e-guest')).exitCode, 0, 'guest FUSE setup missing')
 await check('raw_4MiB_stdin_argv_env_cwd_large_output', transport)
-for (const mode of ['fuse', 'ssh', 'both'] as const) await modeChecks(mode)
+for (const mode of ['own', 'ssh', 'both'] as const) await modeChecks(mode)
 await check('three_mount_close_cycles', cycles)
 await lifecycleChecks()
 console.log(JSON.stringify({ host: 'typescript', passed: passed.length, failed }))

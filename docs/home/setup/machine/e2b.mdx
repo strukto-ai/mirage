@@ -74,7 +74,7 @@ the sandbox; Mirage's own commands start none.
 
     In a browser, import `@struktoai/mirage-core/machine/e2b/handle` once
     to register the provider (`pnpm add @struktoai/mirage-core`), pass
-    `apiKey`, and use `mountType: 'fuse'` or leave it unset.
+    `apiKey`, and use `mountType: 'own'` or leave it unset.
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
@@ -93,14 +93,16 @@ the sandbox; Mirage's own commands start none.
 
 ## Connecting the workspace
 
-Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
-each file call is about 150 ms for a small file from a laptop. With `fuse`,
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
+`ssh` each file call is about 150 ms for a small file from a laptop; under
+`mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
+read, and its template needs `mirage-fuse`. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
 ### sshfs for ssh
 
-`ssh` and `both` need `sshfs` in the sandbox. One that lacks it gets it from
+`ssh` needs `sshfs` in the sandbox. One that lacks it gets it from
 its package manager as the workspace is first served, as root or through
 `sudo` without a password, with `apt-get`, `apk`, `dnf` or `yum`. E2B's
 default template takes about 3 seconds, once per sandbox. Where that cannot
@@ -201,7 +203,7 @@ the workspace again.
 
 ## Notes
 
-- With `mount_type: ssh` or `both`, a workspace that restarts with the
+- With `mount_type: ssh`, `mirage` or `both`, a workspace that restarts with the
   same workspace ID takes back the mounts it left in the sandbox. Give
   each live workspace its own ID: two live workspaces with one ID take
   each other's mounts.

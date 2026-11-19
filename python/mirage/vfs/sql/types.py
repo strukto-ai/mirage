@@ -63,6 +63,13 @@ class SqlDriver(Protocol):
     @property
     def dialect(self) -> SqlDialect: ...
 
+    @property
+    def exclusive(self) -> bool:
+        """Whether nothing but this driver writes the database (one in
+        memory, a Durable Object's own), so every change to it passes
+        the workspace."""
+        ...
+
     def query(self, sql: str, params: Sequence[SqlValue] = ()) -> list[SqlRow]:
         """The rows one statement answers."""
         ...

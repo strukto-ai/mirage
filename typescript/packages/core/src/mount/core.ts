@@ -1124,6 +1124,19 @@ export class MountCore {
   }
 
   /**
+   * Whether the bound session sees `path`, so a notice about it (a change
+   * pushed to a client) never names what it hides. Mirrors Python's
+   * `visible`.
+   */
+  visible(path: string): boolean {
+    const virtual = this.resolve(path)
+    const reader = readerOf(this.files)
+    const seen = (): boolean => reader.visible(virtual)
+    if (this.session === null) return seen()
+    return callsAs({ ...currentCaller(), session: this.session }, seen)()
+  }
+
+  /**
    * Persist a handle's buffered writes. The buffer is detached before the
    * await so a write arriving meanwhile is not lost to the clear, and the
    * runs that did not land are restored ahead of those later writes when

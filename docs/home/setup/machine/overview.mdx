@@ -239,11 +239,12 @@ so the machine must see the mounts. `mount_type` picks how:
 | `mount_type` | How the files get there | Rules that apply |
 | --- | --- | --- |
 | `ssh` | Mirage serves every mount over the provider's connection; the machine mounts each with `sshfs` | This workspace's mount modes, hides, permissions and policies |
-| `fuse` | A Mirage on the machine mounts your backends with FUSE | That Mirage's own config |
-| `both` | The machine's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
+| `mirage` | Mirage serves every mount over the provider's connection; the machine mounts each with `mirage-fuse` | This workspace's mount modes, hides, permissions and policies |
+| `own` | A Mirage on the machine mounts your backends with FUSE | That Mirage's own config |
+| `both` | The machine's own FUSE mounts where it has them, `mirage` for the rest | Each side's own |
 | unset | Nothing; you put the files there yourself | The machine's |
 
-Daytona takes no `mount_type`: run a Mirage on the machine, as `fuse` does,
+Daytona takes no `mount_type`: run a Mirage on the machine, as `own` does,
 or put the files there yourself. boxd takes none either: put the files
 there yourself. Once connected, run the shared
 [workspace file check](#verify-workspace-file-access).
@@ -271,7 +272,22 @@ rules: restrictions on `/`, `/dev` or a path the machine holds itself, hiding a 
 the machine's own files underneath, restrictions on mounts a Mirage on the
 machine serves, and rules that depend on which program opens a file.
 
-### fuse
+### mirage
+
+- The machine needs `mirage-fuse` on its `PATH` or in `~/.mirage/bin`, and
+  FUSE. No Mirage, keys or open port.
+- Files on `ram` mounts, and on `sql` mounts whose database only the
+  workspace opens (one in memory, a Durable Object's own), stay
+  cached on the machine until they change, so a program that walks a
+  project, such as `pytest` or `git status`, runs at about local-disk speed
+  after its first read. A change made through Mirage reaches the machine
+  before its next program starts.
+- Every other mount behaves as under `ssh`: the machine keeps an answer for
+  a second.
+- Sessions, restarts, refused writes and the paths left unserved work as
+  under `ssh`.
+
+### own
 
 Build [the machine image](#the-machine-image), write the same mounts at the
 same paths into `sandbox.yaml`, and start Mirage with it on the machine. Each
@@ -460,8 +476,9 @@ Every machine needs a POSIX shell at `/bin/sh` and `grep`. E2B and Daytona
 also need `dd` and `base64`, which carry a program's output back. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration/workspace#system-time). With
-`mount_type: ssh` the machine also needs `sshfs`, and a machine that runs its
-own Mirage needs `fuse3` and Mirage.
+`mount_type: ssh` the machine also needs `sshfs`, with `mount_type: mirage`
+`mirage-fuse` and `fuse3`, and a machine that runs its own Mirage needs
+`fuse3` and Mirage.
 
 The repository's Dockerfile builds an image with `fuse3`, Mirage and
 libfaketime for every provider. It has no `sshfs`: add it for

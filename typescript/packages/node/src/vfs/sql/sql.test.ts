@@ -850,3 +850,12 @@ describe.skipIf(POSTGRES_URL === undefined)('SqlWorkspaceStateStore over Postgre
     }
   })
 })
+
+describe('exclusive', () => {
+  it('counts only a database in memory as written by the workspace alone', () => {
+    expect(new SqlVFS().soleWriter).toBe(true)
+    expect(new SqlVFS({ path: join(tmpdir(), 'shared.db') }).soleWriter).toBe(false)
+    expect(new SqlVFS({ driver: new SqliteDriver() }).soleWriter).toBe(true)
+    expect(new PostgresSqlDriver('postgresql://u@h/db').exclusive).toBe(false)
+  })
+})

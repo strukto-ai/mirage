@@ -25,6 +25,7 @@ import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
 import { SERVED_BY } from '../mount/changes.ts'
+import type { ServedPrefix } from '../mount/types.ts'
 import { ruleTable } from '../rs/policy.ts'
 import { FileType } from '../types.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
@@ -32,17 +33,21 @@ import type { MountRow } from '../workspace/types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../runtime/binding.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import type { MachinePipe, MountType } from './types.ts'
+import type { MachinePipe, MountType, Transport } from './types.ts'
 import type { OutputFn, PipeWriter, RunAnswer, RunResult } from '../runtime/types.ts'
 import {
+  FSPROTO_SERVER_HINT,
+  MIRAGE_FUSE_FIND,
+  MIRAGE_FUSE_HINT,
+  MIRAGE_FUSE_LINE,
   MOUNT_GUARD,
   MOUNT_POLL_SECONDS,
   MOUNT_WAIT_SECONDS,
   PIPE_SERVER_HINT,
+  SERVED_KINDS,
   SSHFS_HINT,
   SSHFS_LINE,
   SSHFS_LINKS_OPTION,
-  SSHFS_LOG_NAME,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
   UNMOUNT_WAIT_SECONDS,
@@ -52,29 +57,37 @@ import {
 
 export const logger: { debug?: (message: string) => void } = {}
 
-/** A served prefix's SFTP server, as `session` (`mount/sftp`'s PipeServer). */
+/**
+ * A served prefix's file server, as `session`: `mount/sftp`'s PipeServer
+ * for sshfs, `mount/fsproto`'s FsprotoServer for mirage-fuse.
+ */
 export interface PipeServer {
   /** Answer the client's requests on its pipe until it closes it. */
   serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void>
   /** Land every write the client has been told is done; the path and error of each landing that failed since the last sync. */
   sync(): Promise<[string, unknown][]>
+  /** Wait until the client has applied every change noted so far, false when it did not answer in time; sshfs keeps nothing to apply them to. */
+  begin?(): Promise<boolean>
 }
 
-let pipeServer: Parameters<typeof registerPipeServer>[0] | null = null
+const pipeServers = new Map<Transport, Parameters<typeof registerPipeServer>[1]>()
 
 /**
- * Where a host puts the SFTP server a served prefix's pipe runs: as
- * `session`, each request run by `run`. Importing `mount/sftp` registers
- * one; the browser, which cannot run ssh2, has none.
+ * Where a host puts the file server a served prefix's pipe runs for a
+ * transport: as `session`, each request run by `run`. Importing
+ * `mount/sftp` registers sshfs's, `mount/fsproto` mirage-fuse's; the
+ * browser, which cannot run ssh2, registers none.
  */
 export function registerPipeServer(
+  transport: Transport,
   make: (
     files: Files,
     session: SessionState,
     run: (op: () => Promise<void>) => Promise<void>,
+    served: ServedPrefix,
   ) => PipeServer,
 ): void {
-  pipeServer = make
+  pipeServers.set(transport, make)
 }
 
 const DECODER = new TextDecoder()
@@ -183,9 +196,31 @@ export function sshfsLine(source: string, prefix: string, log: string): string {
   )
 }
 
+/**
+ * The pipe command that mounts `source` at `prefix` with mirage-fuse, found
+ * on the machine's PATH or in Mirage's folder there (`MIRAGE_FUSE_FIND`),
+ * its errors in `log`. Its stdin and stdout are the fsproto stream. Mirrors
+ * Python's `mirage_fuse_line`.
+ */
+export function mirageFuseLine(source: string, prefix: string, log: string): string {
+  return (
+    `${MIRAGE_FUSE_FIND}exec "$f" serve ${singleQuote(source)} ${singleQuote(prefix)} ` +
+    `2>${singleQuote(log)}`
+  )
+}
+
 /** Why a line did not run: the machine no longer holds `prefix`. */
 function unmounted(provider: string, prefix: string): string {
   return `${provider}: ${prefix} is no longer mounted in the machine (did it restart?); the line did not run`
+}
+
+/**
+ * Why a line did not run: the machine's file client did not confirm in time
+ * that it dropped what the workspace changed under `prefix`. Mirrors
+ * Python's `unconfirmed`.
+ */
+function unconfirmed(provider: string, prefix: string): string {
+  return `${provider}: the machine did not confirm the workspace's changes under ${prefix} in time; the line did not run`
 }
 
 /**
@@ -339,7 +374,7 @@ export class MachineMounts {
   /**
    * @param provider the machine's provider, for messages.
    * @param machine the machine's name, its key under `machines:`.
-   * @param mountType ssh, fuse or both.
+   * @param mountType ssh, mirage, own or both.
    * @param run runs one setup command in the machine.
    * @param openPipe starts a command in the machine with its stdin and
    *   stdout held open.
@@ -356,7 +391,27 @@ export class MachineMounts {
   ) {}
 
   get fileEffectsDispatched(): boolean {
-    return this.mountType === 'ssh'
+    return this.mountType === 'ssh' || this.mountType === 'mirage'
+  }
+
+  /** How the host serves its prefixes: sshfs under `ssh`, mirage-fuse otherwise. */
+  private get transport(): Transport {
+    return this.mountType === 'ssh' ? 'ssh' : 'mirage'
+  }
+
+  /** The type the machine's mount table gives a prefix the host serves. */
+  private get kind(): string {
+    return this.transport === 'ssh' ? 'fuse.sshfs' : 'fuse.mirage'
+  }
+
+  /** The program that mounts a prefix the host serves, for messages. */
+  private get program(): string {
+    return this.transport === 'ssh' ? 'sshfs' : 'mirage-fuse'
+  }
+
+  /** Whether the host serves every prefix, none being the machine's own. */
+  private get servesAll(): boolean {
+    return this.mountType === 'ssh' || this.mountType === 'mirage'
   }
 
   /**
@@ -392,7 +447,7 @@ export class MachineMounts {
     const seen = rstripSlash(cwd)
     const local = binding.machinePrefixes(this.machine)
     if (
-      this.mountType === 'ssh' &&
+      this.servesAll &&
       seen !== '' &&
       ![...servedPrefixes(mountPrefixes(), local), ...local]
         .map((p) => rstripSlash(p))
@@ -441,7 +496,7 @@ export class MachineMounts {
       const lost = this.lost()
       if (lost !== null) return refuse(`${unmounted(this.provider, lost)}\n`, CANNOT_EXECUTE_STATUS)
       const unserved = this.unserved(ruled)
-      if (this.mountType !== 'fuse' && (!unserved || this.served.size > 0)) {
+      if (this.mountType !== 'own' && (!unserved || this.served.size > 0)) {
         this.session = session
       }
       return unserved
@@ -454,6 +509,18 @@ export class MachineMounts {
     })
     const changes = binding.changes
     if (refusal !== null || this.served.size === 0 || changes === null) return refusal
+    if (this.transport === 'mirage') {
+      const served = [...this.served]
+      const confirmed = await abortable(
+        Promise.all(served.map(([, { server }]) => server.begin?.() ?? Promise.resolve(true))),
+        signal,
+      )
+      const late = served.find((_, i) => confirmed[i] === false)?.[0]
+      if (late !== undefined) {
+        return refuse(`${unconfirmed(this.provider, late)}\n`, CANNOT_EXECUTE_STATUS)
+      }
+      return null
+    }
     this.since = new Map(
       [...this.served.values()].map(({ source }) => [source, this.since.get(source) ?? begun]),
     )
@@ -477,7 +544,7 @@ export class MachineMounts {
     missing: readonly [string, string, string] = ['', 'command not found', ''],
   ): readonly string[] {
     const held = new Map<string, [string, string]>(
-      [...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]),
+      [...this.served].map(([p, entry]) => [p, [entry.source, this.kind]]),
     )
     for (const [p, entry] of this.own) held.set(p, entry)
     if (held.size === 0) return argv
@@ -658,14 +725,10 @@ export class MachineMounts {
   ): Promise<string | null> {
     const local = binding.machinePrefixes(this.machine).map((p) => rstripSlash(p))
     const served = servedPrefixes(binding.resolver.prefixes(), local)
-    const visible = this.mountType === 'fuse' ? [] : await this.mountable(files, served)
+    const visible = this.mountType === 'own' ? [] : await this.mountable(files, served)
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
-    if (
-      this.seen === seen &&
-      ended.length === 0 &&
-      (this.mountType === 'ssh' || ruled.size === 0)
-    ) {
+    if (this.seen === seen && ended.length === 0 && (this.servesAll || ruled.size === 0)) {
       return null
     }
     this.seen = null
@@ -674,11 +737,11 @@ export class MachineMounts {
     const own = [...every]
       .filter(
         (p) =>
-          this.mountType !== 'ssh' &&
+          !this.servesAll &&
           present.has(p) &&
           !this.served.has(p) &&
           !(
-            present.get(p)?.[1] === 'fuse.sshfs' &&
+            SERVED_KINDS.has(present.get(p)?.[1] ?? '') &&
             (present.get(p)?.[0] ?? '').startsWith(SSHFS_SOURCE_PREFIX)
           ),
       )
@@ -692,8 +755,8 @@ export class MachineMounts {
       return (
         wanted.includes(p) &&
         entry !== undefined &&
-        (entry[0] !== this.served.get(p)?.source || entry[1] !== 'fuse.sshfs') &&
-        (!ended.includes(p) || entry[1] !== 'fuse.sshfs') &&
+        (entry[0] !== this.served.get(p)?.source || entry[1] !== this.kind) &&
+        (!ended.includes(p) || entry[1] !== this.kind) &&
         !(ended.includes(p) && JSON.stringify(entry) === this.under.get(p))
       )
     })
@@ -714,20 +777,25 @@ export class MachineMounts {
     const fresh = wanted.filter((p) => !this.served.has(p))
     for (const prefix of fresh) {
       if (await this.held(prefix, present, signal)) {
-        return `another sshfs serves ${prefix} in this machine; give this workspace a machine of its own`
+        return `another ${SERVED_KINDS.get(present.get(prefix)?.[1] ?? '') ?? ''} serves ${prefix} in this machine; give this workspace a machine of its own`
       }
     }
     if (fresh.length > 0) {
-      const make = pipeServer
-      if (make === null) throw new Error(PIPE_SERVER_HINT)
-      if ((await this.run(SSHFS_LINE, signal)).exitCode !== 0) {
-        throw new Error(`${this.provider}: ${SSHFS_HINT}`)
+      const ssh = this.transport === 'ssh'
+      const make = pipeServers.get(this.transport)
+      if (make === undefined) throw new Error(ssh ? PIPE_SERVER_HINT : FSPROTO_SERVER_HINT)
+      if ((await this.run(ssh ? SSHFS_LINE : MIRAGE_FUSE_LINE, signal)).exitCode !== 0) {
+        throw new Error(`${this.provider}: ${ssh ? SSHFS_HINT : MIRAGE_FUSE_HINT}`)
       }
       const folder = await this.folder(served, signal)
       try {
         for (const prefix of fresh) {
           await this.serve(
-            make(files, session, (op) => this.lend(op)),
+            make(files, session, (op) => this.lend(op), {
+              prefix,
+              machine: this.machine,
+              changes: binding.changes ?? null,
+            }),
             prefix,
             present,
             folder,
@@ -739,13 +807,13 @@ export class MachineMounts {
         throw err
       }
     }
-    if (this.mountType !== 'fuse' || topPrefixes(every).every((p) => own.includes(p))) {
+    if (this.mountType !== 'own' || topPrefixes(every).every((p) => own.includes(p))) {
       this.seen = seen
     }
     return null
   }
 
-  /** Whether `source`, mounted at `prefix`, is an sshfs this workspace served: exactly `<name>-<instance>-<n>:<prefix>`. */
+  /** Whether `source`, mounted at `prefix`, is a mount this workspace served: exactly `<name>-<instance>-<n>:<prefix>`. */
   private ours(source: string, prefix: string): boolean {
     const serve = source.slice(this.name.length + 1, source.length - prefix.length - 1)
     return /^[0-9a-f]{8}-[0-9]+$/.test(serve) && source === `${this.name}-${serve}:${prefix}`
@@ -759,14 +827,14 @@ export class MachineMounts {
     return [...this.owned].sort(compareCodePoints).find((p) => !this.own.has(p)) ?? null
   }
 
-  /** Whether another sshfs still serves `prefix`. */
+  /** Whether another workspace's sshfs or mirage-fuse still serves `prefix`. */
   private async held(
     prefix: string,
     present: ReadonlyMap<string, [string, string]>,
     signal?: AbortSignal,
   ): Promise<boolean> {
     const [source, kind] = present.get(prefix) ?? ['', '']
-    if (kind !== 'fuse.sshfs' || this.ours(source, prefix)) return false
+    if (!SERVED_KINDS.has(kind) || this.ours(source, prefix)) return false
     const found = await this.run(runningLine(source), signal)
     if (found.exitCode !== 0 && found.exitCode !== 1) {
       throw new Error(
@@ -800,9 +868,9 @@ export class MachineMounts {
   ): Promise<void> {
     this.under.set(prefix, JSON.stringify(present.get(prefix) ?? null))
     const [old, kind] = present.get(prefix) ?? ['', '']
-    if (kind === 'fuse.sshfs' && this.ours(old, prefix) && !this.sources.has(old))
+    if (SERVED_KINDS.has(kind) && this.ours(old, prefix) && !this.sources.has(old))
       await this.reclaim(old, prefix, signal)
-    else if (kind === 'fuse.sshfs') await this.run(unmountLine(prefix), signal)
+    else if (SERVED_KINDS.has(kind)) await this.run(unmountLine(prefix), signal)
     const path = singleQuote(prefix)
     const made = await this.run(
       `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
@@ -814,12 +882,16 @@ export class MachineMounts {
         `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
       )
     }
-    const logPath = `${folder}/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log`
+    const logPath = `${folder}/${this.program}-${crypto.randomUUID().replaceAll('-', '')}.log`
     const log = singleQuote(logPath)
     this.serves += 1
     const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
-    const pipe = await this.openPipe(sshfsLine(source, prefix, logPath))
+    const pipe = await this.openPipe(
+      this.transport === 'ssh'
+        ? sshfsLine(source, prefix, logPath)
+        : mirageFuseLine(source, prefix, logPath),
+    )
     const entry: Served = {
       source,
       pipe,
@@ -845,14 +917,14 @@ export class MachineMounts {
       for (;;) {
         try {
           const [found, kind] = (await this.table(signal)).get(prefix) ?? ['', '']
-          if (!entry.ended && found === source && kind === 'fuse.sshfs') return
+          if (!entry.ended && found === source && kind === this.kind) return
         } catch (error) {
           signal?.throwIfAborted()
           const diagnostic = (await pipe.diagnostic?.()) ?? ''
           if (diagnostic) {
             const said = error instanceof Error ? error.message : String(error)
             throw new Error(
-              `${this.provider}: sshfs did not mount ${prefix}: ${said}; helper said: ${diagnostic}`,
+              `${this.provider}: ${this.program} did not mount ${prefix}: ${said}; helper said: ${diagnostic}`,
               { cause: error },
             )
           }
@@ -867,12 +939,12 @@ export class MachineMounts {
             if (logText) reason = logText + (diagnostic ? `; helper said: ${diagnostic}` : '')
           } catch (error) {
             signal?.throwIfAborted()
-            console.debug(`${this.provider}: reading the sshfs log failed`, error)
-            if (!reason) reason = `cannot read the sshfs log: ${String(error)}`
+            console.debug(`${this.provider}: reading the ${this.program} log failed`, error)
+            if (!reason) reason = `cannot read the ${this.program} log: ${String(error)}`
           }
-          reason ||= 'no word from sshfs'
-          if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
-          throw new Error(`${this.provider}: sshfs did not mount ${prefix}: ${reason}`)
+          reason ||= `no word from ${this.program}`
+          if (entry.failure !== null) reason += `; the file server failed: ${entry.failure.message}`
+          throw new Error(`${this.provider}: ${this.program} did not mount ${prefix}: ${reason}`)
         }
         signal?.throwIfAborted()
         await sleep(MOUNT_POLL_SECONDS * 1000)
@@ -904,13 +976,13 @@ export class MachineMounts {
         (killed) => {
           if (killed.exitCode !== 0) {
             console.warn(
-              `${this.provider}: killing the sshfs for ${prefix} failed: ${said(killed.stderr)}`,
+              `${this.provider}: killing the ${this.program} for ${prefix} failed: ${said(killed.stderr)}`,
             )
           }
         },
         (err: unknown) => {
           if (!kill.signal.aborted) {
-            console.warn(`${this.provider}: killing the sshfs for ${prefix} failed:`, err)
+            console.warn(`${this.provider}: killing the ${this.program} for ${prefix} failed:`, err)
           }
         },
       )
@@ -988,7 +1060,7 @@ export class MachineMounts {
       await within(entry.serving, UNMOUNT_WAIT_SECONDS * 1000)
       if (entry.failure !== null) throw entry.failure
     } catch (err) {
-      console.warn(`${this.provider}: ending the SFTP server for ${prefix} failed:`, err)
+      console.warn(`${this.provider}: ending the file server for ${prefix} failed:`, err)
     }
   }
 
@@ -1002,7 +1074,7 @@ export class MachineMounts {
           `${this.provider}: reading the mount table to unmount failed; unmounting every served prefix:`,
           err,
         )
-        present = new Map([...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]))
+        present = new Map([...this.served].map(([p, entry]) => [p, [entry.source, this.kind]]))
       }
     }
     for (const prefix of [...this.served.keys()]) await this.drop(prefix, present)

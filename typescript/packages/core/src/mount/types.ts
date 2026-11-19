@@ -15,6 +15,7 @@
 import type { ByteSlice, ByteSpool } from '../io/spool.ts'
 import type { ChunkedHandle, OpenMode } from '../runtime/handles/index.ts'
 import type { FileStat } from '../types.ts'
+import type { RecentChanges } from './changes.ts'
 
 export type WriteBuf = [number, Uint8Array | ByteSlice][]
 
@@ -86,4 +87,14 @@ export interface Handle {
    * from those writes should they come back. Absent while none is.
    */
   cuts?: [number, number][]
+}
+
+/** What a served prefix's server serves beyond its session. Mirrors Python's `ServedPrefix`. */
+export interface ServedPrefix {
+  /** The workspace prefix the machine mounts. */
+  prefix: string
+  /** The machine's name: its own requests' changes its kernel already holds. */
+  machine: string
+  /** The workspace's changes, which reach a client that keeps answers. */
+  changes: RecentChanges | null
 }

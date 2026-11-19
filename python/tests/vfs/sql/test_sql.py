@@ -896,3 +896,12 @@ async def test_the_shell_gets_root_and_workspace_on_one_database():
     finally:
         await ws.close()
         driver.close()
+
+
+def test_only_a_database_in_memory_counts_as_written_by_the_workspace_alone(
+    tmp_path,
+):
+    assert SqlVFS().sole_writer is True
+    assert SqlVFS(path=str(tmp_path / "shared.db")).sole_writer is False
+    assert SqlVFS(driver=SqliteDriver(":memory:")).sole_writer is True
+    assert PostgresSqlDriver("postgresql://u@h/db").exclusive is False

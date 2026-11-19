@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 
 from mirage.utils.clock import Clock
@@ -51,6 +51,7 @@ class RecentChanges:
         self._clock = clock
         self._window = window
         self._changes: deque[tuple[float, str | None, str]] = deque()
+        self._watchers: set[Callable[[str, str | None], None]] = set()
 
     def note(self, path: str) -> None:
         """Record a change at ``path``, made by ``SERVED_BY``'s machine.
@@ -60,7 +61,31 @@ class RecentChanges:
         """
         now = self._clock.monotonic()
         self._forget(now)
-        self._changes.append((now, SERVED_BY.get(), path))
+        by = SERVED_BY.get()
+        self._changes.append((now, by, path))
+        for watcher in list(self._watchers):
+            watcher(path, by)
+
+    def watch(
+        self, listener: Callable[[str, str | None], None]
+    ) -> Callable[[], None]:
+        """Hear each change as it is noted, with the machine whose served
+        mount made it, so a machine that keeps answers longer than the
+        window learns of every change at once.
+
+        Args:
+            listener (Callable[[str, str | None], None]): told each
+                change's path and machine.
+
+        Returns:
+            Callable[[], None]: the call that stops hearing.
+        """
+        self._watchers.add(listener)
+
+        def stop() -> None:
+            self._watchers.discard(listener)
+
+        return stop
 
     def now(self) -> float:
         """The workspace clock's monotonic reading, which ``wait_out``

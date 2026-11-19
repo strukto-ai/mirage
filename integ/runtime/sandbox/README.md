@@ -21,7 +21,11 @@ folder, by a `..` or an absolute path, reaches the box as a link, which
 sshfs refuses since the fix for CVE-2026-47187 unless told otherwise, and an
 absolute target resolves on the box's own disk. A served file shows as owned by the box's user, so git
 takes a repository there as its own. A rename over an existing name lands, through the
-posix-rename extension the server names.
+posix-rename extension the server names. Each `ssh` case has a `mirage` twin, the
+same mounts served by mirage-fuse, which answers alike except that a write into a
+read-only mount says `Read-only file system`, as Mirage does, where sshfs can only say
+`Permission denied`. `both` serves the rest through mirage-fuse, so a box running
+these cases needs sshfs and mirage-fuse; CI builds mirage-fuse and copies it in.
 
 | File              | Pins                                                                                                                                                                                            | Runs on                                                                     |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -34,7 +38,7 @@ posix-rename extension the server names.
 | `captures.json`   | only captured commands go to the box; the rest stay in mirage; a pid two machines share takes `-m`                                                                                              | every box                                                                   |
 | `kernel.json`     | the box runs its own Linux kernel                                                                                                                                                               | smolvm, microsandbox, apple_container                                       |
 | `resources.json`  | `nproc`, `free`, `uptime` and `top` read the box; `$!`, a `kill` of `timeout` and `pkill -f` reach the program                                                                                  | docker, ssh, e2b, microsandbox, apple_container, kubernetes                 |
-| `mounts.json`     | `mount_type` serves the session's view into the box                                                                                                                                             | docker, e2b, microsandbox, kubernetes                                       |
+| `mounts.json`     | `mount_type` serves the session's view into the box, through sshfs and mirage-fuse                                                                                                              | docker, e2b, microsandbox, kubernetes                                       |
 | `local.json`      | `/tmp`, `/dev/shm` and a machine mount at its own path are the box's own files; a machine tree at another prefix; two machines merge, refuse an ambiguous name, rename in place and copy across | docker, e2b, microsandbox, kubernetes; two machines on docker               |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox, apple_container and kubernetes. CI runs docker

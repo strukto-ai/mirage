@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.io.spool import ByteSlice, ByteSpool
+from mirage.mount.changes import RecentChanges
 from mirage.runtime.handles import ChunkedHandle
 from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import FileStat
@@ -99,3 +100,20 @@ class Handle:
     # The ranges other writes took while a landing had its writes out,
     # cut from those writes should they come back. None while none is.
     cuts: list[tuple[int, int]] | None = None
+
+
+@dataclass(frozen=True)
+class ServedPrefix:
+    """What a served prefix's server serves beyond its session.
+
+    Args:
+        prefix (str): the workspace prefix the machine mounts.
+        machine (str): the machine's name: its own requests' changes its
+            kernel already holds.
+        changes (RecentChanges | None): the workspace's changes, which
+            reach a client that keeps answers.
+    """
+
+    prefix: str
+    machine: str
+    changes: RecentChanges | None

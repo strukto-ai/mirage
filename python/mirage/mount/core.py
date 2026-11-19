@@ -2013,6 +2013,26 @@ class MountCore:
             if token is not None:
                 reset_caller(token)
 
+    def visible(self, path: str) -> bool:
+        """Whether the bound session sees ``path``, so a notice about it
+        (a change pushed to a client) never names what it hides.
+
+        Args:
+            path (str): mount path.
+        """
+        virtual = self.resolve(path)
+        reader = reader_of(self._files)
+        token = (
+            None
+            if self._session is None
+            else set_current_session(self._session)
+        )
+        try:
+            return reader.visible(virtual)
+        finally:
+            if token is not None:
+                reset_caller(token)
+
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.
 

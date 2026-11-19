@@ -47,6 +47,7 @@ import type {
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import '@struktoai/mirage-core/machine/cloudflare_container/handle'
+import '@struktoai/mirage-core/mount/fsproto'
 import '@struktoai/mirage-core/mount/sftp'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'

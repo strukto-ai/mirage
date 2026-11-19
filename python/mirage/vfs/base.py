@@ -117,6 +117,12 @@ class BaseVFS:
     # docs/python/setup/fuse.mdx.
     sizes_always_known: bool = False
 
+    # Whether nothing but this workspace writes the store, so every change
+    # passes the dispatcher and is noted (``RecentChanges``): mirage-fuse
+    # then keeps the mount's answers until a change is pushed. True for a
+    # store held in this process (ram) or one only this workspace opens.
+    sole_writer: bool = False
+
     # Whether a `read: fresh` mount can actually be revalidated against
     # this backend: stat() and read must stamp FileStat.fingerprint /
     # the read record with the *same kind* of content token, so the gate

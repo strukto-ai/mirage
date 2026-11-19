@@ -58,6 +58,7 @@ export class RAMVFS extends BaseVFS {
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly soleWriter: boolean = true
   override readonly indexTtl: number = 0
   override readonly usage: StorageUsage | null
   readonly store: RAMStore

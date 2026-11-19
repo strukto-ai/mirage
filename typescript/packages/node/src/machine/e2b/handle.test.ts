@@ -629,10 +629,10 @@ describe('E2BMachine', () => {
     await runtime.connect()
     expect(FakeMachine.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
   })
-  it('takes a mountType of ssh, fuse or both', () => {
+  it('takes a mountType of ssh, mirage, own or both', () => {
     expect(
       () => new FakedE2BMachine('box', { sandboxId: 'sb', mountType: 'nfs' as never }),
-    ).toThrow('e2b mountType must be one of ssh, fuse, both, not "nfs"')
+    ).toThrow('e2b mountType must be one of ssh, mirage, own, both, not "nfs"')
     expect(() => new FakedE2BMachine('box', { sandboxId: 'sb', mountType: 'both' })).not.toThrow()
   })
   it("opens a pipe as a raw pty past the shell's own output", async () => {
@@ -1131,8 +1131,8 @@ describe('E2BMachine under session restrictions', () => {
     }
   })
 
-  it.each(RESTRICTIONS)('refuses a line on fuse mounts', async (profile) => {
-    const runtime = new MountingE2BMachine('box', { sandboxId: 'sb-live', mountType: 'fuse' })
+  it.each(RESTRICTIONS)('refuses a line on own mounts', async (profile) => {
+    const runtime = new MountingE2BMachine('box', { sandboxId: 'sb-live', mountType: 'own' })
     const ws = restricted(runtime, profile)
     try {
       const agent = await ws.session('agent', { profile: 'agent' })

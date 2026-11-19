@@ -61,6 +61,7 @@ function bind(value: SqlValue): unknown {
 export class PostgresSqlDriver implements SqlDriver {
   readonly location: string
   readonly dialect = SqlDialect.POSTGRES
+  readonly exclusive = false
   private pool: Promise<PgPoolLike> | null = null
 
   constructor(private readonly dsn: string) {

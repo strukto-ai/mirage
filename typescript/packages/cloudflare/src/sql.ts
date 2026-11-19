@@ -87,6 +87,7 @@ function row(raw: Record<string, unknown>): SqlRow {
  */
 export class DurableObjectSqlDriver implements SqlDriver {
   readonly dialect = SqlDialect.SQLITE
+  readonly exclusive = true
 
   constructor(
     private readonly storage: DurableObjectStorageLike,
@@ -116,6 +117,7 @@ export class DurableObjectSqlDriver implements SqlDriver {
 /** A D1 database, as the sql mount's driver; a batch is one D1 `batch`, all or nothing. */
 export class D1SqlDriver implements SqlDriver {
   readonly dialect = SqlDialect.SQLITE
+  readonly exclusive = false
 
   constructor(
     private readonly db: D1DatabaseLike,

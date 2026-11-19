@@ -284,9 +284,9 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("profile", RESTRICTIONS)
-async def test_a_session_restriction_refuses_a_line_on_fuse_mounts(profile):
+async def test_a_session_restriction_refuses_a_line_on_own_mounts(profile):
     runtime = MountingDockerMachine(
-        config={"container": "c", "mount_type": "fuse"}
+        config={"container": "c", "mount_type": "own"}
     )
     ws = restricted(runtime, profile)
     agent = await ws.session("agent", profile="agent")

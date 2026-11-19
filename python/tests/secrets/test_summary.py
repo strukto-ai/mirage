@@ -94,9 +94,11 @@ def test_error_summary_joins_every_issue():
 
 
 def test_mask_values_hides_a_value_however_it_was_quoted():
-    message = "e2b mount_type must be one of ssh, fuse, both, not 'ab\"cd'"
+    message = (
+        "e2b mount_type must be one of ssh, mirage, own, both, not 'ab\"cd'"
+    )
     assert mask_values(message, ['ab"cd']) == (
-        "e2b mount_type must be one of ssh, fuse, both, not '***'"
+        "e2b mount_type must be one of ssh, mirage, own, both, not '***'"
     )
     assert mask_values('not "ab\\"cd"', ['ab"cd']) == 'not "***"'
 
