@@ -2417,6 +2417,30 @@ SUMMARIES = [
         Outcome.ALLOW,
         "",
     ),
+    (
+        SUMMARY_CLOSED,
+        "x=$(sort() { ls /data; }); sort /data/x",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "sort /data/x; ls /data &",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "case x in a|x) sort /data/x;; *) ls /data;; esac",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
+    (
+        SUMMARY_CLOSED,
+        "case y in x) sort /data/x;; esac",
+        Outcome.DENY,
+        "sort is not allowed",
+    ),
     (SUMMARY_CLOSED, "sort /data/x", Outcome.DENY, "sort is not allowed"),
     (
         SUMMARY_CLOSED,
@@ -2521,6 +2545,33 @@ async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
         assert (said.exit_code, said.stderr) == (
             ran.exit_code,
             await ran.stderr_str(),
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "outer() { sort /data/x; }; outer; sort() { ls /data; }",
+        "(sort() { ls /data; }); outer() { sort /data/x; }; outer",
+    ],
+)
+async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
+    # `outer`'s body runs where no `sort` function is in scope, defined
+    # later or in a subshell, so the body's `sort` is the tool the closed
+    # root refuses, as the run says.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf 'b\\na\\n' > /data/x")
+        ws.create_session("s", profile={"commands": SUMMARY_CLOSED})
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert ran.decision is not None
+        assert (said.outcome, said.reason) == (
+            Outcome.DENY,
+            ran.decision.reason,
         )
     finally:
         await ws.close()

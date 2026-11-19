@@ -54,6 +54,8 @@ from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
+    get_case_items,
+    get_case_word,
     get_parts,
     get_text,
     input_substitution_redirect,
@@ -424,6 +426,9 @@ class Traced:
             fold reached, run or skipped.
         defined (frozenset[str]): every function a definition the line
             runs defines, wherever it stands.
+        bodies (Mapping[int, frozenset[str]]): for each definition the
+            line runs, by where it starts, the functions defined when a
+            command calls it, which is what its body sees.
     """
 
     exit_code: int
@@ -431,6 +436,7 @@ class Traced:
     calls: frozenset[tuple[int, int, int]]
     reached: frozenset[tuple[int, int, int]]
     defined: frozenset[str]
+    bodies: Mapping[int, frozenset[str]]
 
 
 def _unread_paths(
@@ -2291,7 +2297,7 @@ def explained_line(
             redirects.setdefault((at.start, at.end), []).append(open_.judgment)
     traced = _line_status(tree, commands, redirects, pipefail)
     calling = [
-        _calls_function(one.judgment, key, traced)
+        _calls_function(one, key, traced)
         for one, key in zip(judged, keys, strict=True)
     ]
     parts = _in_line_order(
@@ -2320,26 +2326,29 @@ def explained_line(
 
 
 def _calls_function(
-    judgment: Judgment, key: tuple[int, int, int] | None, traced: Traced
+    one: Judged, key: tuple[int, int, int] | None, traced: Traced
 ) -> bool:
     """Whether a judgment is a tree root's own decision about a command
     that calls a function, which no root's own decision speaks for
     (``is_tool``); a rule that names the function still does. The walk
     reads the line before any definition runs, so it judges every such
     call as a tool. A command the fold reached is a call when the
-    function was defined where it stands (:class:`Traced`); one it did
-    not reach, in a function body, a substitution or a job, when any
-    definition the line runs names it.
+    function was defined where it stands (:class:`Traced`); one in a
+    function's body when the function was defined at a call of that
+    body; any other, in a substitution or a line a command runs, when
+    any definition the line runs names it.
 
     Args:
-        judgment (Judgment): one command's judgment.
+        one (Judged): one command's judgment and place.
         key (tuple[int, int, int] | None): its span and place on the
             typed line, None for one a nested line runs.
         traced (Traced): what the line does.
     """
     if key is not None and key in traced.reached:
         return key in traced.calls
-    return judgment.command in traced.defined and _by_default(judgment)
+    judgment = one.judgment
+    visible = traced.bodies.get(_line_start(one.occurrence), traced.defined)
+    return judgment.command in visible and _by_default(judgment)
 
 
 def _in_line_order(
@@ -2388,15 +2397,18 @@ def _line_status(
     its last stage's (its last failing one under ``pipefail``), ``!``
     inverts a command or a whole pipeline, an ``if`` runs the branch its
     condition picks, a loop its body once when its condition lets it in,
-    and a node whose redirect no command owns is refused fails with 1
-    without running. A case statement, a function definition, a call
-    to a function and the lines a command runs in turn (``$( )``,
-    ``bash -c``, ``eval``) answer 0.
+    a ``case`` the arm its word certainly matches (an arm before it
+    whose pattern is a glob leaves it unknown, and none runs), a
+    statement sent to the background (``&``) 0, and a node whose
+    redirect no command owns is refused fails with 1 without running. A
+    function definition, a call to a function and the lines a command
+    runs in turn (``$( )``, ``bash -c``, ``eval``) answer 0.
 
     The fold also follows which functions the shell has defined: a
     definition counts once it runs, one in a subshell or a pipeline
-    stage is gone when that child shell ends, and one on a branch the
-    line skips never counts. A tree root's own decision about a command
+    stage or a substitution is gone when that child shell ends, and one
+    on a branch the line skips never counts; a function's body sees the
+    functions defined when it is called. A tree root's own decision about a command
     that calls such a function is no refusal (``is_tool``).
 
     Args:
@@ -2413,6 +2425,8 @@ def _line_status(
     reached: set[tuple[int, int, int]] = set()
     defined: set[str] = set()
     every: set[str] = set()
+    starts: dict[str, list[int]] = {}
+    seen: dict[str, set[str]] = {}
 
     def refused(judgments: Sequence[Judgment], runs: bool) -> int:
         first = next((j for j in judgments if j.exit_code), None)
@@ -2430,8 +2444,14 @@ def _line_status(
 
     def statements(nodes: Sequence[Any], runs: bool) -> int:
         code = 0
-        for node in nodes:
-            if node.is_named and node.type not in INERT:
+        for node, after in zip(nodes, [*nodes[1:], None], strict=False):
+            if not node.is_named or node.type in INERT:
+                continue
+            if after is not None and after.type == NodeType.BACKGROUND:
+                # A job: the shell does not wait on it, and it forks.
+                forked([node], False)
+                code = 0
+            else:
                 code = status(node, runs)
         return code
 
@@ -2442,6 +2462,7 @@ def _line_status(
             reached.add(key)
             if judgment.command in defined and _by_default(judgment):
                 calls.add(key)
+                seen.setdefault(judgment.command, set()).update(defined)
             else:
                 kept.append(judgment)
         return refused(kept, runs)
@@ -2484,7 +2505,7 @@ def _line_status(
             return (0 if code else 1) if negated else code
         if kind == NodeType.NEGATED_COMMAND:
             return 0 if statements(node.children, runs) else 1
-        if kind == NodeType.SUBSHELL:
+        if kind in FORK_SCOPES:
             return forked(node.children, runs)
         if kind == NodeType.IF_STATEMENT:
             branches = [_clause(node)] + [
@@ -2524,15 +2545,23 @@ def _line_status(
             if runs and name is not None:
                 defined.add(get_text(name))
                 every.add(get_text(name))
+                starts.setdefault(get_text(name), []).append(node.start_byte)
             return 0
         if kind == NodeType.CASE_STATEMENT:
-            return 0
+            arm = _case_arm(node)
+            code = 0
+            for index, (_, body, _) in enumerate(get_case_items(node)):
+                hit = runs and index == arm
+                result = statements(body, hit)
+                if hit:
+                    code = result
+            return code
         if kind in (NodeType.FOR_STATEMENT, NodeType.C_STYLE_FOR_STATEMENT):
             loop = [
                 c for c in node.named_children if c.type == NodeType.DO_GROUP
             ]
             return statements(loop, runs)
-        return statements(_backgrounded(node.children), runs)
+        return statements(node.children, runs)
 
     code = status(tree, True)
     return Traced(
@@ -2541,6 +2570,11 @@ def _line_status(
         frozenset(calls),
         frozenset(reached),
         frozenset(every),
+        {
+            start: frozenset(seen.get(name, ()))
+            for name, places in starts.items()
+            for start in places
+        },
     )
 
 
@@ -2562,19 +2596,26 @@ def _clause(node: Any) -> tuple[list[Any], list[Any]]:
     return head, body
 
 
-def _backgrounded(children: Sequence[Any]) -> list[Any]:
-    """A scope's statements with each one sent to the background (``&``)
-    dropped, since the scope does not wait on its status.
+def _case_arm(node: Any) -> int | None:
+    """The arm of a ``case`` its word certainly matches: the first whose
+    pattern is the word itself or a bare ``*``, when the word is literal
+    and no arm before it holds a pattern only the shell's matcher can
+    decide (a glob, a quote, an expansion). None when no arm is certain.
 
     Args:
-        children (Sequence[Any]): the scope's parsed children, tokens
-            included.
+        node (Any): the ``case_statement``.
     """
-    return [
-        child
-        for child, after in zip(children, [*children[1:], None], strict=False)
-        if after is None or after.type != NodeType.BACKGROUND
-    ]
+    word = literal_word(get_case_word(node))
+    if word is None:
+        return None
+    for index, (patterns, _, _) in enumerate(get_case_items(node)):
+        for pattern in patterns:
+            text = get_text(pattern)
+            if text == "*" or text == word:
+                return index
+            if any(mark in text for mark in "*?[]\\'\"$`"):
+                return None
+    return None
 
 
 def _refusal(answers: tuple[Deny | Ask | Route, ...]) -> Deny | Ask | None:

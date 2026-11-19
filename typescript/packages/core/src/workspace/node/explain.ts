@@ -38,6 +38,8 @@ import {
 } from '../../policy/types.ts'
 import {
   inputSubstitutionRedirect,
+  getCaseItems,
+  getCaseWord,
   getParts,
   getText,
   literalWord,
@@ -1782,7 +1784,7 @@ export function explainedLine(
   }
   const traced = lineStatus(tree, commands, redirects, pipefail)
   const parts = inLineOrder(
-    judged.filter((one, i) => !callsFunction(one.judgment, keys[i] ?? null, traced)),
+    judged.filter((one, i) => !callsFunction(one, keys[i] ?? null, traced)),
     opened,
   )
   let strictest = Outcome.ALLOW
@@ -1824,8 +1826,10 @@ export function explainedLine(
  * refusals it would print in order, the judgments (by span and place among
  * their span's) of the commands that call a function the shell has
  * defined when they run, the judgments the fold reached, run or skipped,
- * and every function a definition the line runs defines. Mirrors the
- * Python Traced.
+ * every function a definition the line runs defines, and for each
+ * definition the line runs, by where it starts, the functions defined when
+ * a command calls it, which is what its body sees. Mirrors the Python
+ * Traced.
  */
 interface Traced {
   readonly exitCode: number
@@ -1833,6 +1837,7 @@ interface Traced {
   readonly calls: ReadonlySet<string>
   readonly reached: ReadonlySet<string>
   readonly defined: ReadonlySet<string>
+  readonly bodies: ReadonlyMap<number, ReadonlySet<string>>
 }
 
 /**
@@ -1841,13 +1846,15 @@ interface Traced {
  * rule that names the function still does. The walk reads the line before
  * any definition runs, so it judges every such call as a tool. A command
  * the fold reached (`key`, its span and place on the typed line) is a call
- * when the function was defined where it stands; one it did not reach, in
- * a function body, a substitution or a job, when any definition the line
- * runs names it. Mirrors the Python `_calls_function`.
+ * when the function was defined where it stands; one in a function's body
+ * when the function was defined at a call of that body; any other, in a
+ * substitution or a line a command runs, when any definition the line runs
+ * names it. Mirrors the Python `_calls_function`.
  */
-function callsFunction(judgment: Judgment, key: string | null, traced: Traced): boolean {
+function callsFunction(one: Judged, key: string | null, traced: Traced): boolean {
   if (key !== null && traced.reached.has(key)) return traced.calls.has(key)
-  return traced.defined.has(judgment.command) && byDefault(judgment)
+  const visible = traced.bodies.get(lineStart(one.occurrence)) ?? traced.defined
+  return visible.has(one.judgment.command) && byDefault(one.judgment)
 }
 
 /**
@@ -1884,14 +1891,18 @@ function lineStart(at: Occurrence): number {
  * `&&` and `||` skip what bash skips, a pipeline returns its last stage's
  * (its last failing one under `pipefail`), `!` inverts a command or a whole
  * pipeline, an `if` runs the branch its condition picks, a loop its body
- * once when its condition lets it in, and a node whose redirect no command
- * owns is refused fails with 1 without running. A case statement, a
+ * once when its condition lets it in, a `case` the arm its word certainly
+ * matches (an arm before it whose pattern is a glob leaves it unknown, and
+ * none runs), a statement sent to the background (`&`) 0, and a node whose
+ * redirect no command owns is refused fails with 1 without running. A
  * function definition, a call to a function and the lines a command runs
  * in turn (`$( )`, `bash -c`, `eval`) answer 0. The fold also follows
  * which functions the shell has defined: a definition counts once it runs,
- * one in a subshell or a pipeline stage is gone when that child shell
- * ends, and one on a branch the line skips never counts; a tree root's own
- * decision about a command that calls such a function is no refusal.
+ * one in a subshell, a pipeline stage or a substitution is gone when that
+ * child shell ends, and one on a branch the line skips never counts; a
+ * function's body sees the functions defined when it is called, and a tree
+ * root's own decision about a command that calls such a function is no
+ * refusal.
  * `commands` holds each command's judgments on the typed line, and
  * `redirects` those of the redirects no command owns, by the span of the
  * node they open for. Mirrors the Python `_line_status`.
@@ -1907,6 +1918,8 @@ function lineStatus(
   const reached = new Set<string>()
   const defined = new Set<string>()
   const every = new Set<string>()
+  const starts = new Map<string, number[]>()
+  const seen = new Map<string, Set<string>>()
   const spanOf = (node: TSNodeLike): string =>
     `${String(node.startIndex ?? 0)}:${String(node.endIndex ?? 0)}`
   const refused = (judgments: readonly Judgment[], runs: boolean): number => {
@@ -1924,8 +1937,15 @@ function lineStatus(
   }
   const statements = (nodes: readonly TSNodeLike[], runs: boolean): number => {
     let code = 0
-    for (const node of nodes) {
-      if (node.isNamed === true && !INERT.has(node.type)) code = status(node, runs)
+    for (const [i, node] of nodes.entries()) {
+      if (node.isNamed !== true || INERT.has(node.type)) continue
+      if (nodes[i + 1]?.type === NodeType.BACKGROUND) {
+        // A job: the shell does not wait on it, and it forks.
+        forked([node], false)
+        code = 0
+      } else {
+        code = status(node, runs)
+      }
     }
     return code
   }
@@ -1934,8 +1954,14 @@ function lineStatus(
     for (const [place, judgment] of (commands.get(span) ?? []).entries()) {
       const key = `${span}:${String(place)}`
       reached.add(key)
-      if (defined.has(judgment.command) && byDefault(judgment)) calls.add(key)
-      else kept.push(judgment)
+      if (defined.has(judgment.command) && byDefault(judgment)) {
+        calls.add(key)
+        const visible = seen.get(judgment.command) ?? new Set<string>()
+        for (const name of defined) visible.add(name)
+        seen.set(judgment.command, visible)
+      } else {
+        kept.push(judgment)
+      }
     }
     return refused(kept, runs)
   }
@@ -1975,7 +2001,7 @@ function lineStatus(
       return negated ? (last !== 0 ? 0 : 1) : last
     }
     if (kind === NodeType.NEGATED_COMMAND) return statements(node.children, runs) !== 0 ? 0 : 1
-    if (kind === NodeType.SUBSHELL) return forked(node.children, runs)
+    if (FORK_SCOPES.has(kind)) return forked(node.children, runs)
     if (kind === NodeType.IF_STATEMENT) {
       const branches = [
         clause(node),
@@ -2013,20 +2039,34 @@ function lineStatus(
       if (runs && name !== undefined) {
         defined.add(getText(name))
         every.add(getText(name))
+        starts.set(getText(name), [...(starts.get(getText(name)) ?? []), node.startIndex ?? 0])
       }
       return 0
     }
-    if (kind === NodeType.CASE_STATEMENT) return 0
+    if (kind === NodeType.CASE_STATEMENT) {
+      const arm = caseArm(node)
+      let code = 0
+      for (const [index, [, body]] of getCaseItems(node).entries()) {
+        const hit = runs && index === arm
+        const result = statements(body, hit)
+        if (hit) code = result
+      }
+      return code
+    }
     if (kind === NodeType.FOR_STATEMENT || kind === NodeType.C_STYLE_FOR_STATEMENT) {
       return statements(
         node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP),
         runs,
       )
     }
-    return statements(backgrounded(node.children), runs)
+    return statements(node.children, runs)
   }
   const exitCode = status(tree, true)
-  return { exitCode, ran, calls, reached, defined: every }
+  const bodies = new Map<number, ReadonlySet<string>>()
+  for (const [name, places] of starts) {
+    for (const start of places) bodies.set(start, seen.get(name) ?? new Set<string>())
+  }
+  return { exitCode, ran, calls, reached, defined: every, bodies }
 }
 
 /**
@@ -2048,12 +2088,23 @@ function clause(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
 }
 
 /**
- * A scope's statements with each one sent to the background (`&`) dropped,
- * since the scope does not wait on its status. Mirrors the Python
- * `_backgrounded`.
+ * The arm of a `case` its word certainly matches: the first whose pattern
+ * is the word itself or a bare `*`, when the word is literal and no arm
+ * before it holds a pattern only the shell's matcher can decide (a glob, a
+ * quote, an expansion). Null when no arm is certain. Mirrors the Python
+ * `_case_arm`.
  */
-function backgrounded(children: readonly TSNodeLike[]): TSNodeLike[] {
-  return children.filter((_, i) => children[i + 1]?.type !== NodeType.BACKGROUND)
+function caseArm(node: TSNodeLike): number | null {
+  const word = literalWord(getCaseWord(node))
+  if (word === null) return null
+  for (const [index, [patterns]] of getCaseItems(node).entries()) {
+    for (const pattern of patterns) {
+      const text = getText(pattern)
+      if (text === '*' || text === word) return index
+      if (/[*?[\]\\'"$`]/.test(text)) return null
+    }
+  }
+  return null
 }
 
 /**

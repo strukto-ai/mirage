@@ -2029,6 +2029,15 @@ it.each([
     'sort is not allowed',
   ],
   [SUMMARY_CLOSED, 'outer() { inner; }; inner() { ls /data; }; outer', Outcome.ALLOW, ''],
+  [SUMMARY_CLOSED, 'x=$(sort() { ls /data; }); sort /data/x', Outcome.DENY, 'sort is not allowed'],
+  [SUMMARY_CLOSED, 'sort /data/x; ls /data &', Outcome.DENY, 'sort is not allowed'],
+  [
+    SUMMARY_CLOSED,
+    'case x in a|x) sort /data/x;; *) ls /data;; esac',
+    Outcome.DENY,
+    'sort is not allowed',
+  ],
+  [SUMMARY_CLOSED, 'case y in x) sort /data/x;; esac', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'sort /data/x', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'ls /data; sort /data/x', Outcome.DENY, 'sort is not allowed'],
   [SUMMARY_CLOSED, 'sort /data/x; ls /data', Outcome.DENY, 'sort is not allowed'],
@@ -2068,3 +2077,19 @@ it.each([
     expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
   },
 )
+
+// `outer`'s body runs where no `sort` function is in scope, defined later or
+// in a subshell, so the body's `sort` is the tool the closed root refuses, as
+// the run says.
+it.each([
+  'outer() { sort /data/x; }; outer; sort() { ls /data; }',
+  '(sort() { ls /data; }); outer() { sort /data/x; }; outer',
+])('lets a function body see the functions defined when it runs: %j', async (line) => {
+  const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  open.push(w)
+  await w.shell("printf 'b\\na\\n' > /data/x")
+  w.createSession('s', { profile: SessionProfile({ commands: SUMMARY_CLOSED }) })
+  const said = await w.explain(line, 's')
+  const ran = await w.shell(line, { sessionId: 's' })
+  expect([said.outcome, said.reason]).toEqual([Outcome.DENY, ran.decision?.reason])
+})
