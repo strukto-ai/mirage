@@ -40,8 +40,9 @@ to register the provider (`pnpm add @struktoai/mirage-core`), pass
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
 `ssh` each file call is about 150 ms for a small file from a laptop; under
 `mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
-read, unless a policy judges the session's file calls, and its template
-needs `fuse3`. With `own`,
+read, unless a policy judges the session's file calls, and E2B's `base`
+template is enough: it has `fuse3` and `npm`, and Mirage installs
+[`mirage-fuse`](/home/setup/machine/overview#mirage) there the first time. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
@@ -55,23 +56,6 @@ import { Sandbox, Template } from 'e2b'
 await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
 const sandbox = await Sandbox.create('mirage-sshfs', { timeoutMs: 3_600_000 })
 console.log(sandbox.sandboxId)
-```
-
-### A template for mirage
-
-`mirage` needs `fuse3` in the sandbox; Mirage installs
-[`mirage-fuse`](/home/setup/machine/overview#mirage) there with `npm` the
-first time. Build a template with `fuse3` and name it as `template`:
-
-```typescript
-import { Template } from 'e2b'
-
-await Template.build(
-  Template()
-    .fromBaseImage()
-    .aptInstall('fuse3'),
-  'mirage-fuse',
-)
 ```
 
 ## In a browser

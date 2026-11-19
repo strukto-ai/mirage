@@ -96,8 +96,9 @@ the sandbox; Mirage's own commands start none.
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh`, `mirage` and `both` do not work in browsers. Under
 `ssh` each file call is about 150 ms for a small file from a laptop; under
 `mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
-read, unless a policy judges the session's file calls, and its template
-needs `fuse3`. With `own`,
+read, unless a policy judges the session's file calls, and E2B's `base`
+template is enough: it has `fuse3` and `npm`, and Mirage installs
+[`mirage-fuse`](/home/setup/machine/overview#mirage) there the first time. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
@@ -134,39 +135,6 @@ it and pass its ID as `sandbox_id`:
 
 Keep the base image's user, which has `sudo` for mountpoints such as
 `/data`.
-
-### mirage-fuse for mirage
-
-`mirage` needs `fuse3` in the sandbox; Mirage installs
-[`mirage-fuse`](/home/setup/machine/overview#mirage) there with `npm` the
-first time. Build a template with `fuse3` and name it as `template`:
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    from e2b import Template
-
-    Template.build(
-        Template()
-        .from_base_image()
-        .apt_install("fuse3"),
-        "mirage-fuse",
-    )
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import { Template } from 'e2b'
-
-    await Template.build(
-      Template()
-        .fromBaseImage()
-        .aptInstall('fuse3'),
-      'mirage-fuse',
-    )
-    ```
-  </Tab>
-</Tabs>
 
 ## A sandbox Mirage starts
 
