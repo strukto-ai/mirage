@@ -274,8 +274,10 @@ machine serves, and rules that depend on which program opens a file.
 
 ### mirage
 
-- The machine needs `mirage-fuse` on its `PATH` or in `~/.mirage/bin`, and
-  FUSE. No Mirage, keys or open port.
+- The machine needs FUSE (`fuse3`) and `mirage-fuse`, found in
+  `~/.mirage/bin` or on its `PATH`. When it has none, Mirage installs it
+  into `~/.mirage/bin` at its own version, with `uv` or `npm`, whichever
+  the machine has. No Mirage, keys or open port.
 - Files on `ram` mounts, and on `sql` mounts whose database only the
   workspace opens (one in memory, a Durable Object's own), stay
   cached on the machine until they change, so a program that walks a
@@ -292,18 +294,16 @@ machine serves, and rules that depend on which program opens a file.
   (`Permission denied`). The machine asks only for what a program opens or
   lists, never ahead of it.
 
-Mirage's releases do not ship `mirage-fuse` yet. Build it from the
-repository for the machine's architecture; it runs on Linux with glibc 2.36
-or newer, as Debian 12 has:
+`mirage-fuse` runs on Linux, x86_64 or arm64, with glibc or musl. For a
+machine without `uv`, `npm` or network access, put it in the image with
+either:
 
 ```bash
-docker run --rm --platform linux/amd64 -v "$PWD/rust:/src" -w /src \
-  rust:1-bookworm cargo build --release -p mirage-fuse
+npm install -g @struktoai/mirage-fuse
+UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mirage-fuse
 ```
 
-The binary is `rust/target/release/mirage-fuse`; `--platform linux/arm64`
-builds it for arm64. Copy it to the machine's `PATH` or to
-`~/.mirage/bin/mirage-fuse`. `mirage-fuse --version` ends with `fsproto 1`.
+`mirage-fuse --version` ends with `fsproto 1`.
 - Sessions, restarts, refused writes and the paths left unserved work as
   under `ssh`.
 
@@ -497,7 +497,7 @@ also need `dd` and `base64`, which carry a program's output back. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration/workspace#system-time). With
 `mount_type: ssh` the machine also needs `sshfs`, with `mount_type: mirage`
-`mirage-fuse` and `fuse3`, and a machine that runs its own Mirage needs
+`fuse3` and `uv` or `npm` to install `mirage-fuse`, and a machine that runs its own Mirage needs
 `fuse3` and Mirage.
 
 The repository's Dockerfile builds an image with `fuse3`, Mirage and

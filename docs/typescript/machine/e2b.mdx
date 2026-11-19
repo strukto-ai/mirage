@@ -41,7 +41,7 @@ Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `s
 `ssh` each file call is about 150 ms for a small file from a laptop; under
 `mirage`, files on `ram` and `sql` mounts stay cached in the sandbox once
 read, unless a policy judges the session's file calls, and its template
-needs `mirage-fuse`. With `own`,
+needs `fuse3`. With `own`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
@@ -59,9 +59,9 @@ console.log(sandbox.sandboxId)
 
 ### A template for mirage
 
-`mirage` needs [`mirage-fuse`](/home/setup/machine/overview#mirage), built
-for x86_64, and `fuse3` in the sandbox. Build a template with both, from the
-directory holding `mirage-fuse`, and name it as `template`:
+`mirage` needs `fuse3` in the sandbox; Mirage installs
+[`mirage-fuse`](/home/setup/machine/overview#mirage) there with `npm` the
+first time. Build a template with `fuse3` and name it as `template`:
 
 ```typescript
 import { Template } from 'e2b'
@@ -69,8 +69,7 @@ import { Template } from 'e2b'
 await Template.build(
   Template()
     .fromBaseImage()
-    .aptInstall('fuse3')
-    .copy('mirage-fuse', '/usr/local/bin/mirage-fuse', { user: 'root', mode: 0o755 }),
+    .aptInstall('fuse3'),
   'mirage-fuse',
 )
 ```

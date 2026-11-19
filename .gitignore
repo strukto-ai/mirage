@@ -246,3 +246,6 @@ integ/.cli-ref.*
 
 # Live cross-host parity manifests; never checked in.
 /.cache/spec/
+
+# The mirage-fuse executables packed into its npm package
+rust/fuse/bin/mirage-fuse-*

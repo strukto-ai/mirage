@@ -67,8 +67,10 @@ def main(tag: str) -> None:
         "python/pyproject.toml": project["version"],
         "rust/Cargo.toml": pep440(cargo["workspace"]["package"]["version"]),
     }
-    for name in NPM_PACKAGES:
-        path = f"typescript/packages/{name}/package.json"
+    for path in [
+        *(f"typescript/packages/{name}/package.json" for name in NPM_PACKAGES),
+        "rust/fuse/package.json",
+    ]:
         found[path] = pep440(json.loads((ROOT / path).read_text())["version"])
     if tag:
         bare = tag.removeprefix("v")

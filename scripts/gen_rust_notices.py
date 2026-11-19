@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUST = ROOT / "rust"
 WHEEL = ROOT / "python/THIRD_PARTY_NOTICES"
 CORE = ROOT / "typescript/packages/core/THIRD_PARTY_NOTICES"
+FUSE = ROOT / "rust/fuse/THIRD_PARTY_NOTICES"
 RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
 # cargo about cannot see because it is not a dependency.
@@ -40,6 +41,11 @@ WHEEL_LEAD = (
     "https://github.com/strukto-ai/mirage) is compiled from the Rust crates "
     "below,\nPyO3 included, each listed under the license it came with:"
 )
+FUSE_LEAD = (
+    "The mirage-fuse executables in these packages (built from rust/fuse in\n"
+    "https://github.com/strukto-ai/mirage) are compiled from the Rust crates "
+    "below,\neach listed under the license it came with:"
+)
 
 
 def crate_sections(manifest: str) -> list[str]:
@@ -73,24 +79,32 @@ def crate_sections(manifest: str) -> list[str]:
     ]
 
 
-def notices(manifest: str, ast_grep: list[str]) -> str:
-    sections = crate_sections(manifest)
-    sections.append(
+def bundled(ast_grep: list[str]) -> list[str]:
+    """The sections every binding with the shell carries after its crates:
+    the syntax parser and the source adapted into rust/.
+
+    Args:
+        ast_grep (list[str]): notices for the shared syntax parser.
+    """
+    sections = [
         "Mirage is licensed under Apache-2.0. The bundled WebAssembly module "
         "uses\nast-grep under the MIT license, reproduced below. Its Rust "
-        "dependencies\nare listed under their respective licenses."
-    )
-    sections.append(
-        (ROOT / "licenses/third_party/ast-grep.txt").read_text().strip()
-    )
+        "dependencies\nare listed under their respective licenses.",
+        (ROOT / "licenses/third_party/ast-grep.txt").read_text().strip(),
+    ]
     sections.extend(ast_grep)
     sections.extend(path.read_text().strip() for path in ADAPTED)
+    return sections
+
+
+def notices(manifest: str, extra: list[str]) -> str:
+    sections = crate_sections(manifest) + extra
     joined = f"\n\n{RULE}\n\n".join(sections)
     return "\n".join(line.rstrip() for line in joined.splitlines()) + "\n"
 
 
 def append(
-    path: pathlib.Path, lead: str, manifest: str, ast_grep: list[str]
+    path: pathlib.Path, lead: str, manifest: str, extra: list[str]
 ) -> None:
     """Rewrite a package's notices after its hand-kept sections: `lead`,
     then the crates its binding compiles in. The generated part starts at
@@ -101,22 +115,22 @@ def append(
         path (pathlib.Path): the package's THIRD_PARTY_NOTICES.
         lead (str): the paragraph the generated sections follow.
         manifest (str): the binding's Cargo.toml, relative to rust/.
-        ast_grep (list[str]): notices for the shared syntax parser.
+        extra (list[str]): the sections after the binding's crates.
     """
     text = path.read_text()
     at = text.find(lead.split(" (", 1)[0])
     if at >= 0:
         text = text[: text.rfind(RULE, 0, at)].rstrip("\n") + "\n"
-    path.write_text(
-        f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest, ast_grep)}"
-    )
+    path.write_text(f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest, extra)}")
 
 
 def main() -> int:
-    ast_grep = crate_sections("ast-grep/Cargo.toml")
-    append(WHEEL, WHEEL_LEAD, "python/Cargo.toml", ast_grep)
-    append(CORE, CORE_LEAD, "pdf-wasm/Cargo.toml", ast_grep)
-    print(f"wrote {WHEEL.relative_to(ROOT)}, {CORE.relative_to(ROOT)}")
+    shared = bundled(crate_sections("ast-grep/Cargo.toml"))
+    append(WHEEL, WHEEL_LEAD, "python/Cargo.toml", shared)
+    append(CORE, CORE_LEAD, "pdf-wasm/Cargo.toml", shared)
+    append(FUSE, FUSE_LEAD, "fuse/Cargo.toml", [])
+    written = ", ".join(str(p.relative_to(ROOT)) for p in (WHEEL, CORE, FUSE))
+    print(f"wrote {written}")
     return 0
 
 

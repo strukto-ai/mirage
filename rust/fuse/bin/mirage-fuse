@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$(dirname "$(readlink -f "$0")")/mirage-fuse-$(uname -m)" "$@"

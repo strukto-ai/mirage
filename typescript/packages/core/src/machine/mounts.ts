@@ -198,7 +198,7 @@ export function sshfsLine(source: string, prefix: string, log: string): string {
 
 /**
  * The pipe command that mounts `source` at `prefix` with mirage-fuse, found
- * on the machine's PATH or in Mirage's folder there (`MIRAGE_FUSE_FIND`),
+ * in Mirage's folder on the machine or on its PATH (`MIRAGE_FUSE_FIND`),
  * its errors in `log`. Its stdin and stdout are the fsproto stream. Mirrors
  * Python's `mirage_fuse_line`.
  */
