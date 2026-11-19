@@ -628,7 +628,11 @@ async def run_listed_find(
             line, session_id=session_id, stdin=given, sink=relay
         )
 
-    stdout, io = line_output(run, 1 if refused else 0, sink)
+    status = 1 if refused else 0
+    if refused and sink is not None and expr.execs:
+        await sink.emit(Channel.STDERR, encode_text(refused))
+        refused = ""
+    stdout, io = line_output(run, status, sink)
     io.stdout = stdout
     io.stderr = encode_text(refused) or None
     return io

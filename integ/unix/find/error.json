@@ -1510,6 +1510,20 @@
         "stdout": "o1\ne1\no2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_files0_from_refusal_precedes_exec_stderr",
+      "seq": 19996018,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fx && touch /data/fx/f && printf '\\0/data/fx/f\\0' > /data/fx.lst && find -files0-from /data/fx.lst -exec sh -c 'echo e >&2' \\; 2>&1; echo rc=$?; rm -r /data/fx /data/fx.lst",
+      "expect": {
+        "exit": 0,
+        "stdout": "find: '/data/fx.lst':1: invalid zero-length file name\ne\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

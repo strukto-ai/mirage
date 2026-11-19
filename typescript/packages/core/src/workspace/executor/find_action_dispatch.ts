@@ -484,13 +484,20 @@ export async function runListedFind(
   const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
   const given = source === '-' ? null : stdin
   const execute = executeFn
+  const status = refused !== '' ? 1 : 0
+  const hasExec = expr.actions.some((a) => a.kind === 'exec')
+  let said = refused
+  if (said !== '' && sink !== undefined && hasExec) {
+    await sink.emit(Channel.STDERR, encodeText(said))
+    said = ''
+  }
   const [stdout, io] = lineOutput(
     (relay, signal) => execute(line, { sessionId, stdin: given, sink: relay, signal }),
-    refused !== '' ? 1 : 0,
+    status,
     sink,
   )
   io.stdout = stdout
-  if (refused !== '') io.stderr = encodeText(refused)
+  if (said !== '') io.stderr = encodeText(said)
   return io
 }
 
