@@ -5,8 +5,7 @@ icon: /images/trello-logo.svg
 ---
 
 `TrelloVFS` mounts Trello as read-only JSON files: workspaces, boards, lists,
-cards with their comments, members and labels. The API key and token are set
-up on the [Trello page](/home/setup/trello).
+cards with their comments, members and labels. Set up the API key and token as in [Trello setup](/home/setup/trello).
 
 ## Install
 
@@ -109,8 +108,9 @@ enough for the mount; the [`trello`](/home/setup/cli/trello) CLI needs
 
 ## Behavior
 
-- **Read only:** create, move, assign and comment on cards with the [`trello`](/python/cli/trello)
-  CLI; the tree serves the same entities as JSON files. The CLI takes
+- **Read only:** the mount cannot change cards. Use the
+  [`trello`](/python/cli/trello) CLI to create, move, assign and comment on
+  cards; the tree serves the same entities as JSON files. The CLI takes
   `workspace_id` and `board_ids` in its own config, so it covers the boards
   the mount lists only when both are configured alike.
 - **Recent writes:** Trello indexes a write some time after it lands, so a

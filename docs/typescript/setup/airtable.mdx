@@ -7,8 +7,7 @@ icon: /images/airtable-logo.svg
 `AirtableVFS` turns the bases a personal access token can reach into a
 read-only tree: every table holds its field schema, its records as JSON lines
 and one file per saved view. Writes go through the
-[airtable CLI](/typescript/cli/airtable), which takes the same config. The token is set up on the
-[Airtable page](/home/setup/airtable).
+[airtable CLI](/typescript/cli/airtable), which takes the same config. Set up the token as in [Airtable setup](/home/setup/airtable).
 
 ## Install
 
@@ -159,8 +158,15 @@ read. See [Integration](/home/integration/overview).
 - `head -n N`: fetches N records, through `maxRecords`, so the first lines of
   a large table cost one request.
 
-The [Python Airtable page](/python/vfs/airtable#integration) lists when each
-search answers and what it can miss.
+For one plain text in a `records.jsonl` or a view's file, the formula searches
+the record id and each text, select, email, url and phone cell, lowercased, in
+the order a plain read lists them. Number, date and checkbox cells hold no word
+to search. A link, AI text or attachment cell holds no space outside the text a
+formula reads of it, so a table with one is searched for a text with a space
+and read for a single word. The file is read as usual for a table with a
+collaborator, lookup, rollup or formula field, for a text a field name holds,
+or when more than `maxReadRecords` records match. A table too large to read
+can still be searched when the output shows no line numbers or context.
 
 ## VFS.md
 

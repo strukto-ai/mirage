@@ -5,8 +5,7 @@ icon: /images/slack-logo.svg
 ---
 
 `SlackVFS` mounts a Slack workspace as read-only files: channels and DMs as
-one folder per day of messages and attachments, plus user profiles. The tokens
-are set up on the [Slack page](/home/setup/slack).
+one folder per day of messages and attachments, plus user profiles. Set up the tokens as in [Slack setup](/home/setup/slack).
 
 ## Install
 
@@ -114,16 +113,17 @@ Slack's search methods; the bot token still does every read. For `grep` and
 
 ## Behavior
 
-- **Read only:** send messages, react, pin, look up members, search and upload
-  files with the [`slack`](/python/cli/slack) CLI.
-- **Time scope:** `start_time` and `end_time` bound the mount with RFC 3339
-  timestamps that carry a timezone, at most to the millisecond. Start is
-  inclusive, end exclusive, and an unset bound is open. Listings then cover
-  that period instead of the recent window, day folders use UTC, messages are
-  picked by creation time and attachments follow their messages. Direct
-  paths, `stat`, date globs, `grep` and `rg` cannot leave the scope. Users and
-  channel metadata stay visible. The scope applies to the mount, not to the
-  `slack` CLI; rebuild the mount to change it.
+- **Read only:** the mount cannot send or change messages. Use the
+  [`slack`](/python/cli/slack) CLI to send messages, react, pin, look up
+  members, search and upload files.
+- **Time scope:** `start_time` and `end_time` (RFC 3339 with a timezone) limit
+  the mount to that period; start inclusive, end exclusive, an unset bound
+  open.
+  - Day folders use UTC, and messages are picked by creation time. Direct
+    paths, `stat`, date globs, `grep` and `rg` stay inside the scope. Users and
+    channel metadata stay visible.
+  - The scope does not apply to the `slack` CLI. Rebuild the mount to change
+    it.
 - **Upstream changes:** a `read` mount refuses writes through Mirage; it does
   not freeze edits or deletions made in Slack.
 - **Rate limits:** many reads of `chat.jsonl` can hit Slack's per-method rate

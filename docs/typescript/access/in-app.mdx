@@ -4,7 +4,7 @@ description: The TypeScript classes your app calls to run a workspace, each with
 icon: cube
 ---
 
-Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
+Call these when your agent runs in the same process as the workspace. The server, MCP, SSH and the CLI all call them underneath.
 
 ```text
 Workspace  mounts, profiles, policies, the store
@@ -40,10 +40,10 @@ class Workspace {
 }
 ```
 
-One virtual terminal over the backends mounted at each prefix.
+One virtual terminal over the VFS mounted at each path.
 
 <ResponseField name="mounts" type="Record<string, MountSpec>" required>
-  The backend at each prefix, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.
+  The VFS at each path, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.
   <Expandable title="MountSpec">
     A `MountSpec` takes one of four forms:
 
@@ -138,7 +138,11 @@ Expand one for its signature and an example.
     ws.session(sessionId, { profile?, mounts?, permissions? }): Promise<Session>
     ```
 
-    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: a command tree, hides and weaker mount modes. Its tree is judged beside the profile's and the stricter result wins, so it cannot allow what the profile refuses. It cannot add a policy. `ws.createSession` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
+    Returns the [`Session`](#session) for `sessionId`, creating it if the id is new.
+
+    - `profile`, `mounts` and `permissions` apply only when the session is created. Passing them for an existing session throws.
+    - `permissions` adds a command tree, hides and narrower mount modes for this session. The stricter of it and the profile wins, so it cannot allow what the profile refuses. It cannot add a policy.
+    - `ws.createSession(...)` is the sync form. It returns a `SessionState`, not a `Session`.
 
     ```ts
     const session = await ws.session('agent')
@@ -150,7 +154,10 @@ Expand one for its signature and an example.
     ws.setSessionProfile(sessionId, profile): Promise<SessionState>
     ```
 
-    Change the rules after the workspace is built. `setProfile` defines a profile name or replaces what it means; a document no session could run under throws `PolicyError` and leaves the table as it was. A live session keeps its rules until `setSessionProfile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `null` picks the workspace default, and a document passed directly runs without a name. The name is the user the session runs as: `whoami` prints it with uid 1000, a session with no profile is `root`, and one under a document without a name is uid 1000 with no name.
+    - `setProfile(name, profile)` adds or replaces a named profile. An invalid profile throws `PolicyError` and changes nothing.
+    - Running sessions keep their old rules until you call `setSessionProfile`.
+    - `setSessionProfile(sessionId, profile)` takes a profile name, `null` (the workspace default) or an inline profile object. The session keeps its working directory, variables and history.
+    - The profile name is the session's user: `whoami` prints it (uid 1000). A session with no profile is `root`. An inline profile has uid 1000 and no name.
 
     ```ts
     ws.setProfile('user', {
@@ -200,7 +207,7 @@ Expand one for its signature and an example.
     ```ts
     ws.snapshot(): Promise<Uint8Array>
     ws.snapshot(target, { s3? }): Promise<number>
-    Workspace.load(source, { s3?, ... }): Promise<Workspace>
+    Workspace.load(source, options?, overrides?, cliOverrides?): Promise<Workspace>
     ```
 
     Save the workspace to a tar and rebuild it from one. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. With no target, `snapshot` returns the tar's bytes; with one, its size.
@@ -220,7 +227,14 @@ Expand one for its signature and an example.
     ws.copy(options?): Promise<Workspace>
     ```
 
-    A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
+    A deep copy, without a tar in between.
+
+    | Part | In the copy |
+    | --- | --- |
+    | RAM and Disk mounts | Copied: a write in the copy never reaches the original. |
+    | S3, Redis and other remote VFS | Shared: a write through the copy reaches the same bucket. |
+    | Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations, CLIs | Copied. |
+    | Policy objects, the route policy | Not copied. |
 
     ```ts
     const fork = await ws.copy()
@@ -340,13 +354,12 @@ console.log(result.exitCode, result.stdoutText)
 ```
 
 <Accordion title="Stream the output">
-  `await session.shell(line, { stream: true })` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+  `stream: true` returns a `ShellExecution`. Read `execution.events` (stdout and stderr chunks, in order), then await `execution.wait()` for the exit code.
 
-  Consume `events` while the line runs, then await `wait()` for its final `ExecuteResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. The result describes finished work; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
-
-  A policy with a `postExecute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
-
-  To collect the complete result while observing output, use `await execution.collect(callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
+  - Read the events before awaiting `wait()`. A full queue (64 KiB, set by the workspace I/O settings) blocks the line.
+  - Call `await execution.close()` in `finally`, so stopping early cancels the line. `cancel()` requests cancellation; `wait()` then rejects with `AbortError`.
+  - `await execution.collect(callback)` gives the full result and calls `callback` for each chunk.
+  - A policy with `postExecute` holds output until the line finishes.
 
   In this example, `sendBytes` is the application's async output sink:
 
@@ -362,10 +375,6 @@ console.log(result.exitCode, result.stdoutText)
     await execution.close()
   }
   ```
-
-  Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then rejects with `AbortError`. Call `await execution.close()` in `finally` to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
-
-  Closing follows the workspace's cancellation grace. An uncooperative provider may remain tracked as stopping after that grace expires.
 </Accordion>
 
 ### More session calls
@@ -417,13 +426,10 @@ The file API, run as the session. Paths are absolute, bytes are `Uint8Array`. A 
 | `rename(src, dst)` | Nothing. |
 | `truncate(path, length)` | Nothing. |
 
-`stat` can reuse metadata from the mount's listing index. Set `fresh: true` to
-ask the backend past that index, for example after another client replaces or
-deletes a file. It defaults to `false`. Later calls see the answer too: a
-changed or deleted file leaves the index, and a cached copy the backend cannot
-vouch for is dropped. Namespace attributes still apply. The result remains a
-`FileStat`, with `null` for backend version fields the backend does not provide. `nofollow: true` still reports a
-trailing symlink itself. Session visibility and access rules apply to both modes.
+`stat` may answer from the mount's listing index. Pass `fresh: true` to ask the
+service directly, for example after another client changed the file. Later
+calls then see the new answer. `nofollow: true` reports a trailing symlink
+itself.
 
 ```ts
 const current = await session.vfs.stat('/s3/report.csv', undefined, { fresh: true })
@@ -465,7 +471,7 @@ session.tools.call(name, args, signal?): Promise<ToolResult>
 session.tools.names(): readonly string[]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. `write` and `edit` refuse a file the session has not read in full, or one that changed since it was read. Every caller of the session shares that record. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

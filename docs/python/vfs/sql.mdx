@@ -71,7 +71,7 @@ The tables are laid out as [AgentFS](https://github.com/tursodatabase/agentfs)'s
 
 ## Behavior
 
-- **One filesystem, both runtimes:** the TypeScript mount reads and writes the
+- **One filesystem, both SDKs:** the TypeScript mount reads and writes the
   same tables, so a Python and a Node process on one file serve one filesystem.
 - **Several mounts on one database:** a mount serves one folder of its
   database, `/` by default. Hand two mounts one driver to serve the whole

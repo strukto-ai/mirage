@@ -4,13 +4,10 @@ description: "Register and discover Mirage’s supported CLIs, and use them with
 icon: wrench
 ---
 
-Mirage includes command-line programs for working with services and Git
-repositories inside a workspace. Each program's `--help` describes the
-commands and flags implemented by Mirage.
-
-The [host `mirage` CLI](/home/access/cli) connects to and manages workspaces.
-The programs on this page run in those workspaces through `ws.shell(...)`,
-`mirage shell`, or another [access method](/home/access/overview).
+These are programs, such as `gh`, `slack` and `git`, that an agent runs inside
+a workspace shell. Mirage implements them itself; no binary is installed. The
+`mirage` command you run on your own machine is a different thing: see the
+[host `mirage` CLI](/home/access/cli).
 
 ## Supported CLIs
 
@@ -34,13 +31,10 @@ The programs on this page run in those workspaces through `ws.shell(...)`,
 | <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[trello](/typescript/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 | [None; calls the service API](/typescript/cli/trello#license) |
 {/* END GENERATED CLI COMMANDS */}
 
-All of them are available in Python and TypeScript on Node. The TypeScript Node
-package provides `hf` and `himalaya`; the others live in core. These are
-Mirage implementations of the listed command trees, not installed copies of
-the upstream binaries. Each reference links its upstream project or service
-API and documents its supported subset, limits and relevant licenses. See
-[compatibility and licenses](/home/setup/clis#compatibility-and-licenses)
-for the distinction between matching behavior and reusing code.
+`hf` and `himalaya` live in the Node package: import them from
+`@struktoai/mirage-node`. Each page lists the subset Mirage implements, its
+limits and its licenses; see
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
 
 ## Register a CLI
 
@@ -54,10 +48,12 @@ ws.registerCli('slack', SLACK, { token: 'xoxb-...' })
 await ws.shell('slack --help')
 ```
 
-`registerCli(name, spec, config)` validates the config object with the spec's schema.
-`git`, `office`, `pdfinfo` and `pdftotext` have no account config; register their specs without the third argument.
-Two installations of the same spec under different names can use different
-accounts. Registration is a host operation, not an agent shell command.
+- `registerCli(name, spec, config)` validates the config object with the
+  spec's schema. `git`, `office`, `pdfinfo` and `pdftotext` take no config;
+  register them without the third argument.
+- Register the same CLI twice under different names for two accounts.
+- Only your code can register a CLI. An agent cannot install one from the
+  shell.
 
 The equivalent YAML entry is:
 
@@ -87,11 +83,8 @@ refused; wording and exit codes follow the program's declared style. Use each
 reference for command-specific errors rather than assuming one exit code for
 all CLIs.
 
-Visible installed programs have read-only stubs under `/usr/bin`, so
-`which slack` returns `/usr/bin/slack`. The stub describes the command without
-exposing its config or credentials. Executing that path uses the same command
-and policy checks. Changing `PATH` does not change Mirage's virtual command
-lookup; a `host` machine and other machines use their own executable paths.
+`which slack` prints `/usr/bin/slack`. Running that path is the same as
+running `slack`. Changing `PATH` does not change which programs Mirage finds.
 
 ## CLIs and mounts
 

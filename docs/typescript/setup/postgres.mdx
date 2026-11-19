@@ -6,8 +6,7 @@ description: Virtualize a Postgres database from Node or the browser.
 
 `PostgresVFS` turns a Postgres database into a read-only tree: every schema is a
 folder of tables and views, and each one holds its column types, a summary of
-what it means and its rows as JSON lines. The connection string and a read-only
-role are set up on the [Postgres page](/home/setup/postgres).
+what it means and its rows as JSON lines. Set up the connection string and a read-only role as in [Postgres setup](/home/setup/postgres).
 
 ## Install
 
@@ -137,8 +136,17 @@ See [Integration](/home/integration/overview).
 - `wc -l`: `COUNT(*)`.
 - `tail -f`: polls for rows past the last key, on a table with a primary key.
 
-The [Python Postgres page](/python/vfs/postgres#integration) lists when each
-search answers and what it can miss.
+For one plain text in a `rows.jsonl`, grep and rg search the rows a `LIKE` over
+each column returns, in the order a plain read returns them. A column is
+searched through its cast when a line spells it the same way: text, an integer,
+a boolean, a uuid, an enum, `jsonb`, `char(n)` for a text without a space, and
+an array of text, integers or uuids. A number, date or time column is left out
+when the text holds a character it never spells (`ada` in a `float8`). The file
+is read as usual when another column type is present (`json`, `interval`,
+`bytea`), when the text could lie inside one of those values, match a key,
+`null` or the JSON between values, or when more than `maxReadRows` rows
+match. A relation too large to read can still be searched when the output
+shows no line numbers or context.
 
 ## VFS.md
 

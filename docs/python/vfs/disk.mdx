@@ -20,7 +20,7 @@ pip install mirage-ai
 from mirage import MountMode, Workspace
 from mirage.vfs.disk import DiskVFS
 
-ws = Workspace({"/data": DiskVFS(root="/srv/files")}, mode=MountMode.WRITE)
+ws = Workspace({"/data": DiskVFS(root="./files")}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /data && find /data -name '*.json'")
 print(await result.stdout_str())
@@ -50,8 +50,8 @@ await ws.close()
     q2.csv
 ```
 
-The mount mirrors `root`: with `root="/srv/files"`, `/data/reports/q1.csv` is
-the file `/srv/files/reports/q1.csv`.
+The mount mirrors `root`: with `root="./files"`, `/data/reports/q1.csv` is
+the file `./files/reports/q1.csv`.
 
 ## Behavior
 

@@ -13,7 +13,7 @@ For Node applications, use Node 22.20+ on Node 22, 24.12+ on Node 24, or
 pnpm add @struktoai/mirage-node
 ```
 
-This ships the base runtime (Workspace, RAM VFS, Disk VFS, the shell executor) and is enough to follow the [TypeScript Quickstart](/typescript/quickstart).
+It includes the workspace, the shell, and the RAM and Disk VFS: enough for the [Quickstart](/typescript/quickstart).
 
 The packages use ECMAScript modules (ESM). In your application directory,
 set `"type": "module"` in `package.json` before importing them:
@@ -22,13 +22,11 @@ set `"type": "module"` in `package.json` before importing them:
 npm pkg set type=module
 ```
 
-`npm install` and `yarn add` work identically; examples below use pnpm because the FUSE binding's install script needs pnpm's `onlyBuiltDependencies` allow-list.
+npm, pnpm and yarn all work. For FUSE with pnpm, see [FUSE setup](/typescript/setup/fuse).
 
 ## Optional Peer Dependencies
 
-Mirage keeps native and network-heavy dependencies as **optional peers** so consumers who don't use those features don't pay the download or build cost. Mirage imports each library lazily, so unused peers cost nothing at runtime either.
-
-Install a peer with `pnpm add <package>` when you use the feature that needs it:
+Native and network-heavy libraries are optional peers. Install one only when you use its feature:
 
 {/* generated: peers optional start */}
 | Feature | Packages | Needed for |
@@ -58,11 +56,13 @@ follow the [browser quickstart](/typescript/browser-quickstart).
 
 To contribute to Mirage or run the examples:
 
+Building from source needs Rust 1.88 or newer. Install it with [rustup](https://rustup.rs).
+
 ```bash
 git clone https://github.com/strukto-ai/mirage.git
 cd mirage/typescript
 pnpm install
-pnpm -r build
+pnpm build
 ```
 
 The examples in `examples/typescript/` link to the workspace packages via pnpm's workspace protocol, so changes in `packages/core` or `packages/node` are picked up on the next `pnpm build`.
@@ -74,7 +74,7 @@ The examples in `examples/typescript/` link to the workspace packages via pnpm's
     A workspace, a shell line and its result, in a few lines.
   </Card>
   <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
-    S3, Slack, Google Drive, Postgres and 60 more, as files.
+    S3, Slack, Google Drive, Postgres and 50+ more, as files.
   </Card>
   <Card title="Mount as a folder" icon="hard-drive" href="/typescript/setup/fuse">
     Expose mounts to other programs through FUSE.

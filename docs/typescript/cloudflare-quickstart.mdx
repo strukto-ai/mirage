@@ -5,9 +5,9 @@ description: Run Mirage workspaces and the Mirage server API on Cloudflare Worke
 keywords: ["Mirage Cloudflare", "@struktoai/mirage-cloudflare", "Cloudflare Workers", "Durable Objects", "serverless terminal"]
 ---
 
-`@struktoai/mirage-cloudflare` runs a workspace inside a Worker's isolate: the
-shell, the commands and, when a workspace names it, `python3` on
-[Monty](/typescript/runtime/monty), with no machine to start.
+`@struktoai/mirage-cloudflare` runs a workspace inside a Worker: the shell and
+its commands, plus `python3` on [Monty](/typescript/runtime/monty) when the
+workspace declares a Monty machine. Nothing else needs to start.
 
 ## Install
 
@@ -68,15 +68,13 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 {"exit":0,"stdout":"100\n99\n98\n"}
 ```
 
-- `python3` runs on Monty in the isolate's one thread. Monty's own clock
-  stops a run at the line's time limit (exit 124) or after 30 seconds, so a
-  loop that never ends leaves the isolate free for the next line.
-- `node` does not run on Workers: QuickJS would hold the isolate's one thread
-  until Cloudflare's CPU limit, so a config whose machines run `quickjs` is
-  refused.
-- Import anything else from core by subpath
-  (`@struktoai/mirage-core/vfs/registry`): the package root pulls in optional
-  packages, such as Pyodide, that a Worker bundle cannot resolve.
+- `python3` stops after the line's time limit (exit 124) or 30 seconds, so a
+  runaway loop cannot block the Worker.
+- `node` is refused: QuickJS would block the Worker until Cloudflare's CPU
+  limit.
+- Import other core modules by subpath, such as
+  `@struktoai/mirage-core/vfs/registry`. The package root pulls in Pyodide,
+  which a Worker bundle cannot resolve.
 
 ## Serve the server API
 
@@ -100,10 +98,11 @@ MIRAGE_AUTH_MODE = "token"
 ```
 
 ```bash
+export MIRAGE_AUTH_TOKEN=<token>
 npx wrangler secret put MIRAGE_AUTH_TOKEN
 curl -s localhost:8787/v1/workspaces -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram"}}, "machines": {"py": {"provider": "in_process", "runtime": "monty"}}}}'
+  -d '{"id": "demo", "config": {"mode": "exec", "mounts": {"/": {"vfs": "ram"}}, "machines": {"py": {"provider": "in_process", "runtime": "monty"}}}}'
 curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' -d '{"command": "python3 -c \"print(6 * 7)\""}'
 ```
@@ -130,7 +129,9 @@ so `codex exec-server forward` runs its tools in a workspace on the Worker.
 A Worker's memory goes with its isolate. To keep files and sessions, store
 them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's storage
 or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each
-session's directory, variables, functions, jobs and history:
+session's directory, variables, functions, jobs and history.
+
+Inside your Durable Object:
 
 ```ts
 import { DurableObjectSqlDriver, SqlVFS, SqlWorkspaceStateStore, Workspace } from '@struktoai/mirage-cloudflare'
@@ -155,9 +156,8 @@ class in one isolate, sharing its 128 MB.
 ## Secrets
 
 A [pointer](/home/service-credentials) reads `aws-sm` and `1password` in a
-Worker as on the server. There is no `env` source: the Worker's environment
-holds its own secrets, so the Worker's code passes a source its keys from its
-bindings.
+Worker as on the server. There is no `env` source. Read secrets from the
+Worker's `env` bindings in your code and pass them into the source's config.
 
 <AccordionGroup>
   <Accordion title="AWS Secrets Manager">
@@ -196,16 +196,9 @@ bindings.
 
 ## VFS and CLIs
 
-| Runs on Workers | Names |
-| --- | --- |
-| VFS in memory | `ram` |
-| VFS over HTTP | `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `dify`, `slack`, `discord`, `notion`, `dropbox`, `jaeger`, `databricks_volume`, `tidb_filesystem`, `hf_models`, `hf_datasets`, `hf_spaces` |
-| Object store VFS, without `proxy` | `s3`, `r2`, `gcs`, `minio`, `ceph`, `seaweedfs`, `wasabi`, `backblaze`, `digitalocean`, `tencent`, `aliyun`, `scaleway`, `qingstor`, `oci`, `supabase` |
-| VFS with a peer installed | `qdrant` (`@qdrant/js-client-rest`), `postgres` (`pg`), `email` (`imapflow`, `mailparser`, `nodemailer`) |
-| VFS over TCP | `redis`, any Redis at a `redis://` or `rediss://` URL, Upstash included, through Cloudflare's `connect()` |
-| CLIs | `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mcp`, `ntn`, `search`, `slack`, `trello` |
-
-The `chroma` VFS does not run on Workers.
+The [supported VFS](/home/setup/vfs#supported-vfs) and [supported CLIs](/home/setup/clis#supported-clis) tables show which run on Cloudflare. On Workers, object store VFS run without
+`proxy`, Redis is reached through Cloudflare's `connect()`, and the `mcp` and
+`search` CLIs also run.
 
 ## Limits
 
@@ -216,9 +209,8 @@ The `chroma` VFS does not run on Workers.
   to another isolate does not see them, and eviction drops them. `store.type`
   must be `ram`; a workspace built in code keeps its state in SQL, as
   [above](#keep-files-and-sessions).
-- Network rules judge a request by host name, since the isolate never sees
-  the address a name reaches, so a `denied_domains` entry naming an address or
-  a range is refused, and jwt mode's block on cloud metadata addresses
-  covers only a request made to the address itself.
-- SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded
-  by a `source:Class` reference run only on the Node server.
+- Network rules match host names only. A `denied_domains` entry that is an IP
+  address or range is refused. The cloud-metadata block in jwt mode catches
+  only requests made to the IP itself.
+- Node server only: SSH, FUSE, policy or script files given by path, and
+  runtimes or CLIs loaded by a `source:Class` reference.

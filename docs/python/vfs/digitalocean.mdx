@@ -6,8 +6,7 @@ icon: /images/digitalocean-logo.svg
 
 `DigitalOceanVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at DigitalOcean Spaces's
-endpoint, so commands behave as they do on S3. Credentials are set up on the
-[DigitalOcean Spaces page](/home/setup/digitalocean).
+endpoint, so commands behave as they do on S3. Set up credentials as in [DigitalOcean Spaces setup](/home/setup/digitalocean).
 
 ## Install
 
@@ -114,8 +113,7 @@ from the `/` in keys.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/spaces/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/spaces/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

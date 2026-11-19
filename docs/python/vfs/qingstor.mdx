@@ -6,8 +6,7 @@ icon: cloud
 
 `QingStorVFS` mounts one bucket: every object becomes a file and every `/` in
 a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at QingStor's
-endpoint, so commands behave as they do on S3. Credentials are set up on the
-[QingStor page](/home/setup/qingstor).
+endpoint, so commands behave as they do on S3. Set up credentials as in [QingStor setup](/home/setup/qingstor).
 
 ## Install
 
@@ -114,8 +113,7 @@ from the `/` in keys.
 ## Behavior
 
 - **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
-  so `/qingstor/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/qingstor/notes.md` is the key `users/42/notes.md`.
 
 ## Integration
 

@@ -4,7 +4,7 @@ description: The Python classes your app calls to run a workspace, each with an 
 icon: cube
 ---
 
-Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
+Call these when your agent runs in the same process as the workspace. The server, MCP, SSH and the CLI all call them underneath.
 
 ```text
 Workspace  mounts, profiles, policies, the store
@@ -39,16 +39,16 @@ from mirage import Workspace
 
 ```python
 class Workspace(
-    mounts: dict[str, VFS],
+    mounts: dict[str, VFSMount],
     mode: MountMode = MountMode.READ,
     ...,
 )
 ```
 
-One virtual terminal over the backends mounted at each prefix.
+One virtual terminal over the VFS mounted at each path.
 
-<ResponseField name="mounts" type="dict[str, VFS]" required>
-  The backend at each prefix, such as `{"/": RAMVFS(), "/s3": S3VFS(config)}`.
+<ResponseField name="mounts" type="dict[str, VFSMount]" required>
+  The VFS at each path, such as `{"/": RAMVFS(), "/s3": S3VFS(config)}`. Each value is a VFS, `(vfs, mode)`, `(vfs, mode, limits)` or `Mount(...)`.
 </ResponseField>
 <ResponseField name="mode" type="MountMode" default="MountMode.READ">
   The mode a mount gets when it sets none: `READ`, `WRITE` or `EXEC`.
@@ -136,7 +136,11 @@ Expand one for its signature and an example.
     ) -> Session
     ```
 
-    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: a command tree, hides and weaker mount modes. Its tree is judged beside the profile's and the stricter result wins, so it cannot allow what the profile refuses. It cannot add a policy. `ws.create_session` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
+    Returns the [`Session`](#session) for `session_id`, creating it if the id is new.
+
+    - `profile`, `mounts` and `permissions` apply only when the session is created. Passing them for an existing session raises `ValueError`.
+    - `permissions` adds rules for this session only, on top of its profile: a command tree, hides and weaker mount modes. The stricter of it and the profile wins, so it cannot allow what the profile refuses. It cannot add a policy.
+    - `ws.create_session(...)` is the sync form. It returns a `SessionState`, not a `Session`.
 
     ```python
     session = await ws.session("agent")
@@ -148,7 +152,10 @@ Expand one for its signature and an example.
     await ws.set_session_profile(session_id, profile) -> SessionState
     ```
 
-    Change the rules after the workspace is built. `set_profile` defines a profile name or replaces what it means; a document no session could run under raises `PolicyError` and leaves the table as it was. A live session keeps its rules until `set_session_profile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `None` picks the workspace default, and a document passed directly runs without a name. The name is the user the session runs as: `whoami` prints it with uid 1000, a session with no profile is `root`, and one under a document without a name is uid 1000 with no name.
+    - `set_profile(name, profile)` adds or replaces a named profile. A profile no session could run under raises `PolicyError` and changes nothing.
+    - Running sessions keep their old rules until you call `set_session_profile`.
+    - `set_session_profile(session_id, profile)` takes a profile name, `None` (the workspace default) or a profile document. The session keeps its working directory, variables and history.
+    - The profile name is the session's user: `whoami` prints it (uid 1000). A session with no profile is `root`. A profile document passed directly has uid 1000 and no name.
 
     ```python
     ws.set_profile(
@@ -220,7 +227,14 @@ Expand one for its signature and an example.
     await ws.copy() -> Workspace
     ```
 
-    A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
+    A deep copy, without a tar in between.
+
+    | Part | In the copy |
+    | --- | --- |
+    | RAM and Disk mounts | Copied; a Disk mount to a new temporary directory. |
+    | S3, Redis and other remote VFS | Shared: a write through the copy reaches the same bucket. |
+    | Sessions, history, profiles, command limits, secrets declarations, CLIs | Copied. |
+    | Policy objects, the route policy | Not copied. |
 
     ```python
     fork = await ws.copy()
@@ -272,7 +286,7 @@ from mirage import Session
 ```
 
 ```python
-class Session(workspace: Workspace, session_id: str)
+class Session(ws: Workspace, session_id: str | None)
 ```
 
 One session's handle, from [`ws.session`](#workspace-methods). Every call on it runs under the session's [profile](/home/policy/overview), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
@@ -288,7 +302,7 @@ One session's handle, from [`ws.session`](#workspace-methods). Every call on it 
 ```python
 await session.shell(
     command, stdin=None, cwd=None, env=None,
-    cancel=None, record=True, stream=False, machine=None,
+    cancel=None, record=True, *, stream=False, machine=None,
 ) -> IOResult | ShellExecution
 ```
 
@@ -334,13 +348,12 @@ print(result.exit_code, await result.stdout_str())
 ```
 
 <Accordion title="Stream the output">
-  `await session.shell(line, stream=True)` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+  `await session.shell(line, stream=True)` returns a running `ShellExecution`. Read `execution.events` (ordered `stdout` and `stderr` chunks, each with `stream` and `data` bytes), then await `execution.wait()` for the final `IOResult`: the exit code and refusal, with empty output fields.
 
-  Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
-
-  A policy with a `post_execute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
-
-  To collect the complete result while observing output, use `await execution.collect(on_event=callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
+  - Read the events before awaiting `wait()`. A full queue (64 KiB by default, set with `IOConfig`) blocks the line.
+  - Use `async with execution:` (or `await execution.aclose()`) so stopping early cancels the line. `cancel()` stops it, and `wait()` then raises `MirageAbortError`.
+  - `await execution.collect(on_event=callback)` returns the full result and awaits `callback` for each event.
+  - A policy with `post_execute` holds output until the line finishes.
 
   In this example, `send_bytes` is the application's async output sink:
 
@@ -352,8 +365,6 @@ print(result.exit_code, await result.stdout_str())
       result = await execution.wait()
   print(result.exit_code)
   ```
-
-  Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then raises `MirageAbortError`. Use the async context manager, or `await execution.aclose()` in `finally`, to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
 </Accordion>
 
 ### More session calls
@@ -407,13 +418,10 @@ The file API, run as the session. Paths are absolute, bytes are `bytes`. A missi
 | `rename(src, dst)` | `None` |
 | `truncate(path, length)` | `None` |
 
-`stat` can reuse metadata from the mount's listing index. Set `fresh=True` to
-ask the backend past that index, for example after another client replaces or
-deletes a file. Later calls see the answer too: a changed or deleted file
-leaves the index, and a cached copy the backend cannot vouch for is dropped.
-Namespace attributes still apply. The result remains a `FileStat`, with `None`
-for backend version fields the backend does not provide. `nofollow=True` still reports a trailing symlink
-itself. Session visibility and access rules apply to both modes.
+`stat` may answer from the mount's listing index. Pass `fresh=True` to ask the
+service directly, for example after another client changed the file. Later
+calls then see the new answer. `nofollow=True` reports a trailing symlink
+itself.
 
 ```python
 current = await session.vfs.stat("/s3/report.csv", fresh=True)
@@ -453,7 +461,7 @@ await session.tools.call(name, arguments) -> ToolResult
 session.tools.names() -> tuple[str, ...]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. `write` and `edit` refuse a file the session has not read in full, or one that changed since it was read. Every caller of the session shares that record. `names()` is the tools the session's [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command its `commands` lets run, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |
@@ -469,7 +477,7 @@ The seven agent tools, for a model rather than a program: every answer is text, 
   <ResponseField name="is_error" type="bool">`True` when the call failed.</ResponseField>
 </Expandable>
 
-`mirage.workspace.tools.tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/python/agents/index) wire the tools into each framework. `MirageToolOperations(session, stale_write_protection=False)`, from `mirage.workspace.tools.tool_operations`, is a table without the read guard.
+`mirage.workspace.tools.tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/python/agents/index) wire the tools into each framework. `MirageToolOperations(session, stale_write_protection=False)`, from `mirage.workspace.tools.tool_operations`, turns the read guard off.
 
 ```python
 await session.tools.call("read", {"path": "/notes.txt"})

@@ -48,7 +48,11 @@ const session = await client.beta.agents.sessions.create({
   agent: { model: 'gpt-6-luna' },
   environment: { type: 'self_hosted', workspace_directory: '/workspace' },
 })
-console.log(session.environment.id, session.environment.remote_url)
+const environment = session.environment
+if (environment?.type !== 'self_hosted') {
+  throw new Error('the session has no self-hosted environment')
+}
+console.log(environment.id, environment.remote_url)
 ```
 
 ## Connect the workspace

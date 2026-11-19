@@ -7,7 +7,7 @@ icon: download
 
 ## Quick Install
 
-Mirage needs Python 3.12 or newer. Install the base package:
+Mirage needs Python 3.12 or newer. In a uv project, install the base package:
 
 ```bash
 uv add mirage-ai
@@ -21,9 +21,8 @@ is enough to follow the [Python Quickstart](/python/quickstart).
 
 ## Optional Extras
 
-Mirage keeps network and native dependencies in extras, so an app installs
-only what its mounts, machines and agents use. Add one with
-`uv add "mirage-ai[<extra>]"`:
+Service SDKs and native libraries live in extras. Add an extra only for the
+storage, machine or agent SDK you use, with `uv add "mirage-ai[<extra>]"`:
 
 {/* generated: extras optional start */}
 | Feature | Extras | Needed for |
@@ -68,6 +67,8 @@ uv tool install mirage-ai
 
 ## Install From Source
 
+Building from source needs Rust 1.88 or newer. Install it with [rustup](https://rustup.rs).
+
 To contribute to Mirage or run the examples:
 
 ```bash
@@ -83,7 +84,7 @@ uv sync --all-extras
     A workspace, a shell line and its result, in a few lines.
   </Card>
   <Card title="Virtualize data storage" icon="database" href="/python/vfs/index">
-    S3, Slack, Google Drive, Postgres and 60 more, as files.
+    S3, Slack, Google Drive, Postgres and 50+ more, as files.
   </Card>
   <Card title="Mount as a folder" icon="hard-drive" href="/python/setup/fuse">
     Expose mounts to other programs through FUSE.

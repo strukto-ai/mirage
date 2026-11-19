@@ -25,7 +25,7 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 - The agent starts in the disk mount that holds the directory dsh was launched from, or in `/`. The `working_directory` tool moves between mounts.
 - Each `bash` call is a fresh shell. Give `MirageShellExecutor` a `sessionId` to keep exports and functions between calls.
 - Mount modes and [session profiles](/home/configuration/session) apply to every tool. `DSH_PERMISSION_MODE=read-only` makes every mount read-only.
-- An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line is refused and the question stays pending: answer it through `ctx.mirage.decisions`, then run the line again.
+- An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line is refused and the question stays pending: answer it through `ctx.mirage.decisions`, then run the line again. `ctx` is the `Context` from the [Example](#example).
 
 ```ts
 import { Outcome, Scope } from '@struktoai/mirage-core'

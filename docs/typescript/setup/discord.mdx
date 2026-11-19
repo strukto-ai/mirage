@@ -5,8 +5,7 @@ description: Virtualize Discord servers from Node or the browser.
 ---
 
 `DiscordVFS` mounts the Discord servers a bot is in as read-only files: each
-channel as one folder per day of messages and attachments, plus members. The
-bot token is set up on the [Discord page](/home/setup/discord).
+channel as one folder per day of messages and attachments, plus members. Set up the bot token as in [Discord setup](/home/setup/discord).
 
 ## Install
 
@@ -100,8 +99,9 @@ answers `No such file or directory`.
 
 ## Behavior
 
-- **Read only:** send, edit, react, open threads and polls, look up members
-  and servers, and search with the [`discord`](/typescript/cli/discord) CLI.
+- **Read only:** the mount cannot send or change messages. Use the
+  [`discord`](/typescript/cli/discord) CLI to send, edit, react, open threads and
+  polls, look up members and servers, and search.
 - **Search:** `grep -r` and `rg` read every day's `chat.jsonl` under the folder
   they walk, one history fetch per day, so name a day folder or a date glob
   for a large channel. Discord's own search is not used: it cannot say which

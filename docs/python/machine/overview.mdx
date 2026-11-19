@@ -5,15 +5,17 @@ icon: server
 description: Declare machines in Python, change them on a live workspace, and start programs from code.
 ---
 
+A machine is where programs such as `python3` and `node` run: inside Mirage
+(`in_process` with a runtime), on the host, or in a container or sandbox.
 [Machines](/home/setup/machine/overview) explains routing, captures and each
 provider. This page covers what is particular to the Python SDK; each
-machine's page has its install and a runnable example.
+machine's page has its install and an example.
 
 ## Declare machines
 
-`Workspace(machines={...})` takes machine entries, runtime objects and
-machine handles by name. The first machine whose `captures` names a program
-runs it:
+Each entry in `Workspace(machines={...})` is a config dict, a runtime object
+or a machine handle. By default, the first machine whose `captures` names a program runs
+it:
 
 ```python
 from mirage import MountMode, RAMVFS, Workspace
@@ -31,10 +33,10 @@ await ws.shell("python3 -c 'print(1 + 1)'")
 
 ## Change them on a live workspace
 
-On a live workspace, `add_machine` adds a runtime's
-machine, `remove_machine` takes one out, and
-`engines()` lists them. A machine provider's machine, such as docker, is
-declared when the workspace is built:
+Machine providers such as docker and ssh can only be set in the
+constructor. On a running workspace, `add_machine(name, spec)` adds a runtime
+or a `host` or `remote` machine, `remove_machine(name)` removes one, and `engines()` lists
+them:
 
 ```python
 from mirage.runtime.python import WasiRuntime
@@ -50,8 +52,8 @@ runtime class available by name in YAML.
 
 ## Child processes
 
-A host application starts a program through the same admitted entry point
-as the shell.
+`ws.spawn` starts a program from your code with the same policy checks as a
+shell command.
 
 ```python
 from mirage.execution.process.types import SpawnRequest

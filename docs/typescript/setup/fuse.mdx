@@ -4,9 +4,8 @@ icon: hard-drive
 description: Expose a Node workspace's mounts as real folders through FUSE, FSKit or NFS.
 ---
 
-A mount with a kernel `backend` also shows as a folder on the machine running
-Mirage, so editors, `git` and any other program read and write it like a local
-folder. The [FUSE overview](/home/setup/fuse) lists what each OS supports.
+Set `backend: fuse` on a mount and Mirage also shows it as a real folder on this
+computer, so editors, `git` and other programs can read and write it. The [FUSE overview](/home/setup/fuse) lists what each OS supports.
 FUSE runs on Linux and macOS from Node; a browser or a Worker cannot mount a
 folder.
 
@@ -17,13 +16,9 @@ folder.
     Follow the [Linux](/home/setup/linux) or [macOS](/home/setup/macos) guide.
   </Step>
   <Step title="Add the binding">
-    ```bash
-    pnpm add @struktoai/mirage-node @zkochan/fuse-native
-    ```
-
     [`@zkochan/fuse-native`](https://www.npmjs.com/package/@zkochan/fuse-native)
-    is an optional peer that compiles native code on install. Allow pnpm to
-    build it, in `pnpm-workspace.yaml`:
+    is an optional peer that compiles native code on install. First allow pnpm
+    to build it, in `pnpm-workspace.yaml`:
 
     ```yaml pnpm-workspace.yaml
     onlyBuiltDependencies:
@@ -31,7 +26,11 @@ folder.
     ```
 
     Outside a pnpm workspace, put the same list under `"pnpm"` in
-    `package.json`.
+    `package.json`. Then add it:
+
+    ```bash
+    pnpm add @struktoai/mirage-node @zkochan/fuse-native
+    ```
   </Step>
   <Step title="On macOS with macFUSE 4, link the library">
     macFUSE 4 ships `libfuse.2.dylib`, and the binding links the older name.
@@ -96,9 +95,13 @@ mounts:
     mountpoint: /tmp/data   # omit for a temp directory
   /s3:
     vfs: s3
+    config:
+      bucket: my-bucket
     backend: nfs
   /logs:
     vfs: disk               # no backend: stays inside Mirage
+    config:
+      root: ./logs
 ```
 
 <Warning>
@@ -108,24 +111,22 @@ mounts:
 
 ## Behavior
 
-- **Files of unknown size.** Slack, Linear, Trello and other API-backed
-  mounts cannot size a file without fetching it, so it stats as 0 bytes until
-  something opens it, like a `/proc` file. Over `fuse`, `cat`, `grep`, `cp`
-  and `wc -c` read it in full; over `nfs` and `fskit` it reads as empty, so
-  Mirage warns when such a mount uses them. `ls -l`, `du` and `find -size` show 0 until it is opened,
-  and `tar` or `rsync` copy it empty. Mirage never fetches content during
-  `stat`, which would cost one API call per file on every `ls -l`.
-- **Symlinks.** Links made with `ln -s`, in the Mirage Shell or in the
+- **Files of unknown size.** API mounts (Slack, Trello, ...) report
+  0 bytes until a file is opened. `ls -l`, `du` and `find -size` show 0, and
+  `tar` and `rsync` copy such files empty. `cat`, `grep`, `cp` and `wc -c`
+  read the full content through `fuse`, and read the file as empty through
+  `nfs` and `fskit`, which Mirage warns about.
+- **Symlinks.** Links made with `ln -s`, in the shell or in the
   folder, show as real symlinks and resolve inside the folder.
 - **Permissions.** The mode bits `chmod` and `chown` set are for display.
   Mount modes and policy decide access, never the kernel.
 - **Extended attributes.** `getfattr` and `setfattr` in the folder read and
-  write the same attributes as the Mirage Shell, on every VFS.
+  write the same attributes as the shell, on every VFS.
 
 ## FSKit on macOS
 
 With macFUSE 5 on macOS 15.4+, `backend: 'fskit'` serves the folder through
-FSKit instead of the kernel extension, which Apple is phasing out:
+FSKit instead of the kernel extension:
 
 ```ts
 import { Mount, MountBackend, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -135,14 +136,17 @@ await ws.fuseReady()
 console.log(ws.fuseMountpoints['/data']) // /Volumes/mirage-...
 ```
 
-The rules match [Python's](/python/setup/fuse#fskit-on-macos): the folder is a
-volume under `/Volumes`, every VFS on it must know its files' sizes, and
-Mirage warns at mount time about either.
+- The folder is a volume under `/Volumes`. macOS creates it and removes it on
+  unmount, and Mirage refuses a `mountpoint` anywhere else.
+- Every VFS on an FSKit mount must know its files' sizes: a file that stats
+  0 before it is opened reads as empty. Mirage warns at mount time about any
+  VFS that cannot.
+- `fskit` throws on other OSes; there is no automatic choice between it and
+  `fuse`.
 
 <Warning>
   From TypeScript, FSKit is read-mostly and experimental. New files can be
-  written as NUL bytes, as in Python, and on top of that `create`, `mkdir`
-  and `rename` return ENOSYS, because the binding cannot install the macOS
+  written as NUL bytes, and `create`, `mkdir` and `rename` return ENOSYS, because the binding cannot install the macOS
   callbacks FSKit needs for new names. A hung FSKit volume can block the
   system's mount table until the macFUSE FSKit process is killed. Use
   `fuse` for anything long-running or written to.

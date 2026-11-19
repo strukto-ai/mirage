@@ -21,7 +21,7 @@ pnpm add @struktoai/mirage-pi @struktoai/mirage-node @earendil-works/pi-coding-a
 
 Pass the Mirage extension to Pi's regular entry point. Pi continues to own its CLI/TUI, model selection, sessions, themes, commands, and authentication.
 
-```ts
+```ts pi.ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { main } from '@earendil-works/pi-coding-agent'
 import { mirageExtension } from '@struktoai/mirage-pi'
@@ -38,7 +38,7 @@ Running this script in a terminal opens Pi's existing UI. The extension also rou
 For an isolated Mirage session, prevent Pi from loading `AGENTS.md` and `CLAUDE.md` files from the host project:
 
 ```bash
-pnpm exec tsx agents/pi/ui_pi.ts --no-context-files
+pnpm exec tsx pi.ts --no-context-files
 ```
 
 After asking Pi to create a file, you can verify that the native UI is using Mirage:

@@ -43,7 +43,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`build_options(ws, session_id="agent")` runs the tools as that session, under its profile. `system_prompt=` replaces the default prompt.
+`build_options(ws, session_id="agent")` runs the tools as that session, under its profile. Create the session first with [`ws.session`](/python/access/in-app#workspace-methods). `system_prompt=` replaces the default prompt.
 
 ## Tools
 

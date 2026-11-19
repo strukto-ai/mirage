@@ -112,7 +112,7 @@ adds an incident service the handlers change.
 - Names and aliases are single words, and a group's children share one set
   of names. An option can't repeat in a parent and its child.
 - `new CLI(...)` refuses a bad tree when you build it, and Mirage refuses a
-  bad line before the handler runs, so a handler never re-checks its flags.
+  bad line before the handler runs.
 - Read flags through `new FlagView(ctx.flags, ctx.spec)`. Reading an option
   the spec doesn't declare throws, instead of looking like an omitted flag.
 - `configModel` validates each install's config when you register it.
@@ -272,7 +272,12 @@ return promises: await them, or a failure goes unseen.
 | `cwd()` | Returns the session's working directory |
 | `sessionId` | The session's ID |
 
+A `login` leaf for the pager CLI. Add `new CommandSpec({ name: 'login' })` to its
+`subcommands` and `login: new CLIHandler({ fn: login })` to its `handlers`:
+
 ```typescript
+import { UsageError } from '@struktoai/mirage-node'
+
 async function login(
   accessor: NOOPAccessor,
   _paths: PathSpec[],
@@ -296,7 +301,18 @@ A typed CLI registered on a mount runs its subcommands there, with the
 mount's accessor, so it declares no `configModel`, `accessor` or `script`:
 
 ```typescript
-import { MountMode, RAMVFS } from '@struktoai/mirage-node'
+import {
+  Argument,
+  CLI,
+  CLIHandler,
+  type CommandFnResult,
+  CommandSpec,
+  IOResult,
+  MountMode,
+  type PathSpec,
+  RAMVFS,
+  Workspace,
+} from '@struktoai/mirage-node'
 import type { RAMAccessor } from '@struktoai/mirage-core/accessor/ram'
 
 function tag(accessor: RAMAccessor, paths: PathSpec[], texts: string[]): CommandFnResult {

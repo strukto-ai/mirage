@@ -4,7 +4,7 @@ description: The Mirage server in Python, a FastAPI app that holds workspaces an
 icon: server
 ---
 
-The Mirage server is a FastAPI app. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh), on its own port when `ssh_port` is set and through its HTTP port either way. The TypeScript server speaks the same protocol, so a client of one works against the other. Every route, with its request and response, is in the [API Reference](/api/overview).
+The Mirage server is a FastAPI app that holds workspaces. It serves them over [HTTP](/home/access/http), [MCP](/home/access/mcp), [RPC](/home/access/rpc) and [SSH](/home/access/ssh). SSH runs through the HTTP port, and on its own port too when you set `ssh_port`. The TypeScript server speaks the same protocol. The [API Reference](/api/overview) lists every route.
 
 ## Install
 
@@ -72,18 +72,21 @@ Arguments of `build_app`. The Default column names the environment variable or `
 
 ## Workers
 
-By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), it runs that many workers, each the whole server on a Unix socket of its own, and its own server passes each request to the worker holding the workspace. A new workspace goes to a worker at random. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
+By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), the daemon starts that many workers. Each worker is a full server on its own Unix socket. The daemon routes each request to the worker that holds the workspace. New workspaces go to a random worker. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
 
-`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
+`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. The default is `process`, or `thread` on a free-threaded interpreter (3.14t).
 
-The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges their `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
+- The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges the workers' `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers.
+- A worker that exits stays gone, and so do its workspaces.
+- Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker.
+- The SSH port does not work with workers above 1.
 
 ## Started by the CLI
 
 The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last running workspace stops or is deleted, and tunes the interpreter as it starts. Its other settings are on the [Server](/home/configuration/server) page.
 
 <Accordion title="The interpreter tuning, for an app run with build_app">
-  It collects and freezes what startup made, so a full collection no longer scans it, raises the young collection threshold to 10,000, and sets the GIL switch interval to 1 ms. These settings are process-wide, so an app started with `build_app` keeps its own. Set them in the app for the same fairness: a busy line yields its workspace's loop every two GIL switch intervals, so under Python's default 5 ms a line in another session waits on 10 ms turns, and under 1 ms on 2 ms turns.
+  The CLI's daemon tunes the garbage collector and sets the GIL switch interval to 1 ms, so a busy line makes other sessions wait 2 ms turns instead of 10 ms. An app run with `build_app` does not get this. Add the same lines at startup:
 
   ```python
   import gc

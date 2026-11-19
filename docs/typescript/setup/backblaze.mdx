@@ -6,8 +6,7 @@ description: Virtualize a Backblaze B2 bucket from Node or the browser.
 
 `BackblazeVFS` mounts one bucket: every object becomes a file and every `/` in a key
 a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Backblaze B2's
-endpoint, so commands behave as they do on S3. Credentials are set up on the
-[Backblaze B2 page](/home/setup/backblaze).
+endpoint, so commands behave as they do on S3. Set up credentials as in [Backblaze B2 setup](/home/setup/backblaze).
 
 ## Install
 
@@ -114,8 +113,7 @@ from the `/` in keys.
 ## Behavior
 
 - **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
-  so `/b2/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
-  and a trailing `/` added.
+  so `/b2/notes.md` is the key `users/42/notes.md`.
 
 ## Browser
 
@@ -155,6 +153,8 @@ const ws = new Workspace({ '/b2': b2 }, { mode: MountMode.READ })
 
 <AccordionGroup>
   <Accordion title="Signing server">
+
+An Express route that signs URLs:
 
 ```ts
 import {
