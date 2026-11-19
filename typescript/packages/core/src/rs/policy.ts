@@ -86,7 +86,7 @@ export function request(
  */
 export class PolicyMatcher {
   private readonly stream: MovableStream
-  private table: readonly CommandRule[] | null = null
+  private table: readonly Readonly<CommandRule>[] | null = null
 
   constructor(config: Readonly<Wire>) {
     this.stream = open(config)
@@ -99,7 +99,7 @@ export class PolicyMatcher {
    * depends on the line (`reasonOf`). Every row is frozen, since equal
    * rule sets share one matcher and its table.
    */
-  rules(): readonly CommandRule[] {
+  rules(): readonly Readonly<CommandRule>[] {
     this.table ??= Object.freeze(
       (this.ask('rules') as readonly RuleRow[]).map((row): CommandRule => {
         const reason = fromUnits(row.reason)
@@ -183,7 +183,7 @@ interface RuleRow {
  * the rule set (`PolicyMatcher.rules`), so the two never disagree.
  * Mirrors Python's rule_table.
  */
-export function ruleTable(rules: AdmissionRules): readonly CommandRule[] {
+export function ruleTable(rules: AdmissionRules): readonly Readonly<CommandRule>[] {
   return admissionMatcher(rules).rules()
 }
 

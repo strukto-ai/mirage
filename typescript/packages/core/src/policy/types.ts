@@ -528,7 +528,8 @@ const EMPTY = Object.freeze({
   set: Object.freeze(Object.defineProperties(new Set<never>(), WRITES)),
 })
 
-const SEALED = new WeakSet(Object.values(EMPTY))
+const SEALED = new WeakSet()
+for (const empty of Object.values(EMPTY)) SEALED.add(empty)
 
 /**
  * A copy of a tree value that nobody can change in place: every object

@@ -146,7 +146,7 @@ describe('policy stream', () => {
     const row = ruleTable(first)[0]
     if (row === undefined) throw new Error('expected one rule')
     expect(() => {
-      row.reason = 'changed'
+      ;(row as { reason: string }).reason = 'changed'
     }).toThrow(TypeError)
     expect(() => (row.paths as string[]).push('/b')).toThrow(TypeError)
     expect(ruleTable(second)[0]).toMatchObject({ reason: '', paths: ['/a'] })
