@@ -334,7 +334,11 @@ class MontyFs(AbstractOS):
         # workspace's memory room is refused before it is fetched.
         target = path_from_arg(path)
         files = self._files_for(target)
-        row = self._row(target)
+        try:
+            row = self._row(target)
+        except OSError as exc:
+            logger.debug("monty read: %s did not stat: %s", target, exc)
+            row = None
         with as_guest_error(str(target)):
             check_memory(row.size if row is not None else 0)
             data = files.read(str(target))

@@ -429,7 +429,11 @@ export class MontyFs {
    * guest's MemoryError. Mirrors Python's `path_read_bytes`.
    */
   private async readWhole(path: string, files: RuntimeFiles): Promise<Uint8Array> {
-    checkMemory((await files.viewStat(path))?.size ?? 0)
+    const row = await files.viewStat(path).catch((err: unknown) => {
+      console.debug(`monty read: ${path} did not stat: ${String(err)}`)
+      return null
+    })
+    checkMemory(row?.size ?? 0)
     const data = await files.read(path)
     checkMemory(data.byteLength)
     return data

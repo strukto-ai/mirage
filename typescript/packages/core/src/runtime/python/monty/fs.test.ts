@@ -589,6 +589,17 @@ describe('MontyFs path operations', () => {
     ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
   })
 
+  it('reads a file whose mount answers no stat', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op) =>
+      op === 'stat'
+        ? Promise.reject(Object.assign(new Error('stat not supported'), { code: 'ENOTSUP' }))
+        : Promise.resolve(new TextEncoder().encode('hi')),
+    )
+    expect(await accessOn(dispatch).handle('Path.read_bytes', ['/ram/a.txt'])).toEqual(
+      new TextEncoder().encode('hi'),
+    )
+  })
+
   it('iterdir yields the entry paths', async () => {
     const dispatch = listing(['/ram/d/a', '/ram/d/sub'], ['/ram/d/sub'])
     expect(await accessOn(dispatch).handle('Path.iterdir', ['/ram/d'])).toEqual([

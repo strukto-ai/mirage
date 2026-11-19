@@ -602,3 +602,29 @@ def test_monty_a_read_refused_for_memory_is_a_guest_memory_error():
         )
     )
     assert result.stdout == b"MemoryError memory exhausted\n", result.stderr
+
+
+class StatlessDispatch(FakeDispatch):
+    """A mount that serves a file's bytes but answers no stat for it."""
+
+    async def __call__(self, op, path, **kwargs):
+        if op == "stat" and path.virtual in self.files:
+            raise OSError(errno.ENOTSUP, "stat not supported")
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_reads_a_file_whose_mount_answers_no_stat():
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(
+            StatlessDispatch({"/s3/a.txt": b"hi"}),
+            PrefixResolver(lambda: ["/s3/"]),
+        )
+    )
+    result = asyncio.run(
+        _run(
+            runtime,
+            "from pathlib import Path\nprint(Path('/s3/a.txt').read_text())",
+        )
+    )
+    assert result.stdout == b"hi\n", result.stderr
