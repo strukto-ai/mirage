@@ -24,6 +24,7 @@ import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
 import type { ExecuteNodeDeps } from '../executor/deps.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { runCommandTree } from './run_tree.ts'
 
 function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
@@ -62,5 +63,34 @@ describe('runCommandTree', () => {
       new EvaluationContext(new SessionState({ sessionId: 'test', cwd: '/' })),
     )
     expect(io.exitCode).not.toBe(0)
+  })
+})
+
+describe('runCommandTree under a cancelled line', () => {
+  const slow = 'sleep 0.3; touch /data/late; echo /data/f'
+
+  async function filesAfterCancel(line: string): Promise<string[]> {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell("printf 'hello\\n' > /data/f")
+      const abort = new AbortController()
+      setTimeout(() => {
+        abort.abort()
+      }, 50)
+      await expect(ws.shell(line, { signal: abort.signal })).rejects.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const io = await ws.shell('ls /data')
+      return new TextDecoder().decode(io.stdout).split(/\s+/).filter(Boolean)
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('stops the substitution in a backtick read', async () => {
+    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual(['f'])
+  })
+
+  it('stops the substitution in a $( ) read', async () => {
+    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual(['f'])
   })
 })
