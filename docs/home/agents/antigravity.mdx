@@ -1,0 +1,69 @@
+---
+title: Google Antigravity
+description: Connect Antigravity to a Mirage workspace through MCP or a FUSE mount.
+icon: /images/google-logo.svg
+---
+
+## Install
+
+<CodeGroup>
+```bash uv
+uv tool install mirage-ai
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+Install [Antigravity](https://antigravity.google) separately.
+
+## Workspace
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+    mode: write
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+## MCP
+
+<CodeGroup>
+```json .agents/mcp_config.json
+{
+  "mcpServers": {
+    "mirage": { "command": "mirage", "args": ["mcp", "-w", "demo"] }
+  }
+}
+```
+```bash Plugin
+git clone https://github.com/strukto-ai/mirage
+agy plugin install ./mirage/plugins/mirage
+```
+</CodeGroup>
+
+`~/.gemini/config/mcp_config.json` adds the server to every project. The plugin serves its own workspace from `.mirage/workspace.yaml`, not `demo`.
+
+## FUSE
+
+Install a [FUSE driver](/home/setup/fuse), and with uv, `'mirage-ai[fuse]'`.
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+    mode: write
+    backend: fuse
+    mountpoint: /tmp/mirage-demo
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo-fuse
+cd /tmp/mirage-demo && agy
+```
+
+In the Antigravity app, open `/tmp/mirage-demo` as the project folder. For an SSH Host project, mount the workspace on that Linux host and open the mountpoint there.

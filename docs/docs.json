@@ -118,6 +118,7 @@
                 "group": "Coding Agents",
                 "icon": "laptop-code",
                 "pages": [
+                  "home/agents/antigravity",
                   "home/agents/claude-code",
                   "home/agents/codex",
                   "home/agents/grok-build"
@@ -492,6 +493,7 @@
                 "icon": "cubes",
                 "pages": [
                   "python/agents/claude-agent-sdk",
+                  "python/agents/antigravity",
                   "python/agents/agno",
                   "python/agents/openai-agents",
                   "python/agents/langchain",
