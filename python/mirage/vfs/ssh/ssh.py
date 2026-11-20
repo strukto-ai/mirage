@@ -33,6 +33,7 @@ from mirage.core.ssh.rm import rm_r as _rm_r
 from mirage.core.ssh.rmdir import rmdir as _rmdir
 from mirage.core.ssh.search import files_containing as _files_containing
 from mirage.core.ssh.set_attrs import set_attrs as _set_attrs
+from mirage.core.ssh.stat import realpath as _realpath
 from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stat import tree as _tree
 from mirage.core.ssh.stream import follow as _follow
@@ -43,7 +44,9 @@ from mirage.core.ssh.write import write as _write
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.call import vfs_call
 from mirage.vfs.ssh.config import SSHConfig
+from mirage.vfs.types import Effect
 
 
 class SSHVFS(BaseVFS):
@@ -79,6 +82,10 @@ class SSHVFS(BaseVFS):
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
+
+    @vfs_call(effect=Effect.METADATA)
+    async def realpath(self, path: PathSpec) -> str:
+        return await _realpath(self.accessor, path)
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)

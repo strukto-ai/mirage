@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import asyncssh
 import pytest
 
+from mirage import MountMode, Workspace
+from mirage.mount.core import MountCore
 from mirage.types import PathSpec
 from mirage.vfs.ssh.config import SSHConfig
 from mirage.vfs.ssh.ssh import SSHVFS
@@ -35,6 +39,38 @@ def test_two_logins_to_one_root_are_one_store():
 def test_a_relative_root_is_each_logins_own():
     assert _location("ada", "data") != _location("bob", "data")
     assert _location("ada", "data") == _location("ada", "data/")
+
+
+@pytest.mark.asyncio
+async def test_a_client_parent_step_follows_a_remote_directory_link():
+    sftp = Mock(
+        stat=AsyncMock(
+            return_value=asyncssh.SFTPAttrs(
+                type=asyncssh.FILEXFER_TYPE_DIRECTORY
+            )
+        ),
+        realpath=AsyncMock(
+            side_effect=lambda path: {
+                "data": "/srv/data",
+                "/srv/data/left/jump": "/srv/data/right/deep",
+                "/srv/data/left/outside": "/srv/data-other/deep",
+            }[path]
+        ),
+        remove=AsyncMock(),
+    )
+    vfs = SSHVFS(SSHConfig(host="box", root="data"))
+    vfs.accessor._sftp = sftp
+    ws = Workspace({"/ssh": vfs}, mode=MountMode.WRITE)
+    try:
+        core = MountCore(ws.vfs, root_prefix="/ssh")
+        path = await core.client_path("/left/jump/../marker")
+        await core.unlink(path)
+        with pytest.raises(OSError) as error:
+            await core.client_path("/left/outside/../marker")
+        assert error.value.errno == errno.EXDEV
+        sftp.remove.assert_awaited_once_with("data/right/marker")
+    finally:
+        await ws.close()
 
 
 # The mount asks for an atomic write of bytes as it does of a stream, and

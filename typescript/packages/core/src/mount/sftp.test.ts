@@ -181,10 +181,10 @@ it.each(['', '/export'])('walks SFTP client paths from root %j', async (root) =>
     data: vi.fn(),
     end: vi.fn(),
   }
-  const request = (operation: string, ...paths: string[]): Promise<unknown> =>
+  const request = (operation: string, ...args: (string | Buffer)[]): Promise<unknown> =>
     new Promise((resolve) => {
       events.once('reply', resolve)
-      events.emit(operation, 1, ...paths)
+      events.emit(operation, 1, ...args)
     })
   const core = new MountCore(ws.vfs, { rootPrefix: root })
   const server = new MirageSFTPServer(channel, () => Promise.resolve(core))
@@ -213,6 +213,21 @@ it.each(['', '/export'])('walks SFTP client paths from root %j', async (root) =>
     await expect(request('STAT', '/left/marker/')).resolves.toMatchObject({
       code: STATUS.FAILURE,
     })
+
+    await expect(request('RMDIR', '/left/jump/.')).resolves.toMatchObject({
+      code: STATUS.FAILURE,
+    })
+    await expect(request('RENAME', '/left/jump/.', '/moved')).resolves.toMatchObject({
+      code: STATUS.FAILURE,
+    })
+    const renamePaths = Buffer.concat([
+      sftpString(Buffer.from('/left/')),
+      sftpString(Buffer.from('/left/jump/../')),
+    ])
+    await expect(request('EXTENDED', POSIX_RENAME, renamePaths)).resolves.toMatchObject({
+      code: STATUS.FAILURE,
+    })
+    await expect(request('STAT', '/right/deep')).resolves.toMatchObject({ mode: 0o40755 })
 
     await expect(request('REMOVE', '/left/jump/../marker')).resolves.toMatchObject({
       code: STATUS.OK,

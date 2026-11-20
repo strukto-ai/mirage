@@ -287,11 +287,15 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         self,
         path: bytes,
         op: Callable[[MountCore, str], Coroutine[Any, Any, T]],
+        *,
+        reject_final_dot: bool = False,
     ) -> T:
         async def run(core: MountCore) -> T:
-            return await op(
-                core, await core.client_path(path.decode(ENCODING, ERRORS))
+            name = await core.client_path(
+                path.decode(ENCODING, ERRORS),
+                reject_final_dot=reject_final_dot,
             )
+            return await op(core, name)
 
         return await self._call(run)
 
@@ -403,23 +407,29 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         await self._at(path, lambda core, p: core.mkdir(p, attrs.permissions))
 
     async def rmdir(self, path: bytes) -> None:
-        await self._at(path, lambda core, p: core.rmdir(p))
+        await self._at(
+            path, lambda core, p: core.rmdir(p), reject_final_dot=True
+        )
 
     async def rename(self, oldpath: bytes, newpath: bytes) -> None:
         async def rename_new(core: MountCore, old: str) -> None:
-            new = await core.client_path(newpath.decode(ENCODING, ERRORS))
+            new = await core.client_path(
+                newpath.decode(ENCODING, ERRORS), reject_final_dot=True
+            )
             if await exists(core, new):
                 raise eexist(new)
             await core.rename(old, new)
 
-        await self._at(oldpath, rename_new)
+        await self._at(oldpath, rename_new, reject_final_dot=True)
 
     async def posix_rename(self, oldpath: bytes, newpath: bytes) -> None:
         async def replace(core: MountCore, old: str) -> None:
-            new = await core.client_path(newpath.decode(ENCODING, ERRORS))
+            new = await core.client_path(
+                newpath.decode(ENCODING, ERRORS), reject_final_dot=True
+            )
             await core.rename(old, new)
 
-        await self._at(oldpath, replace)
+        await self._at(oldpath, replace, reject_final_dot=True)
 
     async def readlink(self, path: bytes) -> bytes:
         return self._encode(

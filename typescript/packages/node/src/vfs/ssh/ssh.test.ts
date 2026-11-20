@@ -13,12 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import { MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import type { SSHConfig } from './config.ts'
 import { SSHVFS } from './ssh.ts'
+import { Workspace } from '../../workspace.ts'
 
 function makeVfs(state: FakeSftp, config?: Partial<SSHConfig>): SSHVFS {
   const cfg: SSHConfig = {
@@ -95,6 +97,39 @@ describe('SSHVFS storageLocation', () => {
 })
 
 describe('SSHVFS write', () => {
+  it('follows a remote directory link before a client parent step', async () => {
+    state.dirs.set('data/left/jump', { mode: 0o40755 })
+    state.dirs.set('data/left/outside', { mode: 0o40755 })
+    state.dirs.set('data/right/deep', { mode: 0o40755 })
+    const marker = { data: new Uint8Array(), attrs: { mode: 0o100644 } }
+    state.files.set('data/left/marker', marker)
+    state.files.set('data/right/marker', marker)
+    const vfs = makeVfs(state, { root: 'data' })
+    const sftp = await vfs.accessor.sftp()
+    const targets = new Map([
+      ['data', '/srv/data'],
+      ['/srv/data/left/jump', '/srv/data/right/deep'],
+      ['/srv/data/left/outside', '/srv/data-other/deep'],
+    ])
+    sftp.realpath = (path, callback) => {
+      const target = targets.get(path)
+      if (target === undefined) throw new Error(`unexpected realpath ${path}`)
+      callback(undefined, target)
+    }
+    const ws = new Workspace({ '/ssh': vfs }, { mode: MountMode.WRITE })
+    try {
+      const core = new MountCore(ws.vfs, { rootPrefix: '/ssh' })
+      await core.unlink(await core.clientPath('/left/jump/../marker'))
+      await expect(core.clientPath('/left/outside/../marker')).rejects.toMatchObject({
+        code: 'EXDEV',
+      })
+      expect(state.files.has('data/left/marker')).toBe(true)
+      expect(state.files.has('data/right/marker')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
   // The mount asks for an atomic write of bytes as it does of a stream, and
   // either is staged and renamed into place whole.
   it('stages an atomic write of bytes', async () => {
