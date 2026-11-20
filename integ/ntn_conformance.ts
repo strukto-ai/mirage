@@ -100,6 +100,7 @@ function show(label: string, value: string): string {
 // into `head` races: when head exits first, ntn panics on the broken pipe
 // instead of dying silently as a C program does. That panic is the reference
 // tool's, not a divergence, and the pipeline's status is head's either way.
+// RUST_BACKTRACE is pinned to 0 below, so the panic always ends in its note.
 const PIPE_PANIC =
   /\n?thread '[^'\n]*' (?:\(\d+\) )?panicked at [^\n]*\nfailed printing to stdout: Broken pipe \(os error 32\)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n/g
 
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
     XDG_CONFIG_HOME: join(home, 'config'),
     XDG_CACHE_HOME: join(home, 'cache'),
     NO_COLOR: '1',
+    RUST_BACKTRACE: '0',
   }
 
   const skipped: string[] = []
