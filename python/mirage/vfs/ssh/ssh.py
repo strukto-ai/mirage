@@ -84,7 +84,7 @@ class SSHVFS(BaseVFS):
         return await _stat(self.accessor, path)
 
     @vfs_call(effect=Effect.METADATA)
-    async def realpath(self, path: PathSpec) -> str:
+    async def realpath(self, path: PathSpec) -> tuple[PathSpec]:
         return await _realpath(self.accessor, path)
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:

@@ -34,6 +34,7 @@ import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
 import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
+import { underPath } from '../utils/key_prefix.ts'
 import { endsAtDot, parent, posixNormpath } from '../utils/path.ts'
 import { sliceWindow } from '../utils/ranges.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -212,16 +213,24 @@ export class MountCore {
   private clientIdentity(path: string): Promise<string> {
     return this.op(async () => {
       let resolved = this.identity(path)
-      if (resolved !== this.root && !resolved.startsWith(this.root + '/')) throw enoent(path)
+      if (!underPath(resolved, this.root)) throw enoent(path)
       const reader = readerOf(this.files)
       const owner = reader.owner(resolved)
       if (owner?.calls?.has('realpath') === true) {
-        const [key] = await this.files.dispatch('realpath', PathSpec.fromStrPath(resolved))
-        if (typeof key !== 'string' || key.startsWith('/')) throw einval(path)
-        const landing = rstripSlash(rstripSlash(owner.prefix) + '/' + key) || '/'
+        let targets: unknown
+        try {
+          ;[targets] = await this.files.dispatch('realpath', PathSpec.fromStrPath(resolved))
+        } catch (err) {
+          if (classify(err) === 'ENOENT' && reader.owed(resolved).length > 0)
+            return resolved.slice(this.root.length) || '/'
+          throw err
+        }
+        const target: unknown = Array.isArray(targets) ? targets[0] : undefined
+        if (!(target instanceof PathSpec)) throw enoent(path)
+        const landing = rstripSlash(target.virtual) || '/'
         if (landing !== resolved) {
           if (
-            (landing !== this.root && !landing.startsWith(this.root + '/')) ||
+            !underPath(landing, this.root) ||
             reader.owner(landing)?.prefix !== owner.prefix ||
             reader.follow(landing) !== landing
           ) {

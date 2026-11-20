@@ -51,6 +51,7 @@ from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
+from mirage.utils.key_prefix import under_path
 from mirage.utils.path import ends_at_dot
 from mirage.utils.stat_view import (
     atime_ns,
@@ -377,28 +378,26 @@ class MountCore:
     async def _client_identity(self, path: str) -> str:
         async def identify() -> str:
             resolved = self.identity(path)
-            if resolved != self._root and not resolved.startswith(
-                self._root + "/"
-            ):
+            if not under_path(resolved, self._root):
                 raise enoent(path)
             reader = reader_of(self._files)
             owner = reader.owner(resolved)
             if owner is not None and "realpath" in owner.calls:
-                key, _ = await self._files.dispatch(
-                    "realpath", PathSpec.from_str_path(resolved)
-                )
-                if not isinstance(key, str) or key.startswith("/"):
-                    raise einval(path)
-                landing = (owner.prefix.rstrip("/") + "/" + key).rstrip(
-                    "/"
-                ) or "/"
+                try:
+                    targets, _ = await self._files.dispatch(
+                        "realpath", PathSpec.from_str_path(resolved)
+                    )
+                except FileNotFoundError:
+                    if reader.owed(resolved):
+                        return resolved[len(self._root) :] or "/"
+                    raise
+                if not targets or not isinstance(targets[0], PathSpec):
+                    raise enoent(path)
+                landing = targets[0].virtual.rstrip("/") or "/"
                 if landing != resolved:
                     target_owner = reader.owner(landing)
                     if (
-                        (
-                            landing != self._root
-                            and not landing.startswith(self._root + "/")
-                        )
+                        not under_path(landing, self._root)
                         or target_owner is None
                         or target_owner.prefix != owner.prefix
                         or reader.follow(landing) != landing

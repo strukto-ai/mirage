@@ -22,6 +22,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.mount.core import MountCore
 from mirage.types import PathSpec
+from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ssh.config import SSHConfig
 from mirage.vfs.ssh.ssh import SSHVFS
 
@@ -69,6 +70,40 @@ async def test_a_client_parent_step_follows_a_remote_directory_link():
             await core.client_path("/left/outside/../marker")
         assert error.value.errno == errno.EXDEV
         sftp.remove.assert_awaited_once_with("data/right/marker")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spelling", ["/", "/virtual"])
+async def test_client_realpath_keeps_visible_namespace_directories(spelling):
+    def stat(path):
+        if path == "data/virtual":
+            raise asyncssh.SFTPNoSuchFile(path)
+        return asyncssh.SFTPAttrs(type=asyncssh.FILEXFER_TYPE_DIRECTORY)
+
+    def realpath(path):
+        if path == "/srv/data/virtual":
+            raise asyncssh.SFTPNoSuchFile(path)
+        if path == "/srv/data/alias":
+            return "/srv/data/.env"
+        return "/srv/data"
+
+    vfs = SSHVFS(SSHConfig(host="box", root="data"))
+    vfs.accessor._sftp = Mock(
+        stat=AsyncMock(side_effect=stat),
+        realpath=AsyncMock(side_effect=realpath),
+    )
+    ws = Workspace({"/ssh": vfs, "/ssh/virtual/tools": RAMVFS()})
+    try:
+        session = ws.create_session(
+            "reader", profile={"paths": {"hide": ["/ssh/.env"]}}
+        )
+        core = MountCore(ws.vfs, root_prefix="/ssh", session=session)
+        assert await core.canonical_client_path(spelling) == spelling
+        assert await core.client_path("/virtual/../marker") == "/marker"
+        with pytest.raises(FileNotFoundError):
+            await core.canonical_client_path("/alias")
     finally:
         await ws.close()
 
