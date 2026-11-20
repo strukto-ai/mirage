@@ -28,6 +28,7 @@ vi.mock('../../core/github/constants.ts', async () => {
 })
 
 import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
+import { GitHubConfig } from '../../core/github/config.ts'
 import { ensureRef } from '../../core/github/repo.ts'
 import { ensureTree } from '../../core/github/tree.ts'
 import type { GitHubTreeItem } from '../../core/github/client.ts'
@@ -36,6 +37,7 @@ import { Limit, MountMode } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
+import { parseConfigWithSchema } from '../secrets.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
@@ -126,6 +128,25 @@ describe('GitHubVFS', () => {
   // Mirrors test_find_judges_a_directory_by_what_the_session_sees: a walk
   // asks readTree, which the dispatcher declines under a hide, so -empty sees
   // the directory as the session does.
+  // Python writes an unset field as null, so the config a Python snapshot
+  // saves for an anonymous mount names token, app, ref and base_url as null,
+  // and a TypeScript workspace rebuilds the mount from it.
+  it('builds an anonymous mount from the config a Python snapshot writes', async () => {
+    const config = parseConfigWithSchema(GitHubConfig, {
+      timeout: 30,
+      token: null,
+      app: null,
+      owner: 'o',
+      repo: 'r',
+      ref: null,
+      base_url: null,
+    })
+    const vfs = await GitHubVFS.create(config)
+    expect(vfs.accessor.account.anonymous).toBe(true)
+    expect(vfs.accessor.ref).toBeNull()
+    expect(vfs.listingsPin).toBeNull()
+  })
+
   it('judges a directory for find by what the session sees', async () => {
     offline([
       { path: 'docs', type: 'tree', sha: 'd' },
