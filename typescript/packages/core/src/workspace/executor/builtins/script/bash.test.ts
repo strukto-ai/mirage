@@ -92,6 +92,60 @@ describe('parseBashArgs', () => {
     expect(parseBashArgs(['-c']).needsValue).toBe('-c')
   })
 
+  // bash 5.2.37 on debian:stable-slim: -c's program is the first word that
+  // is not an option, so options may follow -c.
+  it.each<[string[], [string, boolean][]]>([
+    [['-c', '-x', 'echo hi', 'A', 'B'], [['xtrace', true]]],
+    [
+      ['-c', '-e', '+x', 'echo hi', 'A', 'B'],
+      [
+        ['errexit', true],
+        ['xtrace', false],
+      ],
+    ],
+    [['-c', '-o', 'pipefail', 'echo hi', 'A', 'B'], [['pipefail', true]]],
+    [['-c', '-l', 'echo hi', 'A', 'B'], []],
+    [['-c', '--', 'echo hi', 'A', 'B'], []],
+    [['-c', '-', 'echo hi', 'A', 'B'], []],
+    [['-c', '-x', '--', 'echo hi', 'A', 'B'], [['xtrace', true]]],
+    [
+      ['-cx', '-e', 'echo hi', 'A', 'B'],
+      [
+        ['xtrace', true],
+        ['errexit', true],
+      ],
+    ],
+  ])('reads options after -c before its program: %j', (args, settings) => {
+    const parsed = parseBashArgs(args)
+    expect(parsed.script).toBe('echo hi')
+    expect(parsed.argv).toEqual(['A', 'B'])
+    expect(parsed.settings).toEqual(settings)
+  })
+
+  it.each([[['-c', '--', '-x']], [['-c', '-', '-x']]])(
+    'takes a dash program after the end of options: %j',
+    (args) => {
+      const parsed = parseBashArgs(args)
+      expect(parsed.script).toBe('-x')
+      expect(parsed.argv).toEqual([])
+    },
+  )
+
+  it.each([[['-c', '-x']], [['-c', '--']], [['-c', '-e', '-']]])(
+    'needs a program after -c and its options: %j',
+    (args) => {
+      expect(parseBashArgs(args).needsValue).toBe('-c')
+    },
+  )
+
+  it.each<[string[], string]>([
+    [['-c', '--norc', 'echo hi'], '--'],
+    [['-c', '-q', 'echo hi'], '-q'],
+    [['-c', '-O', 'extglob', 'echo hi'], '-O'],
+  ])('refuses after -c what bash refuses: %j', (args, invalid) => {
+    expect(parseBashArgs(args).invalid).toBe(invalid)
+  })
+
   // bash 5.2.37 on debian:stable-slim: long options lead, then short.
   it.each([
     [['--version', '--help'], 'help', true],

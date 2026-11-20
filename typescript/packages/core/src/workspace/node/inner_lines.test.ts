@@ -54,6 +54,7 @@ describe('innerLines', () => {
     ['eval', ['rm', '/x', '&&', 'ls'], [['line', 'rm /x && ls', false]]],
     ['sh', ['-c', 'rm /x'], [['line', 'rm /x', false]]],
     ['bash', ['-xc', 'rm /x', 'a'], [['line', 'rm /x', false]]],
+    ['bash', ['-c', '-x', 'rm /x'], [['line', 'rm /x', false]]],
     ['mapfile', ['-C', 'rm /x', 'arr'], [['line', 'rm /x', true]]],
     // A command already split into words.
     ['command', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],

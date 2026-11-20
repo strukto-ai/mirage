@@ -71,8 +71,10 @@ def parse_bash_args(args: list[str]) -> BashArgs:
     whole character here, rather than its first byte as GNU does.
 
     Options after a script file or ``-c``'s program are positional; ``-``
-    and ``--`` end option parsing. ``-c`` takes the next word, never the
-    rest of its cluster: ``-cx 'echo hi'`` traces and runs ``echo hi``.
+    and ``--`` end option parsing. ``-c`` is a flag: its program is the
+    first word after the options, so ``-cx 'echo hi'``, ``-c -x 'echo hi'``
+    and ``-c -- 'echo hi'`` all run ``echo hi``. ``-O`` is refused, where
+    GNU takes a shopt name.
 
     Args:
         args (list[str]): words after the head word.
@@ -105,7 +107,7 @@ def parse_bash_args(args: list[str]) -> BashArgs:
         return BashArgs(help=want_help, version=want_version)
     if unsupported is not None:
         return BashArgs(invalid=unsupported)
-    read_stdin = False
+    read_stdin = command = False
     while i < len(args):
         tok = args[i]
         if tok in ("--", "-"):
@@ -122,15 +124,14 @@ def parse_bash_args(args: list[str]) -> BashArgs:
             return BashArgs(invalid=tok[0] + refused[0])
         settings.extend(word.settings)
         read_stdin = read_stdin or "s" in word.other
-        if "c" in word.other:
-            if i + word.consumed >= len(args):
-                return BashArgs(needs_value="-c")
-            return BashArgs(
-                script=args[i + word.consumed],
-                argv=args[i + word.consumed + 1 :],
-                settings=tuple(settings),
-            )
+        command = command or "c" in word.other
         i += word.consumed
+    if command:
+        if i >= len(args):
+            return BashArgs(needs_value="-c")
+        return BashArgs(
+            script=args[i], argv=args[i + 1 :], settings=tuple(settings)
+        )
     # The program comes from stdin whenever no operand names one, which
     # is the rule `-s` states explicitly for the case where operands do
     # follow: `bash -s A B` reads stdin and makes A and B positional.
