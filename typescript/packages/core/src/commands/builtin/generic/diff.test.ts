@@ -140,6 +140,27 @@ describe('diffGeneric with stdin', () => {
     expect([out, io.exitCode]).toEqual([null, 0])
   })
 
+  it('names a missing operand before either is read', async () => {
+    const unread = (p: PathSpec): AsyncIterable<Uint8Array> => {
+      throw new Error(`read ${p.virtual}`)
+    }
+    const statGone = (p: PathSpec): Promise<FileStat> =>
+      p.virtual === '/d/gone' ? Promise.reject(enoent(p.virtual)) : stat(p)
+    const ctx = { flags: {} } as unknown as Context
+    const [out, io] = await diffRun(
+      [operand('slow', '/d/slow'), operand('gone', '/d/gone')],
+      ctx,
+      unread,
+      readdir,
+      statGone,
+    )
+    expect([out, io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([
+      null,
+      2,
+      'diff: gone: No such file or directory\n',
+    ])
+  })
+
   it('keeps the option words as typed for the header', () => {
     expect(switchWords(['-ru', '--exclude', '.git', 'a', 'b', '-x*.log'])).toEqual([
       '-ru',

@@ -12,7 +12,7 @@ from mirage.rs import diff_pool
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import DiffOptions
 from mirage.rs.errors import StreamRefusal
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def _bytes(value: bytes = b"a\n") -> bytes:
@@ -62,13 +62,16 @@ async def _standalone_diff_cleanup():
     async def read(path):
         return files[path.virtual]
 
+    async def stat(path):
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
     asyncio.create_subprocess_exec = start
     try:
         await diff(
             [PathSpec.from_str_path(path, "") for path in files],
             stream=read,
             readdir_fn=_unexpected_metadata,
-            stat_fn=_unexpected_metadata,
+            stat_fn=stat,
             flags=DiffFlags(),
         )
     except ExceptionGroup as exc:
