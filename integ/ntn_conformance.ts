@@ -96,6 +96,17 @@ function show(label: string, value: string): string {
   return `${label}: ${JSON.stringify(value)}`
 }
 
+// The real ntn is a Rust binary that ignores SIGPIPE, so a case that pipes it
+// into `head` races: when head exits first, ntn panics on the broken pipe
+// instead of dying silently as a C program does. That panic is the reference
+// tool's, not a divergence, and the pipeline's status is head's either way.
+const PIPE_PANIC =
+  /\n?thread '[^'\n]*' (?:\(\d+\) )?panicked at [^\n]*\nfailed printing to stdout: Broken pipe \(os error 32\)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n/g
+
+function withoutPipePanic(stderr: string): string {
+  return stderr.replace(PIPE_PANIC, '')
+}
+
 interface Run {
   exit: number
   stdout: string
@@ -180,10 +191,9 @@ async function main(): Promise<void> {
         `  ${show('stdout want', one.expect.stdout)}\n  ${show('stdout got ', got.stdout)}`,
       )
     }
-    if (got.stderr !== one.expect.stderr) {
-      diffs.push(
-        `  ${show('stderr want', one.expect.stderr)}\n  ${show('stderr got ', got.stderr)}`,
-      )
+    const stderr = withoutPipePanic(got.stderr)
+    if (stderr !== one.expect.stderr) {
+      diffs.push(`  ${show('stderr want', one.expect.stderr)}\n  ${show('stderr got ', stderr)}`)
     }
     if (diffs.length > 0) failures.push(`${one.id} (${one.command})\n${diffs.join('\n')}`)
   }
