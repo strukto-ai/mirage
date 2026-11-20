@@ -43,7 +43,7 @@ import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { EXEC_WRAPPERS, FOLDER_FREE, KEYWORDS } from './constants.ts'
+import { FOLDER_FREE, KEYWORDS } from './constants.ts'
 import { lookupAll } from './lookup.ts'
 import { Consumer, MachineAnswer, ProgramLookup, type ExternalTarget } from './types.ts'
 
@@ -234,6 +234,25 @@ function optionPaths(argv: Argv, cwd: string): string[] {
 }
 
 /**
+ * The paths a command takes as operands, the files it works on, and not as an
+ * option's value: `grep -r -f /tmp/p` takes none, so it searches its folder.
+ * Every path for a command without a spec. Mirrors Python's `_path_operands`.
+ *
+ * @param argv the command.
+ * @param cwd the directory a relative path resolves against.
+ */
+function pathOperands(argv: Argv, cwd: string): PathSpec[] {
+  const spec = SPECS[argv.name]
+  if (spec === undefined) {
+    return argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
+  }
+  const roles = parseCommand(spec, [...argv.args], cwd, argv.name).wordRoles
+  return argv.operands.filter(
+    (w, i): w is PathSpec => roles[i] === WordKind.OPERAND && w instanceof PathSpec,
+  )
+}
+
+/**
  * The paths a `find -exec` command names, which the machine must hold as
  * well, since the classifier keeps its words as text: an absolute word, or
  * one that climbs with `..`. A word that is no path at all keeps the command
@@ -254,33 +273,22 @@ function childPaths(name: string, words: readonly string[], cwd: string): string
 }
 
 /**
- * Whether a command touches nothing but the paths its words name
- * (`FOLDER_FREE`), an `egrep` as the `grep` it runs. Mirrors Python's
- * `_folder_free`.
- *
- * @param name the command's name.
- */
-function folderFree(name: string): boolean {
-  return FOLDER_FREE.has(EXEC_WRAPPERS.get(name)?.[0] ?? name)
-}
-
-/**
  * Every path a command names, absolute, with whether any of them depends on
  * the folder it runs from: an operand typed relative, an option's path the
- * folder changes, or no path operand at all (`ls` and `grep -r -f /tmp/p x`
+ * folder changes, or no path operand at all (`ls` and `grep -r -f /tmp/p`
  * read the folder). Mirrors Python's `_named_paths`.
  *
  * @param argv the command.
  * @param cwd the session's folder.
  */
 function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
-  const operands = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
+  const named = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
   const options = optionPaths(argv, cwd)
   const children = childPaths(argv.name, argv.args, cwd)
-  const paths = operands.map((w) => unmarkGlobs(w.virtual))
+  const paths = named.map((w) => unmarkGlobs(w.virtual))
   const relative =
-    paths.length === 0 ||
-    operands.some((w) => !w.rawPath.startsWith('/')) ||
+    pathOperands(argv, cwd).length === 0 ||
+    named.some((w) => !w.rawPath.startsWith('/')) ||
     options.join('\0') !== optionPaths(argv, '/').join('\0')
   return [[...paths, ...options, ...children], relative]
 }
@@ -330,7 +338,7 @@ export async function operandMachine(
   const here: [string, boolean][] = cwd === '/' ? scopes : [...scopes, [cwd, false]]
   let runtime = await machineHolding(here, session, registry, links, null)
   let runsFrom: string | null = null
-  if (runtime === null && !relative && cwd !== '/' && folderFree(argv.name)) {
+  if (runtime === null && !relative && cwd !== '/' && FOLDER_FREE.has(argv.name)) {
     runtime = await machineHolding(scopes, session, registry, links, null)
     runsFrom = '/'
   }
@@ -382,7 +390,7 @@ export function statedMachine(
   ]
   const here = norm(cwd)
   const tries: [string, boolean][][] = here === '/' ? [scopes] : [[...scopes, [here, false]]]
-  if (!relative && here !== '/' && folderFree(name)) tries.push(scopes)
+  if (!relative && here !== '/' && FOLDER_FREE.has(name)) tries.push(scopes)
   for (const scoped of tries) {
     const mounts = heldMounts(scoped, session, registry, links)
     if (mounts === null) continue
