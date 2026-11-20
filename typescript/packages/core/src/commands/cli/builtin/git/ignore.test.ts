@@ -28,6 +28,11 @@ const RULES = [
   'nested/**/x.txt',
   'sp?ce.txt',
   '[abc]set.txt',
+  'trail.txt   ',
+  'esc\\    ',
+  'tab\\\t\t',
+  'crlf.txt\r',
+  '   ',
 ].join('\n')
 
 const stack = (): IgnoreStack => new IgnoreStack().push('', ENC.encode(RULES))
@@ -54,6 +59,16 @@ const CASES: [string, boolean, boolean][] = [
   ['spXce.txt', true, false],
   ['aset.txt', true, false],
   ['dset.txt', false, false],
+  // Trailing spaces drop unless escaped; a tab stays, and a CRLF line ends at the CR.
+  ['trail.txt', true, false],
+  ['trail.txt ', false, false],
+  ['esc', false, false],
+  ['esc ', true, false],
+  ['esc  ', false, false],
+  ['tab\t', false, false],
+  ['tab\t\t', true, false],
+  ['crlf.txt', true, false],
+  ['   ', false, false],
 ]
 
 describe('IgnoreStack', () => {
