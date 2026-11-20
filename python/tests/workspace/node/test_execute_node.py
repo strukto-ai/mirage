@@ -440,6 +440,35 @@ def test_subshell_eval_sees_no_job_started_outside():
     assert out == "done\n"
 
 
+def test_subshell_backtick_read_sees_only_its_jobs():
+    out = _run(
+        _shell_stdout(
+            "printf 'ok\\n' > /f; sleep 2 & "
+            "( sleep 1 & echo `< $(jobs > /jobs; echo /f)`; wait; cat /jobs )"
+        )
+    )
+    assert out == "ok\n[1]+  Running                 sleep 1 &\n"
+
+
+def test_subshell_backtick_read_sees_no_job_started_outside():
+    out = _run(
+        _shell_stdout(
+            "printf 'ok\\n' > /f; sleep 2 & "
+            "( echo `< $(jobs > /jobs; echo /f)`; cat /jobs )"
+        )
+    )
+    assert out == "ok\n"
+
+
+def test_subshell_exit_action_sees_only_its_jobs():
+    out = _run(
+        _shell_stdout(
+            "sleep 2 & ( sleep 1 & trap 'eval jobs; eval wait; echo done' EXIT )"
+        )
+    )
+    assert out == "[1]+  Running                 sleep 1 &\ndone\n"
+
+
 def test_subshell_evaluates_a_line_on_the_typed_lines_handle():
     reg, _ = _mock_registry()
     execute_fn = AsyncMock(return_value=IOResult())

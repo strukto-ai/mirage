@@ -572,7 +572,7 @@ async def handle_subshell(
     finishes; the body is a shell of its own, which routes what it wrote
     to its terminal through a copy, so a program nested in it (``$( )``,
     ``eval``) leaves that to it. Its ``execute_fn`` runs the subshell's
-    own EXIT action as it ends.
+    own EXIT action as it ends, bound to its private job table.
 
     Args:
         deps (ExecuteNodeDeps): what the subshell's body runs against.
@@ -598,9 +598,6 @@ async def handle_subshell(
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
     call_stack = (call_stack or CallStack()).fork(loops=False, paren=True)
-    # The subshell's actions run as its own lines: their `wait` and
-    # `jobs` see the subshell's jobs, not the caller's.
-    execute_fn = partial(execute_fn, job_table=job_table)
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="()", exit_code=0)

@@ -497,7 +497,7 @@ async function subshellEnded(
  * takes each statement's output as it finishes; the body is a shell of its
  * own, which routes what it wrote to its terminal through a copy, so a
  * program nested in it (`$( )`, `eval`) leaves that to it. `deps.executeFn`
- * runs the subshell's own EXIT action as it ends.
+ * runs the subshell's own EXIT action as it ends, bound to its private job table.
  */
 export async function handleSubshell(
   deps: ExecuteNodeDeps,
@@ -518,9 +518,7 @@ export async function handleSubshell(
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
   callStack = (callStack ?? new CallStack()).fork(false, true)
-  // The subshell's actions run as its own lines: their `wait` and `jobs`
-  // see the subshell's jobs, not the caller's.
-  const runAction: ExecuteFn = (action, opts) => executeFn(action, { ...opts, session, jobTable })
+  const runAction: ExecuteFn = (action, opts) => executeFn(action, { ...opts, session })
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })

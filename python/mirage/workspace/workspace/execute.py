@@ -275,6 +275,7 @@ async def recurse(
     records = opts.pop("records", None)
     read = opts.pop("read", None)
     began = opts.pop("started", None)
+    jobs = opts.get("job_table") or ws.job_table
     if handed is None:
         inner = None
     elif node is None:
@@ -317,12 +318,13 @@ async def recurse(
                     ws.dispatch,
                     ws.registry,
                     ws.namespace,
-                    ws.job_table,
+                    jobs,
                     partial(
                         recurse,
                         ws,
                         routing_decision=routing_decision,
                         nested=nested,
+                        job_table=jobs,
                     ),
                     cancel=cancel,
                     handed=inner,
@@ -391,8 +393,7 @@ async def recurse(
         # and it ends when its jobs do. They are its own jobs.
         session.job_output = capture.jobs
         session.job_waits = waits
-        caller = opts.get("job_table") or ws.job_table
-        opts["job_table"] = caller.child(caller)
+        opts["job_table"] = jobs.child(jobs)
         if opts.get("sink") is not None:
             await capture.attach(opts["sink"])
         opts["sink"] = capture

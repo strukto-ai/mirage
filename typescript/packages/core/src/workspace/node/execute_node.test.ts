@@ -490,6 +490,28 @@ describe('a subshell', () => {
     expect(await shellStdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )")).toBe('done\n')
   })
 
+  it('shows only the subshell jobs when expanding a backtick read', async () => {
+    expect(
+      await shellStdout(
+        "printf 'ok\\n' > /f; sleep 2 & ( sleep 1 & echo `< $(jobs > /jobs; echo /f)`; wait; cat /jobs )",
+      ),
+    ).toBe('ok\n[1]+  Running                 sleep 1 &\n')
+  })
+
+  it('shows no outside jobs when expanding a backtick read in a subshell', async () => {
+    expect(
+      await shellStdout(
+        "printf 'ok\\n' > /f; sleep 2 & ( echo `< $(jobs > /jobs; echo /f)`; cat /jobs )",
+      ),
+    ).toBe('ok\n')
+  })
+
+  it('shows only the subshell jobs to its EXIT action', async () => {
+    expect(
+      await shellStdout("sleep 2 & ( sleep 1 & trap 'eval jobs; eval wait; echo done' EXIT )"),
+    ).toBe('[1]+  Running                 sleep 1 &\ndone\n')
+  })
+
   it("evaluates a line on the typed line's handle", async () => {
     const handles: (LineHandle | undefined)[] = []
     const executeFn: ExecuteFn = (_cmd, opts) => {

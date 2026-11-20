@@ -98,7 +98,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { runsOnMachine } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import { withHandOff } from '../executor/deps.ts'
+import { withHandOff, withOpts } from '../executor/deps.ts'
 import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import {
   admitLine,
@@ -635,14 +635,17 @@ function recurse(
           // shows: the read runs with no sink, the line's terminal least
           // of all.
           const [stdout, io] = await runCommandTree(
-            withHandOff(
+            withOpts(
               {
                 ...deps(),
                 parser: substitutionParser,
                 ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
                 ...(opts.lineHandle !== undefined ? { lineHandle: opts.lineHandle } : {}),
               },
-              innerOpts.handed ?? handed,
+              {
+                handed: innerOpts.handed ?? handed,
+                ...(jobs === undefined ? {} : { jobTable: jobs }),
+              },
             ),
             substitutionTree,
             innerContext,
