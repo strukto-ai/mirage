@@ -799,6 +799,19 @@ export async function diffGeneric(
   if (fromFile === null && toFile === null) {
     return compare(flags, paths, ctx, read, readdir, backendStat, sizeOf)
   }
+  let each = flags
+  if (flags.excludeFrom.length > 0) {
+    try {
+      const exclude = await excludedPatterns(flags, stdinStream(read, ctx.stdin))
+      each = { ...flags, exclude, excludeFrom: [] }
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, [...flags.excludeFrom]) }),
+      ]
+    }
+  }
   const parts: ByteSource[] = []
   const errors: Uint8Array[] = []
   let status = 0
@@ -806,7 +819,8 @@ export async function diffGeneric(
   try {
     for (const path of paths) {
       const pair = fromFile !== null ? [fromFile, path] : toFile !== null ? [path, toFile] : []
-      const dash = pair.find((p) => isStdin(p))
+      // Two stdin sides are one file, which diff never reads.
+      const dash = pair.every((p) => isStdin(p)) ? undefined : pair.find((p) => isStdin(p))
       if (dash !== undefined && readStdin) {
         // The first comparison read stdin to its end.
         errors.push(ENC.encode(`diff: ${dash.rawPath}: Bad file descriptor\n`))
@@ -814,7 +828,7 @@ export async function diffGeneric(
         continue
       }
       readStdin = readStdin || dash !== undefined
-      const [output, io] = await compare(flags, pair, ctx, read, readdir, backendStat, sizeOf)
+      const [output, io] = await compare(each, pair, ctx, read, readdir, backendStat, sizeOf)
       if (output !== null) parts.push(output)
       if (io.stderr !== null) errors.push(await materialize(io.stderr))
       status = Math.max(status, io.exitCode)

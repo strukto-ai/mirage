@@ -770,6 +770,19 @@ async def diff(
     )
     if flags.from_file is None and flags.to_file is None:
         return await compare(paths)
+    if flags.exclude_from:
+        try:
+            excluded = await _excluded_patterns(
+                flags, stdin_stream(stream, stdin)
+            )
+        except FS_ERRORS as exc:
+            return None, IOResult(
+                exit_code=2,
+                stderr=format_fs_error("diff", exc, list(flags.exclude_from)),
+            )
+        compare = partial(
+            compare, flags=replace(flags, exclude=excluded, exclude_from=())
+        )
     parts: list[ByteSource] = []
     errors: list[bytes] = []
     status = 0
@@ -783,6 +796,9 @@ async def diff(
             )
             sides = [p for p in pair if p is not None]
             dash = next((p for p in sides if is_stdin(p)), None)
+            # Two stdin sides are one file, which diff never reads.
+            if all(is_stdin(p) for p in sides):
+                dash = None
             if dash is not None and read_stdin:
                 # The first comparison read stdin to its end.
                 errors.append(

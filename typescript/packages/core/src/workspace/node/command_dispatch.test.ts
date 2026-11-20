@@ -741,6 +741,26 @@ describe('a wrapper over a path-spelled program', () => {
     }
   })
 
+  // `ls` with no operand lists the cwd, so the name pass judges that folder as
+  // `ls` alone would.
+  it('reads the folder a path program lists by default by its name', async () => {
+    const ws = spelledWs({
+      profiles: {
+        default: SessionProfile({
+          commands: { ls: { decision: 'deny', reason: 'r', paths: ['/secret'] } },
+        }),
+      },
+    })
+    try {
+      await ws.shell('mkdir /secret')
+      const r = await ws.shell('cd /secret && /opt/ls')
+      expect([r.exitCode === 0, text(r.stdout)]).toEqual([false, ''])
+      expect(text((await ws.shell('/opt/ls')).stdout)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   // The path runs where its own words place it: a route of its file's name
   // places that name, not the path.
   it('does not move a path by a route of its name', async () => {

@@ -2631,7 +2631,6 @@ function written(
   return null
 }
 
-/** The one of `names` a node sets itself, null when it sets none. */
 /**
  * The one of `names` a node sets itself (an element of it included), null
  * when it sets none. A node setting a variable the gate cannot name (a
@@ -2655,10 +2654,24 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
     return null
   }
   if (node.type === NodeType.DECLARATION_COMMAND) {
-    const flags = kids.filter((k) => k.type === NodeType.WORD).map(getText)
-    const named = flags.some((f) => f.startsWith('-') && f.includes('n'))
     const head = kids[0] === undefined ? '' : getText(kids[0])
-    return named && NAMEREFS.has(head) ? head : null
+    // An assignment names its variable and is read as one; any other word is
+    // a flag or a NAME[=VALUE] the builtin parses at run time.
+    const words = kids
+      .slice(1)
+      .filter((k) => k.type !== NodeType.VARIABLE_ASSIGNMENT)
+      .map((k) =>
+        k.type === NodeType.VARIABLE_NAME
+          ? { raw: getText(k), text: getText(k) }
+          : readWord(k, null),
+      )
+    for (const word of words) {
+      if (word.text === null) return head
+      if (NAMEREFS.has(head) && word.text.startsWith('-') && word.text.includes('n')) return head
+      const name = word.text.split('=', 1)[0]?.split('[', 1)[0] ?? ''
+      if (names.has(name)) return name
+    }
+    return null
   }
   if (node.type !== NodeType.COMMAND) return null
   let words = wordsOf(node, null)

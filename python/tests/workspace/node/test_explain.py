@@ -1230,6 +1230,12 @@ ANOTHER_SPELLING = (
     "exec -l bash -c :",
     "exec -a -bash bash -c :",
     'a=x=hostname; alias "$a"\nx',
+    "v='PS4=$(hostname)'; declare \"$v\"; set -x; :",
+    "declare PS4\\='$(hostname)'; set -x; :",
+    "o=l; exec -$o bash -c :",
+    "o=l; env -$o bash -c :",
+    "o=p; hash -$o /bin/hostname ls; ls",
+    "o='-p /bin/hostname'; hash $o ls; ls",
 )
 
 STILL_RUNS = (
@@ -1256,6 +1262,7 @@ STILL_RUNS_UNDER_RULES = (
     'read -p "Name: $USER " ans < /data/f',
     'getopts ":ab:" opt "$@"',
     "export -n FOO",
+    'g() { local x="$1"; }; g a',
 )
 
 

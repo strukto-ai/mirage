@@ -2269,10 +2269,27 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
                 return get_text(kid)
         return None
     if node.type == NodeType.DECLARATION_COMMAND:
-        flags = [get_text(k) for k in kids if k.type == NodeType.WORD]
-        named = any(f[:1] == "-" and "n" in f for f in flags)
         head = get_text(kids[0]) if kids else ""
-        return head if named and head in _NAMEREFS else None
+        # An assignment names its variable and is read as one; any other
+        # word is a flag or a NAME[=VALUE] the builtin parses at run time.
+        words = [
+            (
+                Word(get_text(k), get_text(k))
+                if k.type == NodeType.VARIABLE_NAME
+                else read_word(k, None)
+            )
+            for k in kids[1:]
+            if k.type != NodeType.VARIABLE_ASSIGNMENT
+        ]
+        for word in words:
+            if word.text is None:
+                return head
+            if head in _NAMEREFS and word.text[:1] == "-" and "n" in word.text:
+                return head
+            name = word.text.split("=", 1)[0].split("[", 1)[0]
+            if name in names:
+                return name
+        return None
     if node.type != NodeType.COMMAND:
         return None
     words = _words_of(node, None)

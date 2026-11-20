@@ -226,9 +226,12 @@ def _command_inner(args: Sequence[Word]) -> list[InnerLine]:
 def _exec_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``exec [-cl] [-a name] [command [arg ...]]``; ``-l``, or a name
     starting with ``-``, starts a shell as a login shell, which sources
-    rc files the gate cannot read."""
+    rc files the gate cannot read; an option only the run expands may be
+    either, so it is unreadable."""
     i = 0
     while i < len(args) and args[i].value.startswith("-"):
+        if args[i].text is None:
+            return [InnerLine()]
         word = args[i].value
         i += 1
         if word == "--":
@@ -314,11 +317,14 @@ def _value_of(
 
 def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``,
-    read the way the tree's ``env`` builtin reads it."""
+    read the way the tree's ``env`` builtin reads it; an option only the
+    run expands may be any of them, so it is unreadable."""
     chdir: Word | None = None
     i = 0
     while i < len(args):
         word = args[i].value
+        if word.startswith("-") and args[i].text is None:
+            return [InnerLine()]
         if word == "--":
             i += 1
             break
@@ -460,6 +466,9 @@ def _loads(args: Sequence[Word], letter: str) -> list[InnerLine]:
         letter (str): the loading option.
     """
     for word in args:
+        if word.text is None:
+            # The run may expand it to the loading option.
+            return [InnerLine()]
         if word.value == "--" or not word.value.startswith("-"):
             break
         if letter in word.value[1:]:

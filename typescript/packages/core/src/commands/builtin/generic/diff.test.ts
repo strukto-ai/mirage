@@ -505,11 +505,15 @@ describe('--from-file and --to-file', () => {
       'diff: -: Bad file descriptor\n',
       2,
     ],
+    ["printf 'a\\nb\\n' | diff --from-file=- - x", '', '', 0],
+    ["printf 'skip\\n' | diff -r -X - --from-file=d e f", '', '', 0],
+    ['diff -X nope --from-file=x y z', '', 'diff: nope: No such file or directory\n', 2],
   ])('compares one file with each operand: %s', async (line, stdout, stderr, code) => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell(
-        "cd /data && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z",
+        "cd /data && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z" +
+          ' && mkdir d e f && printf 1 > d/skip && printf 2 > e/skip && printf 3 > f/skip',
       )
       const r = await ws.shell(`cd /data && ${line}`)
       const dec = new TextDecoder()

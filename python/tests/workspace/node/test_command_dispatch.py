@@ -713,6 +713,21 @@ async def test_a_path_s_name_reads_the_program_s_own_paths():
 
 
 @pytest.mark.asyncio
+async def test_a_path_s_name_reads_the_folder_its_program_lists_by_default():
+    # `ls` with no operand lists the cwd, so the name pass judges that
+    # folder as `ls` alone would.
+    deny = {"ls": {"decision": "deny", "reason": "r", "paths": ["/secret"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir /secret")
+        r = await ws.shell("cd /secret && /opt/ls")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+        assert (await ws.shell("/opt/ls")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_route_of_a_path_s_name_does_not_move_the_path():
     # The path runs where its own words place it: a route of its file's
     # name places that name, not the path.

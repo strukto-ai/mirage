@@ -189,13 +189,13 @@ function commandInner(args: readonly Word[]): InnerLine[] {
   return asArgv(args.slice(i))
 }
 
-// `exec [-cl] [-a name] [command [arg ...]]`.
 // `exec [-cl] [-a name] [command [arg ...]]`; `-l`, or a name starting with
 // `-`, starts a shell as a login shell, which sources rc files the gate cannot
-// read.
+// read; an option only the run expands may be either, so it is unreadable.
 function execInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length && valueAt(args, i).startsWith('-')) {
+    if (args[i]?.text === null) return [UNREADABLE]
     const word = valueAt(args, i)
     i += 1
     if (word === '--') break
@@ -208,8 +208,6 @@ function execInner(args: readonly Word[]): InnerLine[] {
   return asArgv(args.slice(i))
 }
 
-// `env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]`, read the
-// way the tree's `env` builtin reads it.
 // Whether an `env` word is GNU's `-S` / `--split-string`, whose value env
 // splits into the command line itself.
 function splits(word: string): boolean {
@@ -260,11 +258,15 @@ function valueOf(word: Word, after: Word | null, letter: string, long: string): 
   return { raw: attached, text: word.text === null ? null : attached }
 }
 
+// `env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]`, read the way
+// the tree's `env` builtin reads it; an option only the run expands may be any
+// of them, so it is unreadable.
 function envInner(args: readonly Word[]): InnerLine[] {
   let chdir: Word | null = null
   let i = 0
   while (i < args.length) {
     const word = valueAt(args, i)
+    if (word.startsWith('-') && args[i]?.text === null) return [UNREADABLE]
     if (word === '--') {
       i += 1
       break
@@ -433,7 +435,10 @@ function trapInner(args: readonly Word[]): InnerLine[] {
 // A builtin whose option `letter` loads what a later word runs from a file
 // the gate cannot read (`hash -p`, `enable -f`).
 function loads(args: readonly Word[], letter: string): InnerLine[] {
-  for (const word of args.map(wordValue)) {
+  for (const arg of args) {
+    // The run may expand it to the loading option.
+    if (arg.text === null) return [UNREADABLE]
+    const word = wordValue(arg)
     if (word === '--' || !word.startsWith('-')) break
     if (word.slice(1).includes(letter)) return [UNREADABLE]
   }

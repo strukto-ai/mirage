@@ -469,6 +469,14 @@ def test_parse_flags_refuses_what_diffutils_refuses(
             "diff: -: Bad file descriptor\n",
             2,
         ),
+        ("printf 'a\\nb\\n' | diff --from-file=- - x", "", "", 0),
+        ("printf 'skip\\n' | diff -r -X - --from-file=d e f", "", "", 0),
+        (
+            "diff -X nope --from-file=x y z",
+            "",
+            "diff: nope: No such file or directory\n",
+            2,
+        ),
     ],
 )
 async def test_from_file_and_to_file_compare_one_file_with_each_operand(
@@ -480,7 +488,8 @@ async def test_from_file_and_to_file_compare_one_file_with_each_operand(
     try:
         await ws.shell(
             "cd /data && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y"
-            " && printf 'a\\nb\\n' > z"
+            " && printf 'a\\nb\\n' > z && mkdir d e f && printf 1 > d/skip"
+            " && printf 2 > e/skip && printf 3 > f/skip"
         )
         r = await ws.shell(f"cd /data && {line}")
         assert (

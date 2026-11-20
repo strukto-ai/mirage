@@ -175,6 +175,18 @@ describe('innerLines', () => {
     expect(unknown && innerReadable(unknown)).toBe(false)
     const [alias] = innerLines('alias', [{ raw: '"$a"', text: null }])
     expect(alias && innerReadable(alias)).toBe(false)
+    // An option only the run expands may be `-l`, `-C DIR` or `-p FILE`.
+    for (const [name, raw] of [
+      ['exec', '-$o'],
+      ['env', '-$o'],
+      ['hash', '$o'],
+      ['enable', '$o'],
+    ] as const) {
+      const [held] = innerLines(name, [{ raw, text: null }, ...words('rm')])
+      expect([name, held && innerReadable(held)]).toEqual([name, false])
+    }
+    const [assigned] = innerLines('env', [{ raw: 'A="$x"', text: null }, ...words('rm')])
+    expect(assigned?.argv.map(wordValue)).toEqual(['rm'])
     expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
     const [stable] = innerLines('sh', [...words('-c', 'echo safe'), dynamic])
     expect(stable?.line).toBe('echo safe')

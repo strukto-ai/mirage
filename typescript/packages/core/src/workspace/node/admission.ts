@@ -582,6 +582,10 @@ export async function gate(
       env,
       sessionAccess(session),
     )
+    const ownImplied =
+      named in CWD_DEFAULT_RAW
+        ? defaultCwdOperand([named, ...classified], named, registry, session.cwd, stdin)
+        : null
     const programCtx: CommandContext = {
       ...ctx,
       command: named,
@@ -591,7 +595,7 @@ export async function gate(
       read: own.read,
       paths: seen(
         session,
-        linePaths(named, own, follows, links, session.cwd, implied, redirects),
+        linePaths(named, own, follows, links, session.cwd, ownImplied, redirects),
         unread,
       ),
       words: seenWords(session, contextWords(named, own, redirects), unread),

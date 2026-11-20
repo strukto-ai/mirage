@@ -177,6 +177,16 @@ def test_inner_words_keep_what_the_gate_could_not_read():
     (inner,) = inner_lines("bash", [*_words("-c"), dynamic, *_words("rm /x")])
     assert not inner.readable
     assert inner_lines("alias", [Word('"$a"', None)]) == [InnerLine()]
+    # An option only the run expands may be `-l`, `-C DIR` or `-p FILE`.
+    option = Word("-$o", None)
+    for name in ("exec", "env"):
+        assert inner_lines(name, [option, *_words("rm")]) == [InnerLine()]
+    for name in ("hash", "enable"):
+        assert inner_lines(name, [Word("$o", None), *_words("ls")]) == [
+            InnerLine()
+        ]
+    (inner,) = inner_lines("env", [Word('A="$x"', None), *_words("rm")])
+    assert [w.value for w in inner.argv] == ["rm"]
     assert inner_lines("bash", [*_words("--version"), dynamic]) == []
     (inner,) = inner_lines("sh", [*_words("-c", "echo safe"), dynamic])
     assert inner.line == "echo safe"

@@ -666,6 +666,13 @@ async def gate(
         own = read_line(
             registry, named, args, classified[1:], session.cwd, env
         )
+        own_implied = (
+            default_cwd_operand(
+                [named, *classified[1:]], named, registry, session.cwd, stdin
+            )
+            if named in CWD_DEFAULT_RAW
+            else None
+        )
         program_ctx = dataclasses.replace(
             ctx,
             command=named,
@@ -676,7 +683,13 @@ async def gate(
             paths=_seen(
                 session,
                 line_paths(
-                    named, own, follows, links, session.cwd, implied, redirects
+                    named,
+                    own,
+                    follows,
+                    links,
+                    session.cwd,
+                    own_implied,
+                    redirects,
                 ),
                 unread,
             ),
