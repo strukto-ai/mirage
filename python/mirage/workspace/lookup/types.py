@@ -16,12 +16,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias
+from typing import ClassVar
 
-if TYPE_CHECKING:
-    from mirage.runtime.types import RuntimeIdentity
-    from mirage.workspace.cli.types import CLIInstall
-    from mirage.workspace.session.functions import FunctionSite
+from mirage.runtime.types import RuntimeIdentity
+from mirage.workspace.session.functions import FunctionSite
 
 
 class Consumer(Enum):
@@ -55,22 +53,6 @@ class FunctionTarget:
     body: str
     site: FunctionSite | None
     kind: ClassVar[Consumer] = Consumer.FUNCTION
-
-
-@dataclass(frozen=True, slots=True)
-class CliTarget:
-    install: CLIInstall
-    kind: ClassVar[Consumer] = Consumer.CLI
-
-
-CommandTarget: TypeAlias = (
-    ExternalTarget
-    | FunctionTarget
-    | CliTarget
-    | Literal[
-        Consumer.SESSION, Consumer.NAMESPACE, Consumer.MOUNT, Consumer.UNKNOWN
-    ]
-)
 
 
 # CLI rides with the shell consumers for word policy: an installed CLI

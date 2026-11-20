@@ -20,6 +20,7 @@ import { LanguageRuntime } from '../../runtime/language.ts'
 import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
+import type { CLIInstall } from '../cli/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import {
@@ -37,12 +38,29 @@ import {
   SHELL_ONLY_BUILTINS,
   readWrapper,
 } from './constants.ts'
-import { type CommandTarget, Consumer, type ExternalTarget } from './types.ts'
+import { Consumer, type ExternalTarget, type FunctionTarget } from './types.ts'
 import { CycleError, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+
+export interface CliTarget {
+  readonly kind: typeof Consumer.CLI
+  readonly install: CLIInstall
+}
+
+export type CommandTarget =
+  | ExternalTarget
+  | FunctionTarget
+  | CliTarget
+  | {
+      readonly kind:
+        | typeof Consumer.SESSION
+        | typeof Consumer.NAMESPACE
+        | typeof Consumer.MOUNT
+        | typeof Consumer.UNKNOWN
+    }
 
 /** Debug sink for a link loop met while naming a program; set it to see one. */
 export const logger: { debug?: (message: string) => void } = {}

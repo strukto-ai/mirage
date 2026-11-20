@@ -43,17 +43,14 @@ from mirage.workspace.lookup import (
     programs,
 )
 from mirage.workspace.lookup.lookup import (
+    CliTarget,
     lookup,
     resolve_target,
     routed_consumer,
     runs_on_machine,
     runs_wrapper,
 )
-from mirage.workspace.lookup.types import (
-    CliTarget,
-    ExternalTarget,
-    FunctionTarget,
-)
+from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.functions import FunctionSite
 from tests.fixtures.command_trees import trees

@@ -15,6 +15,7 @@
 import dataclasses
 import logging
 from collections.abc import Iterator, Mapping, Sequence
+from typing import ClassVar, Literal, TypeAlias
 
 from mirage.commands.spec.compile import compile_spec
 from mirage.context.session_context import is_program_invocation
@@ -25,6 +26,7 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
 from mirage.vfs.bin import BinViewVFS
+from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
@@ -42,8 +44,6 @@ from mirage.workspace.lookup.constants import (
     read_wrapper,
 )
 from mirage.workspace.lookup.types import (
-    CliTarget,
-    CommandTarget,
     Consumer,
     ExternalTarget,
     FunctionTarget,
@@ -52,6 +52,22 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CliTarget:
+    install: CLIInstall
+    kind: ClassVar[Consumer] = Consumer.CLI
+
+
+CommandTarget: TypeAlias = (
+    ExternalTarget
+    | FunctionTarget
+    | CliTarget
+    | Literal[
+        Consumer.SESSION, Consumer.NAMESPACE, Consumer.MOUNT, Consumer.UNKNOWN
+    ]
+)
 
 
 def path_program(

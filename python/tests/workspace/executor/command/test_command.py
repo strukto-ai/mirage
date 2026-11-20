@@ -31,8 +31,8 @@ from mirage.workspace.executor.command.command import handle_command
 from mirage.workspace.executor.command.resolved import ResolvedCommand
 from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.lookup import resolve_target
-from mirage.workspace.lookup.types import CliTarget, Consumer, FunctionTarget
+from mirage.workspace.lookup.lookup import CliTarget, resolve_target
+from mirage.workspace.lookup.types import Consumer, FunctionTarget
 from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.session import SessionState
 

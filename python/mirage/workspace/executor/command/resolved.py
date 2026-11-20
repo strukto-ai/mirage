@@ -17,21 +17,19 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, TypeAlias, Union
+from typing import Literal, TypeAlias
 
+from mirage.execution.job import JobTable
+from mirage.view.types import SessionView
+from mirage.workspace.executor.builtins.types import BuiltinFn, Result
+from mirage.workspace.expand.argv import Argv
+from mirage.workspace.lookup.lookup import CliTarget
 from mirage.workspace.lookup.types import (
-    CliTarget,
     Consumer,
     ExternalTarget,
     FunctionTarget,
 )
-
-if TYPE_CHECKING:
-    from mirage.execution.job import JobTable
-    from mirage.view.types import SessionView
-    from mirage.workspace.executor.builtins.types import BuiltinFn, Result
-    from mirage.workspace.expand.argv import Argv
-    from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState
 
 
 class NamespaceProgram(StrEnum):
@@ -50,7 +48,7 @@ class NamespaceProgram(StrEnum):
 NAMESPACE_PROGRAMS = {program.value: program for program in NamespaceProgram}
 
 CommandWorker: TypeAlias = Callable[
-    ["JobTable", list[str], "SessionState", "SessionView"], Awaitable["Result"]
+    [JobTable, list[str], SessionState, SessionView], Awaitable[Result]
 ]
 
 
@@ -82,15 +80,15 @@ HandlerTarget: TypeAlias = (
     | MountTarget
     | Literal[Consumer.UNKNOWN]
 )
-ExecutionTarget: TypeAlias = Union[
-    HandlerTarget,
-    ExternalTarget,
-    PathTarget,
-    NamespaceProgram,
-    "BuiltinFn",
-    Literal["wrapper", "unsupported"],
-    "Result",
-]
+ExecutionTarget: TypeAlias = (
+    HandlerTarget
+    | ExternalTarget
+    | PathTarget
+    | NamespaceProgram
+    | BuiltinFn
+    | Literal["wrapper", "unsupported"]
+    | Result
+)
 
 
 @dataclass(frozen=True, slots=True)

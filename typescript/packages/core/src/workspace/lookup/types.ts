@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../../runtime/base.ts'
-import type { CLIInstall } from '../cli/types.ts'
 import type { FunctionSite } from '../session/functions.ts'
 
 /**
@@ -48,23 +47,6 @@ export interface FunctionTarget {
   readonly body: string
   readonly site: FunctionSite | null
 }
-
-export interface CliTarget {
-  readonly kind: typeof Consumer.CLI
-  readonly install: CLIInstall
-}
-
-export type CommandTarget =
-  | ExternalTarget
-  | FunctionTarget
-  | CliTarget
-  | {
-      readonly kind:
-        | typeof Consumer.SESSION
-        | typeof Consumer.NAMESPACE
-        | typeof Consumer.MOUNT
-        | typeof Consumer.UNKNOWN
-    }
 
 // CLI rides with the shell consumers for word policy: an installed CLI
 // is a program, and bash hands programs glob matches, never patterns.

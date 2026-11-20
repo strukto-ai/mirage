@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
 from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
@@ -129,6 +129,7 @@ from mirage.workspace.executor.find_action_dispatch import (
     run_listed_find,
 )
 from mirage.workspace.executor.find_refs import resolve_newer_refs
+from mirage.workspace.expand.argv import Argv
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
@@ -137,8 +138,13 @@ from mirage.workspace.lookup import (
     line_facts,
 )
 from mirage.workspace.lookup.constants import MACHINE_VIEW
-from mirage.workspace.lookup.lookup import lookup, picks_machine, runs_programs
-from mirage.workspace.lookup.types import CliTarget, FunctionTarget
+from mirage.workspace.lookup.lookup import (
+    CliTarget,
+    lookup,
+    picks_machine,
+    runs_programs,
+)
+from mirage.workspace.lookup.types import FunctionTarget
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -151,10 +157,6 @@ from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
-
-if TYPE_CHECKING:
-    from mirage.workspace.expand.argv import Argv
-
 
 JOB_HANDLERS: dict[str, CommandWorker] = {
     "ps": handle_ps,
@@ -181,7 +183,7 @@ MACHINE_HANDLERS: dict[str, CommandWorker] = {
 
 
 def command_worker(
-    argv: "Argv",
+    argv: Argv,
     bindings: Mapping[str, RuntimeIdentity | None],
 ) -> CommandWorker | None:
     """Select a job or machine-view handler for the admitted words.
