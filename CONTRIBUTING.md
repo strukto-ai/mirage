@@ -151,7 +151,8 @@ A release publishes `mirage-ai` and `mirage-fuse` to PyPI and the
 `.github/workflows/release.yml` builds and checks them; publishing is by
 hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
 (`mirage._rs`), `@struktoai/mirage-core` its WebAssembly build, and
-`rust/fuse` publishes the Linux `mirage-fuse` executables to both registries.
+`rust/fuse` publishes the Linux and macOS `mirage-fuse` executables to both
+registries.
 
 1. Set the new version in `python/pyproject.toml`, `rust/Cargo.toml`,
    `rust/fuse/package.json` and each published
@@ -162,8 +163,9 @@ hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
 1. Run the Release workflow by hand to build and check everything: the
    `mirage-ai` wheels for Linux (glibc and musl), macOS and Windows on
    x86_64 and arm64, each installed with its dependencies and run on its
-   own platform, the sdist, built and run the same way, and the npm
-   tarballs.
+   own platform, the sdist, built and run the same way, the `mirage-fuse`
+   wheels for Linux (x86_64, arm64, armv7 and armv6) and macOS (x86_64 and
+   arm64) with the npm package that carries them, and the npm tarballs.
 
 1. Push a tag named for the version (`v0.0.8`) on that commit. The
    workflow checks the tag against the versions and builds again.

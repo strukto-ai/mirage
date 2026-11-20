@@ -432,8 +432,8 @@ export function darwinMountTable(
  * prefix whose top folder is missing there (`/data`) becomes a link
  * `/etc/synthetic.conf` names, to a folder of the same name under `root`;
  * that takes an administrator, so the line makes it with `sudo -n` where it
- * may and exits `DARWIN_ADMIN_STATUS` where it may not. Mirrors Python's
- * `darwin_mountpoint_line`.
+ * may, adding the row only once, and exits `DARWIN_ADMIN_STATUS` where it
+ * may not. Mirrors Python's `darwin_mountpoint_line`.
  *
  * @param prefix the workspace prefix.
  * @param root the folder the links lead into.
@@ -446,8 +446,11 @@ export function darwinMountpointLine(prefix: string, root: string): string {
     'if [ -e "$t" ] || [ -L "$t" ]; then mkdir -p -- "$p"; exit 1; fi; ' +
     'mkdir -p -- "$r$t" || exit 1; ' +
     `sudo -n true 2>/dev/null || exit ${admin}; ` +
-    `printf '%s\\t%s\\n' "\${t#/}" "\${r#/}$t" | ` +
-    `sudo -n tee -a ${SYNTHETIC_CONF} >/dev/null || exit ${admin}; ` +
+    `e=$(printf '%s\\t%s' "\${t#/}" "\${r#/}$t"); ` +
+    `grep -qxF -- "$e" ${SYNTHETIC_CONF} 2>/dev/null || ` +
+    `{ printf '%s\\n' "$e" | ` +
+    `sudo -n tee -a ${SYNTHETIC_CONF} >/dev/null; } ` +
+    `|| exit ${admin}; ` +
     `sudo -n ${APFS_UTIL} -t >/dev/null 2>&1; ` +
     `[ -L "$t" ] || exit ${admin}; ` +
     'mkdir -p -- "$p" || exit 1; fi; cd -- "$p" && pwd -P'
@@ -757,7 +760,8 @@ export const PIPE_SIGNAL = 13
  * program that ignores it stops too. A Mac shows few environments, so
  * there it is the run's program, `root`, and what runs under it
  * (`darwinRuns`), and each process found first stays in the run, while it
- * is the one that started then, once its parent exits. The tag is matched
+ * is the one that started then, once its parent exits, and while `ps`
+ * fails; one that fails before it found any exits 1. The tag is matched
  * as a whole entry,
  * so `w1:9` never stops the run of `w1:90`. The line exits 0 once it
  * stopped them and `NOT_RUNNING_STATUS` when there were none. It looks tr and
@@ -783,8 +787,9 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     'tr \'\\000\' \'\\n\' < "$p/environ" 2>/dev/null | grep -qxF "$m" ' +
     '&& l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
-    `else PATH=${DARWIN_PATH}; k=; ${darwinRoots(mine)}` +
-    `left() { k=$(${DARWIN_PS} | M="$m" R="$r" K="$k" awk ` +
+    `else PATH=${DARWIN_PATH}; k=; l=; ${darwinRoots(mine)}` +
+    `left() { o=$(${DARWIN_PS}) || { [ -n "$l" ] || exit 1; return 0; }; ` +
+    `k=$(printf '%s\\n' "$o" | M="$m" R="$r" K="$k" awk ` +
     `'${darwinRuns(true, 'ids')}'); r=; l=; ` +
     'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; ' +
     `left || exit ${String(NOT_RUNNING_STATUS)}; kill -${String(signum)} $l 2>/dev/null; ` +

@@ -59,6 +59,7 @@ from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import (
     kill_line,
+    mirage_source,
     mount_table,
     running_line,
     served_prefixes,
@@ -2000,6 +2001,30 @@ async def test_a_macs_guard_refuses_a_line_once_its_mount_is_gone():
         "fake: /data is no longer mounted in the machine (did it restart?); "
         "the line did not run\n"
     )
+    await ws.close()
+
+
+def test_a_mirage_source_is_one_a_workspace_names():
+    assert mirage_source("w1-box-0a1b2c3d-4:/data", "/data")
+    assert not mirage_source("w1-box-0a1b2c3d-4:/data", "/other")
+    assert not mirage_source("cryptomator@vault:/data", "/data")
+    assert not mirage_source("-0a1b2c3d-4:/data", "/data")
+
+
+@pytest.mark.asyncio
+async def test_a_mac_leaves_a_macfuse_mount_no_workspace_made():
+    mac = FakeMac("mirage", linked={"/data", "/my notes"})
+    mac.table["/home/u/.mirage/mnt/data"] = ("vault", "macfuse")
+    ws = workspace(mac)
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert (result.exit_code, await result.stderr_str()) == (
+        1,
+        "fake: another macFUSE mount serves /data in this machine; "
+        "give this workspace a machine of its own\n",
+    )
+    assert mac.table == {"/home/u/.mirage/mnt/data": ("vault", "macfuse")}
+    assert not [c for c in mac.commands if c.startswith("umount")]
     await ws.close()
 
 

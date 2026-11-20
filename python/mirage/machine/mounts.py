@@ -331,6 +331,20 @@ def kill_line(source: str) -> str:
     )
 
 
+def mirage_source(source: str, prefix: str) -> bool:
+    """Whether ``source``, mounted at ``prefix``, has the shape every
+    workspace gives the mounts it serves, ``<name>-<instance>-<n>:<prefix>``,
+    so a Mac's macFUSE mount, whose type names no program, can be told for
+    one of Mirage's.
+
+    Args:
+        source (str): a mount's source.
+        prefix (str): its mountpoint.
+    """
+    head = source.removesuffix(f":{prefix}")
+    return head != source and bool(re.search(r".-[0-9a-f]{8}-[0-9]+\Z", head))
+
+
 class MachineMounts:
     """The workspace prefixes one machine sees, by its ``mount_type``.
 
@@ -1023,7 +1037,8 @@ class MachineMounts:
         self, prefix: str, present: dict[str, tuple[str, str]]
     ) -> bool:
         """Whether another workspace's sshfs or mirage-fuse still serves
-        ``prefix``.
+        ``prefix``. A Mac's macFUSE mount no workspace made is taken as
+        served, as no program can be told for its server.
 
         Args:
             prefix (str): the mountpoint.
@@ -1032,6 +1047,8 @@ class MachineMounts:
         source, kind = present.get(prefix, ("", ""))
         if kind not in SERVED_KINDS or self._ours(source, prefix):
             return False
+        if kind == MACFUSE_KIND and not mirage_source(source, prefix):
+            return True
         found = await self._run(
             darwin_running_line(source)
             if self._darwin
@@ -1263,14 +1280,15 @@ class MachineMounts:
                 raise RuntimeError(
                     darwin_admin_hint(self._provider, prefix, root)
                 )
-            point = said(made.stdout).splitlines()[-1:]
+            out = made.stdout.decode(errors="replace").removesuffix("\n")
+            point = out.rpartition("\n")[2]
             if made.exit_code != 0 or not point:
                 raise RuntimeError(
                     f"{self._provider}: cannot make {prefix} in the machine: "
                     f"{said(made.stderr)}"
                 )
-            self._points[prefix] = point[0]
-            return point[0]
+            self._points[prefix] = point
+            return point
         path = single_quote(prefix)
         made = await self._run(
             f"mkdir -p {path} 2>/dev/null || {{ sudo -n mkdir -p {path} && "
