@@ -43,6 +43,7 @@ import {
 import { stripSlash } from '../../utils/slash.ts'
 import { BaseVFS } from '../base.ts'
 import { charge, storageUsage, type Charge, type StorageUsage } from '../capacity.ts'
+import { LOCAL_WALK_LIMIT } from '../constants.ts'
 import type { Handed, VFSStateBase } from '../types.ts'
 import type { SqlDriver } from './types.ts'
 
@@ -95,6 +96,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   override readonly indexTtl: number = 0
   override readonly readsRanges: boolean = true
   override readonly local: boolean = true
+  override walkLimit: number = LOCAL_WALK_LIMIT
   override readonly accessor: SqlAccessor
   override readonly usage: StorageUsage | null
   override readonly soleWriter: boolean

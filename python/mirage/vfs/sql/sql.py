@@ -49,6 +49,7 @@ from mirage.types import (
 )
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.capacity import Charge, StorageUsage, charge, storage_usage
+from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.types import SqlDriver
 
@@ -90,6 +91,7 @@ class SqlVFS(BaseVFS):
 
     reads_ranges: bool = True
     local: bool = True
+    walk_limit: int = LOCAL_WALK_LIMIT
 
     def __init__(
         self,
