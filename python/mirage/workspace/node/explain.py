@@ -210,6 +210,7 @@ _STORES = {
 }
 # The declarations whose `-n` makes a nameref (`export -n` unexports).
 _NAMEREFS = frozenset({"declare", "typeset", "local"})
+_DECLARES = _NAMEREFS | {"export", "readonly"}
 # An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
 _ASSIGNED_TILDE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?:[^~'\"\\]*[:=])?~")
 
@@ -2281,15 +2282,7 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
             for k in kids[1:]
             if k.type != NodeType.VARIABLE_ASSIGNMENT
         ]
-        for word in words:
-            if word.text is None:
-                return head
-            if head in _NAMEREFS and word.text[:1] == "-" and "n" in word.text:
-                return head
-            name = word.text.split("=", 1)[0].split("[", 1)[0]
-            if name in names:
-                return name
-        return None
+        return _declared(head, words, names)
     if node.type != NodeType.COMMAND:
         return None
     words = _words_of(node, None)
@@ -2306,6 +2299,8 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
     if not words:
         return None
     head = words[0].value
+    if head in _DECLARES:
+        return _declared(head, words[1:], names)
     if head == "printf":
         words = _printf_target(words[1:])
     elif head in _STORES:
@@ -2317,6 +2312,33 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
             return head
         if word.text.split("[", 1)[0] in names:
             return word.text.split("[", 1)[0]
+    return None
+
+
+def _declared(
+    head: str, words: Sequence[Word], names: frozenset[str]
+) -> str | None:
+    """The one of ``names`` a declaration builtin's words set, as
+    ``_sets`` answers; none when ``declare``, ``typeset`` or ``local``
+    only prints (``-p``, ``-f``, ``-F``).
+
+    Args:
+        head (str): the builtin, one of ``_DECLARES``.
+        words (Sequence[Word]): its words after the name, flags and
+            NAME[=VALUE] operands the builtin parses at run time.
+        names (frozenset[str]): the variables asked about.
+    """
+    for word in words:
+        if word.text is None:
+            return head
+        if head in _NAMEREFS and word.text[:1] == "-":
+            if any(flag in word.text for flag in "pfF"):
+                return None
+            if "n" in word.text:
+                return head
+        name = word.text.split("=", 1)[0].split("[", 1)[0]
+        if name in names:
+            return name
     return None
 
 

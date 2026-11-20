@@ -40,7 +40,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
-from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import (
@@ -770,6 +770,10 @@ async def diff(
     )
     if flags.from_file is None and flags.to_file is None:
         return await compare(paths)
+    if stdin is not None:
+        # One cursor for -X and every comparison, so none replays stdin.
+        stdin = ensure_stream(stdin)
+        compare = partial(compare, stdin=stdin)
     if flags.exclude_from:
         try:
             excluded = await _excluded_patterns(

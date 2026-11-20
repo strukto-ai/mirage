@@ -14,7 +14,7 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import type { DiffComputer, DiffMode, PairResult } from '../../../rs/diff_types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
@@ -799,10 +799,12 @@ export async function diffGeneric(
   if (fromFile === null && toFile === null) {
     return compare(flags, paths, ctx, read, readdir, backendStat, sizeOf)
   }
+  // One cursor for -X and every comparison, so none replays stdin.
+  const shared = ctx.stdin === null ? ctx : { ...ctx, stdin: ensureStream(ctx.stdin) }
   let each = flags
   if (flags.excludeFrom.length > 0) {
     try {
-      const exclude = await excludedPatterns(flags, stdinStream(read, ctx.stdin))
+      const exclude = await excludedPatterns(flags, stdinStream(read, shared.stdin))
       each = { ...flags, exclude, excludeFrom: [] }
     } catch (err) {
       if (!isFsError(err)) throw err
@@ -828,7 +830,7 @@ export async function diffGeneric(
         continue
       }
       readStdin = readStdin || dash !== undefined
-      const [output, io] = await compare(each, pair, ctx, read, readdir, backendStat, sizeOf)
+      const [output, io] = await compare(each, pair, shared, read, readdir, backendStat, sizeOf)
       if (output !== null) parts.push(output)
       if (io.stderr !== null) errors.push(await materialize(io.stderr))
       status = Math.max(status, io.exitCode)

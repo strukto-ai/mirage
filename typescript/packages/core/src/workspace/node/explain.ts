@@ -128,6 +128,7 @@ const STORES: ReadonlyMap<string, string> = new Map([
 ])
 // The declarations whose `-n` makes a nameref (`export -n` unexports).
 const NAMEREFS: ReadonlySet<string> = new Set(['declare', 'typeset', 'local'])
+const DECLARES: ReadonlySet<string> = new Set([...NAMEREFS, 'export', 'readonly'])
 // An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
 const ASSIGNED_TILDE = /^[A-Za-z_][A-Za-z0-9_]*=(?:[^~'"\\]*[:=])?~/
 
@@ -2632,6 +2633,23 @@ function written(
 }
 
 /**
+ * The one of `names` a declaration builtin's words set, as `sets` answers;
+ * none when `declare`, `typeset` or `local` only prints (`-p`, `-f`, `-F`).
+ */
+function declared(head: string, words: readonly Word[], names: ReadonlySet<string>): string | null {
+  for (const word of words) {
+    if (word.text === null) return head
+    if (NAMEREFS.has(head) && word.text.startsWith('-')) {
+      if (/[pfF]/.test(word.text)) return null
+      if (word.text.includes('n')) return head
+    }
+    const name = word.text.split('=', 1)[0]?.split('[', 1)[0] ?? ''
+    if (names.has(name)) return name
+  }
+  return null
+}
+
+/**
  * The one of `names` a node sets itself (an element of it included), null
  * when it sets none. A node setting a variable the gate cannot name (a
  * `declare -n` nameref, a store into a word only the run expands) answers with
@@ -2665,13 +2683,7 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
           ? { raw: getText(k), text: getText(k) }
           : readWord(k, null),
       )
-    for (const word of words) {
-      if (word.text === null) return head
-      if (NAMEREFS.has(head) && word.text.startsWith('-') && word.text.includes('n')) return head
-      const name = word.text.split('=', 1)[0]?.split('[', 1)[0] ?? ''
-      if (names.has(name)) return name
-    }
-    return null
+    return declared(head, words, names)
   }
   if (node.type !== NodeType.COMMAND) return null
   let words = wordsOf(node, null)
@@ -2688,6 +2700,7 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
   }
   if (words[0] === undefined) return null
   const head = wordValue(words[0])
+  if (DECLARES.has(head)) return declared(head, words.slice(1), names)
   let targets: Word[]
   if (head === 'printf') {
     targets = printfTarget(words.slice(1))

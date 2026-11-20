@@ -472,6 +472,12 @@ def test_parse_flags_refuses_what_diffutils_refuses(
         ("printf 'a\\nb\\n' | diff --from-file=- - x", "", "", 0),
         ("printf 'skip\\n' | diff -r -X - --from-file=d e f", "", "", 0),
         (
+            "printf 'a\\n' | diff -X - --from-file=- x",
+            "0a1,2\n> a\n> b\n",
+            "",
+            1,
+        ),
+        (
             "diff -X nope --from-file=x y z",
             "",
             "diff: nope: No such file or directory\n",

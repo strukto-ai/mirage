@@ -835,7 +835,7 @@
           "command": "bash -c -x hostname",
           "expect": {
             "exit": 126,
-            "stderr": "bash: Permission denied\n"
+            "stderr": "hostname: Permission denied\n"
           }
         }
       ]

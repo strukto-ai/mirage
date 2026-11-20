@@ -1236,6 +1236,10 @@ ANOTHER_SPELLING = (
     "o=l; env -$o bash -c :",
     "o=p; hash -$o /bin/hostname ls; ls",
     "o='-p /bin/hostname'; hash $o ls; ls",
+    "builtin declare 'PS4=$(hostname)'; set -x; :",
+    "command typeset 'PS4=$(hostname)'; set -x; :",
+    "builtin export 'PS4=$(hostname)'; set -x; :",
+    "export -p 'PS4=$(hostname)'; set -x; :",
 )
 
 STILL_RUNS = (
@@ -1263,6 +1267,8 @@ STILL_RUNS_UNDER_RULES = (
     'getopts ":ab:" opt "$@"',
     "export -n FOO",
     'g() { local x="$1"; }; g a',
+    "declare -p PS4",
+    "typeset -F PS4",
 )
 
 
