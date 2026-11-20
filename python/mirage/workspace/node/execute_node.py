@@ -46,7 +46,6 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
-from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -187,11 +186,8 @@ STREAMING_KINDS = frozenset(
 
 
 async def _recurse_reassociated(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     redirects: list[Redirect],
     processes: ProcessTable | None,
     right: TSNodeLike,
@@ -210,11 +206,8 @@ async def _recurse_reassociated(
     ran, so cwd changes apply). Every other node recurses normally.
 
     Args:
+        deps (ExecuteNodeDeps): what the redirected operand runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         redirects (list): parsed redirects hoisted off the list.
         processes (ProcessTable | None): where the stages run as
             managed processes.
@@ -223,22 +216,22 @@ async def _recurse_reassociated(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        sink (JobConsole | None): where this call's output goes as it
+            arrives, None to return it.
     """
+    deps = with_opts(deps, {"sink": sink})
     if node.id != right.id:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     return await _run_redirected(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         right,
         with_own_redirects(right, redirects),
         processes,
         context,
         stdin,
         call_stack,
-        sink=sink,
+        sink=deps.sink,
     )
 
 
@@ -258,11 +251,8 @@ async def _no_command(
 
 
 async def _recurse_lifted(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     processes: ProcessTable | None,
     right: TSNodeLike,
@@ -277,11 +267,8 @@ async def _recurse_lifted(
     pipeline; every other node recurses normally.
 
     Args:
+        deps (ExecuteNodeDeps): what the pipeline runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline, its lead already taken.
         processes (ProcessTable | None): where the stages run as
             managed processes.
@@ -290,30 +277,27 @@ async def _recurse_lifted(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        sink (JobConsole | None): where this call's output goes as it
+            arrives, None to return it.
     """
+    deps = with_opts(deps, {"sink": sink})
     if node is not right:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     return await _run_pipeline(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         stages,
         context,
         stdin,
         call_stack,
         processes,
-        sink,
+        deps.sink,
     )
 
 
 async def _recurse_stage(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
     processes: ProcessTable | None,
@@ -332,11 +316,8 @@ async def _recurse_stage(
     gets that ``2>&1`` from ``_recurse_pipe_stderr``.
 
     Args:
+        deps (ExecuteNodeDeps): what the stage runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline being run.
         targets (list[Any]): the stages a ``|&`` follows.
         processes (ProcessTable | None): where the stages run as
@@ -347,6 +328,7 @@ async def _recurse_stage(
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): the stage's pipe console.
     """
+    deps = with_opts(deps, {"sink": sink})
     for command, hoisted in zip(stages.commands, stages.redirects):
         if command is not node or not hoisted:
             continue
@@ -356,11 +338,8 @@ async def _recurse_stage(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
         return await _run_redirected(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             node,
             bound,
             processes,
@@ -369,26 +348,20 @@ async def _recurse_stage(
             call_stack,
         )
     return await _recurse_pipe_stderr(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         targets,
         node,
         context,
         stdin,
         call_stack,
-        sink=sink,
+        sink=deps.sink,
     )
 
 
 async def _run_pipeline(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -404,11 +377,8 @@ async def _run_pipeline(
     the list's. A leading ``!`` negates the whole pipeline's status.
 
     Args:
+        deps (ExecuteNodeDeps): what the pipeline runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline's stages.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -417,16 +387,15 @@ async def _run_pipeline(
             managed processes.
         sink (JobConsole | None): where the output goes as it arrives.
     """
+    deps = with_opts(deps, {"sink": sink})
+    execute_fn = deps.execute_fn
     session = context.session
     if stages.lead is not None:
         left, op, right = stages.lead
         wrapped = partial(
             _recurse_lifted,
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             replace(stages, lead=None),
             processes,
             right,
@@ -450,11 +419,8 @@ async def _run_pipeline(
     ]
     pipe_recurse = partial(
         _recurse_stage,
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         stages,
         targets,
         processes,
@@ -469,8 +435,8 @@ async def _run_pipeline(
             call_stack,
             processes,
             execute_fn,
-            registry.io.buffer_bytes,
-            sink,
+            deps.registry.io.buffer_bytes,
+            deps.sink,
         )
     if stages.negated:
         io = IOResult(
@@ -484,11 +450,8 @@ async def _run_pipeline(
 
 
 async def _recurse_pipe_stderr(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     targets: list[Any],
     node: TSNodeLike,
     context: EvaluationContext,
@@ -497,25 +460,23 @@ async def _recurse_pipe_stderr(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    deps = with_opts(deps, {"sink": sink})
     if node not in targets or node_kind(node) != NodeKind.REDIRECT:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     command, redirects = get_redirects(node)
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
     return await _run_redirected(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         command,
         redirects,
         None,
         context,
         stdin,
         call_stack,
-        sink=sink,
+        sink=deps.sink,
     )
 
 
@@ -556,11 +517,8 @@ async def _negated(
 
 
 async def _run_redirected(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     command: TSNodeLike | None,
     redirects: list[Redirect],
     processes: ProcessTable | None,
@@ -579,11 +537,8 @@ async def _run_redirected(
     command they follow.
 
     Args:
+        deps (ExecuteNodeDeps): what the statement runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
@@ -595,15 +550,17 @@ async def _run_redirected(
         sink (JobConsole | None): where the redirect writes what it
             routes as it goes, None to return it.
     """
+    deps = with_opts(deps, {"sink": sink})
+    dispatch = deps.dispatch
+    execute_fn = deps.execute_fn
+    registry = deps.registry
+    namespace = deps.namespace
     session = context.session
     if command is not None and command.type == NT.REDIRECTED_STATEMENT:
         inner, own = get_redirects(command)
         return await _run_redirected(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             inner,
             [*own, *redirects],
             processes,
@@ -628,11 +585,8 @@ async def _run_redirected(
         left, op, right = get_list_parts(command)
         wrapped = partial(
             _recurse_reassociated,
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             redirects,
             processes,
             right,
@@ -649,11 +603,8 @@ async def _run_redirected(
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             get_pipeline_stages(command, redirects),
             context,
             stdin,
@@ -667,11 +618,8 @@ async def _run_redirected(
         inner = get_negated_command(command)
         with ignoring_errexit(session):
             stdout, io, exec_node = await _run_redirected(
+                deps,
                 recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
                 inner,
                 redirects
                 if inner is None
@@ -1457,11 +1405,8 @@ async def _execute_node_body(
         to: JobConsole | None,
     ) -> Awaitable[RedirectResult]:
         return _run_redirected(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             command,
             redirects,
             job_table.processes if job_table is not None else None,
@@ -1490,11 +1435,8 @@ async def _execute_node_body(
                 return await redirected(None, list(pending), sink)
             program_recurse = partial(
                 _recurse_reassociated,
+                deps,
                 recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
                 list(pending),
                 job_table.processes if job_table is not None else None,
                 statements[-1],
@@ -1577,11 +1519,8 @@ async def _execute_node_body(
         # the stages are read the way bash reads them rather than as the
         # parse nested them (see get_pipeline_stages).
         ran = await _run_pipeline(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             get_pipeline_stages(node),
             context,
             stdin,
