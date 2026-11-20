@@ -761,8 +761,8 @@ export const PIPE_SIGNAL = 13
  * there it is the run's program, `root`, and what runs under it
  * (`darwinRuns`), and each process found first stays in the run, while it
  * is the one that started then, once its parent exits, and while `ps`
- * fails; one that fails before it found any exits 1. The tag is matched
- * as a whole entry,
+ * fails; one that fails before it found any, or on its last look, exits 1,
+ * with no KILL sent unchecked. The tag is matched as a whole entry,
  * so `w1:9` never stops the run of `w1:90`. The line exits 0 once it
  * stopped them and `NOT_RUNNING_STATUS` when there were none. It looks tr and
  * grep up on its own PATH (`TOOLS_PATH`) and exits 127 without them, so it
@@ -780,7 +780,7 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     root !== null ? [[root.pid, [process, root.started]]] : [],
   )
   return (
-    `m=${mark}; if [ -d /proc/self ]; then PATH=${TOOLS_PATH}; ` +
+    `m=${mark}; f=; if [ -d /proc/self ]; then PATH=${TOOLS_PATH}; ` +
     'command -v tr >/dev/null || exit 127; ' +
     'command -v grep >/dev/null || exit 127; ' +
     'left() { l=; for p in /proc/[0-9]*; do ' +
@@ -788,13 +788,13 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     '&& l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
     `else PATH=${DARWIN_PATH}; k=; l=; ${darwinRoots(mine)}` +
-    `left() { o=$(${DARWIN_PS}) || { [ -n "$l" ] || exit 1; return 0; }; ` +
+    `left() { o=$(${DARWIN_PS}) || { [ -n "$l" ] || exit 1; f=1; return 0; }; f=; ` +
     `k=$(printf '%s\\n' "$o" | M="$m" R="$r" K="$k" awk ` +
     `'${darwinRuns(true, 'ids')}'); r=; l=; ` +
     'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; ' +
     `left || exit ${String(NOT_RUNNING_STATUS)}; kill -${String(signum)} $l 2>/dev/null; ` +
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
-    'kill -KILL $l 2>/dev/null; true'
+    '[ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
   )
 }
 

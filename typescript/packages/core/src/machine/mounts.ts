@@ -1097,7 +1097,7 @@ export class MachineMounts {
       if (made.exitCode === DARWIN_ADMIN_STATUS) {
         throw new Error(darwinAdminHint(this.provider, prefix, root))
       }
-      const out = made.stdout === null ? '' : DECODER.decode(made.stdout).replace(/\n$/, '')
+      const out = DECODER.decode(made.stdout).replace(/\n$/, '')
       const point = out.slice(out.lastIndexOf('\n') + 1)
       if (made.exitCode !== 0 || !point) {
         throw new Error(
