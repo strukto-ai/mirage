@@ -27,6 +27,7 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import { executeNode } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
+import { Workspace } from '../workspace/workspace.ts'
 
 function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
@@ -442,6 +443,33 @@ describe('executeNode dispatcher', () => {
     )
     expect(io.exitCode).toBe(1)
     expect(exec.command).toBe('false')
+  })
+})
+
+async function shellStdout(line: string): Promise<string> {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC })
+  try {
+    return decode((await ws.shell(line)).stdout)
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('a subshell', () => {
+  it("lists the subshell's jobs to a line it evaluates", async () => {
+    expect(await shellStdout('( sleep 0.2 & eval jobs )')).toBe(
+      '[1]+  Running                 sleep 0.2 &\n',
+    )
+  })
+
+  it("waits on the subshell's jobs in a line it evaluates", async () => {
+    expect(await shellStdout('( (sleep 0.2; echo late) & eval wait; echo done )')).toBe(
+      'late\ndone\n',
+    )
+  })
+
+  it('shows a line it evaluates no job started outside', async () => {
+    expect(await shellStdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )")).toBe('done\n')
   })
 })
 

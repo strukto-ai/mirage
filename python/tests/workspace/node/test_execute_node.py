@@ -34,6 +34,7 @@ from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
+from mirage.workspace.workspace import Workspace
 
 
 def execute_node(dispatch, registry, job_table, execute_fn, *args, **kwargs):
@@ -403,6 +404,37 @@ def test_subshell_isolates_cwd():
     session = _session(cwd="/start")
     _exec("(cd /other)", session=session, dispatch=dispatch)
     assert session.cwd == "/start"
+
+
+async def _shell_stdout(line: str) -> str:
+    """Run a line in a fresh RAM workspace and return its stdout.
+
+    Args:
+        line (str): the shell line.
+    """
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(line)
+        return await io.stdout_str()
+    finally:
+        await ws.close()
+
+
+def test_subshell_eval_lists_the_subshells_jobs():
+    out = _run(_shell_stdout("( sleep 0.2 & eval jobs )"))
+    assert out == "[1]+  Running                 sleep 0.2 &\n"
+
+
+def test_subshell_eval_wait_waits_on_the_subshells_jobs():
+    out = _run(
+        _shell_stdout("( (sleep 0.2; echo late) & eval wait; echo done )")
+    )
+    assert out == "late\ndone\n"
+
+
+def test_subshell_eval_sees_no_job_started_outside():
+    out = _run(_shell_stdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )"))
+    assert out == "done\n"
 
 
 # ── function definition ────────────────────────

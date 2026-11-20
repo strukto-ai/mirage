@@ -865,7 +865,7 @@ async function forkSubshell(
   const abort = new AbortController()
   const subSignal =
     deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal])
-  const subDeps: ExecuteNodeDeps = { ...deps, jobTable: subTable, signal: subSignal }
+  const subDeps = withOpts({ ...deps, signal: subSignal }, { jobTable: subTable })
   // The opts parameter is load-bearing, not decoration: a job started
   // inside the subshell body hands `handleBackground` its own console
   // and abort signal through it. Dropping it (a 4-parameter closure
@@ -888,16 +888,18 @@ async function forkSubshell(
       opts?.ownDiagnostics !== false,
       opts?.endsShell === true,
     )
-  const subshellDeps: ExecuteNodeDeps = {
-    ...deps,
-    jobTable: subTable,
-    // Its EXIT action runs as the subshell, which a stop ends.
-    executeFn: (cmd, opts) =>
-      executeFn(cmd, {
-        ...opts,
-        signal: opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
-      }),
-  }
+  const subshellDeps = withOpts(
+    {
+      ...deps,
+      // Its EXIT action runs as the subshell, which a stop ends.
+      executeFn: (cmd, opts) =>
+        executeFn(cmd, {
+          ...opts,
+          signal: opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
+        }),
+    },
+    { jobTable: subTable },
+  )
   if (sink !== undefined) subshellDeps.sink = sink
   const child = childContext(context)
   const asProgram = isProgramInvocation(session)
