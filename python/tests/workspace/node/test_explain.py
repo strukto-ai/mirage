@@ -1475,6 +1475,65 @@ class _SealedSecret(Policy):
         return None
 
 
+SEALED_RULE = {
+    "commands": {
+        "*": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret.txt"],
+            },
+        ]
+    }
+}
+
+# What a path check reads must be the file the machine opens: its shell
+# expands `~` with its own HOME and user database, and `//` is `/`.
+MACHINE_PATHS = (
+    "HOME=/data; cat ~/secret.txt",
+    "export HOME=/data; cat ~/secret.txt",
+    "HOME=/data; eval 'cat ~/secret.txt'",
+    "cat ~backup/secret.txt",
+    "cat //data/secret.txt",
+)
+MACHINE_WRITES = (
+    "find /data/pub -fprint /data/secret.txt",
+    "find /data/pub -fprint0 /data/secret.txt",
+    "find /data/pub -fls /data/secret.txt",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_path_check_reads_the_file_a_whole_line_opens(coded):
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else SEALED_RULE},
+        policies=[_SealedSecret()] if coded else [],
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        lines = MACHINE_PATHS + (MACHINE_WRITES if coded else ())
+        for line in lines:
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code != 0, line
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            ), line
+        assert box.lines == []
+        for line in ("cat ~/secret.txt", "cat ~root/secret.txt"):
+            assert (await ws.shell(line, session_id="s")).exit_code == 0
+        assert box.lines == ["cat ~/secret.txt", "cat ~root/secret.txt"]
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
     # With no rule in force a coded policy is a whole line's only gate:

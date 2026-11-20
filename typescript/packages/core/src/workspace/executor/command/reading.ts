@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ownsArgv, parseLeaf, walk } from '../../../commands/cli/walk.ts'
+import { UsageError } from '../../../commands/errors.ts'
+import { parseFind } from '../../../rs/find.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { type ParsedArgs, parseCommand, wordPaths } from '../../../commands/spec/parser.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
@@ -49,6 +51,30 @@ function leafGrammar(
     attached.get(slot) ?? null,
     paths[slot] ?? null,
   ])
+}
+
+export const logger: { debug?: (message: string) => void } = {}
+
+// The find actions whose next word is a file the run writes.
+const FIND_WRITES: ReadonlySet<string> = new Set(['-fprint', '-fprint0', '-fprintf', '-fls'])
+
+/**
+ * The files find's expression writes (`-fprint`, `-fprint0`, `-fprintf`,
+ * `-fls`), read as paths. find's spec leaves them text, since its run takes
+ * every path among its words as a start point.
+ */
+function findWrites(argv: readonly string[], cwd: string): PathSpec[] {
+  let files: readonly string[]
+  try {
+    files = parseFind(argv).bind().files ?? []
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error
+    // The machine's find may take what Mirage's refuses (`-D`, `-O3`): each
+    // word after a writing action is then read as its file.
+    logger.debug?.(`find's words read by their actions: ${error.message}`)
+    files = argv.slice(1).filter((_, at) => FIND_WRITES.has(argv[at] ?? ''))
+  }
+  return files.map((file) => toScope(resolvePath(file, cwd)))
 }
 
 /**
@@ -112,6 +138,7 @@ export function readLine(
       const parsed = parseCommand(spec, [...argv], cwd, name)
       grammar = leafGrammar(parsed, argv, cwd, false)
       supplied.push(...parsed.suppliedPathValues.map((v) => toScope(v)))
+      if (name === 'find') supplied.push(...findWrites(argv, cwd))
       spoken = { spec, tree: false, passthrough: false }
       read = leafRead([name], parsed)
     }

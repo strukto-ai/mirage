@@ -116,6 +116,7 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 // Why the gate refuses, under a rule, a command that runs lines it cannot
 // see into: a sourced file, a script, a bash option mirage does not read.
 export const UNREADABLE_LINES = 'runs lines the gate cannot read'
+export const HOME_VAR: ReadonlySet<string> = new Set(['HOME'])
 
 /**
  * Commands that move the shell's cwd where the walk cannot follow: a line
@@ -505,10 +506,8 @@ async function* judgeWords(
   reparse: (line: string) => TSNodeLike,
 ): AsyncGenerator<Judged> {
   const {
-    words,
     occurrence,
     session,
-    redirects: redirectWords,
     stated = true,
     intrinsic = false,
     lost = false,
@@ -516,6 +515,8 @@ async function* judgeWords(
     open = false,
   } = item
   const wholeLine = takesWholeLine(mode)
+  const words = wholeLine ? item.words.map(machineWord) : item.words
+  const redirectWords = wholeLine ? item.redirects.map(machineWord) : item.redirects
   const head = words[0]
   if (head === undefined) return
   const rules = session.commands
@@ -1154,8 +1155,8 @@ function* walkedLine(
   lost = false,
   opens = false,
   pipeline = pipelineWalk(),
+  homes: Readonly<Record<string, string>> = tildeHomes(session),
 ): Generator<Walked> {
-  const homes = tildeHomes(session)
   for (const item of walkNode(
     root,
     session,
@@ -2531,7 +2532,12 @@ async function* judgeLine(
     }
     return
   }
-  for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline)) {
+  let homes = tildeHomes(session)
+  if (takesWholeLine(mode) && assignmentTo(typedLine(root, frame, reparse), HOME_VAR) !== null) {
+    // The machine's shell expands a later `~` with the HOME it was set.
+    homes = Object.fromEntries(Object.entries(homes).filter(([name]) => name !== ''))
+  }
+  for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline, homes)) {
     const elsewhere = item.elsewhere ?? []
     if (!takesWholeLine(mode) || elsewhere.length === 0) {
       yield* judged(item, item.session)
@@ -2545,6 +2551,33 @@ async function* judgeLine(
     }
     yield* strictest(places)
   }
+}
+
+/**
+ * The parse of the line a frame's text was typed in: `root` itself for a typed
+ * line, else the outermost line it was evaluated from.
+ */
+function typedLine(
+  root: TSNodeLike,
+  frame: Frame,
+  reparse: (line: string) => TSNodeLike,
+): TSNodeLike {
+  let at = frame.parent
+  if (at === null) return root
+  while (at.parent !== null) at = at.parent
+  return reparse(at.source)
+}
+
+/**
+ * A word as a whole line's gate reads it: a leading `~` the gate left
+ * unexpanded (a user it does not know, `~+`, or `~` once the line set HOME)
+ * names what only the machine's shell can say.
+ */
+function machineWord(word: Word): Word {
+  if (word.text !== null && word.raw.startsWith('~') && word.text.startsWith('~')) {
+    return { ...word, text: null }
+  }
+  return word
 }
 
 /**

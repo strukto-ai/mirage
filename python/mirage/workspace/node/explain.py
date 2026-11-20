@@ -192,6 +192,7 @@ PLACES_LIMIT = 8
 # Why the gate refuses, under a rule, a command that runs lines it cannot
 # see into: a sourced file, a script, a bash option mirage does not read.
 UNREADABLE_LINES = "runs lines the gate cannot read"
+HOME_VAR = frozenset({"HOME"})
 
 
 class JudgmentMode(StrEnum):
@@ -585,14 +586,17 @@ async def _judge_words(
         namespace (Namespace | None): the link table.
         mode (JudgmentMode): how this judgment reads the command and policies.
     """
+    whole_line = takes_whole_line(mode)
     words = item.words
+    redirect_words = item.redirects
+    if whole_line:
+        words = [_machine_word(w) for w in words]
+        redirect_words = tuple(_machine_word(w) for w in redirect_words)
     occurrence = item.occurrence
     session = item.session
-    redirect_words = item.redirects
     intrinsic = item.intrinsic
     lost = item.lost
     open_ = item.open_
-    whole_line = takes_whole_line(mode)
     head = words[0]
     rules = session.commands
     if whole_line and await registry.policies.wants_for(
@@ -1466,6 +1470,7 @@ def _walked_line(
     lost: bool = False,
     opens: bool = False,
     pipeline: _PipelineWalk | None = None,
+    homes: Mapping[str, str] | None = None,
 ) -> Iterator[Walked]:
     """Every command of a line with its redirect targets, the session
     it is judged in and its place on the line.
@@ -1487,14 +1492,16 @@ def _walked_line(
         opens (bool): also yield each statement's redirects no command
             owns, as an item with no words, where the statement stands
             (``explain_redirects``).
+        homes (Mapping[str, str] | None): the homes each ``~name`` names;
+            None for the session's own.
     """
     if frame is None:
         frame = root_frame(ast, None)
     if pipeline is None:
         pipeline = _pipeline_walk()
-    for item in _walk_node(
-        ast, session, tilde_homes(session), frame, pipeline, lost
-    ):
+    if homes is None:
+        homes = tilde_homes(session)
+    for item in _walk_node(ast, session, homes, frame, pipeline, lost):
         if item.words or opens:
             yield item
 
@@ -2128,7 +2135,13 @@ async def _judge_line(
             False,
         )
         return
-    for item in _walked_line(ast, session, frame, lost, pipeline=pipeline):
+    homes = tilde_homes(session)
+    if whole_line and _assignment_to(_typed_line(ast, frame), HOME_VAR):
+        # The machine's shell expands a later `~` with the HOME it was set.
+        homes = {name: home for name, home in homes.items() if name}
+    for item in _walked_line(
+        ast, session, frame, lost, pipeline=pipeline, homes=homes
+    ):
         if not whole_line or not item.elsewhere:
             async for one in judged(item, item.session):
                 yield one
@@ -2139,6 +2152,35 @@ async def _judge_line(
         ]
         for one in _strictest(places):
             yield one
+
+
+def _typed_line(ast: Any, frame: Frame) -> Any:
+    """The parse of the line a frame's text was typed in: ``ast`` itself
+    for a typed line, else the outermost line it was evaluated from.
+
+    Args:
+        ast (Any): the parsed root node of the frame's text.
+        frame (Frame): the scope the line is read in.
+    """
+    at = frame.parent
+    if at is None:
+        return ast
+    while at.parent is not None:
+        at = at.parent
+    return parse(at.source)
+
+
+def _machine_word(word: Word) -> Word:
+    """A word as a whole line's gate reads it: a leading ``~`` the gate
+    left unexpanded (a user it does not know, ``~+``, or ``~`` once the
+    line set HOME) names what only the machine's shell can say.
+
+    Args:
+        word (Word): the word as the walk read it.
+    """
+    if word.text is not None and word.raw[:1] == word.text[:1] == "~":
+        return Word(word.raw, None, word.glob)
+    return word
 
 
 def _assignment_to(ast: Any, names: frozenset[str]) -> Any | None:

@@ -783,6 +783,75 @@
           }
         }
       ]
+    },
+    {
+      "id": "whole_line_paths",
+      "note": "A path rule on a line run whole reads the file the machine's shell opens: a `~` once the line sets HOME, or for a user Mirage does not know, is refused as a word only the machine can expand, and `//` is `/`.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "s\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "*": [
+                "allow",
+                {
+                  "decision": "deny",
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/secret.txt"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "HOME=/ram; cat ~/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat ~backup/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat //ram/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: //ram/secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat ~/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:cat ~/secret.txt\n"
+          }
+        }
+      ]
     }
   ]
 }

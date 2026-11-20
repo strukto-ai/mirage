@@ -62,7 +62,8 @@ refuses `git push --force`.
 A machine that takes a line whole (`@line`) expands its words itself, so a
 method reads them as typed. While a `pre_command` method is installed, in code
 or in the session's profile, such a line exits 126 when it holds a word only
-the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
+the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`, a
+`~` once the line sets `HOME`, `~name` for a user Mirage does not know), a
 line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
 the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
 So does a line that sets what the machine's shell runs later in a way Mirage

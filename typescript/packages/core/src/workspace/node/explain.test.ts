@@ -1253,6 +1253,67 @@ describe('prejudge', () => {
     },
   )
 
+  // What a path check reads must be the file the machine opens: its shell
+  // expands `~` with its own HOME and user database, and `//` is `/`.
+  it.each([false, true])(
+    'reads the file a whole line opens in a path check (coded %s)',
+    async (coded) => {
+      const sealedSecret: Policy = {
+        preCommand: (ctx: CommandContext): Action | null =>
+          ctx.paths.some((p) => p.virtual === '/data/secret.txt')
+            ? { kind: 'deny', reason: 'sealed' }
+            : null,
+      }
+      const rule = SessionProfile({
+        commands: {
+          '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] }],
+        },
+      })
+      const box = new LineBox()
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: { r: coded ? SessionProfile({}) : rule },
+          policies: coded ? [sealedSecret] : [],
+          machines: [box],
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'r' })
+      const lines = [
+        'HOME=/data; cat ~/secret.txt',
+        'export HOME=/data; cat ~/secret.txt',
+        "HOME=/data; eval 'cat ~/secret.txt'",
+        'cat ~backup/secret.txt',
+        'cat //data/secret.txt',
+        ...(coded
+          ? [
+              'find /data/pub -fprint /data/secret.txt',
+              'find /data/pub -fprint0 /data/secret.txt',
+              'find /data/pub -fls /data/secret.txt',
+            ]
+          : []),
+      ]
+      for (const line of lines) {
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        expect([line, ran.exitCode === 0]).toEqual([line, false])
+        expect([line, said.exitCode, said.stderr]).toEqual([
+          line,
+          ran.exitCode,
+          DEC.decode(ran.stderr),
+        ])
+      }
+      expect(box.lines).toEqual([])
+      for (const line of ['cat ~/secret.txt', 'cat ~root/secret.txt']) {
+        expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
+      }
+      expect(box.lines).toEqual(['cat ~/secret.txt', 'cat ~root/secret.txt'])
+    },
+    30_000,
+  )
+
   it('has a coded policy judge a whole line where it may stand', async () => {
     // With no rule in force a coded policy is a whole line's only gate: it
     // was shown only the cwd a skipped cd predicted, nothing at all for a name

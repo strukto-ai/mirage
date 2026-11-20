@@ -13,14 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import logging
 from collections.abc import Mapping, Sequence
 
 from mirage.commands.cli.walk import owns_argv, parse_leaf, walk
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.parser import ParsedArgs, word_paths
 from mirage.commands.spec.types import WordKind
 from mirage.policy.match.grammar import flag_facts, leaf_read
 from mirage.policy.types import CommandRead, CommandWord, Grammar
+from mirage.rs.find import parse_find
 from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
@@ -30,6 +33,11 @@ from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.lookup import SLASH_KEEPS_LAST
 from mirage.workspace.mount import MountRegistry
+
+logger = logging.getLogger(__name__)
+
+# The find actions whose next word is a file the run writes.
+_FIND_WRITES = frozenset({"-fprint", "-fprint0", "-fprintf", "-fls"})
 
 WordGrammar = tuple[WordKind, str | None, PathSpec | None]
 
@@ -140,6 +148,8 @@ def read_line(
             parsed = parse_command(spec, list(argv), cwd, name)
             grammar = _leaf_grammar(parsed, argv, cwd, operands=False)
             supplied += [_to_scope(v) for v in parsed.supplied_path_values]
+            if name == "find":
+                supplied += _find_writes(argv, cwd)
             spoken = Grammar(spec)
             read = leaf_read((name,), parsed)
         program = (name,)
@@ -184,6 +194,29 @@ def context_words(
             for p in redirects
         ),
     )
+
+
+def _find_writes(argv: Sequence[str], cwd: str) -> list[PathSpec]:
+    """The files find's expression writes (``-fprint``, ``-fprint0``,
+    ``-fprintf``, ``-fls``), read as paths. find's spec leaves them text,
+    since its run takes every path among its words as a start point.
+
+    Args:
+        argv (Sequence[str]): find's words after its name.
+        cwd (str): working directory the line was typed under.
+    """
+    try:
+        files = parse_find(argv).bind().files
+    except UsageError as exc:
+        # The machine's find may take what Mirage's refuses (`-D`, `-O3`):
+        # each word after a writing action is then read as its file.
+        logger.debug("find's words read by their actions: %s", exc)
+        files = [
+            after
+            for word, after in zip(argv, argv[1:])
+            if word in _FIND_WRITES
+        ]
+    return [_to_scope(resolve_path(f, cwd)) for f in files]
 
 
 def line_paths(
