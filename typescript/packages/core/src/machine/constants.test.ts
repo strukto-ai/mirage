@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  DARWIN_POINT_MARK,
   ENCODE_OUTPUT,
   MIRAGE_FUSE_FIND,
   MIRAGE_FUSE_LINE,
@@ -41,6 +42,9 @@ import {
   SSHFS_LINE,
   SSHFS_OPTIONS,
   TOOLS_PATH,
+  darwinMountTable,
+  darwinStart,
+  darwinTableLine,
   decodeOutput,
   mountField,
   machineDirLine,
@@ -48,6 +52,8 @@ import {
   runDoneMark,
   runExitMark,
   runTag,
+  scanLine,
+  signalLine,
   stopLine,
   wrapLine,
 } from './constants.ts'
@@ -636,5 +642,99 @@ describe('MIRAGE_FUSE_LINE', () => {
   })
   it('fails without uv or npm', () => {
     expect(line(machine(), [])).toEqual([1, []])
+  })
+})
+
+describe('darwinMountTable', () => {
+  it('names each prefix by its real path', () => {
+    const [rows, points] = darwinMountTable(
+      '/dev/disk3s1 on / (apfs, local, read-only, journaled)\n' +
+        'src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, ' +
+        'synchronous, nobrowse, mounted by u)\n' +
+        'map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n' +
+        `${DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n` +
+        `${DARWIN_POINT_MARK}/notes\t/notes\n`,
+    )
+    expect(Object.fromEntries(rows)).toEqual({ '/data': ['src-1:/data', 'macfuse'] })
+    expect(Object.fromEntries(points)).toEqual({
+      '/data': '/home/u/.mirage/mnt/data',
+      '/notes': '/notes',
+    })
+  })
+})
+
+const onMac = process.platform === 'darwin' ? describe : describe.skip
+
+function sh(line: string): { status: number; stdout: string } {
+  const done = spawnSync('/bin/sh', ['-c', line], { encoding: 'utf8' })
+  return { status: done.status ?? 1, stdout: done.stdout }
+}
+
+// The tag, pid and parent of each row a scan prints.
+function scanned(stdout: string): [string, number, number][] {
+  return stdout
+    .split('\n')
+    .filter((row) => row.startsWith('M '))
+    .map((row) => {
+      const [, tag = '', pid = '', ppid = ''] = row.split(' ')
+      return [tag, Number(pid), Number(ppid)]
+    })
+}
+
+async function settled(child: ReturnType<typeof spawn>): Promise<number | null> {
+  if (child.exitCode !== null || child.signalCode !== null) return child.exitCode
+  return new Promise((resolve) =>
+    child.on('exit', (code) => {
+      resolve(code)
+    }),
+  )
+}
+
+onMac('a Mac', () => {
+  it('follows a link to its real path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-table-'))
+    try {
+      mkdirSync(join(dir, 'real'))
+      symlinkSync(join(dir, 'real'), join(dir, 'link'))
+      const [, points] = darwinMountTable(sh(darwinTableLine([`${dir}/link/ws`])).stdout)
+      const real = spawnSync('/bin/sh', ['-c', `cd '${dir}/real' && pwd -P`], {
+        encoding: 'utf8',
+      }).stdout.trim()
+      expect(Object.fromEntries(points)).toEqual({ [`${dir}/link/ws`]: `${real}/ws` })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('knows a run by its program and what runs under it', async () => {
+    const tagged = { ...process.env, [PROCESS]: 'w1:9' }
+    const untagged = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name !== PROCESS),
+    )
+    const wrapper = spawn('/bin/sh', ['-c', '/bin/sleep 30', 'sh', `${PROCESS}=w1:9`], {
+      env: untagged,
+    })
+    const other = spawn('/bin/sh', ['-c', 'exec /bin/sleep 31'], {
+      env: { ...process.env, [PROCESS]: 'w1:90' },
+    })
+    const program = spawn('/bin/sh', ['-c', '/bin/sleep 32 & wait'], { env: tagged })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const pid = program.pid ?? 0
+      const started = Number(sh(darwinStart(String(pid))).stdout)
+      const rows = scanned(sh(scanLine('w1', new Map([[pid, ['w1:9', started]]]))).stdout)
+      expect(
+        new Set(rows.map(([tag, row, parent]) => `${tag} ${String(parent === pid || row)}`)),
+      ).toEqual(new Set([`w1:9 ${String(pid)}`, 'w1:9 true']))
+      expect(sh(signalLine({ pid, started: started + 100 }, 0)).status).toBe(NOT_RUNNING_STATUS)
+      expect(sh(signalLine({ pid, started }, 0)).status).toBe(0)
+      expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(0)
+      await settled(program)
+      expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(NOT_RUNNING_STATUS)
+      expect([wrapper.exitCode, other.exitCode]).toEqual([null, null])
+    } finally {
+      for (const child of [wrapper, other, program]) child.kill('SIGKILL')
+      await Promise.all([wrapper, other, program].map((child) => settled(child)))
+    }
   })
 })

@@ -1,2 +1,5 @@
 #!/bin/sh
-exec "$(dirname "$(readlink -f "$0")")/mirage-fuse-$(uname -m)" "$@"
+m=$(uname -m)
+[ "$m" = armv8l ] && m=armv7l
+[ "$(uname -s)" = Darwin ] && m=darwin-$m
+exec "$(dirname "$(readlink -f "$0")")/mirage-fuse-$m" "$@"

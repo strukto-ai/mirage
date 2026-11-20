@@ -40,6 +40,10 @@ from mirage.errors.types import QuotaExceededError
 from mirage.io.types import materialize
 from mirage.machine import mounts
 from mirage.machine.constants import (
+    DARWIN_ADMIN_STATUS,
+    DARWIN_MOUNT_GUARD,
+    DARWIN_PATH,
+    DARWIN_POINT_MARK,
     MIRAGE_FUSE_LINE,
     MOUNT_GUARD,
     PIPE_SERVER_HINT,
@@ -48,6 +52,7 @@ from mirage.machine.constants import (
     SSHFS_LINE,
     SSHFS_LINKS_OPTION,
     SSHFS_OPTIONS,
+    darwin_admin_hint,
     is_run,
 )
 from mirage.machine.handle import MachineHandle
@@ -276,6 +281,99 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.requests[prefix].feed_eof()
         source, _ = self.table.pop(prefix)
         self.running.discard(source)
+
+
+class FakeMac(FakeMachine):
+    """A Mac: no ``/proc``, a table ``mount`` prints at each mount's real
+    path, and a root folder only where a link in ``/etc/synthetic.conf``
+    leads it into Mirage's folder (``linked``)."""
+
+    def __init__(self, mount_type, linked=(), **options):
+        super().__init__(mount_type, **options)
+        self.linked = set(linked)
+
+    def real(self, prefix):
+        if prefix in self.linked:
+            return f"/home/u/.mirage/mnt{prefix}"
+        return prefix
+
+    def mount_rows(self):
+        return "".join(
+            f"{source} on {point} ({kind}, nodev, nosuid)\n"
+            for point, (source, kind) in self.table.items()
+        )
+
+    async def _answer(self, argv, stdin, env, cwd) -> RunAnswer:
+        if is_run(argv):
+            argv = argv[RUN_PROGRAM_AT:]
+        if argv[2:3] == (DARWIN_MOUNT_GUARD,):
+            checked = await self.run_mac_guard(argv)
+            if checked.exit_code != 0:
+                return checked
+            argv = argv[argv.index("--", 5) + 1 :]
+        return await super()._answer(argv, stdin, env, cwd)
+
+    async def exec_line(
+        self, line, stdin, env, cwd, *, bounded=False
+    ) -> RunAnswer:
+        if line == "uname -s":
+            self.commands.append(line)
+            return RunAnswer(0, b"Darwin\n")
+        if line.startswith(f"PATH={DARWIN_PATH}; mount || exit 1;"):
+            self.commands.append(line)
+            words = line.split("for p in ", 1)[1].split("; do", 1)[0]
+            points = "".join(
+                f"{DARWIN_POINT_MARK}{p}\t{self.real(p)}\n"
+                for p in shlex.split(words)
+            )
+            return RunAnswer(0, (self.mount_rows() + points).encode())
+        if line.startswith(f"PATH={DARWIN_PATH}; p="):
+            self.commands.append(line)
+            prefix = shlex.split(line)[1][2:-1]
+            if prefix.count("/") == 1 and prefix not in self.linked:
+                return RunAnswer(DARWIN_ADMIN_STATUS)
+            return RunAnswer(0, f"{self.real(prefix)}\n".encode())
+        if line.startswith("umount -f "):
+            self.commands.append(line)
+            source, _ = self.table.pop(shlex.split(line)[2], (None, None))
+            self.running.discard(source)
+            return RunAnswer(0)
+        return await super().exec_line(line, stdin, env, cwd, bounded=bounded)
+
+    async def open_pipe(self, command):
+        pipe = await super().open_pipe(command)
+        source, point = sshfs_mount(command)
+        if point in self.table:
+            self.table[point] = (source, "macfuse")
+        return pipe
+
+    async def run_mac_guard(self, argv):
+        """Run a line's Mac mount guard through /bin/sh, its ``mount``
+        printing this table."""
+        entries = argv[8 : argv.index("--", 8)]
+        self.guards.append(entries)
+        fd, path = tempfile.mkstemp()
+        with os.fdopen(fd, "w") as script:
+            script.write(
+                f"#!/bin/sh\nprintf '%s' {shlex.quote(self.mount_rows())}\n"
+            )
+        os.chmod(path, 0o755)
+        try:
+            done = await asyncio.create_subprocess_exec(
+                argv[0],
+                argv[1],
+                argv[2].replace("/sbin/mount", path),
+                *argv[3:8],
+                *entries,
+                "--",
+                "true",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out, err = await done.communicate()
+        finally:
+            os.unlink(path)
+        return RunAnswer(done.returncode, out, err)
 
 
 def escaped(text, more=""):
@@ -1854,4 +1952,66 @@ async def test_a_line_waits_out_only_what_another_changed_under_its_mounts():
         SERVED_BY.reset(token)
     assert (await ws.shell("python3 job.py")).exit_code == 0
     assert clock.monotonic() == start + 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mac_mounts_each_prefix_where_its_root_link_leads():
+    mac = FakeMac("mirage", linked={"/data", "/my notes"})
+    ws = workspace(mac)
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
+    points = ["/home/u/.mirage/mnt/data", "/home/u/.mirage/mnt/my notes"]
+    assert sorted(mac.table) == points
+    assert [sshfs_mount(p)[1] for p in mac.pipes] == points
+    assert list(mac.guards[0][0::4]) == points
+    assert list(mac.guards[0][2::4]) == ["macfuse", "macfuse"]
+    await ws.close()
+    assert mac.table == {}
+
+
+@pytest.mark.asyncio
+async def test_a_mac_without_a_root_link_names_the_commands_that_make_it():
+    mac = FakeMac("mirage")
+    ws = workspace(mac)
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == (
+        "python3: "
+        + darwin_admin_hint("fake", "/data", "/home/u/.mirage/mnt")
+        + "\n"
+    )
+    assert mac.pipes == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_macs_guard_refuses_a_line_once_its_mount_is_gone():
+    mac = FakeMac("mirage", linked={"/data", "/my notes"})
+    ws = workspace(mac)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    mac.table.pop("/home/u/.mirage/mnt/data")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 126
+    assert await result.stderr_str() == (
+        "fake: /data is no longer mounted in the machine (did it restart?); "
+        "the line did not run\n"
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mac_takes_no_ssh_mount():
+    mac = FakeMac("ssh", linked={"/data", "/my notes"})
+    ws = workspace(mac)
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == (
+        "python3: fake: mount_type ssh needs a Linux machine; a Mac takes "
+        "mount_type mirage\n"
+    )
     await ws.close()

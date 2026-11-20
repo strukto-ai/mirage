@@ -258,3 +258,17 @@ export function parseDarwinResources(text: string, machine: string): MachineReso
     cpuInfo: cpuInfo(rows),
   }
 }
+
+/**
+ * What `machineResourcesLine` printed: a Mac's rows, which name its memory
+ * size, or a Linux machine's. Mirrors Python's `parse_machine_resources`.
+ *
+ * @param text what the line printed.
+ * @param machine the machine, as `ps` shows it.
+ */
+export function parseMachineResources(text: string, machine: string): MachineResources {
+  if (`\n${text}`.includes(`\n${RESOURCE_MARK} memsize `)) {
+    return parseDarwinResources(text, machine)
+  }
+  return parseResources(text, machine)
+}

@@ -50,7 +50,7 @@ from mirage.machine.constants import (
     STOP_POLL_SECONDS,
     faketime_env,
     faketime_probe,
-    resources_line,
+    machine_resources_line,
     run_argv,
     run_done_mark,
     run_exit_mark,
@@ -61,7 +61,7 @@ from mirage.machine.constants import (
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
-from mirage.machine.resources import parse_resources
+from mirage.machine.resources import parse_machine_resources
 from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.constants import sdk_install_hint
@@ -583,10 +583,10 @@ class MachineHandle:
                     if runner.signal is not None
                     else runner.interrupted
                 )
-            await asyncio.shield(self.stop(tag, signum or 15))
+            await asyncio.shield(self.stop(tag, signum or 15, _root(reported)))
             raise
         except PipeClosed:
-            await asyncio.shield(self.stop(tag, PIPE_SIGNAL))
+            await asyncio.shield(self.stop(tag, PIPE_SIGNAL, _root(reported)))
             raise
         except ConnectionLostError:
             logger.debug("%s: connection lost", self.machine, exc_info=True)
@@ -689,27 +689,34 @@ class MachineHandle:
         """Whether a run is executing on the machine right now."""
         return self._executing > 0
 
-    async def status(self, workspace: str) -> list[MachineProcess]:
+    async def status(
+        self,
+        workspace: str,
+        roots: Mapping[int, tuple[str, float]] | None = None,
+    ) -> list[MachineProcess]:
         """Every process the runs of ``workspace`` started on the
         machine, as one scan (``scan_line``) finds them now, within
         ``SCAN_WAIT_SECONDS``.
 
         Args:
             workspace (str): the workspace's id.
+            roots (Mapping[int, tuple[str, float]] | None): each run's
+                program on the machine, by its pid: its tag and start,
+                which a Mac knows a run by.
 
         Raises:
             Exception: the machine could not be reached, or the scan
                 failed.
         """
         done = await self._connected_line(
-            scan_line(workspace), SCAN_WAIT_SECONDS
+            scan_line(workspace, roots), SCAN_WAIT_SECONDS
         )
         if done.exit_code != 0:
             raise RuntimeError(f"{self.machine}: scan exited {done.exit_code}")
         return _parse_scan(done.stdout)
 
     async def resources(self, cpu: bool) -> MachineResources:
-        """What the machine holds now (``resources_line``), within
+        """What the machine holds now (``machine_resources_line``), within
         ``RESOURCE_WAIT_SECONDS``.
 
         Args:
@@ -721,11 +728,11 @@ class MachineHandle:
                 printed does not read.
         """
         done = await self._connected_line(
-            resources_line(cpu), RESOURCE_WAIT_SECONDS
+            machine_resources_line(cpu), RESOURCE_WAIT_SECONDS
         )
         if done.exit_code != 0:
             raise RuntimeError(f"{self.machine}: read exited {done.exit_code}")
-        return parse_resources(
+        return parse_machine_resources(
             done.stdout.decode(errors="replace"), str(self.machine)
         )
 
@@ -756,7 +763,9 @@ class MachineHandle:
             )
         return done.exit_code == 0
 
-    async def stop(self, tag: str, signum: int) -> bool:
+    async def stop(
+        self, tag: str, signum: int, root: MachinePid | None = None
+    ) -> bool:
         """Stop a run: every process its ``PROCESS`` tag marks gets
         ``signum``, then KILL a second later. Connecting and stopping
         take at most ``MACHINE_STOP_WAIT_SECONDS``, so a machine that
@@ -778,7 +787,7 @@ class MachineHandle:
                 async with self._at_work():
                     done = await answer_of(
                         lambda output, errors: self._exec_argv(
-                            ("/bin/sh", "-c", stop_line(tag, signum)),
+                            ("/bin/sh", "-c", stop_line(tag, signum, root)),
                             None,
                             dict(self.config.env),
                             "/",
@@ -1110,6 +1119,18 @@ def _usage_of(
         rss,
         vsize // 1024,
     )
+
+
+def _root(reported: list[RunStatus]) -> MachinePid | None:
+    """The program a run's wrapper reported, which a Mac stops a run
+    by; None before it did.
+
+    Args:
+        reported (list[RunStatus]): what the wrapper reported, if it has.
+    """
+    if not reported or reported[0].started is None:
+        return None
+    return MachinePid(reported[0].pid, reported[0].started)
 
 
 def _parse_scan(stdout: bytes | None) -> list[MachineProcess]:

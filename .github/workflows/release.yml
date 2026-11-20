@@ -69,31 +69,55 @@ jobs:
           name: npm-tarballs
           path: ${{ runner.temp }}/npm/*.tgz
 
-  # mirage-fuse runs on the machine, so it builds for Linux alone: one static
-  # musl executable per architecture, which runs on glibc and musl alike, so
-  # each wheel carries both platform tags.
+  # mirage-fuse runs on the machine: on Linux, one static musl executable
+  # per architecture, which runs on glibc and musl alike, so each wheel
+  # carries both platform tags. 32-bit ARM covers the Raspberry Pi: armv6
+  # (Pi Zero and 1) has neither tag, so its wheel is linux_armv6l, which
+  # PyPI accepts for that architecture. On macOS it loads macFUSE's library
+  # when it mounts, so it links nothing of it and builds without it.
   fuse:
     needs: versions
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            args: --zig --compatibility manylinux2014 musllinux_1_2
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            args: --zig --compatibility manylinux2014 musllinux_1_2
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            args: --zig --compatibility manylinux2014 musllinux_1_2
+          - os: ubuntu-latest
+            target: arm-unknown-linux-musleabihf
+            args: --zig --compatibility linux
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: ""
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
       - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: rust/fuse
           target: ${{ matrix.target }}
-          args: --release --locked --zig --compatibility manylinux2014 musllinux_1_2 --out dist
+          args: --release --locked ${{ matrix.args }} --out dist
       - uses: actions/upload-artifact@v7
         with:
           name: mirage-fuse-wheel-${{ matrix.target }}
           path: rust/fuse/dist/*.whl
 
-  # The npm package carries both executables, and its bin script picks the
-  # one for `uname -m`. npm pack keeps their mode; pnpm pack would not.
+  # The npm package carries every executable, and its bin script picks the
+  # one for `uname -s` and `uname -m`. npm pack keeps their mode; pnpm pack
+  # would not.
   fuse-npm:
     needs: fuse
     runs-on: ubuntu-latest
@@ -107,10 +131,13 @@ jobs:
           path: ${{ runner.temp }}/wheels
       - name: Pack
         run: |
-          for arch in x86_64 aarch64; do
-            unzip -p "$RUNNER_TEMP"/wheels/*_"$arch".whl '*.data/scripts/mirage-fuse' > "rust/fuse/bin/mirage-fuse-$arch"
-            chmod +x "rust/fuse/bin/mirage-fuse-$arch"
+          for arch in x86_64 aarch64 armv7l armv6l; do
+            unzip -p "$RUNNER_TEMP"/wheels/*linux*_"$arch".whl '*.data/scripts/mirage-fuse' > "rust/fuse/bin/mirage-fuse-$arch"
           done
+          for arch in x86_64 arm64; do
+            unzip -p "$RUNNER_TEMP"/wheels/*macosx*_"$arch".whl '*.data/scripts/mirage-fuse' > "rust/fuse/bin/mirage-fuse-darwin-$arch"
+          done
+          chmod +x rust/fuse/bin/mirage-fuse-*
           mkdir "$RUNNER_TEMP/npm"
           (cd rust/fuse && npm pack --pack-destination "$RUNNER_TEMP/npm")
       - name: Each artifact carries the license

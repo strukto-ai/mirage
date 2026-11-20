@@ -15,6 +15,7 @@ keywords = ["ai-agents", "filesystem", "fuse"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
     "Topic :: System :: Filesystems",

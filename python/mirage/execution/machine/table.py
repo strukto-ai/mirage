@@ -270,10 +270,31 @@ class MachineTable:
                 for tag in unscanned
                 if _reached(processes, runs[tag].machine) != processes.machine
             }
+            wanted = {
+                tag: record
+                for tag, record in runs.items()
+                if record.machine_pid is not None
+                and (tag in live or tag in unscanned or tag in found_tags)
+            }
             scans: list[
                 tuple[MachineName, Awaitable[list[MachineProcess]]]
             ] = [
-                (handle.machine, handle.status(workspace))
+                (
+                    handle.machine,
+                    handle.status(
+                        workspace,
+                        {
+                            record.machine_pid.pid: (
+                                tag,
+                                record.machine_pid.started,
+                            )
+                            for tag, record in wanted.items()
+                            if record.machine_pid is not None
+                            and _reached(processes, record.machine)
+                            == handle.machine
+                        },
+                    ),
+                )
                 for handle in self._handles.values()
                 if handle.executing or str(handle.machine) in machines_to_scan
             ]
@@ -424,7 +445,11 @@ class MachineTable:
         if handle is None:
             return False
         return await handle.stop(
-            str(ProcessId(processes.workspace_id, pid)), signum
+            str(ProcessId(processes.workspace_id, pid)),
+            signum,
+            MachinePid(found["pid"], found["started"], found["exited"])
+            if isinstance(found, dict)
+            else None,
         )
 
     async def _signal_on(

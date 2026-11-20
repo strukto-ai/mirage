@@ -220,9 +220,23 @@ export class MachineTable {
       if (machine !== undefined && reached(processes, machine).toString() !== host)
         machinesToScan.add(machine.toString())
     }
+    const wanted = [...runs].filter(
+      ([tag, record]) =>
+        record.machinePid !== null && (live.has(tag) || unscanned.has(tag) || foundTags.has(tag)),
+    )
     const scans: [MachineName, Promise<MachineProcess[]>][] = this.handles()
       .filter((handle) => handle.executing || machinesToScan.has(handle.machine.toString()))
-      .map((handle) => [handle.machine, handle.status(workspace)])
+      .map((handle) => {
+        const roots = new Map<number, readonly [string, number]>()
+        for (const [tag, record] of wanted) {
+          if (
+            record.machinePid !== null &&
+            reached(processes, record.machine).toString() === handle.machine.toString()
+          )
+            roots.set(record.machinePid.pid, [tag, record.machinePid.started])
+        }
+        return [handle.machine, handle.status(workspace, roots)]
+      })
     if (this.scanHost !== null) {
       const groups = new Map<number, readonly [string, number]>()
       for (const [tag, record] of runs) {
@@ -343,7 +357,7 @@ export class MachineTable {
     }
     const handle = typeof machine === 'string' ? this.byId(machine) : null
     if (handle === null) return false
-    return handle.stop(new ProcessId(processes.workspaceId, pid).toString(), signum)
+    return handle.stop(new ProcessId(processes.workspaceId, pid).toString(), signum, found ?? null)
   }
 
   /** Send `signum` to one process on `machine`. */

@@ -294,9 +294,13 @@ machine serves, and rules that depend on which program opens a file.
   (`Permission denied`). The machine asks only for what a program opens or
   lists, never ahead of it.
 
-`mirage-fuse` runs on Linux, x86_64 or arm64, with glibc or musl. For a
-machine without `uv`, `npm` or network access, put it in the image with
-either:
+- Sessions, restarts, refused writes and the paths left unserved work as
+  under `ssh`.
+
+`mirage-fuse` runs on Linux, x86_64, arm64 or 32-bit ARM (armv7 and armv6,
+so every Raspberry Pi), with glibc or musl, and on macOS, Apple silicon or
+Intel. For a machine without `uv`, `npm` or network access, put it in the
+image with either:
 
 ```bash
 npm install -g @struktoai/mirage-fuse
@@ -304,8 +308,31 @@ UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mirage-fuse
 ```
 
 `mirage-fuse --version` ends with `fsproto 1`.
-- Sessions, restarts, refused writes and the paths left unserved work as
-  under `ssh`.
+
+#### A Mac
+
+A Mac reached over [SSH](/home/setup/machine/ssh) takes `mount_type:
+mirage`, not `ssh`. `mirage-fuse` mounts through
+[macFUSE](/home/setup/macos), which the Mac's owner installs once, its
+system extension allowed; Mirage cannot install it.
+
+- A prefix mounts at its own path when the machine user can make that
+  folder (`/Users/me/project`, `/tmp/work`).
+- macOS keeps its root folder read-only, so a prefix there (`/data`)
+  needs a link in `/etc/synthetic.conf` into Mirage's folder,
+  `~/.mirage/mnt/data`. Mirage makes it with `sudo -n` where it may;
+  otherwise the line stops and names the two commands an administrator
+  runs once:
+
+  ```bash
+  printf 'data\tUsers/me/.mirage/mnt/data\n' | sudo tee -a /etc/synthetic.conf
+  sudo /System/Library/Filesystems/apfs.fs/Contents/Resources/apfs.util -t
+  ```
+- Programs, `ps`, `kill`, `timeout`, `top` and `free` work as on Linux.
+  macOS hides the environment of its own programs (`/bin/sh`,
+  `/usr/bin/*`), so Mirage knows a run there by its program and what runs
+  under it; a program that leaves its run and is one of Apple's is no
+  longer shown or stopped with it.
 
 ### own
 
@@ -497,8 +524,8 @@ also need `dd` and `base64`, which carry a program's output back. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration/workspace#system-time). With
 `mount_type: ssh` the machine also needs `sshfs`, with `mount_type: mirage`
-`fuse3` and `uv` or `npm` to install `mirage-fuse`, and a machine that runs its own Mirage needs
-`fuse3` and Mirage.
+`fuse3` (macFUSE on a Mac) and `uv` or `npm` to install `mirage-fuse`, and a
+machine that runs its own Mirage needs `fuse3` and Mirage.
 
 The repository's Dockerfile builds an image with `fuse3`, Mirage and
 libfaketime for every provider. It has no `sshfs`: add it for
