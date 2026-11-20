@@ -48,6 +48,7 @@ overrides:
   source-map-js@>=1.0.0 <1.2.2: '>=1.2.2 <2'
   deepmerge-ts@<8.0.0: '>=8.0.0 <9'
   zod@>=4.0.0 <4.6.6: '>=4.6.6 <5'
+  effect@<3.22.1: '>=3.22.1 <4'
   effect@>=4.0.0-beta.0 <4.0.0-beta.103: '>=4.0.0-beta.103 <4.0.0-rc.0'
   '@deepseek-ai/dsh-agent': 0.2.2-rc.3
   '@deepseek-ai/dsh-brand': 0.2.2-rc.3
@@ -211,7 +212,7 @@ importers:
         version: 1.9.29(@langchain/core@1.3.2(@opentelemetry/api@1.10.0)(@opentelemetry/exporter-trace-otlp-proto@0.223.0(@opentelemetry/api@1.10.0))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.10.0))(openai@7.19.0(@aws-sdk/credential-provider-node@3.972.92)(@smithy/signature-v4@5.7.5)(undici@8.12.3)(ws@8.22.0)(zod@4.6.7))(ws@8.22.0))
       '@mastra/core':
         specifier: ^1.81.0
-        version: 1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.21.0)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+        version: 1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.22.5)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
       '@modelcontextprotocol/client':
         specifier: ^2.3.0
         version: 2.3.0
@@ -860,7 +861,7 @@ importers:
     devDependencies:
       '@mastra/core':
         specifier: ^1.81.0
-        version: 1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.21.0)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+        version: 1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.22.5)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
       '@struktoai/mirage-node':
         specifier: workspace:*
         version: link:../node
@@ -3954,7 +3955,7 @@ packages:
       '@types/json-schema': ^7.0.15
       '@valibot/to-json-schema': ^1.3.0
       arktype: ^2.1.20
-      effect: ^3.20.0
+      effect: '>=3.22.1 <4'
       sury: ^10.0.0
       typebox: ^1.0.17
       valibot: ^1.4.2
@@ -3984,7 +3985,7 @@ packages:
       '@standard-community/standard-json': ^0.3.5
       '@standard-schema/spec': ^1.0.0
       arktype: ^2.1.20
-      effect: ^3.20.0
+      effect: '>=3.22.1 <4'
       openapi-types: ^12.1.3
       sury: ^10.0.0
       typebox: ^1.0.0
@@ -5012,8 +5013,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@3.21.0:
-    resolution: {integrity: sha512-PPN80qRokCd1f015IANNhrwOnLO7GrrMQfk4/lnZRE/8j7UPWrNNjPV0uBrZutI/nHzernbW+J0hdqQysHiSnQ==}
+  effect@3.22.5:
+    resolution: {integrity: sha512-AdIU4llI19BzhJ4xUBZix7kS8oiYSlCsJ61j3UM3UyJw9ecDrsrrweDFm/Ku1nHbJWMLoynK+1Me4it3Zkmjpw==}
 
   effect@4.0.0-beta.107:
     resolution: {integrity: sha512-OoBAv8eF+yanc+C6xhgEUnWeXUSHA6ynnscYqpkAY9GSnzZWystsIjBowVqCkLpHGlnRtdIqYT3wHwpOY6JDnQ==}
@@ -9693,7 +9694,7 @@ snapshots:
       globby: 11.1.0
       read-yaml-file: 1.1.0
 
-  '@mastra/core@1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.21.0)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)':
+  '@mastra/core@1.81.0(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(@opentelemetry/api@1.10.0)(ai@7.0.159(zod@4.6.7))(effect@3.22.5)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(@bufbuild/protobuf@2.16.0)(@grpc/grpc-js@1.14.5)(express@5.2.1)'
@@ -9712,7 +9713,7 @@ snapshots:
       execa: 9.6.1
       fastq: 1.20.3
       hono: 4.13.18
-      hono-openapi: 1.5.0(effect@3.21.0)(hono@4.13.18)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+      hono-openapi: 1.5.0(effect@3.22.5)(hono@4.13.18)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
       ignore: 7.0.14
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -10623,7 +10624,7 @@ snapshots:
     dependencies:
       c12: 3.1.0
       deepmerge-ts: 8.0.1
-      effect: 3.21.0
+      effect: 3.22.5
       empathic: 2.0.0
     transitivePeerDependencies:
       - magicast
@@ -10911,24 +10912,24 @@ snapshots:
 
   '@stablelib/base64@1.0.1': {}
 
-  '@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.21.0)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)':
+  '@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.5)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       quansync: 0.2.11
     optionalDependencies:
-      effect: 3.21.0
+      effect: 3.22.5
       typebox: 1.3.27
       zod: 4.6.7
       zod-to-json-schema: 3.25.2(zod@4.6.7)
 
-  '@standard-community/standard-openapi@0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.21.0)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.21.0)(openapi-types@12.1.3)(typebox@1.3.27)(zod@4.6.7)':
+  '@standard-community/standard-openapi@0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.5)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.22.5)(openapi-types@12.1.3)(typebox@1.3.27)(zod@4.6.7)':
     dependencies:
-      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.21.0)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.5)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
     optionalDependencies:
-      effect: 3.21.0
+      effect: 3.22.5
       typebox: 1.3.27
       zod: 4.6.7
 
@@ -11906,7 +11907,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@3.21.0:
+  effect@3.22.5:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
@@ -12579,11 +12580,11 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono-openapi@1.5.0(effect@3.21.0)(hono@4.13.18)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7):
+  hono-openapi@1.5.0(effect@3.22.5)(hono@4.13.18)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7):
     dependencies:
       '@hono/standard-validator': 0.4.0(@standard-schema/spec@1.1.0)(hono@4.13.18)
-      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.21.0)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
-      '@standard-community/standard-openapi': 0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.21.0)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.21.0)(openapi-types@12.1.3)(typebox@1.3.27)(zod@4.6.7)
+      '@standard-community/standard-json': 0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.5)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+      '@standard-community/standard-openapi': 0.2.11(@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.5)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.22.5)(openapi-types@12.1.3)(typebox@1.3.27)(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       hono: 4.13.18
