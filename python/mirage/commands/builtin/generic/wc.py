@@ -101,7 +101,8 @@ async def wc(
 
     Args:
         src (bytes | AsyncIterator[bytes]): The input.
-        flags (WCFlags | None): The counts asked for; None counts all.
+        flags (WCFlags | None): The command's count selectors, defaulting
+            to lines, words and bytes. Passing None computes all five counts.
     """
     asked = flags or WCFlags()
     config: dict[str, JsonValue] = {
@@ -111,6 +112,8 @@ async def wc(
         "chars": asked.chars,
         "max_line_length": asked.max_line_length,
     }
+    if flags is not None and not any(config.values()):
+        config.update(lines=True, words=True, bytes=True)
     async with aclosing(run_stream("wc", config, src)) as parts:
         report = b"".join([part async for part in parts])
     lines, words, bytes_count, chars, max_len = (
