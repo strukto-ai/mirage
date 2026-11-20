@@ -713,10 +713,7 @@ onMac('a Mac', () => {
     try {
       mkdirSync(join(dir, 'real'))
       symlinkSync(join(dir, 'real'), join(dir, 'link'))
-      const [, points] = darwinMountTable(
-        sh(darwinTableLine([`${dir}/link/ws`])).stdout,
-        new Map(),
-      )
+      const [, points] = darwinMountTable(sh(darwinTableLine([`${dir}/link/ws`])).stdout, new Map())
       const real = spawnSync('/bin/sh', ['-c', `cd '${dir}/real' && pwd -P`], {
         encoding: 'utf8',
       }).stdout.trim()
