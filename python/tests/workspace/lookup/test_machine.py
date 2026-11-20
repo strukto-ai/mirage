@@ -113,7 +113,7 @@ async def test_absolute_paths_run_there_from_root_off_the_machine_s_folders():
         "tar -xf /tmp/a.tar",
         r"find /tmp -exec cat a.py \;",
         "wc -l /tmp/a.py",
-        "grep -r -f /tmp/a.py x",
+        "grep -r -f /tmp/a.py",
     ],
 )
 async def test_a_command_that_may_use_its_folder_runs_only_from_the_machine_s(
@@ -144,7 +144,7 @@ async def test_explain_names_the_machine_the_run_hands_a_command_to():
     assert await placed("ls") == [("ls", "")]
     assert await placed("cat /tmp/a.py /data/b") == [("cat", "")]
     assert await placed("wc -l /tmp/a.py") == [("wc", "")]
-    assert await placed("grep -r -f /tmp/a.py x") == [("grep", "")]
+    assert await placed("grep -r -f /tmp/a.py") == [("grep", "")]
     await ws.shell("cd /tmp")
     assert await placed(r"find /tmp -exec cat /tmp/a.py \;") == [
         ("find", "box")

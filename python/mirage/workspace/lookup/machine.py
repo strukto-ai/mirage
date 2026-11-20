@@ -40,11 +40,7 @@ from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.constants import (
-    EXEC_WRAPPERS,
-    FOLDER_FREE,
-    KEYWORDS,
-)
+from mirage.workspace.lookup.constants import FOLDER_FREE, KEYWORDS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import (
     Consumer,
@@ -274,6 +270,27 @@ def _option_paths(argv: Argv, cwd: str) -> list[str]:
     return [p for p in parsed.path_flag_values if p != "-"]
 
 
+def _path_operands(argv: Argv, cwd: str) -> list[PathSpec]:
+    """The paths a command takes as operands, the files it works on, and
+    not as an option's value: ``grep -r -f /tmp/p`` takes none, so it
+    searches its folder. Every path for a command without a spec.
+
+    Args:
+        argv (Argv): the command.
+        cwd (str): the directory a relative path resolves against.
+    """
+    words = list(argv.operands)
+    spec = SPECS.get(argv.name)
+    if spec is None:
+        return [w for w in words if isinstance(w, PathSpec)]
+    roles = parse_command(spec, list(argv.args), cwd, argv.name).word_roles
+    return [
+        w
+        for w, role in zip(words, roles, strict=False)
+        if role is WordKind.OPERAND and isinstance(w, PathSpec)
+    ]
+
+
 def _child_paths(name: str, words: Sequence[str], cwd: str) -> list[str]:
     """The paths a ``find -exec`` command names, which the machine must
     hold as well, since the classifier keeps its words as text: an
@@ -295,33 +312,23 @@ def _child_paths(name: str, words: Sequence[str], cwd: str) -> list[str]:
     ]
 
 
-def _folder_free(name: str) -> bool:
-    """Whether a command touches nothing but the paths its words name
-    (``FOLDER_FREE``), an ``egrep`` as the ``grep`` it runs.
-
-    Args:
-        name (str): the command's name.
-    """
-    return EXEC_WRAPPERS.get(name, (name,))[0] in FOLDER_FREE
-
-
 def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
     """Every path a command names, absolute, with whether any of them
     depends on the folder it runs from: an operand typed relative, an
     option's path the folder changes, or no path operand at all (``ls``
-    and ``grep -r -f /tmp/p x`` read the folder).
+    and ``grep -r -f /tmp/p`` read the folder).
 
     Args:
         argv (Argv): the command.
         cwd (str): the session's folder.
     """
-    operands = [w for w in argv.operands if isinstance(w, PathSpec)]
+    named = [w for w in argv.operands if isinstance(w, PathSpec)]
     options = _option_paths(argv, cwd)
     children = _child_paths(argv.name, argv.args, cwd)
-    paths = [unmark_globs(w.virtual) for w in operands]
+    paths = [unmark_globs(w.virtual) for w in named]
     relative = (
-        not paths
-        or any(not w.raw_path.startswith("/") for w in operands)
+        not _path_operands(argv, cwd)
+        or any(not w.raw_path.startswith("/") for w in named)
         or options != _option_paths(argv, "/")
     )
     return [*paths, *options, *children], relative
@@ -380,7 +387,7 @@ async def operand_machine(
         runtime is None
         and not relative
         and cwd != "/"
-        and _folder_free(argv.name)
+        and argv.name in FOLDER_FREE
     ):
         runtime = await _machine_holding(
             scopes, session, registry, links, None
@@ -437,7 +444,7 @@ def stated_machine(
     ]
     here = norm(cwd)
     tries = [scopes] if here == "/" else [[*scopes, (here, False)]]
-    if not relative and here != "/" and _folder_free(name):
+    if not relative and here != "/" and name in FOLDER_FREE:
         tries.append(scopes)
     for scoped in tries:
         mounts = _held_mounts(scoped, session, registry, links)
