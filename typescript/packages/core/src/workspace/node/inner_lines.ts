@@ -175,9 +175,12 @@ function tail(args: readonly Word[], count: number): Word[] {
 }
 
 // `command [-pVv] name [arg ...]`: `-v`/`-V` only report.
+// `command [-pVv] name [arg ...]`: `-v`/`-V` only report; an option only the
+// run expands may be either, so it is unreadable.
 function commandInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length && valueAt(args, i).startsWith('-')) {
+    if (args[i]?.text === null) return [UNREADABLE]
     const word = valueAt(args, i)
     i += 1
     if (word === '--') break

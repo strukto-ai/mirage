@@ -207,9 +207,12 @@ def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
 
 
 def _command_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``command [-pVv] name [arg ...]``: ``-v``/``-V`` only report."""
+    """``command [-pVv] name [arg ...]``: ``-v``/``-V`` only report; an
+    option only the run expands may be either, so it is unreadable."""
     i = 0
     while i < len(args) and args[i].value.startswith("-"):
+        if args[i].text is None:
+            return [InnerLine()]
         word = args[i].value
         i += 1
         if word == "--":

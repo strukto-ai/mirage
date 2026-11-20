@@ -259,6 +259,8 @@ const ANOTHER_SPELLING = [
   'read -a PS4 <<< x; set -x; :',
   "command -p printf -v PS4 '$(hostname)'; set -x; :",
   "empty=; printf $empty -v PS4 '$(hostname)'; set -x; :",
+  "v=p; command -$v printf -v PS4 '$(hostname)'; set -x; :",
+  'v=p; command -$v hostname',
   "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
   'declare -n r; r=PS4; r=x; set -x; :',
   'v=PS4; printf -v "$v" x; set -x; :',
