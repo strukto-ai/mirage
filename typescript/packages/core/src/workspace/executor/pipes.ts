@@ -18,7 +18,6 @@ import { CAPACITY } from '../../io/pipe.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ProcessTable } from '../../execution/process/table.ts'
 import { isAborting } from '../../errors/fs.ts'
@@ -494,7 +493,7 @@ async function subshellEnded(
  * lets the subshell honor an `exec` redirect the way the program loop does;
  * the subshell is a child shell, so the redirect it installs is discarded
  * when the body ends. `deps.handed` is the line's hand-off, for a background
- * job to borrow. `deps.sink` takes each statement's output as it finishes;
+ * job to borrow, with the registry's `decisions` as its ledger. `deps.sink` takes each statement's output as it finishes;
  * the body is a shell of its own, which routes what it wrote to its terminal
  * through a copy, so a program nested in it (`$( )`, `eval`) leaves that to
  * it. `deps.executeFn` runs the subshell's own EXIT action as it ends.
@@ -506,11 +505,10 @@ export async function handleSubshell(
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  // The line's ledger, for a background job to borrow with the hand-off.
-  decisions: Decisions | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const { dispatch, jobTable, executeFn } = deps
+  const decisions = deps.registry.decisions
   const handed = deps.handed ?? null
   const sink = deps.sink ?? null
   inheritTraps(session)

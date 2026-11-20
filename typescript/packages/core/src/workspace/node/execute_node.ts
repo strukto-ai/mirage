@@ -857,7 +857,7 @@ async function forkSubshell(
   callStack: CallStack,
 ): Promise<RedirectResult> {
   const session = context.session
-  const { registry, jobTable } = deps
+  const { jobTable } = deps
   // A subshell is its own shell: background jobs started inside live
   // in a private job table (`$!`/`wait`/`kill` in the body see them;
   // the parent's table never does), mirroring bash's forked process.
@@ -913,15 +913,7 @@ async function forkSubshell(
   }
   const run = async (): Promise<number> => {
     const body = () =>
-      handleSubshell(
-        subshellDeps,
-        subRecurse,
-        node.children,
-        child,
-        stdin,
-        callStack,
-        registry.decisions,
-      )
+      handleSubshell(subshellDeps, subRecurse, node.children, child, stdin, callStack)
     try {
       subshellRan = await setCurrentEvaluation(child, () =>
         asProgram ? setProgramInvocation(child.session, body) : body(),
