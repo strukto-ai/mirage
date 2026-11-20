@@ -1,0 +1,271 @@
+{
+  "cases": [
+    {
+      "id": "diff_from_file_each_operand",
+      "seq": 601124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff && cd /data/ffdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z && diff --from-file=x y z; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2c2\n< b\n---\n> c\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from-file"
+      ]
+    },
+    {
+      "id": "diff_to_file_each_operand",
+      "seq": 601125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff && cd /data/ffdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z && diff --to-file=x y z; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2c2\n< c\n---\n> b\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "to-file"
+      ]
+    },
+    {
+      "id": "diff_from_file_no_operand",
+      "seq": 601126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff && cd /data/ffdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z && diff --from-file=x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from-file"
+      ]
+    },
+    {
+      "id": "diff_from_file_missing_operand",
+      "seq": 601127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff && cd /data/ffdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z && diff --from-file=x nope y; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2c2\n< b\n---\n> c\nrc=2\n",
+        "stderr": "diff: nope: No such file or directory\n"
+      },
+      "flags": [
+        "from-file"
+      ]
+    },
+    {
+      "id": "diff_from_file_and_to_file",
+      "seq": 601128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff && cd /data/ffdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z && diff --from-file=x --to-file=y z; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "diff: --from-file and --to-file both specified\n"
+      },
+      "flags": [
+        "from-file",
+        "to-file"
+      ]
+    },
+    {
+      "id": "zdiff_from_file_each_operand",
+      "seq": 601129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffzdiff && cd /data/ffzdiff && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && gzip -k y && zdiff --from-file=x y.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2c2\n< b\n---\n> c\n2c2\n< b\n---\n> c\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from-file"
+      ]
+    },
+    {
+      "id": "diff_from_file_stdin_twice",
+      "seq": 601149,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff2 && cd /data/ffdiff2 && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nz\\n' | diff --from-file=- x y; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2c2\n< z\n---\n> b\nrc=2\n",
+        "stderr": "diff: -: Bad file descriptor\n"
+      },
+      "flags": [
+        "from-file"
+      ]
+    }
+  ]
+}

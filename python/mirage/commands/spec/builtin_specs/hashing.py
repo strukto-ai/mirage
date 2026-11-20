@@ -81,6 +81,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--no-dereference", action="store_true"),
             Argument("-x", "--exclude", action="append"),
             Argument("-X", "--exclude-from", type="path", action="append"),
+            Argument("--from-file", type="path", action="append"),
+            Argument("--to-file", type="path", action="append"),
             Argument("-s", "--report-identical-files", action="store_true"),
             PATH_OPERAND,
             PATH2_OPERAND,

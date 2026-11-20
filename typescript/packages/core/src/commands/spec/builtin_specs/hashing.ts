@@ -98,6 +98,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--no-dereference', { action: 'store_true' }),
       new Argument(['-x', '--exclude'], { action: 'append' }),
       new Argument(['-X', '--exclude-from'], { action: 'append', type: 'path' }),
+      new Argument(['--from-file'], { action: 'append', type: 'path' }),
+      new Argument(['--to-file'], { action: 'append', type: 'path' }),
       new Argument(['-s', '--report-identical-files'], { action: 'store_true' }),
       PATH_OPERAND,
       PATH2_OPERAND,

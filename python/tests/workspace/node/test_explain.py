@@ -1496,6 +1496,8 @@ MACHINE_PATHS = (
     "HOME=/data; eval 'cat ~/secret.txt'",
     "cat ~backup/secret.txt",
     "cat //data/secret.txt",
+    "diff --from-file=/data/secret.txt /data/pub",
+    "diff --to-file=/data/secret.txt /data/pub",
 )
 MACHINE_WRITES = (
     "find /data/pub -fprint /data/secret.txt",

@@ -94,6 +94,9 @@ class DiffFlags:
     exclude_from: tuple[PathSpec, ...] = ()
     # --no-dereference compares a link as itself: by the path it holds.
     no_dereference: bool = False
+    # --from-file compares it with each operand, --to-file each with it.
+    from_file: PathSpec | None = None
+    to_file: PathSpec | None = None
 
 
 @dataclass(slots=True)
@@ -730,6 +733,91 @@ async def diff(
     computer: DiffComputer | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Compare two operands, or, under ``--from-file`` or ``--to-file``,
+    that file with each operand in turn: each comparison's output in
+    order, its errors in order, and the worst status of them.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        stream (ReadStreamFn): reads a file.
+        readdir_fn (Callable[..., Awaitable[list[str]]]): lists a folder.
+        stat_fn (Callable[..., Awaitable[FileStat]]): stats a path.
+        flags (DiffFlags): the parsed options.
+        stdin (ByteSource | None): what a ``-`` operand reads.
+        argv (Sequence[str]): the words as typed, for ``-r`` headers.
+        stat_path (StatPath | None): stats a path for header times.
+        zone (tzinfo | None): the zone header times are written in.
+        dispatch (DispatchFn | None): the op dispatcher.
+        links (LinkView | None): the session's links.
+        computer (DiffComputer | None): the diff engine; None owns one.
+        size_of (Callable[[PathSpec], Awaitable[int | None]] | None): a
+            regular file's size, for ``-q`` to answer unread.
+    """
+    compare = partial(
+        _compare,
+        stream=stream,
+        readdir_fn=readdir_fn,
+        stat_fn=stat_fn,
+        flags=flags,
+        stdin=stdin,
+        argv=argv,
+        stat_path=stat_path,
+        zone=zone,
+        dispatch=dispatch,
+        links=links,
+        computer=computer,
+        size_of=size_of,
+    )
+    if flags.from_file is None and flags.to_file is None:
+        return await compare(paths)
+    parts: list[ByteSource] = []
+    errors: list[bytes] = []
+    status = 0
+    read_stdin = False
+    try:
+        for path in paths:
+            pair = (
+                [flags.from_file, path]
+                if flags.from_file is not None
+                else [path, flags.to_file]
+            )
+            sides = [p for p in pair if p is not None]
+            dash = next((p for p in sides if is_stdin(p)), None)
+            if dash is not None and read_stdin:
+                # The first comparison read stdin to its end.
+                errors.append(
+                    f"diff: {dash.raw_path}: Bad file descriptor\n".encode()
+                )
+                status = 2
+                continue
+            read_stdin = read_stdin or dash is not None
+            output, io = await compare(sides)
+            if output is not None:
+                parts.append(output)
+            errors.append(await io.materialize_stderr())
+            status = max(status, io.exit_code)
+    except BaseException:
+        await settle(owned_task(_close_parts(parts)))
+        raise
+    return _output(parts), IOResult(exit_code=status, stderr=b"".join(errors))
+
+
+async def _compare(
+    paths: list[PathSpec],
+    *,
+    stream: ReadStreamFn,
+    readdir_fn: Callable[..., Awaitable[list[str]]],
+    stat_fn: Callable[..., Awaitable[FileStat]],
+    flags: DiffFlags,
+    stdin: ByteSource | None = None,
+    argv: Sequence[str] = (),
+    stat_path: StatPath | None = None,
+    zone: tzinfo | None = None,
+    dispatch: DispatchFn | None = None,
+    links: LinkView | None = None,
+    computer: DiffComputer | None = None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
     if len(paths) < 2:
@@ -1005,6 +1093,24 @@ def parse_flags(
     if isinstance(context, IOResult):
         return context
     new_file = fl.as_bool("new_file")
+    fixed: dict[str, PathSpec | None] = {}
+    for option in ("from_file", "to_file"):
+        given = fl.as_paths(option)
+        spelled = [p.raw_path or p.virtual for p in given]
+        other = next((s for s in spelled if s != spelled[0]), None)
+        if other is not None:
+            name = option.replace("_", "-")
+            return IOResult(
+                exit_code=2,
+                stderr=f"diff: conflicting --{name} option value '{other}'\n"
+                f"{_HINT}".encode(),
+            )
+        fixed[option] = given[0] if given else None
+    if fixed["from_file"] is not None and fixed["to_file"] is not None:
+        return IOResult(
+            exit_code=2,
+            stderr=b"diff: --from-file and --to-file both specified\n",
+        )
     return DiffFlags(
         options=DiffOptions(
             mode=mode,
@@ -1036,6 +1142,8 @@ def parse_flags(
         exclude=tuple(fl.as_list("exclude")),
         exclude_from=tuple(fl.as_paths("exclude_from")),
         no_dereference=fl.as_bool("no_dereference"),
+        from_file=fixed["from_file"],
+        to_file=fixed["to_file"],
     )
 
 

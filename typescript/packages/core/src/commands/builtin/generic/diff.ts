@@ -100,6 +100,9 @@ export interface DiffFlags {
   readonly excludeFrom: readonly PathSpec[]
   /** --no-dereference compares a link as itself: by the path it holds. */
   readonly noDereference: boolean
+  /** --from-file compares it with each operand, --to-file each with it. */
+  readonly fromFile: PathSpec | null
+  readonly toFile: PathSpec | null
 }
 
 // Each output style and the options that ask for it.
@@ -195,6 +198,28 @@ export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): DiffFl
   const context = engineChecks(lengths, widths, ignoreLines, functionLines)
   if (context instanceof IOResult) return context
   const newFile = fl.asBool('new_file')
+  const fixed: Record<string, PathSpec | null> = {}
+  for (const option of ['from_file', 'to_file']) {
+    const given = fl.asPaths(option)
+    const spelled = given.map((p) => (p.rawPath !== '' ? p.rawPath : p.virtual))
+    const other = spelled.find((s) => s !== spelled[0])
+    if (other !== undefined) {
+      const name = option.replace('_', '-')
+      return new IOResult({
+        exitCode: 2,
+        stderr: ENC.encode(`diff: conflicting --${name} option value '${other}'\n${HINT}`),
+      })
+    }
+    fixed[option] = given[0] ?? null
+  }
+  const fromFile = fixed.from_file ?? null
+  const toFile = fixed.to_file ?? null
+  if (fromFile !== null && toFile !== null) {
+    return new IOResult({
+      exitCode: 2,
+      stderr: ENC.encode('diff: --from-file and --to-file both specified\n'),
+    })
+  }
   return {
     mode,
     ignoreCase: fl.asBool('ignore_case'),
@@ -224,6 +249,8 @@ export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): DiffFl
     exclude: fl.asList('exclude'),
     excludeFrom: fl.asPaths('exclude_from'),
     noDereference: fl.asBool('no_dereference'),
+    fromFile,
+    toFile,
   }
 }
 
@@ -752,6 +779,12 @@ async function excludedPatterns(
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
   return fl.asBool('no_dereference') ? new LineFacts({ follows: Follow.NONE }) : new LineFacts()
 }
+
+/**
+ * Compare two operands, or, under `--from-file` or `--to-file`, that file with
+ * each operand in turn: each comparison's output in order, its errors in
+ * order, and the worst status of them.
+ */
 export async function diffGeneric(
   flags: DiffFlags,
   paths: PathSpec[],
@@ -760,6 +793,50 @@ export async function diffGeneric(
   readdir: ReaddirFn,
   backendStat: StatFn,
   sizeOf: ((p: PathSpec) => Promise<number | null>) | null = null,
+): Promise<[ByteSource | null, IOResult]> {
+  const fromFile = flags.fromFile ?? null
+  const toFile = flags.toFile ?? null
+  if (fromFile === null && toFile === null) {
+    return compare(flags, paths, ctx, read, readdir, backendStat, sizeOf)
+  }
+  const parts: ByteSource[] = []
+  const errors: Uint8Array[] = []
+  let status = 0
+  let readStdin = false
+  try {
+    for (const path of paths) {
+      const pair = fromFile !== null ? [fromFile, path] : toFile !== null ? [path, toFile] : []
+      const dash = pair.find((p) => isStdin(p))
+      if (dash !== undefined && readStdin) {
+        // The first comparison read stdin to its end.
+        errors.push(ENC.encode(`diff: ${dash.rawPath}: Bad file descriptor\n`))
+        status = 2
+        continue
+      }
+      readStdin = readStdin || dash !== undefined
+      const [output, io] = await compare(flags, pair, ctx, read, readdir, backendStat, sizeOf)
+      if (output !== null) parts.push(output)
+      if (io.stderr !== null) errors.push(await materialize(io.stderr))
+      status = Math.max(status, io.exitCode)
+    }
+  } catch (error) {
+    await closeParts(parts)
+    throw error
+  }
+  return [
+    new OutputStream(outputChunks(parts), () => closeParts(parts)),
+    new IOResult({ exitCode: status, stderr: concat(errors) }),
+  ]
+}
+
+async function compare(
+  flags: DiffFlags,
+  paths: PathSpec[],
+  ctx: Context,
+  read: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  readdir: ReaddirFn,
+  backendStat: StatFn,
+  sizeOf: ((p: PathSpec) => Promise<number | null>) | null,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)

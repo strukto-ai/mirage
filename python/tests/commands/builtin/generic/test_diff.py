@@ -30,8 +30,10 @@ from mirage.io.stream import OutputStream
 from mirage.io.types import IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import DiffOptions, PairResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.timezone import resolve_tz
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from mirage.workspace.executor.command.flags import (
     parse_flags as parse_line_flags,
 )
@@ -407,6 +409,14 @@ def _line_flags(argv: list[str]) -> DiffFlags | IOResult:
         (["-W", "40", "-W", "20"], b"diff: conflicting width options\n"),
         (["-C", "x"], b"diff: invalid context length 'x'\n" + _HINT),
         (["-I", "\\("], b"diff: \\(: Unmatched ( or \\(\n"),
+        (
+            ["--from-file=x", "--to-file=y"],
+            b"diff: --from-file and --to-file both specified\n",
+        ),
+        (
+            ["--from-file=x", "--from-file=y"],
+            b"diff: conflicting --from-file option value 'y'\n" + _HINT,
+        ),
     ],
 )
 def test_parse_flags_refuses_what_diffutils_refuses(
@@ -415,6 +425,71 @@ def test_parse_flags_refuses_what_diffutils_refuses(
     parsed = _line_flags(argv)
     assert isinstance(parsed, IOResult)
     assert (parsed.exit_code, parsed.stderr) == (2, stderr)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout,stderr,code",
+    [
+        ("diff --from-file=x y z", "2c2\n< b\n---\n> c\n", "", 1),
+        ("diff --to-file=x y z", "2c2\n< c\n---\n> b\n", "", 1),
+        ("diff --from-file x y", "2c2\n< b\n---\n> c\n", "", 1),
+        ("diff --from=x y", "2c2\n< b\n---\n> c\n", "", 1),
+        ("diff --from-file=x", "", "", 0),
+        ("diff --from-file=x x z", "", "", 0),
+        ("diff -q --from-file=x y z", "Files x and y differ\n", "", 1),
+        (
+            "diff --from-file=x nope y",
+            "2c2\n< b\n---\n> c\n",
+            "diff: nope: No such file or directory\n",
+            2,
+        ),
+        (
+            "diff --from-file=x y nope",
+            "2c2\n< b\n---\n> c\n",
+            "diff: nope: No such file or directory\n",
+            2,
+        ),
+        (
+            "diff --from-file=nope y",
+            "",
+            "diff: nope: No such file or directory\n",
+            2,
+        ),
+        ("diff --from-file=x --from-file=x y", "2c2\n< b\n---\n> c\n", "", 1),
+        (
+            "printf 'a\\nz\\n' | diff --from-file=- x y",
+            "2c2\n< z\n---\n> b\n",
+            "diff: -: Bad file descriptor\n",
+            2,
+        ),
+        (
+            "printf 'a\\nz\\n' | diff --from-file=x - -",
+            "2c2\n< b\n---\n> z\n",
+            "diff: -: Bad file descriptor\n",
+            2,
+        ),
+    ],
+)
+async def test_from_file_and_to_file_compare_one_file_with_each_operand(
+    line, stdout, stderr, code
+):
+    # Pinned against GNU diffutils 3.10: one comparison per operand, in
+    # order, with no separator, and the worst status of them.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "cd /data && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y"
+            " && printf 'a\\nb\\n' > z"
+        )
+        r = await ws.shell(f"cd /data && {line}")
+        assert (
+            await r.stdout_str(),
+            await r.stderr_str(),
+            r.exit_code,
+        ) == (stdout, stderr, code)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.parametrize(
@@ -494,6 +569,36 @@ async def test_recursive_side_by_side_heads_every_pair_it_shows():
 
 async def _one_empty_chunk():
     yield b""
+
+
+@pytest.mark.asyncio
+async def test_a_from_file_comparison_that_fails_closes_the_ones_before():
+    closed: list[bool] = []
+    calls: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    async def compare(options, old, new) -> PairResult:
+        calls.append(True)
+        if len(calls) > 1:
+            raise ValueError("engine broke")
+        kept = OutputStream(_one_empty_chunk(), close)
+        return PairResult("different", (kept,), 1, ())
+
+    async def stat(path: PathSpec) -> FileStat:
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    with pytest.raises(ValueError):
+        await diff(
+            [_operand("y", "/d/y"), _operand("z", "/d/z")],
+            stream=_readdir,
+            readdir_fn=_readdir,
+            stat_fn=stat,
+            flags=DiffFlags(from_file=_operand("x", "/d/x")),
+            computer=SimpleNamespace(compare=compare),
+        )
+    assert closed == [True]
 
 
 @pytest.mark.asyncio

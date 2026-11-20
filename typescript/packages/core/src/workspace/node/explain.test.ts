@@ -1287,6 +1287,8 @@ describe('prejudge', () => {
         "HOME=/data; eval 'cat ~/secret.txt'",
         'cat ~backup/secret.txt',
         'cat //data/secret.txt',
+        'diff --from-file=/data/secret.txt /data/pub',
+        'diff --to-file=/data/secret.txt /data/pub',
         ...(coded
           ? [
               'find /data/pub -fprint /data/secret.txt',
