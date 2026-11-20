@@ -276,29 +276,30 @@ export const DARWIN_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
 // `/bin/sleep`), so a run is also known by its program's pid, which the
 // wrapper reports (`darwinRuns`). The first list is how the second's
 // environment is told from its arguments: the wrapper takes the tag as an
-// argument, and shows in no scan.
+// argument, and shows in no scan. It fails when either listing does.
 export const DARWIN_SPLIT = '--'
 export const DARWIN_PS =
-  '{ LC_ALL=C ps -axww -o pid=,command=; echo --; LC_ALL=C ps -axwwE ' +
+  '{ LC_ALL=C ps -axww -o pid=,command= && echo -- && LC_ALL=C ps -axwwE ' +
   '-o pid=,ppid=,state=,utime=,time=,vsz=,rss=,lstart=,command=; } 2>/dev/null'
 
 /**
  * The awk program that picks a run's processes out of what `DARWIN_PS`
  * prints: each whose environment holds the tag `M` names (the whole entry
- * when `exact`, else any tag it starts), and each under one of those or
- * under a root `R` names (`pid:tag` words), which takes that tag. `show` is
- * what it prints: `pids` each picked pid, `programs` those whose parent was
- * not picked, each space-led; `rows` a line each as `scanLine` writes it,
- * the start still as `ps` writes it, ahead of the arguments. Mirrors
- * Python's `darwin_runs`.
+ * when `exact`, else any tag it starts), each `K` names (`pid@start` words,
+ * as `ids` prints them) while it is the process that started then, and each
+ * under one of those or under a root `R` names (`pid:tag` words), which
+ * takes that tag. `show` is what it prints: `ids` each picked pid with its
+ * start, `programs` the pids whose parent was not picked, each space-led;
+ * `rows` a line each as `scanLine` writes it, the start still as `ps`
+ * writes it, ahead of the arguments. Mirrors Python's `darwin_runs`.
  *
  * @param exact match the whole tag.
- * @param show `pids`, `programs` or `rows`.
+ * @param show `ids`, `programs` or `rows`.
  */
-export function darwinRuns(exact: boolean, show: 'pids' | 'programs' | 'rows'): string {
+export function darwinRuns(exact: boolean, show: 'ids' | 'programs' | 'rows'): string {
   const accept = exact ? `ENVIRON["M"] == "${PROCESS}=" t` : '1'
   const shown = {
-    pids: 'for (p in tag) printf " %s", p',
+    ids: 'for (p in tag) printf " %s@%s", p, st[p]',
     programs: 'for (p in tag) if (!(up[p] in tag)) printf " %s", p',
     rows:
       'for (p in tag) { split(row[p], f, " "); s = substr(f[3], 1, 1); ' +
@@ -313,10 +314,12 @@ export function darwinRuns(exact: boolean, show: 'pids' | 'programs' | 'rows'): 
     'for (i = 1; i <= n; i++) v = v * 60 + a[i]; return int(v * 100 + 0.5) } ' +
     'BEGIN { n = split(ENVIRON["R"], rs, " "); for (i = 1; i <= n; i++) { ' +
     'j = index(rs[i], ":"); root[substr(rs[i], 1, j - 1)] = substr(rs[i], j + 1) } ' +
+    'n = split(ENVIRON["K"], ks, " "); for (i = 1; i <= n; i++) kp[ks[i]] = 1; ' +
     'm = " " ENVIRON["M"] } ' +
     `!e { if ($0 == "${DARWIN_SPLIT}") e = 1; else { c = $0; ` +
     'sub(/^ *[0-9]+ /, "", c); arg[$1] = c } next } ' +
-    '{ row[$1] = $0; up[$1] = $2; c = $0; ' +
+    '{ row[$1] = $0; up[$1] = $2; st[$1] = $8 $9 $10 $11 $12; ' +
+    'if (($1 "@" st[$1]) in kp) tag[$1] = "@"; c = $0; ' +
     'for (j = 1; j <= 12; j++) sub(/^ *[^ ]+/, "", c); sub(/^ +/, "", c); ' +
     'a = arg[$1]; s = " "; if (a != "" && substr(c, 1, length(a)) == a) ' +
     's = substr(c, length(a) + 1) " "; k = 0; ' +
@@ -390,40 +393,37 @@ export function darwinTableLine(prefixes: readonly string[]): string {
 
 /**
  * What `darwinTableLine` printed: the source and type of each prefix
- * mounted at its real path, and each prefix's real path. Mirrors Python's
- * `darwin_mount_table`.
+ * mounted at its real path, and each prefix's real path, those `known`
+ * already among them. A row is found by the real path it shows at, never
+ * split at its first ` on /`, which a source can hold; the last row at a
+ * path wins. Mirrors Python's `darwin_mount_table`.
  *
  * @param text the line's output.
+ * @param known real paths resolved before, by prefix.
  */
 export function darwinMountTable(
   text: string,
+  known: ReadonlyMap<string, string>,
 ): [Map<string, [string, string]>, Map<string, string>] {
+  const lines = text.split('\n')
+  const points = new Map(known)
+  for (const line of lines) {
+    if (!line.startsWith(DARWIN_POINT_MARK)) continue
+    const rest = line.slice(DARWIN_POINT_MARK.length)
+    const tab = rest.indexOf('\t')
+    points.set(tab < 0 ? rest : rest.slice(0, tab), tab < 0 ? '' : rest.slice(tab + 1))
+  }
   const rows = new Map<string, [string, string]>()
-  const points = new Map<string, string>()
-  for (const line of text.split('\n')) {
-    if (line.startsWith(DARWIN_POINT_MARK)) {
-      const rest = line.slice(DARWIN_POINT_MARK.length)
-      const tab = rest.indexOf('\t')
-      points.set(tab < 0 ? rest : rest.slice(0, tab), tab < 0 ? '' : rest.slice(tab + 1))
-      continue
+  for (const [prefix, point] of points) {
+    const marker = ` on ${point} (`
+    for (const line of lines) {
+      const at = line.lastIndexOf(marker)
+      if (at < 0 || line.startsWith(DARWIN_POINT_MARK)) continue
+      const kind = (line.slice(at + marker.length).split(',')[0] ?? '').replace(/\)+$/, '')
+      rows.set(prefix, [line.slice(0, at), kind])
     }
-    const on = line.indexOf(' on /')
-    if (on < 0) continue
-    const rest = line.slice(on + ' on /'.length)
-    const opened = rest.lastIndexOf(' (')
-    if (opened < 0) continue
-    const options = rest.slice(opened + 2)
-    rows.set('/' + rest.slice(0, opened), [
-      line.slice(0, on),
-      (options.split(',')[0] ?? '').replace(/\)+$/, ''),
-    ])
   }
-  const mounted = new Map<string, [string, string]>()
-  for (const [prefix, real] of points) {
-    const row = rows.get(real)
-    if (row !== undefined) mounted.set(prefix, row)
-  }
-  return [mounted, points]
+  return [rows, points]
 }
 
 /**
@@ -468,7 +468,8 @@ export function darwinAdminHint(provider: string, prefix: string, root: string):
   return (
     `${provider}: ${prefix} needs a folder ${top}, and macOS keeps its root ` +
     'folder read-only; make it once as an administrator on the Mac, ' +
-    `then run the line again: printf '${top.slice(1)}\\t${root.slice(1)}${top}\\n' ` +
+    "then run the line again: printf '%s\\t%s\\n' " +
+    `${singleQuote(top.slice(1))} ${singleQuote(root.slice(1) + top)} ` +
     `| sudo tee -a ${SYNTHETIC_CONF} && sudo ${APFS_UTIL} -t`
   )
 }
@@ -627,7 +628,7 @@ export const RUN_WRAPPER =
   't=${20}; else t=$(' +
   darwinStart('$PPID') +
   '); fi; ' +
-  'printf "\\036mirage-pid %s %s\\n" "$PPID" "$t" >&6\'; ' +
+  'printf "\\036mirage-pid %s %s\\n" "$PPID" "$t" >&6\' || exit $?; ' +
   'export "$5"; exec 2>&6 6>&-; ' +
   '( set -- "$2" "$3" "$4" "$6"; ' +
   PROGRAM_CHECK +
@@ -755,7 +756,9 @@ export const PIPE_SIGNAL = 13
  * gets `signum`, and what still runs a second later gets KILL, so a
  * program that ignores it stops too. A Mac shows few environments, so
  * there it is the run's program, `root`, and what runs under it
- * (`darwinRuns`). The tag is matched as a whole entry,
+ * (`darwinRuns`), and each process found first stays in the run, while it
+ * is the one that started then, once its parent exits. The tag is matched
+ * as a whole entry,
  * so `w1:9` never stops the run of `w1:90`. The line exits 0 once it
  * stopped them and `NOT_RUNNING_STATUS` when there were none. It looks tr and
  * grep up on its own PATH (`TOOLS_PATH`) and exits 127 without them, so it
@@ -780,10 +783,10 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     'tr \'\\000\' \'\\n\' < "$p/environ" 2>/dev/null | grep -qxF "$m" ' +
     '&& l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
-    `else PATH=${DARWIN_PATH}; ${darwinRoots(mine)}` +
-    `left() { l=$(${DARWIN_PS} | M="$m" R="$r" awk ` +
-    `'${darwinRuns(true, 'pids')}'); ` +
-    '[ -n "$l" ]; }; fi; ' +
+    `else PATH=${DARWIN_PATH}; k=; ${darwinRoots(mine)}` +
+    `left() { k=$(${DARWIN_PS} | M="$m" R="$r" K="$k" awk ` +
+    `'${darwinRuns(true, 'ids')}'); r=; l=; ` +
+    'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; ' +
     `left || exit ${String(NOT_RUNNING_STATUS)}; kill -${String(signum)} $l 2>/dev/null; ` +
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
     'kill -KILL $l 2>/dev/null; true'
@@ -903,10 +906,12 @@ export function runTag(argv: readonly string[]): string {
  * `DARWIN_SCAN`.
  */
 export const DARWIN_SCAN =
-  `PATH=${DARWIN_PATH}; b=$(pagesize 2>/dev/null) || b=4096; ` +
+  `PATH=${DARWIN_PATH}; o=$(${DARWIN_PS}) || exit 1; ` +
+  'b=$(pagesize 2>/dev/null) || b=4096; ' +
   'k=$(sysctl -n hw.memsize 2>/dev/null) || k=0; ' +
   `printf '${SCAN_FACTS_MARK} %s 100 %s %s\\n' "$(date +%s)" "$b" "$((k / 1024))"; ` +
-  `${DARWIN_PS} | M="$m" R="$r" B="$b" awk '${darwinRuns(false, 'rows')}' | ` +
+  `printf '%s\\n' "$o" | ` +
+  `M="$m" R="$r" B="$b" awk '${darwinRuns(false, 'rows')}' | ` +
   'while read -r t p q s u c v z d m n h y a; do ' +
   'e=$(LC_ALL=C date -j -f \'%a %b %e %T %Y\' "$d $m $n $h $y" +%s00 ' +
   '2>/dev/null) || continue; ' +

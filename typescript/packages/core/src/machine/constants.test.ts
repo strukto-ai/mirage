@@ -654,12 +654,29 @@ describe('darwinMountTable', () => {
         'map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n' +
         `${DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n` +
         `${DARWIN_POINT_MARK}/notes\t/notes\n`,
+      new Map(),
     )
     expect(Object.fromEntries(rows)).toEqual({ '/data': ['src-1:/data', 'macfuse'] })
     expect(Object.fromEntries(points)).toEqual({
       '/data': '/home/u/.mirage/mnt/data',
       '/notes': '/notes',
     })
+  })
+
+  it('keeps a source holding on whole', () => {
+    const [rows, points] = darwinMountTable(
+      'src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n' +
+        'src-1:/c on /c (macfuse, nodev, mounted by u)\n',
+      new Map([
+        ['/a on /b', '/a on /b'],
+        ['/c', '/c'],
+      ]),
+    )
+    expect(Object.fromEntries(rows)).toEqual({
+      '/a on /b': ['src-1:/a on /b', 'macfuse'],
+      '/c': ['src-1:/c', 'macfuse'],
+    })
+    expect(Object.fromEntries(points)).toEqual({ '/a on /b': '/a on /b', '/c': '/c' })
   })
 })
 
@@ -696,7 +713,10 @@ onMac('a Mac', () => {
     try {
       mkdirSync(join(dir, 'real'))
       symlinkSync(join(dir, 'real'), join(dir, 'link'))
-      const [, points] = darwinMountTable(sh(darwinTableLine([`${dir}/link/ws`])).stdout)
+      const [, points] = darwinMountTable(
+        sh(darwinTableLine([`${dir}/link/ws`])).stdout,
+        new Map(),
+      )
       const real = spawnSync('/bin/sh', ['-c', `cd '${dir}/real' && pwd -P`], {
         encoding: 'utf8',
       }).stdout.trim()
@@ -731,10 +751,50 @@ onMac('a Mac', () => {
       expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(0)
       await settled(program)
       expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(NOT_RUNNING_STATUS)
-      expect([wrapper.exitCode, other.exitCode]).toEqual([null, null])
+      expect([wrapper.exitCode, wrapper.signalCode, other.exitCode, other.signalCode]).toEqual([
+        null,
+        null,
+        null,
+        null,
+      ])
     } finally {
       for (const child of [wrapper, other, program]) child.kill('SIGKILL')
       await Promise.all([wrapper, other, program].map((child) => settled(child)))
+    }
+  })
+
+  it('stops what outlives the program', async () => {
+    const untagged = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name !== PROCESS),
+    )
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-stop-'))
+    const pidfile = join(dir, 'child')
+    const program = spawn(
+      '/bin/sh',
+      [
+        '-c',
+        '/bin/sh -c \'trap "" TERM; echo $$ > "$1"; while :; do /bin/sleep 0.05; done\' sh "$0" & wait',
+        pidfile,
+      ],
+      { env: untagged },
+    )
+    let child = 0
+    try {
+      for (let i = 0; i < 50 && child === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        child = Number(sh(`cat '${pidfile}' 2>/dev/null`).stdout.trim())
+      }
+      const pid = program.pid ?? 0
+      const started = Number(sh(darwinStart(String(pid))).stdout)
+      expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(0)
+      await settled(program)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(sh(`kill -0 ${String(child)}`).status).not.toBe(0)
+    } finally {
+      program.kill('SIGKILL')
+      await settled(program)
+      if (child) sh(`kill -KILL ${String(child)}`)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

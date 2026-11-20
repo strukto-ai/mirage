@@ -301,10 +301,11 @@ DARWIN_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 # (``/bin/sh``, ``/bin/sleep``), so a run is also known by its program's
 # pid, which the wrapper reports (``darwin_runs``). The first list is how
 # the second's environment is told from its arguments: the wrapper takes
-# the tag as an argument, and shows in no scan.
+# the tag as an argument, and shows in no scan. It fails when either
+# listing does.
 DARWIN_SPLIT = "--"
 DARWIN_PS = (
-    "{ LC_ALL=C ps -axww -o pid=,command=; echo --; LC_ALL=C ps -axwwE "
+    "{ LC_ALL=C ps -axww -o pid=,command= && echo -- && LC_ALL=C ps -axwwE "
     "-o pid=,ppid=,state=,utime=,time=,vsz=,rss=,lstart=,command=; } 2>/dev/null"
 )
 
@@ -312,20 +313,22 @@ DARWIN_PS = (
 def darwin_runs(exact: bool, show: str) -> str:
     """The awk program that picks a run's processes out of what
     ``DARWIN_PS`` prints: each whose environment holds the tag ``M``
-    names (the whole entry when ``exact``, else any tag it starts), and
-    each under one of those or under a root ``R`` names (``pid:tag``
-    words), which takes that tag. ``show`` is what it prints: ``pids``
-    each picked pid, ``programs`` those whose parent was not picked, each
-    space-led; ``rows`` a line each as ``scan_line`` writes it, the start
-    still as ``ps`` writes it, ahead of the arguments.
+    names (the whole entry when ``exact``, else any tag it starts), each
+    ``K`` names (``pid@start`` words, as ``ids`` prints them) while it is
+    the process that started then, and each under one of those or under a
+    root ``R`` names (``pid:tag`` words), which takes that tag. ``show``
+    is what it prints: ``ids`` each picked pid with its start,
+    ``programs`` the pids whose parent was not picked, each space-led;
+    ``rows`` a line each as ``scan_line`` writes it, the start still as
+    ``ps`` writes it, ahead of the arguments.
 
     Args:
         exact (bool): match the whole tag.
-        show (str): ``pids``, ``programs`` or ``rows``.
+        show (str): ``ids``, ``programs`` or ``rows``.
     """
     accept = f'ENVIRON["M"] == "{PROCESS}=" t' if exact else "1"
     shown = {
-        "pids": 'for (p in tag) printf " %s", p',
+        "ids": 'for (p in tag) printf " %s@%s", p, st[p]',
         "programs": 'for (p in tag) if (!(up[p] in tag)) printf " %s", p',
         "rows": (
             'for (p in tag) { split(row[p], f, " "); s = substr(f[3], 1, 1); '
@@ -341,10 +344,12 @@ def darwin_runs(exact: bool, show: str) -> str:
         "for (i = 1; i <= n; i++) v = v * 60 + a[i]; return int(v * 100 + 0.5) } "
         'BEGIN { n = split(ENVIRON["R"], rs, " "); for (i = 1; i <= n; i++) { '
         'j = index(rs[i], ":"); root[substr(rs[i], 1, j - 1)] = substr(rs[i], j + 1) } '
+        'n = split(ENVIRON["K"], ks, " "); for (i = 1; i <= n; i++) kp[ks[i]] = 1; '
         'm = " " ENVIRON["M"] } '
         f'!e {{ if ($0 == "{DARWIN_SPLIT}") e = 1; else {{ c = $0; '
         'sub(/^ *[0-9]+ /, "", c); arg[$1] = c } next } '
-        "{ row[$1] = $0; up[$1] = $2; c = $0; "
+        "{ row[$1] = $0; up[$1] = $2; st[$1] = $8 $9 $10 $11 $12; "
+        'if (($1 "@" st[$1]) in kp) tag[$1] = "@"; c = $0; '
         'for (j = 1; j <= 12; j++) sub(/^ *[^ ]+/, "", c); sub(/^ +/, "", c); '
         'a = arg[$1]; s = " "; if (a != "" && substr(c, 1, length(a)) == a) '
         's = substr(c, length(a) + 1) " "; k = 0; '
@@ -416,29 +421,33 @@ def darwin_table_line(prefixes: Sequence[str]) -> str:
 
 
 def darwin_mount_table(
-    text: str,
+    text: str, known: Mapping[str, str]
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
     """What ``darwin_table_line`` printed: the source and type of each
-    prefix mounted at its real path, and each prefix's real path.
+    prefix mounted at its real path, and each prefix's real path, those
+    ``known`` already among them. A row is found by the real path it
+    shows at, never split at its first `` on /``, which a source can hold;
+    the last row at a path wins.
 
     Args:
         text (str): the line's output.
+        known (Mapping[str, str]): real paths resolved before, by prefix.
     """
-    rows: dict[str, tuple[str, str]] = {}
-    points: dict[str, str] = {}
-    for line in text.split("\n"):
+    lines = text.split("\n")
+    points = dict(known)
+    for line in lines:
         if line.startswith(DARWIN_POINT_MARK):
             prefix, _, point = line[len(DARWIN_POINT_MARK) :].partition("\t")
             points[prefix] = point
-            continue
-        source, found, rest = line.partition(" on /")
-        point, opened, options = rest.rpartition(" (")
-        if found and opened:
-            rows["/" + point] = (source, options.split(",")[0].rstrip(")"))
-    return (
-        {p: rows[real] for p, real in points.items() if real in rows},
-        points,
-    )
+    rows: dict[str, tuple[str, str]] = {}
+    for prefix, point in points.items():
+        marker = f" on {point} ("
+        for line in lines:
+            at = line.rfind(marker)
+            if at >= 0 and not line.startswith(DARWIN_POINT_MARK):
+                kind = line[at + len(marker) :].split(",")[0].rstrip(")")
+                rows[prefix] = (line[:at], kind)
+    return rows, points
 
 
 def darwin_mountpoint_line(prefix: str, root: str) -> str:
@@ -481,7 +490,8 @@ def darwin_admin_hint(provider: str, prefix: str, root: str) -> str:
     return (
         f"{provider}: {prefix} needs a folder {top}, and macOS keeps its root "
         "folder read-only; make it once as an administrator on the Mac, "
-        f"then run the line again: printf '{top[1:]}\\t{root[1:]}{top}\\n' "
+        "then run the line again: printf '%s\\t%s\\n' "
+        f"{single_quote(top[1:])} {single_quote(root[1:] + top)} "
         f"| sudo tee -a {SYNTHETIC_CONF} && sudo {APFS_UTIL} -t"
     )
 
@@ -637,7 +647,7 @@ RUN_WRAPPER = (
     "exec 6>&2 2>/dev/null; "
     "( /bin/sh -c 'if read -r s </proc/$PPID/stat; then set -- ${s##*)}; "
     "t=${20}; else t=$(" + darwin_start("$PPID") + "); fi; "
-    'printf "\\036mirage-pid %s %s\\n" "$PPID" "$t" >&6\'; '
+    'printf "\\036mirage-pid %s %s\\n" "$PPID" "$t" >&6\' || exit $?; '
     'export "$5"; exec 2>&6 6>&-; '
     '( set -- "$2" "$3" "$4" "$6"; ' + PROGRAM_CHECK + " ) || exit $?; "
     'shift 5; exec "$@" ); '
@@ -771,7 +781,9 @@ def stop_line(
     ``/proc``, gets ``signum``, and what still runs a second later gets
     KILL, so a program that ignores it stops too. A Mac shows few
     environments, so there it is the run's program, ``root``, and what
-    runs under it (``darwin_runs``). The tag is matched as
+    runs under it (``darwin_runs``), and each process found first stays
+    in the run, while it is the one that started then, once its parent
+    exits. The tag is matched as
     a whole entry, so ``w1:9`` never stops the run of ``w1:90``. The line
     exits 0 once it stopped them and ``NOT_RUNNING_STATUS`` when there were
     none. It looks tr and grep up on its own PATH (``TOOLS_PATH``) and
@@ -796,10 +808,10 @@ def stop_line(
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
         '&& l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
-        f"else PATH={DARWIN_PATH}; {darwin_roots(mine)}"
-        f'left() {{ l=$({DARWIN_PS} | M="$m" R="$r" awk '
-        f"'{darwin_runs(True, 'pids')}'); "
-        '[ -n "$l" ]; }; fi; '
+        f"else PATH={DARWIN_PATH}; k=; {darwin_roots(mine)}"
+        f'left() {{ k=$({DARWIN_PS} | M="$m" R="$r" K="$k" awk '
+        f"'{darwin_runs(True, 'ids')}'); r=; l=; "
+        'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; '
         f"left || exit {NOT_RUNNING_STATUS}; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
@@ -936,10 +948,12 @@ def run_tag(argv: Sequence[str]) -> str:
 # size in bytes and its resident set in pages, as Linux counts them, and
 # idle (``I``) and uninterruptible (``U``) as Linux's ``S`` and ``D``.
 DARWIN_SCAN = (
-    f"PATH={DARWIN_PATH}; b=$(pagesize 2>/dev/null) || b=4096; "
+    f"PATH={DARWIN_PATH}; o=$({DARWIN_PS}) || exit 1; "
+    "b=$(pagesize 2>/dev/null) || b=4096; "
     "k=$(sysctl -n hw.memsize 2>/dev/null) || k=0; "
     f'printf \'{SCAN_FACTS_MARK} %s 100 %s %s\\n\' "$(date +%s)" "$b" "$((k / 1024))"; '
-    f'{DARWIN_PS} | M="$m" R="$r" B="$b" awk \'{darwin_runs(False, "rows")}\' | '
+    "printf '%s\\n' \"$o\" | "
+    f'M="$m" R="$r" B="$b" awk \'{darwin_runs(False, "rows")}\' | '
     "while read -r t p q s u c v z d m n h y a; do "
     "e=$(LC_ALL=C date -j -f '%a %b %e %T %Y' \"$d $m $n $h $y\" +%s00 "
     "2>/dev/null) || continue; "

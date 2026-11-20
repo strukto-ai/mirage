@@ -1124,7 +1124,9 @@ export class MachineMounts {
     }
     if (this.darwin) {
       const listed = await this.run(
-        darwinTableLine([...this.looked].sort(compareCodePoints)),
+        darwinTableLine(
+          [...this.looked].filter((prefix) => !this.points.has(prefix)).sort(compareCodePoints),
+        ),
         signal,
       )
       if (listed.exitCode !== 0) {
@@ -1132,7 +1134,7 @@ export class MachineMounts {
           `${this.provider}: cannot read the machine's mount table: ${said(listed.stderr)}`,
         )
       }
-      const [rows, points] = darwinMountTable(DECODER.decode(listed.stdout))
+      const [rows, points] = darwinMountTable(DECODER.decode(listed.stdout), this.points)
       for (const [prefix, point] of points) this.points.set(prefix, point)
       return rows
     }

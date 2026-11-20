@@ -1312,14 +1312,16 @@ class MachineMounts:
                 )
             self._darwin = said(asked.stdout) == "Darwin"
         if self._darwin:
-            listed = await self._run(darwin_table_line(sorted(self._looked)))
+            listed = await self._run(
+                darwin_table_line(sorted(self._looked - self._points.keys()))
+            )
             if listed.exit_code != 0:
                 raise RuntimeError(
                     f"{self._provider}: cannot read the machine's mount "
                     f"table: {said(listed.stderr)}"
                 )
             rows, points = darwin_mount_table(
-                listed.stdout.decode(errors="replace")
+                listed.stdout.decode(errors="replace"), self._points
             )
             self._points.update(points)
             return rows
