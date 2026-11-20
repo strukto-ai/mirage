@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import ANY, patch
+
 import pytest
 
 from mirage import Policy
@@ -433,7 +435,11 @@ async def test_known_machine_builtin_with_no_placed_machine_tries_the_mount(
         route_policy=lambda ctx: "workspace",
     )
     try:
-        result = await ws.shell(name)
+        with patch.object(
+            ws.registry, "invocation_mount", wraps=ws.registry.invocation_mount
+        ) as resolve_mount:
+            result = await ws.shell(name)
+        resolve_mount.assert_any_call(name, [], "/", (), ANY)
         assert (result.exit_code, result.stderr) == (
             127,
             f"bash: line 1: {name}: command not found".encode(),
