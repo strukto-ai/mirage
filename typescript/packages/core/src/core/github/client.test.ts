@@ -318,7 +318,15 @@ describe('a call that gets no response', () => {
   function refuse(code: string, extra: Record<string, unknown> = {}): void {
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init)
-      SEEN.push({ url: req.url, method: req.method, body: null, contentType: null, accept: null })
+      SEEN.push({
+        url: req.url,
+        method: req.method,
+        body: null,
+        contentType: null,
+        accept: null,
+        authorization: null,
+        apiVersion: null,
+      })
       const cause = Object.assign(new Error(`connect ${code}`), { code, ...extra })
       return Promise.reject(new TypeError('fetch failed', { cause }))
     }) as typeof globalThis.fetch
