@@ -51,7 +51,9 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-AI Agent 在終端機中工作。Mirage 是一個**虛擬終端機**，它把終端機介面、資料儲存和運算機器彼此分開。Mirage 把每條命令路由到適合它的機器上，涵蓋容器、microVM、雲端沙箱和 SSH 主機等異質機器。檔案、CLI 和機器分別加入，因此它保持彈性、基礎設施成本低，並讓 Agent 以最有效率、最安全的方式工作。
+LLM 在終端機環境中完成後訓練，因此 AI Agent 最熟悉終端機介面。但如今的終端機綁定在單一機器和它的作業系統核心上，檔案和運算都在同一台機器上。
+
+Mirage 是一個**為 AI Agent 打造的虛擬終端機**，它把終端機介面與資料儲存和運算機器分開。它虛擬化了 shell、檔案系統、CLI 和機器。每個虛擬終端機啟動時只佔用幾 KB 記憶體，因此 AI Agent 可以在任何地方使用終端機環境，包括應用程式內、行動應用程式、瀏覽器分頁、FastAPI 或 Express 伺服器，甚至 Raspberry Pi 這樣的邊緣裝置。
 
 <p align="center">
   <picture>
@@ -60,9 +62,10 @@ AI Agent 在終端機中工作。Mirage 是一個**虛擬終端機**，它把終
   </picture>
 </p>
 
-- **可控。** 決定每個 Agent 能觸及什麼，包括它能看到哪些檔案、它的虛擬檔案系統和 CLI 在不向它展示的情況下使用哪些憑證，以及由哪台機器執行它的每個程式。
-- **可腳本化。** 整個終端機以程式碼或設定檔定義，從虛擬檔案系統、CLI 和機器，到各項規則，例如哪些命令需要審核、Agent 能拿回多少輸出。
-- **託管式。** Mirage 管理虛擬終端機的基礎設施，由所選的後端組合而成。虛擬檔案系統放在 S3、Drive、資料庫或 RAM 上，工作和歷史記錄放在 RAM、Redis 或磁碟上，整個工作區可以儲存為快照。Agent 執行的每條命令都會被記錄，並可以作為 trace 傳送到 OpenTelemetry 後端。
+- **可控。** 每個 Agent 只能取得它的 profile 允許的檔案、命令、憑證和機器。
+- **可腳本化。** 整個終端機以程式碼或一個設定檔定義，從檔案系統、CLI 和機器到各項規則。
+- **託管式。** 狀態存放在既有的基礎設施上，例如 RAM、磁碟、Redis 或 S3，每條命令都會被記錄，並可以匯出為 OpenTelemetry trace。
+- **輕量。** 每個工作區只佔用幾 KB 記憶體，Mirage 從 shell 到每次服務呼叫都是非同步的，因此一個行程可以同時服務許多 Agent。它幾乎可以部署在任何地方，包括 Python 或 TypeScript 伺服器、瀏覽器分頁、Cloudflare Worker 或 Raspberry Pi。
 
 <p align="center">
   <picture>
@@ -138,7 +141,7 @@ slack: Permission denied
 - **可腳本化的策略引擎。** 策略腳本可以在任何危險操作執行前將其阻擋，同一套策略堆疊還會攔截每一次 VFS 操作和工作階段寫入，因此檔案和環境變數都不會外洩。
 - **接入 VFS 與 Agent 的通知。** 外部變更會成為掛載上的事件串流，因此一則新的 Slack 回覆會表現為虛擬檔案系統中聊天檔案的變化，Agent 直接據此回應，而不必重新掃描整棵樹。
 
-## 虛擬檔案系統
+## 統一虛擬檔案系統
 
 [Mirage](https://www.strukto.ai/mirage) 把一切「掛載」為一個面向 AI Agent 的統一虛擬檔案系統。每個服務並排位於同一個根目錄下，並遵循相同的 POSIX 語意。
 
@@ -153,7 +156,7 @@ slack: Permission denied
 
 Agent 可以透過 Python 和 TypeScript SDK、`mirage` CLI，或基於 FUSE 和 FSKit 的真實掛載點存取它，再用已經熟悉的 unix 工具操作，如 `ls`、`grep`、`find` 和 `jq`。
 
-## 虛擬命令列工具
+## 虛擬 CLI
 
 這些命令列工具是虛擬化的：[Mirage](https://www.strukto.ai/mirage) 自己回應 `git`、`slack` 或 `ntn`，因此 Agent 無需在機器上安裝對應程式即可驅動服務。每個工具都模仿真實工具，熟悉該 CLI 的 Agent 無需學習新東西。由於它們是虛擬的，同一個工具可以用不同名稱安裝多次，各自使用獨立的憑證，因此每個 Agent 拿到的恰好是分配給它的帳號。
 

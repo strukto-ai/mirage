@@ -1,7 +1,7 @@
 [project]
 name = "mirage-ai"
 version = "0.1.0a3"
-description = "A unified virtual filesystem for AI agents. Mount S3, Google Drive, Slack, Gmail, GitHub, Linear, Notion, Postgres, MongoDB, SSH, and more behind one filesystem so agents read, write, and pipe across services with familiar shell commands."
+description = "A virtual terminal for AI agents. Mirage virtualizes the shell, the filesystem, the CLIs and the machines, so agents use one terminal over S3, Google Drive, Slack, Gmail, GitHub, Notion, Postgres and more, with Unix-like commands they already know."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
@@ -11,6 +11,8 @@ authors = [
 ]
 keywords = [
     "ai-agents",
+    "virtual-terminal",
+    "terminal",
     "filesystem",
     "vfs",
     "fuse",

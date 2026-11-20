@@ -1,8 +1,9 @@
 {
   "name": "@struktoai/mirage-server",
   "version": "0.1.0-alpha.3",
-  "description": "A Unified Virtual Filesystem For AI Agents",
+  "description": "A Virtual Terminal for AI Agents",
   "keywords": [
+    "virtual-terminal",
     "bash",
     "fuse",
     "typescript",

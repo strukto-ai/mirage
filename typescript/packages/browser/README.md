@@ -50,7 +50,9 @@
   <a href="https://github.com/strukto-ai/mirage/blob/main/readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
-AI agents work in a terminal. Mirage is **a virtual terminal** that separates the terminal interface, the data storage and the computing machines. Mirage routes each command to the machine that fits it, across heterogeneous machines such as containers, microVMs, cloud sandboxes and SSH hosts. Files, CLIs and machines are added to it separately, which keeps it flexible and its infrastructure cost low, and lets agents work in the most efficient and safest way.
+LLMs are post-trained in terminal environments, so AI agents are most familiar with the terminal interface. But a terminal today is bound to a single machine and its operating system kernel, with its files and its computation on that same machine.
+
+Mirage is **a virtual terminal for AI agents** that separates the terminal interface from the data storage and the computing machines. It virtualizes the shell, the filesystem, the CLIs and the machines. Each virtual terminal starts with only KBs of memory, so AI agents can use terminal environments everywhere, inside an application, a mobile app, a browser tab, a FastAPI or Express server, and even an edge device such as a Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -59,9 +61,10 @@ AI agents work in a terminal. Mirage is **a virtual terminal** that separates th
   </picture>
 </p>
 
-- **Controllable.** Decide what each agent reaches, which files it sees, which credentials its virtual filesystems and CLIs use without showing them, and which machine runs each of its programs.
-- **Scriptable.** The whole terminal is defined in code or a config file, from its virtual filesystems, CLIs and machines to its rules, such as which commands need approval and how much output an agent gets back.
-- **Managed.** Mirage manages the virtual terminal's infrastructure, composed from the chosen backends. The virtual filesystem sits on S3, Drive, a database or RAM, jobs and history on RAM, Redis or disk, and whole workspaces can be saved as snapshots. Every command an agent runs is recorded and can be sent to an OpenTelemetry backend as a trace.
+- **Controllable.** Each agent gets only the files, commands, credentials and machines its profile allows.
+- **Scriptable.** The whole terminal is defined in code or one config file, from its filesystems, CLIs and machines to its rules.
+- **Managed.** State lives on infrastructure that already runs, such as RAM, disk, Redis or S3, and every command is recorded and can be exported as an OpenTelemetry trace.
+- **Lightweight.** Each workspace takes only KBs of memory and Mirage is async from the shell down to each service call, so one process serves many agents at once. It can be deployed almost everywhere, to a Python or TypeScript server, a browser tab, a Cloudflare Worker or a Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -137,7 +140,7 @@ slack: Permission denied
 - **A scriptable policy engine.** A policy script can prohibit any dangerous action before it runs, and the same stack gates every VFS op and session write, so neither a file nor an environment variable leaks.
 - **Notifications wired into the VFS and agents.** External changes become an event stream on the mount, so a new Slack reply surfaces as a change to the chat file in the virtual filesystem, and the agent reacts to it instead of rescanning the tree.
 
-## Virtual Filesystem
+## Unified Virtual Filesystem
 
 Everything [Mirage](https://www.strukto.ai/mirage) "mounts" as one unified virtual filesystem for AI agents. Each
 service sits side-by-side under a single root and answers the same POSIX semantics.
@@ -155,7 +158,7 @@ Agents reach it through the Python and TypeScript SDKs, the `mirage` CLI, or a r
 mountpoint over FUSE and FSKit, then work it with the unix tools they already know,
 like `ls`, `grep`, `find` and `jq`.
 
-## Virtual Command Line Tool
+## Virtual CLIs
 
 These command line tools are virtualized: [Mirage](https://www.strukto.ai/mirage) answers `git`, `slack` or `ntn`
 itself, so an agent drives the service without that program being installed on the
@@ -170,7 +173,7 @@ accounts it is given.
 | **Communication** | <a href="https://docs.mirage.strukto.ai/home/setup/cli/slack"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/discord"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/himalaya"><img src="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **Work and Data** | <a href="https://docs.mirage.strukto.ai/home/setup/cli/linear"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/ntn"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/trello"><img src="https://cdn.simpleicons.org/trello" width="20" height="20" alt="trello" title="trello" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/airtable"><img src="https://cdn.simpleicons.org/airtable" width="20" height="20" alt="airtable" title="airtable" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/gws"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/hf"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/office"><img src="https://api.iconify.design/lucide/file-spreadsheet.svg?color=%23888888" width="20" height="20" alt="office" title="office" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/pdftotext"><img src="https://api.iconify.design/lucide/file-text.svg?color=%23888888" width="20" height="20" alt="pdftotext" title="pdftotext" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/pdfinfo"><img src="https://api.iconify.design/lucide/file-search.svg?color=%23888888" width="20" height="20" alt="pdfinfo" title="pdfinfo" /></a> |
 
-## Virtual Machine
+## Virtual Machines
 
 Machines are virtualized the same way, and not only for coding languages. Any
 command on the line can be sent to a configured machine, so Python might run
