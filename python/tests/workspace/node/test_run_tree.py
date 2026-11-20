@@ -23,6 +23,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.run_tree import (
     run_command_tree as _run_command_tree,
 )
@@ -30,10 +31,18 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.workspace import Workspace
 
 
-def run_command_tree(dispatch, registry, *args, **kwargs):
-    return _run_command_tree(
-        dispatch, registry, Namespace(registry), *args, **kwargs
+def run_command_tree(
+    dispatch, registry, job_table, execute_fn, ast, context, stdin, cancel
+):
+    deps = ExecuteNodeDeps(
+        dispatch,
+        registry,
+        Namespace(registry),
+        job_table,
+        execute_fn,
+        cancel=cancel,
     )
+    return _run_command_tree(deps, ast, context, stdin)
 
 
 @pytest.fixture

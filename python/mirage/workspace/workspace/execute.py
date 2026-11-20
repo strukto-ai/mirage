@@ -91,6 +91,7 @@ from mirage.workspace.history.line import LineHistory
 from mirage.workspace.lookup.lookup import runs_on_machine
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.explain import (
     Judged,
     Walked,
@@ -312,29 +313,28 @@ async def recurse(
                 context.frame.runs_on_machine = partial(
                     runs_on_machine, ws.registry
                 )
-                evaluate = partial(
-                    recurse,
-                    ws,
-                    cancel=cancel,
-                    routing_decision=routing_decision,
-                    nested=nested,
-                    line_handle=line_handle,
-                    handed=inner,
-                )
-                io, _ = await run_command_tree(
+                deps = ExecuteNodeDeps(
                     ws.dispatch,
                     ws.registry,
                     ws.namespace,
                     ws.job_table,
-                    evaluate,
+                    partial(
+                        recurse,
+                        ws,
+                        routing_decision=routing_decision,
+                        nested=nested,
+                    ),
+                    cancel=cancel,
+                    handed=inner,
+                    line_handle=line_handle,
+                )
+                io, _ = await run_command_tree(
+                    deps,
                     tree,
                     context,
                     None,
-                    cancel,
-                    handed=inner,
                     command_substitution=True,
                     read=read,
-                    line_handle=line_handle,
                     route=ws.router.context(
                         cmd,
                         session,
@@ -1157,15 +1157,10 @@ async def _run_limited(
     ws: ExecuteEnv,
     command: str,
     ast: Any,
+    deps: ExecuteNodeDeps,
     context: EvaluationContext,
     stdin: ByteSource | None,
-    cancel: asyncio.Event | None,
-    job_table: JobTable,
-    exec_recursion: Callable[..., Awaitable[IOResult]],
-    handed: HandOff,
-    sink: JobConsole | None,
     call_stack: CallStack | None,
-    line_handle: LineHandle,
     judged: Callable[[], Awaitable[list[tuple[Walked, list[Judged]]]]],
     timeout: float | None,
     budget_start: float,
@@ -1183,15 +1178,12 @@ async def _run_limited(
         ws (ExecuteEnv): the workspace running the line.
         command (str): the line's text.
         ast (Any): its parse.
+        deps (ExecuteNodeDeps): what its tree runs against: the jobs it
+            starts, its nested lines' entry point, its grants, abort
+            event, handle and where its output streams.
         context (EvaluationContext): its evaluation.
         stdin (ByteSource | None): its input.
-        cancel (asyncio.Event | None): its abort event.
-        job_table (JobTable): the jobs it starts.
-        exec_recursion (Callable): runs its nested lines.
-        handed (HandOff): its grants.
-        sink (JobConsole | None): where its output streams.
         call_stack (CallStack | None): its call stack.
-        line_handle (LineHandle): its handle.
         judged (Callable): its commands as admission judged them.
         timeout (float | None): its ``@line`` deadline.
         budget_start (float): when that deadline started.
@@ -1215,19 +1207,11 @@ async def _run_limited(
                     ws.registry.max_env,
                     run_with_timeout(
                         run_command_tree(
-                            ws.dispatch,
-                            ws.registry,
-                            ws.namespace,
-                            job_table,
-                            exec_recursion,
+                            deps,
                             ast,
                             context,
                             stdin,
-                            cancel,
-                            handed=handed,
-                            sink=sink,
                             call_stack=call_stack,
-                            line_handle=line_handle,
                             route=route,
                         ),
                         timeout,
@@ -1541,17 +1525,25 @@ async def run_prepared_line(
             context.frame.runs_on_machine = partial(
                 runs_on_machine, ws.registry
             )
-            # Bound by keyword so the walker can rebind it per node: a
-            # background job's nested lines run without the caller's
-            # event, as the job itself does.
-            exec_recursion = partial(
-                recurse,
-                ws,
+            # The walker binds the event, the hand-off and the handle
+            # per node: a background job's nested lines run without the
+            # caller's event, as the job itself does.
+            deps = ExecuteNodeDeps(
+                ws.dispatch,
+                ws.registry,
+                ws.namespace,
+                job_table or ws.job_table,
+                partial(
+                    recurse,
+                    ws,
+                    routing_decision=decision,
+                    nested=nested,
+                    job_table=job_table,
+                ),
                 cancel=cancel,
-                routing_decision=decision,
-                nested=nested,
+                handed=handed,
                 line_handle=line_handle,
-                job_table=job_table,
+                sink=sink,
             )
             line_runtime = whole_line_runtime(decision.bindings)
             if line_runtime is not None:
@@ -1627,15 +1619,10 @@ async def run_prepared_line(
                 ws,
                 command,
                 ast,
+                deps,
                 context,
                 stdin,
-                cancel,
-                job_table or ws.job_table,
-                exec_recursion,
-                handed,
-                sink,
                 call_stack,
-                line_handle,
                 judged,
                 context.frame.line_timeout if top_level else None,
                 budget_start,

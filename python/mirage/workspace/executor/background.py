@@ -839,7 +839,7 @@ async def handle_background(
                         new_line_id(), bg_session.session_id, cmd_str_inner
                     ),
                     ends_shell=True,
-                    jobs=job_table.child(),
+                    job_table=job_table.child(),
                 )
             except (ExitSignal, ReturnSignal) as sig:
                 stdout, io, exec_node = _job_left(

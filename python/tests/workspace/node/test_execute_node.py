@@ -30,18 +30,20 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
 
-def execute_node(dispatch, registry, *args, **kwargs):
-    context = kwargs.get("context", args[3] if len(args) > 3 else None)
+def execute_node(dispatch, registry, job_table, execute_fn, *args, **kwargs):
+    context = kwargs.get("context", args[1] if len(args) > 1 else None)
     if context is not None and context.frame.routing is None:
         context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
-    return _execute_node(
-        dispatch, registry, Namespace(registry), *args, **kwargs
+    deps = ExecuteNodeDeps(
+        dispatch, registry, Namespace(registry), job_table, execute_fn
     )
+    return _execute_node(deps, *args, **kwargs)
 
 
 def _session(cwd="/", env=None):

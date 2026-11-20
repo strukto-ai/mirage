@@ -923,9 +923,7 @@ def with_hand_off(
     return replace(deps, handed=handed)
 
 
-def with_opts(
-    base: ExecuteNodeDeps, opts: ExecuteNodeOpts
-) -> ExecuteNodeDeps:
+def with_opts(base: ExecuteNodeDeps, opts: ExecuteNodeOpts) -> ExecuteNodeDeps:
     """Layer a caller's overrides on the walker's dependencies.
 
     A key decides by its presence: ``cancel=None`` runs the subtree with
@@ -966,87 +964,52 @@ def with_opts(
 
 
 async def execute_node(
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    job_table: JobTable,
-    execute_fn: ExecuteFn,
+    deps: ExecuteNodeDeps,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    cancel: asyncio.Event | None = None,
-    sink: JobConsole | None = None,
-    handed: HandOff | None = None,
-    line_handle: LineHandle | None = None,
-    ends_shell: bool = False,
-    own_diagnostics: bool = True,
-    jobs: JobTable | None = None,
+    **opts: Unpack[ExecuteNodeOpts],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run one node of the tree, with the caller's overrides layered on.
+
+    Args:
+        deps (ExecuteNodeDeps): what the walk runs against.
+        node (TSNodeLike): parsed node to execute.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
+        **opts (ExecuteNodeOpts): the caller's overrides (``with_opts``).
+    """
     session = context.session
-    # The job list the subtree runs on in place of the bound one: a
-    # background job's own, as bash's forked job starts with none of its
-    # shell's, so a bare `wait` in it never waits on itself. The lines it
-    # runs (`eval`, `source`, its EXIT action) see that list too.
-    if jobs is not None:
-        job_table = jobs
-        execute_fn = partial(execute_fn, job_table=jobs)
-    line_handle = line_handle or LineHandle(
-        new_line_id(registry.ids), session.session_id, get_text(node)
-    )
+    deps = with_opts(deps, opts)
+    line_handle = deps.line_handle
+    if line_handle is None:
+        line_handle = LineHandle(
+            new_line_id(deps.registry.ids), session.session_id, get_text(node)
+        )
+        deps = replace(deps, line_handle=line_handle)
     # The node is the whole of a child shell (a background job), which
     # runs its EXIT action when the node ends, its evaluator bound the
-    # way `_execute_node` binds it for the node's own lines.
-    if ends_shell:
+    # way `_execute_node_body` binds it for the node's own lines.
+    if opts.get("ends_shell", False):
         if node.type == NT.REDIRECTED_STATEMENT:
             whole = get_redirects(node)[0]
             context.frame.ending = None if whole is None else whole.id
         return await end_shell(
-            partial(
-                execute_fn,
-                handed=handed,
-                cancel=cancel,
-                line_handle=line_handle,
-            ),
+            deps.execute_fn,
             session,
             stdin,
             call_stack,
-            execute_node(
-                dispatch,
-                registry,
-                namespace,
-                job_table,
-                execute_fn,
-                node,
-                context,
-                stdin,
-                call_stack,
-                cancel,
-                sink,
-                handed,
-                line_handle,
-            ),
+            execute_node(deps, node, context, stdin, call_stack),
         )
-    await line_handle.checkpoint(cancel)
-    run = partial(
-        _execute_node,
-        dispatch,
-        registry,
-        namespace,
-        job_table,
-        execute_fn,
-        node,
-        context,
-        stdin,
-        call_stack,
-        cancel,
-        sink,
-        handed,
-        line_handle,
-    )
+    await line_handle.checkpoint(deps.cancel)
+    job_table = deps.job_table
+    sink = deps.sink
+    run = partial(_execute_node_body, deps, node, context, stdin, call_stack)
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
-    process_subs = ProcessSubScope(context, registry, job_table)
+    process_subs = ProcessSubScope(context, deps.registry, job_table)
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
     writers = context.frame.writers
@@ -1055,7 +1018,7 @@ async def execute_node(
         # What expanding the node printed (a substitution's stderr) goes
         # out with the node's own stderr, unless its caller collects it: a
         # simple command's words expand before its redirects apply.
-        if not own_diagnostics:
+        if not opts.get("own_diagnostics", True):
             stdout, io, exec_node = await shallow(run(own_diagnostics=False))
         else:
             outer = context.frame.diagnostics
@@ -1216,50 +1179,33 @@ async def _assign_then_open(
 
 
 async def _fork_subshell(
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    job_table: JobTable,
-    execute_fn: ExecuteFn,
-    cancel: asyncio.Event | None,
-    handed: HandOff | None,
+    deps: ExecuteNodeDeps,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None,
     cs: CallStack,
-    sink: JobConsole | None,
 ) -> RedirectResult:
     """Run a subshell, its own shell, as bash forks one.
 
+    Each statement of the body is a line of its own, and its nested
+    lines keep the entry point's job list.
+
     Args:
-        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        job_table (JobTable): background job management.
-        execute_fn (ExecuteFn): recursive execute (for source/eval).
-        cancel (asyncio.Event | None): event used to abort mid-flight.
-        handed (HandOff | None): the hand-off this subtree runs on.
+        deps (ExecuteNodeDeps): what the subshell node runs against.
         node (TSNodeLike): the subshell node.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream.
         cs (CallStack): shell call stack.
-        sink (JobConsole | None): where the body writes as it runs.
     """
     session = context.session
     # A subshell is its own shell: background jobs started inside
     # live in a private job table (`$!`/`wait`/`kill` in the body
     # see them; the parent's table never does), mirroring bash's
     # forked process.
-    sub_table = job_table.child() if job_table is not None else JobTable()
+    sub_table = deps.job_table.child()
     sub_recurse = partial(
         execute_node,
-        dispatch,
-        registry,
-        namespace,
-        sub_table,
-        execute_fn,
-        cancel=cancel,
-        handed=handed,
+        replace(deps, job_table=sub_table, sink=None, line_handle=None),
     )
     child = child_context(context)
     as_program = is_program_invocation(session)
@@ -1278,11 +1224,11 @@ async def _fork_subshell(
                 stdin,
                 cs,
                 sub_table,
-                dispatch,
-                handed,
-                registry.decisions,
-                sink=sink,
-                execute_fn=execute_fn,
+                deps.dispatch,
+                deps.handed,
+                deps.registry.decisions,
+                sink=deps.sink,
+                execute_fn=deps.execute_fn,
             )
             results.append(result)
             return result[1].exit_code
@@ -1357,32 +1303,29 @@ async def _run_arith(
 
 
 async def _run_for(
+    deps: ExecuteNodeDeps,
     kind: NodeKind,
     node: TSNodeLike,
     run_body: Callable[..., Awaitable[RedirectResult]],
     context: EvaluationContext,
     stdin: ByteSource | None,
     cs: CallStack,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    sink: JobConsole | None,
 ) -> RedirectResult:
     """Run a ``for`` or ``select`` over its expanded words.
 
     Args:
+        deps (ExecuteNodeDeps): what the loop node runs against; its
+            sink is where ``select`` writes its menu.
         kind (NodeKind): which of the two the node is.
         node (TSNodeLike): the loop node.
         run_body (Callable): runs the loop's statements.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream.
         cs (CallStack): shell call stack.
-        execute_fn (ExecuteFn): recursive execute (for substitutions).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        sink (JobConsole | None): where ``select`` writes its menu.
     """
     session = context.session
+    execute_fn = deps.execute_fn
+    registry = deps.registry
     var, values, body = get_for_parts(node)
     if not is_valid_name(var):
         return fail(
@@ -1407,7 +1350,7 @@ async def _run_for(
                 classified,
                 registry,
                 noglob=bool(session.shell_options.get("noglob")),
-                links=namespace.session_links(session),
+                links=deps.namespace.session_links(session),
                 options=glob_options(session),
             )
     head = loop_head(node)
@@ -1421,7 +1364,7 @@ async def _run_for(
                 body,
                 context,
                 stdin,
-                sink=sink,
+                sink=deps.sink,
             )
         return await handle_for(
             run_body, var, classified, head, body, context, execute_fn, cs
@@ -1510,20 +1453,12 @@ async def _assign_all(
     )
 
 
-async def _execute_node(
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    job_table: JobTable,
-    execute_fn: ExecuteFn,
+async def _execute_node_body(
+    deps: ExecuteNodeDeps,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    cancel: asyncio.Event | None = None,
-    sink: JobConsole | None = None,
-    handed: HandOff | None = None,
-    line_handle: LineHandle | None = None,
     own_diagnostics: bool = True,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Walk the parsed tree and dispatch each node.
@@ -1532,34 +1467,34 @@ async def _execute_node(
     then set -n; echo BAD; fi`` with nothing; the program loop's own stop
     is what silences ``set -v`` for the lines it never reads.
 
+    The node's ``cancel`` is bound into ``execute_fn`` with ``handed``,
+    so a ``$(...)`` in a background job never dies of the caller's
+    abort. Its ``handed`` is carried to every command's gate so it runs
+    on the grants claimed for this line and never another's, and bound
+    into ``execute_fn`` so every line the subtree evaluates stands under
+    it too, a line a background job evaluates after the typed line ended
+    included. A ``sink`` makes the node write its output as it is
+    produced and return no stdout; with none it returns stdout as a
+    value, which is what capture sites (command substitution, pipe
+    stages, redirects) rely on.
+
     Args:
-        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        job_table (JobTable): background job management.
-        execute_fn (Callable): recursive execute (for source/eval).
-        node (Any): parsed node to execute.
+        deps (ExecuteNodeDeps): what the node runs against.
+        node (TSNodeLike): parsed node to execute.
         context (EvaluationContext): the evaluation's session and frame.
-        stdin (Any): input stream.
-        call_stack (CallStack): shell call stack.
-        cancel (asyncio.Event | None): event used to abort mid-flight,
-            bound into ``execute_fn`` with ``handed``, so a ``$(...)`` in
-            a background job never dies of the caller's abort.
-        handed (HandOff | None): the hand-off this subtree runs on,
-            carried to every command's gate so it runs on the grants
-            claimed for this line and never another's, and bound into
-            ``execute_fn`` so every line the subtree evaluates stands
-            under it too, a line a background job evaluates after the
-            typed line ended included.
-        sink (JobConsole | None): console to write this node's output to
-            as it is produced. When set, the node emits and returns no
-            stdout; when None it returns stdout as a value, which is
-            what capture sites (command substitution, pipe stages,
-            redirects) rely on.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
         own_diagnostics (bool): whether a node drained into the sink
             flushes its own diagnostics; a redirect's simple command
             leaves them for the redirect to put outside it.
     """
+    dispatch = deps.dispatch
+    registry = deps.registry
+    namespace = deps.namespace
+    job_table = deps.job_table
+    cancel = deps.cancel
+    handed = deps.handed
+    sink = deps.sink
     session = context.session
     if session.shell_options.get("noexec"):
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
@@ -1572,23 +1507,9 @@ async def _execute_node(
     if node.type != NT.PROGRAM:
         # The command whose line bash numbers diagnostics and `$LINENO` by.
         session._line_node = node
-    execute_fn = partial(
-        execute_fn,
-        handed=handed,
-        cancel=cancel,
-        line_handle=line_handle,
-    )
-
+    execute_fn = deps.execute_fn
     recurse = partial(
-        execute_node,
-        dispatch,
-        registry,
-        namespace,
-        job_table,
-        execute_fn,
-        cancel=cancel,
-        handed=handed,
-        line_handle=line_handle,
+        execute_node, deps if sink is None else replace(deps, sink=None)
     )
 
     kind = node_kind(node)
@@ -1626,7 +1547,7 @@ async def _execute_node(
             ),
         )
 
-    stream = partial(recurse, sink=sink) if sink is not None else recurse
+    stream = partial(execute_node, deps) if sink is not None else recurse
 
     def redirected(
         command: TSNodeLike | None,
@@ -1786,20 +1707,7 @@ async def _execute_node(
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.SUBSHELL:
-        return await _fork_subshell(
-            dispatch,
-            registry,
-            namespace,
-            job_table,
-            execute_fn,
-            cancel,
-            handed,
-            node,
-            context,
-            stdin,
-            cs,
-            sink,
-        )
+        return await _fork_subshell(deps, node, context, stdin, cs)
 
     if kind == NodeKind.ARITH:
         return await _run_arith(node, context, execute_fn, cs)
@@ -1834,18 +1742,7 @@ async def _execute_node(
             )
 
     if kind in (NodeKind.FOR, NodeKind.SELECT):
-        return await _run_for(
-            kind,
-            node,
-            run_body,
-            context,
-            stdin,
-            cs,
-            execute_fn,
-            registry,
-            namespace,
-            sink,
-        )
+        return await _run_for(deps, kind, node, run_body, context, stdin, cs)
 
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         test, body = get_while_parts(node)
