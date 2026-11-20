@@ -2279,10 +2279,13 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
     while words and words[0].value in ("command", "builtin"):
         words = words[1:]
         while words and words[0].value[:1] == "-" and words[0].value != "-":
-            ended = words[0].value == "--"
+            option = words[0].value
             words = words[1:]
-            if ended:
+            if option == "--":
                 break
+            if "v" in option or "V" in option:
+                # `command -v`/`-V` only looks names up.
+                return None
     if not words:
         return None
     head = words[0].value
@@ -2308,6 +2311,9 @@ def _printf_target(args: Sequence[Word]) -> list[Word]:
         args (Sequence[Word]): the words after ``printf``.
     """
     for at, word in enumerate(args):
+        if word.text is None:
+            # The run may expand it to an option, `-v NAME` among them.
+            return [word]
         if word.value[:1] != "-" or word.value in ("-", "--"):
             return []
         if word.value == "-v":

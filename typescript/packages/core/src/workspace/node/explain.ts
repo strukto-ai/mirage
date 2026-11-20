@@ -2669,6 +2669,8 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
       if (!option.startsWith('-') || option === '-') break
       words = words.slice(1)
       if (option === '--') break
+      // `command -v`/`-V` only looks names up.
+      if (option.includes('v') || option.includes('V')) return null
     }
   }
   if (words[0] === undefined) return null
@@ -2697,6 +2699,8 @@ function printfTarget(args: readonly Word[]): Word[] {
   for (let at = 0; at < args.length; at++) {
     const word = args[at]
     if (word === undefined) break
+    // The run may expand an unknown word to an option, `-v NAME` among them.
+    if (word.text === null) return [word]
     const value = wordValue(word)
     if (!value.startsWith('-') || value === '-' || value === '--') return []
     if (value === '-v') return args.slice(at + 1, at + 2)

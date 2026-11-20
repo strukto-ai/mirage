@@ -258,6 +258,7 @@ const ANOTHER_SPELLING = [
   "read 'PS4[0]' <<< x; set -x; :",
   'read -a PS4 <<< x; set -x; :',
   "command -p printf -v PS4 '$(hostname)'; set -x; :",
+  "empty=; printf $empty -v PS4 '$(hostname)'; set -x; :",
   "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
   'declare -n r; r=PS4; r=x; set -x; :',
   'v=PS4; printf -v "$v" x; set -x; :',
@@ -282,6 +283,7 @@ const STILL_RUNS = [
   "bash -c ': -l'",
   'exec -a name echo hi',
   "printf '%s\\n' -v PS4",
+  'command -v read PS4',
 ] as const
 
 // Lines a rule leaves alone (a coded policy refuses their `$` words).
