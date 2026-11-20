@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-fuse",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "The FUSE client a machine mounts a Mirage workspace's prefixes with, served by Mirage over fsproto",
   "homepage": "https://github.com/strukto-ai/mirage#readme",
   "bugs": {
