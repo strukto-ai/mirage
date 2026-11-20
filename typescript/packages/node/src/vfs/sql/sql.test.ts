@@ -346,6 +346,18 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
   })
 }
 
+it('finds more files than a remote service allows one walk', async () => {
+  const ws = new Workspace({ '/work': new SqlVFS() }, { mode: MountMode.WRITE })
+  try {
+    const seeded = await ws.shell('mkdir /work/d && touch /work/d/f{1..1001}')
+    expect(seeded.exitCode).toBe(0)
+    const found = await ws.shell('find /work/d -type f | wc -l')
+    expect([found.stdoutText.trim(), found.stderrText, found.exitCode]).toEqual(['1001', '', 0])
+  } finally {
+    await ws.close()
+  }
+})
+
 it('finds a short quiet match behind a one-file walk limit', async () => {
   const vfs = new SqlVFS()
   vfs.walkLimit = 1

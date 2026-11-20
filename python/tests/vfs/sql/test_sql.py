@@ -255,6 +255,22 @@ async def test_recursive_grep_walks_after_one_declined_candidate_query(
 
 
 @pytest.mark.asyncio
+async def test_find_walks_more_files_than_a_remote_service_allows():
+    ws = Workspace({"/work": SqlVFS(":memory:")}, mode=MountMode.WRITE)
+    try:
+        seeded = await ws.shell("mkdir /work/d && touch /work/d/f{1..1001}")
+        assert seeded.exit_code == 0
+        found = await ws.shell("find /work/d -type f | wc -l")
+        assert (found.stdout, found.stderr or b"", found.exit_code) == (
+            b"1001\n",
+            b"",
+            0,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_recursive_grep_keeps_file_diagnostics_and_zero_counts():
     ws = Workspace({"/work": SqlVFS(":memory:")}, mode=MountMode.WRITE)
     try:
