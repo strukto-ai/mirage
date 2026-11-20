@@ -55,9 +55,11 @@ import {
   isDotWalkError,
   isEacces,
   isRefusal,
+  isAborting,
   isEnotdir,
   isFsError,
   isMissingPath,
+  strerrorOf,
 } from '../../../errors/fs.ts'
 import { nameLocation, typedLink } from '../utils/links.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
@@ -565,8 +567,19 @@ export async function symlinkedTree(
         PathSpec.fromStrPath(`${rstripSlash(there.virtual)}/${leaf}`),
         `${rstripSlash(there.rawPath)}/${leaf}`,
       )
-      const { kind } = await sourceKind(stat, entry)
-      if (kind === FileType.DIRECTORY) stack.push([entry, landing])
+      let source
+      try {
+        source = await sourceKind(stat, entry)
+      } catch (err) {
+        if (isAborting(err)) throw err
+        errors.push(`cp: cannot stat '${entry.rawPath}': ${strerrorOf(err)}`)
+        continue
+      }
+      if (source.condition !== null && source.condition !== 'ENOENT') {
+        errors.push(`cp: cannot stat '${entry.rawPath}': ${posixPhrase(source.condition)}`)
+        continue
+      }
+      if (source.kind === FileType.DIRECTORY) stack.push([entry, landing])
       else await symlinked(dispatch, stat, entry, landing, flags, policy, copies, errors, lines)
     }
   }

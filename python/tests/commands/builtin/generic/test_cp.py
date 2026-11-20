@@ -46,6 +46,7 @@ from mirage.types import (
     PathSpec,
     PrimitiveCopy,
 )
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.sql import SqlVFS
@@ -214,6 +215,63 @@ async def _run_primitive(
         stat=stat,
         flags=flags or CpFlags(recursive=recursive),
     )
+
+
+async def _symbolic_copy_with_stat_failure(
+    failure: Exception, links: dict[str, str]
+) -> IOResult:
+    files = {"/src/a-good": b"", "/src/z-bad": b""}
+    dirs = {"/src"}
+    stat, strategy = _make_primitive(
+        files,
+        dirs,
+        stat_fails={"/src/z-bad": failure},
+    )
+
+    async def dispatch(op, path, **kwargs):
+        if op == "mkdir":
+            dirs.add(path.virtual)
+        elif op == "symlink":
+            links[path.virtual] = kwargs["target"]
+        else:
+            pytest.fail(f"unexpected op: {op}")
+        return None, IOResult()
+
+    _, io = await cp_generic(
+        [_spec("/src"), _spec("/out")],
+        stat=stat,
+        strategy=strategy,
+        flags=CpFlags(recursive=True, link="symbolic"),
+        readdir=strategy.readdir,
+        dispatch=dispatch,
+    )
+    return io
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure,message",
+    [
+        (eacces("/src/z-bad"), "Permission denied"),
+        (ValueError("malformed metadata"), "malformed metadata"),
+    ],
+)
+async def test_recursive_symbolic_copy_continues_after_child_stat_failure(
+    failure, message
+):
+    links = {}
+    io = await _symbolic_copy_with_stat_failure(failure, links)
+    assert io.exit_code == 1
+    assert io.stderr == f"cp: cannot stat '/src/z-bad': {message}\n".encode()
+    assert links == {"/out/a-good": "/src/a-good"}
+
+
+@pytest.mark.asyncio
+async def test_recursive_symbolic_copy_stops_linking_on_abort():
+    links = {}
+    with pytest.raises(MirageAbortError):
+        await _symbolic_copy_with_stat_failure(MirageAbortError(), links)
+    assert links == {}
 
 
 @pytest.mark.asyncio

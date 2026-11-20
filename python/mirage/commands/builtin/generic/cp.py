@@ -50,7 +50,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK, session_umask
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import enoent, fs_strerror
+from mirage.errors.fs import enoent, fs_strerror, is_aborting, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import (
     DotWalkLoop,
@@ -2147,7 +2147,20 @@ async def symlinked_tree(
                 PathSpec.from_str_path(there.virtual.rstrip("/") + "/" + leaf),
                 raw_path=there.raw_path.rstrip("/") + "/" + leaf,
             )
-            kind, _ = await source_kind(stat, entry)
+            try:
+                kind, condition = await source_kind(stat, entry)
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
+                errors.append(
+                    f"cp: cannot stat '{entry.raw_path}': {strerror_of(exc)}"
+                )
+                continue
+            if condition is not None and condition != FsCondition.ENOENT:
+                errors.append(
+                    f"cp: cannot stat '{entry.raw_path}': {posix_phrase(condition)}"
+                )
+                continue
             if kind == FileType.DIRECTORY:
                 stack.append((entry, landing))
             else:
