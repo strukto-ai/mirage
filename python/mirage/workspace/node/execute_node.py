@@ -1480,19 +1480,12 @@ async def _execute_node_body(
         try:
             async with command_scope():
                 ran = await execute_command(
+                    deps,
                     recurse,
-                    dispatch,
-                    registry,
-                    namespace,
-                    execute_fn,
                     node,
                     context,
                     stdin,
                     cs,
-                    job_table,
-                    cancel=cancel,
-                    handed=handed,
-                    sink=sink,
                     expanded=expanded,
                 )
             return ran if sink is None else await drained(sink, *ran)

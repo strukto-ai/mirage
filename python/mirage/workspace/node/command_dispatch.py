@@ -45,7 +45,6 @@ from mirage.context.session_context import (
     redirect_syntax_for,
     syntax_head,
 )
-from mirage.execution.job import JobTable
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, OutputState, materialize
@@ -136,6 +135,7 @@ from mirage.workspace.executor.command.command import (
 )
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.executor.command.handler import argument_list_too_long
+from mirage.workspace.executor.deps import ExecuteNodeDeps, with_opts
 from mirage.workspace.expand import expand_assignment
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import (
@@ -143,7 +143,6 @@ from mirage.workspace.expand.globs import (
     glob_options,
     resolve_globs,
 )
-from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
@@ -396,28 +395,25 @@ async def _run_alias(
 
 
 async def execute_command(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    execute_fn: ExecuteFn,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Dispatch a command node by name.
 
-    ``sink`` is where a command that runs statements of its own (a
+    ``deps.sink`` is where a command that runs statements of its own (a
     function body, a nested shell) writes them as they finish, and
     ``expanded`` is filled with the words the command expanded to, so
     its caller knows what the head ran as.
     """
+    registry = deps.registry
+    execute_fn = deps.execute_fn
+    handed = deps.handed
+    sink = deps.sink
     session = context.session
     name = get_command_name(node)
     assignment_nodes, parts = split_env_prefix(get_parts(node))
@@ -582,21 +578,14 @@ async def execute_command(
     settling: OutputState | None = None
     try:
         stdout, io, exec_node = await _run_command_body(
+            deps,
             recurse,
-            dispatch,
-            registry,
-            namespace,
-            execute_fn,
             node,
             parts,
             context,
             stdin,
             call_stack,
-            job_table,
             seed_prefix,
-            cancel,
-            handed,
-            sink,
             expanded,
             assigned=frozenset(k for k, _ in prefix_assignments),
         )
@@ -716,21 +705,14 @@ def _write_refused(
 
 
 async def _run_command_body(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    execute_fn: ExecuteFn,
     node: TSNodeLike,
     parts: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
     seed_prefix: Callable[[str], None],
-    cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
     assigned: frozenset[str] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -740,8 +722,22 @@ async def _run_command_body(
     # substitution names its own node when it calls, so every nested
     # line stands under the node its text came from.
     session = context.session
-    claimant = claimant_for(node, handed)
-    execute_fn = partial(execute_fn, node=node)
+    registry = deps.registry
+    namespace = deps.namespace
+    sink = deps.sink
+    claimant = claimant_for(node, deps.handed)
+    deps = ExecuteNodeDeps(
+        deps.dispatch,
+        registry,
+        namespace,
+        deps.job_table,
+        partial(deps.entry, node=node),
+        deps.cancel,
+        deps.handed,
+        deps.line_handle,
+        sink,
+    )
+    execute_fn = deps.execute_fn
 
     argv = await _own_words(
         node,
@@ -758,23 +754,17 @@ async def _run_command_body(
         expanded.words = (argv.name, *argv.args)
 
     body = _run_argv(
+        deps,
         recurse,
-        dispatch,
-        registry,
-        namespace,
-        execute_fn,
         argv,
         context,
         stdin,
         call_stack,
-        job_table,
-        cancel,
         row=read_row(node),
         redirects=redirect_paths_for(node.id),
         runner=redirect_runner_for(node.id),
         seed_prefix=seed_prefix,
         claimant=claimant,
-        sink=sink,
         assigned=assigned,
     )
     # Capture xtrace before the body runs so `set -x` itself is not
@@ -813,23 +803,17 @@ async def _run_command_body(
 
 
 async def _run_argv(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    cancel: asyncio.Event | None = None,
     row: int = 0,
     redirects: tuple[PathSpec, ...] = (),
     runner: RedirectRunner | None = None,
     seed_prefix: Callable[[str], None] | None = None,
     claimant: Claimant | None = None,
-    sink: JobConsole | None = None,
     assigned: frozenset[str] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
@@ -842,6 +826,11 @@ async def _run_argv(
     the shell's own fds outside the admitted command's gate window, and
     ``runner`` applies redirects after word expansion, gating each open.
     """
+    dispatch = deps.dispatch
+    registry = deps.registry
+    namespace = deps.namespace
+    cancel = deps.cancel
+    sink = deps.sink
     session = context.session
     name = argv.name
 
@@ -973,10 +962,10 @@ async def _run_argv(
         # the line's placement for its run alone: the lines it runs
         # (`eval`) keep the command's placement, not the line's.
         line_routing = context.frame.routing
-        nested = execute_fn
+        entry = deps.entry
 
         def place(route: Route | None) -> None:
-            nonlocal nested
+            nonlocal entry
             here = context.frame.routing
             if route is None or here is None:
                 return
@@ -986,9 +975,7 @@ async def _run_argv(
                 )
             except ValueError as exc:
                 raise RouteError(str(exc)) from exc
-            nested = partial(
-                execute_fn, routing_decision=context.frame.routing
-            )
+            entry = partial(deps.entry, routing_decision=context.frame.routing)
 
         try:
             place(admitted.route if admitted is not None else None)
@@ -1022,22 +1009,18 @@ async def _run_argv(
                         Refused(err, code, decision_of(answer)),
                     )
                 place(answer)
+            routed_deps = with_opts(deps, {"sink": output})
+            if entry is not deps.entry:
+                routed_deps = dataclasses.replace(routed_deps, entry=entry)
             with command_records(own=True) as mine:
                 result = await _route_argv(
+                    routed_deps,
                     recurse,
-                    dispatch,
-                    registry,
-                    namespace,
-                    nested,
                     argv,
                     context,
                     given,
                     call_stack,
-                    job_table,
-                    cancel,
                     row,
-                    claimant.line if claimant is not None else None,
-                    output,
                 )
         finally:
             context.frame.routing = line_routing
@@ -1625,26 +1608,24 @@ async def _wrapped_verdict(
 
 
 async def _route_argv(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    cancel: asyncio.Event | None,
     row: int,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
 
     The half of ``_run_argv`` past the gate, split out so the gate's
     verdict can be bound around it.
     """
+    dispatch = deps.dispatch
+    registry = deps.registry
+    namespace = deps.namespace
+    execute_fn = deps.execute_fn
+    sink = deps.sink
     session = context.session
     name = argv.name
     args = list(argv.args)
@@ -1718,16 +1699,11 @@ async def _route_argv(
             and not runtime_refused(name, session, registry, placed)
         )
         return await handle_exec_path(
-            dispatch,
-            execute_fn,
+            deps,
             name,
             [word_text(a) for a in args],
             context,
-            registry,
-            namespace,
             stdin,
-            sink,
-            job_table,
             call_stack,
             on_the_runtime if external else None,
         )
@@ -1832,14 +1808,14 @@ async def _route_argv(
                     context=context,
                     stdin=stdin,
                     call_stack=call_stack,
-                    cancel=cancel,
+                    cancel=deps.cancel,
                     row=row,
                     dispatch=dispatch,
                     registry=registry,
                     namespace=namespace,
                     execute_fn=execute_fn,
                     sink=sink,
-                    job_table=job_table,
+                    job_table=deps.job_table,
                 )
             )
         except ArithError as exc:
@@ -1945,18 +1921,12 @@ async def _route_argv(
 
     # ── mount command (default) ─────────────────
     stdout, io, exec_node = await handle_command(
+        deps,
         recurse,
-        dispatch,
-        registry,
         argv.words,
         context,
         stdin,
         call_stack,
-        job_table=job_table,
-        namespace=namespace,
-        execute_fn=execute_fn,
-        handed=handed,
-        sink=sink,
     )
 
     if link_errors:

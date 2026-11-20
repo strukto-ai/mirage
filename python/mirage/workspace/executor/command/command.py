@@ -44,11 +44,9 @@ from mirage.commands.spec.standard import standard_request
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import current_caller
 from mirage.context.session_context import session_access
-from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.policy.types import HandOff
 from mirage.rs.find import FindExpr, parse_find
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text, utf8_locale
@@ -112,6 +110,7 @@ from mirage.workspace.executor.command.types import (
     ExecuteNodeFn,
     ParsedCommand,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.fanout import (
     _fan_out_traversal,
     _should_fan_out,
@@ -996,26 +995,37 @@ def _spanning(
 
 
 async def handle_command(
+    deps: ExecuteNodeDeps,
     execute_node: ExecuteNodeFn,
-    dispatch: DispatchFn,
-    registry: MountRegistry,
     parts: list[str | PathSpec],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    job_table: JobTable | None = None,
-    namespace: Namespace | None = None,
-    execute_fn: ExecuteFn | None = None,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.run_command. ``execute_fn``
-    runs a line in the session, which is how find's ``-exec`` runs its
-    command. ``sink`` is where a function body writes its statements.
+    PathSpec for paths. Dispatches to mount.run_command. The value's
+    ``execute_fn`` runs a line in the session, which is how find's
+    ``-exec`` runs its command, and its ``sink`` is where a function
+    body writes its statements.
+
+    Args:
+        deps (ExecuteNodeDeps): what the command runs against.
+        execute_node (ExecuteNodeFn): the node recursion, for a
+            function body.
+        parts (list[str | PathSpec]): the classified command words.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
     """
+    dispatch = deps.dispatch
+    registry = deps.registry
+    job_table = deps.job_table
+    namespace = deps.namespace
+    execute_fn = deps.execute_fn
+    handed = deps.handed
+    sink = deps.sink
     session = context.session
     if not parts:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)

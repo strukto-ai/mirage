@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from mirage.context import (
     missing_program,
@@ -23,13 +22,10 @@ from mirage.context import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
@@ -43,9 +39,8 @@ from mirage.workspace.executor.builtins.script.script import (
     read_script_bytes,
     script_error,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.lookup.lookup import path_program
-from mirage.workspace.mount import MountRegistry
-from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
 
 
@@ -94,16 +89,11 @@ def shebang_words(script: str) -> list[str]:
 
 
 async def handle_exec_path(
-    dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    deps: ExecuteNodeDeps,
     path: str,
     args: list[str],
     context: EvaluationContext,
-    registry: MountRegistry,
-    namespace: Namespace,
     stdin: ByteSource | None = None,
-    sink: JobConsole | None = None,
-    job_table: JobTable | None = None,
     call_stack: CallStack | None = None,
     absent: (
         Callable[
@@ -132,25 +122,29 @@ async def handle_exec_path(
     and an interpreter nobody registers answers with its own "command
     not found".
 
+    The value's ``dispatch`` reads the file, its ``execute_fn`` runs a
+    program line in this session, its ``registry`` identifies the
+    program view and its ``namespace`` resolves links to program files;
+    its ``sink`` is where the script's statements write as they finish
+    (None returns them), and its ``job_table`` holds the caller's jobs,
+    which a shell script starts a table of its own beside.
+
     Args:
-        dispatch (DispatchFn): op dispatcher, used to read the file.
-        execute_fn (Callable): runs a program line in this session.
+        deps (ExecuteNodeDeps): what the program runs against.
         path (str): the head word, as typed.
         args (list[str]): the words after it, positional for the script.
         context (EvaluationContext): the evaluation's session and frame.
-        registry (MountRegistry): identifies the program view.
-        namespace (Namespace): resolves links to program files.
         stdin (ByteSource | None): input stream for the script.
-        sink (JobConsole | None): where the script's statements write as
-            they finish, None to return them.
-        job_table (JobTable | None): the caller's jobs, which a shell
-            script starts a table of its own beside.
         call_stack (CallStack | None): the caller's frames, whose nesting
             a shell script counts on from.
         absent (Callable | None): runs the path where a runtime takes
             programs Mirage does not have, when no file of Mirage's is
             there; None answers ``No such file or directory``.
     """
+    dispatch = deps.dispatch
+    execute_fn = deps.execute_fn
+    registry = deps.registry
+    sink = deps.sink
     session = context.session
     try:
         data = await read_script_bytes(dispatch, path, session.cwd)
@@ -176,7 +170,7 @@ async def handle_exec_path(
         )
     script = decode_text(data)
     name = path_program(
-        path, session, registry, namespace.session_links(session)
+        path, session, registry, deps.namespace.session_links(session)
     )
     if name is not None:
         # The read above enforces visibility and path policy. Dispatch the
@@ -210,7 +204,7 @@ async def handle_exec_path(
             stdin,
             interp,
             sink,
-            job_table,
+            deps.job_table,
             call_stack,
         )
     line = shell_join([*words, path, *args])
