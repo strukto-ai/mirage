@@ -53,7 +53,7 @@
 
 LLMs werden in Terminal-Umgebungen nachtrainiert, deshalb kennen KI-Agenten die Terminal-Schnittstelle am besten. Doch ein Terminal ist heute an eine einzige Maschine und den Kernel ihres Betriebssystems gebunden, mit seinen Dateien und seinen Berechnungen auf derselben Maschine.
 
-Mirage ist **ein virtuelles Terminal für KI-Agenten**, das die Terminal-Schnittstelle vom Datenspeicher und von den Rechenmaschinen trennt. Es virtualisiert die Shell, das Dateisystem, die CLIs und die Maschinen. Jedes virtuelle Terminal startet mit nur wenigen KB Speicher, sodass KI-Agenten überall ein Terminal nutzen können, in einer Anwendung, einer mobilen App, einem Browser-Tab, einem FastAPI- oder Express-Server und sogar auf einem Edge-Gerät wie einem Raspberry Pi.
+Mirage ist **ein virtuelles Terminal für KI-Agenten**, das die Terminal-Schnittstelle vom Datenspeicher und von den Rechenmaschinen trennt. Es virtualisiert die Shell, das Dateisystem, die CLIs und die Maschinen. Jedes virtuelle Terminal startet mit Speicher im KB-Bereich, sodass KI-Agenten überall ein Terminal nutzen können, in einer Anwendung, einer mobilen App, einem Browser-Tab, einem FastAPI- oder Express-Server und sogar auf einem Edge-Gerät wie einem Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -65,7 +65,7 @@ Mirage ist **ein virtuelles Terminal für KI-Agenten**, das die Terminal-Schnitt
 - **Kontrollierbar.** Jeder Agent bekommt nur die Dateien, Befehle, Zugangsdaten und Maschinen, die sein Profil erlaubt.
 - **Skriptbar.** Das gesamte Terminal wird in Code oder einer einzigen Konfigurationsdatei definiert, von seinen Dateisystemen, CLIs und Maschinen bis zu seinen Regeln.
 - **Verwaltet.** Der Zustand liegt auf bereits vorhandener Infrastruktur wie RAM, Festplatte, Redis oder S3, und jeder Befehl wird aufgezeichnet und kann als OpenTelemetry-Trace exportiert werden.
-- **Leichtgewichtig.** Jeder Workspace belegt nur wenige KB Speicher, und Mirage ist von der Shell bis zu jedem Dienstaufruf asynchron, sodass ein Prozess viele Agenten gleichzeitig bedient. Es lässt sich fast überall einsetzen, auf einem Python- oder TypeScript-Server, in einem Browser-Tab, einem Cloudflare Worker oder auf einem Raspberry Pi.
+- **Leichtgewichtig.** Jeder Workspace belegt nur Speicher im KB-Bereich, und Mirage ist von der Shell bis zu jedem Dienstaufruf asynchron, sodass ein Prozess viele Agenten gleichzeitig bedient. Es lässt sich fast überall einsetzen, auf einem Python- oder TypeScript-Server, in einem Browser-Tab, einem Cloudflare Worker oder auf einem Raspberry Pi.
 
 <p align="center">
   <picture>

@@ -53,7 +53,7 @@
 
 Les LLM sont post-entraînés dans des environnements de terminal, si bien que l'interface que les agents IA connaissent le mieux est celle du terminal. Mais aujourd'hui, un terminal est lié à une seule machine et au noyau de son système d'exploitation, avec ses fichiers et ses calculs sur cette même machine.
 
-Mirage est **un terminal virtuel pour les agents IA** qui sépare l'interface du terminal du stockage des données et des machines de calcul. Il virtualise le shell, le système de fichiers, les CLI et les machines. Chaque terminal virtuel démarre avec seulement quelques Ko de mémoire, si bien que les agents IA peuvent utiliser un terminal partout, dans une application, une application mobile, un onglet de navigateur, un serveur FastAPI ou Express, et même un appareil en périphérie comme un Raspberry Pi.
+Mirage est **un terminal virtuel pour les agents IA** qui sépare l'interface du terminal du stockage des données et des machines de calcul. Il virtualise le shell, le système de fichiers, les CLI et les machines. Chaque terminal virtuel démarre avec une mémoire qui se compte en Ko, si bien que les agents IA peuvent utiliser un terminal partout, dans une application, une application mobile, un onglet de navigateur, un serveur FastAPI ou Express, et même un appareil en périphérie comme un Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -65,7 +65,7 @@ Mirage est **un terminal virtuel pour les agents IA** qui sépare l'interface du
 - **Contrôlable.** Chaque agent n'obtient que les fichiers, les commandes, les identifiants et les machines que son profil autorise.
 - **Scriptable.** Le terminal entier se définit en code ou dans un seul fichier de configuration, de ses systèmes de fichiers, CLI et machines jusqu'à ses règles.
 - **Géré.** L'état repose sur une infrastructure déjà en place, comme la RAM, le disque, Redis ou S3, et chaque commande est enregistrée et peut être exportée sous forme de trace OpenTelemetry.
-- **Léger.** Chaque espace de travail n'occupe que quelques Ko de mémoire et Mirage est asynchrone du shell jusqu'à chaque appel de service, si bien qu'un seul processus sert de nombreux agents à la fois. Il se déploie presque partout, sur un serveur Python ou TypeScript, dans un onglet de navigateur, un Cloudflare Worker ou un Raspberry Pi.
+- **Léger.** Chaque espace de travail n'occupe qu'une mémoire qui se compte en Ko et Mirage est asynchrone du shell jusqu'à chaque appel de service, si bien qu'un seul processus sert de nombreux agents à la fois. Il se déploie presque partout, sur un serveur Python ou TypeScript, dans un onglet de navigateur, un Cloudflare Worker ou un Raspberry Pi.
 
 <p align="center">
   <picture>

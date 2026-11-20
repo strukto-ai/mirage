@@ -53,7 +53,7 @@
 
 LLM 在終端機環境中完成後訓練，因此 AI Agent 最熟悉終端機介面。但如今的終端機綁定在單一機器和它的作業系統核心上，檔案和運算都在同一台機器上。
 
-Mirage 是一個**為 AI Agent 打造的虛擬終端機**，它把終端機介面與資料儲存和運算機器分開。它虛擬化了 shell、檔案系統、CLI 和機器。每個虛擬終端機啟動時只佔用幾 KB 記憶體，因此 AI Agent 可以在任何地方使用終端機環境，包括應用程式內、行動應用程式、瀏覽器分頁、FastAPI 或 Express 伺服器，甚至 Raspberry Pi 這樣的邊緣裝置。
+Mirage 是一個**為 AI Agent 打造的虛擬終端機**，它把終端機介面與資料儲存和運算機器分開。它虛擬化了 shell、檔案系統、CLI 和機器。每個虛擬終端機啟動時只佔用 KB 等級的記憶體，因此 AI Agent 可以在任何地方使用終端機環境，包括應用程式內、行動應用程式、瀏覽器分頁、FastAPI 或 Express 伺服器，甚至 Raspberry Pi 這樣的邊緣裝置。
 
 <p align="center">
   <picture>
@@ -65,7 +65,7 @@ Mirage 是一個**為 AI Agent 打造的虛擬終端機**，它把終端機介�
 - **可控。** 每個 Agent 只能取得它的 profile 允許的檔案、命令、憑證和機器。
 - **可腳本化。** 整個終端機以程式碼或一個設定檔定義，從檔案系統、CLI 和機器到各項規則。
 - **託管式。** 狀態存放在既有的基礎設施上，例如 RAM、磁碟、Redis 或 S3，每條命令都會被記錄，並可以匯出為 OpenTelemetry trace。
-- **輕量。** 每個工作區只佔用幾 KB 記憶體，Mirage 從 shell 到每次服務呼叫都是非同步的，因此一個行程可以同時服務許多 Agent。它幾乎可以部署在任何地方，包括 Python 或 TypeScript 伺服器、瀏覽器分頁、Cloudflare Worker 或 Raspberry Pi。
+- **輕量。** 每個工作區只佔用 KB 等級的記憶體，Mirage 從 shell 到每次服務呼叫都是非同步的，因此一個行程可以同時服務許多 Agent。它幾乎可以部署在任何地方，包括 Python 或 TypeScript 伺服器、瀏覽器分頁、Cloudflare Worker 或 Raspberry Pi。
 
 <p align="center">
   <picture>
