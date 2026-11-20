@@ -1055,6 +1055,7 @@ async def _fork_subshell(
         execute_node,
         replace(deps, job_table=sub_table, sink=None, line_handle=None),
     )
+    sub_deps = replace(deps, job_table=sub_table)
     child = child_context(context)
     as_program = is_program_invocation(session)
     results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
@@ -1066,17 +1067,12 @@ async def _fork_subshell(
         )
         try:
             result = await handle_subshell(
+                sub_deps,
                 sub_recurse,
                 list(node.children),
                 child,
                 stdin,
                 cs,
-                sub_table,
-                deps.dispatch,
-                deps.handed,
-                deps.registry.decisions,
-                sink=deps.sink,
-                execute_fn=deps.execute_fn,
             )
             results.append(result)
             return result[1].exit_code
@@ -1444,18 +1440,13 @@ async def _execute_node_body(
         # A root run in a caller's frame is the caller's own line (eval,
         # an alias); one given none is a shell of its own.
         return await execute_program(
+            deps,
             program_recurse,
             node,
             context,
             stdin,
             cs,
-            job_table,
-            dispatch,
-            handed,
-            registry.decisions,
-            sink=sink,
             inline=call_stack is not None,
-            execute_fn=execute_fn,
         )
 
     if kind == NodeKind.COMMAND and not any(

@@ -1024,7 +1024,6 @@ async def handle_command(
     job_table = deps.job_table
     namespace = deps.namespace
     execute_fn = deps.execute_fn
-    handed = deps.handed
     sink = deps.sink
     session = context.session
     if not parts:
@@ -1101,17 +1100,13 @@ async def handle_command(
         is Consumer.FUNCTION
     ):
         return await run_shell_function(
+            deps,
             execute_node,
             cmd_name,
             parts,
             context,
             stdin,
             call_stack,
-            job_table,
-            handed,
-            registry.decisions,
-            sink,
-            execute_fn,
         )
 
     if dispatch is not None:

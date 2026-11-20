@@ -12,24 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from functools import partial
-from typing import Any
 
 from mirage.context import (
     clear_program_invocation,
     reset_caller,
     session_voice,
 )
-from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
-from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
 from mirage.shell.constants import NESTING_MAX
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
@@ -40,6 +35,7 @@ from mirage.workspace.executor.builtins.alias.alias import body_aliases
 from mirage.workspace.executor.builtins.shared import is_count_word
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import execute_body, returning
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.traps import (
     lift_function_traps,
     restore_function_traps,
@@ -68,17 +64,13 @@ def _funcnest_limit(session: SessionState) -> int:
 
 
 async def run_shell_function(
+    deps: ExecuteNodeDeps,
     execute_node: ExecuteNodeFn,
     cmd_name: str,
     parts: list[str | PathSpec],
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable | None = None,
-    handed: HandOff | None = None,
-    decisions: Decisions | None = None,
-    sink: JobConsole | None = None,
-    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a user-defined shell function's body statement by statement.
 
@@ -90,7 +82,15 @@ async def run_shell_function(
     -T``; one it sets itself it sees, and the RETURN action runs as it
     returns.
 
+    The value's ``job_table`` is the job plane for a body statement
+    ending in ``&``; its ``handed`` holds the approval claims a job
+    inherits and its registry's ``decisions`` the ledger that holds
+    them; its ``sink`` is where each statement writes as it finishes
+    (None returns the body's output); its ``execute_fn`` runs a trap
+    action as a line of the shell.
+
     Args:
+        deps (ExecuteNodeDeps): what the call runs against.
         execute_node (ExecuteNodeFn): the executor's statement runner.
         cmd_name (str): the function's name (already resolved).
         parts (list[str | PathSpec]): classified command words; the
@@ -99,15 +99,12 @@ async def run_shell_function(
         stdin (ByteSource | None): stdin forwarded to each statement.
         call_stack (CallStack | None): the caller's stack, or a fresh
             one for a top-level call.
-        job_table (JobTable | None): the job plane for a body statement
-            ending in ``&``.
-        handed (HandOff | None): approval claims inherited by a job.
-        decisions (Decisions | None): ledger that holds those claims.
-        sink (JobConsole | None): where each statement writes as it
-            finishes, None to return the body's output.
-        execute_fn (Callable[..., Any] | None): runs a trap action as a
-            line of the shell; None where nothing can run one.
     """
+    job_table = deps.job_table
+    handed = deps.handed
+    decisions = deps.registry.decisions
+    sink = deps.sink
+    execute_fn = deps.execute_fn
     session = context.session
     cs = (
         call_stack

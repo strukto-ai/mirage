@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -36,6 +38,22 @@ class FakeNode:
         self.text = text
         self.is_named = True
         self.type = "command"
+
+
+async def no_line(*_args, **_kw):
+    raise AssertionError("nothing to run")
+
+
+def bare_deps() -> ExecuteNodeDeps:
+    """The value a caller with no dispatcher, job table or ledger gives:
+    every field None but the entry point, which runs nothing."""
+    return ExecuteNodeDeps(
+        None,
+        SimpleNamespace(decisions=None),
+        None,
+        None,
+        no_line,
+    )
 
 
 @pytest.mark.asyncio
@@ -115,6 +133,7 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
         )
 
     await handle_subshell(
+        bare_deps(),
         execute_node,
         [FakeNode("a"), FakeNode("b")],
         child_context(EvaluationContext(session)),
