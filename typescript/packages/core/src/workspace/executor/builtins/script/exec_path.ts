@@ -17,20 +17,15 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { missingProgram, setProgramInvocation } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
-import type { JobTable } from '../../../../execution/job/index.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
 import { pathProgram } from '../../../lookup/lookup.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
-import type { ExecuteFn } from '../../../expand/types.ts'
+import type { ExecuteNodeDeps } from '../../deps.ts'
 import { handleBash } from './bash.ts'
 import { isBinary, readScriptBytes, scriptError } from './script.ts'
 
@@ -99,16 +94,11 @@ function shebangWords(script: string): string[] {
  * nobody registers answers with its own "command not found".
  */
 export async function handleExecPath(
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
+  deps: ExecuteNodeDeps,
   path: string,
   args: string[],
   context: EvaluationContext,
-  registry: MountRegistry,
-  namespace: Namespace,
   stdin: ByteSource | null = null,
-  sink?: JobConsole,
-  jobTable?: JobTable,
   // The caller's frames, whose nesting a shell script counts on from.
   callStack: CallStack | null = null,
   // Runs the path where a runtime takes programs Mirage does not have, when
@@ -116,6 +106,7 @@ export async function handleExecPath(
   absent?: () => Promise<RedirectResult>,
 ): Promise<RedirectResult> {
   let session = context.session
+  const { dispatch, executeFn, registry, namespace, sink, jobTable } = deps
   let data: Uint8Array
   try {
     data = await readScriptBytes(dispatch, path, session.cwd)

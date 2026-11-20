@@ -1283,23 +1283,7 @@ async function executeNodeBody(
     const expanded: ExpandedWords = { words: null }
     try {
       const ran = await commandScope(() =>
-        executeCommand(
-          recurse,
-          dispatch,
-          registry,
-          deps.namespace,
-          executeFn,
-          node,
-          context,
-          stdin,
-          callStack,
-          jobTable,
-          deps.signal,
-          deps.parser,
-          deps.handed,
-          sink,
-          expanded,
-        ),
+        executeCommand(called, recurse, node, context, stdin, callStack, expanded),
       )
       return sink === undefined ? ran : await drained(sink, ...ran)
     } catch (err) {
