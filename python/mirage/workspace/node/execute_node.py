@@ -74,7 +74,13 @@ from mirage.shell.helpers import (
     read_row,
     with_own_redirects,
 )
-from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
+from mirage.shell.node_kind import (
+    NodeKind,
+    ScopeKind,
+    node_kind,
+    pipeline_transparent,
+    scope_kind,
+)
 from mirage.shell.printer import case_head, loop_head
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
@@ -911,7 +917,7 @@ def _names_process_sub(word: TSNodeLike) -> bool:
     """
     if word.type == NT.PROCESS_SUBSTITUTION:
         return True
-    if word.type == NT.COMMAND_SUBSTITUTION:
+    if scope_kind(word) == ScopeKind.SUBSTITUTION:
         return False
     return any(_names_process_sub(child) for child in word.children)
 
@@ -1348,6 +1354,7 @@ async def _execute_node_body(
     )
 
     kind = node_kind(node)
+    scope = scope_kind(node, kind)
 
     # The statements a construct runs all read one descriptor, as bash's
     # do: `read` takes its line and the command after it gets the rest,
@@ -1485,7 +1492,7 @@ async def _execute_node_body(
                 ),
             )
 
-    if kind == NodeKind.PIPELINE:
+    if scope == ScopeKind.PIPELINE:
         # `! a | b` parses as pipeline(negated_command(a), b), and a
         # redirect followed by `|` closes over everything to its left, so
         # the stages are read the way bash reads them rather than as the
@@ -1518,7 +1525,7 @@ async def _execute_node_body(
                 bind_last_word(session, ())
         return ran if sink is None else await drained(sink, *ran)
 
-    if kind == NodeKind.SUBSHELL:
+    if scope == ScopeKind.FORK:
         return await _fork_subshell(deps, node, context, stdin, cs)
 
     if kind == NodeKind.ARITH:
@@ -1542,17 +1549,18 @@ async def _execute_node_body(
             run_body, branches, else_body, context, execute_fn, cs
         )
 
-    if kind == NodeKind.CFOR:
-        exprs, body = get_cfor_parts(node)
-        with cs.loop():
-            return await handle_cfor(
-                run_body, exprs, body, context, execute_fn, cs
+    if scope == ScopeKind.REPEATED:
+        if kind == NodeKind.CFOR:
+            exprs, body = get_cfor_parts(node)
+            with cs.loop():
+                return await handle_cfor(
+                    run_body, exprs, body, context, execute_fn, cs
+                )
+
+        if kind in (NodeKind.FOR, NodeKind.SELECT):
+            return await _run_for(
+                deps, kind, node, run_body, context, stdin, cs
             )
-
-    if kind in (NodeKind.FOR, NodeKind.SELECT):
-        return await _run_for(deps, kind, node, run_body, context, stdin, cs)
-
-    if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         test, body = get_while_parts(node)
         with cs.loop():
             return await handle_while(
@@ -1574,7 +1582,7 @@ async def _execute_node_body(
             run_body, word, get_case_items(node), context, execute_fn, cs
         )
 
-    if kind == NodeKind.FUNCTION_DEF:
+    if scope == ScopeKind.DEFERRED:
         return _define_function(node, session, handed)
 
     if kind == NodeKind.DECLARATION:

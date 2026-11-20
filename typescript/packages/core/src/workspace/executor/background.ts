@@ -51,7 +51,7 @@ import {
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
 import type { JobHandle, JobTable, JobWaits } from '../../execution/job/index.ts'
 import type { Hold } from '../../execution/job/waits.ts'
-import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
+import { backgroundPipeline, NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandArgs, commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
@@ -575,7 +575,7 @@ export async function handleBackground(
   // builtin or a function its shell runs (`f &`) ends with that program on
   // INT, as bash's shell does of an INT its child died of.
   const command = left.type === NT.REDIRECTED_STATEMENT ? getRedirects(left)[0] : left
-  const piped = command !== null && command.type === NT.PIPELINE
+  const piped = backgroundPipeline(left)
   const oneCommand = command !== null && command.type === NT.COMMAND
   const ends = oneCommand && !forks(command, session)
   const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)

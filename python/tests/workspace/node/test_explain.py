@@ -51,7 +51,7 @@ from mirage.shell.console import ConsoleStore
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.node.explain import Judgment, explain_line
+from mirage.workspace.node.explain import Judgment, JudgmentMode, explain_line
 
 
 async def _judged(
@@ -76,8 +76,9 @@ async def _judged(
             session,
             ws._registry,
             ws._namespace,
-            whole_line=whole_line_runtime(ws._registry.runtime_bindings)
-            is not None,
+            JudgmentMode.EXPLAIN_WHOLE_LINE
+            if whole_line_runtime(ws._registry.runtime_bindings) is not None
+            else JudgmentMode.EXPLAIN,
         )
     finally:
         reset_caller(token)
@@ -2148,6 +2149,288 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
             126,
         )
         assert await Session(ws, None).explain.shell("rm /data/x") == said
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("whole_line", [False, True])
+async def test_explanation_reports_answers_after_denial(
+    whole_line, monkeypatch
+):
+    later: list[str] = []
+    ask = _AskRm()
+    original = ask.pre_command
+
+    async def recorded(ctx):
+        later.append(ctx.command)
+        return await original(ctx)
+
+    monkeypatch.setattr(ask, "pre_command", recorded)
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC if whole_line else MountMode.WRITE,
+        policies=[_DenyRm(), ask],
+        machines=[box] if whole_line else [],
+    )
+    try:
+        line = "rm /data/x"
+        [rm] = await _judged(ws, line)
+        assert rm.answers == (
+            Deny("no", policy="_DenyRm"),
+            Ask("sign-off", policy="_AskRm"),
+        )
+        assert later == ["rm"]
+        later.clear()
+        ran = await ws.shell(line)
+        assert ran.decision is not None and ran.decision.reason == "no"
+        assert later == []
+        assert box.lines == []
+        assert not ws.decisions.pending()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("statement", "following"),
+    [
+        ("{ cd /data/d; cat inside; }", "/data/d/after"),
+        ("(cd /data/d; cat inside)", "/after"),
+        ("{ cd /data/d; cat inside; } &", "/after"),
+        (": | { cd /data/d; cat inside; }", "/after"),
+        ("echo $(cd /data/d; cat inside)", "/after"),
+        ("echo <(cd /data/d; cat inside)", "/after"),
+    ],
+)
+async def test_scope_of_a_cd_in_the_static_walk(statement, following):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        separator = " " if statement.endswith("&") else "; "
+        said = await _judged(ws, f"{statement}{separator}cat after")
+        assert [one.paths for one in said if one.command == "cat"] == [
+            ("/data/d/inside",),
+            (following,),
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_lastpipe_uses_the_live_shell_options():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (
+            await ws.shell("mkdir /data/d; shopt -s lastpipe")
+        ).exit_code == 0
+        line = ": | { cd /data/d; }; cat after"
+        assert (await _judged(ws, line))[-1].paths == ("/data/d/after",)
+        ran = await ws.shell(": | { cd /data/d; }; pwd")
+        assert await ran.stdout_str() == "/data/d\n"
+        ran = await ws.shell("cd /; set -m; : | { cd /data/d; }; pwd")
+        assert await ran.stdout_str() == "/\n"
+        assert (await _judged(ws, line))[-1].paths == ("/after",)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_later_and_forked_option_changes_leave_lastpipe_known():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("shopt -s lastpipe")).exit_code == 0
+        for line in (
+            ": | cd /data; cat ./file; shopt -u lastpipe",
+            "(shopt -u lastpipe); : | cd /data; cat ./file",
+            "echo $(shopt -u lastpipe); : | cd /data; cat ./file",
+        ):
+            [cat] = [
+                item
+                for item in await _judged(ws, line)
+                if item.command == "cat"
+            ]
+            assert cat.paths == ("/data/file",)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "toggle",
+    [
+        "shopt -u lastpipe",
+        "set -m",
+        "set -o monitor",
+        "command -- shopt -u lastpipe",
+        'opt=shopt; "$opt" -u lastpipe',
+        'opt=shopt; command -- "$opt" -u lastpipe',
+    ],
+)
+async def test_same_line_option_changes_defer_relative_prepass_judgments(
+    toggle,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir /data/d; printf outer > /data/d/file")
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "cat": [
+                        "allow",
+                        {
+                            "decision": "deny",
+                            "paths": ["/data/file"],
+                            "reason": "sealed",
+                        },
+                    ],
+                },
+            },
+        )
+        await ws.shell("cd /data/d; shopt -s lastpipe", session_id="s")
+        line = f"{toggle}; : | cd /data; cat ./file"
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert (said.outcome, ran.exit_code) == (Outcome.ALLOW, 0)
+        assert await ran.stdout_str() == "outer"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("definition", "outcome"),
+    [
+        (": | { sort() { :; }; };", Outcome.ALLOW),
+        ("{ sort() { :; }; } | :;", Outcome.DENY),
+        (": | { sort() { :; }; } &", Outcome.DENY),
+    ],
+)
+async def test_explanation_follows_function_definitions_through_lastpipe(
+    definition, outcome
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {"*": "deny", ":": "allow", "shopt": "allow"}
+            },
+        )
+        assert (
+            await ws.shell("shopt -s lastpipe", session_id="s")
+        ).exit_code == 0
+        line = f"{definition} sort /data/file"
+        explained = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert explained.outcome is outcome
+        assert explained.exit_code == ran.exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_background_pipeline_passes_lastpipe_to_its_child_stages():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf inner > /data/file; shopt -s lastpipe")
+        line = ": | { : | cd /data; cat ./file; } & wait"
+        [cat] = [
+            item for item in await _judged(ws, line) if item.command == "cat"
+        ]
+        assert cat.paths == ("/data/file",)
+        ran = await ws.shell(line)
+        assert ran.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sealed", [None, "/data/secret", "/data/public/secret"]
+)
+async def test_whole_line_lastpipe_checks_both_guest_cwds(sealed):
+    box = _LineBox()
+    cat = (
+        "allow"
+        if sealed is None
+        else [
+            "allow",
+            {"decision": "deny", "paths": [sealed], "reason": "sealed"},
+        ]
+    )
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"commands": {"cat": cat, "cd": "allow"}}},
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        session = ws.get_session("s")
+        session.cwd = "/data"
+        line = "cd /data | cd /data/public; cat ./secret"
+        for lastpipe, monitor in [(False, False), (True, False), (True, True)]:
+            session.shopts["lastpipe"] = lastpipe
+            session.shell_options["monitor"] = monitor
+            explained = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            if sealed is None:
+                assert (explained.outcome, ran.exit_code) == (Outcome.ALLOW, 0)
+                assert ran.decision is None
+            else:
+                assert (explained.outcome, explained.reason) == (
+                    Outcome.DENY,
+                    "sealed",
+                )
+                assert (
+                    ran.decision is not None
+                    and ran.decision.reason == "sealed"
+                )
+        assert box.lines == ([line] * 3 if sealed is None else [])
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_line", [False, True])
+async def test_a_function_can_change_lastpipe_before_the_next_pipeline(
+    same_line,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir /data/d; printf outer > /data/d/file")
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "cat": [
+                        "allow",
+                        {
+                            "decision": "deny",
+                            "paths": ["/data/file"],
+                            "reason": "sealed",
+                        },
+                    ],
+                },
+            },
+        )
+        await ws.shell("cd /data/d; shopt -s lastpipe", session_id="s")
+        definition = "setoff() { shopt -u lastpipe; }"
+        if not same_line:
+            assert (await ws.shell(definition, session_id="s")).exit_code == 0
+        line = "setoff; : | cd /data; cat ./file"
+        if same_line:
+            line = f"{definition}; {line}"
+        [cat] = [
+            item
+            for item in await _judged(ws, line, "s")
+            if item.command == "cat"
+        ]
+        assert "/data/file" not in cat.paths
+        ran = await ws.shell(line, session_id="s")
+        assert (ran.exit_code, await ran.stdout_str()) == (0, "outer")
     finally:
         await ws.close()
 

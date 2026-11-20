@@ -28,8 +28,9 @@ import { Channel } from '../../shell/console/types.ts'
 import { FD_STDIN, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import type { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
+import { isBackgrounded } from '../../shell/helpers.ts'
 import { JobWaits } from '../../execution/job/index.ts'
-import { simpleCommand } from '../../shell/node_kind.ts'
+import { connectionRunsRight, pipelineStageForks, simpleCommand } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
@@ -135,11 +136,11 @@ export async function handlePipe(
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
     // program it runs right now (`runProgram`).
-    const inParent =
-      i === commands.length - 1 &&
-      session.shopts.lastpipe === true &&
-      session.shellOptions.monitor !== true &&
-      currentCaller().process?.pipeline !== true
+    const inParent = !pipelineStageForks(i === commands.length - 1, {
+      lastpipe: session.shopts.lastpipe === true,
+      monitor: session.shellOptions.monitor === true,
+      backgroundPipeline: currentCaller().process?.pipeline === true,
+    })
     const childEvaluation = inParent ? context : childContext(context)
     const stopped = new AbortController()
     const stops = mergeSignals(abort.signal, stopped.signal) ?? abort.signal
@@ -396,7 +397,7 @@ export async function handleConnection(
     return [await finishStatement(out, io, session, left), io, ran]
   })
   const children = [leftExec]
-  if ((op === NT.AND && leftIo.exitCode !== 0) || (op === NT.OR && leftIo.exitCode === 0)) {
+  if (!connectionRunsRight(op, leftIo.exitCode)) {
     if (op === NT.AND) session.errexitImmune = true
     carryStatus(session)
     return [leftBytes, leftIo, new ExecutionNode({ op, exitCode: leftIo.exitCode, children })]
@@ -533,7 +534,7 @@ export async function handleSubshell(
     // `set -n` needs no arm here: `executeNode` refuses every node
     // while the option is on, so this loop simply runs a tail of
     // no-ops. The child owns the option, so it cannot leak to the parent.
-    const isBg = body[i + 1]?.type === NT.BACKGROUND
+    const isBg = isBackgrounded(child)
     const armed = errTrapArmed(session)
     if (isBg) {
       let launched: RedirectResult

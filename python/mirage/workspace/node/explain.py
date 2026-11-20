@@ -23,9 +23,10 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
-from mirage.context.session_context import voice_name
+from mirage.context.session_context import current_caller, voice_name
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
     AdmissionRules,
@@ -56,12 +57,26 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
     get_case_items,
     get_case_word,
+    get_function_name,
+    get_if_branches,
     get_parts,
     get_text,
     input_substitution_redirect,
+    is_backgrounded,
     literal_word,
     split_env_prefix,
 )
+from mirage.shell.node_kind import (
+    NodeKind,
+    PipelineScope,
+    ScopeKind,
+    background_pipeline,
+    connection_runs_right,
+    node_kind,
+    pipeline_stage_forks,
+    scope_kind,
+)
+from mirage.shell.options import parse_option_word
 from mirage.shell.parse import opaque_reads, parse, referenced_names
 from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
@@ -70,6 +85,7 @@ from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.env.env import env_child, env_vars
+from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount import MountRegistry
@@ -127,33 +143,6 @@ SHAPES = {
     NodeType.FUNCTION_DEFINITION: "group",
 }
 
-# The nodes whose body a nested line evaluates on its own.
-SUBSTITUTIONS = frozenset(
-    {NodeType.COMMAND_SUBSTITUTION, NodeType.PROCESS_SUBSTITUTION}
-)
-
-# Nodes that run their commands in a child shell: a ``cd`` inside one
-# applies to the rest of that child and is gone when it exits. A
-# pipeline is not here because it forks per segment, not once.
-FORK_SCOPES = frozenset(
-    {
-        NodeType.SUBSHELL,
-        NodeType.COMMAND_SUBSTITUTION,
-        NodeType.PROCESS_SUBSTITUTION,
-    }
-)
-
-# Nodes whose body may run again from where it ended, or later than where
-# it stands: a ``cd`` in one moves the commands before it too.
-REPEATED_SCOPES = frozenset(
-    {
-        NodeType.FOR_STATEMENT,
-        NodeType.C_STYLE_FOR_STATEMENT,
-        NodeType.WHILE_STATEMENT,
-        NodeType.FUNCTION_DEFINITION,
-    }
-)
-
 # How strict an outcome is, for a line's summary: the strictest part of
 # the line speaks for it.
 STRICTNESS = {Outcome.ALLOW: 0, Outcome.ASK: 1, Outcome.DENY: 2}
@@ -202,6 +191,20 @@ PLACES_LIMIT = 8
 # Why the gate refuses, under a rule, a command that runs lines it cannot
 # see into: a sourced file, a script, a bash option mirage does not read.
 UNREADABLE_LINES = "runs lines the gate cannot read"
+
+
+class JudgmentMode(StrEnum):
+    """How a static judgment reads the policy chain and the command."""
+
+    PREPASS = "prepass"
+    EXPLAIN = "explain"
+    WHOLE_LINE = "whole_line"
+    EXPLAIN_WHOLE_LINE = "explain_whole_line"
+
+
+def takes_whole_line(mode: JudgmentMode) -> bool:
+    """Whether this is the gate for a runtime that expands its own line."""
+    return mode in (JudgmentMode.WHOLE_LINE, JudgmentMode.EXPLAIN_WHOLE_LINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,20 +554,10 @@ def _line_decision(
 
 
 async def _judge_words(
-    words: list[Word],
-    occurrence: Occurrence,
-    session: SessionState,
+    item: "Walked",
     registry: MountRegistry,
     namespace: Namespace | None,
-    redirect_words: tuple[Word, ...] = (),
-    stated: bool = True,
-    intrinsic: bool = False,
-    whole_line: bool = False,
-    lost: bool = False,
-    every: bool = False,
-    rules_only: bool = True,
-    stdin: bytes | None = None,
-    open_: bool = False,
+    mode: JudgmentMode,
 ) -> AsyncIterator[Judged]:
     """Judge one command and whatever lines it runs in turn, each with
     its occurrence, one at a time, so a reader that stops at a refusal
@@ -585,36 +578,20 @@ async def _judge_words(
     then an ask.
 
     Args:
-        words (list[Word]): the command's words, name first.
-        occurrence (Occurrence): the command's place on the line.
-        session (SessionState): the session running the line.
+        item (Walked): the read command and its place in the shell.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        redirect_words (tuple[Word, ...]): the statement's redirect
-            targets, empty for a command that has none and for the
-            inner lines a command runs.
-        stated (bool): whether the words reach here as the gate will
-            read them; False under a command the runtime completes,
-            since a line built from its words (``eval``) or run on its
-            operands (``xargs``) is completed with them.
-        intrinsic (bool): keep the shell-provided operation's tool policy.
-        whole_line (bool): whether a runtime takes the line whole, where
-            this is the only gate; the executor judges each command
-            again once its words are expanded.
-        lost (bool): whether a ``cd`` the walk could not follow ran
-            before the command, as ``Walked`` carries it. A whole line
-            still shows the chain what its words name where the walk last
-            knew the shell, since no gate judges them once it runs.
-        every (bool): ask every policy past a Deny, for ``explain``.
-        rules_only (bool): ask the profile's rules alone, for a pass
-            that judges a line before it runs; a policy's own
-            ``pre_command`` is asked once, by the gate that runs the
-            command.
-        stdin (bytes | None): empty when the statement redirects input.
-        open_ (bool): whether the runtime appends operands the gate
-            cannot read (``xargs``, ``find -exec``, ``mapfile -C``).
+        mode (JudgmentMode): how this judgment reads the command and policies.
     """
+    words = item.words
+    occurrence = item.occurrence
+    session = item.session
+    redirect_words = item.redirects
+    intrinsic = item.intrinsic
+    lost = item.lost
+    open_ = item.open_
+    whole_line = takes_whole_line(mode)
     head = words[0]
     rules = session.commands
     if whole_line and await registry.policies.wants_for(
@@ -639,7 +616,7 @@ async def _judge_words(
             _denied(head.raw, unreadable(head.raw)), occurrence, False
         )
         return
-    stated = stated and all(
+    stated = item.stated and all(
         w.text is not None for w in [*words, *redirect_words]
     )
     name = head.value
@@ -664,12 +641,12 @@ async def _judge_words(
         session,
         registry,
         namespace,
-        stdin=stdin,
+        stdin=item.stdin,
         redirects=redirects,
         intrinsic=intrinsic,
         unread=unread,
-        every=every,
-        rules_only=rules_only,
+        every=mode in (JudgmentMode.EXPLAIN, JudgmentMode.EXPLAIN_WHOLE_LINE),
+        rules_only=mode is JudgmentMode.PREPASS,
         line=occurrence.source,
     )
     # After a lost cd, a relative path names no file the pass can place.
@@ -742,6 +719,15 @@ async def _judge_words(
         inner_session = session.fork()
         inner_session.functions.pop(inners[0].argv[0].value, None)
         inner_session.aliases.pop(inners[0].argv[0].value, None)
+    pipeline: _PipelineWalk | None
+    if name in ("sh", "bash"):
+        pipeline = _PipelineWalk(guest=whole_line)
+    else:
+        pipeline = (
+            None
+            if item.pipeline is None
+            else dataclasses.replace(item.pipeline)
+        )
     for inner in inners:
         if not inner.readable:
             continue
@@ -752,12 +738,11 @@ async def _judge_words(
                 registry,
                 namespace,
                 line_frame(inner.line, occurrence),
-                stated and not inner.open,
-                whole_line,
-                lost,
-                every,
-                rules_only,
-                inner.open,
+                mode,
+                stated=stated and not inner.open,
+                lost=lost,
+                open_=inner.open,
+                pipeline=pipeline,
             ):
                 yield one
         else:
@@ -766,17 +751,19 @@ async def _judge_words(
                 argv_frame([w.value for w in argv], occurrence)
             )
             async for one in _judge_words(
-                argv,
-                within,
-                inner_session,
+                Walked(
+                    argv,
+                    (),
+                    inner_session,
+                    within,
+                    stated=stated and not inner.open,
+                    lost=lost,
+                    open_=inner.open,
+                    pipeline=pipeline,
+                ),
                 registry,
                 namespace,
-                stated=stated and not inner.open,
-                whole_line=whole_line,
-                lost=lost,
-                every=every,
-                rules_only=rules_only,
-                open_=inner.open,
+                mode,
             ):
                 yield one
 
@@ -885,6 +872,100 @@ def _is_judged(expl: Judgment) -> bool:
     return expl.exit_code == 0 or _is_verdict(expl)
 
 
+@dataclass(slots=True)
+class _PipelineWalk:
+    """Options may change before the static walk reaches a pipeline."""
+
+    background: bool = False
+    options_may_change: bool = False
+    guest: bool = False
+    functions: frozenset[str] = frozenset()
+
+
+def _pipeline_walk() -> _PipelineWalk:
+    owner = current_caller().process
+    return _PipelineWalk(background=owner is not None and owner.pipeline)
+
+
+def _stage_forks(
+    last: bool,
+    session: SessionState,
+    pipeline: _PipelineWalk,
+    *,
+    possible: bool = False,
+) -> bool:
+    return pipeline_stage_forks(
+        last,
+        PipelineScope(
+            lastpipe=(
+                possible
+                if pipeline.guest or pipeline.options_may_change
+                else session.shopts.get("lastpipe", False)
+            ),
+            monitor=(
+                not possible
+                if pipeline.guest or pipeline.options_may_change
+                else session.shell_options.get("monitor", False)
+            ),
+            background_pipeline=pipeline.background,
+        ),
+    )
+
+
+def _changes_pipeline_options(
+    words: Sequence[Word], session: SessionState, pipeline: _PipelineWalk
+) -> bool:
+    """Whether a command may toggle lastpipe or job control.
+
+    A literal setter may still be skipped, shadowed or denied. The static
+    walk keeps both possibilities until the live executor reads the options.
+    """
+    if not words:
+        return False
+    head = words[0].text
+    if (
+        head is None
+        or words[0].glob
+        or head in session.functions
+        or head in pipeline.functions
+    ):
+        return True
+    index = 0
+    while index < len(words) and words[index].text in ("command", "builtin"):
+        index += 1
+        if index < len(words) and words[index].text == "--":
+            index += 1
+    if index == len(words):
+        return False
+    if words[index].text is None or words[index].glob:
+        return True
+    if words[index].text not in ("shopt", "set"):
+        return False
+    operands = words[index + 1 :]
+    if any(word.text is None or word.glob for word in operands):
+        return True
+    args = [word.value for word in operands]
+    if words[index].text == "shopt":
+        scan = scan_options(args, "pqosu")
+        option = "monitor" if "o" in scan.letters else "lastpipe"
+        return (
+            scan.bad is None
+            and ("s" in scan.letters) != ("u" in scan.letters)
+            and option in scan.operands
+        )
+    index = 0
+    while index < len(args):
+        word = parse_option_word(
+            args[index], args[index + 1] if index + 1 < len(args) else None
+        )
+        if word is None:
+            break
+        if any(option == "monitor" for option, _ in word.settings):
+            return True
+        index += word.consumed
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class Walked:
     """One command of a walked line, as both readers of the line see
@@ -905,6 +986,8 @@ class Walked:
         elsewhere (tuple[SessionState, ...]): the other places the
             command may stand, where a ``cd`` before it was skipped or
             failed.
+        open_ (bool): the runtime appends operands the gate cannot read
+            (``xargs``, ``find -exec``, ``mapfile -C``).
     """
 
     words: list[Word]
@@ -916,6 +999,8 @@ class Walked:
     stdin: bytes | None = None
     stated: bool = True
     elsewhere: tuple[SessionState, ...] = ()
+    open_: bool = False
+    pipeline: _PipelineWalk | None = None
 
 
 # Where a scope leaves the shell: the session, whether a `cd` the walk
@@ -979,6 +1064,7 @@ def _walk_substitution(
     session: SessionState,
     homes: Mapping[str, str] | None,
     frame: Frame,
+    pipeline: _PipelineWalk,
     lost: bool,
     elsewhere: tuple[SessionState, ...],
 ) -> Walk:
@@ -989,6 +1075,7 @@ def _walk_substitution(
         session (SessionState): the shell whose paths are read.
         homes (Mapping[str, str] | None): the homes each ``~name``
             names, ``""`` for a bare ``~``.
+        pipeline (_PipelineWalk): the shell's pipeline options and owner.
         frame (Frame): the body's occurrence frame.
         lost (bool): whether the shell's cwd is lost, as ``Walked``
             carries it.
@@ -998,7 +1085,9 @@ def _walk_substitution(
     redirect = input_substitution_redirect(tree)
     if redirect is None:
         return (
-            yield from _walk_node(tree, session, homes, frame, lost, elsewhere)
+            yield from _walk_node(
+                tree, session, homes, frame, pipeline, lost, elsewhere
+            )
         )
     target = redirect.target_node
     assert target is not None
@@ -1011,7 +1100,9 @@ def _walk_substitution(
         lost,
         elsewhere=elsewhere,
     )
-    yield from _walk_node(target, session, homes, frame, lost, elsewhere)
+    yield from _walk_node(
+        target, session, homes, frame, pipeline, lost, elsewhere
+    )
     return session, lost, elsewhere
 
 
@@ -1020,6 +1111,7 @@ def _walk_node(
     session: SessionState,
     homes: Mapping[str, str] | None,
     frame: Frame,
+    pipeline: _PipelineWalk,
     lost: bool = False,
     elsewhere: tuple[SessionState, ...] = (),
 ) -> Walk:
@@ -1030,9 +1122,9 @@ def _walk_node(
     question. Pinned against bash: ``( )``, ``$( )`` and ``<( )`` run
     their contents in a child shell, so a ``cd`` inside one applies to
     the rest of that child and is gone when it exits; a pipeline forks
-    once per segment, so a ``cd`` in one segment reaches neither the
-    next segment nor the line; ``&`` backgrounds into a fork; and a
-    brace group or an ``if`` body does not fork at all, so its ``cd``
+    once per segment unless its last stage runs in this shell, so a
+    ``cd`` in one segment never reaches another stage. ``&`` backgrounds
+    into a fork. A brace group or an ``if`` body stays in this shell, so its ``cd``
     does escape. Reading a subshell as "no ``cd`` applies" rather than
     "no ``cd`` escapes" judged ``(cd d && tar -c ..)`` at the wrong
     directory, which made ``..`` read as a mount root. A loop or a
@@ -1056,14 +1148,18 @@ def _walk_node(
         session (SessionState): the session this node begins in.
         homes (Mapping[str, str] | None): the homes each ``~name``
             names, ``""`` for a bare ``~``.
+        pipeline (_PipelineWalk): the shell's pipeline options and owner.
         frame (Frame): the scope the node is read in.
         lost (bool): whether the node begins with its cwd lost, as
             ``Walked`` carries it.
         elsewhere (tuple[SessionState, ...]): the other places the node
             may begin in, as ``Walked`` carries them.
     """
-    if node.type == NodeType.FUNCTION_DEFINITION:
+    scope = scope_kind(node)
+    if scope == ScopeKind.DEFERRED:
         frame = definition_frame(node, frame)
+        pipeline.functions |= {get_function_name(node)}
+        pipeline = dataclasses.replace(pipeline)
     opened = (
         opened_by(node, homes)
         if node.type in OPENERS
@@ -1083,6 +1179,7 @@ def _walk_node(
             occurrence_in(node, frame),
             lost=lost,
             elsewhere=elsewhere,
+            pipeline=pipeline,
         )
     if node.type == NodeType.TEST_COMMAND:
         # The shell's own test, judged as a command of its own name, a
@@ -1098,10 +1195,11 @@ def _walk_node(
                 stdin=statement_stdin(node),
                 stated=test.stated,
                 elsewhere=elsewhere,
+                pipeline=pipeline,
             )
         for child in node.children:
             yield from _walk_node(
-                child, session, homes, frame, lost, elsewhere
+                child, session, homes, frame, pipeline, lost, elsewhere
             )
         return session, lost, elsewhere
     if node.type == NodeType.COMMAND:
@@ -1116,15 +1214,21 @@ def _walk_node(
                 lost=lost,
                 stdin=statement_stdin(node),
                 elsewhere=tuple(_seeded(node, e, homes) for e in elsewhere),
+                pipeline=pipeline,
             )
             walked = _after_cd(words, session, lost, elsewhere)
         for child in node.children:
             # A substitution among the words runs in its own shell.
             yield from _walk_node(
-                child, session, homes, frame, lost, elsewhere
+                child, session, homes, frame, pipeline, lost, elsewhere
+            )
+        if not pipeline.options_may_change:
+            pipeline.options_may_change = _changes_pipeline_options(
+                words, session, pipeline
             )
         return walked
-    if node.type in FORK_SCOPES:
+    if scope in (ScopeKind.FORK, ScopeKind.SUBSTITUTION):
+        child_pipeline = dataclasses.replace(pipeline, background=False)
         segments = segment_frames(node, frame)
         if segments:
             # A backtick region is read as the evaluator runs it: its
@@ -1136,6 +1240,7 @@ def _walk_node(
                     session,
                     homes,
                     segment,
+                    child_pipeline,
                     lost,
                     elsewhere,
                 )
@@ -1147,6 +1252,7 @@ def _walk_node(
                 session,
                 homes,
                 Frame(inner.text, 0, inner.parent),
+                child_pipeline,
                 lost,
                 elsewhere,
             )
@@ -1156,56 +1262,106 @@ def _walk_node(
             session,
             homes,
             frame if inner is None else inner,
+            child_pipeline,
             lost,
             elsewhere,
         )
         return session, lost, elsewhere
-    if node.type == NodeType.PIPELINE:
-        for child in node.children:
-            yield from _walk_node(
-                child, session, homes, frame, lost, elsewhere
+    if scope == ScopeKind.PIPELINE:
+        stages = node.named_children
+        ended = session, lost, elsewhere
+        for index, stage in enumerate(stages):
+            last = index == len(stages) - 1
+            forked = _stage_forks(last, session, pipeline)
+            child_pipeline = (
+                dataclasses.replace(pipeline, background=False)
+                if forked
+                else pipeline
             )
-        return session, lost, elsewhere
-    if node.type in REPEATED_SCOPES and _moves(node, session, homes):
+            after = yield from _walk_node(
+                stage, session, homes, frame, child_pipeline, lost, elsewhere
+            )
+            if not forked:
+                ended = after
+            elif not _stage_forks(last, session, pipeline, possible=True) and (
+                after[0] is not session or after[1] != lost
+            ):
+                if pipeline.guest:
+                    # The guest may keep its cwd or the last stage's. The
+                    # whole-line gate must judge both before handing it off.
+                    places = {
+                        place.cwd: place
+                        for place in (*elsewhere, after[0], *after[2])
+                        if place.cwd != session.cwd
+                    }
+                    ended = (
+                        session,
+                        after[1] or len(places) > PLACES_LIMIT,
+                        tuple(places.values())
+                        if len(places) <= PLACES_LIMIT
+                        else elsewhere,
+                    )
+                else:
+                    # The live command gate can judge the real path.
+                    ended = session, True, elsewhere
+        return ended
+    if scope in (ScopeKind.REPEATED, ScopeKind.DEFERRED) and _moves(
+        node, session, homes, pipeline
+    ):
         lost = True
     return (
-        yield from _walk_children(node, session, homes, frame, lost, elsewhere)
+        yield from _walk_children(
+            node, session, homes, frame, pipeline, lost, elsewhere
+        )
     )
 
 
 def _moves(
-    node: Any, session: SessionState, homes: Mapping[str, str] | None
+    node: Any,
+    session: SessionState,
+    homes: Mapping[str, str] | None,
+    pipeline: _PipelineWalk,
 ) -> bool:
-    """Whether a command in a scope may move the shell's cwd, outside the
-    child shells it forks (a subshell, a substitution, a pipeline's
-    stages, a job sent to the background), as ``_walk_node`` reads them:
-    what a loop or a function body carries into its next run. Read off
-    the tree, so a nested scope costs one more scan, not another walk.
-
-    Args:
-        node (Any): the scope's parsed node.
-        session (SessionState): the session the scope begins in.
-        homes (Mapping[str, str] | None): the homes each ``~name``
-            names, ``""`` for a bare ``~``.
-    """
-    stack = [node]
+    """Whether a scope may change cwd across invocations or iterations."""
+    stack = [(node, False)]
+    moved_in_last_stage = False
+    changes_options = False
     while stack:
-        current = stack.pop()
-        if current.type in FORK_SCOPES or current.type == NodeType.PIPELINE:
+        current, needs_lastpipe = stack.pop()
+        scope = scope_kind(current)
+        if scope in (ScopeKind.FORK, ScopeKind.SUBSTITUTION):
+            continue
+        if scope == ScopeKind.PIPELINE:
+            stages = current.named_children
+            if stages and not pipeline.background:
+                stack.append(
+                    (
+                        stages[-1],
+                        needs_lastpipe
+                        or _stage_forks(
+                            True, session, pipeline, possible=True
+                        ),
+                    )
+                )
             continue
         if current.type == NodeType.COMMAND:
             words = _words_of(current, homes)
             if words:
-                moved, lost, _ = _after_cd(words, session, False, ())
-                if lost or moved is not session:
-                    return True
-        children = current.children
+                if not needs_lastpipe:
+                    changes_options |= _changes_pipeline_options(
+                        words, session, pipeline
+                    )
+                after, lost, _ = _after_cd(words, session, False, ())
+                if lost or after is not session:
+                    if not needs_lastpipe:
+                        return True
+                    moved_in_last_stage = True
         stack.extend(
-            child
-            for child, after in zip(children, [*children[1:], None])
-            if after is None or after.type != "&"
+            (child, needs_lastpipe)
+            for child in current.children
+            if not is_backgrounded(child)
         )
-    return False
+    return moved_in_last_stage and changes_options
 
 
 def _walk_children(
@@ -1213,6 +1369,7 @@ def _walk_children(
     session: SessionState,
     homes: Mapping[str, str] | None,
     frame: Frame,
+    pipeline: _PipelineWalk,
     lost: bool,
     elsewhere: tuple[SessionState, ...],
 ) -> Walk:
@@ -1224,20 +1381,26 @@ def _walk_children(
         session (SessionState): the session the scope begins in.
         homes (Mapping[str, str] | None): the homes each ``~name``
             names, ``""`` for a bare ``~``.
+        pipeline (_PipelineWalk): the shell's pipeline options and owner.
         frame (Frame): the scope the children are read in.
         lost (bool): whether the scope begins with its cwd lost.
         elsewhere (tuple[SessionState, ...]): the other places the
             scope may begin in.
     """
-    children = node.children
-    for index, child in enumerate(children):
-        after = children[index + 1] if index + 1 < len(children) else None
-        ended = yield from _walk_node(
-            child, session, homes, frame, lost, elsewhere
+    for child in node.children:
+        background = is_backgrounded(child)
+        child_pipeline = (
+            dataclasses.replace(
+                pipeline, background=background_pipeline(child)
+            )
+            if background
+            else pipeline
         )
-        if after is not None and after.type == "&":
-            continue
-        session, lost, elsewhere = ended
+        ended = yield from _walk_node(
+            child, session, homes, frame, child_pipeline, lost, elsewhere
+        )
+        if not background:
+            session, lost, elsewhere = ended
     return session, lost, elsewhere
 
 
@@ -1301,6 +1464,7 @@ def _walked_line(
     frame: Frame | None = None,
     lost: bool = False,
     opens: bool = False,
+    pipeline: _PipelineWalk | None = None,
 ) -> Iterator[Walked]:
     """Every command of a line with its redirect targets, the session
     it is judged in and its place on the line.
@@ -1325,7 +1489,11 @@ def _walked_line(
     """
     if frame is None:
         frame = root_frame(ast, None)
-    for item in _walk_node(ast, session, tilde_homes(session), frame, lost):
+    if pipeline is None:
+        pipeline = _pipeline_walk()
+    for item in _walk_node(
+        ast, session, tilde_homes(session), frame, pipeline, lost
+    ):
         if item.words or opens:
             yield item
 
@@ -1365,16 +1533,7 @@ async def line_judgments(
                 [
                     one
                     async for one in _judge_words(
-                        item.words,
-                        item.occurrence,
-                        item.session,
-                        registry,
-                        namespace,
-                        item.redirects,
-                        item.stated,
-                        stdin=item.stdin,
-                        intrinsic=item.intrinsic,
-                        lost=item.lost,
+                        item, registry, namespace, JudgmentMode.PREPASS
                     )
                 ],
             )
@@ -1619,8 +1778,7 @@ async def admit_line(
         registry,
         namespace,
         root_frame(ast, handed.origin if handed is not None else None),
-        whole_line=True,
-        rules_only=False,
+        JudgmentMode.WHOLE_LINE,
     ):
         refused = await _admitted(one, registry, handed, cancel)
         if refused is None and off_line is not None:
@@ -1809,15 +1967,10 @@ async def _command_refused(
     explained = [
         one
         async for one in _judge_words(
-            item.words,
-            item.occurrence,
-            item.session,
+            dataclasses.replace(item, intrinsic=False),
             registry,
             namespace,
-            item.redirects,
-            item.stated,
-            stdin=item.stdin,
-            lost=item.lost,
+            JudgmentMode.PREPASS,
         )
     ]
     # The profile refusing the line's one command on words no glob
@@ -1917,12 +2070,12 @@ async def _judge_line(
     registry: MountRegistry,
     namespace: Namespace | None,
     frame: Frame,
+    mode: JudgmentMode,
+    *,
     stated: bool = True,
-    whole_line: bool = False,
     lost: bool = False,
-    every: bool = False,
-    rules_only: bool = True,
     open_: bool = False,
+    pipeline: _PipelineWalk | None = None,
 ) -> AsyncIterator[Judged]:
     """Every command of a line judged, in the order the gate reads
     them, each with its place on the line, one at a time as
@@ -1935,15 +2088,11 @@ async def _judge_line(
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
         frame (Frame): the scope the line is read in.
+        mode (JudgmentMode): how this judgment reads the commands and policies.
         stated (bool): whether the line's text reaches here as the gate
             will read it, as ``_judge_words`` takes it.
-        whole_line (bool): whether a runtime takes the line whole, as
-            ``_judge_words`` takes it.
         lost (bool): whether the line begins with its cwd lost, as a
             line a command runs after such a ``cd`` does.
-        every (bool): ask every policy past a Deny, for ``explain``.
-        rules_only (bool): ask the profile's rules alone, as
-            ``_judge_words`` takes it.
         open_ (bool): whether the runtime appends operands the gate
             cannot read to the line (``mapfile -C``'s callback, which
             runs with the index and the record after it), as
@@ -1952,23 +2101,20 @@ async def _judge_line(
 
     def judged(item: Walked, place: SessionState) -> AsyncIterator[Judged]:
         return _judge_words(
-            item.words,
-            item.occurrence,
-            place,
+            dataclasses.replace(
+                item, session=place, stated=stated and item.stated, open_=open_
+            ),
             registry,
             namespace,
-            item.redirects,
-            stated and item.stated,
-            stdin=item.stdin,
-            intrinsic=item.intrinsic,
-            whole_line=whole_line,
-            lost=item.lost,
-            every=every,
-            rules_only=rules_only,
-            open_=open_,
+            mode,
         )
 
-    for item in _walked_line(ast, session, frame, lost):
+    whole_line = takes_whole_line(mode)
+    if pipeline is None and whole_line:
+        # The runtime receives the line, cwd and environment. Its shell
+        # options are independent of the workspace's.
+        pipeline = _PipelineWalk(guest=True)
+    for item in _walked_line(ast, session, frame, lost, pipeline=pipeline):
         if not whole_line or not item.elsewhere:
             async for one in judged(item, item.session):
                 yield one
@@ -2066,8 +2212,7 @@ async def explain_line(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    whole_line: bool = False,
-    every: bool = True,
+    mode: JudgmentMode = JudgmentMode.EXPLAIN,
 ) -> list[Judged]:
     """What every command of a line would do, in the order the gate
     reads them, each where it stands, without running any of it
@@ -2089,12 +2234,7 @@ async def explain_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        whole_line (bool): whether a runtime takes the line whole, which
-            reads it as typed (``admit_line``); the executor's gate reads
-            each command once expanded.
-        every (bool): ask every policy, as each command's explanation
-            shows them; False asks the profile's rules alone, as the run
-            does before any of the line runs, which is what holds it.
+        mode (JudgmentMode): how this judgment reads the commands and policies.
     """
     return [
         one
@@ -2104,9 +2244,7 @@ async def explain_line(
             registry,
             namespace,
             root_frame(ast, None),
-            whole_line=whole_line,
-            every=every,
-            rules_only=not every,
+            mode,
         )
     ]
 
@@ -2186,7 +2324,8 @@ def explained_line(
     whole_line: bool = False,
     aliases: frozenset[str] = frozenset(),
     opened: Sequence[Opened] = (),
-    pipefail: bool = False,
+    *,
+    session: SessionState,
 ) -> ShellExplanation:
     """A line's public explanation: its verdict and its parse tree, with
     every command's explanation where the command stands.
@@ -2219,7 +2358,7 @@ def explained_line(
         line (str): the line as given.
         judged (Sequence[Judged]): :func:`explain_line`'s judgments.
         verdicts (Sequence[Judged]): the judgments the run holds the
-            line on: the profile's rules alone (``every=False``), or
+            line on: the profile's rules alone (``JudgmentMode.PREPASS``), or
             ``judged`` itself for a runtime that takes the line whole,
             whose gate asks every policy.
         placed_of (Callable[[Judged], str]): the machine that would run
@@ -2229,8 +2368,7 @@ def explained_line(
             which each scope is parsed with.
         opened (Sequence[Opened]): the line's redirects no command owns
             that its trees refuse or ask about (:func:`explain_redirects`).
-        pipefail (bool): whether the session's ``pipefail`` is set, so a
-            pipeline answers its last failing stage.
+        session (SessionState): the shell whose pipeline options are read.
     """
     scopes: dict[tuple[Occurrence | None, str], list[Judged]] = {}
     for one in judged:
@@ -2296,7 +2434,7 @@ def explained_line(
         at = open_.occurrence
         if at.parent is None:
             redirects.setdefault((at.start, at.end), []).append(open_.judgment)
-    traced = _line_status(tree, commands, redirects, pipefail)
+    traced = _line_status(tree, commands, redirects, session)
     calling = [
         _calls_function(one, key, traced)
         for one, key in zip(judged, keys, strict=True)
@@ -2390,7 +2528,7 @@ def _line_status(
     tree: Any,
     commands: Mapping[tuple[int, int], Sequence[Judgment]],
     redirects: Mapping[tuple[int, int], Sequence[Judgment]],
-    pipefail: bool,
+    session: SessionState,
 ) -> Traced:
     """The exit code a line would return and the refusals it would print
     on the way, read off the line's control flow with every command let
@@ -2423,7 +2561,7 @@ def _line_status(
         redirects (Mapping[tuple[int, int], Sequence[Judgment]]): the
             judgments of the redirects no command owns, by the span of
             the node they open for.
-        pipefail (bool): whether the session's ``pipefail`` is set.
+        session (SessionState): the shell whose pipeline options are read.
     """
     ran: list[Judgment] = []
     calls: set[tuple[int, int, int]] = set()
@@ -2440,21 +2578,34 @@ def _line_status(
         ran.append(first)
         return first.exit_code
 
-    def forked(nodes: Sequence[Any], runs: bool) -> int:
+    pipeline = _pipeline_walk()
+    homes = tilde_homes(session)
+    # The status fold uses the session's pipefail at line entry.
+    pipefail = session.shell_options.get("pipefail", False)
+
+    def forked(
+        node: Any, runs: bool, *, body: bool = False, background: bool = False
+    ) -> int:
+        nonlocal pipeline
         kept = set(defined)
-        code = statements(nodes, runs)
-        defined.clear()
-        defined.update(kept)
-        return code
+        outer = pipeline
+        pipeline = dataclasses.replace(outer, background=background)
+        try:
+            return (
+                statements(node.children, runs) if body else status(node, runs)
+            )
+        finally:
+            pipeline = outer
+            defined.clear()
+            defined.update(kept)
 
     def statements(nodes: Sequence[Any], runs: bool) -> int:
         code = 0
-        for node, after in zip(nodes, [*nodes[1:], None], strict=False):
+        for node in nodes:
             if not node.is_named or node.type in INERT:
                 continue
-            if after is not None and after.type == NodeType.BACKGROUND:
-                # A job: the shell does not wait on it, and it forks.
-                forked([node], False)
+            if is_backgrounded(node):
+                forked(node, False, background=background_pipeline(node))
                 code = 0
             else:
                 code = status(node, runs)
@@ -2476,56 +2627,79 @@ def _line_status(
         return refused(kept, runs)
 
     def status(node: Any, runs: bool) -> int:
-        kind = node.type
+        kind = node_kind(node)
+        scope = scope_kind(node, kind)
         span = (node.start_byte, node.end_byte)
         at.setdefault(node.start_byte, frozenset(defined))
         code = refused(redirects.get(span, ()), runs)
         if code:
             return code
-        if kind in (NodeType.COMMAND, NodeType.TEST_COMMAND):
+        if kind in (NodeKind.COMMAND, NodeKind.TEST):
             for sub in _substitutions(node.children):
                 status(sub, runs)
-            return command(span, runs)
-        if kind == NodeType.REDIRECTED_STATEMENT:
+            code = command(span, runs)
+            if kind == NodeKind.COMMAND and not pipeline.options_may_change:
+                head = next(
+                    (
+                        c
+                        for c in node.named_children
+                        if c.type == NodeType.COMMAND_NAME
+                    ),
+                    None,
+                )
+                name = None if head is None else literal_word(head)
+                if (
+                    head is not None
+                    and name is None
+                    or name in session.functions
+                    or name in pipeline.functions
+                    or name in ("shopt", "set", "command", "builtin")
+                ):
+                    pipeline.options_may_change = _changes_pipeline_options(
+                        _words_of(node, homes), session, pipeline
+                    )
+            return code
+        if kind == NodeKind.REDIRECT:
             for sub in _substitutions(node.named_children[1:]):
                 status(sub, runs)
             body = node.named_children[:1]
             if not body or body[0].type in REDIRECT_TYPES:
                 return 0
             return status(body[0], runs)
-        if kind == NodeType.LIST:
+        if kind == NodeKind.LIST:
             left, op, right = (
                 node.children[0],
                 node.children[1],
                 node.children[-1],
             )
             code = status(left, runs)
-            goes = (op.type == NodeType.AND) == (code == 0)
+            goes = connection_runs_right(op.type, code)
             later = status(right, runs and goes)
             return later if goes else code
-        if kind == NodeType.PIPELINE:
+        if scope == ScopeKind.PIPELINE:
             stages = list(node.named_children)
             negated = (
                 bool(stages) and stages[0].type == NodeType.NEGATED_COMMAND
             )
             if negated:
                 stages[0] = stages[0].named_children[-1]
-            codes = [forked([stage], runs) for stage in stages]
+            codes = [
+                forked(stage, runs)
+                if _stage_forks(index == len(stages) - 1, session, pipeline)
+                else status(stage, runs)
+                for index, stage in enumerate(stages)
+            ]
             if pipefail:
                 code = next((c for c in reversed(codes) if c), 0)
             else:
                 code = codes[-1] if codes else 0
             return (0 if code else 1) if negated else code
-        if kind == NodeType.NEGATED_COMMAND:
+        if kind == NodeKind.NEGATED:
             return 0 if statements(node.children, runs) else 1
-        if kind in FORK_SCOPES:
-            return forked(node.children, runs)
-        if kind == NodeType.IF_STATEMENT:
-            branches = [_clause(node)] + [
-                _clause(c)
-                for c in node.named_children
-                if c.type == NodeType.ELIF_CLAUSE
-            ]
+        if scope in (ScopeKind.FORK, ScopeKind.SUBSTITUTION):
+            return forked(node, runs, body=True)
+        if kind == NodeKind.IF:
+            branches, else_body = get_if_branches(node)
             code = 0
             taken = False
             for head, body in branches:
@@ -2534,32 +2708,32 @@ def _line_status(
                 result = statements(body, hit)
                 if hit:
                     code, taken = result, True
-            for child in node.named_children:
-                if child.type == NodeType.ELSE_CLAUSE:
-                    live = runs and not taken
-                    result = statements(child.children, live)
-                    if live:
-                        code = result
+            if else_body is not None:
+                live = runs and not taken
+                result = statements(else_body, live)
+                if live:
+                    code = result
             return code
-        if kind == NodeType.WHILE_STATEMENT:
+        if scope == ScopeKind.REPEATED and kind in (
+            NodeKind.WHILE,
+            NodeKind.UNTIL,
+        ):
             loop = [
                 c for c in node.named_children if c.type == NodeType.DO_GROUP
             ]
             head = [c for c in node.children if c.type != NodeType.DO_GROUP]
-            until = node.children[0].type == NodeType.UNTIL
+            until = kind == NodeKind.UNTIL
             entered = runs and (statements(head, runs) == 0) != until
             code = statements(loop, entered)
             return code if entered else 0
-        if kind == NodeType.FUNCTION_DEFINITION:
-            name = next(
-                (c for c in node.named_children if c.type == NodeType.WORD),
-                None,
-            )
-            if runs and name is not None:
-                defined.add(get_text(name))
-                starts.setdefault(get_text(name), []).append(node.start_byte)
+        if scope == ScopeKind.DEFERRED:
+            name = get_function_name(node)
+            pipeline.functions |= {name}
+            if runs:
+                defined.add(name)
+                starts.setdefault(name, []).append(node.start_byte)
             return 0
-        if kind == NodeType.CASE_STATEMENT:
+        if kind == NodeKind.CASE:
             arm = _case_arm(node)
             code = 0
             for index, (_, body, _) in enumerate(get_case_items(node)):
@@ -2568,7 +2742,7 @@ def _line_status(
                 if hit:
                     code = result
             return code
-        if kind in (NodeType.FOR_STATEMENT, NodeType.C_STYLE_FOR_STATEMENT):
+        if scope == ScopeKind.REPEATED:
             loop = [
                 c for c in node.named_children if c.type == NodeType.DO_GROUP
             ]
@@ -2600,32 +2774,11 @@ def _substitutions(nodes: Sequence[Any]) -> list[Any]:
     """
     found: list[Any] = []
     for node in nodes:
-        if node.type in (
-            NodeType.COMMAND_SUBSTITUTION,
-            NodeType.PROCESS_SUBSTITUTION,
-        ):
+        if scope_kind(node) == ScopeKind.SUBSTITUTION:
             found.append(node)
         else:
             found.extend(_substitutions(node.children))
     return found
-
-
-def _clause(node: Any) -> tuple[list[Any], list[Any]]:
-    """An ``if`` or ``elif``'s condition and the body it guards, as two
-    lists of parsed children; the branches after it are left out.
-
-    Args:
-        node (Any): the ``if_statement`` or ``elif_clause``.
-    """
-    head: list[Any] = []
-    body: list[Any] = []
-    into = head
-    for child in node.children:
-        if child.type == "then":
-            into = body
-        elif child.type not in (NodeType.ELIF_CLAUSE, NodeType.ELSE_CLAUSE):
-            into.append(child)
-    return head, body
 
 
 def _case_arm(node: Any) -> int | None:
@@ -2758,7 +2911,7 @@ def _scope_node(
                 )
                 for i, one in enumerate(ones)
             ]
-        if node.type in SUBSTITUTIONS:
+        if scope_kind(node) == ScopeKind.SUBSTITUTION:
             return list(take(start, end))
         inner = [
             part for child in node.named_children for part in convert(child)

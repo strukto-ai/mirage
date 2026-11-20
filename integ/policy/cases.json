@@ -25,6 +25,22 @@
    ]
   },
   {
+   "id": "explain_follows_the_last_pipeline_stage_in_the_current_shell",
+   "settings": {"mode": "write", "mounts": {"/": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "reader", "profile": {"commands": {"cat": {"decision": "deny", "reason": "review copy", "paths": ["/data/file"]}}}},
+    {"op": "exec", "command": "mkdir /data; echo parent > /file; echo child > /data/file", "expect": {"value": {"exit_code": 0}}},
+    {"op": "explain", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"outcome": "allow", "exit_code": 0}}},
+    {"op": "exec", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"exit_code": 0, "stdout": "parent\n"}}},
+    {"op": "exec", "session": "reader", "command": "shopt -s lastpipe", "expect": {"value": {"exit_code": 0}}},
+    {"op": "explain", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"outcome": "deny", "reason": "review copy", "exit_code": 1}}},
+    {"op": "exec", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"exit_code": 1, "stdout": "", "decision": "review copy"}}},
+    {"op": "exec", "session": "reader", "command": "cd /; set -m", "expect": {"value": {"exit_code": 0}}},
+    {"op": "explain", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"outcome": "allow", "exit_code": 0}}},
+    {"op": "exec", "session": "reader", "command": "true | cd /data; cat ./file", "expect": {"value": {"exit_code": 0, "stdout": "parent\n"}}}
+   ]
+  },
+  {
    "id": "a_path_rule_answers_in_the_commands_own_voice",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

@@ -181,6 +181,7 @@ import {
   explainedLine,
   explainRedirects,
   explainLine,
+  JudgmentMode,
   holds,
   lineJudgments,
   offLineRefusal,
@@ -1937,11 +1938,9 @@ export class Workspace {
         this.registry,
         this.namespace,
         reparse,
-        false,
-        false,
+        JudgmentMode.PREPASS,
       )
       const opened = await explainRedirects(root, session, this.registry, this.namespace, reparse)
-      const pipefail = session.shellOptions.pipefail === true
       if (holds(verdicts.map((one) => one.judgment))) {
         // The run leaves a held line on its static bindings for the gate to
         // answer (`Router.decide`), whole when they take it whole.
@@ -1953,7 +1952,7 @@ export class Workspace {
           this.registry,
           this.namespace,
           reparse,
-          wholeLine,
+          wholeLine ? JudgmentMode.EXPLAIN_WHOLE_LINE : JudgmentMode.EXPLAIN,
         )
         return explainedLine(
           line,
@@ -1963,7 +1962,7 @@ export class Workspace {
           reparse,
           wholeLine,
           opened,
-          pipefail,
+          session,
         )
       }
       const [answers, placed] = await this.router.placement(line, session, () =>
@@ -1985,12 +1984,12 @@ export class Workspace {
         this.registry,
         this.namespace,
         reparse,
-        wholeLine,
+        wholeLine ? JudgmentMode.EXPLAIN_WHOLE_LINE : JudgmentMode.EXPLAIN,
       )
       if ('kind' in placed) {
         const refused = placementRefused(placed, line)
         return {
-          ...explainedLine(line, judged, verdicts, () => '', reparse),
+          ...explainedLine(line, judged, verdicts, () => '', reparse, false, [], session),
           answers,
           outcome: placed.kind === 'pending' ? Outcome.ASK : Outcome.DENY,
           reason: placed.reason,
@@ -2009,7 +2008,7 @@ export class Workspace {
         reparse,
         wholeLine,
         opened,
-        pipefail,
+        session,
       )
       if (wholeLine && said.outcome === Outcome.ALLOW) {
         // A command routed off the runtime that runs the line whole

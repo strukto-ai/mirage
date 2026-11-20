@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from mirage.shell.helpers import REDIRECT_NODE_TYPES
+from mirage.shell.helpers import REDIRECT_NODE_TYPES, get_redirects
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 
 
 class NodeKind(StrEnum):
@@ -52,6 +54,72 @@ class NodeKind(StrEnum):
     VAR_ASSIGN = "var_assign"
     VAR_ASSIGNS = "var_assigns"
     UNSUPPORTED = "unsupported"
+
+
+class ScopeKind(StrEnum):
+    """How a statement or word body can reach the enclosing shell."""
+
+    SHARED = "shared"
+    FORK = "fork"
+    PIPELINE = "pipeline"
+    SUBSTITUTION = "substitution"
+    REPEATED = "repeated"
+    DEFERRED = "deferred"
+
+
+_SCOPE_KINDS = {
+    NodeKind.SUBSHELL: ScopeKind.FORK,
+    NodeKind.PIPELINE: ScopeKind.PIPELINE,
+    NodeKind.FOR: ScopeKind.REPEATED,
+    NodeKind.CFOR: ScopeKind.REPEATED,
+    NodeKind.SELECT: ScopeKind.REPEATED,
+    NodeKind.WHILE: ScopeKind.REPEATED,
+    NodeKind.UNTIL: ScopeKind.REPEATED,
+    NodeKind.FUNCTION_DEF: ScopeKind.DEFERRED,
+}
+
+
+def scope_kind(node: TSNodeLike, kind: NodeKind | None = None) -> ScopeKind:
+    """Classify a parsed node's execution scope."""
+    if node.type in (NT.COMMAND_SUBSTITUTION, NT.PROCESS_SUBSTITUTION):
+        return ScopeKind.SUBSTITUTION
+    return _SCOPE_KINDS.get(kind or node_kind(node), ScopeKind.SHARED)
+
+
+def background_pipeline(node: TSNodeLike) -> bool:
+    """Whether the shell spawned for a background job owns a pipeline."""
+    command = (
+        get_redirects(node)[0]
+        if node.type == NT.REDIRECTED_STATEMENT
+        else node
+    )
+    return command is not None and node_kind(command) == NodeKind.PIPELINE
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineScope:
+    lastpipe: bool
+    monitor: bool
+    background_pipeline: bool
+
+
+def pipeline_stage_forks(last: bool, scope: PipelineScope) -> bool:
+    """Only the last stage of a foreground pipeline can run in its caller."""
+    return (
+        not last
+        or not scope.lastpipe
+        or scope.monitor
+        or scope.background_pipeline
+    )
+
+
+def connection_runs_right(op: str | None, status: int) -> bool:
+    """Whether the left status lets the next command of a list run."""
+    if op == NT.AND:
+        return status == 0
+    if op == NT.OR:
+        return status != 0
+    return True
 
 
 _SIMPLE_KINDS = {

@@ -46,7 +46,13 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
-from mirage.shell.node_kind import simple_command
+from mirage.shell.helpers import is_backgrounded
+from mirage.shell.node_kind import (
+    PipelineScope,
+    connection_runs_right,
+    pipeline_stage_forks,
+    simple_command,
+)
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -156,13 +162,15 @@ async def handle_pipe(
     # signal stops on its own, its status 128 plus it, and which hands a
     # QUIT to the program it runs right now (``run_program``).
     owner = current_caller().process
-    lastpipe = session.shopts.get("lastpipe", False) and not (
-        session.shell_options.get("monitor") or (owner and owner.pipeline)
+    scope = PipelineScope(
+        lastpipe=session.shopts.get("lastpipe", False),
+        monitor=session.shell_options.get("monitor", False),
+        background_pipeline=owner is not None and owner.pipeline,
     )
     children = [
-        context
-        if lastpipe and i == len(commands) - 1
-        else child_context(context)
+        child_context(context)
+        if pipeline_stage_forks(i == len(commands) - 1, scope)
+        else context
         for i in range(len(commands))
     ]
     stages: list[ProcessHandle | None] = [None for _ in commands]
@@ -450,9 +458,7 @@ async def handle_connection(
 
     left_bytes, left_io, left_exec = await run_program(left, context, tested)
     children = [left_exec]
-    if (op == NT.AND and left_io.exit_code != 0) or (
-        op == NT.OR and left_io.exit_code == 0
-    ):
+    if not connection_runs_right(op, left_io.exit_code):
         if op == NT.AND:
             session.errexit_immune = True
         carry_status(session)
@@ -613,7 +619,7 @@ async def handle_subshell(
         # node while the option is on, so this loop simply runs a
         # tail of no-ops. The child owns the option, so it cannot
         # leak to the parent.
-        is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
+        is_bg = is_backgrounded(child)
         armed = err_trap_armed(session)
         if is_bg:
             try:

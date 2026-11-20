@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { REDIRECT_NODE_TYPES } from './helpers.ts'
+import { getRedirects, REDIRECT_NODE_TYPES } from './helpers.ts'
 import { NodeType as NT, type TSNodeLike } from './types.ts'
 
 /**
@@ -50,6 +50,58 @@ export const NodeKind = Object.freeze({
   UNSUPPORTED: 'unsupported',
 } as const)
 export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind]
+
+/** How a statement or word body can reach the enclosing shell. */
+export const ScopeKind = {
+  SHARED: 'shared',
+  FORK: 'fork',
+  PIPELINE: 'pipeline',
+  SUBSTITUTION: 'substitution',
+  REPEATED: 'repeated',
+  DEFERRED: 'deferred',
+} as const
+export type ScopeKind = (typeof ScopeKind)[keyof typeof ScopeKind]
+
+const SCOPE_KINDS: Readonly<Partial<Record<NodeKind, ScopeKind>>> = {
+  [NodeKind.SUBSHELL]: ScopeKind.FORK,
+  [NodeKind.PIPELINE]: ScopeKind.PIPELINE,
+  [NodeKind.FOR]: ScopeKind.REPEATED,
+  [NodeKind.CFOR]: ScopeKind.REPEATED,
+  [NodeKind.SELECT]: ScopeKind.REPEATED,
+  [NodeKind.WHILE]: ScopeKind.REPEATED,
+  [NodeKind.UNTIL]: ScopeKind.REPEATED,
+  [NodeKind.FUNCTION_DEF]: ScopeKind.DEFERRED,
+}
+
+export function scopeKind(node: TSNodeLike, kind = nodeKind(node)): ScopeKind {
+  if (node.type === NT.COMMAND_SUBSTITUTION || node.type === NT.PROCESS_SUBSTITUTION)
+    return ScopeKind.SUBSTITUTION
+  return SCOPE_KINDS[kind] ?? ScopeKind.SHARED
+}
+
+/** Whether the shell spawned to run a background job owns a pipeline. */
+export function backgroundPipeline(node: TSNodeLike): boolean {
+  const command = node.type === NT.REDIRECTED_STATEMENT ? getRedirects(node)[0] : node
+  return command !== null && nodeKind(command) === NodeKind.PIPELINE
+}
+
+export interface PipelineScope {
+  readonly lastpipe: boolean
+  readonly monitor: boolean
+  readonly backgroundPipeline: boolean
+}
+
+/** Only the last stage of a foreground pipeline can run in its caller. */
+export function pipelineStageForks(last: boolean, scope: PipelineScope): boolean {
+  return !last || !scope.lastpipe || scope.monitor || scope.backgroundPipeline
+}
+
+/** Whether the left status lets the next command of a list run. */
+export function connectionRunsRight(op: string | null, status: number): boolean {
+  if (op === NT.AND) return status === 0
+  if (op === NT.OR) return status !== 0
+  return true
+}
 
 const SIMPLE_KINDS: Readonly<Record<string, NodeKind>> = Object.freeze({
   [NT.COMMENT]: NodeKind.COMMENT,

@@ -24,7 +24,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
-import { getText, sameLine, sourceRow } from '../../shell/helpers.ts'
+import { getText, isBackgrounded, sameLine, sourceRow } from '../../shell/helpers.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { PARSED_WORDS } from '../../shell/parse/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -271,7 +271,7 @@ async function runProgram(
     }
 
     lastRow = endRow
-    if (!reread && children[i + 1]?.type === NT.BACKGROUND) {
+    if (!reread && isBackgrounded(child)) {
       let launched: [ByteSource | null, IOResult, ExecutionNode]
       try {
         launched = await handleBackground(

@@ -40,6 +40,7 @@ class FakeNode:
         self.text = text
         self.is_named = True
         self.type = "command"
+        self.next_sibling = None
 
 
 async def no_line(*_args, **_kw):
