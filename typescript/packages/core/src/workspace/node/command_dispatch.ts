@@ -73,6 +73,7 @@ import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { CycleError, globPrefixMatch, parent, resolvePath } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { guardDispatch } from '../abort.ts'
+import type { CLIInstall } from '../cli/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { divertedFile } from '../executor/builtins/exec/index.ts'
@@ -961,8 +962,24 @@ async function runArgv(
       }
       if (output === undefined) delete routedDeps.sink
       else routedDeps.sink = output
-      const command = await bindCommand(argv, routedDeps, context, given)
-      return runResolved(routedDeps, recurse, command, context, given, callStack, row, admitted)
+      let releaseInstall: (() => void) | undefined
+      try {
+        const command = await bindCommand(argv, routedDeps, context, given, (install) => {
+          releaseInstall = install.activity.acquire()
+        })
+        return await runResolved(
+          routedDeps,
+          recurse,
+          command,
+          context,
+          given,
+          callStack,
+          row,
+          admitted,
+        )
+      } finally {
+        releaseInstall?.()
+      }
     }
     // A preCommand route places this command, and what it runs, over the
     // line's placement for its run alone: the lines it runs (`eval`) keep
@@ -1378,6 +1395,7 @@ async function bindCommand(
   deps: ExecuteNodeDeps,
   context: EvaluationContext,
   stdin: ByteSource | null,
+  retainCli: (install: CLIInstall) => void,
 ): Promise<ResolvedCommand> {
   const { name, args } = argv
   const { session } = context
@@ -1408,8 +1426,11 @@ async function bindCommand(
     return { argv, target }
   }
   if (target.kind === Consumer.FUNCTION) return { argv, target }
-  const [held, words] = await heldMachine(argv, deps, context, stdin, target.kind)
-  if (held !== null) return { argv: words, target: { kind: Consumer.EXTERNAL, runtime: held } }
+  // A CLI is selected and retained without yielding to its uninstaller.
+  if (target.kind !== Consumer.CLI) {
+    const [held, words] = await heldMachine(argv, deps, context, stdin, target.kind)
+    if (held !== null) return { argv: words, target: { kind: Consumer.EXTERNAL, runtime: held } }
+  }
   if (args[0] === '--help' && !isProgramInvocation(session)) {
     const answer = flagHelp(name)
     if (answer !== null) return { argv, target: { kind: 'result', result: answer } }
@@ -1421,7 +1442,10 @@ async function bindCommand(
   const handler = commandWorker(argv, routing?.bindings ?? registry.runtimeBindings)
   if (handler !== undefined) return { argv, target: { kind: 'worker', handler } }
 
-  if (target.kind === Consumer.CLI) return { argv, target }
+  if (target.kind === Consumer.CLI) {
+    retainCli(target.install)
+    return { argv, target }
+  }
   // A machine-only builtin visible at install time still tries the mount
   // implementation when placement takes away the last machine.
   if (

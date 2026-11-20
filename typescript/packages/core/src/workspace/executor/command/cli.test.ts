@@ -36,11 +36,13 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { varsFromEnv } from '../../session/session.ts'
 import { CLIRegistry } from '../../cli/registry.ts'
 import type { CLIInstall } from '../../cli/types.ts'
+import * as lookup from '../../lookup/lookup.ts'
 import { MountEntry } from '../../mount/mount.ts'
 import { SessionState } from '../../session/session.ts'
 import type { ExecutionNode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { handleCli, reachesService } from './cli.ts'
+import * as commands from './command.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
@@ -1095,6 +1097,87 @@ async function* doneOutput(): AsyncGenerator<Uint8Array> {
 }
 
 describe('handleCli install lifetime', () => {
+  it.each([false, true])(
+    'retires the selected CLI after dispatch (fail preparation=%s)',
+    async (failPreparation) => {
+      const ws = new Workspace({ '/': new RAMVFS() })
+      let select!: () => void
+      const selected = new Promise<void>((resolve) => {
+        select = resolve
+      })
+      let retire!: () => void
+      const retiring = new Promise<void>((resolve) => {
+        retire = resolve
+      })
+      const events: [string, ClosingAccessor][] = []
+      async function* output(accessor: ClosingAccessor) {
+        events.push(['output', accessor])
+        yield* doneOutput()
+      }
+      const cli = new CLI({
+        spec: new CommandSpec({ name: 'demo' }),
+        accessor: (config) => new ClosingAccessor(config),
+        handlers: {
+          '': new CLIHandler({
+            fn: (accessor: ClosingAccessor) => {
+              events.push(['leaf', accessor])
+              return [output(accessor), new IOResult()]
+            },
+          }),
+        },
+      })
+      const install = ws.registerCli('demo', cli)
+      const accessor = install.accessor as ClosingAccessor
+      try {
+        await ws.shell('type -a demo; command -v demo')
+        await install.activity.wait()
+        const resolveTarget = lookup.resolveTarget
+        const handle = commands.handleCommand
+        const wait = install.activity.wait.bind(install.activity)
+        vi.spyOn(lookup, 'resolveTarget').mockImplementation((...args) => {
+          const target = resolveTarget(...args)
+          if (args[0] === 'demo') select()
+          return target
+        })
+        vi.spyOn(install.activity, 'wait').mockImplementation(() => {
+          const idle = wait()
+          ws.registerCli('demo', cli)
+          retire()
+          return idle.then(() => {
+            events.push(['idle', accessor])
+          })
+        })
+        vi.spyOn(commands, 'handleCommand').mockImplementation(async (...args) => {
+          await retiring
+          events.push(['prepare', accessor])
+          if (failPreparation) throw new Error('preparation failed')
+          return handle(...args)
+        })
+        const running = ws.shell('demo')
+        await selected
+        const removal = ws.unregisterCli('demo')
+        const result = await running
+        if (failPreparation) {
+          expect(result.exitCode).toBe(1)
+          expect(result.stderrText).toContain('preparation failed')
+        } else {
+          expect([result.exitCode, result.stdoutText]).toEqual([0, 'done\n'])
+        }
+        await removal
+        const expected = failPreparation
+          ? ['prepare', 'idle']
+          : ['prepare', 'leaf', 'output', 'idle']
+        expect(events.map(([event]) => event)).toEqual(expected)
+        for (const [, used] of events) expect(used).toBe(accessor)
+        expect(accessor.closed).toBe(true)
+        expect((ws.registry.clis.get('demo')?.accessor as ClosingAccessor).closed).toBe(false)
+      } finally {
+        vi.restoreAllMocks()
+        await ws.close()
+      }
+    },
+  )
+
   it('removal closes the accessor after the leaf and its output', async () => {
     let enter!: () => void
     const entered = new Promise<void>((resolve) => (enter = resolve))
