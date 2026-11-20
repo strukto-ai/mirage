@@ -77,6 +77,62 @@ def test_parse_bash_args_dash_c_needs_a_value():
 
 
 @pytest.mark.parametrize(
+    "args,settings",
+    [
+        (["-c", "-x", "echo hi", "A", "B"], (("xtrace", True),)),
+        (
+            ["-c", "-e", "+x", "echo hi", "A", "B"],
+            (("errexit", True), ("xtrace", False)),
+        ),
+        (["-c", "-o", "pipefail", "echo hi", "A", "B"], (("pipefail", True),)),
+        (["-c", "-l", "echo hi", "A", "B"], ()),
+        (["-c", "--", "echo hi", "A", "B"], ()),
+        (["-c", "-", "echo hi", "A", "B"], ()),
+        (["-c", "-x", "--", "echo hi", "A", "B"], (("xtrace", True),)),
+        (
+            ["-cx", "-e", "echo hi", "A", "B"],
+            (("xtrace", True), ("errexit", True)),
+        ),
+    ],
+)
+def test_parse_bash_args_dash_c_reads_options_before_its_program(
+    args, settings
+):
+    parsed = parse_bash_args(args)
+    assert parsed.script == "echo hi"
+    assert parsed.argv == ["A", "B"]
+    assert parsed.settings == settings
+
+
+@pytest.mark.parametrize("args", [["-c", "--", "-x"], ["-c", "-", "-x"]])
+def test_parse_bash_args_dash_c_takes_a_dash_program_after_end_of_options(
+    args,
+):
+    parsed = parse_bash_args(args)
+    assert parsed.script == "-x"
+    assert parsed.argv == []
+
+
+@pytest.mark.parametrize(
+    "args", [["-c", "-x"], ["-c", "--"], ["-c", "-e", "-"]]
+)
+def test_parse_bash_args_dash_c_with_only_options_needs_a_value(args):
+    assert parse_bash_args(args).needs_value == "-c"
+
+
+@pytest.mark.parametrize(
+    "args,invalid",
+    [
+        (["-c", "--norc", "echo hi"], "--"),
+        (["-c", "-q", "echo hi"], "-q"),
+        (["-c", "-O", "extglob", "echo hi"], "-O"),
+    ],
+)
+def test_parse_bash_args_dash_c_refuses_options_bash_refuses(args, invalid):
+    assert parse_bash_args(args).invalid == invalid
+
+
+@pytest.mark.parametrize(
     "args,field,expected",
     [
         (["--version", "--help"], "help", True),
