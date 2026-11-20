@@ -44,19 +44,18 @@ def test_a_relative_root_is_each_logins_own():
 
 @pytest.mark.asyncio
 async def test_a_client_parent_step_follows_a_remote_directory_link():
+    targets = {
+        "data": "/srv/data",
+        "/srv/data/left/jump": "/srv/data/right/deep",
+        "/srv/data/left/outside": "/srv/data-other/deep",
+    }
     sftp = Mock(
         stat=AsyncMock(
             return_value=asyncssh.SFTPAttrs(
                 type=asyncssh.FILEXFER_TYPE_DIRECTORY
             )
         ),
-        realpath=AsyncMock(
-            side_effect=lambda path: {
-                "data": "/srv/data",
-                "/srv/data/left/jump": "/srv/data/right/deep",
-                "/srv/data/left/outside": "/srv/data-other/deep",
-            }[path]
-        ),
+        realpath=AsyncMock(side_effect=targets.__getitem__),
         remove=AsyncMock(),
     )
     vfs = SSHVFS(SSHConfig(host="box", root="data"))
@@ -74,25 +73,27 @@ async def test_a_client_parent_step_follows_a_remote_directory_link():
         await ws.close()
 
 
+def _namespace_stat(path: str) -> asyncssh.SFTPAttrs:
+    if path == "data/virtual":
+        raise asyncssh.SFTPNoSuchFile(path)
+    return asyncssh.SFTPAttrs(type=asyncssh.FILEXFER_TYPE_DIRECTORY)
+
+
+def _namespace_realpath(path: str) -> str:
+    if path == "/srv/data/virtual":
+        raise asyncssh.SFTPNoSuchFile(path)
+    if path == "/srv/data/alias":
+        return "/srv/data/.env"
+    return "/srv/data"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("spelling", ["/", "/virtual"])
 async def test_client_realpath_keeps_visible_namespace_directories(spelling):
-    def stat(path):
-        if path == "data/virtual":
-            raise asyncssh.SFTPNoSuchFile(path)
-        return asyncssh.SFTPAttrs(type=asyncssh.FILEXFER_TYPE_DIRECTORY)
-
-    def realpath(path):
-        if path == "/srv/data/virtual":
-            raise asyncssh.SFTPNoSuchFile(path)
-        if path == "/srv/data/alias":
-            return "/srv/data/.env"
-        return "/srv/data"
-
     vfs = SSHVFS(SSHConfig(host="box", root="data"))
     vfs.accessor._sftp = Mock(
-        stat=AsyncMock(side_effect=stat),
-        realpath=AsyncMock(side_effect=realpath),
+        stat=AsyncMock(side_effect=_namespace_stat),
+        realpath=AsyncMock(side_effect=_namespace_realpath),
     )
     ws = Workspace({"/ssh": vfs, "/ssh/virtual/tools": RAMVFS()})
     try:
