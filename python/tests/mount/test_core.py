@@ -63,6 +63,45 @@ def test_core_needs_no_fuse_module():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_hidden_file", [False, True])
+async def test_rmdir_keeps_a_configured_disk_mount_root(
+    tmp_path, with_hidden_file
+):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace({"/data": DiskVFS(root=str(root))}, mode=MountMode.WRITE)
+    try:
+        shell = await ws.shell("rmdir /data")
+        assert shell.exit_code == 1
+        assert (
+            shell.stderr
+            == b"rmdir: failed to remove '/data': Device or resource busy\n"
+        )
+
+        hidden = root / "hidden.txt"
+        if with_hidden_file:
+            hidden.write_bytes(b"keep this file")
+        session = ws.create_session(
+            "boxed", profile={"paths": {"hide": ["/data/hidden.txt"]}}
+        )
+        core = MountCore(ws.vfs, session=session)
+        child = root / "empty"
+        child.mkdir()
+        await core.rmdir("/data/empty")
+        assert not child.exists()
+        assert await core.readdir("/data") == [".", ".."]
+
+        with pytest.raises(OSError) as error:
+            await core.rmdir("/data")
+        assert error.value.errno == errno.EBUSY
+        assert root.is_dir()
+        if with_hidden_file:
+            assert hidden.read_bytes() == b"keep this file"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_getattr_file(seeded):
     attrs = await seeded.getattr("/a.txt")
     assert attrs.mode & stat.S_IFREG

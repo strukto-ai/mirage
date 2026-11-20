@@ -56,6 +56,7 @@ from mirage.context.session_context import (
 from mirage.errors.constants import FS_ERRORS, MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
+    ebusy,
     eexist,
     einval,
     eisdir,
@@ -1478,6 +1479,12 @@ class Dispatcher:
         if name == "statfs":
             return await self._statfs(call.path, caller), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
+        if (
+            name == "rmdir"
+            and mount is not None
+            and mount.prefix == norm_dir(call.path.virtual)
+        ):
+            raise ebusy(call.path)
         if prune and (
             mount is None
             or not mount.vfs.search_covers_tree

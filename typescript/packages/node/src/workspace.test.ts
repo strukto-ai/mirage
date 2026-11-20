@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chmodSync, statSync, writeFileSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -30,6 +31,40 @@ import './runtime/python/local/runtime.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
+  it.each([false, true])(
+    'rmdir keeps the disk mount root (hidden file: %s)',
+    async (withHiddenFile) => {
+      const { root, cleanup } = tmpRoot('mirage-rmdir-')
+      const ws = new Workspace({ '/data': new DiskVFS({ root }) }, { mode: MountMode.WRITE })
+      try {
+        const shell = await ws.shell('rmdir /data')
+        expect(shell.exitCode).toBe(1)
+        expect(new TextDecoder().decode(shell.stderr)).toBe(
+          "rmdir: failed to remove '/data': Device or resource busy\n",
+        )
+
+        const hidden = join(root, 'hidden.txt')
+        if (withHiddenFile) await writeFile(hidden, 'keep this file')
+        const session = ws.createSession('boxed', {
+          profile: { paths: { hide: ['/data/hidden.txt'] } },
+        })
+        const core = new MountCore(ws.vfs, { session })
+        const child = join(root, 'empty')
+        await mkdir(child)
+        await core.rmdir('/data/empty')
+        await expect(access(child)).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(await core.readdir('/data')).toEqual(['.', '..'])
+
+        await expect(core.rmdir('/data')).rejects.toMatchObject({ code: 'EBUSY' })
+        expect(statSync(root).isDirectory()).toBe(true)
+        if (withHiddenFile) expect(await readFile(hidden, 'utf8')).toBe('keep this file')
+      } finally {
+        await ws.close()
+        cleanup()
+      }
+    },
+  )
+
   it('runs `echo hi` end-to-end', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const res = await ws.shell('echo hi')
