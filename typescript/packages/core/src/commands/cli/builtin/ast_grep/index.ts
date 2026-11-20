@@ -195,6 +195,7 @@ function walkOf(off: ReadonlySet<string>, vfs: Files, maxMemory: number): Walk {
           )
         } catch (error) {
           if (!isFsError(error)) throw error
+          console.debug(`ast-grep: cannot list ${dir}: ${String(error)}`)
           return null
         }
       },
@@ -315,7 +316,7 @@ async function loadRules(
       new WalkBudget(root, mounts),
       cwd,
       new Overrides([], [], false),
-      walkOf(new Set(), vfs, maxMemory),
+      walkOf(new Set(['parent']), vfs, maxMemory),
     )) {
       if (!/\.ya?ml$/.test(path.virtual)) continue
       const data = await read(vfs, path, maxMemory)

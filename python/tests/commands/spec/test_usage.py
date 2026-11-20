@@ -5,8 +5,10 @@ from mirage.commands.spec.standard import help_page
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
     clap_builtin,
+    clap_conflict,
     clap_invalid_value,
     clap_missing_value,
+    clap_shown,
     clap_unknown_option,
     extra_operand_error,
     invalid_argument_error,
@@ -747,3 +749,33 @@ def test_fd_refuses_a_missing_or_unlisted_value_in_clap_words():
     )
     assert clap_builtin("fd", True) and not clap_builtin("fd", False)
     assert not clap_builtin("rg", True)
+
+
+@pytest.mark.parametrize(
+    "name, shown",
+    [
+        ("unrestricted", "--unrestricted..."),
+        ("exec", "--exec <cmd>..."),
+        ("strip_cwd_prefix", "--strip-cwd-prefix[=<when>]"),
+        ("args_1", "-1"),
+        ("max_results", "--max-results <count>"),
+        ("paths", "[path]..."),
+    ],
+)
+def test_clap_names_an_argument_as_its_display_does(name, shown):
+    assert clap_shown("fd", name) == shown
+
+
+def test_clap_refuses_arguments_that_cannot_be_used_together():
+    assert clap_conflict(
+        "fd", "--quiet", ["--max-results <count>"], ["quiet", "text", "paths"]
+    ) == (
+        "the argument '--quiet' cannot be used with '--max-results <count>'"
+        "\n\nUsage: fd --quiet <pattern> <path>..."
+    )
+    assert clap_conflict(
+        "fd", "-1", ["--exec <cmd>...", "--list-details"], ["args_1"]
+    ) == (
+        "the argument '-1' cannot be used with:\n  --exec <cmd>...\n"
+        "  --list-details\n\nUsage: fd -1 [pattern] [path]..."
+    )

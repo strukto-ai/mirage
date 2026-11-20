@@ -2232,3 +2232,18 @@ def test_a_remainder_option_in_a_short_cluster_and_with_no_words():
     assert clustered.flags["--hidden"] is True
     assert clustered.flags["--exec"] == ["echo"]
     assert parse_command(SPECS["fd"], ["-X"], "/").flags["--exec-batch"] == []
+
+
+def test_each_remainder_occurrence_and_a_clap_operand_keep_their_place():
+    parsed = parse_command(
+        SPECS["fd"],
+        ["-x", "echo", "a", ";", "pat", "-x", "echo", "b", ";", "src"],
+        "/",
+        "fd",
+    )
+    assert parsed.flags.occurrences == [
+        ("--exec", ["echo", "a"]),
+        ("", "pat"),
+        ("--exec", ["echo", "b"]),
+        ("", "src"),
+    ]

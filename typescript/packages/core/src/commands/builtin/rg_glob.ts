@@ -249,13 +249,20 @@ export function overrideGlob(line: string, caseInsensitive: boolean): OverrideGl
  * keeping it whatever the type and hidden filters would say. Once any plain
  * glob exists, a file no glob matches is dropped, while a directory no glob
  * matches is still walked. `iglobs` come after every `-g`, whatever order
- * the line gave them.
+ * the line gave them. `root` is where an anchored glob starts, cut off each
+ * path as the ignore crate cuts a matcher's root: fd roots `-E` at its first
+ * search path; empty for ripgrep, whose paths already start at the cwd.
  */
 export class Overrides {
   private readonly globs: readonly OverrideGlob[]
   private readonly keeps: boolean
 
-  constructor(globs: readonly string[], iglobs: readonly string[], caseInsensitive: boolean) {
+  constructor(
+    globs: readonly string[],
+    iglobs: readonly string[],
+    caseInsensitive: boolean,
+    private readonly root = '',
+  ) {
     const parsed = [
       ...globs.map((g) => overrideGlob(g, caseInsensitive)),
       ...iglobs.map((g) => overrideGlob(g, true)),
@@ -267,28 +274,53 @@ export class Overrides {
   // What the globs say about one walked path (`walkCandidate`'s form).
   verdict(path: string, isDir: boolean): Verdict {
     if (this.globs.length === 0) return Verdict.NONE
+    const candidate = stripped(path, this.root)
     for (let i = this.globs.length - 1; i >= 0; i--) {
       const glob = this.globs[i]
       if (glob === undefined || (glob.dirOnly && !isDir)) continue
-      if (glob.matcher.test(path)) return glob.keep ? Verdict.WHITELIST : Verdict.IGNORE
+      if (glob.matcher.test(candidate)) return glob.keep ? Verdict.WHITELIST : Verdict.IGNORE
     }
     if (this.keeps && !isDir) return Verdict.IGNORE
     return Verdict.NONE
   }
 }
 
+// `path` with `root` cut off its front as the ignore crate's `strip` cuts
+// it: byte for byte, never off a bare file name, and not at all for an
+// empty or `.` root. Mirrors Python's _stripped.
+function stripped(path: string, root: string): string {
+  if (root === '' || root === '.' || !path.includes('/') || !path.startsWith(root)) return path
+  const rest = path.slice(root.length)
+  return rest.startsWith('/') ? rest.slice(1) : rest
+}
+
 /**
  * --ignore-file's rules: gitignore lines rooted at the working directory, the
  * last one that matches a walked path deciding it, a plain one ignoring it and
- * a `!` one keeping it. Mirrors Python's IgnoreRules.
+ * a `!` one keeping it. A line whose glob does not compile is left out and
+ * kept in `errors`, as the ignore crate keeps the rest of the file. Mirrors
+ * Python's IgnoreRules.
  */
 export class IgnoreRules {
   private readonly globs: readonly OverrideGlob[]
+  readonly errors: readonly string[]
 
   constructor(lines: readonly string[] = []) {
-    this.globs = lines
-      .map((line) => overrideGlob(line, false))
-      .filter((g): g is OverrideGlob => g !== null)
+    const globs: OverrideGlob[] = []
+    const errors: string[] = []
+    lines.forEach((line, index) => {
+      let glob: OverrideGlob | null
+      try {
+        glob = overrideGlob(line, false)
+      } catch (error) {
+        if (!(error instanceof UsageError)) throw error
+        errors.push(`line ${String(index + 1)}: ${error.message.replace(/^rg: /, '')}`)
+        return
+      }
+      if (glob !== null) globs.push(glob)
+    })
+    this.globs = globs
+    this.errors = errors
   }
 
   /** Whether the files held no rule. */

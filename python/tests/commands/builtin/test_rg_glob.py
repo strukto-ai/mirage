@@ -276,3 +276,30 @@ def test_ignore_stack_reads_git_files_only_inside_a_repository():
         .within(_rules("/r", True))
     )
     assert above.verdict("/r/a.log", False) is Verdict.NONE
+
+
+def test_ignore_rules_keep_the_lines_around_one_that_does_not_compile():
+    rules = IgnoreRules(["[", "*.log", "# note", "{"])
+    assert rules.verdict("a.log", False) is Verdict.IGNORE
+    assert rules.errors == (
+        "line 1: error parsing glob '[': unclosed character class; "
+        "missing ']'",
+        "line 4: error parsing glob '{': unclosed alternate group; "
+        "missing '}' (maybe escape '{' with '[{]'?)",
+    )
+
+
+@pytest.mark.parametrize(
+    "root, path, verdict",
+    [
+        ("data", "data/cache", Verdict.IGNORE),
+        ("src", "data/cache", Verdict.NONE),
+        ("", "cache", Verdict.IGNORE),
+        (".", "data/cache", Verdict.NONE),
+        ("data", "cache", Verdict.IGNORE),
+    ],
+)
+def test_overrides_anchor_a_glob_at_their_root(root, path, verdict):
+    assert (
+        Overrides(["!/cache"], [], False, root).verdict(path, True) is verdict
+    )

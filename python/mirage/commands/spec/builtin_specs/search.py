@@ -280,9 +280,11 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         ),
     ),
-    # fd 10.2.0: clap takes a long flag only as spelled, -s and -i
-    # override each other, and -x/-X take the rest of the line up to a
-    # lone `;`. Mirage writes no colors, so --color is accepted and plain.
+    # fd 10.2.0: clap takes a long flag only as spelled, the later of -s
+    # and -i, -g and --regex, -1 and --max-results wins, and each -x/-X
+    # takes the rest of the line up to a lone `;`; fd's generic refuses
+    # the pairs clap does. Mirage writes no colors, so --color is accepted
+    # and plain.
     "fd": CommandSpec(
         allow_abbrev=False,
         usage_style=UsageStyle.CLAP,

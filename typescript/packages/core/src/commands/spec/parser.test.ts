@@ -2329,4 +2329,19 @@ describe('a REMAINDER option', () => {
     expect(clustered.flags['--exec']).toEqual(['echo'])
     expect(parseCommand(specOf('fd'), ['-X'], '/').flags['--exec-batch']).toEqual([])
   })
+
+  it('keeps each occurrence and a clap operand in its place', () => {
+    const parsed = parseCommand(
+      specOf('fd'),
+      ['-x', 'echo', 'a', ';', 'pat', '-x', 'echo', 'b', ';', 'src'],
+      '/',
+      'fd',
+    )
+    expect(flagOccurrences(parsed.flags)).toEqual([
+      ['--exec', ['echo', 'a']],
+      ['', 'pat'],
+      ['--exec', ['echo', 'b']],
+      ['', 'src'],
+    ])
+  })
 })

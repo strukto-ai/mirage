@@ -153,4 +153,117 @@ describe('fdGeneric', () => {
     ).toBe(true)
     expect(out[4]).toBe('1\n')
   })
+  const HINT = "\n\nFor more information, try '--help'.\n"
+
+  it('refuses arguments that cannot be used together', async () => {
+    const out = await run(
+      SETUP,
+      'cd /w/r && fd -q -x echo {} a.ts',
+      'cd /w/r && fd -1 -q -X echo \\;',
+      'cd /w/r && fd a src --strip-cwd-prefix',
+      'cd /w/r && fd -F -g x',
+      'cd /w/r && fd -q --max-results 2 -1 zzz; echo $?',
+    )
+    expect(out[1]).toBe(
+      "error: the argument '--quiet' cannot be used with:\n" +
+        '  --exec <cmd>...\n  --exec-batch <cmd>...\n  --list-details\n\n' +
+        `Usage: fd --quiet [pattern] [path]...${HINT}`,
+    )
+    expect(out[2]).toBe(
+      "error: the argument '-1' cannot be used with:\n" +
+        '  --exec-batch <cmd>...\n  --exec <cmd>...\n  --list-details\n\n' +
+        `Usage: fd -1 --quiet [pattern] [path]...${HINT}`,
+    )
+    expect(out[3]).toBe(
+      "error: the argument '[path]...' cannot be used with '--strip-cwd-prefix[=<when>]'\n\n" +
+        `Usage: fd <pattern> <path>...${HINT}`,
+    )
+    expect(out[4]).toBe(
+      "error: the argument '--fixed-strings' cannot be used with '--glob'\n\n" +
+        `Usage: fd --fixed-strings <pattern> [path]...${HINT}`,
+    )
+    expect(out[5]).toBe('1\n')
+  })
+
+  it('lets the later of an overriding pair win', async () => {
+    const out = await run(
+      SETUP,
+      'cd /w/r && fd -g --regex ts src',
+      'cd /w/r && fd --regex -g ts src',
+      'cd /w/r && fd -1 --max-results 2 -t f . src',
+      'cd /w/r && fd --max-results 2 -1 -t f . src',
+    )
+    expect(out.slice(1)).toEqual(['src/a.ts\n', '', 'src/a.ts\nsrc/full.txt\n', 'src/a.ts\n'])
+  })
+
+  it('runs every repeated command', async () => {
+    const out = await run(
+      SETUP,
+      'cd /w/r && fd -t f -x echo first {} \\; -x echo second {} \\; c.py',
+      'cd /w/r && fd -t f -X echo one \\; -X echo two \\; c.py',
+    )
+    expect(out.slice(1)).toEqual([
+      'first ./src/sub/c.py\nsecond ./src/sub/c.py\n',
+      'one ./src/sub/c.py\ntwo ./src/sub/c.py\n',
+    ])
+  })
+
+  it('roots excludes at its first search path', async () => {
+    const out = await run(
+      'mkdir -p /w/d/data/cache /w/d/src && touch /w/d/data/cache/x /w/d/src/a',
+      'cd /w/d && fd -E /cache . data',
+      'cd /w/d && fd -E /cache . src data',
+      'cd / && fd -E /cache . /w/d/data',
+    )
+    expect(out.slice(1)).toEqual(['', 'data/cache/\ndata/cache/x\nsrc/a\n', ''])
+  })
+
+  it('keeps the first results in its order', async () => {
+    const out = await run(
+      SETUP,
+      'cd /w/r && fd --max-results 2 -t f . src docs',
+      'cd /w/r && fd -1 -t f',
+    )
+    expect(out.slice(1)).toEqual(['src/a.ts\nsrc/full.txt\n', 'AGENTS.md\n'])
+  })
+
+  it("stops at the mount's walk limit", async () => {
+    const capped = new RAMVFS()
+    capped.walkLimit = 2
+    const ws = new Workspace({ '/': new RAMVFS(), '/m': capped }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /m/d && touch /m/d/a /m/d/b /m/d/c')
+      const io = await ws.shell('fd . /m/d')
+      expect(io.exitCode).toBe(1)
+      expect(new TextDecoder().decode(io.stdout)).toBe('/m/d/a\n/m/d/b\n')
+      expect(new TextDecoder().decode(io.stderr)).toBe(
+        '[fd error]: /m/d: stopped after 2 files (walk_limit); narrow the path\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps the rules around a bad ignore line', async () => {
+    const out = await run(
+      "mkdir -p /w/i && cd /w/i && touch a.log b.txt c.tmp && printf '[\\n*.log\\n' > .ignore && " +
+        "printf '[1\\n*.tmp\\n' > one && printf '[2\\n[3\\n' > two",
+      'cd /w/i && fd -t f . --ignore-file one',
+      'cd /w/i && fd -t f . --ignore-file two',
+    )
+    expect(out[1]).toBe(
+      'b.txt\none\ntwo\n[fd error]: Malformed pattern in custom ignore file. one: line 1: ' +
+        "error parsing glob '[1': unclosed character class; missing ']'.\n",
+    )
+    expect(out[2]).toBe('b.txt\nc.tmp\none\ntwo\n')
+  })
+
+  it('matches ignore rules on the path it walked', async () => {
+    const out = await run(
+      'mkdir -p /w/L/repo /w/L/other && touch /w/L/other/a.log /w/L/other/b.txt && ' +
+        "printf '*.log\\n' > /w/L/repo/.ignore && ln -s ../other /w/L/repo/link",
+      'cd /w/L/repo && fd -L -t f',
+    )
+    expect(out[1]).toBe('link/b.txt\n')
+  })
 })

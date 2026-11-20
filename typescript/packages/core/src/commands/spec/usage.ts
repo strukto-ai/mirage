@@ -36,9 +36,10 @@ import {
   USAGE_PAGE,
   ZGREP_UNSUPPORTED_LONG,
   ZGREP_UNSUPPORTED_SHORT,
+  flagKwargName,
 } from './constants.ts'
 import { BUILTIN_SPECS, specOf } from './builtins.ts'
-import { argumentDest, compileSpec } from './compile.ts'
+import { argumentDest, compileSpec, positionalName } from './compile.ts'
 import { clapUnexpectedArgument, operandSlot, optionMetavar } from './help.ts'
 import { helpPage } from './standard.ts'
 import { SYNOPSES } from './synopsis.ts'
@@ -616,10 +617,66 @@ export function jaro(a: string, b: string): number {
   return (m / a.length + m / b.length + (m - swaps) / m) / 3
 }
 
-function clapShown(opt: Argument): string {
+function clapDisplay(opt: Argument): string {
   const dest = argumentDest(opt)
-  if (opt.action === 'store_true' || opt.action === 'count') return dest
+  if (opt.action === 'count') return `${dest}...`
+  if (opt.action === 'store_true') return dest
+  if (opt.nargs === 'REMAINDER') return `${dest} <${optionMetavar(opt)}>...`
+  if (opt.nargs === '?') return `${dest}[=<${optionMetavar(opt)}>]`
   return `${dest} <${optionMetavar(opt)}>`
+}
+
+function clapOperands(cmdName: string): [Argument, boolean][] {
+  const compiled = compileSpec(specOf(cmdName))
+  const operands: [Argument, boolean][] = compiled.positional.map((operand) => [operand, false])
+  if (compiled.rest !== null) operands.push([compiled.rest, true])
+  return operands
+}
+
+/**
+ * How clap names one of a builtin's arguments in a refusal: an option by its
+ * long spelling and its value, an operand by its usage slot. `name` is the
+ * option's flag name (`exec_batch`) or the operand's (`paths`). Mirrors
+ * Python's clap_shown.
+ */
+export function clapShown(cmdName: string, name: string): string {
+  for (const opt of compileSpec(specOf(cmdName)).options) {
+    if (flagKwargName(argumentDest(opt)) === name) return clapDisplay(opt)
+  }
+  for (const [operand, rest] of clapOperands(cmdName)) {
+    if (argumentDest(operand) === name) return operandSlot(operand, rest)
+  }
+  return name
+}
+
+/**
+ * clap's refusal of arguments that cannot be used together, without its
+ * `error:` lead and footer: the earliest typed argument that has a conflict,
+ * the ones it conflicts with, and a usage line naming what else was typed, a
+ * typed operand in angle brackets. `used` holds the flag and operand names of
+ * the other typed arguments, in the order typed. Mirrors Python's
+ * clap_conflict.
+ */
+export function clapConflict(
+  cmdName: string,
+  first: string,
+  partners: readonly string[],
+  used: readonly string[],
+): string {
+  const against =
+    partners.length === 1
+      ? ` '${partners[0] ?? ''}'`
+      : `:\n${partners.map((partner) => `  ${partner}`).join('\n')}`
+  const operands = clapOperands(cmdName)
+  const named = new Set(operands.map(([operand]) => argumentDest(operand)))
+  const shown = used.filter((name) => !named.has(name)).map((name) => clapShown(cmdName, name))
+  const slots = operands.map(([operand, rest]) =>
+    used.includes(argumentDest(operand))
+      ? `<${positionalName(operand)}>${rest ? '...' : ''}`
+      : operandSlot(operand, rest),
+  )
+  const usage = ['Usage:', cmdName, ...shown, ...slots].join(' ')
+  return `the argument '${first}' cannot be used with${against}\n\n${usage}`
 }
 
 function clapUsage(cmdName: string, used: string): string {
@@ -651,7 +708,7 @@ export function clapUnknownOption(cmdName: string, token: string): [Uint8Array, 
     }
     if (best !== null) {
       tip = `tip: a similar argument exists: '${best[1]}'`
-      used = clapShown(best[2])
+      used = clapDisplay(best[2])
     }
   }
   const text = `${clapUnexpectedArgument(name)}\n\n  ${tip}\n\n${clapUsage(cmdName, used)}${CLAP_FOOTER}`
@@ -668,7 +725,7 @@ function clapOption(cmdName: string, option: string): Argument | undefined {
 /** clap's refusal of an option typed without its value. Mirrors Python's clap_missing_value. */
 export function clapMissingValue(cmdName: string, option: string): [Uint8Array, number] {
   const opt = clapOption(cmdName, option)
-  const shown = opt === undefined ? option : clapShown(opt)
+  const shown = opt === undefined ? option : clapDisplay(opt)
   const allowed =
     opt !== undefined && opt.choices.length > 0
       ? `\n  [possible values: ${opt.choices.join(', ')}]`
@@ -684,7 +741,7 @@ export function clapInvalidValue(
   value: string,
 ): [Uint8Array, number] {
   const opt = clapOption(cmdName, option)
-  const shown = opt === undefined ? option : clapShown(opt)
+  const shown = opt === undefined ? option : clapDisplay(opt)
   const allowed = opt === undefined ? '' : opt.choices.join(', ')
   const text = `error: invalid value '${value}' for '${shown}'\n  [possible values: ${allowed}]${CLAP_FOOTER}`
   return [encodeText(text), usageExitCode(cmdName)]

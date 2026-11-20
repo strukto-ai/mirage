@@ -571,3 +571,72 @@ async def test_rg_walks_under_the_ignore_files_of_each_directory():
         "a/b/x.py a/env/e.py a/g.py a/i.py a/k.log a/r.py ",
         "b/x.py g.py ",
     ]
+
+
+async def _lines(*lines: str) -> list[tuple[str, str, int]]:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    out = []
+    try:
+        for line in lines:
+            io = await ws.shell(line)
+            out.append(
+                (
+                    (io.stdout or b"").decode(),
+                    (io.stderr or b"").decode(),
+                    io.exit_code,
+                )
+            )
+    finally:
+        await ws.close()
+    return out
+
+
+@pytest.mark.asyncio
+async def test_rg_keeps_the_rules_around_a_bad_ignore_line():
+    bad = "error parsing glob '[': unclosed character class; missing ']'"
+    out = await _lines(
+        "mkdir -p /w/n/d && cd /w/n && echo t > b.txt && echo t > a.log"
+        " && echo t > d/c.txt && printf '[\\n*.log\\n' > .ignore"
+        " && printf '[1\\n[2\\n' > ig",
+        "cd /w/n && rg --files --sort=path",
+        "cd /w/n && rg -l zzz",
+        "cd /w/n/d && rg --files",
+        "cd /w/n && rg --files --sort=path --ignore-file ig d",
+    )
+    assert out[1] == (
+        "b.txt\nd/c.txt\nig\n",
+        f"rg: ./.ignore: line 1: {bad}\n",
+        0,
+    )
+    assert out[2] == ("", f"rg: ./.ignore: line 1: {bad}\n", 1)
+    assert out[3] == ("c.txt\n", f"rg: /w/n/.ignore: line 1: {bad}\n", 2)
+    assert out[4] == (
+        "d/c.txt\n",
+        "rg: ig: line 1: error parsing glob '[1': unclosed character class;"
+        " missing ']'\nig: line 2: error parsing glob '[2': unclosed"
+        f" character class; missing ']'\nrg: /w/n/.ignore: line 1: {bad}\n",
+        2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_rg_keeps_a_repository_above_without_its_rules():
+    out = await _lines(
+        "mkdir -p /w/q/.git /w/q/sub && cd /w/q && touch sub/keep sub/drop"
+        " sub/top && echo drop > sub/.gitignore && echo top > .gitignore",
+        "cd /w/q/sub && rg --files --sort=path",
+        "cd /w/q/sub && rg --files --sort=path --no-ignore-parent",
+    )
+    assert out[1][0] == "keep\n"
+    assert out[2][0] == "keep\ntop\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_matches_ignore_rules_on_the_path_it_walked():
+    out = await _lines(
+        "mkdir -p /w/L/repo /w/L/other && touch /w/L/other/a.log"
+        " /w/L/other/b.txt && printf '*.log\\n' > /w/L/repo/.ignore"
+        " && ln -s ../other /w/L/repo/link",
+        "cd /w/L/repo && rg -L --files",
+    )
+    assert out[1] == ("link/b.txt\n", "", 0)

@@ -357,9 +357,10 @@ export function walkFilter(f: RgFlags, types?: FileTypes, ignores?: IgnoreRules)
 
 /**
  * --ignore-file's rules, each file read through the dispatcher. A file
- * ripgrep cannot read is reported in `notes` and skipped, the search going on
- * with its exit status untouched (14.1.1); --no-ignore-files drops every one.
- * Mirrors Python's ignore_rules.
+ * ripgrep cannot read is reported in `notes` and skipped, and so is each line
+ * whose glob does not compile, the file's lines under one `rg:`; the search
+ * goes on with its exit status untouched (14.1.1). --no-ignore-files drops
+ * every one. Mirrors Python's ignore_rules.
  */
 export async function ignoreRules(
   fl: FlagView,
@@ -369,14 +370,20 @@ export async function ignoreRules(
   if (last(fl, 'ignore_files', 'no_ignore_files') === 'no_ignore_files') return new IgnoreRules()
   const lines: string[] = []
   for (const path of fl.asPaths('ignore_file')) {
+    let read: string[]
     try {
       if (dispatch === undefined) throw enoent(path.rawPath)
       const [data] = await dispatch('read', path)
-      lines.push(...ignoreLines(await materialize(data as ByteSource), false))
+      read = ignoreLines(await materialize(data as ByteSource), false)
     } catch (err) {
       if (!isFsError(err)) throw err
       notes.push(`rg: ${path.rawPath}: ${osErrorText(err)}`)
+      continue
     }
+    const errors = new IgnoreRules(read).errors
+    if (errors.length > 0)
+      notes.push(`rg: ${errors.map((error) => `${path.rawPath}: ${error}`).join('\n')}`)
+    lines.push(...read)
   }
   return new IgnoreRules(lines)
 }
@@ -392,6 +399,7 @@ class DispatchReader implements IgnoreReader {
       return await materialize(data as ByteSource)
     } catch (err) {
       if (!isFsError(err)) throw err
+      console.debug(`rg: cannot read ignore file ${path}: ${String(err)}`)
       return null
     }
   }
@@ -402,6 +410,7 @@ class DispatchReader implements IgnoreReader {
       return new Set((entries as string[]).map((entry) => gnuBasename(rstripSlash(entry) || entry)))
     } catch (err) {
       if (!isFsError(err)) throw err
+      console.debug(`rg: cannot list ${dir}: ${String(err)}`)
       return null
     }
   }
@@ -555,6 +564,7 @@ export async function rgGeneric(
       linkResolver(ctx),
       stopped,
       ignoreReader(dispatchOf(ctx)),
+      notes,
     )
     if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
       const listed: Haystack[] = []
@@ -564,7 +574,7 @@ export async function rgGeneric(
     const io = new IOResult()
     const out =
       pat === null
-        ? listFiles(found, f, warnings, io)
+        ? listFiles(found, f, warnings, io, notes)
         : searchAll(
             found,
             paths,
@@ -578,8 +588,9 @@ export async function rgGeneric(
             stopped,
             ctx.signal,
             ctx.shell,
+            notes,
           )
-    return await noted(owned(pat, [out, io]), notes, f)
+    return owned(pat, [out, io])
   } catch (error) {
     pat?.stream.close()
     throw error
@@ -802,7 +813,9 @@ function lead(
 // mounts --one-file-system keeps each walk to its operand's own, null when
 // the walk may enter any directory; `resolver` the namespace's links and the
 // dispatcher past them, which -L walks through; `stopped` the directories a
-// search stopped at their mount's `walkLimit`, whose walk ends there.
+// search stopped at their mount's `walkLimit`, whose walk ends there; `notes`
+// collects a walked directory's ignore-file lines that do not compile (null
+// logs them).
 export async function* haystacks(
   paths: readonly PathSpec[],
   rd: (path: string) => Promise<string[]>,
@@ -815,6 +828,7 @@ export async function* haystacks(
   resolver: LinkResolver | null,
   stopped: ReadonlySet<string>,
   reader: IgnoreReader | null = null,
+  notes: string[] | null = null,
 ): AsyncGenerator<Haystack> {
   // ripgrep holds one path that is not a directory to one thread, as it
   // does -j1 and a sort; every other line runs its parallel walker.
@@ -882,6 +896,8 @@ export async function* haystacks(
       f.follow,
       parallel,
       reader === null ? null : { sources: f.ignoreSources, reader },
+      false,
+      notes,
     )) {
       yield hit
       if (stopped.has(p.virtual)) break
@@ -889,12 +905,15 @@ export async function* haystacks(
   }
 }
 
-// --files: every path the search would read, and nothing searched.
+// --files: every path the search would read, and nothing searched. `notes`
+// is the ignore files' word, printed ahead of the warnings with the exit
+// status untouched.
 async function* listFiles(
   found: AsyncIterable<Haystack>,
   f: RgFlags,
   warnings: string[],
   io: IOResult,
+  notes: readonly string[],
 ): AsyncIterable<Uint8Array> {
   const term = f.null ? '\0' : '\n'
   let selected = false
@@ -906,8 +925,8 @@ async function* listFiles(
     }
   } finally {
     io.exitCode = exitCodeFor(selected, warnings.length > 0, f.quiet)
-    if (warnings.length > 0 && !f.noMessages)
-      io.stderr = concat([await materialize(io.stderr), formatRecords(warnings)])
+    const shown = f.noMessages ? [] : [...notes, ...warnings]
+    if (shown.length > 0) io.stderr = concat([await materialize(io.stderr), formatRecords(shown)])
   }
 }
 
@@ -965,6 +984,9 @@ async function* searchAll(
   signal?: AbortSignal,
   // Runs --pre's command in the session.
   shell?: ShellFn,
+  // The ignore files' word, printed ahead of the warnings with the exit
+  // status untouched.
+  notes: readonly string[] = [],
 ): AsyncIterable<Uint8Array> {
   const multi = paths.length > 1
   let lone = !multi
@@ -1130,7 +1152,7 @@ async function* searchAll(
     // skipped counts as one without a match, though no listing names it.
     if (f.filesWithoutMatch && !f.quiet) selected = printed || skipped
     let code = exitCodeFor(selected, warnings.length > 0, f.quiet)
-    const shown = f.noMessages ? [] : [...warnings]
+    const shown = f.noMessages ? [] : [...notes, ...warnings]
     if (implicit && searched === 0) {
       // An error whatever --no-messages says, which only silences it.
       if (!f.noMessages) shown.push(NOTHING_SEARCHED)

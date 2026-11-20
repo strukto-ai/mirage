@@ -422,4 +422,61 @@ describe('rg walks under the ignore files of each directory', () => {
       'b/x.py g.py ',
     ])
   })
+
+  const lines = async (...input: string[]): Promise<[string, string, number][]> => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const dec = new TextDecoder()
+    const out: [string, string, number][] = []
+    try {
+      for (const line of input) {
+        const io = await ws.shell(line)
+        out.push([dec.decode(io.stdout), dec.decode(io.stderr), io.exitCode])
+      }
+    } finally {
+      await ws.close()
+    }
+    return out
+  }
+
+  it('keeps the rules around a bad ignore line', async () => {
+    const bad = "error parsing glob '[': unclosed character class; missing ']'"
+    const out = await lines(
+      'mkdir -p /w/n/d && cd /w/n && echo t > b.txt && echo t > a.log && echo t > d/c.txt && ' +
+        "printf '[\\n*.log\\n' > .ignore && printf '[1\\n[2\\n' > ig",
+      'cd /w/n && rg --files --sort=path',
+      'cd /w/n && rg -l zzz',
+      'cd /w/n/d && rg --files',
+      'cd /w/n && rg --files --sort=path --ignore-file ig d',
+    )
+    expect(out[1]).toEqual(['b.txt\nd/c.txt\nig\n', `rg: ./.ignore: line 1: ${bad}\n`, 0])
+    expect(out[2]).toEqual(['', `rg: ./.ignore: line 1: ${bad}\n`, 1])
+    expect(out[3]).toEqual(['c.txt\n', `rg: /w/n/.ignore: line 1: ${bad}\n`, 2])
+    expect(out[4]).toEqual([
+      'd/c.txt\n',
+      "rg: ig: line 1: error parsing glob '[1': unclosed character class; missing ']'\n" +
+        "ig: line 2: error parsing glob '[2': unclosed character class; missing ']'\n" +
+        `rg: /w/n/.ignore: line 1: ${bad}\n`,
+      2,
+    ])
+  })
+
+  it('keeps a repository above without its rules', async () => {
+    const out = await lines(
+      'mkdir -p /w/q/.git /w/q/sub && cd /w/q && touch sub/keep sub/drop sub/top && ' +
+        'echo drop > sub/.gitignore && echo top > .gitignore',
+      'cd /w/q/sub && rg --files --sort=path',
+      'cd /w/q/sub && rg --files --sort=path --no-ignore-parent',
+    )
+    expect(out[1]?.[0]).toBe('keep\n')
+    expect(out[2]?.[0]).toBe('keep\ntop\n')
+  })
+
+  it('matches ignore rules on the path it walked', async () => {
+    const out = await lines(
+      'mkdir -p /w/L/repo /w/L/other && touch /w/L/other/a.log /w/L/other/b.txt && ' +
+        "printf '*.log\\n' > /w/L/repo/.ignore && ln -s ../other /w/L/repo/link",
+      'cd /w/L/repo && rg -L --files',
+    )
+    expect(out[1]).toEqual(['link/b.txt\n', '', 0])
+  })
 })

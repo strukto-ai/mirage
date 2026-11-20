@@ -385,9 +385,10 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
     allowAbbrev: false,
   }),
-  // fd 10.2.0: clap takes a long flag only as spelled, -s and -i override
-  // each other, and -x/-X take the rest of the line up to a lone `;`. Mirage
-  // writes no colors, so --color is accepted and plain.
+  // fd 10.2.0: clap takes a long flag only as spelled, the later of -s and
+  // -i, -g and --regex, -1 and --max-results wins, and each -x/-X takes the
+  // rest of the line up to a lone `;`; fd's generic refuses the pairs clap
+  // does. Mirage writes no colors, so --color is accepted and plain.
   fd: new CommandSpec({
     arguments: [
       new Argument(['-H', '--hidden'], { action: 'store_true' }),

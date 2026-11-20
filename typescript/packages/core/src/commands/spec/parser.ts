@@ -61,6 +61,7 @@ import {
   type Attached,
   type CommandSpec,
   type ParsedFlagValue,
+  UsageStyle,
   type ValueType,
   WordKind,
 } from './types.ts'
@@ -341,7 +342,8 @@ function checkValue(
 // argparse's `type=` do, so `numfmt --to=bogus --to=si` is refused for
 // `bogus` although the bag keeps only `si`, and `--from=bad1 --to=bad2`
 // names `bad1`. Only what the environment or a default fills in afterwards
-// is checked after the scan.
+// is checked after the scan. The tape keeps a REMAINDER option's words as
+// one occurrence, so two `fd -x` commands on one line stay two.
 function setValueFlag(
   flags: Record<string, ParsedFlagValue>,
   refusals: Refusals,
@@ -354,7 +356,8 @@ function setValueFlag(
   const stored = (typeof value === 'string' ? [value] : value).map((part) =>
     checkValue(refusals, cs, wordChoiceDestSet, name, part),
   )
-  flagOccurrences(flags).push(...stored.map((part): [string, ParsedFlagValue] => [name, part]))
+  if (cs.restDests.has(name)) flagOccurrences(flags).push([name, [...stored]])
+  else flagOccurrences(flags).push(...stored.map((part): [string, ParsedFlagValue] => [name, part]))
   if (cs.multipleDests.has(name)) {
     const previous = flags[name]
     if (Array.isArray(previous)) for (const item of stored) previous.push(item)
@@ -709,13 +712,17 @@ export function parseCommand(
     return ownLoop
   }
 
+  // clap's validator names the earliest typed of two conflicting
+  // arguments, an operand among them (fd 10.2.0's path and
+  // --strip-cwd-prefix), so a clap program's operands keep their place.
+  const clapOrder = !unknownIsOperand && builtin && spec.usageStyle === UsageStyle.CLAP
   let i = 0
   let endOfFlags = false
   const recordOperand = (word: string): void => {
     rawArgs.push(word)
     rawIndices.push(scanOrigins[i] ?? -1)
     rawBases.push(base)
-    if (inOrderOperands || ownLoop) flagOccurrences(flags).push([OPERAND, word])
+    if (inOrderOperands || ownLoop || clapOrder) flagOccurrences(flags).push([OPERAND, word])
   }
 
   const recordValues = (

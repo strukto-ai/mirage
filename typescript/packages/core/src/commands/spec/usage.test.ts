@@ -16,8 +16,10 @@ import { describe, expect, it } from 'vitest'
 import {
   ambiguousOptionError,
   clapBuiltin,
+  clapConflict,
   clapInvalidValue,
   clapMissingValue,
+  clapShown,
   clapUnknownOption,
   jaro,
   extraOperandError,
@@ -641,5 +643,31 @@ describe('clap refusals for a builtin', () => {
     expect(clapBuiltin('fd', true)).toBe(true)
     expect(clapBuiltin('fd', false)).toBe(false)
     expect(clapBuiltin('rg', true)).toBe(false)
+  })
+})
+
+describe('clap names and conflicts', () => {
+  it.each([
+    ['unrestricted', '--unrestricted...'],
+    ['exec', '--exec <cmd>...'],
+    ['strip_cwd_prefix', '--strip-cwd-prefix[=<when>]'],
+    ['args_1', '-1'],
+    ['max_results', '--max-results <count>'],
+    ['paths', '[path]...'],
+  ])('names %s as its display does', (name, shown) => {
+    expect(clapShown('fd', name)).toBe(shown)
+  })
+
+  it('refuses arguments that cannot be used together', () => {
+    expect(
+      clapConflict('fd', '--quiet', ['--max-results <count>'], ['quiet', 'text', 'paths']),
+    ).toBe(
+      "the argument '--quiet' cannot be used with '--max-results <count>'\n\n" +
+        'Usage: fd --quiet <pattern> <path>...',
+    )
+    expect(clapConflict('fd', '-1', ['--exec <cmd>...', '--list-details'], ['args_1'])).toBe(
+      "the argument '-1' cannot be used with:\n  --exec <cmd>...\n  --list-details\n\n" +
+        'Usage: fd -1 [pattern] [path]...',
+    )
   })
 })

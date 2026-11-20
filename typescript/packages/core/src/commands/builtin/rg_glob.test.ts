@@ -255,3 +255,26 @@ describe('IgnoreStack', () => {
     expect(above.verdict('/r/a.log', false)).toBe(Verdict.NONE)
   })
 })
+
+describe('IgnoreRules with a line that does not compile', () => {
+  it('keeps the lines around it', () => {
+    const rules = new IgnoreRules(['[', '*.log', '# note', '{'])
+    expect(rules.verdict('a.log', false)).toBe(Verdict.IGNORE)
+    expect(rules.errors).toEqual([
+      "line 1: error parsing glob '[': unclosed character class; missing ']'",
+      "line 4: error parsing glob '{': unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)",
+    ])
+  })
+})
+
+describe('Overrides with a root', () => {
+  it.each([
+    ['data', 'data/cache', Verdict.IGNORE],
+    ['src', 'data/cache', Verdict.NONE],
+    ['', 'cache', Verdict.IGNORE],
+    ['.', 'data/cache', Verdict.NONE],
+    ['data', 'cache', Verdict.IGNORE],
+  ])('anchors a glob at %s for %s', (root, path, verdict) => {
+    expect(new Overrides(['!/cache'], [], false, root).verdict(path, true)).toBe(verdict)
+  })
+})

@@ -459,9 +459,10 @@ async def ignore_rules(
 ) -> IgnoreRules:
     """--ignore-file's rules, each file read through the dispatcher.
 
-    A file ripgrep cannot read is reported and skipped, the search going
-    on with its exit status untouched (14.1.1); --no-ignore-files drops
-    every one.
+    A file ripgrep cannot read is reported and skipped, and so is each
+    line whose glob does not compile, the file's lines under one ``rg:``;
+    the search goes on with its exit status untouched (14.1.1).
+    --no-ignore-files drops every one.
 
     Args:
         fl (FlagView): the flag view.
@@ -476,9 +477,16 @@ async def ignore_rules(
             if dispatch is None:
                 raise FileNotFoundError(path.raw_path)
             data, _ = await dispatch("read", path)
-            lines.extend(ignore_lines(await materialize(data), False))
+            read = ignore_lines(await materialize(data), False)
         except FS_ERRORS as exc:
             notes.append(f"rg: {path.raw_path}: {os_error_text(exc)}")
+            continue
+        if errors := IgnoreRules(read).errors:
+            notes.append(
+                "rg: "
+                + "\n".join(f"{path.raw_path}: {error}" for error in errors)
+            )
+        lines.extend(read)
     return IgnoreRules(lines)
 
 
@@ -721,6 +729,7 @@ async def rg_generic(
         link_resolver(ctx),
         stopped,
         ignore_reader(dispatch_of(ctx)),
+        notes,
     )
     if f.sort not in (None, "none") and not (
         f.sort == "path" and not f.sort_reverse
@@ -729,7 +738,7 @@ async def rg_generic(
         found = _replay(sort_haystacks(listed, f))
     io = IOResult()
     out = (
-        _list_files(found, f, warnings, io)
+        _list_files(found, f, warnings, io, notes)
         if pat is None
         else _search_all(
             found,
@@ -743,9 +752,10 @@ async def rg_generic(
             io,
             stopped,
             ctx.shell,
+            notes,
         )
     )
-    return await _noted((out, io), notes, f)
+    return out, io
 
 
 async def _noted(
@@ -1015,6 +1025,7 @@ async def haystacks(
     resolver: LinkResolver | None,
     stopped: set[str],
     reader: IgnoreReader | None = None,
+    notes: list[str] | None = None,
 ) -> AsyncIterator[Haystack]:
     """Every input the line searches, in order: a stdin operand, a named
     file as itself whatever the filters say, and a directory walked.
@@ -1036,6 +1047,8 @@ async def haystacks(
             mount's ``walk_limit``, whose walk ends there.
         reader (IgnoreReader | None): how a walk reads the ignore files
             it meets, None to read none.
+        notes (list[str] | None): collects a walked directory's
+            ignore-file lines that do not compile; None logs them.
     """
     # ripgrep holds one path that is not a directory to one thread, as it
     # does -j1 and a sort; every other line runs its parallel walker.
@@ -1096,6 +1109,7 @@ async def haystacks(
             f.follow,
             parallel,
             ignore,
+            notes=notes,
         )
         try:
             async for hit in walked:
@@ -1111,6 +1125,7 @@ async def _list_files(
     f: RgFlags,
     warnings: list[str],
     io: IOResult,
+    notes: list[str],
 ) -> AsyncIterator[bytes]:
     """--files: every path the search would read, and nothing searched.
 
@@ -1120,6 +1135,8 @@ async def _list_files(
         warnings (list[str]): what could not be read.
         io (IOResult): receives the exit status and the warnings, however
             the output ends.
+        notes (list[str]): the ignore files' word, printed ahead of the
+            warnings with the exit status untouched.
     """
     term = b"\0" if f.null else b"\n"
     selected = False
@@ -1132,8 +1149,9 @@ async def _list_files(
     finally:
         await close_quietly(found)
         io.exit_code = exit_code_for(selected, bool(warnings), f.quiet)
-        if warnings and not f.no_messages:
-            io.stderr = await materialize(io.stderr) + format_records(warnings)
+        shown = [] if f.no_messages else [*notes, *warnings]
+        if shown:
+            io.stderr = await materialize(io.stderr) + format_records(shown)
 
 
 async def preprocessed(
@@ -1179,6 +1197,7 @@ async def _search_all(
     io: IOResult,
     stopped: set[str],
     shell: ShellFn | None = None,
+    notes: Sequence[str] = (),
 ) -> AsyncIterator[bytes]:
     """Search every haystack in order and put the output together.
 
@@ -1204,6 +1223,8 @@ async def _search_all(
         stopped (set[str]): collects each directory whose walk a read
             stopped at its mount's ``walk_limit``.
         shell (ShellFn | None): runs --pre's command in the session.
+        notes (Sequence[str]): the ignore files' word, printed ahead of
+            the warnings with the exit status untouched.
     """
     multi = len(paths) > 1
     lone = not multi
@@ -1391,7 +1412,7 @@ async def _search_all(
             # without a match, though no listing names it.
             selected = printed or skipped
         code = exit_code_for(selected, bool(warnings), f.quiet)
-        shown = [] if f.no_messages else list(warnings)
+        shown = [] if f.no_messages else [*notes, *warnings]
         if implicit and searched == 0:
             # An error whatever --no-messages says, which only silences it.
             if not f.no_messages:

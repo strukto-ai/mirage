@@ -46,6 +46,7 @@ from mirage.commands.spec.types import (
     Attached,
     CommandSpec,
     ParsedFlagValue,
+    UsageStyle,
     ValueType,
     WordKind,
 )
@@ -317,7 +318,9 @@ def _set_value_flag(
     and argparse's ``type=`` do, so ``numfmt --to=bogus --to=si`` is
     refused for ``bogus`` although the bag keeps only ``si``, and
     ``--from=bad1 --to=bad2`` names ``bad1``. Only what the environment
-    or a default fills in afterwards is checked after the scan.
+    or a default fills in afterwards is checked after the scan. The tape
+    keeps a REMAINDER option's words as one occurrence, so two ``fd -x``
+    commands on one line stay two.
 
     Args:
         flags (dict): parsed flag bag, updated in place.
@@ -333,7 +336,10 @@ def _set_value_flag(
         for part in ([value] if isinstance(value, str) else value)
     ]
     if isinstance(flags, FlagBag):
-        flags.occurrences.extend((name, part) for part in stored)
+        if name in cs.rest_dests:
+            flags.occurrences.append((name, list(stored)))
+        else:
+            flags.occurrences.extend((name, part) for part in stored)
     if name in cs.multiple_dests:
         previous = flags.get(name)
         if isinstance(previous, list):
@@ -764,11 +770,20 @@ def parse_command(
             flags.occurrences.append((constants.REFUSED, word))
         return own_loop
 
+    # clap's validator names the earliest typed of two conflicting
+    # arguments, an operand among them (fd 10.2.0's path and
+    # --strip-cwd-prefix), so a clap program's operands keep their place.
+    clap_order = (
+        not unknown_is_operand
+        and builtin
+        and spec.usage_style is UsageStyle.CLAP
+    )
+
     def record_operand(word: str) -> None:
         raw_args.append(word)
         raw_indices.append(scan_origins[i])
         raw_bases.append(base)
-        if in_order_operands or own_loop:
+        if in_order_operands or own_loop or clap_order:
             flags.occurrences.append((constants.OPERAND, word))
 
     def record_values(

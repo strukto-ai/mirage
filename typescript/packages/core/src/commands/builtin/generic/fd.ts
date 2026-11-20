@@ -20,25 +20,36 @@ import { encodeText } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { gnuBasename as basename } from '../../../utils/path.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import {
   FileType,
   LineFacts,
+  PathSpec,
   type FileStat,
-  type PathSpec,
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
+import { OPERAND } from '../../spec/constants.ts'
+import { FlagView, specFlagNames } from '../../spec/flag_view.ts'
+import { clapConflict, clapShown } from '../../spec/usage.ts'
 import { FileTypes } from '../rg_filetypes.ts'
-import { type IgnoreSources, IgnoreRules, Overrides, compileGlob, ignoreLines } from '../rg_glob.ts'
+import {
+  type IgnoreSources,
+  IgnoreRules,
+  Overrides,
+  compileGlob,
+  ignoreLines,
+  walkCandidate,
+} from '../rg_glob.ts'
 import { type Haystack, WalkFilter, walkHaystacks } from '../rg_scan.ts'
 import { type RgFlags, type Tally, smartCaseFolds } from '../rg_search.ts'
 import { type RgProgram, openRg, streamHaystack } from '../rg_stream.ts'
 import { dispatchOf, linkResolver, mountRoot, mountsOf } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
+import { WalkBudget } from '../utils/tree.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { ignoreReader, parseFlags as rgFlags } from './rg.ts'
 
@@ -80,6 +91,31 @@ const REGEX_NOTE =
   "instead of a regular expression. Alternatively, you can also use the '--glob' option " +
   'to match on a glob pattern.'
 const HELP_HINT = "\n\nFor more information, try '--help'."
+// fd 10.2.0's cli.rs by flag name: -x, -X and -l are one group whose members
+// refuse each other and --max-results, -q and -1; each pair below refuses its
+// other; the later of an overriding pair drops the earlier.
+const EXECS = ['exec', 'exec_batch', 'list_details'] as const
+const AGAINST_EXECS = new Set(['max_results', 'quiet', 'args_1'])
+const CONFLICTS = new Set(
+  [
+    ['exec', 'exec_batch'],
+    ['glob', 'fixed_strings'],
+    ['exact_depth', 'max_depth'],
+    ['exact_depth', 'min_depth'],
+    ['quiet', 'max_results'],
+    ['strip_cwd_prefix', 'paths'],
+  ].flatMap(([a, b]) => [`${a ?? ''} ${b ?? ''}`, `${b ?? ''} ${a ?? ''}`]),
+)
+const OVERRIDES = new Map([
+  ['glob', 'regex'],
+  ['regex', 'glob'],
+  ['max_results', 'args_1'],
+  ['args_1', 'max_results'],
+  ['case_sensitive', 'ignore_case'],
+  ['ignore_case', 'case_sensitive'],
+])
+const UNDECLARED = new Map([['list_details', '--list-details']])
+const FLAGS = [...specFlagNames(specOf('fd'))].sort(compareCodePoints)
 
 /**
  * What --type keeps, as fd reads its values: the entry kinds it lists, then
@@ -111,8 +147,10 @@ export interface FdFlags {
   readonly print0: boolean
   readonly maxResults: number | null
   readonly quiet: boolean
-  readonly execWords: readonly string[] | null
-  readonly batchWords: readonly string[] | null
+  // Each -x's command, run in turn for every result.
+  readonly execCommands: readonly (readonly string[])[] | null
+  // Each -X's command, run in turn once with every result.
+  readonly batchCommands: readonly (readonly string[])[] | null
   readonly stripPrefix: string
 }
 
@@ -158,10 +196,90 @@ function last(fl: FlagView, ...dests: string[]): string | undefined {
   return typed[typed.length - 1]
 }
 
-/** fd's options, the last of each overriding pair winning. Mirrors Python's parse_flags. */
+function commands(
+  fl: FlagView,
+  dest: string,
+  shown: string,
+): readonly (readonly string[])[] | null {
+  if (fl.raw(dest) === undefined) return null
+  const typed = fl
+    .occurrences(dest)
+    .map(([, value]) => value)
+    .filter((value): value is string[] => Array.isArray(value))
+  const found = typed.length > 0 ? typed : [fl.asList(dest)]
+  if (found.some((words) => words.length === 0))
+    throw clapError(`a value is required for '${shown}' but none was supplied`)
+  return found
+}
+
+/**
+ * The arguments a line typed, by flag or operand name, in the order clap's
+ * matcher holds them: where each was first typed, the earlier of an
+ * overriding pair dropped. Mirrors Python's _typed.
+ */
+function typedArguments(fl: FlagView): string[] {
+  const names: string[] = []
+  let operands = 0
+  for (const [key, value] of fl.occurrences(OPERAND, ...FLAGS)) {
+    if (typeof value !== 'string' && !Array.isArray(value) && !value) continue
+    let name = key
+    if (name === OPERAND) {
+      operands += 1
+      name = operands === 1 ? 'text' : 'paths'
+    }
+    const loser = OVERRIDES.get(name)
+    const at = loser === undefined ? -1 : names.indexOf(loser)
+    if (at !== -1) names.splice(at, 1)
+    if (!names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+function shownArgument(name: string): string {
+  return UNDECLARED.get(name) ?? clapShown('fd', name)
+}
+
+/**
+ * Refuse the first typed argument another typed one conflicts with, as
+ * clap's validator does: a group's members unrolled where its first typed
+ * member stands. Mirrors Python's _refuse_conflicts.
+ */
+function refuseConflicts(names: readonly string[]): void {
+  const inExecs = (name: string): boolean => (EXECS as readonly string[]).includes(name)
+  for (const name of names) {
+    const partners: string[] = []
+    for (const other of names) {
+      if (other === name) continue
+      const grouped = AGAINST_EXECS.has(name) && inExecs(other)
+      if (
+        grouped ||
+        (AGAINST_EXECS.has(other) && inExecs(name)) ||
+        CONFLICTS.has(`${name} ${other}`)
+      )
+        partners.push(other)
+      if (grouped) partners.push(...EXECS)
+    }
+    if (partners.length > 0)
+      throw clapError(
+        clapConflict(
+          'fd',
+          shownArgument(name),
+          [...new Set(partners.map(shownArgument))],
+          names.filter((n) => !partners.includes(n)),
+        ),
+      )
+  }
+}
+
+/**
+ * fd's options, the last of each overriding pair winning, refused as clap
+ * refuses them: a bad value first, then a conflict. Mirrors Python's
+ * parse_flags.
+ */
 export function parseFlags(fl: FlagView, texts: readonly string[]): FdFlags {
   const pattern = texts[0] ?? ''
-  const syntax = fl.asBool('glob') ? 'glob' : fl.asBool('fixed_strings') ? 'fixed' : 'regex'
+  const syntax =
+    last(fl, 'glob', 'regex') === 'glob' ? 'glob' : fl.asBool('fixed_strings') ? 'fixed' : 'regex'
   const caseMode = last(fl, 'case_sensitive', 'ignore_case')
   const ignoreCase =
     caseMode === 'ignore_case'
@@ -188,18 +306,12 @@ export function parseFlags(fl: FlagView, texts: readonly string[]): FdFlags {
   let minDepth = count(fl, 'min_depth', '--min-depth <depth>')
   if (exact !== null) maxDepth = minDepth = exact
   let maxResults = count(fl, 'max_results', '--max-results <count>')
-  if (fl.asBool('args_1')) maxResults = 1
+  if (last(fl, 'max_results', 'args_1') === 'args_1') maxResults = 1
   if (maxResults === 0) maxResults = null
   count(fl, 'threads', '--threads <num>')
-  const execWords = fl.raw('exec') !== undefined ? fl.asList('exec') : null
-  const batchWords = fl.raw('exec_batch') !== undefined ? fl.asList('exec_batch') : null
-  for (const [words, shown] of [
-    [execWords, '--exec <cmd>...'],
-    [batchWords, '--exec-batch <cmd>...'],
-  ] as const) {
-    if (words !== null && words.length === 0)
-      throw clapError(`a value is required for '${shown}' but none was supplied`)
-  }
+  const execCommands = commands(fl, 'exec', '--exec <cmd>...')
+  const batchCommands = commands(fl, 'exec_batch', '--exec-batch <cmd>...')
+  refuseConflicts(typedArguments(fl))
   return {
     pattern,
     syntax,
@@ -218,8 +330,8 @@ export function parseFlags(fl: FlagView, texts: readonly string[]): FdFlags {
     print0: fl.asBool('print0'),
     maxResults,
     quiet: fl.asBool('quiet'),
-    execWords,
-    batchWords,
+    execCommands,
+    batchCommands,
     stripPrefix: fl.asStr('strip_cwd_prefix') ?? 'auto',
   }
 }
@@ -307,6 +419,11 @@ class Matcher {
       ),
     )
     return tally.selected
+  }
+
+  /** Release the engine's stream. */
+  close(): void {
+    this.program?.stream.close()
   }
 }
 
@@ -405,6 +522,7 @@ async function isEmpty(
     return entries.length === 0
   } catch (error) {
     if (!isWalkError(error)) throw error
+    console.debug(`fd: cannot list ${hit.virtual}: ${String(error)}`)
     return false
   }
 }
@@ -433,19 +551,37 @@ async function kept(
   return !kinds.empty || (await isEmpty(hit, readdir))
 }
 
+/**
+ * --ignore-file's rules. fd reports a file with one line that does not
+ * compile and keeps its other lines; a file with more is kept as quietly, as
+ * fd drops the ignore crate's partial error. Mirrors Python's
+ * _ignore_rules_of.
+ */
 async function ignoreRulesOf(
   paths: readonly PathSpec[],
   dispatch: DispatchFn | undefined,
+  err: Uint8Array[],
 ): Promise<IgnoreRules> {
   const lines: string[] = []
   for (const path of paths) {
     if (dispatch === undefined) continue
+    let read: string[]
     try {
       const [data] = await dispatch('read', path)
-      lines.push(...ignoreLines(await materialize(data as ByteSource), false))
+      read = ignoreLines(await materialize(data as ByteSource), false)
     } catch (error) {
       if (!isFsError(error)) throw error
+      console.debug(`fd: cannot read ${path.rawPath}: ${String(error)}`)
+      continue
     }
+    const errors = new IgnoreRules(read).errors
+    if (errors.length === 1)
+      err.push(
+        encodeText(
+          `[fd error]: Malformed pattern in custom ignore file. ${path.rawPath}: ${errors[0] ?? ''}.\n`,
+        ),
+      )
+    lines.push(...read)
   }
   return new IgnoreRules(lines)
 }
@@ -494,24 +630,33 @@ export async function fdGeneric(
       new IOResult({ exitCode: error.exitCode, stderr: encodeText(`${error.message}\n`) }),
     ]
   }
+  try {
+    return await search(paths, f, matcher, ctx, stat, readdir)
+  } finally {
+    matcher.close()
+  }
+}
+
+/**
+ * fd's walk and output once its flags parsed. -E is rooted at the first
+ * search path, as fd roots its overrides. A result limit walks the roots as
+ * typed, each directory in name order, and stops once it is met. Each
+ * operand's walk stops at its mounts' `walkLimit`, reported in fd's voice.
+ * Mirrors Python's _search.
+ */
+async function search(
+  paths: PathSpec[],
+  f: FdFlags,
+  matcher: Matcher,
+  ctx: Context,
+  stat: StatFn,
+  readdir: ReaddirFn,
+): Promise<CommandFnResult> {
   const dispatch = dispatchOf(ctx)
   const cwd = ctx.cwd.virtual
   const mounts = mountsOf(ctx)
   const rd = mountParentReaddir((p: string) => readdir(toPathspec(p)), mounts, mountRoot(ctx))
   const st = mountParentStat((p: string) => stat(toPathspec(p)), mounts)
-  const walk = new WalkFilter(
-    new Overrides(
-      f.excludes.map((glob) => `!${glob}`),
-      [],
-      false,
-    ),
-    new FileTypes([], []),
-    f.hidden,
-    f.maxDepth,
-    null,
-    true,
-    await ignoreRulesOf(f.ignoreFiles, dispatch),
-  )
   const err: Uint8Array[] = []
   const roots: [PathSpec, string][] = []
   const typed = paths.length > 0
@@ -521,6 +666,7 @@ export async function fdGeneric(
       isDir = (await st(p.virtual)).type === FileType.DIRECTORY
     } catch (error) {
       if (!isWalkError(error)) throw error
+      console.debug(`fd: cannot stat ${p.rawPath}: ${String(error)}`)
     }
     if (!isDir) {
       err.push(encodeText(`[fd error]: Search path '${p.rawPath}' is not a directory.\n`))
@@ -532,7 +678,23 @@ export async function fdGeneric(
     err.push(encodeText('[fd error]: No valid search paths given.\n'))
     return [null, new IOResult({ exitCode: 1, stderr: concat(err) })]
   }
+  const walk = new WalkFilter(
+    new Overrides(
+      f.excludes.map((glob) => `!${glob}`),
+      [],
+      false,
+      walkCandidate(roots[0]?.[1] ?? '', cwd),
+    ),
+    new FileTypes([], []),
+    f.hidden,
+    f.maxDepth,
+    null,
+    true,
+    await ignoreRulesOf(f.ignoreFiles, dispatch, err),
+  )
+  const limit = f.maxResults
   const warnings: string[] = []
+  const stopped: string[] = []
   const resolver = linkResolver(ctx)
   const reader = ignoreReader(dispatch)
   const ignore = reader === null ? null : { sources: f.sources, reader }
@@ -541,15 +703,18 @@ export async function fdGeneric(
   const statPath = vfsStatPath(ctx.vfs)
   for (const [root, shownRoot] of roots) {
     const home = mounts?.rootOf(root.virtual) ?? null
+    const budget = new WalkBudget(root, mounts ?? null)
     const crosses = (path: string): boolean =>
       mounts !== undefined && home !== null && mounts.rootOf(path) !== home
-    const walkRd = async (path: string): Promise<string[]> =>
+    const listed = async (path: string): Promise<string[]> =>
       readdirPath !== undefined && crosses(path) ? readdirPath(path) : rd(path)
+    const walkRd = (path: string): Promise<string[]> =>
+      budget.listing((directory) => listed(directory.virtual), PathSpec.fromStrPath(path))
     const walkSt = async (path: string): Promise<FileStat> => {
       if (statPath !== undefined && crosses(path)) {
-        const found = await statPath(path)
-        if (found === null) throw enoent(path)
-        return found
+        const at = await statPath(path)
+        if (at === null) throw enoent(path)
+        return at
       }
       return st(path)
     }
@@ -560,7 +725,7 @@ export async function fdGeneric(
       shownRoot,
       cwd,
       walk,
-      false,
+      limit !== null,
       warnings,
       null,
       resolver,
@@ -569,50 +734,59 @@ export async function fdGeneric(
       ignore,
       true,
     )) {
-      if (await kept(hit, f, matcher, cwd, walkRd)) {
+      if (await kept(hit, f, matcher, cwd, listed)) {
         found.push({
           path: hit.shown,
           isDir: hit.stat?.type === FileType.DIRECTORY,
           implicit: shownRoot === '',
         })
-        if (f.quiet) break
+        if (f.quiet || found.length === limit) break
       }
     }
-    if (f.quiet && found.length > 0) break
+    for (const line of budget.stopped) if (!stopped.includes(line)) stopped.push(line)
+    if (found.length > 0 && (f.quiet || found.length === limit)) break
   }
+  for (const line of warnings) console.debug(`fd: ${line}`)
+  for (const line of stopped) err.push(encodeText(`[fd error]: ${line}\n`))
   if (f.quiet)
     return [null, new IOResult({ exitCode: found.length > 0 ? 0 : 1, stderr: concat(err) })]
-  const sorted = found
+  const listedResults = found
     .map((result) => [sortKey(result.path), result] as const)
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .map(([, result]) => result)
-  const listed = f.maxResults === null ? sorted : sorted.slice(0, f.maxResults)
   const prefixed =
     f.stripPrefix === 'never' ||
-    (f.stripPrefix === 'auto' && (f.print0 || f.execWords !== null || f.batchWords !== null))
+    (f.stripPrefix === 'auto' && (f.print0 || f.execCommands !== null || f.batchCommands !== null))
   const spelled = (result: Result): string => {
     if (f.absolute) return absolute(result.path, cwd)
     if (prefixed && result.implicit) return `./${result.path}`
     return result.path
   }
   const out: Uint8Array[] = []
-  if (f.execWords !== null) {
-    let ok = true
-    for (const result of listed)
-      ok = (await run(ctx.shell, execArgv(f.execWords, spelled(result)), out, err)) && ok
+  let ok = stopped.length === 0
+  if (f.execCommands !== null) {
+    for (const result of listedResults) {
+      for (const words of f.execCommands) {
+        const ran = await run(ctx.shell, execArgv(words, spelled(result)), out, err)
+        ok = ran && ok
+      }
+    }
     return [concat(out), new IOResult({ exitCode: ok ? 0 : 1, stderr: concat(err) })]
   }
-  if (f.batchWords !== null) {
-    let ok = true
-    if (listed.length > 0)
-      ok = await run(ctx.shell, batchArgv(f.batchWords, listed.map(spelled)), out, err)
+  if (f.batchCommands !== null) {
+    if (listedResults.length > 0) {
+      for (const words of f.batchCommands) {
+        const ran = await run(ctx.shell, batchArgv(words, listedResults.map(spelled)), out, err)
+        ok = ran && ok
+      }
+    }
     return [concat(out), new IOResult({ exitCode: ok ? 0 : 1, stderr: concat(err) })]
   }
   const end = f.print0 ? '\0' : '\n'
-  for (const result of listed) {
+  for (const result of listedResults) {
     const path = spelled(result)
     const mark = result.isDir && !path.endsWith('/') ? '/' : ''
     out.push(encodeText(path + mark + end))
   }
-  return [concat(out), new IOResult({ stderr: concat(err) })]
+  return [concat(out), new IOResult({ exitCode: ok ? 0 : 1, stderr: concat(err) })]
 }

@@ -296,6 +296,10 @@ class Overrides:
         iglobs (Sequence[str]): the ``--iglob`` values, which ripgrep adds
             after every ``-g`` whatever order the line gave them.
         case_insensitive (bool): --glob-case-insensitive.
+        root (str): where an anchored glob starts, cut off each path as
+            the ignore crate cuts a matcher's root: fd roots ``-E`` at its
+            first search path; empty for ripgrep, whose paths already
+            start at the cwd.
     """
 
     def __init__(
@@ -303,11 +307,13 @@ class Overrides:
         globs: Sequence[str],
         iglobs: Sequence[str],
         case_insensitive: bool,
+        root: str = "",
     ) -> None:
         parsed = [override_glob(g, case_insensitive) for g in globs]
         parsed += [override_glob(g, True) for g in iglobs]
         self._globs = tuple(g for g in parsed if g is not None)
         self._keeps = any(g.keep for g in self._globs)
+        self._root = root
 
     def verdict(self, path: str, is_dir: bool) -> Verdict:
         """What the globs say about one walked path.
@@ -318,6 +324,7 @@ class Overrides:
         """
         if not self._globs:
             return Verdict.NONE
+        path = _stripped(path, self._root)
         for glob in reversed(self._globs):
             if glob.dir_only and not is_dir:
                 continue
@@ -328,18 +335,47 @@ class Overrides:
         return Verdict.NONE
 
 
+def _stripped(path: str, root: str) -> str:
+    """``path`` with ``root`` cut off its front as the ignore crate's
+    ``strip`` cuts it: byte for byte, never off a bare file name, and not
+    at all for an empty or ``.`` root.
+
+    Args:
+        path (str): the path as matched.
+        root (str): the matcher's root.
+    """
+    if root in ("", ".") or "/" not in path or not path.startswith(root):
+        return path
+    rest = path[len(root) :]
+    return rest[1:] if rest.startswith("/") else rest
+
+
 class IgnoreRules:
     """--ignore-file's rules: gitignore lines rooted at the working
     directory, the last one that matches a walked path deciding it, a
-    plain one ignoring it and a ``!`` one keeping it.
+    plain one ignoring it and a ``!`` one keeping it. A line whose glob
+    does not compile is left out and kept in ``errors``, as the ignore
+    crate keeps the rest of the file.
 
     Args:
         lines (Sequence[str]): the rules, in the order the files gave them.
     """
 
     def __init__(self, lines: Sequence[str] = ()) -> None:
-        parsed = [override_glob(line, False) for line in lines]
-        self._globs = tuple(g for g in parsed if g is not None)
+        globs: list[OverrideGlob] = []
+        errors: list[str] = []
+        for number, line in enumerate(lines, 1):
+            try:
+                glob = override_glob(line, False)
+            except UsageError as exc:
+                errors.append(
+                    f"line {number}: {str(exc).removeprefix('rg: ')}"
+                )
+                continue
+            if glob is not None:
+                globs.append(glob)
+        self._globs = tuple(globs)
+        self.errors = tuple(errors)
 
     @property
     def empty(self) -> bool:

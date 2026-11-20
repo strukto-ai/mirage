@@ -177,3 +177,135 @@ async def test_fd_reports_search_paths_and_patterns_it_cannot_use():
         "error: unclosed character class\n\nNote: "
     )
     assert out[4] == "1\n"
+
+
+CLAP_HINT = "\n\nFor more information, try '--help'.\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_refuses_arguments_that_cannot_be_used_together():
+    out = await _run(
+        SETUP,
+        "cd /w/r && fd -q -x echo {} a.ts",
+        "cd /w/r && fd -1 -q -X echo \\;",
+        "cd /w/r && fd a src --strip-cwd-prefix",
+        "cd /w/r && fd -F -g x",
+        "cd /w/r && fd -q --max-results 2 -1 zzz; echo $?",
+    )
+    assert out[1] == (
+        "error: the argument '--quiet' cannot be used with:\n"
+        "  --exec <cmd>...\n  --exec-batch <cmd>...\n  --list-details\n\n"
+        f"Usage: fd --quiet [pattern] [path]...{CLAP_HINT}"
+    )
+    assert out[2] == (
+        "error: the argument '-1' cannot be used with:\n"
+        "  --exec-batch <cmd>...\n  --exec <cmd>...\n  --list-details\n\n"
+        f"Usage: fd -1 --quiet [pattern] [path]...{CLAP_HINT}"
+    )
+    assert out[3] == (
+        "error: the argument '[path]...' cannot be used with "
+        "'--strip-cwd-prefix[=<when>]'\n\n"
+        f"Usage: fd <pattern> <path>...{CLAP_HINT}"
+    )
+    assert out[4] == (
+        "error: the argument '--fixed-strings' cannot be used with "
+        f"'--glob'\n\nUsage: fd --fixed-strings <pattern> [path]...{CLAP_HINT}"
+    )
+    assert out[5] == "1\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_lets_the_later_of_an_overriding_pair_win():
+    out = await _run(
+        SETUP,
+        "cd /w/r && fd -g --regex ts src",
+        "cd /w/r && fd --regex -g ts src",
+        "cd /w/r && fd -1 --max-results 2 -t f . src",
+        "cd /w/r && fd --max-results 2 -1 -t f . src",
+    )
+    assert out[1] == "src/a.ts\n"
+    assert out[2] == ""
+    assert out[3] == "src/a.ts\nsrc/full.txt\n"
+    assert out[4] == "src/a.ts\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_runs_every_repeated_command():
+    out = await _run(
+        SETUP,
+        "cd /w/r && fd -t f -x echo first {} \\; -x echo second {} \\; c.py",
+        "cd /w/r && fd -t f -X echo one \\; -X echo two \\; c.py",
+    )
+    assert out[1] == "first ./src/sub/c.py\nsecond ./src/sub/c.py\n"
+    assert out[2] == "one ./src/sub/c.py\ntwo ./src/sub/c.py\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_roots_excludes_at_its_first_search_path():
+    out = await _run(
+        "mkdir -p /w/d/data/cache /w/d/src && touch /w/d/data/cache/x"
+        " /w/d/src/a",
+        "cd /w/d && fd -E /cache . data",
+        "cd /w/d && fd -E /cache . src data",
+        "cd / && fd -E /cache . /w/d/data",
+    )
+    assert out[1] == ""
+    assert out[2] == "data/cache/\ndata/cache/x\nsrc/a\n"
+    assert out[3] == ""
+
+
+@pytest.mark.asyncio
+async def test_fd_keeps_the_first_results_in_its_order():
+    out = await _run(
+        SETUP,
+        "cd /w/r && fd --max-results 2 -t f . src docs",
+        "cd /w/r && fd -1 -t f",
+    )
+    assert out[1] == "src/a.ts\nsrc/full.txt\n"
+    assert out[2] == "AGENTS.md\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_stops_at_the_mounts_walk_limit():
+    capped = RAMVFS()
+    capped.walk_limit = 2
+    ws = Workspace({"/": RAMVFS(), "/m": capped}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /m/d && touch /m/d/a /m/d/b /m/d/c")
+        io = await ws.shell("fd . /m/d")
+        assert io.exit_code == 1
+        assert io.stdout == b"/m/d/a\n/m/d/b\n"
+        assert io.stderr == (
+            b"[fd error]: /m/d: stopped after 2 files (walk_limit); "
+            b"narrow the path\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_fd_keeps_the_rules_around_a_bad_ignore_line():
+    out = await _run(
+        "mkdir -p /w/i && cd /w/i && touch a.log b.txt c.tmp"
+        " && printf '[\\n*.log\\n' > .ignore && printf '[1\\n*.tmp\\n' > one"
+        " && printf '[2\\n[3\\n' > two",
+        "cd /w/i && fd -t f . --ignore-file one",
+        "cd /w/i && fd -t f . --ignore-file two",
+    )
+    assert out[1] == (
+        "b.txt\none\ntwo\n[fd error]: Malformed pattern in custom ignore "
+        "file. one: line 1: error parsing glob '[1': unclosed character "
+        "class; missing ']'.\n"
+    )
+    assert out[2] == "b.txt\nc.tmp\none\ntwo\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_matches_ignore_rules_on_the_path_it_walked():
+    out = await _run(
+        "mkdir -p /w/L/repo /w/L/other && touch /w/L/other/a.log"
+        " /w/L/other/b.txt && printf '*.log\\n' > /w/L/repo/.ignore"
+        " && ln -s ../other /w/L/repo/link",
+        "cd /w/L/repo && fd -L -t f",
+    )
+    assert out[1] == "link/b.txt\n"

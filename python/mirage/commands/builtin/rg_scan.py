@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ from mirage.types import FileStat, FileType, PathSpec, StatFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.types import MountIsRoot, MountRoot
+
+logger = logging.getLogger(__name__)
 
 
 def os_error_text(exc: BaseException) -> str:
@@ -327,8 +330,11 @@ async def root_stack(
     root: str, sources: IgnoreSources, reader: IgnoreReader
 ) -> IgnoreStack:
     """The stack a walk of ``root`` starts from: the ignore files of every
-    directory above it, nearest first, when the sources read parents. Each
-    is listed once, so a file no listing names costs no read.
+    directory above it, nearest first, when the sources read parents. With
+    parents off a repository above still counts, so a ``.gitignore`` below
+    it applies, as the ignore crate keeps its parents' ``.git`` while it
+    drops their rules. Each is listed once, so a file no listing names
+    costs no read.
 
     Args:
         root (str): the walk's root.
@@ -336,7 +342,8 @@ async def root_stack(
         reader (IgnoreReader): how they are read.
     """
     stack = IgnoreStack(sources)
-    if not sources.parents or root == "/":
+    repos = sources.vcs and sources.require_git
+    if root == "/" or not (sources.parents or repos):
         return stack
     above: list[str] = []
     dir_ = root
@@ -347,10 +354,41 @@ async def root_stack(
         names = await reader.names(dir_)
         if names is None:
             continue
+        if not sources.parents:
+            if _GIT_DIR in names:
+                stack = stack.within(
+                    DirRules(dir_, True, None, None, None, None)
+                )
+            continue
         rules = await dir_rules(dir_, names, sources, reader)
         if rules is not None:
             stack = stack.within(rules)
     return stack
+
+
+def ignore_errors(rules: DirRules, shown: str, custom: str | None) -> str:
+    """One directory's ignore-file lines that do not compile, as ripgrep
+    prints them under one ``rg:``: the tool's own file, then ``.ignore``,
+    ``.gitignore`` and the exclude file, each line as ``<file>: line N:
+    ...``. Empty when every line compiled.
+
+    Args:
+        rules (DirRules): the directory's files.
+        shown (str): the directory as the walker names it.
+        custom (str | None): the tool's own file name.
+    """
+    files = (
+        (custom, rules.custom),
+        (".ignore", rules.dot),
+        (".gitignore", rules.git),
+        (f"{_GIT_DIR}/info/exclude", rules.exclude),
+    )
+    return "\n".join(
+        f"{posixpath.join(shown, name)}: {error}"
+        for name, kept in files
+        if name is not None and kept is not None
+        for error in kept.errors
+    )
 
 
 async def walk_haystacks(
@@ -368,6 +406,7 @@ async def walk_haystacks(
     parallel: bool = False,
     ignore: tuple[IgnoreSources, IgnoreReader] | None = None,
     entries: bool = False,
+    notes: list[str] | None = None,
 ) -> AsyncIterator[Haystack]:
     """The files a walk of one directory operand searches, in walk order.
 
@@ -405,6 +444,10 @@ async def walk_haystacks(
             them: a directory before what it holds, a link the walk does
             not follow (and under ``follow`` one that dangles) as the
             link, and every file type, not regular files alone.
+        notes (list[str] | None): collects ripgrep's word on a walked
+            directory's ignore-file line that does not compile, which
+            leaves the exit status alone; None logs it. A directory above
+            the operand reports its own into ``warnings``, an error.
     """
     walker = _Walker(
         readdir_fn,
@@ -420,8 +463,14 @@ async def walk_haystacks(
         parallel,
         None if ignore is None else ignore[1],
         entries,
+        notes,
     )
     stack = None if ignore is None else await root_stack(root, *ignore)
+    if stack is not None:
+        for layer in reversed(stack.layers):
+            said = ignore_errors(layer, layer.dir, stack.sources.custom)
+            if said and (warnings is None or f"rg: {said}" not in warnings):
+                walker.warn(f"rg: {said}")
     top = walker.named(shown_root)
     async for found in walker.below(
         root, root, shown_root, 0, ((root, top),), False, stack
@@ -448,6 +497,8 @@ class _Walker:
         parallel (bool): ripgrep would walk with its parallel walker.
         reader (IgnoreReader | None): how ignore files are read.
         entries (bool): yield every kept entry, not regular files alone.
+        notes (list[str] | None): collects a walked directory's
+            ignore-file lines that do not compile; None logs them.
     """
 
     readdir_fn: AsyncReaddirFn
@@ -463,6 +514,7 @@ class _Walker:
     parallel: bool
     reader: IgnoreReader | None = None
     entries: bool = False
+    notes: list[str] | None = None
 
     def link_entry(
         self,
@@ -470,6 +522,7 @@ class _Walker:
         shown: str,
         depth: int,
         rules: IgnoreStack | None,
+        ruled: str,
     ) -> Haystack | None:
         """A link as an entry of its own, when the walk lists entries
         and its filters keep the link's name.
@@ -479,10 +532,11 @@ class _Walker:
             shown (str): the link as printed.
             depth (int): how deep the directory holding it is.
             rules (IgnoreStack | None): that directory's ignore files.
+            ruled (str): the link's path as walked, which they match.
         """
         if not self.entries or self.resolver is None:
             return None
-        files = Verdict.NONE if rules is None else rules.verdict(link, False)
+        files = Verdict.NONE if rules is None else rules.verdict(ruled, False)
         if not self.walk.admits(
             walk_candidate(shown, self.cwd),
             posixpath.basename(link),
@@ -498,15 +552,20 @@ class _Walker:
         )
 
     async def rules(
-        self, here: str, entries: list[str], stack: IgnoreStack | None
+        self,
+        here: str,
+        entries: list[str],
+        stack: IgnoreStack | None,
+        named: str,
     ) -> IgnoreStack | None:
         """``stack`` with ``here``'s own ignore files on top, read when its
-        listing names them.
+        listing names them; a line that does not compile is noted.
 
         Args:
-            here (str): the directory's virtual path.
+            here (str): the directory's path as walked, through any link.
             entries (list[str]): its listing.
             stack (IgnoreStack | None): the stack above it.
+            named (str): the directory as the walker names it.
         """
         if stack is None or self.reader is None:
             return stack
@@ -514,7 +573,14 @@ class _Walker:
             posixpath.basename(entry.rstrip("/") or entry) for entry in entries
         )
         own = await dir_rules(here, names, stack.sources, self.reader)
-        return stack if own is None else stack.within(own)
+        if own is None:
+            return stack
+        said = ignore_errors(own, named, stack.sources.custom)
+        if said and self.notes is not None:
+            self.notes.append(f"rg: {said}")
+        elif said:
+            logger.debug("ignore file lines left out: %s", said)
+        return stack.within(own)
 
     def named(self, shown: str) -> str:
         """A path as the walker names it in a warning.
@@ -559,6 +625,7 @@ class _Walker:
         chain: tuple[tuple[str, str], ...],
         linked: bool,
         stack: IgnoreStack | None = None,
+        logical: str | None = None,
     ) -> AsyncIterator[Haystack]:
         """The files under one directory the walk lists.
 
@@ -577,7 +644,12 @@ class _Walker:
             linked (bool): reached through a link, so read through the
                 dispatcher rather than the operand's backend.
             stack (IgnoreStack | None): the ignore files above ``here``.
+            logical (str | None): ``base`` as walked, through the links
+                that led to it, which the ignore files match: the ignore
+                crate matches the walked path, not where a link leads.
+                None when ``base`` is.
         """
+        walked = base if logical is None else logical
         if self.walk.max_depth is not None and depth >= self.walk.max_depth:
             return
         resolver = self.resolver if linked else None
@@ -591,19 +663,22 @@ class _Walker:
             return
         if self.sort_by_name:
             entries = sorted(entries, key=_entry_name)
-        rules = await self.rules(here, entries, stack)
+        rules = await self.rules(
+            respell_one(here, base, walked), entries, stack, chain[0][1]
+        )
         for entry in entries:
             # box/dropbox readdir marks folders with a trailing slash.
             child = entry.rstrip("/") or entry
             shown = respell_one(child, base, shown_base)
+            ruled = respell_one(child, base, walked)
             if self.is_link(child):
                 if self.follow:
                     async for found in self.through(
-                        child, shown, depth, chain, rules
+                        child, shown, depth, chain, rules, ruled
                     ):
                         yield found
                 elif (
-                    link := self.link_entry(child, shown, depth, rules)
+                    link := self.link_entry(child, shown, depth, rules, ruled)
                 ) is not None:
                     yield link
                 continue
@@ -621,7 +696,7 @@ class _Walker:
             candidate = walk_candidate(shown, self.cwd)
             is_dir = s.type == FileType.DIRECTORY
             files = (
-                Verdict.NONE if rules is None else rules.verdict(child, is_dir)
+                Verdict.NONE if rules is None else rules.verdict(ruled, is_dir)
             )
             if is_dir:
                 if self.boundary is not None and self.boundary(child):
@@ -639,6 +714,7 @@ class _Walker:
                         ((child, self.named(shown)), *chain),
                         linked,
                         rules,
+                        logical,
                     ):
                         yield found
             elif (
@@ -654,7 +730,8 @@ class _Walker:
         shown: str,
         depth: int,
         chain: tuple[tuple[str, str], ...],
-        rules: IgnoreStack | None = None,
+        rules: IgnoreStack | None,
+        ruled: str,
     ) -> AsyncIterator[Haystack]:
         """What -L walks in place of one link.
 
@@ -670,6 +747,7 @@ class _Walker:
             chain (tuple[tuple[str, str], ...]): that directory and
                 every one above it, nearest first.
             rules (IgnoreStack | None): that directory's ignore files.
+            ruled (str): the link's path as walked, which they match.
         """
         resolver = self.resolver
         if resolver is None:
@@ -680,14 +758,14 @@ class _Walker:
             s = await resolver.stat(target)
         except WALK_ERRORS as exc:
             self.warn(walk_error_line(named, exc, self.parallel))
-            dangling = self.link_entry(link, shown, depth, rules)
+            dangling = self.link_entry(link, shown, depth, rules, ruled)
             if dangling is not None:
                 yield dangling
             return
         name = posixpath.basename(link)
         candidate = walk_candidate(shown, self.cwd)
         is_dir = s.type == FileType.DIRECTORY
-        files = Verdict.NONE if rules is None else rules.verdict(link, is_dir)
+        files = Verdict.NONE if rules is None else rules.verdict(ruled, is_dir)
         if is_dir:
             for above, spelled in chain:
                 if above == target:
@@ -708,6 +786,7 @@ class _Walker:
                     ((target, named), *chain),
                     True,
                     rules,
+                    ruled,
                 ):
                     yield found
         elif (

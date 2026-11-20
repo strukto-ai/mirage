@@ -28,6 +28,7 @@ from mirage.commands.builtin.rg_glob import (
     Overrides,
     compile_glob,
     ignore_lines,
+    walk_candidate,
 )
 from mirage.commands.builtin.rg_scan import (
     Haystack,
@@ -51,6 +52,7 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
 )
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.builtin.utils.wrap import (
     mount_parent_readdir,
     mount_parent_stat,
@@ -59,7 +61,9 @@ from mirage.commands.builtin.utils.wrap import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.constants import OPERAND
+from mirage.commands.spec.flag_view import FlagView, spec_flag_names
+from mirage.commands.spec.usage import clap_conflict, clap_shown
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
 from mirage.io.stream import drain, yield_bytes
@@ -112,6 +116,32 @@ _REGEX_NOTE = (
     "can also use the '--glob' option to match on a glob pattern."
 )
 _HELP_HINT = "\n\nFor more information, try '--help'."
+# fd 10.2.0's cli.rs by flag name: -x, -X and -l are one group whose
+# members refuse each other and --max-results, -q and -1; each pair below
+# refuses its other; the later of an overriding pair drops the earlier.
+_EXECS = ("exec", "exec_batch", "list_details")
+_AGAINST_EXECS = frozenset({"max_results", "quiet", "args_1"})
+_CONFLICTS = frozenset(
+    frozenset(pair)
+    for pair in (
+        ("exec", "exec_batch"),
+        ("glob", "fixed_strings"),
+        ("exact_depth", "max_depth"),
+        ("exact_depth", "min_depth"),
+        ("quiet", "max_results"),
+        ("strip_cwd_prefix", "paths"),
+    )
+)
+_OVERRIDES = {
+    "glob": "regex",
+    "regex": "glob",
+    "max_results": "args_1",
+    "args_1": "max_results",
+    "case_sensitive": "ignore_case",
+    "ignore_case": "case_sensitive",
+}
+_UNDECLARED = {"list_details": "--list-details"}
+_FLAGS = sorted(spec_flag_names(SPECS["fd"]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +184,10 @@ class FdFlags:
         print0 (bool): -0.
         max_results (int | None): --max-results and -1.
         quiet (bool): -q.
-        exec_words (tuple[str, ...] | None): -x's command.
-        batch_words (tuple[str, ...] | None): -X's command.
+        exec_commands (tuple[tuple[str, ...], ...] | None): each -x's
+            command, run in turn for every result.
+        batch_commands (tuple[tuple[str, ...], ...] | None): each -X's
+            command, run in turn once with every result.
         strip_prefix (str): --strip-cwd-prefix: auto, always or never.
     """
 
@@ -176,8 +208,8 @@ class FdFlags:
     print0: bool
     max_results: int | None
     quiet: bool
-    exec_words: tuple[str, ...] | None
-    batch_words: tuple[str, ...] | None
+    exec_commands: tuple[tuple[str, ...], ...] | None
+    batch_commands: tuple[tuple[str, ...], ...] | None
     strip_prefix: str
 
 
@@ -226,8 +258,90 @@ def _last(fl: FlagView, *dests: str) -> str | None:
     return typed[-1] if typed else None
 
 
+def _commands(
+    fl: FlagView, dest: str, shown: str
+) -> tuple[tuple[str, ...], ...] | None:
+    if fl.raw(dest) is None:
+        return None
+    commands = tuple(
+        tuple(word for word in value if isinstance(word, str))
+        for _, value in fl.occurrences(dest)
+        if isinstance(value, list)
+    ) or (tuple(fl.as_list(dest)),)
+    if not all(commands):
+        raise _clap_error(
+            f"a value is required for '{shown}' but none was supplied"
+        )
+    return commands
+
+
+def _typed_arguments(fl: FlagView) -> list[str]:
+    """The arguments a line typed, by flag or operand name, in the order
+    clap's matcher holds them: where each was first typed, the earlier of
+    an overriding pair dropped.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+    """
+    names: list[str] = []
+    operands = 0
+    for name, value in fl.occurrences(OPERAND, *_FLAGS):
+        if not isinstance(value, (str, list)) and not value:
+            continue
+        if name == OPERAND:
+            operands += 1
+            name = "text" if operands == 1 else "paths"
+        loser = _OVERRIDES.get(name)
+        if loser in names:
+            names.remove(loser)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _shown_argument(name: str) -> str:
+    return _UNDECLARED.get(name) or clap_shown("fd", name)
+
+
+def _refuse_conflicts(names: Sequence[str]) -> None:
+    """Refuse the first typed argument another typed one conflicts with,
+    as clap's validator does: a group's members unrolled where its first
+    typed member stands.
+
+    Args:
+        names (Sequence[str]): the typed arguments, from ``_typed_arguments``.
+
+    Raises:
+        UsageError: two arguments that cannot be used together.
+    """
+    for name in names:
+        partners: list[str] = []
+        for other in names:
+            if other == name:
+                continue
+            grouped = name in _AGAINST_EXECS and other in _EXECS
+            if (
+                grouped
+                or (other in _AGAINST_EXECS and name in _EXECS)
+                or frozenset((name, other)) in _CONFLICTS
+            ):
+                partners.append(other)
+            if grouped:
+                partners.extend(_EXECS)
+        if partners:
+            raise _clap_error(
+                clap_conflict(
+                    "fd",
+                    _shown_argument(name),
+                    list(dict.fromkeys(_shown_argument(p) for p in partners)),
+                    [n for n in names if n not in partners],
+                )
+            )
+
+
 def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
-    """fd's options, the last of each overriding pair winning.
+    """fd's options, the last of each overriding pair winning, refused
+    as clap refuses them: a bad value first, then a conflict.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -239,7 +353,7 @@ def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
     pattern = texts[0] if texts else ""
     syntax = (
         "glob"
-        if fl.as_bool("glob")
+        if _last(fl, "glob", "regex") == "glob"
         else "fixed"
         if fl.as_bool("fixed_strings")
         else "regex"
@@ -271,23 +385,14 @@ def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
     if exact is not None:
         max_depth = min_depth = exact
     max_results = _count(fl, "max_results", "--max-results <count>")
-    if fl.as_bool("args_1"):
+    if _last(fl, "max_results", "args_1") == "args_1":
         max_results = 1
     if max_results == 0:
         max_results = None
     _count(fl, "threads", "--threads <num>")
-    exec_words = fl.as_list("exec") if fl.raw("exec") is not None else None
-    batch_words = (
-        fl.as_list("exec_batch") if fl.raw("exec_batch") is not None else None
-    )
-    for words, shown in (
-        (exec_words, "--exec <cmd>..."),
-        (batch_words, "--exec-batch <cmd>..."),
-    ):
-        if words is not None and not words:
-            raise _clap_error(
-                f"a value is required for '{shown}' but none was supplied"
-            )
+    exec_commands = _commands(fl, "exec", "--exec <cmd>...")
+    batch_commands = _commands(fl, "exec_batch", "--exec-batch <cmd>...")
+    _refuse_conflicts(_typed_arguments(fl))
     return FdFlags(
         pattern=pattern,
         syntax=syntax,
@@ -308,8 +413,8 @@ def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
         print0=fl.as_bool("print0"),
         max_results=max_results,
         quiet=fl.as_bool("quiet"),
-        exec_words=None if exec_words is None else tuple(exec_words),
-        batch_words=None if batch_words is None else tuple(batch_words),
+        exec_commands=exec_commands,
+        batch_commands=batch_commands,
         strip_prefix=fl.as_str("strip_cwd_prefix") or "auto",
     )
 
@@ -384,6 +489,11 @@ class _Matcher:
             )
         )
         return tally.selected
+
+    def close(self) -> None:
+        """Release the engine's stream."""
+        if self._program is not None:
+            self._program.stream.close()
 
 
 def _unwrapped(message: str, pattern: str) -> str:
@@ -557,17 +667,36 @@ async def _kept(
 
 
 async def _ignore_rules_of(
-    paths: Sequence[PathSpec], dispatch: DispatchFn | None
+    paths: Sequence[PathSpec], dispatch: DispatchFn | None, err: bytearray
 ) -> IgnoreRules:
+    """--ignore-file's rules. fd reports a file with one line that does
+    not compile and keeps its other lines; a file with more is kept as
+    quietly, as fd drops the ignore crate's partial error.
+
+    Args:
+        paths (Sequence[PathSpec]): the files.
+        dispatch (DispatchFn | None): the workspace's dispatcher.
+        err (bytearray): receives fd's report.
+    """
     lines: list[str] = []
     for path in paths:
         if dispatch is None:
             continue
         try:
             data, _ = await dispatch("read", path)
-            lines.extend(ignore_lines(await materialize(data), False))
+            read = ignore_lines(await materialize(data), False)
         except FS_ERRORS as exc:
             logger.debug("fd: cannot read %s: %s", path.raw_path, exc)
+            continue
+        errors = IgnoreRules(read).errors
+        if len(errors) == 1:
+            err.extend(
+                encode_text(
+                    "[fd error]: Malformed pattern in custom ignore file. "
+                    f"{path.raw_path}: {errors[0]}.\n"
+                )
+            )
+        lines.extend(read)
     return IgnoreRules(lines)
 
 
@@ -617,6 +746,35 @@ async def fd_generic(
         return None, IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
+    try:
+        return await _search(paths, f, matcher, ctx, readdir, stat)
+    finally:
+        matcher.close()
+
+
+async def _search(
+    paths: list[PathSpec],
+    f: FdFlags,
+    matcher: _Matcher,
+    ctx: Context,
+    readdir: Callable[..., Awaitable[list[str]]],
+    stat: Callable[..., Awaitable[FileStat]],
+) -> tuple[ByteSource | None, IOResult]:
+    """fd's walk and output once its flags parsed. -E is rooted at the
+    first search path, as fd roots its overrides. A result limit walks
+    the roots as typed, each directory in name order, and stops once it
+    is met.
+    Each operand's walk stops at its mounts' ``walk_limit``, reported in
+    fd's voice.
+
+    Args:
+        paths (list[PathSpec]): the search paths; none searches the cwd.
+        f (FdFlags): the parsed flags.
+        matcher (_Matcher): the pattern.
+        ctx (Context): the invocation's context.
+        readdir (Callable): the directory reader.
+        stat (Callable): the stat reader.
+    """
     dispatch = dispatch_of(ctx)
     cwd = ctx.cwd.virtual
     mounts = mounts_of(ctx)
@@ -624,15 +782,6 @@ async def fd_generic(
         lambda path: readdir(to_pathspec(path)), mounts, mount_root(ctx)
     )
     st = mount_parent_stat(lambda path: stat(to_pathspec(path)), mounts)
-    walk = WalkFilter(
-        Overrides([f"!{glob}" for glob in f.excludes], [], False),
-        FileTypes([], []),
-        f.hidden,
-        f.max_depth,
-        None,
-        True,
-        await _ignore_rules_of(f.ignore_files, dispatch),
-    )
     err = bytearray()
     roots: list[tuple[PathSpec, str]] = []
     for p in paths or [ctx.cwd]:
@@ -654,7 +803,23 @@ async def fd_generic(
     if not roots:
         err.extend(b"[fd error]: No valid search paths given.\n")
         return None, IOResult(exit_code=1, stderr=bytes(err))
+    walk = WalkFilter(
+        Overrides(
+            [f"!{glob}" for glob in f.excludes],
+            [],
+            False,
+            walk_candidate(roots[0][1], cwd),
+        ),
+        FileTypes([], []),
+        f.hidden,
+        f.max_depth,
+        None,
+        True,
+        await _ignore_rules_of(f.ignore_files, dispatch, err),
+    )
+    limit = f.max_results
     warnings: list[str] = []
+    stopped: list[str] = []
     resolver = link_resolver(ctx)
     reader = ignore_reader(dispatch)
     ignore = None if reader is None else (f.sources, reader)
@@ -663,6 +828,7 @@ async def fd_generic(
     stat_path = vfs_stat_path(ctx.vfs)
     for root, shown_root in roots:
         home = None if mounts is None else mounts.root_of(root.virtual)
+        budget = WalkBudget(root, mounts)
 
         def crosses(path: str, home: str | None = home) -> bool:
             return (
@@ -671,10 +837,20 @@ async def fd_generic(
                 and mounts.root_of(path) != home
             )
 
-        async def walk_rd(path: str, home: str | None = home) -> list[str]:
+        async def listed(path: str, home: str | None = home) -> list[str]:
             if readdir_path is not None and crosses(path, home):
                 return await readdir_path(path)
             return await rd(path)
+
+        async def walk_rd(
+            path: str,
+            listed: Callable[[str], Awaitable[list[str]]] = listed,
+            budget: WalkBudget = budget,
+        ) -> list[str]:
+            return await budget.listing(
+                lambda directory, **_: listed(directory.virtual),
+                PathSpec.from_str_path(path),
+            )
 
         async def walk_st(path: str, home: str | None = home) -> FileStat:
             if stat_path is not None and crosses(path, home):
@@ -691,7 +867,7 @@ async def fd_generic(
             shown_root,
             cwd,
             walk,
-            False,
+            limit is not None,
             warnings,
             None,
             resolver,
@@ -700,26 +876,31 @@ async def fd_generic(
             ignore,
             entries=True,
         ):
-            if await _kept(hit, f, matcher, cwd, walk_rd):
+            if await _kept(hit, f, matcher, cwd, listed):
                 is_dir = (
                     hit.stat is not None
                     and hit.stat.type == FileType.DIRECTORY
                 )
                 found.append(_Result(hit.shown, is_dir, not shown_root))
-                if f.quiet:
+                if f.quiet or len(found) == limit:
                     break
-        if f.quiet and found:
+        stopped.extend(line for line in budget.stopped if line not in stopped)
+        if found and (f.quiet or len(found) == limit):
             break
     for line in warnings:
         logger.debug("fd: %s", line)
+    for line in stopped:
+        err.extend(encode_text(f"[fd error]: {line}\n"))
     if f.quiet:
         return None, IOResult(exit_code=0 if found else 1, stderr=bytes(err))
     found.sort(key=lambda r: _sort_key(r.path))
-    if f.max_results is not None:
-        found = found[: f.max_results]
     prefixed = f.strip_prefix == "never" or (
         f.strip_prefix == "auto"
-        and (f.print0 or f.exec_words is not None or f.batch_words is not None)
+        and (
+            f.print0
+            or f.exec_commands is not None
+            or f.batch_commands is not None
+        )
     )
 
     def spelled(result: _Result) -> str:
@@ -730,30 +911,27 @@ async def fd_generic(
         return result.path
 
     out = bytearray()
-    if f.exec_words is not None:
-        ok = True
+    ok = not stopped
+    if f.exec_commands is not None:
         for result in found:
-            ok = (
-                await _run(
-                    ctx.shell,
-                    exec_argv(f.exec_words, spelled(result)),
-                    out,
-                    err,
+            for words in f.exec_commands:
+                ran = await _run(
+                    ctx.shell, exec_argv(words, spelled(result)), out, err
                 )
-                and ok
-            )
+                ok = ran and ok
         return bytes(out), IOResult(
             exit_code=0 if ok else 1, stderr=bytes(err)
         )
-    if f.batch_words is not None:
-        ok = True
+    if f.batch_commands is not None:
         if found:
-            ok = await _run(
-                ctx.shell,
-                batch_argv(f.batch_words, [spelled(r) for r in found]),
-                out,
-                err,
-            )
+            for words in f.batch_commands:
+                ran = await _run(
+                    ctx.shell,
+                    batch_argv(words, [spelled(r) for r in found]),
+                    out,
+                    err,
+                )
+                ok = ran and ok
         return bytes(out), IOResult(
             exit_code=0 if ok else 1, stderr=bytes(err)
         )
@@ -763,7 +941,7 @@ async def fd_generic(
             "/" if result.is_dir and not spelled(result).endswith("/") else ""
         )
         out.extend(encode_text(spelled(result) + mark) + end)
-    return bytes(out), IOResult(stderr=bytes(err))
+    return bytes(out), IOResult(exit_code=0 if ok else 1, stderr=bytes(err))
 
 
 __all__ = ["facts", "fd_generic"]

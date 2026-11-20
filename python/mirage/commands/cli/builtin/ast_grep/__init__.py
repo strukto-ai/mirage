@@ -378,7 +378,7 @@ async def _rules(
             WalkBudget(root, mounts),
             cwd,
             Overrides([], [], False),
-            _walk_of(frozenset(), vfs, max_memory),
+            _walk_of(frozenset({"parent"}), vfs, max_memory),
         ):
             if path.virtual.endswith((".yaml", ".yml")):
                 data = await _read(vfs, path, max_memory)

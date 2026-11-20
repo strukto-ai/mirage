@@ -254,7 +254,7 @@
       "targets": [
         "ast-grep-sql"
       ],
-      "command": "cd /repo && printf '%s\\n' '{id: keep, language: Ts, severity: error, message: found, rule: {pattern: \"log($A)\"}, fix: \"emit($A)\", files: [\"src/*.ts\"], ignores: [\"src/omit.ts\"]}' > rules/keep.yml && printf 'log(0) // ast-grep-ignore: keep\\nlog(1)\\n' > src/keep.ts && printf 'log(2)\\n' > src/omit.ts && cd src && ast-grep scan --report-style short /repo/src/keep.ts omit.ts",
+      "command": "cd /repo && printf 'rules/keep.yml\\n' > .ignore && printf '%s\\n' '{id: keep, language: Ts, severity: error, message: found, rule: {pattern: \"log($A)\"}, fix: \"emit($A)\", files: [\"src/*.ts\"], ignores: [\"src/omit.ts\"]}' > rules/keep.yml && printf 'log(0) // ast-grep-ignore: keep\\nlog(1)\\n' > src/keep.ts && printf 'log(2)\\n' > src/omit.ts && cd src && ast-grep scan --report-style short /repo/src/keep.ts omit.ts",
       "expect": {
         "exit": 1,
         "stdout": "/repo/src/keep.ts:2:1: error[keep]: found\n",
