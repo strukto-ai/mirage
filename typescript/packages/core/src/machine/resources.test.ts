@@ -13,8 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { darwinResourcesLine, RESOURCE_MARK as M, resourcesLine } from './constants.ts'
-import { parseDarwinResources, parseResources } from './resources.ts'
+import {
+  darwinResourcesLine,
+  machineResourcesLine,
+  RESOURCE_MARK as M,
+  resourcesLine,
+} from './constants.ts'
+import { parseDarwinResources, parseMachineResources, parseResources } from './resources.ts'
 
 const LINUX = `${M} cpus 5 8
 ${M} clock 1762745722 03:35:22 +0000
@@ -98,5 +103,16 @@ describe('resources', () => {
     expect(found.swapFree).toBe(1123 * 1024 ** 2)
     expect(found.tasks?.total).toBe(875)
     expect([found.cpu?.user, found.cpu?.system, found.cpu?.wait]).toEqual([15.1, 8.3, null])
+  })
+
+  it("asks a Mac for its own rows on a machine's line", () => {
+    const line = machineResourcesLine(false)
+    expect(line).toContain(resourcesLine(false))
+    expect(line).toContain(darwinResourcesLine(false))
+  })
+
+  it('reads rows as the system that wrote them', () => {
+    expect(parseMachineResources(DARWIN, 'm')).toEqual(parseDarwinResources(DARWIN, 'm'))
+    expect(parseMachineResources(LINUX, 'm')).toEqual(parseResources(LINUX, 'm'))
   })
 })

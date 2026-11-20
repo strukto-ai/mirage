@@ -17,11 +17,13 @@
     "access": "public"
   },
   "os": [
-    "linux"
+    "linux",
+    "darwin"
   ],
   "cpu": [
     "x64",
-    "arm64"
+    "arm64",
+    "arm"
   ],
   "bin": {
     "mirage-fuse": "bin/mirage-fuse"

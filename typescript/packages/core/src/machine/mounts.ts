@@ -36,7 +36,10 @@ import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import type { MachinePipe, MountType, Transport } from './types.ts'
 import type { OutputFn, PipeWriter, RunAnswer, RunResult } from '../runtime/types.ts'
 import {
+  DARWIN_ADMIN_STATUS,
+  DARWIN_MOUNT_GUARD,
   FSPROTO_SERVER_HINT,
+  MACFUSE_KIND,
   MIRAGE_FUSE_FIND,
   MIRAGE_FUSE_HINT,
   MIRAGE_FUSE_LINE,
@@ -51,6 +54,13 @@ import {
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
   UNMOUNT_WAIT_SECONDS,
+  darwinAdminHint,
+  darwinKillLine,
+  darwinMountTable,
+  darwinMountpointLine,
+  darwinRunningLine,
+  darwinTableLine,
+  darwinUnmountLine,
   machineDirLine,
   mountField,
 } from './constants.ts'
@@ -370,6 +380,11 @@ export class MachineMounts {
   // When each served sshfs source's mount began keeping answers, so a change
   // made before it is not waited out.
   private since = new Map<string, number>()
+  // Whether the machine is a Mac, asked once; there each prefix the table is
+  // read for, and the real path each mounts at.
+  private darwin: boolean | null = null
+  private readonly looked = new Set<string>()
+  private readonly points = new Map<string, string>()
 
   /**
    * @param provider the machine's provider, for messages.
@@ -399,8 +414,12 @@ export class MachineMounts {
     return this.mountType === 'ssh' ? 'ssh' : 'mirage'
   }
 
-  /** The type the machine's mount table gives a prefix the host serves. */
+  /**
+   * The type the machine's mount table gives a prefix the host serves:
+   * macFUSE's on a Mac.
+   */
   private get kind(): string {
+    if (this.darwin === true) return MACFUSE_KIND
     return this.transport === 'ssh' ? 'fuse.sshfs' : 'fuse.mirage'
   }
 
@@ -548,6 +567,27 @@ export class MachineMounts {
     )
     for (const [p, entry] of this.own) held.set(p, entry)
     if (held.size === 0) return argv
+    if (this.darwin === true) {
+      const marks = [...held]
+        .sort(([a], [b]) => compareCodePoints(a, b))
+        .flatMap(([prefix, [source, kind]]) => [
+          this.points.get(prefix) ?? prefix,
+          source,
+          kind,
+          unmounted(this.provider, prefix),
+        ])
+      return [
+        '/bin/sh',
+        '-c',
+        DARWIN_MOUNT_GUARD,
+        'sh',
+        ...missing,
+        'mount',
+        ...marks,
+        '--',
+        ...argv,
+      ]
+    }
     const words = [...held]
       .sort(([a], [b]) => compareCodePoints(a, b))
       .flatMap(([prefix, [source, kind]]) => [
@@ -732,6 +772,7 @@ export class MachineMounts {
       return null
     }
     this.seen = null
+    for (const p of [...every, ...served, ...this.served.keys()]) this.looked.add(p)
     const present = await this.table(signal)
     for (const p of this.served.keys()) if (!ended.includes(p) && !present.has(p)) ended.push(p)
     const own = [...every]
@@ -782,6 +823,11 @@ export class MachineMounts {
     }
     if (fresh.length > 0) {
       const ssh = this.transport === 'ssh'
+      if (ssh && this.darwin === true) {
+        throw new Error(
+          `${this.provider}: mount_type ssh needs a Linux machine; a Mac takes mount_type mirage`,
+        )
+      }
       const make = pipeServers.get(this.transport)
       if (make === undefined) throw new Error(ssh ? PIPE_SERVER_HINT : FSPROTO_SERVER_HINT)
       if ((await this.run(ssh ? SSHFS_LINE : MIRAGE_FUSE_LINE, signal)).exitCode !== 0) {
@@ -836,7 +882,10 @@ export class MachineMounts {
   ): Promise<boolean> {
     const [source, kind] = present.get(prefix) ?? ['', '']
     if (!SERVED_KINDS.has(kind) || this.ours(source, prefix)) return false
-    const found = await this.run(runningLine(source), signal)
+    const found = await this.run(
+      this.darwin === true ? darwinRunningLine(source) : runningLine(source),
+      signal,
+    )
     if (found.exitCode !== 0 && found.exitCode !== 1) {
       throw new Error(
         `${this.provider}: cannot tell whether ${source} is served: ${said(found.stderr)}`,
@@ -871,18 +920,8 @@ export class MachineMounts {
     const [old, kind] = present.get(prefix) ?? ['', '']
     if (SERVED_KINDS.has(kind) && this.ours(old, prefix) && !this.sources.has(old))
       await this.reclaim(old, prefix, signal)
-    else if (SERVED_KINDS.has(kind)) await this.run(unmountLine(prefix), signal)
-    const path = singleQuote(prefix)
-    const made = await this.run(
-      `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
-        `sudo -n chown "$(id -u):$(id -g)" ${path}; }`,
-      signal,
-    )
-    if (made.exitCode !== 0) {
-      throw new Error(
-        `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
-      )
-    }
+    else if (SERVED_KINDS.has(kind)) await this.run(this.unmountLine(prefix), signal)
+    const point = await this.mountpoint(prefix, folder, signal)
     const logPath = `${folder}/${this.program}-${crypto.randomUUID().replaceAll('-', '')}.log`
     const log = singleQuote(logPath)
     this.serves += 1
@@ -890,8 +929,8 @@ export class MachineMounts {
     this.sources.add(source)
     const pipe = await this.openPipe(
       this.transport === 'ssh'
-        ? sshfsLine(source, prefix, logPath)
-        : mirageFuseLine(source, prefix, logPath),
+        ? sshfsLine(source, point, logPath)
+        : mirageFuseLine(source, point, logPath),
     )
     const entry: Served = {
       source,
@@ -972,7 +1011,7 @@ export class MachineMounts {
     const kill = new AbortController()
     const signal = mergeSignals(kill.signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000))
     this.kills.add(kill)
-    abortable(this.run(killLine(entry.source), signal), signal)
+    abortable(this.run(this.killLine(entry.source), signal), signal)
       .then(
         (killed) => {
           if (killed.exitCode !== 0) {
@@ -999,8 +1038,8 @@ export class MachineMounts {
    * fails loud rather than leaving the old mount to pass for the new one.
    */
   private async reclaim(source: string, prefix: string, signal?: AbortSignal): Promise<void> {
-    await this.run(killLine(source), signal)
-    const done = await this.run(unmountLine(prefix), signal)
+    await this.run(this.killLine(source), signal)
+    const done = await this.run(this.unmountLine(prefix), signal)
     if (done.exitCode !== 0) {
       throw new Error(
         `${this.provider}: cannot unmount ${prefix}, which this workspace served before a restart: ${said(done.stderr)}`,
@@ -1022,7 +1061,81 @@ export class MachineMounts {
     }
   }
 
+  /**
+   * Make `prefix` a folder the machine can mount on and answer where its
+   * mount shows: `prefix` itself, or on a Mac its real path
+   * (`darwinMountpointLine`), a link into Mirage's folder for a prefix in
+   * macOS's read-only root. Mirrors Python's `MachineMounts._mountpoint`.
+   *
+   * @param prefix the prefix to serve.
+   * @param folder Mirage's folder on the machine.
+   * @param signal stops the line.
+   */
+  private async mountpoint(prefix: string, folder: string, signal?: AbortSignal): Promise<string> {
+    if (this.darwin === true) {
+      const root = `${folder}/mnt`
+      const made = await this.run(darwinMountpointLine(prefix, root), signal)
+      if (made.exitCode === DARWIN_ADMIN_STATUS) {
+        throw new Error(darwinAdminHint(this.provider, prefix, root))
+      }
+      const point = said(made.stdout).split(/\r?\n/).at(-1) ?? ''
+      if (made.exitCode !== 0 || !point) {
+        throw new Error(
+          `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
+        )
+      }
+      this.points.set(prefix, point)
+      return point
+    }
+    const path = singleQuote(prefix)
+    const made = await this.run(
+      `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
+        `sudo -n chown "$(id -u):$(id -g)" ${path}; }`,
+      signal,
+    )
+    if (made.exitCode !== 0) {
+      throw new Error(
+        `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
+      )
+    }
+    return prefix
+  }
+
+  /** The command that unmounts `prefix`, at its real path on a Mac. */
+  private unmountLine(prefix: string): string {
+    if (this.darwin === true) return darwinUnmountLine(this.points.get(prefix) ?? prefix)
+    return unmountLine(prefix)
+  }
+
+  /** The command that kills what serves `source`. */
+  private killLine(source: string): string {
+    return this.darwin === true ? darwinKillLine(source) : killLine(source)
+  }
+
   private async table(signal?: AbortSignal): Promise<Map<string, [string, string]>> {
+    if (this.darwin === null) {
+      const asked = await this.run('uname -s', signal)
+      if (asked.exitCode !== 0) {
+        throw new Error(
+          `${this.provider}: cannot ask the machine its system: ${said(asked.stderr)}`,
+        )
+      }
+      this.darwin = said(asked.stdout) === 'Darwin'
+    }
+    if (this.darwin) {
+      const listed = await this.run(
+        darwinTableLine([...this.looked].sort(compareCodePoints)),
+        signal,
+      )
+      if (listed.exitCode !== 0) {
+        throw new Error(
+          `${this.provider}: cannot read the machine's mount table: ${said(listed.stderr)}`,
+        )
+      }
+      const [rows, points] = darwinMountTable(DECODER.decode(listed.stdout))
+      for (const [prefix, point] of points) this.points.set(prefix, point)
+      return rows
+    }
     const listed = await this.run('cat /proc/mounts', signal)
     if (listed.exitCode !== 0) {
       throw new Error(
@@ -1046,7 +1159,7 @@ export class MachineMounts {
     this.under.delete(prefix)
     if (present.get(prefix)?.[0] === entry.source) {
       try {
-        const done = await this.run(unmountLine(prefix))
+        const done = await this.run(this.unmountLine(prefix))
         if (done.exitCode !== 0) {
           console.warn(
             `${this.provider}: unmounting ${prefix} in the machine failed: ${said(done.stderr)}`,

@@ -122,7 +122,7 @@ class _Sleeper(MachineHandle):
         self.rows = []
         return RunResult(exit_code=self.code)
 
-    async def status(self, workspace):
+    async def status(self, workspace, roots=None):
         return [r for r in self.rows if r.tag.startswith(f"{workspace}:")]
 
     async def signal(self, target, signum):
@@ -805,7 +805,7 @@ class _Dropping(_Leaver):
 
     dropped = False
 
-    async def status(self, workspace):
+    async def status(self, workspace, roots=None):
         if not self.dropped:
             self.dropped = True
             raise ConnectionError("connection lost")
@@ -842,7 +842,7 @@ class _Shared(_Sleeper):
         self.rows_of.pop(self.name, None)
         return RunResult(exit_code=143)
 
-    async def status(self, workspace):
+    async def status(self, workspace, roots=None):
         return [
             r
             for rows in self.rows_of.values()

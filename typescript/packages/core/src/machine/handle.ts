@@ -50,7 +50,7 @@ import {
   STOP_POLL_SECONDS,
   faketimeEnv,
   faketimeProbe,
-  resourcesLine,
+  machineResourcesLine,
   runArgv,
   runDoneMark,
   runExitMark,
@@ -58,7 +58,7 @@ import {
   signalLine,
   stopLine,
 } from './constants.ts'
-import { parseResources } from './resources.ts'
+import { parseMachineResources } from './resources.ts'
 import { ConnectionLostError } from './errors.ts'
 import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
@@ -501,11 +501,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       for (const filter of filters) await filter.finish()
     } catch (error) {
       if (ctx.signal?.aborted === true) {
-        await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15, root(reported))
         throw error
       }
       if (error instanceof PipeClosed) {
-        await this.stop(tag, PIPE_SIGNAL)
+        await this.stop(tag, PIPE_SIGNAL, root(reported))
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
@@ -605,25 +605,30 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * Python's `MachineHandle.status`.
    *
    * @param workspace the workspace's id.
+   * @param roots each run's program on the machine, by its pid: its tag and
+   *   start, which a Mac knows a run by.
    */
-  async status(workspace: string): Promise<MachineProcess[]> {
-    const done = await this.connectedLine(scanLine(workspace), SCAN_WAIT_SECONDS)
+  async status(
+    workspace: string,
+    roots: ReadonlyMap<number, readonly [string, number]> = new Map(),
+  ): Promise<MachineProcess[]> {
+    const done = await this.connectedLine(scanLine(workspace, roots), SCAN_WAIT_SECONDS)
     if (done.exitCode !== 0)
       throw new Error(`${this.machine.toString()}: scan exited ${String(done.exitCode)}`)
     return parseScan(done.stdout)
   }
 
   /**
-   * What the machine holds now (`resourcesLine`), within
+   * What the machine holds now (`machineResourcesLine`), within
    * `RESOURCE_WAIT_SECONDS`. Mirrors Python's `resources`.
    *
    * @param cpu read the processors' time and the process states too.
    */
   async resources(cpu: boolean): Promise<MachineResources> {
-    const done = await this.connectedLine(resourcesLine(cpu), RESOURCE_WAIT_SECONDS)
+    const done = await this.connectedLine(machineResourcesLine(cpu), RESOURCE_WAIT_SECONDS)
     if (done.exitCode !== 0)
       throw new Error(`${this.machine.toString()}: read exited ${String(done.exitCode)}`)
-    return parseResources(new TextDecoder().decode(done.stdout), this.machine.toString())
+    return parseMachineResources(new TextDecoder().decode(done.stdout), this.machine.toString())
   }
 
   /**
@@ -657,8 +662,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    *
    * @param tag the id of the process the run is, as `PROCESS` carries it.
    * @param signum the first signal.
+   * @param root the run's program, as its wrapper reported it; null when it
+   *   did not.
    */
-  async stop(tag: string, signum: number): Promise<boolean> {
+  async stop(tag: string, signum: number, root: MachinePid | null = null): Promise<boolean> {
     const signal = AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000)
     try {
       await this.ensureConnected(signal)
@@ -666,7 +673,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         this.busyWith(() =>
           answerOf((output, errors) =>
             this.execArgv(
-              ['/bin/sh', '-c', stopLine(tag, signum)],
+              ['/bin/sh', '-c', stopLine(tag, signum, root)],
               null,
               { ...this.config.env },
               '/',
@@ -1000,6 +1007,16 @@ function usageOf(
     rss,
     vsz: Math.floor(vsize / 1024),
   }
+}
+
+/**
+ * The program a run's wrapper reported, which a Mac stops a run by; null
+ * before it did. Mirrors Python's `_root`.
+ */
+function root(reported: readonly RunStatus[]): MachinePid | null {
+  const report = reported[0]
+  if (report?.started == null) return null
+  return { pid: report.pid, started: report.started, exited: null }
 }
 
 /**

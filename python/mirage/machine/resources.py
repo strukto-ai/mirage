@@ -285,3 +285,16 @@ def parse_darwin_resources(text: str, machine: str) -> MachineResources:
         hostname=facts.get("host", ""),
         cpu_info=_cpu_info(rows),
     )
+
+
+def parse_machine_resources(text: str, machine: str) -> MachineResources:
+    """What ``machine_resources_line`` printed: a Mac's rows, which name
+    its memory size, or a Linux machine's.
+
+    Args:
+        text (str): what the line printed.
+        machine (str): the machine, as ``ps`` shows it.
+    """
+    if f"\n{RESOURCE_MARK} memsize " in f"\n{text}":
+        return parse_darwin_resources(text, machine)
+    return parse_resources(text, machine)

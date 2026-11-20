@@ -30,6 +30,9 @@ from mirage.context import (
 )
 from mirage.errors.fs import strerror_of
 from mirage.machine.constants import (
+    DARWIN_ADMIN_STATUS,
+    DARWIN_MOUNT_GUARD,
+    MACFUSE_KIND,
     MIRAGE_FUSE_FIND,
     MIRAGE_FUSE_HINT,
     MIRAGE_FUSE_LINE,
@@ -44,6 +47,13 @@ from mirage.machine.constants import (
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
+    darwin_admin_hint,
+    darwin_kill_line,
+    darwin_mount_table,
+    darwin_mountpoint_line,
+    darwin_running_line,
+    darwin_table_line,
+    darwin_unmount_line,
     machine_dir_line,
     mount_field,
 )
@@ -435,6 +445,11 @@ class MachineMounts:
         # by the mount's row, which the registry builds anew whenever its
         # mounts change.
         self._directories: dict[str, tuple[MountRow | None, bool]] = {}
+        # Whether the machine is a Mac, asked once; there each prefix the
+        # table is read for, and the real path each mounts at.
+        self._darwin: bool | None = None
+        self._looked: set[str] = set()
+        self._points: dict[str, str] = {}
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -451,7 +466,9 @@ class MachineMounts:
     @property
     def _kind(self) -> str:
         """The type the machine's mount table gives a prefix the host
-        serves."""
+        serves: macFUSE's on a Mac."""
+        if self._darwin:
+            return MACFUSE_KIND
         return "fuse.sshfs" if self._transport == "ssh" else "fuse.mirage"
 
     @property
@@ -639,6 +656,26 @@ class MachineMounts:
         } | self._own
         if not held:
             return argv
+        if self._darwin:
+            marks: list[str] = []
+            for prefix, (source, kind) in sorted(held.items()):
+                marks += [
+                    self._points.get(prefix, prefix),
+                    source,
+                    kind,
+                    unmounted(self._provider, prefix),
+                ]
+            return (
+                "/bin/sh",
+                "-c",
+                DARWIN_MOUNT_GUARD,
+                "sh",
+                *missing,
+                "mount",
+                *marks,
+                "--",
+                *argv,
+            )
         words: list[str] = []
         for prefix, (source, kind) in sorted(held.items()):
             words += [
@@ -864,6 +901,7 @@ class MachineMounts:
         ):
             return None
         self._seen = None
+        self._looked |= set(every) | set(served) | set(self._served)
         present = await self._table()
         ended += [
             p for p in self._served if p not in ended and p not in present
@@ -924,6 +962,11 @@ class MachineMounts:
                 )
         if new:
             ssh = self._transport == "ssh"
+            if ssh and self._darwin:
+                raise RuntimeError(
+                    f"{self._provider}: mount_type ssh needs a Linux machine; "
+                    "a Mac takes mount_type mirage"
+                )
             server = pipe_server(self._transport)
             line = SSHFS_LINE if ssh else MIRAGE_FUSE_LINE
             if (await self._run(line)).exit_code != 0:
@@ -989,7 +1032,11 @@ class MachineMounts:
         source, kind = present.get(prefix, ("", ""))
         if kind not in SERVED_KINDS or self._ours(source, prefix):
             return False
-        found = await self._run(running_line(source))
+        found = await self._run(
+            darwin_running_line(source)
+            if self._darwin
+            else running_line(source)
+        )
         if found.exit_code not in (0, 1):
             raise RuntimeError(
                 f"{self._provider}: cannot tell whether {source} is served: "
@@ -1028,26 +1075,17 @@ class MachineMounts:
         ):
             await self._reclaim(old, prefix)
         elif kind in SERVED_KINDS:
-            await self._run(unmount_line(prefix))
-        path = single_quote(prefix)
-        made = await self._run(
-            f"mkdir -p {path} 2>/dev/null || {{ sudo -n mkdir -p {path} && "
-            f'sudo -n chown "$(id -u):$(id -g)" {path}; }}'
-        )
-        if made.exit_code != 0:
-            raise RuntimeError(
-                f"{self._provider}: cannot make {prefix} in the machine: "
-                f"{said(made.stderr)}"
-            )
+            await self._run(self._unmount_line(prefix))
+        point = await self._mountpoint(prefix, folder)
         log_path = f"{folder}/{self._program}-{uuid.uuid4().hex}.log"
         log = single_quote(log_path)
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
         pipe = await self._open_pipe(
-            sshfs_line(source, prefix, log_path)
+            sshfs_line(source, point, log_path)
             if self._transport == "ssh"
-            else mirage_fuse_line(source, prefix, log_path)
+            else mirage_fuse_line(source, point, log_path)
         )
         context = Context()
         context.run(SERVED_BY.set, self._machine)
@@ -1153,7 +1191,7 @@ class MachineMounts:
         """
         try:
             killed = await asyncio.wait_for(
-                self._run(kill_line(source)), UNMOUNT_WAIT_SECONDS
+                self._run(self._kill_line(source)), UNMOUNT_WAIT_SECONDS
             )
         except Exception:
             logger.warning(
@@ -1184,8 +1222,8 @@ class MachineMounts:
             source (str): the stale mount's source.
             prefix (str): its mountpoint.
         """
-        await self._run(kill_line(source))
-        done = await self._run(unmount_line(prefix))
+        await self._run(self._kill_line(source))
+        done = await self._run(self._unmount_line(prefix))
         if done.exit_code != 0:
             raise RuntimeError(
                 f"{self._provider}: cannot unmount {prefix}, which this "
@@ -1208,7 +1246,83 @@ class MachineMounts:
                 "could not remove sshfs log: %s", said(removed.stderr)
             )
 
+    async def _mountpoint(self, prefix: str, folder: str) -> str:
+        """Make ``prefix`` a folder the machine can mount on and return
+        where its mount shows: ``prefix`` itself, or on a Mac its real
+        path (``darwin_mountpoint_line``), a link into Mirage's folder
+        for a prefix in macOS's read-only root.
+
+        Args:
+            prefix (str): the prefix to serve.
+            folder (str): Mirage's folder on the machine.
+        """
+        if self._darwin:
+            root = f"{folder}/mnt"
+            made = await self._run(darwin_mountpoint_line(prefix, root))
+            if made.exit_code == DARWIN_ADMIN_STATUS:
+                raise RuntimeError(
+                    darwin_admin_hint(self._provider, prefix, root)
+                )
+            point = said(made.stdout).splitlines()[-1:]
+            if made.exit_code != 0 or not point:
+                raise RuntimeError(
+                    f"{self._provider}: cannot make {prefix} in the machine: "
+                    f"{said(made.stderr)}"
+                )
+            self._points[prefix] = point[0]
+            return point[0]
+        path = single_quote(prefix)
+        made = await self._run(
+            f"mkdir -p {path} 2>/dev/null || {{ sudo -n mkdir -p {path} && "
+            f'sudo -n chown "$(id -u):$(id -g)" {path}; }}'
+        )
+        if made.exit_code != 0:
+            raise RuntimeError(
+                f"{self._provider}: cannot make {prefix} in the machine: "
+                f"{said(made.stderr)}"
+            )
+        return prefix
+
+    def _unmount_line(self, prefix: str) -> str:
+        """The command that unmounts ``prefix``, at its real path on a
+        Mac.
+
+        Args:
+            prefix (str): the mountpoint.
+        """
+        if self._darwin:
+            return darwin_unmount_line(self._points.get(prefix, prefix))
+        return unmount_line(prefix)
+
+    def _kill_line(self, source: str) -> str:
+        """The command that kills what serves ``source``.
+
+        Args:
+            source (str): the mount's source.
+        """
+        return darwin_kill_line(source) if self._darwin else kill_line(source)
+
     async def _table(self) -> dict[str, tuple[str, str]]:
+        if self._darwin is None:
+            asked = await self._run("uname -s")
+            if asked.exit_code != 0:
+                raise RuntimeError(
+                    f"{self._provider}: cannot ask the machine its system: "
+                    f"{said(asked.stderr)}"
+                )
+            self._darwin = said(asked.stdout) == "Darwin"
+        if self._darwin:
+            listed = await self._run(darwin_table_line(sorted(self._looked)))
+            if listed.exit_code != 0:
+                raise RuntimeError(
+                    f"{self._provider}: cannot read the machine's mount "
+                    f"table: {said(listed.stderr)}"
+                )
+            rows, points = darwin_mount_table(
+                listed.stdout.decode(errors="replace")
+            )
+            self._points.update(points)
+            return rows
         listed = await self._run("cat /proc/mounts")
         if listed.exit_code != 0:
             raise RuntimeError(
@@ -1231,7 +1345,7 @@ class MachineMounts:
         self._under.pop(prefix, None)
         if present.get(prefix, ("", ""))[0] == source:
             try:
-                done = await self._run(unmount_line(prefix))
+                done = await self._run(self._unmount_line(prefix))
                 if done.exit_code != 0:
                     logger.warning(
                         "%s: unmounting %s in the machine failed: %s",

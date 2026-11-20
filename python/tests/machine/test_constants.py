@@ -16,12 +16,16 @@ import os
 import pathlib
 import stat
 import subprocess
+import sys
+import time
 import tomllib
 import uuid
 
 import pytest
 
+from mirage.execution.types import MachinePid
 from mirage.machine.constants import (
+    DARWIN_POINT_MARK,
     ENCODE_OUTPUT,
     MIRAGE_FUSE_FIND,
     MIRAGE_FUSE_LINE,
@@ -34,6 +38,9 @@ from mirage.machine.constants import (
     SSHFS_LINE,
     SSHFS_OPTIONS,
     TOOLS_PATH,
+    darwin_mount_table,
+    darwin_start,
+    darwin_table_line,
     decode_output,
     machine_dir_line,
     mount_field,
@@ -41,9 +48,12 @@ from mirage.machine.constants import (
     run_done_mark,
     run_exit_mark,
     run_tag,
+    scan_line,
+    signal_line,
     stop_line,
     wrap_line,
 )
+from mirage.machine.handle import _parse_scan
 from mirage.mount.constants import FSPROTO_VERSION
 
 PRELUDE = '/bin/sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
@@ -670,3 +680,81 @@ def test_mirage_fuse_line_takes_the_path_one_past_a_stale_home_one(tmp_path):
 
 def test_mirage_fuse_line_fails_without_uv_or_npm(tmp_path):
     assert _mirage_fuse_line(tmp_path, []) == (1, [])
+
+
+def test_a_macs_mount_table_names_each_prefix_by_its_real_path():
+    rows, points = darwin_mount_table(
+        "/dev/disk3s1 on / (apfs, local, read-only, journaled)\n"
+        "src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, "
+        "synchronous, nobrowse, mounted by u)\n"
+        "map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n"
+        f"{DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n"
+        f"{DARWIN_POINT_MARK}/notes\t/notes\n"
+    )
+    assert rows == {"/data": ("src-1:/data", "macfuse")}
+    assert points == {"/data": "/home/u/.mirage/mnt/data", "/notes": "/notes"}
+
+
+MAC = pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac's ps")
+
+
+def _sh(line):
+    return subprocess.run(
+        ["/bin/sh", "-c", line], capture_output=True, text=True
+    )
+
+
+@MAC
+def test_a_macs_table_line_follows_a_link_to_its_real_path(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    done = _sh(darwin_table_line([f"{tmp_path}/link/ws"]))
+    _, points = darwin_mount_table(done.stdout)
+    assert points == {f"{tmp_path}/link/ws": f"{real.resolve()}/ws"}
+
+
+@MAC
+def test_a_mac_knows_a_run_by_its_program_and_what_runs_under_it():
+    tagged = {**os.environ, PROCESS: "w1:9"}
+    untagged = {k: v for k, v in os.environ.items() if k != PROCESS}
+    wrapper = subprocess.Popen(
+        ["/bin/sh", "-c", "/bin/sleep 30", "sh", f"{PROCESS}=w1:9"],
+        env=untagged,
+    )
+    other = subprocess.Popen(
+        ["/bin/sh", "-c", "exec /bin/sleep 31"],
+        env={**os.environ, PROCESS: "w1:90"},
+    )
+    program = subprocess.Popen(
+        ["/bin/sh", "-c", "/bin/sleep 32 & wait"], env=tagged
+    )
+    try:
+        time.sleep(0.5)
+        started = float(_sh(darwin_start(str(program.pid))).stdout)
+        rows = _parse_scan(
+            _sh(
+                scan_line("w1", {program.pid: ("w1:9", started)})
+            ).stdout.encode()
+        )
+        assert {(r.tag, r.ppid == program.pid or r.pid) for r in rows} == {
+            ("w1:9", program.pid),
+            ("w1:9", True),
+        }
+        stale = MachinePid(program.pid, started + 100)
+        assert _sh(signal_line(stale, 0)).returncode == NOT_RUNNING_STATUS
+        assert (
+            _sh(signal_line(MachinePid(program.pid, started), 0)).returncode
+            == 0
+        )
+        root = MachinePid(program.pid, started)
+        assert _sh(stop_line("w1:9", 15, root)).returncode == 0
+        assert program.wait(5) != 0
+        assert (
+            _sh(stop_line("w1:9", 15, root)).returncode == NOT_RUNNING_STATUS
+        )
+        assert wrapper.poll() is None and other.poll() is None
+    finally:
+        for left in (wrapper, other, program):
+            left.kill()
+            left.wait(5)

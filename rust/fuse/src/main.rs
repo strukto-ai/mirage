@@ -1,8 +1,8 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 mod link;
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 mod proto;
 
 use std::process::ExitCode;
@@ -24,10 +24,10 @@ fn main() -> ExitCode {
 
 /// Mount `source`'s prefix at `mountpoint` and answer the kernel from what
 /// the host serves on stdin and stdout, until the host closes the pipe.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn serve(source: &str, mountpoint: &str) -> ExitCode {
     use fs::{MirageFs, Note, Shared};
-    use fuser::{Config, INodeNo, MountOption, Session};
+    use fuser::{Config, INodeNo};
     use serde_json::{Map, json};
     use std::ffi::OsStr;
     use std::io;
@@ -64,20 +64,9 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    let mut config = Config::default();
-    config.mount_options = vec![
-        MountOption::FSName(source.to_string()),
-        MountOption::Subtype("mirage".into()),
-        MountOption::NoDev,
-        MountOption::NoSuid,
-    ];
-    config.n_threads = Some(8);
+    let config = Config::default();
     let fs = MirageFs::new(link.clone(), shared);
-    let (mounted, direct) = match mount_direct(source, mountpoint) {
-        Ok(Some(fd)) => (Session::from_fd(fs, fd, config.acl, config), true),
-        Ok(None) => (Session::new(fs, mountpoint, &config), false),
-        Err(err) => (Err(err), false),
-    };
+    let (mounted, direct) = mount(fs, source, mountpoint, config);
     let failed = |doing: &str, err: io::Error| {
         eprintln!("mirage-fuse: {doing} {mountpoint} failed: {err}");
         if direct {
@@ -128,6 +117,123 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
     let _ = reader.join();
     unmount(mountpoint);
     std::process::exit(0)
+}
+
+/// The session for `mountpoint`, and whether this process mounted it
+/// itself, so it unmounts it when serving fails: mount(2) when it may, else
+/// fusermount3 through fuser.
+#[cfg(target_os = "linux")]
+fn mount(
+    fs: fs::MirageFs,
+    source: &str,
+    mountpoint: &str,
+    mut config: fuser::Config,
+) -> (std::io::Result<fuser::Session<fs::MirageFs>>, bool) {
+    use fuser::{MountOption, Session};
+
+    config.n_threads = Some(8);
+    config.mount_options = vec![
+        MountOption::FSName(source.to_string()),
+        MountOption::Subtype("mirage".into()),
+        MountOption::NoDev,
+        MountOption::NoSuid,
+    ];
+    match mount_direct(source, mountpoint) {
+        Ok(Some(fd)) => (Session::from_fd(fs, fd, config.acl, config), true),
+        Ok(None) => (Session::new(fs, mountpoint, &config), false),
+        Err(err) => (Err(err), false),
+    }
+}
+
+/// The session for `mountpoint`, mounted through macFUSE, read from one
+/// thread: fuser serves the device from several on Linux alone.
+#[cfg(target_os = "macos")]
+fn mount(
+    fs: fs::MirageFs,
+    source: &str,
+    mountpoint: &str,
+    mut config: fuser::Config,
+) -> (std::io::Result<fuser::Session<fs::MirageFs>>, bool) {
+    config.n_threads = Some(1);
+    let session = mount_macfuse(source, mountpoint)
+        .and_then(|fd| fuser::Session::from_fd(fs, fd, config.acl, config));
+    (session, true)
+}
+
+/// macFUSE's options for a mount: `fsname` names it as the
+/// host looks for it, it reads nothing ahead of a program, keeps Finder's
+/// `._` files and `com.apple` attributes out of the workspace, stays off
+/// the desktop, raises no dialog, and waits for the host as long as a call
+/// may take.
+#[cfg(target_os = "macos")]
+const MACFUSE_OPTIONS: &str =
+    "nosuid,noreadahead,noappledouble,noapplexattr,nobrowse,noalerts,daemon_timeout=600";
+
+/// Where macFUSE installs its libfuse.
+#[cfg(target_os = "macos")]
+const MACFUSE_LIBRARY: &std::ffi::CStr = c"/usr/local/lib/libfuse.2.dylib";
+
+/// Mount `mountpoint` through macFUSE's libfuse, which this process loads
+/// only now, so the binary runs and names its version on a Mac without
+/// macFUSE, and links nothing of it. libfuse's channel stays open until the
+/// process ends: macFUSE finishes the mount once the session answers the
+/// kernel's first request.
+#[cfg(target_os = "macos")]
+fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd::OwnedFd> {
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
+    use std::io::{Error, ErrorKind};
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    #[repr(C)]
+    struct Args {
+        argc: c_int,
+        argv: *const *const c_char,
+        allocated: c_int,
+    }
+    type Mount = unsafe extern "C" fn(*const c_char, *const Args) -> *mut c_void;
+    type ChannelFd = unsafe extern "C" fn(*mut c_void) -> c_int;
+
+    let library = unsafe { libc::dlopen(MACFUSE_LIBRARY.as_ptr(), libc::RTLD_NOW) };
+    if library.is_null() {
+        return Err(Error::new(ErrorKind::NotFound, "macFUSE is not installed"));
+    }
+    let symbol = |name: &CStr| {
+        let found = unsafe { libc::dlsym(library, name.as_ptr()) };
+        if found.is_null() {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                format!("macFUSE's libfuse has no {}", name.to_string_lossy()),
+            ))
+        } else {
+            Ok(found)
+        }
+    };
+    let mount: Mount = unsafe { std::mem::transmute::<*mut c_void, Mount>(symbol(c"fuse_mount")?) };
+    let channel_fd: ChannelFd =
+        unsafe { std::mem::transmute::<*mut c_void, ChannelFd>(symbol(c"fuse_chan_fd")?) };
+    let bad = |_| Error::from(ErrorKind::InvalidInput);
+    let options = format!("fsname={},{MACFUSE_OPTIONS}", source.replace(',', "\\,"));
+    let argv = [
+        CString::new("mirage-fuse").map_err(bad)?,
+        CString::new("-o").map_err(bad)?,
+        CString::new(options).map_err(bad)?,
+    ];
+    let pointers: Vec<*const c_char> = argv.iter().map(|arg| arg.as_ptr()).collect();
+    let args = Args {
+        argc: pointers.len() as c_int,
+        argv: pointers.as_ptr(),
+        allocated: 0,
+    };
+    let target = CString::new(mountpoint).map_err(bad)?;
+    let channel = unsafe { mount(target.as_ptr(), &args) };
+    if channel.is_null() {
+        return Err(Error::other("macFUSE refused the mount"));
+    }
+    let fd = unsafe { channel_fd(channel) };
+    if fd < 0 {
+        return Err(Error::other("macFUSE gave the mount no device"));
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// Mount `/dev/fuse` at `mountpoint` as `fuse.mirage` when this process
@@ -204,9 +310,23 @@ fn unmount(mountpoint: &str) {
     }
 }
 
+/// Detach the mount; one no longer mounted is left alone, and one a
+/// program holds open is forced off.
+#[cfg(target_os = "macos")]
+fn unmount(mountpoint: &str) {
+    let Ok(target) = std::ffi::CString::new(mountpoint) else {
+        return;
+    };
+    if unsafe { libc::unmount(target.as_ptr(), 0) } != 0
+        && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBUSY)
+    {
+        unsafe { libc::unmount(target.as_ptr(), libc::MNT_FORCE) };
+    }
+}
+
 /// The protocol is named only where the binary can serve it, so a host's
-/// install check on a machine without Linux FUSE refuses it.
-#[cfg(target_os = "linux")]
+/// install check on a machine it cannot mount on refuses it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn version() -> String {
     format!(
         "mirage-fuse {} fsproto {}",
@@ -215,16 +335,16 @@ fn version() -> String {
     )
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn version() -> String {
     format!(
-        "mirage-fuse {} (serving needs Linux)",
+        "mirage-fuse {} (serving needs Linux or macOS)",
         env!("CARGO_PKG_VERSION")
     )
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn serve(_source: &str, _mountpoint: &str) -> ExitCode {
-    eprintln!("mirage-fuse: serving needs Linux");
+    eprintln!("mirage-fuse: serving needs Linux or macOS");
     ExitCode::from(1)
 }

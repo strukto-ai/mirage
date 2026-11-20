@@ -14,6 +14,22 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// A mode's file-type bits as fsproto carries them: POSIX's, on every
+/// platform, though macOS's `mode_t` is 16 bits and Linux's 32.
+const S_IFMT: u32 = 0o170000;
+const S_IFDIR: u32 = 0o040000;
+const S_IFREG: u32 = 0o100000;
+const S_IFLNK: u32 = 0o120000;
+const S_IFIFO: u32 = 0o010000;
+const S_IFSOCK: u32 = 0o140000;
+const S_IFCHR: u32 = 0o020000;
+const S_IFBLK: u32 = 0o060000;
+/// The errno a missing extended attribute answers: Linux's ENODATA,
+/// macOS's ENOATTR.
+#[cfg(target_os = "linux")]
+const NO_XATTR: i32 = libc::ENODATA;
+#[cfg(target_os = "macos")]
+const NO_XATTR: i32 = libc::ENOATTR;
 /// How long the kernel and the client keep an answer the host gave no
 /// directive to keep: `KERNEL_CACHE_SECONDS`, as sshfs keeps one.
 const SHORT: Duration = Duration::from_secs(1);
@@ -67,7 +83,7 @@ impl Attrs {
     }
 
     fn is(&self, kind: u32) -> bool {
-        self.mode & libc::S_IFMT == kind
+        self.mode & S_IFMT == kind
     }
 
     /// What content cached under these attributes is: its size and mtime.
@@ -283,12 +299,36 @@ fn errno(condition: &str) -> Errno {
         "EPIPE" => libc::EPIPE,
         "ESTALE" => libc::ESTALE,
         "ENOTSUP" | "EOPNOTSUPP" => libc::EOPNOTSUPP,
-        "ENODATA" | "ENOATTR" => libc::ENODATA,
+        "ENODATA" | "ENOATTR" => NO_XATTR,
         "ERANGE" => libc::ERANGE,
         "EAGAIN" => libc::EAGAIN,
         "ENOSYS" => libc::ENOSYS,
         _ => libc::EIO,
     })
+}
+
+/// Whether a rename swaps the two names, and whether it refuses to replace
+/// one: renameat2's flags on Linux, renamex_np's on macOS.
+#[cfg(target_os = "linux")]
+fn rename_flags(flags: RenameFlags) -> (bool, bool) {
+    (
+        flags.contains(RenameFlags::RENAME_EXCHANGE),
+        flags.contains(RenameFlags::RENAME_NOREPLACE),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn rename_flags(flags: RenameFlags) -> (bool, bool) {
+    (
+        flags.bits() & libc::RENAME_SWAP != 0,
+        flags.bits() & libc::RENAME_EXCL != 0,
+    )
+}
+
+/// setxattr's flags as fsproto carries them, Linux's values (create 1,
+/// replace 2), from the platform's (macOS's are 2 and 4).
+fn xattr_flags(flags: i32) -> i32 {
+    i32::from(flags & libc::XATTR_CREATE != 0) | i32::from(flags & libc::XATTR_REPLACE != 0) << 1
 }
 
 fn failed(failure: Failure) -> Errno {
@@ -496,13 +536,13 @@ impl MirageFs {
     }
 
     fn attr(&self, ino: u64, a: &Attrs) -> FileAttr {
-        let kind = match a.mode & libc::S_IFMT {
-            libc::S_IFDIR => FileType::Directory,
-            libc::S_IFLNK => FileType::Symlink,
-            libc::S_IFIFO => FileType::NamedPipe,
-            libc::S_IFSOCK => FileType::Socket,
-            libc::S_IFCHR => FileType::CharDevice,
-            libc::S_IFBLK => FileType::BlockDevice,
+        let kind = match a.mode & S_IFMT {
+            S_IFDIR => FileType::Directory,
+            S_IFLNK => FileType::Symlink,
+            S_IFIFO => FileType::NamedPipe,
+            S_IFSOCK => FileType::Socket,
+            S_IFCHR => FileType::CharDevice,
+            S_IFBLK => FileType::BlockDevice,
             _ => FileType::RegularFile,
         };
         FileAttr {
@@ -772,7 +812,7 @@ impl MirageFs {
         let mut dots = Vec::new();
         if offset < 2 {
             let dot = self.stat(&dir).unwrap_or(Attrs {
-                mode: libc::S_IFDIR | 0o755,
+                mode: S_IFDIR | 0o755,
                 size: 0,
                 atime: 0.0,
                 mtime: 0.0,
@@ -1068,7 +1108,8 @@ impl Filesystem for MirageFs {
         flags: RenameFlags,
         reply: ReplyEmpty,
     ) {
-        if flags.contains(RenameFlags::RENAME_EXCHANGE) {
+        let (exchange, noreplace) = rename_flags(flags);
+        if exchange {
             return reply.error(Errno::EINVAL);
         }
         let (Some(dir), Some(newdir), Ok(name), Ok(newname)) = (
@@ -1080,7 +1121,6 @@ impl Filesystem for MirageFs {
             return reply.error(Errno::ENOENT);
         };
         let (from, to) = (child(&dir, name), child(&newdir, newname));
-        let noreplace = flags.contains(RenameFlags::RENAME_NOREPLACE);
         match self.call(
             "rename",
             json!({ "from": from, "to": to, "noreplace": noreplace }),
@@ -1142,7 +1182,7 @@ impl Filesystem for MirageFs {
         if !writes
             && let Ok(attrs) = self.stat(&path)
             && attrs.kept
-            && attrs.is(libc::S_IFREG)
+            && attrs.is(S_IFREG)
             && attrs.size <= WHOLE_FILE
         {
             if let Some(data) = self.cached(&path, &attrs) {
@@ -1424,7 +1464,7 @@ impl Filesystem for MirageFs {
         };
         match self.call(
             "setxattr",
-            json!({ "path": path, "name": name, "flags": flags }),
+            json!({ "path": path, "name": name, "flags": xattr_flags(flags) }),
             value,
         ) {
             Ok(_) => reply.ok(),
@@ -1440,7 +1480,7 @@ impl Filesystem for MirageFs {
         // capabilities to drop; on a nosuid mount none apply, so the answer
         // needs no round trip.
         if name == "security.capability" {
-            return reply.error(Errno::ENODATA);
+            return reply.error(Errno::NO_XATTR);
         }
         match self.call("getxattr", json!({ "path": path, "name": name }), &[]) {
             Ok(frame) if size == 0 => reply.size(frame.body.len() as u32),
@@ -1544,6 +1584,19 @@ mod tests {
 
     fn attrs(kept: bool) -> Attrs {
         Attrs::parse(&json!({"m": 0o100644, "s": 3, "t": 1000.0}), kept, false).unwrap()
+    }
+
+    #[test]
+    fn setxattr_flags_reach_the_host_as_linux_numbers_them() {
+        assert_eq!(xattr_flags(0), 0);
+        assert_eq!(xattr_flags(libc::XATTR_CREATE), 1);
+        assert_eq!(xattr_flags(libc::XATTR_REPLACE), 2);
+    }
+
+    #[test]
+    fn a_mode_reads_by_posix_file_type_bits() {
+        assert!(attrs(false).is(S_IFREG));
+        assert!(!attrs(false).is(S_IFDIR));
     }
 
     /// The host end of a client's pipe, played by the test: each request

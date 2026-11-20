@@ -37,6 +37,11 @@ import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import {
+  DARWIN_ADMIN_STATUS,
+  DARWIN_MOUNT_GUARD,
+  DARWIN_PATH,
+  DARWIN_POINT_MARK,
+  darwinAdminHint,
   isRun,
   MIRAGE_FUSE_LINE,
   MOUNT_GUARD,
@@ -289,6 +294,127 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     const [source] = this.table.get(prefix) ?? ['']
     this.table.delete(prefix)
     this.running.delete(source)
+  }
+}
+
+/**
+ * A Mac: no `/proc`, a table `mount` prints at each mount's real path, and a
+ * root folder only where a link in `/etc/synthetic.conf` leads it into
+ * Mirage's folder (`linked`).
+ */
+class FakeMac extends FakeMachine {
+  readonly linked: Set<string>
+
+  constructor(mountType: MountType, linked: readonly string[] = []) {
+    super(mountType)
+    this.linked = new Set(linked)
+  }
+
+  real(prefix: string): string {
+    return this.linked.has(prefix) ? `/home/u/.mirage/mnt${prefix}` : prefix
+  }
+
+  mountRows(): string {
+    return [...this.table]
+      .map(([point, [source, kind]]) => `${source} on ${point} (${kind}, nodev, nosuid)\n`)
+      .join('')
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    let run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
+    if (run[2] === DARWIN_MOUNT_GUARD) {
+      const checked = this.runMacGuard(run)
+      if (checked.exitCode !== 0) {
+        if (checked.stdout.byteLength > 0) await output(checked.stdout)
+        if (checked.stderr.byteLength > 0) await errors(checked.stderr)
+        return { exitCode: checked.exitCode }
+      }
+      run = run.slice(run.indexOf('--', 5) + 1)
+    }
+    return super.execArgv(run, stdin, env, cwd, output, errors, signal)
+  }
+
+  override execLine(
+    line: string,
+    stdin?: ByteSource | null,
+    env?: Record<string, string>,
+    cwd?: string,
+    signal?: AbortSignal,
+  ): Promise<RunAnswer> {
+    if (line === 'uname -s') {
+      this.commands.push(line)
+      return Promise.resolve(answer('Darwin\n'))
+    }
+    if (line.startsWith(`PATH=${DARWIN_PATH}; mount || exit 1;`)) {
+      this.commands.push(line)
+      const listed = line.split('for p in ')[1]?.split('; do')[0] ?? ''
+      const points = words(listed)
+        .map((p) => `${DARWIN_POINT_MARK}${p}\t${this.real(p)}\n`)
+        .join('')
+      return Promise.resolve(answer(this.mountRows() + points))
+    }
+    if (line.startsWith(`PATH=${DARWIN_PATH}; p=`)) {
+      this.commands.push(line)
+      const prefix = /; p='([^']*)';/.exec(line)?.[1] ?? ''
+      if (prefix.split('/').length === 2 && !this.linked.has(prefix)) {
+        return Promise.resolve(answer('', DARWIN_ADMIN_STATUS))
+      }
+      return Promise.resolve(answer(`${this.real(prefix)}\n`))
+    }
+    if (line.startsWith('umount -f ')) {
+      this.commands.push(line)
+      const point = words(line)[2] ?? ''
+      const [source] = this.table.get(point) ?? ['']
+      this.table.delete(point)
+      this.running.delete(source)
+      return Promise.resolve(answer())
+    }
+    return super.execLine(line, stdin, env, cwd, signal)
+  }
+
+  override async openPipe(command: string): Promise<MachinePipe> {
+    const pipe = await super.openPipe(command)
+    const [source, point] = sshfsMount(command)
+    if (this.table.has(point)) this.table.set(point, [source, 'macfuse'])
+    return pipe
+  }
+
+  /** Run a line's Mac mount guard through /bin/sh, its `mount` printing this table. */
+  runMacGuard(argv: readonly string[]): RunAnswer {
+    const entries = argv.slice(8, argv.indexOf('--', 8))
+    this.guards.push(entries)
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-guard-'))
+    const mount = join(dir, 'mount')
+    writeFileSync(
+      mount,
+      `#!/bin/sh\nprintf '%s' '${this.mountRows().replaceAll("'", "'\\''")}'\n`,
+      { mode: 0o755 },
+    )
+    try {
+      const done = spawnSync('/bin/sh', [
+        '-c',
+        (argv[2] ?? '').replaceAll('/sbin/mount', mount),
+        ...argv.slice(3, 8),
+        ...entries,
+        '--',
+        'true',
+      ])
+      return {
+        stdout: new Uint8Array(done.stdout),
+        stderr: new Uint8Array(done.stderr),
+        exitCode: done.status ?? 1,
+      }
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
   }
 }
 
@@ -1752,6 +1878,62 @@ describe('MachineMounts', () => {
     await expect(running).rejects.toThrow()
     sandbox.hang = false
     expect((await ws.shell('python3 job.py', { sessionId: 'agent' })).exitCode).toBe(0)
+    await ws.close()
+  })
+})
+
+describe('MachineMounts on a Mac', () => {
+  it('mounts each prefix where its root link leads', async () => {
+    const mac = new FakeMac('mirage', ['/data', '/my notes'])
+    const ws = workspace(mac)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+    const points = ['/home/u/.mirage/mnt/data', '/home/u/.mirage/mnt/my notes']
+    expect([...mac.table.keys()].sort()).toEqual(points)
+    expect(mac.served()).toEqual(points)
+    expect(mac.guards[0]?.filter((_, i) => i % 4 === 0)).toEqual(points)
+    expect(mac.guards[0]?.filter((_, i) => i % 4 === 2)).toEqual(['macfuse', 'macfuse'])
+    await ws.close()
+    expect(mac.table.size).toBe(0)
+  })
+
+  it('names the commands that make a root link it lacks', async () => {
+    const mac = new FakeMac('mirage')
+    const ws = workspace(mac)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      `python3: ${darwinAdminHint('fake', '/data', '/home/u/.mirage/mnt')}\n`,
+    )
+    expect(mac.pipes).toEqual([])
+    await ws.close()
+  })
+
+  it('refuses a line once its mount is gone', async () => {
+    const mac = new FakeMac('mirage', ['/data', '/my notes'])
+    const ws = workspace(mac)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    mac.table.delete('/home/u/.mirage/mnt/data')
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(126)
+    expect(DEC.decode(result.stderr)).toBe(
+      'fake: /data is no longer mounted in the machine (did it restart?); the line did not run\n',
+    )
+    await ws.close()
+  })
+
+  it('takes no ssh mount', async () => {
+    const mac = new FakeMac('ssh', ['/data', '/my notes'])
+    const ws = workspace(mac)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      'python3: fake: mount_type ssh needs a Linux machine; a Mac takes mount_type mirage\n',
+    )
     await ws.close()
   })
 })

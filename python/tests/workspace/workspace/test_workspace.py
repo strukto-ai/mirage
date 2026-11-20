@@ -33,7 +33,7 @@ from mirage.execution.job import JobState
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import LineId, MachineName, ProcessId
+from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.machine import MachineHandle
 from mirage.types import (
     FileChangeKind,
@@ -836,7 +836,9 @@ class _StoppedBox(MachineHandle):
     async def connect(self) -> None:
         return None
 
-    async def stop(self, tag: str, signum: int) -> bool:
+    async def stop(
+        self, tag: str, signum: int, root: MachinePid | None = None
+    ) -> bool:
         self.stopped.append((tag, signum))
         pid = int(tag.rpartition(":")[2])
         return pid != 6 and pid in self.holds
