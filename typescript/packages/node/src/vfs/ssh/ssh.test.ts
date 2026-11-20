@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
@@ -125,6 +126,30 @@ describe('SSHVFS write', () => {
       })
       expect(state.files.has('data/left/marker')).toBe(true)
       expect(state.files.has('data/right/marker')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['/', '/virtual'])('keeps visible namespace directory %s in REALPATH', async (path) => {
+    state.dirs.set('data', { mode: 0o40755 })
+    state.dirs.set('data/alias', { mode: 0o40755 })
+    const vfs = makeVfs(state, { root: 'data' })
+    const sftp = await vfs.accessor.sftp()
+    sftp.realpath = (spelling, callback) => {
+      if (spelling === '/srv/data/virtual') {
+        callback(Object.assign(new Error('missing'), { code: 2 }), '')
+        return
+      }
+      callback(undefined, spelling === '/srv/data/alias' ? '/srv/data/.env' : '/srv/data')
+    }
+    const ws = new Workspace({ '/ssh': vfs, '/ssh/virtual/tools': new RAMVFS() })
+    try {
+      const session = ws.createSession('reader', { profile: { paths: { hide: ['/ssh/.env'] } } })
+      const core = new MountCore(ws.vfs, { rootPrefix: '/ssh', session })
+      await expect(core.canonicalClientPath(path)).resolves.toBe(path)
+      await expect(core.clientPath('/virtual/../marker')).resolves.toBe('/marker')
+      await expect(core.canonicalClientPath('/alias')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await ws.close()
     }

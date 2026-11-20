@@ -18,7 +18,7 @@ import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { parseTree, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
-import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { mountedPath, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { modeType, S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
@@ -89,8 +89,8 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
   return attrsToFileStat(name, attrs)
 }
 
-/** Resolve remote links to a key under the configured root. */
-export async function realpath(accessor: SSHAccessor, path: PathSpec): Promise<string> {
+/** Return the remote link destination as a filterable virtual path. */
+export async function realpath(accessor: SSHAccessor, path: PathSpec): Promise<[PathSpec]> {
   const sftp = await accessor.sftp()
   try {
     const root = posixNormpath(
@@ -105,7 +105,8 @@ export async function realpath(accessor: SSHAccessor, path: PathSpec): Promise<s
     )
     const prefix = rstripSlash(root) + '/'
     if (!root.startsWith('/') || (remote !== root && !remote.startsWith(prefix))) throw exdev(path)
-    return remote === root ? '' : remote.slice(prefix.length)
+    const key = remote === root ? '' : remote.slice(prefix.length)
+    return [mountedPath(path, '/' + key)]
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(path)
     if (isPermissionDenied(err)) throw eacces(path)

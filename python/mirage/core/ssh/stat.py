@@ -24,6 +24,7 @@ from mirage.errors.fs import eacces, enoent, exdev
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_path
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import posix_normpath
 from mirage.utils.stat_view import mode_type
 
@@ -90,8 +91,8 @@ async def stat(
     )
 
 
-async def realpath(accessor: SSHAccessor, path: PathSpec) -> str:
-    """Resolve remote links to a key under the configured root.
+async def realpath(accessor: SSHAccessor, path: PathSpec) -> tuple[PathSpec]:
+    """Return the remote link destination as a filterable virtual path.
 
     Args:
         accessor (SSHAccessor): the mount's connection.
@@ -112,7 +113,8 @@ async def realpath(accessor: SSHAccessor, path: PathSpec) -> str:
         remote != root and not remote.startswith(prefix)
     ):
         raise exdev(path)
-    return "" if remote == root else remote[len(prefix) :]
+    key = "" if remote == root else remote[len(prefix) :]
+    return (mounted_path(path, "/" + key),)
 
 
 async def tree(

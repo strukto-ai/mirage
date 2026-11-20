@@ -100,7 +100,7 @@ export class SSHVFS extends BaseVFS {
   }
 
   @vfsCall({ effect: Effect.METADATA })
-  realpath(path: PathSpec): Promise<string> {
+  realpath(path: PathSpec): Promise<[PathSpec]> {
     return sshRealpath(this.accessor, path)
   }
 
