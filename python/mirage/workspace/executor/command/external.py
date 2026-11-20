@@ -93,7 +93,10 @@ async def run_external(
     without one it lands on the result, kept as it arrives all the same.
     Where its stderr goes where its stdout goes (``2>&1``), the runtime
     is told so (``Caller.joins_errors``): a machine joins the two where
-    the program writes them, so they keep the order it wrote them in.
+    the program writes them, so they keep the order it wrote them in. An
+    ``exec`` that points either stream elsewhere inside the redirect
+    (``{ exec 2>f; prog; } 2>&1``) parts them again, so the run is not
+    joined while one holds.
 
     Args:
         argv (Argv): the program's words.
@@ -149,7 +152,10 @@ async def run_external(
 
         joined = (
             bind_caller(current_caller().changed({"joins_errors": True}))
-            if sink is not None and sink.joins_errors
+            if sink is not None
+            and sink.joins_errors
+            and session.exec_stdout is None
+            and session.exec_stderr is None
             else None
         )
         try:

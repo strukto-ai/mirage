@@ -894,8 +894,8 @@ it('records a program its cap stopped as 141', async () => {
 
 // A program whose stderr goes where its stdout goes (`2>&1`) runs joined on
 // its machine, which writes the two into one stream in the order the program
-// wrote them; one whose redirects part them (`2>&1 >f`) runs as any other,
-// its streams Mirage's to route.
+// wrote them; one whose redirects part them (`2>&1 >f`, or an `exec 2>f`
+// inside the group) runs as any other, its streams Mirage's to route.
 describe('a joined program', () => {
   it.each([
     ['prog 2>&1', 'out\nerr\n', '', true],
@@ -904,6 +904,8 @@ describe('a joined program', () => {
     ['{ prog; } 2>&1 | cat', 'out\nerr\n', '', true],
     ['prog &> /data/o; cat /data/o', 'out\nerr\n', '', true],
     ['{ prog < /dev/null; } 2>&1', 'out\nerr\n', '', true],
+    ['{ exec 2>/data/e; prog; } 2>&1; echo -; cat /data/e', 'out\n-\nerr\n', '', false],
+    ['{ exec 2>&-; prog; } 2>&1', 'out\n', '', false],
   ])('runs %j joined on its machine as its redirects say', async (line, said, errs, joined) => {
     const enc = new TextEncoder()
     const box = new ScriptedMachine('box', () => ({

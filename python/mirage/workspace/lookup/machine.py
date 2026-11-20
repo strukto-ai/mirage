@@ -40,7 +40,11 @@ from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.constants import KEYWORDS
+from mirage.workspace.lookup.constants import (
+    EXEC_WRAPPERS,
+    FOLDER_FREE,
+    KEYWORDS,
+)
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import (
     Consumer,
@@ -270,19 +274,19 @@ def _option_paths(argv: Argv, cwd: str) -> list[str]:
     return [p for p in parsed.path_flag_values if p != "-"]
 
 
-def _child_paths(argv: Argv, cwd: str) -> list[str]:
+def _child_paths(name: str, words: Sequence[str], cwd: str) -> list[str]:
     """The paths a ``find -exec`` command names, which the machine must
     hold as well, since the classifier keeps its words as text: an
     absolute word, or one that climbs with ``..``. A word that is no path
     at all keeps the command in Mirage, which is always right.
 
     Args:
-        argv (Argv): the command.
+        name (str): the command's name.
+        words (Sequence[str]): its words after the name.
         cwd (str): the directory a relative word resolves against.
     """
-    if argv.name != "find":
+    if name != "find":
         return []
-    words = list(argv.args)
     return [
         norm(posixpath.join(cwd, word))
         for start, end in find_layout(words).spans
@@ -291,11 +295,21 @@ def _child_paths(argv: Argv, cwd: str) -> list[str]:
     ]
 
 
+def _folder_free(name: str) -> bool:
+    """Whether a command touches nothing but the paths its words name
+    (``FOLDER_FREE``), an ``egrep`` as the ``grep`` it runs.
+
+    Args:
+        name (str): the command's name.
+    """
+    return EXEC_WRAPPERS.get(name, (name,))[0] in FOLDER_FREE
+
+
 def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
     """Every path a command names, absolute, with whether any of them
     depends on the folder it runs from: an operand typed relative, an
-    option's or a ``find -exec`` command's path the folder changes, or
-    no path at all (``ls`` and ``find`` list the folder).
+    option's path the folder changes, or no path at all (``ls`` lists
+    the folder).
 
     Args:
         argv (Argv): the command.
@@ -303,13 +317,12 @@ def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
     """
     operands = [w for w in argv.operands if isinstance(w, PathSpec)]
     options = _option_paths(argv, cwd)
-    children = _child_paths(argv, cwd)
+    children = _child_paths(argv.name, argv.args, cwd)
     paths = [unmark_globs(w.virtual) for w in operands]
     relative = (
         not (paths or options or children)
         or any(not w.raw_path.startswith("/") for w in operands)
         or options != _option_paths(argv, "/")
-        or children != _child_paths(argv, "/")
     )
     return [*paths, *options, *children], relative
 
@@ -329,10 +342,11 @@ async def operand_machine(
     ``/proc`` included.
 
     It runs from the session's folder when that folder is on the same
-    machine. A command whose every path is absolute runs there from
-    ``/`` otherwise, since none of its words depends on the folder
-    (``ls /proc/self/fd`` from a Mirage store); one with a relative path,
-    or none, needs the folder on the machine.
+    machine. A command that touches nothing but the paths it names
+    (``FOLDER_FREE``), every one absolute, runs there from ``/``
+    otherwise, since nothing it does depends on the folder (``ls
+    /proc/self/fd`` from a Mirage store); any other needs the folder on
+    the machine.
 
     Mirage keeps the command when anything is piped into it, since its
     own command leaves input it does not read for the next one (``... |
@@ -362,7 +376,12 @@ async def operand_machine(
     here = scopes if cwd == "/" else [*scopes, (cwd, False)]
     runtime = await _machine_holding(here, session, registry, links, None)
     runs_from: str | None = None
-    if runtime is None and not relative and cwd != "/":
+    if (
+        runtime is None
+        and not relative
+        and cwd != "/"
+        and _folder_free(argv.name)
+    ):
         runtime = await _machine_holding(
             scopes, session, registry, links, None
         )
@@ -381,7 +400,8 @@ def stated_machine(
 ) -> RemoteRuntime | None:
     """The machine a mount command runs on whole as far as its words
     tell, without asking anything (``explain``): ``operand_machine``'s
-    rule over the paths its operands and options name, where each mount
+    rule over the paths its operands, options and ``find -exec`` command
+    name, where each mount
     shows one machine, for a session no coded file policy speaks for
     (the caller asks, ``wants_for``). What only a machine or the run can
     tell is left to the run, which keeps the command in Mirage: which of
@@ -401,11 +421,23 @@ def stated_machine(
         if w.path is not None
         and w.kind in (WordKind.OPERAND, WordKind.VALUE, WordKind.OPTION)
     ]
-    relative = not named or any(not p.raw_path.startswith("/") for p in named)
-    scopes = [(unmark_globs(p.virtual), True) for p in named]
+    name = next((w.text for w in words if w.kind is WordKind.NAME), "")
+    args = [
+        w.text
+        for w in words
+        if w.kind not in (WordKind.NAME, WordKind.REDIRECT)
+    ]
+    children = _child_paths(name, args, cwd)
+    relative = not (named or children) or any(
+        not p.raw_path.startswith("/") for p in named
+    )
+    scopes = [
+        *((unmark_globs(p.virtual), True) for p in named),
+        *((c, True) for c in children),
+    ]
     here = norm(cwd)
     tries = [scopes] if here == "/" else [[*scopes, (here, False)]]
-    if not relative and here != "/":
+    if not relative and here != "/" and _folder_free(name):
         tries.append(scopes)
     for scoped in tries:
         mounts = _held_mounts(scoped, session, registry, links)

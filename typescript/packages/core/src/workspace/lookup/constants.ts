@@ -44,6 +44,26 @@ export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set([
 // link there is the machine's real link, not one in the namespace's table.
 export const MACHINE_ANSWERED: ReadonlySet<string> = new Set(['readlink'])
 
+// The mount commands that touch nothing but the paths their words name, so a
+// line of one naming only absolute paths does the same from any folder: a
+// machine holding them all runs it from `/` when the session's folder is not
+// its own (`cd /data && ls -l /tmp`). The rest may use the folder unasked:
+// they write into it (`tar -x`, `unzip`, `split`, `ln /tmp/a`), run a script
+// or a program there (`sed`, `awk`, `find -exec`, `rg --pre`), or read more
+// names from a file (`md5sum -c`, `wc --files0-from`), so they run on a
+// machine only from a folder of its own.
+export const FOLDER_FREE: ReadonlySet<string> = new Set([
+  'cat',
+  'dir',
+  'grep',
+  'head',
+  'ls',
+  'readlink',
+  'stat',
+  'tail',
+  'vdir',
+])
+
 // Programs the router answers by name from the mount table and the attr
 // overlay (node/command_dispatch), with spec-classified words like a mount
 // command's. No mount registers them, so lookup names them here for `type`,

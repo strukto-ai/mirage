@@ -155,12 +155,14 @@ machine lacks keep a command in Mirage too. `/dev` is Mirage's (`/dev/null`,
 `/dev/stdin`); only `/dev/shm` is the machine's.
 
 The command runs from the current folder when that folder is the machine's.
-When the folder is Mirage's and every path the command names is absolute, it
-runs on the machine from `/`: `cd /data && ls -l /tmp` lists the machine's
-`/tmp` with the machine's own `ls`. With the machine's disk at `/`, `ls -ld
-/bin` shows its link and `ls /proc/self/fd` its descriptors from any folder
-the same way. A relative path, or no path at all (`ls`), needs the folder on
-the machine.
+When the folder is Mirage's, `ls`, `stat`, `readlink`, `cat`, `head`, `tail`
+and `grep` still run on the machine, from `/`, if every path they name is
+absolute: `cd /data && ls -l /tmp` lists the machine's `/tmp` with the
+machine's own `ls`. With the machine's disk at `/`, `ls -ld /bin` shows its
+link and `ls /proc/self/fd` its descriptors from any folder the same way. A
+relative path, no path at all (`ls`), or a command that can use the folder
+without naming it (`tar -x`, `find -exec`, `sed`) needs the folder on the
+machine.
 
 A program's `2>&1` is applied on its machine, so its errors land among its
 output in the order the program wrote them, as in bash.

@@ -43,7 +43,7 @@ import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { KEYWORDS } from './constants.ts'
+import { EXEC_WRAPPERS, FOLDER_FREE, KEYWORDS } from './constants.ts'
 import { lookupAll } from './lookup.ts'
 import { Consumer, MachineAnswer, ProgramLookup, type ExternalTarget } from './types.ts'
 
@@ -239,12 +239,12 @@ function optionPaths(argv: Argv, cwd: string): string[] {
  * one that climbs with `..`. A word that is no path at all keeps the command
  * in Mirage, which is always right. Mirrors Python's `_child_paths`.
  *
- * @param argv the command.
+ * @param name the command's name.
+ * @param words its words after the name.
  * @param cwd the directory a relative word resolves against.
  */
-function childPaths(argv: Argv, cwd: string): string[] {
-  if (argv.name !== 'find') return []
-  const words = [...argv.args]
+function childPaths(name: string, words: readonly string[], cwd: string): string[] {
+  if (name !== 'find') return []
   return findLayout(words).spans.flatMap(([start, end]) =>
     words
       .slice(start + 1, end)
@@ -254,10 +254,21 @@ function childPaths(argv: Argv, cwd: string): string[] {
 }
 
 /**
+ * Whether a command touches nothing but the paths its words name
+ * (`FOLDER_FREE`), an `egrep` as the `grep` it runs. Mirrors Python's
+ * `_folder_free`.
+ *
+ * @param name the command's name.
+ */
+function folderFree(name: string): boolean {
+  return FOLDER_FREE.has(EXEC_WRAPPERS.get(name)?.[0] ?? name)
+}
+
+/**
  * Every path a command names, absolute, with whether any of them depends on
- * the folder it runs from: an operand typed relative, an option's or a `find
- * -exec` command's path the folder changes, or no path at all (`ls` and
- * `find` list the folder). Mirrors Python's `_named_paths`.
+ * the folder it runs from: an operand typed relative, an option's path the
+ * folder changes, or no path at all (`ls` lists the folder). Mirrors Python's
+ * `_named_paths`.
  *
  * @param argv the command.
  * @param cwd the session's folder.
@@ -265,15 +276,12 @@ function childPaths(argv: Argv, cwd: string): string[] {
 function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
   const operands = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
   const options = optionPaths(argv, cwd)
-  const children = childPaths(argv, cwd)
+  const children = childPaths(argv.name, argv.args, cwd)
   const paths = operands.map((w) => unmarkGlobs(w.virtual))
-  const same = (a: readonly string[], b: readonly string[]): boolean =>
-    a.length === b.length && a.every((x, i) => x === b[i])
   const relative =
     paths.length + options.length + children.length === 0 ||
     operands.some((w) => !w.rawPath.startsWith('/')) ||
-    !same(options, optionPaths(argv, '/')) ||
-    !same(children, childPaths(argv, '/'))
+    options.join('\0') !== optionPaths(argv, '/').join('\0')
   return [[...paths, ...options, ...children], relative]
 }
 
@@ -285,9 +293,10 @@ function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
  * every detail, its links and its `/proc` included.
  *
  * It runs from the session's folder when that folder is on the same machine.
- * A command whose every path is absolute runs there from `/` otherwise, since
- * none of its words depends on the folder (`ls /proc/self/fd` from a Mirage
- * store); one with a relative path, or none, needs the folder on the machine.
+ * A command that touches nothing but the paths it names (`FOLDER_FREE`),
+ * every one absolute, runs there from `/` otherwise, since nothing it does
+ * depends on the folder (`ls /proc/self/fd` from a Mirage store); any other
+ * needs the folder on the machine.
  *
  * Mirage keeps the command when anything is piped into it, since its own
  * command leaves input it does not read for the next one (`... | while read
@@ -321,7 +330,7 @@ export async function operandMachine(
   const here: [string, boolean][] = cwd === '/' ? scopes : [...scopes, [cwd, false]]
   let runtime = await machineHolding(here, session, registry, links, null)
   let runsFrom: string | null = null
-  if (runtime === null && !relative && cwd !== '/') {
+  if (runtime === null && !relative && cwd !== '/' && folderFree(argv.name)) {
     runtime = await machineHolding(scopes, session, registry, links, null)
     runsFrom = '/'
   }
@@ -332,7 +341,8 @@ export async function operandMachine(
 /**
  * The machine a mount command runs on whole as far as its words tell, without
  * asking anything (`explain`): `operandMachine`'s rule over the paths its
- * operands and options name, where each mount shows one machine, for a
+ * operands, options and `find -exec` command name, where each mount shows
+ * one machine, for a
  * session no coded file policy speaks for (the caller asks, `wantsFor`). What
  * only a machine or the run can tell is left to the run, which keeps the
  * command in Mirage: which of several machines a mount shows holds a name,
@@ -358,11 +368,20 @@ export function statedMachine(
       ? [w.path]
       : [],
   )
-  const relative = named.length === 0 || named.some((p) => !p.rawPath.startsWith('/'))
-  const scopes: [string, boolean][] = named.map((p) => [unmarkGlobs(p.virtual), true])
+  const name = words.find((w) => w.kind === WordKind.NAME)?.text ?? ''
+  const args = words
+    .filter((w) => w.kind !== WordKind.NAME && w.kind !== WordKind.REDIRECT)
+    .map((w) => w.text)
+  const children = childPaths(name, args, cwd)
+  const relative =
+    named.length + children.length === 0 || named.some((p) => !p.rawPath.startsWith('/'))
+  const scopes: [string, boolean][] = [
+    ...named.map((p): [string, boolean] => [unmarkGlobs(p.virtual), true]),
+    ...children.map((c): [string, boolean] => [c, true]),
+  ]
   const here = norm(cwd)
   const tries: [string, boolean][][] = here === '/' ? [scopes] : [[...scopes, [here, false]]]
-  if (!relative && here !== '/') tries.push(scopes)
+  if (!relative && here !== '/' && folderFree(name)) tries.push(scopes)
   for (const scoped of tries) {
     const mounts = heldMounts(scoped, session, registry, links)
     if (mounts === null) continue

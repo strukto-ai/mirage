@@ -70,8 +70,10 @@ export function handedTokens(
  * kept as it arrives all the same. Where its stderr goes where its stdout
  * goes (`2>&1`), the runtime is told so (`Caller.joinsErrors`): a machine
  * joins the two where the program writes them, so they keep the order it
- * wrote them in. `cwd` is the folder it runs from, null or absent for the
- * session's own.
+ * wrote them in. An `exec` that points either stream elsewhere inside the
+ * redirect (`{ exec 2>f; prog; } 2>&1`) parts them again, so the run is not
+ * joined while one holds. `cwd` is the folder it runs from, null or absent
+ * for the session's own.
  */
 export async function runExternal(
   argv: Argv,
@@ -129,7 +131,7 @@ export async function runExternal(
       )
     try {
       const result =
-        sink?.joinsErrors === true
+        sink?.joinsErrors === true && session.execStdout === null && session.execStderr === null
           ? await bindCaller({ ...currentCaller(), joinsErrors: true }, execute)
           : await execute()
       node.stderr = concat(said)
