@@ -44,9 +44,15 @@ from mirage.workspace.lookup import (
 )
 from mirage.workspace.lookup.lookup import (
     lookup,
+    resolve_target,
     routed_consumer,
     runs_on_machine,
     runs_wrapper,
+)
+from mirage.workspace.lookup.types import (
+    CliTarget,
+    ExternalTarget,
+    FunctionTarget,
 )
 from mirage.workspace.session import SessionState
 from tests.fixtures.command_trees import trees
@@ -193,6 +199,9 @@ def test_installed_cli_routes_cli():
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
     assert lookup("prog", session, ws._registry) is Consumer.CLI
+    target = resolve_target("prog", (), session, ws.registry)
+    assert isinstance(target, CliTarget)
+    assert target.install is ws.registry.clis.get("prog")
 
 
 def test_function_shadows_installed_cli():
@@ -200,6 +209,9 @@ def test_function_shadows_installed_cli():
     ws.register_cli("prog", _cli_tree())
     session.functions["prog"] = "prog() { :; }"
     assert lookup("prog", session, ws._registry) is Consumer.FUNCTION
+    assert resolve_target("prog", (), session, ws.registry) == FunctionTarget(
+        "prog() { :; }"
+    )
 
 
 @pytest.mark.asyncio
@@ -208,6 +220,24 @@ async def test_unregistered_cli_routes_unknown():
     ws.register_cli("prog", _cli_tree())
     await ws.unregister_cli("prog")
     assert lookup("prog", session, ws._registry) is Consumer.UNKNOWN
+
+
+def test_resolved_runtime_keeps_named_fallback_and_refused_bindings_distinct():
+    named, fallback = _Sandbox(), _Sandbox()
+    ws = Workspace({"/": RAMVFS()}, machines=[named])
+    session = SessionState(session_id="t")
+    bindings = {"gcc": named, EXTERNAL_COMMANDS: fallback}
+    routing = RouteDecision(bindings=bindings)
+    assert resolve_target(
+        "gcc", (), session, ws.registry, routing
+    ) == ExternalTarget(named)
+    assert resolve_target(
+        "unregistered", (), session, ws.registry, routing
+    ) == ExternalTarget(fallback)
+    refused = RouteDecision(bindings={**bindings, "gcc": None})
+    assert resolve_target(
+        "gcc", (), session, ws.registry, refused
+    ) == ExternalTarget(None)
 
 
 def test_shell_consumers_resolve_globs():

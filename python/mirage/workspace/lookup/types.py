@@ -12,8 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from mirage.runtime.types import RuntimeIdentity
+    from mirage.workspace.cli.types import CLIInstall
 
 
 class Consumer(Enum):
@@ -34,6 +41,34 @@ class Consumer(Enum):
     MOUNT = auto()
     EXTERNAL = auto()
     UNKNOWN = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalTarget:
+    runtime: RuntimeIdentity | None
+    kind: ClassVar[Consumer] = Consumer.EXTERNAL
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionTarget:
+    body: str
+    kind: ClassVar[Consumer] = Consumer.FUNCTION
+
+
+@dataclass(frozen=True, slots=True)
+class CliTarget:
+    install: CLIInstall
+    kind: ClassVar[Consumer] = Consumer.CLI
+
+
+CommandTarget: TypeAlias = (
+    ExternalTarget
+    | FunctionTarget
+    | CliTarget
+    | Literal[
+        Consumer.SESSION, Consumer.NAMESPACE, Consumer.MOUNT, Consumer.UNKNOWN
+    ]
+)
 
 
 # CLI rides with the shell consumers for word policy: an installed CLI

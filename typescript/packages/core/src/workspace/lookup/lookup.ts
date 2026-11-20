@@ -37,7 +37,7 @@ import {
   SHELL_ONLY_BUILTINS,
   readWrapper,
 } from './constants.ts'
-import { Consumer } from './types.ts'
+import { type CommandTarget, Consumer, type ExternalTarget } from './types.ts'
 import { CycleError, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -212,6 +212,28 @@ export function routedConsumer(
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
 ): [Consumer, RouteDecision<Runtime> | undefined] {
+  return [resolveTarget(name, args, session, registry, routing).kind, routing]
+}
+
+function targetConsumer(target: CommandTarget): Consumer {
+  return target.kind
+}
+
+export function externalTarget(
+  name: string,
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
+): ExternalTarget {
+  const key = Object.hasOwn(bindings, name) ? name : EXTERNAL_COMMANDS
+  return { kind: Consumer.EXTERNAL, runtime: bindings[key] ?? null }
+}
+
+export function resolveTarget(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing?: RouteDecision<Runtime>,
+): CommandTarget {
   if (
     name === MACHINE_VIEW &&
     routing !== undefined &&
@@ -219,8 +241,9 @@ export function routedConsumer(
     runsPrograms(routing.bindings) &&
     picksMachine(args)
   )
-    return [Consumer.SESSION, routing]
-  return [lookup(name, session, registry, routing), routing]
+    return { kind: Consumer.SESSION }
+  for (const target of layers(name, session, registry, routing)) return target
+  return { kind: Consumer.UNKNOWN }
 }
 
 /**
@@ -262,24 +285,6 @@ export function runsWrapper(
 }
 
 /**
- * Whether a function of the name runs ahead of every other layer.
- *
- * bash finds a function before a builtin or a file on PATH, so one
- * shadows `timeout`, `env` or `echo` there. The shell's own words
- * (`SHELL_ONLY_BUILTINS`: cd, export, type) still beat one here, though
- * bash lets a function shadow those too. A program run
- * (`timeout 1 sleep 0`) is not one either: the program is exec'd and never
- * sees a function (`layers` puts it last there).
- */
-function functionFirst(name: string, session: SessionState): boolean {
-  return (
-    Object.hasOwn(session.functions, name) &&
-    !SHELL_ONLY_BUILTINS.has(name) &&
-    !isProgramInvocation(session)
-  )
-}
-
-/**
  * Yield every layer holding the name, most-preferred first.
  *
  * The one place precedence is written down: `lookup` reads the first
@@ -295,50 +300,50 @@ function* layers(
   session: SessionState,
   registry: MountRegistry,
   routing?: RouteDecision<Runtime>,
-): Generator<Consumer> {
+): Generator<CommandTarget> {
   let found = false
   const bindings: Readonly<Record<string, Runtime | null | undefined>> =
     routing?.bindings ?? registry.runtimeBindings
   const bound = Object.hasOwn(bindings, name) ? bindings[name] : undefined
   const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
-  const first = functionFirst(name, session)
-  // A program run execs the program, so a function answers only a name no
-  // other layer holds (`timeout 1 f`).
-  const last = Object.hasOwn(session.functions, name) && !first && isProgramInvocation(session)
-  if (first) {
+  const body = Object.hasOwn(session.functions, name) ? session.functions[name] : undefined
+  // A program invocation considers a function only after all program layers.
+  const asProgram = body !== undefined && isProgramInvocation(session)
+  if (body !== undefined && !asProgram && !SHELL_ONLY_BUILTINS.has(name)) {
     found = true
-    yield Consumer.FUNCTION
+    yield { kind: Consumer.FUNCTION, body }
   }
   if (SHELL_NAMES.has(name) && (!MACHINE_ONLY_BUILTINS.has(name) || runsPrograms(bindings))) {
     found = true
     yield (native || refused) && CAPTURABLE_BUILTINS.has(name)
-      ? Consumer.EXTERNAL
-      : Consumer.SESSION
+      ? { kind: Consumer.EXTERNAL, runtime: bound ?? null }
+      : { kind: Consumer.SESSION }
   }
   if (NAMESPACE_COMMANDS.has(name)) {
     found = true
-    yield Consumer.NAMESPACE
+    yield { kind: Consumer.NAMESPACE }
   }
-  if (Object.hasOwn(session.functions, name) && !first && !last) {
+  if (body !== undefined && !asProgram && SHELL_ONLY_BUILTINS.has(name)) {
     found = true
-    yield Consumer.FUNCTION
+    yield { kind: Consumer.FUNCTION, body }
   }
-  if (registry.clis.get(name) !== null) {
+  const install = registry.clis.get(name)
+  if (install !== null) {
     found = true
-    yield Consumer.CLI
+    yield { kind: Consumer.CLI, install }
   }
   if ((native || refused) && !SHELL_NAMES.has(name)) {
     found = true
-    yield Consumer.EXTERNAL
+    yield { kind: Consumer.EXTERNAL, runtime: bound ?? null }
   }
   if (ROUTED_COMMANDS.has(name) || registry.mountForCommand(runsAs(name, registry)) !== null) {
     found = true
-    yield Consumer.MOUNT
+    yield { kind: Consumer.MOUNT }
   }
-  if (last) {
+  if (body !== undefined && asProgram) {
     found = true
-    yield Consumer.FUNCTION
+    yield { kind: Consumer.FUNCTION, body }
   }
   const fallback = Object.hasOwn(bindings, EXTERNAL_COMMANDS)
     ? bindings[EXTERNAL_COMMANDS]
@@ -348,7 +353,7 @@ function* layers(
     fallback !== undefined &&
     (isLineExecutor(fallback) || isProcessExecutor(fallback))
   if (!found && !Object.hasOwn(bindings, name) && (fallbackNative || refused)) {
-    yield Consumer.EXTERNAL
+    yield { kind: Consumer.EXTERNAL, runtime: fallback ?? null }
   }
 }
 
@@ -391,7 +396,7 @@ export function lookup(
   registry: MountRegistry,
   routing?: RouteDecision<Runtime>,
 ): Consumer {
-  for (const consumer of layers(name, session, registry, routing)) return consumer
+  for (const target of layers(name, session, registry, routing)) return target.kind
   return Consumer.UNKNOWN
 }
 
@@ -409,7 +414,7 @@ export function lookupAll(
   registry: MountRegistry,
   routing?: RouteDecision<Runtime>,
 ): Consumer[] {
-  return [...layers(name, session, registry, routing)]
+  return Array.from(layers(name, session, registry, routing), targetConsumer)
 }
 
 /**
@@ -437,7 +442,7 @@ export function program(
   registry: MountRegistry,
 ): Consumer | null {
   if (name.includes('/') || KEYWORDS.has(name)) return null
-  for (const consumer of layers(name, session, registry)) {
+  for (const { kind: consumer } of layers(name, session, registry)) {
     if (consumer === Consumer.FUNCTION) continue
     if (consumer === Consumer.SESSION && SHELL_ONLY_BUILTINS.has(name)) return null
     if (
