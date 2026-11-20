@@ -667,9 +667,10 @@ def stop_line(
     so one that ignores it (``nohup``) keeps running too. CONT follows
     it, as the kernel's own hangup sends it, so a stopped process takes
     the hangup instead of holding it. Once ``root`` has exited its
-    session can no longer be read, so the hangup spares each process in
-    a session another process of the run leads, which is what
-    ``setsid`` leaves.
+    session can no longer be read, so the hangup reaches a process only
+    when its session's leader is ``root`` or a live process outside the
+    run: a session another process of the run leads, or whose leader has
+    exited, is what ``setsid`` leaves.
 
     Args:
         process (str): the id of the Mirage process the run is, as
@@ -683,7 +684,7 @@ def stop_line(
     mine = {root.pid: (process, root.started)} if root is not None else {}
     hangup = signum == HANGUP_SIGNAL
     own = (
-        f"sid {root.pid} && s=$q || g=1; "
+        f"z={root.pid}; sid $z && s=$q || g=1; "
         if hangup and root is not None
         else ""
     )
@@ -707,7 +708,8 @@ def stop_line(
         'for p in $a; do if [ -n "$s" ]; then '
         '{ sid $p && [ "$q" = "$s" ]; } || continue; '
         'elif [ -n "$g" ]; then sid $p || continue; '
-        'case " $a " in *" $q "*) continue ;; esac; fi; '
+        'if [ "$q" != "$z" ]; then [ -d "/proc/$q" ] || continue; '
+        'case " $a " in *" $q "*) continue ;; esac; fi; fi; '
         'l="$l $p"; done; [ -n "$l" ]; }; '
         f"else PATH={DARWIN_PATH}; k=; l=; {darwin_roots(mine)}"
         f"left() {{ o=$({DARWIN_PS}) || "

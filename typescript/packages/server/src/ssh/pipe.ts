@@ -34,17 +34,22 @@ export async function servePipe(
   sessionId: string,
   line: string,
   channel: ServerChannel,
+  gone: AbortSignal,
   door: string,
 ): Promise<number> {
   const ws = entry.runner.ws
   const output = new ChannelOutput(channel, false)
+  let hung = false
   const onClose = (): void => {
-    if (!stillServed(registry, entry)) return
+    if (hung || !stillServed(registry, entry)) return
+    hung = true
     ws.hangup(sessionId).catch((err: unknown) => {
       console.debug(`ssh: ${door} hangup failed`, err)
     })
   }
   channel.once('close', onClose)
+  gone.addEventListener('abort', onClose, { once: true })
+  if (gone.aborted) onClose()
   try {
     const execution = await ws.shell(line, {
       sessionId,
@@ -70,6 +75,7 @@ export async function servePipe(
     return 1
   } finally {
     channel.off('close', onClose)
+    gone.removeEventListener('abort', onClose)
     if (stillServed(registry, entry)) await ws.closeSession(sessionId)
   }
 }

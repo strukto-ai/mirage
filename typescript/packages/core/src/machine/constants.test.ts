@@ -303,26 +303,30 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
   }, 15_000)
 
   // Once the run's program has exited, a hangup still spares what setsid
-  // moved out of the session, and a stopped process is continued so the
-  // hangup ends it.
+  // moved out of the session, even once that session's leader has exited
+  // too, and a stopped process is continued so the hangup ends it.
   it('keeps to the session once the program is gone', async () => {
     const tag = `${crypto.randomUUID().replaceAll('-', '')}:9`
     const program = spawn(
       '/bin/sh',
-      ['-c', 'setsid sleep 300 & echo $!; sleep 301 & echo $!; sleep 302 & echo $!'],
+      [
+        '-c',
+        'setsid sleep 300 & echo $!; sleep 301 & echo $!; sleep 302 & echo $!; ' +
+          "setsid sh -c 'sleep 303 & echo $!'",
+      ],
       { env: { ...process.env, [PROCESS]: tag }, detached: true },
     )
     const pids = new Promise<number[]>((resolve) => {
       let text = ''
       program.stdout.on('data', (d: Buffer) => {
         text += d.toString()
-        const lines = text.split('\n').filter(Boolean).map(Number)
-        if (lines.length >= 3) resolve(lines.slice(0, 3))
+        const lines = text.split('\n').slice(0, -1).filter(Boolean).map(Number)
+        if (lines.length >= 4) resolve(lines.slice(0, 4))
       })
     })
     const exited = new Promise((resolve) => program.once('exit', resolve))
-    const [[kept, hung, stopped]] = (await Promise.all([pids, exited])) as [
-      [number, number, number],
+    const [[kept, hung, stopped, orphan]] = (await Promise.all([pids, exited])) as [
+      [number, number, number, number],
       unknown,
     ]
     const ended = (pid: number): boolean => {
@@ -347,7 +351,7 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
       expect(ended(hung) && ended(stopped)).toBe(true)
-      expect(ended(kept)).toBe(false)
+      expect(ended(kept) || ended(orphan)).toBe(false)
     } finally {
       spawnSync('/bin/sh', ['-c', stopLine(tag)], { timeout: 10_000 })
     }

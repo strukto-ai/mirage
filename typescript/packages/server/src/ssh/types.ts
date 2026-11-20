@@ -44,6 +44,8 @@ export interface ChannelRequest {
   env: Readonly<Record<string, string>>
   peer: Endpoint | null
   local: Endpoint | null
+  /** Aborts when the connection closes, however its channels stand. */
+  gone: AbortSignal
 }
 
 /** Who a login is: the workspace it names and its key's options. */

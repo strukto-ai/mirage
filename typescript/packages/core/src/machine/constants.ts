@@ -632,8 +632,9 @@ export const PIPE_SIGNAL = 13
  * it (`nohup`) keeps running too. CONT follows it, as the kernel's own
  * hangup sends it, so a stopped process takes the hangup instead of holding
  * it. Once `root` has exited its session can no longer be read, so the
- * hangup spares each process in a session another process of the run
- * leads, which is what `setsid` leaves.
+ * hangup reaches a process only when its session's leader is `root` or a
+ * live process outside the run: a session another process of the run
+ * leads, or whose leader has exited, is what `setsid` leaves.
  *
  * @param process the id of the Mirage process the run is, as `PROCESS`
  *   carries it.
@@ -647,7 +648,7 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     root !== null ? [[root.pid, [process, root.started]]] : [],
   )
   const hangup = signum === HANGUP_SIGNAL
-  const own = hangup && root !== null ? `sid ${String(root.pid)} && s=$q || g=1; ` : ''
+  const own = hangup && root !== null ? `z=${String(root.pid)}; sid $z && s=$q || g=1; ` : ''
   const end = hangup
     ? 'kill -CONT $l 2>/dev/null; exit 0'
     : 'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; ' +
@@ -666,7 +667,8 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     'for p in $a; do if [ -n "$s" ]; then ' +
     '{ sid $p && [ "$q" = "$s" ]; } || continue; ' +
     'elif [ -n "$g" ]; then sid $p || continue; ' +
-    'case " $a " in *" $q "*) continue ;; esac; fi; ' +
+    'if [ "$q" != "$z" ]; then [ -d "/proc/$q" ] || continue; ' +
+    'case " $a " in *" $q "*) continue ;; esac; fi; fi; ' +
     'l="$l $p"; done; [ -n "$l" ]; }; ' +
     `else PATH=${DARWIN_PATH}; k=; l=; ${darwinRoots(mine)}` +
     `left() { o=$(${DARWIN_PS}) || { [ -n "$l" ] || exit 1; f=1; return 0; }; f=; ` +

@@ -134,11 +134,14 @@ export class ShellChannel {
       else if (this.tty) this.hangUp()
     }
     this.channel.once('close', onClose)
+    this.request.gone.addEventListener('abort', onClose, { once: true })
+    if (this.request.gone.aborted) onClose()
     try {
       if (this.request.command !== null) return await this.run(this.request.command)
       return await this.repl()
     } finally {
       this.channel.off('close', onClose)
+      this.request.gone.removeEventListener('abort', onClose)
       this.input.close()
       if (this.live()) await this.entry.runner.ws.closeSession(this.sessionId)
     }

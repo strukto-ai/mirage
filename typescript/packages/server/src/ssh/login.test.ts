@@ -41,6 +41,7 @@ describe('loginEnv', () => {
       env: {},
       peer: { address: '10.0.0.5', port: 40000 },
       local: { address: '10.0.0.1', port: 2222 },
+      gone: new AbortController().signal,
     }
     expect(loginEnv(request)).toEqual({
       USER: 'demo',

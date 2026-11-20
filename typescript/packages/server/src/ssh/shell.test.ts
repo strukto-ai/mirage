@@ -272,6 +272,7 @@ describe('a pty without a terminal type', () => {
       env: {},
       peer: null,
       local: null,
+      gone: new AbortController().signal,
     }
     const served = handleChannel(registry, term.asChannel(), request, () => undefined)
     await term.until('mirage:/$ ')

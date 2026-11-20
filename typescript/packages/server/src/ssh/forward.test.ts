@@ -26,7 +26,7 @@ import { runProgram } from '@struktoai/mirage-node/machine/program'
 import ssh2, { type Client, type ClientChannel } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry } from '../registry.ts'
-import { closeHarnesses, connect, startHarness } from './harness.ts'
+import { closeHarnesses, connect, sshSessions, startHarness } from './harness.ts'
 import { serveTunnel } from './server.ts'
 
 afterEach(closeHarnesses)
@@ -132,6 +132,36 @@ describe('forwards', () => {
       expect(await got).toBe('PING\n')
     } finally {
       upper.close()
+    }
+  }, 30_000)
+
+  it('end with a dropped connection while the port reads nothing', async () => {
+    const stalled = createServer((socket) => {
+      socket.pause()
+    })
+    await new Promise<void>((resolve) => stalled.listen(0, '127.0.0.1', resolve))
+    const port = (stalled.address() as AddressInfo).port
+    try {
+      const ws = new Workspace(
+        { '/': new RAMVFS() },
+        { mode: MountMode.EXEC, machines: { here: new Here('here', { captures: ['@line'] }) } },
+      )
+      const h = await startHarness(ws)
+      const client = await connect(h)
+      const stream = await openForward(client, port)
+      for (let i = 0; i < 500 && sshSessions(h).length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 10))
+      }
+      expect(sshSessions(h)).toHaveLength(1)
+      stream.write(Buffer.alloc(8 * 1024 * 1024, 97))
+      await new Promise((r) => setTimeout(r, 1000))
+      ;(client as unknown as { _sock: { destroy(): void } })._sock.destroy()
+      for (let i = 0; i < 1000 && sshSessions(h).length > 0; i++) {
+        await new Promise((r) => setTimeout(r, 10))
+      }
+      expect(sshSessions(h)).toEqual([])
+    } finally {
+      stalled.close()
     }
   }, 30_000)
 

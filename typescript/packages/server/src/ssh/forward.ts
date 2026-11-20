@@ -32,6 +32,7 @@ export async function serveForward(
   login: Login,
   port: number,
   channel: ServerChannel,
+  gone: AbortSignal,
 ): Promise<void> {
   let opened: [WorkspaceEntry, string]
   try {
@@ -50,6 +51,7 @@ export async function serveForward(
       sessionId,
       FORWARD_LINE.replaceAll('{port}', String(port)),
       channel,
+      gone,
       `forward to port ${String(port)}`,
     )
   } finally {

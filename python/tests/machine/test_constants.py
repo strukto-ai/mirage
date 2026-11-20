@@ -840,8 +840,8 @@ def _ended(pid: int) -> bool:
 
 
 # Once the run's program has exited, a hangup still spares what setsid
-# moved out of the session, and a stopped process is continued so the
-# hangup ends it.
+# moved out of the session, even once that session's leader has exited
+# too, and a stopped process is continued so the hangup ends it.
 @pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
 def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
     tag = f"{uuid.uuid4().hex}:9"
@@ -850,14 +850,16 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
             "/bin/sh",
             "-c",
             "setsid sleep 300 & echo $!; sleep 301 & echo $!; "
-            "sleep 302 & echo $!",
+            "sleep 302 & echo $!; setsid sh -c 'sleep 303 & echo $!'",
         ],
         env={**os.environ, PROCESS: tag},
         stdout=subprocess.PIPE,
         start_new_session=True,
     )
     assert program.stdout is not None
-    kept, hung, stopped = (int(program.stdout.readline()) for _ in range(3))
+    kept, hung, stopped, orphan = (
+        int(program.stdout.readline()) for _ in range(4)
+    )
     program.wait(timeout=5)
     try:
         os.kill(stopped, 19)
@@ -872,7 +874,7 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
                 break
             time.sleep(0.1)
         assert _ended(hung) and _ended(stopped)
-        assert not _ended(kept)
+        assert not _ended(kept) and not _ended(orphan)
     finally:
         subprocess.run(
             ["/bin/sh", "-c", stop_line(tag)], check=False, timeout=10

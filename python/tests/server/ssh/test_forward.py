@@ -113,6 +113,52 @@ async def test_a_forward_carries_the_answer_to_a_request_ended_by_eof(
         server.close()
 
 
+def _ssh_sessions(harness) -> list[str]:
+    return [
+        s.session_id
+        for s in harness.entry.runner.ws.list_sessions()
+        if s.session_id.startswith("ssh_")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_forward_ends_with_a_dropped_connection_while_the_port_stalls(
+    tmp_path,
+):
+    held: list[asyncio.StreamWriter] = []
+
+    async def stall(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        writer.transport.pause_reading()
+        held.append(writer)
+
+    server = await asyncio.start_server(stall, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    harness = await start_harness(tmp_path, _line_machine_workspace())
+    try:
+        async with harness.connect() as conn:
+            _, writer = await conn.open_connection("127.0.0.1", port)
+            for _ in range(500):
+                if _ssh_sessions(harness):
+                    break
+                await asyncio.sleep(0.01)
+            assert len(_ssh_sessions(harness)) == 1
+            writer.write(b"a" * (8 * 1024 * 1024))
+            await asyncio.sleep(1)
+            conn.abort()
+        for _ in range(1000):
+            if not _ssh_sessions(harness):
+                break
+            await asyncio.sleep(0.01)
+        assert _ssh_sessions(harness) == []
+    finally:
+        for stalled in held:
+            stalled.close()
+        await stop_harness(harness)
+        server.close()
+
+
 @pytest.mark.asyncio
 async def test_a_forward_to_another_host_is_refused(ssh):
     async with ssh.connect() as conn:
