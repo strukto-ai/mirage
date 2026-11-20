@@ -68,8 +68,10 @@ function bashArgs(partial: Partial<BashArgs>): BashArgs {
  * whole character here, rather than its first byte as GNU does.
  *
  * Options after a script file or `-c`'s program are positional; `-` and
- * `--` end option parsing. `-c` takes the next word, never the rest of its
- * cluster: `-cx 'echo hi'` traces and runs `echo hi`.
+ * `--` end option parsing. `-c` is a flag: its program is the first word
+ * after the options, so `-cx 'echo hi'`, `-c -x 'echo hi'` and
+ * `-c -- 'echo hi'` all run `echo hi`. `-O` is refused, where GNU takes a
+ * shopt name.
  */
 export function parseBashArgs(args: string[]): BashArgs {
   const settings: [string, boolean][] = []
@@ -101,6 +103,7 @@ export function parseBashArgs(args: string[]): BashArgs {
   if (wantHelp || wantVersion) return bashArgs({ help: wantHelp, version: wantVersion })
   if (unsupported !== null) return bashArgs({ invalid: unsupported })
   let readStdin = false
+  let command = false
   while (i < args.length) {
     const tok = args[i] ?? ''
     if (tok === '--' || tok === '-') {
@@ -115,12 +118,13 @@ export function parseBashArgs(args: string[]): BashArgs {
     }
     for (const item of word.settings) settings.push(item)
     readStdin = readStdin || word.other.includes('s')
-    if (word.other.includes('c')) {
-      const next = args[i + word.consumed]
-      if (next === undefined) return bashArgs({ needsValue: '-c' })
-      return bashArgs({ script: next, argv: args.slice(i + word.consumed + 1), settings })
-    }
+    command = command || word.other.includes('c')
     i += word.consumed
+  }
+  if (command) {
+    const script = args[i]
+    if (script === undefined) return bashArgs({ needsValue: '-c' })
+    return bashArgs({ script, argv: args.slice(i + 1), settings })
   }
   // The program comes from stdin whenever no operand names one, which is
   // the rule `-s` states explicitly for the case where operands do follow:
