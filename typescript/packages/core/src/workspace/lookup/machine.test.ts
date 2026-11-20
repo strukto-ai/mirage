@@ -77,7 +77,8 @@ describe('operand routing', () => {
 
   it.each([
     'cat /tmp/a.py /data/b',
-    'cd /data && cat /tmp/a.py',
+    'cd /data && ls',
+    'cd /data && cat ../tmp/a.py',
     'echo hi | wc -l',
     'echo hi | cat /tmp/a.py',
   ])('keeps %j, which reaches past the machine, with Mirage', async (line) => {
@@ -86,6 +87,36 @@ describe('operand routing', () => {
     await ws.shell('echo b > /data/b')
     await ws.shell(line)
     expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it("runs absolute paths there from / off the machine's folders", async () => {
+    const files = new FakeFiles({ '/tmp/a.py': 'x' }, TOOLS)
+    const box = new ScriptedMachine('box', files.answer)
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: { box } },
+    )
+    expect(await out(ws, 'cd /data && cat /tmp/a.py')).toBe('ran\n')
+    expect([files.ran, box.cwds]).toEqual([['cat /tmp/a.py'], ['/']])
+    expect(await out(ws, 'cd /tmp && cat /tmp/a.py')).toBe('ran\n')
+    expect(box.cwds.at(-1)).toBe('/tmp')
+    await ws.close()
+  })
+
+  it('names in explain the machine the run hands a command to', async () => {
+    const files = new FakeFiles({ '/tmp/a.py': 'x' }, TOOLS)
+    const ws = one(files, { '/data': new RAMVFS() })
+    await ws.shell('cd /data')
+    const placed = async (line: string): Promise<[string, string][]> => {
+      const said = await ws.explain(line)
+      return said.node.children.flatMap((c) =>
+        'command' in c ? [[c.command, c.machine] as [string, string]] : [],
+      )
+    }
+    expect(await placed('cat /tmp/a.py')).toEqual([['cat', 'box']])
+    expect(await placed('ls')).toEqual([['ls', '']])
+    expect(await placed('cat /tmp/a.py /data/b')).toEqual([['cat', '']])
     await ws.close()
   })
 

@@ -487,7 +487,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     }
     const watch = new OutputWatch()
     const execution = this.execArgv(
-      runArgv(tag, nonce, run, missing),
+      runArgv(tag, nonce, run, missing, currentCaller().joinsErrors),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,

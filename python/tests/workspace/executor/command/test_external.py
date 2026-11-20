@@ -33,7 +33,7 @@ from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer, RunResult
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.expand.argv import Argv
@@ -42,6 +42,7 @@ from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.session import SessionState
 from tests.fixtures.command_trees import trees
+from tests.fixtures.machine import ScriptedMachine
 
 
 async def _request(texts: list[str], ctx: Context) -> SimpleNamespace:
@@ -842,3 +843,39 @@ async def test_a_program_its_cap_stopped_is_recorded_as_141(monkeypatch):
         assert await result.stdout_str() == "y\n"
         assert result.exit_code == 141
     assert '"exit_code": 141' in seen.results[0]
+
+
+# A program whose stderr goes where its stdout goes (`2>&1`) runs joined on
+# its machine, which writes the two into one stream in the order the
+# program wrote them; one whose redirects part them (`2>&1 >f`) runs as
+# any other, its streams Mirage's to route.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "said", "errs", "joined"),
+    [
+        ("prog 2>&1", "out\nerr\n", "", True),
+        ("prog", "out\n", "err\n", False),
+        ("prog 2>&1 >/dev/null", "err\n", "", False),
+        ("{ prog; } 2>&1 | cat", "out\nerr\n", "", True),
+        ("prog &> /data/o; cat /data/o", "out\nerr\n", "", True),
+        ("{ prog < /dev/null; } 2>&1", "out\nerr\n", "", True),
+    ],
+)
+async def test_a_joined_program_runs_joined_on_its_machine(
+    line, said, errs, joined
+):
+    box = ScriptedMachine(
+        "box", lambda line, data: RunAnswer(0, b"out\n", b"err\n")
+    )
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"box": box}
+    )
+    try:
+        result = await ws.shell(line)
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            said,
+            errs,
+        )
+        assert box.joined == [joined]
+    finally:
+        await ws.close()

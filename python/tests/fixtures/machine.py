@@ -21,7 +21,7 @@ from typing import Any
 from mirage.commands.config import Context
 from mirage.execution.machine.table import MachineTable
 from mirage.io.types import ByteSource, materialize
-from mirage.machine.constants import RUN_PROGRAM_AT, is_run
+from mirage.machine.constants import RUN_PROGRAM_AT, RUN_WRAPPER_JOINED, is_run
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.binding import answer_of
 from mirage.runtime.machine import RemoteRuntime
@@ -56,6 +56,8 @@ class ScriptedMachine(MachineHandle):
         self.answer = answer
         self.lines: list[str] = []
         self.fed: list[bytes | None] = []
+        self.cwds: list[str] = []
+        self.joined: list[bool] = []
 
     async def connect(self) -> None:
         return None
@@ -69,7 +71,10 @@ class ScriptedMachine(MachineHandle):
         output: OutputFn,
         errors: OutputFn,
     ) -> RunResult:
+        joined = is_run(argv) and argv[2] == RUN_WRAPPER_JOINED
         if is_run(argv):
+            self.cwds.append(cwd)
+            self.joined.append(joined)
             argv = argv[RUN_PROGRAM_AT:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
@@ -79,7 +84,9 @@ class ScriptedMachine(MachineHandle):
         if done.stdout:
             await output(done.stdout)
         if done.stderr:
-            await (output if self.joins_streams else errors)(done.stderr)
+            await (output if self.joins_streams or joined else errors)(
+                done.stderr
+            )
         return RunResult(done.exit_code)
 
 

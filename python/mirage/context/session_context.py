@@ -198,6 +198,9 @@ class Caller:
         machine (MachineName | None): the machine the running command's
             program runs on, where a name its redirects make lands; None
             for a command Mirage runs itself.
+        joins_errors (bool): whether the running program's stderr goes
+            where its stdout goes (``2>&1``), so a machine joins the two
+            where the program writes them.
     """
 
     session: SessionState | None = None
@@ -246,6 +249,7 @@ class Caller:
     ] = ()
     output_file: str | None = None
     machine: MachineName | None = None
+    joins_errors: bool = False
 
     @property
     def visibility(self) -> Visibility | None:

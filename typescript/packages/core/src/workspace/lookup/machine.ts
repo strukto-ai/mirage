@@ -14,10 +14,12 @@
 
 import { splitLines } from '../../commands/builtin/utils/lines.ts'
 import { SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { WordKind } from '../../commands/spec/types.ts'
 import { holders } from '../../core/machine/place.ts'
 import { findLayout } from '../../rs/find.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
+import type { CommandWord } from '../../policy/types.ts'
 import { restrictedMountsFor } from '../../runtime/binding.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
@@ -40,9 +42,10 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { KEYWORDS } from './constants.ts'
 import { lookupAll } from './lookup.ts'
-import { Consumer, MachineAnswer, ProgramLookup } from './types.ts'
+import { Consumer, MachineAnswer, ProgramLookup, type ExternalTarget } from './types.ts'
 
 /**
  * The machine mount showing `path` at the same path on its machines, with no
@@ -101,6 +104,68 @@ function ruled(session: SessionState, registry: MountRegistry, entries: MountEnt
 }
 
 /**
+ * The machine mount showing each path at its own path, in order; null when
+ * there is no path, any path is elsewhere, or the session's rules restrict
+ * one of those mounts. Mirrors Python's `_held_mounts`.
+ *
+ * @param scopes each absolute path, with whether the command may write it.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ */
+function heldMounts(
+  scopes: readonly (readonly [string, boolean])[],
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+): MountEntry[] | null {
+  const mounts: MountEntry[] = []
+  for (const [path, writes] of scopes) {
+    const entry = localMount(registry, links, path, writes)
+    if (entry === null) return null
+    mounts.push(entry)
+  }
+  if (scopes.length === 0 || ruled(session, registry, mounts)) return null
+  return mounts
+}
+
+/**
+ * The runtime that runs programs on the one machine named; null for none or
+ * several. Mirrors Python's `_runtime_of`.
+ *
+ * @param machines the candidate machines.
+ * @param registry the workspace's mounts and machines.
+ */
+function runtimeOf(machines: readonly string[], registry: MountRegistry): RemoteRuntime | null {
+  if (machines.length !== 1) return null
+  return (
+    registry.runtimeEntries.find(
+      (e): e is RemoteRuntime => e instanceof RemoteRuntime && e.defaultMachine === machines[0],
+    ) ?? null
+  )
+}
+
+/**
+ * The machines a machine mount shows, by its config: the ones it names, else
+ * every machine the workspace runs programs on. Mirrors Python's
+ * `_shown_machines`.
+ *
+ * @param entry a machine mount.
+ * @param registry the workspace's mounts and machines.
+ */
+function shownMachines(entry: MountEntry, registry: MountRegistry): string[] {
+  const named = entry.vfs instanceof MachineVFS ? entry.vfs.config.machines : null
+  if (named !== null && named !== undefined) return [...named]
+  return [
+    ...new Set(
+      registry.runtimeEntries
+        .filter((e): e is RemoteRuntime => e instanceof RemoteRuntime)
+        .map((e) => e.defaultMachine),
+    ),
+  ].sort(compareCodePoints)
+}
+
+/**
  * The one machine holding every path, each its own at the same path on a
  * machine mount the session may use; null when any path is elsewhere, no one
  * machine holds them all, or input is piped into a machine that takes none.
@@ -119,13 +184,8 @@ async function machineHolding(
   links: NamespaceReader,
   stdin: ByteSource | null,
 ): Promise<RemoteRuntime | null> {
-  const mounts: MountEntry[] = []
-  for (const [path, writes] of scopes) {
-    const entry = localMount(registry, links, path, writes)
-    if (entry === null) return null
-    mounts.push(entry)
-  }
-  if (scopes.length === 0 || ruled(session, registry, mounts)) return null
+  const mounts = heldMounts(scopes, session, registry, links)
+  if (mounts === null) return null
   if (await registry.policies.wantsFor('preVfs', session.sessionId)) return null
   let candidates: string[] | null = null
   for (const [at, [path]] of scopes.entries()) {
@@ -137,12 +197,8 @@ async function machineHolding(
     )
     candidates = candidates === null ? held : candidates.filter((m) => held.includes(m))
   }
-  if (candidates?.length !== 1) return null
-  const only = candidates
-  const runtime = registry.runtimeEntries.find(
-    (e): e is RemoteRuntime => e instanceof RemoteRuntime && only.includes(e.defaultMachine),
-  )
-  if (runtime === undefined) return null
+  const runtime = runtimeOf(candidates ?? [], registry)
+  if (runtime === null) return null
   if (piped(stdin) && !runtime.handle().takesInput) return null
   return runtime
 }
@@ -198,10 +254,40 @@ function childPaths(argv: Argv, cwd: string): string[] {
 }
 
 /**
+ * Every path a command names, absolute, with whether any of them depends on
+ * the folder it runs from: an operand typed relative, an option's or a `find
+ * -exec` command's path the folder changes, or no path at all (`ls` and
+ * `find` list the folder). Mirrors Python's `_named_paths`.
+ *
+ * @param argv the command.
+ * @param cwd the session's folder.
+ */
+function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
+  const operands = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
+  const options = optionPaths(argv, cwd)
+  const children = childPaths(argv, cwd)
+  const paths = operands.map((w) => unmarkGlobs(w.virtual))
+  const same = (a: readonly string[], b: readonly string[]): boolean =>
+    a.length === b.length && a.every((x, i) => x === b[i])
+  const relative =
+    paths.length + options.length + children.length === 0 ||
+    operands.some((w) => !w.rawPath.startsWith('/')) ||
+    !same(options, optionPaths(argv, '/')) ||
+    !same(children, childPaths(argv, '/'))
+  return [[...paths, ...options, ...children], relative]
+}
+
+/**
  * The machine a mount command runs on whole, when every path it names is one
  * machine's own at the same path: `grep -rn x /testbed` is one exec there,
  * with the machine's own output, where Mirage's implementation would read
- * each file through an exec of its own.
+ * each file through an exec of its own. Its output is then the machine's in
+ * every detail, its links and its `/proc` included.
+ *
+ * It runs from the session's folder when that folder is on the same machine.
+ * A command whose every path is absolute runs there from `/` otherwise, since
+ * none of its words depends on the folder (`ls /proc/self/fd` from a Mirage
+ * store); one with a relative path, or none, needs the folder on the machine.
  *
  * Mirage keeps the command when anything is piped into it, since its own
  * command leaves input it does not read for the next one (`... | while read
@@ -210,12 +296,10 @@ function childPaths(argv: Argv, cwd: string): string[] {
  * nested under it); when no one machine holds every path (a new name, or a
  * name on several machines, which Mirage places by its own rules); when the
  * session's rules restrict its mount, a coded file policy speaks for the
- * session, or the mount is read-only; when the cwd
- * is not on the machine; when a path, an option's or a `find -exec`
- * command's included, walks through a link of Mirage's own; or
- * when the machine lacks the program. A command
- * naming no path runs there from a cwd on the machine (`ls`, `find`).
- * Mirrors Python's `operand_machine`.
+ * session, or the mount is read-only; when a path, an option's or a `find
+ * -exec` command's included, walks through a link of Mirage's own; or when
+ * the machine lacks the program. `statedMachine` is the same rule as far as a
+ * command's words tell it. Mirrors Python's `operand_machine`.
  *
  * @param argv the command.
  * @param session the session it runs in.
@@ -229,19 +313,68 @@ export async function operandMachine(
   registry: MountRegistry,
   links: NamespaceReader,
   stdin: ByteSource | null,
-): Promise<RemoteRuntime | null> {
+): Promise<ExternalTarget | null> {
   if (piped(stdin)) return null
-  const paths = argv.operands.flatMap((w) =>
-    w instanceof PathSpec ? [unmarkGlobs(w.virtual)] : [],
-  )
-  const cwd = norm(session.cwd)
-  paths.push(...optionPaths(argv, session.cwd))
-  paths.push(...childPaths(argv, session.cwd))
+  const [paths, relative] = namedPaths(argv, session.cwd)
   const scopes: [string, boolean][] = paths.map((path) => [path, true])
-  if (cwd !== '/') scopes.push([cwd, false])
-  const runtime = await machineHolding(scopes, session, registry, links, null)
+  const cwd = norm(session.cwd)
+  const here: [string, boolean][] = cwd === '/' ? scopes : [...scopes, [cwd, false]]
+  let runtime = await machineHolding(here, session, registry, links, null)
+  let runsFrom: string | null = null
+  if (runtime === null && !relative && cwd !== '/') {
+    runtime = await machineHolding(scopes, session, registry, links, null)
+    runsFrom = '/'
+  }
   if (runtime === null || !(await runtime.handle().hasProgram(argv.name))) return null
-  return runtime
+  return { kind: Consumer.EXTERNAL, runtime, cwd: runsFrom }
+}
+
+/**
+ * The machine a mount command runs on whole as far as its words tell, without
+ * asking anything (`explain`): `operandMachine`'s rule over the paths its
+ * operands and options name, where each mount shows one machine, for a
+ * session no coded file policy speaks for (the caller asks, `wantsFor`). What
+ * only a machine or the run can tell is left to the run, which keeps the
+ * command in Mirage: which of several machines a mount shows holds a name,
+ * whether the machine has the program, and input piped in. Mirrors Python's
+ * `stated_machine`.
+ *
+ * @param words the command's words, as judged.
+ * @param cwd the session's folder.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ */
+export function statedMachine(
+  words: readonly CommandWord[],
+  cwd: string,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+): RemoteRuntime | null {
+  const named = words.flatMap((w) =>
+    w.path !== null &&
+    (w.kind === WordKind.OPERAND || w.kind === WordKind.VALUE || w.kind === WordKind.OPTION)
+      ? [w.path]
+      : [],
+  )
+  const relative = named.length === 0 || named.some((p) => !p.rawPath.startsWith('/'))
+  const scopes: [string, boolean][] = named.map((p) => [unmarkGlobs(p.virtual), true])
+  const here = norm(cwd)
+  const tries: [string, boolean][][] = here === '/' ? [scopes] : [[...scopes, [here, false]]]
+  if (!relative && here !== '/') tries.push(scopes)
+  for (const scoped of tries) {
+    const mounts = heldMounts(scoped, session, registry, links)
+    if (mounts === null) continue
+    let machines: string[] | null = null
+    for (const entry of mounts) {
+      const shown = shownMachines(entry, registry)
+      machines = machines === null ? shown : machines.filter((m) => shown.includes(m))
+    }
+    const runtime = runtimeOf(machines ?? [], registry)
+    if (runtime !== null) return runtime
+  }
+  return null
 }
 
 /**

@@ -18,9 +18,11 @@ import posixpath
 from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS, parse_command
+from mirage.commands.spec.types import WordKind
 from mirage.core.machine.place import holders
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
+from mirage.policy.types import CommandWord
 from mirage.rs.find import find_layout
 from mirage.runtime.binding import restricted_mounts_for
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -42,6 +44,7 @@ from mirage.workspace.lookup.constants import KEYWORDS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import (
     Consumer,
+    ExternalTarget,
     MachineAnswer,
     ProgramLookup,
 )
@@ -118,6 +121,78 @@ def _ruled(
     return any(norm(e.prefix) in restricted for e in entries)
 
 
+def _held_mounts(
+    scopes: list[tuple[str, bool]],
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+) -> list[MountEntry] | None:
+    """The machine mount showing each path at its own path, in order;
+    None when there is no path, any path is elsewhere, or the session's
+    rules restrict one of those mounts.
+
+    Args:
+        scopes (list[tuple[str, bool]]): each absolute path, with whether
+            the command may write it.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+    """
+    entries = [
+        _local_mount(registry, links, p, writes) for p, writes in scopes
+    ]
+    if not scopes or None in entries:
+        return None
+    mounts = [e for e in entries if e is not None]
+    if _ruled(session, registry, mounts):
+        return None
+    return mounts
+
+
+def _runtime_of(
+    machines: Sequence[str], registry: MountRegistry
+) -> RemoteRuntime | None:
+    """The runtime that runs programs on the one machine named; None for
+    none or several.
+
+    Args:
+        machines (Sequence[str]): the candidate machines.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    if len(machines) != 1:
+        return None
+    return next(
+        (
+            e
+            for e in registry.runtime_entries
+            if isinstance(e, RemoteRuntime)
+            and e.default_machine == machines[0]
+        ),
+        None,
+    )
+
+
+def _shown_machines(entry: MountEntry, registry: MountRegistry) -> list[str]:
+    """The machines a machine mount shows, by its config: the ones it
+    names, else every machine the workspace runs programs on.
+
+    Args:
+        entry (MountEntry): a machine mount.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    assert isinstance(entry.vfs, MachineVFS)
+    named = entry.vfs.config.machines
+    if named is not None:
+        return list(named)
+    return sorted(
+        {
+            e.default_machine
+            for e in registry.runtime_entries
+            if isinstance(e, RemoteRuntime)
+        }
+    )
+
+
 async def _machine_holding(
     scopes: list[tuple[str, bool]],
     session: SessionState,
@@ -138,13 +213,8 @@ async def _machine_holding(
         links (NamespaceReader): the session's link table.
         stdin (ByteSource | None): what is piped into it.
     """
-    entries = [
-        _local_mount(registry, links, p, writes) for p, writes in scopes
-    ]
-    if not scopes or None in entries:
-        return None
-    mounts = [e for e in entries if e is not None]
-    if _ruled(session, registry, mounts) or (
+    mounts = _held_mounts(scopes, session, registry, links)
+    if mounts is None or (
         await registry.policies.wants_for("pre_vfs", session.session_id)
     ):
         return None
@@ -160,16 +230,7 @@ async def _machine_holding(
             if candidates is None
             else [m for m in candidates if m in held]
         )
-    if candidates is None or len(candidates) != 1:
-        return None
-    runtime = next(
-        (
-            e
-            for e in registry.runtime_entries
-            if isinstance(e, RemoteRuntime) and e.default_machine in candidates
-        ),
-        None,
-    )
+    runtime = _runtime_of(candidates or [], registry)
     if runtime is None:
         return None
     if _piped(stdin) and not runtime.handle().takes_input:
@@ -230,17 +291,48 @@ def _child_paths(argv: Argv, cwd: str) -> list[str]:
     ]
 
 
+def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
+    """Every path a command names, absolute, with whether any of them
+    depends on the folder it runs from: an operand typed relative, an
+    option's or a ``find -exec`` command's path the folder changes, or
+    no path at all (``ls`` and ``find`` list the folder).
+
+    Args:
+        argv (Argv): the command.
+        cwd (str): the session's folder.
+    """
+    operands = [w for w in argv.operands if isinstance(w, PathSpec)]
+    options = _option_paths(argv, cwd)
+    children = _child_paths(argv, cwd)
+    paths = [unmark_globs(w.virtual) for w in operands]
+    relative = (
+        not (paths or options or children)
+        or any(not w.raw_path.startswith("/") for w in operands)
+        or options != _option_paths(argv, "/")
+        or children != _child_paths(argv, "/")
+    )
+    return [*paths, *options, *children], relative
+
+
 async def operand_machine(
     argv: Argv,
     session: SessionState,
     registry: MountRegistry,
     links: NamespaceReader,
     stdin: ByteSource | None,
-) -> RemoteRuntime | None:
+) -> ExternalTarget | None:
     """The machine a mount command runs on whole, when every path it
     names is one machine's own at the same path: ``grep -rn x /testbed``
     is one exec there, with the machine's own output, where Mirage's
-    implementation would read each file through an exec of its own.
+    implementation would read each file through an exec of its own. Its
+    output is then the machine's in every detail, its links and its
+    ``/proc`` included.
+
+    It runs from the session's folder when that folder is on the same
+    machine. A command whose every path is absolute runs there from
+    ``/`` otherwise, since none of its words depends on the folder
+    (``ls /proc/self/fd`` from a Mirage store); one with a relative path,
+    or none, needs the folder on the machine.
 
     Mirage keeps the command when anything is piped into it, since its
     own command leaves input it does not read for the next one (``... |
@@ -250,11 +342,10 @@ async def operand_machine(
     every path (a new name, or a name on several machines, which Mirage
     places by its own rules); when the session's rules restrict its
     mount, a coded file policy speaks for the session, or the mount is
-    read-only; when the cwd is not on the machine;
-    when a path, an option's or a ``find -exec`` command's included,
-    walks through a link of Mirage's own; or when the machine
-    lacks the program. A command naming no path runs
-    there from a cwd on the machine (``ls``, ``find``).
+    read-only; when a path, an option's or a ``find -exec`` command's
+    included, walks through a link of Mirage's own; or when the machine
+    lacks the program. ``stated_machine`` is the same rule as far as a
+    command's words tell it.
 
     Args:
         argv (Argv): the command.
@@ -265,21 +356,73 @@ async def operand_machine(
     """
     if _piped(stdin):
         return None
-    paths = [
-        unmark_globs(w.virtual)
-        for w in argv.operands
-        if isinstance(w, PathSpec)
-    ]
-    cwd = norm(session.cwd)
-    paths += _option_paths(argv, session.cwd)
-    paths += _child_paths(argv, session.cwd)
+    paths, relative = _named_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
-    if cwd != "/":
-        scopes.append((cwd, False))
-    runtime = await _machine_holding(scopes, session, registry, links, None)
+    cwd = norm(session.cwd)
+    here = scopes if cwd == "/" else [*scopes, (cwd, False)]
+    runtime = await _machine_holding(here, session, registry, links, None)
+    runs_from: str | None = None
+    if runtime is None and not relative and cwd != "/":
+        runtime = await _machine_holding(
+            scopes, session, registry, links, None
+        )
+        runs_from = "/"
     if runtime is None or not await runtime.handle().has_program(argv.name):
         return None
-    return runtime
+    return ExternalTarget(runtime, runs_from)
+
+
+def stated_machine(
+    words: Sequence[CommandWord],
+    cwd: str,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+) -> RemoteRuntime | None:
+    """The machine a mount command runs on whole as far as its words
+    tell, without asking anything (``explain``): ``operand_machine``'s
+    rule over the paths its operands and options name, where each mount
+    shows one machine, for a session no coded file policy speaks for
+    (the caller asks, ``wants_for``). What only a machine or the run can
+    tell is left to the run, which keeps the command in Mirage: which of
+    several machines a mount shows holds a name, whether the machine has
+    the program, and input piped in.
+
+    Args:
+        words (Sequence[CommandWord]): the command's words, as judged.
+        cwd (str): the session's folder.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+    """
+    named = [
+        w.path
+        for w in words
+        if w.path is not None
+        and w.kind in (WordKind.OPERAND, WordKind.VALUE, WordKind.OPTION)
+    ]
+    relative = not named or any(not p.raw_path.startswith("/") for p in named)
+    scopes = [(unmark_globs(p.virtual), True) for p in named]
+    here = norm(cwd)
+    tries = [scopes] if here == "/" else [[*scopes, (here, False)]]
+    if not relative and here != "/":
+        tries.append(scopes)
+    for scoped in tries:
+        mounts = _held_mounts(scoped, session, registry, links)
+        if mounts is None:
+            continue
+        machines: list[str] | None = None
+        for entry in mounts:
+            shown = _shown_machines(entry, registry)
+            machines = (
+                shown
+                if machines is None
+                else [m for m in machines if m in shown]
+            )
+        runtime = _runtime_of(machines or [], registry)
+        if runtime is not None:
+            return runtime
+    return None
 
 
 async def program_machine(

@@ -870,6 +870,18 @@ def _output_recorder(
     recorder = PipeRecorder(
         dispatch, streams, forward if live else {}, sink, live
     )
+    # The level's stderr goes where its stdout goes: one description for
+    # both (``2>&1``, ``&>f``), or the enclosing level's join where the
+    # level leaves both where they were.
+    recorder.joins_errors = outputs[1] is not _CLOSED and (
+        outputs[2] is outputs[1]
+        or (
+            outputs[1] is _TO_STDOUT
+            and outputs[2] is _TO_STDERR
+            and sink is not None
+            and sink.joins_errors
+        )
+    )
     for file in files:
         if file.source is None:
             for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):

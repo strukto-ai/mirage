@@ -62,7 +62,6 @@ from mirage.policy import (
 from mirage.policy.match import closed_by_default
 from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
-from mirage.runtime.machine.runtime import RemoteRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
@@ -1175,7 +1174,11 @@ async def _run_argv(
         if denied is not None:
             return denied
         held, _ = await _held_machine(argv, deps, context, stdin)
-        machine = machine if held is None else held.machine
+        machine = (
+            machine
+            if held is None or held.runtime is None
+            else held.runtime.machine
+        )
     staged = (
         bind_caller(current_caller().changed({"machine": machine}))
         if machine != current_caller().machine
@@ -1252,9 +1255,10 @@ async def _held_machine(
     context: EvaluationContext,
     stdin: ByteSource | None,
     consumer: Consumer | None = None,
-) -> tuple[RemoteRuntime | None, Argv]:
+) -> tuple[ExternalTarget | None, Argv]:
     """The machine holding the program path or every operand, including
-    each glob match. Return its matched argv when it can run there whole.
+    each glob match, and the folder it runs from there. Return its
+    matched argv when it can run there whole.
 
     Args:
         argv (Argv): the command.
@@ -1280,7 +1284,7 @@ async def _held_machine(
             deps.dispatch,
             stdin,
         )
-        return held, argv
+        return (None if held is None else ExternalTarget(held)), argv
     if consumer is None:
         consumer = target_consumer(
             resolve_target(name, argv.args, session, registry, placed)
@@ -1675,7 +1679,7 @@ async def bind_command(
     if "/" in name:
         held, _ = await _held_machine(argv, deps, context, stdin)
         if held is not None:
-            return ResolvedCommand(argv, ExternalTarget(held))
+            return ResolvedCommand(argv, held)
         absent = None
         if placed is not None and name.startswith("/"):
             target = resolve_target(name, argv.args, session, registry, placed)
@@ -1713,7 +1717,7 @@ async def bind_command(
             argv, deps, context, stdin, consumer
         )
         if held is not None:
-            return ResolvedCommand(matched, ExternalTarget(held))
+            return ResolvedCommand(matched, held)
 
     if argv.args[:1] == ("--help",) and not is_program_invocation(session):
         answered = flag_help(name)
@@ -1779,7 +1783,7 @@ async def run_resolved(
         )
     if isinstance(target, ExternalTarget):
         return await run_external(
-            argv, stdin, session, registry, target.runtime, sink
+            argv, stdin, session, registry, target.runtime, sink, target.cwd
         )
     if isinstance(target, PathTarget):
         absent = target.fallback

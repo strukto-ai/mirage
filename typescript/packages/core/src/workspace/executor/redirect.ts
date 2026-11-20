@@ -683,6 +683,14 @@ function outputRecorder(
     sink ?? null,
     live,
   )
+  // The level's stderr goes where its stdout goes: one description for both
+  // (`2>&1`, `&>f`), or the enclosing level's join where the level leaves
+  // both where they were.
+  const out = outputs.get(1)
+  const err = outputs.get(2)
+  recorder.joinsErrors =
+    out !== CLOSED &&
+    (err === out || (out === TO_STDOUT && err === TO_STDERR && sink?.joinsErrors === true))
   for (const file of files) {
     if (file.source !== null) continue
     for (const [fd, channel] of [

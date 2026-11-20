@@ -77,7 +77,8 @@ async def test_a_glob_hands_the_program_its_matches():
     "line",
     [
         "cat /tmp/a.py /data/b",
-        "cd /data && cat /tmp/a.py",
+        "cd /data && ls",
+        "cd /data && cat ../tmp/a.py",
         "echo hi | wc -l",
         "echo hi | cat /tmp/a.py",
     ],
@@ -88,6 +89,36 @@ async def test_mirage_keeps_a_command_that_reaches_past_the_machine(line):
     await ws.shell("echo b > /data/b")
     await ws.shell(line)
     assert files.ran == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_absolute_paths_run_there_from_root_off_the_machine_s_folders():
+    files = FakeFiles({"/tmp/a.py": b"x"}, programs=TOOLS)
+    box = ScriptedMachine("box", files.answer)
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines={"box": box}
+    )
+    assert await out(ws, "cd /data && cat /tmp/a.py") == "ran\n"
+    assert (files.ran, box.cwds) == (["cat /tmp/a.py"], ["/"])
+    assert await out(ws, "cd /tmp && cat /tmp/a.py") == "ran\n"
+    assert box.cwds[-1] == "/tmp"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_names_the_machine_the_run_hands_a_command_to():
+    files = FakeFiles({"/tmp/a.py": b"x"}, programs=TOOLS)
+    ws = one(files, {"/data": RAMVFS()})
+    await ws.shell("cd /data")
+
+    async def placed(line: str) -> list[tuple[str, str]]:
+        said = await ws.explain(line)
+        return [(c.command, c.machine) for c in said.node.children]
+
+    assert await placed("cat /tmp/a.py") == [("cat", "box")]
+    assert await placed("ls") == [("ls", "")]
+    assert await placed("cat /tmp/a.py /data/b") == [("cat", "")]
     await ws.close()
 
 

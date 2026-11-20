@@ -34,11 +34,13 @@ from mirage.machine.constants import (
     PROCESS,
     PROGRAM_CHECK,
     RUN_PROGRAM_AT,
+    RUN_WRAPPER_JOINED,
     SSHFS_LINE,
     SSHFS_OPTIONS,
     TOOLS_PATH,
     darwin_start,
     decode_output,
+    is_run,
     machine_dir_line,
     mount_field,
     run_argv,
@@ -110,6 +112,27 @@ def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
         b"a b||w:7|" + run_done_mark("n1") + b"3\n",
     )
     assert done.stderr.endswith(b"err\n" + run_exit_mark("n1") + b"3\n")
+
+
+# A joined run (`2>&1`) writes the program's stderr into its stdout where
+# the program writes it, so the two keep its order; the wrapper's own pid
+# and exit lines stay on stderr, and the check that reports a program the
+# machine cannot run speaks on stdout too, as bash's redirect makes it.
+def test_a_joined_run_writes_stderr_into_stdout_in_order():
+    program = ("sh", "-c", "echo out1; echo err >&2; echo out2")
+    argv = run_argv("w:7", "n1", program, joined=True)
+    assert is_run(argv) and argv[2] == RUN_WRAPPER_JOINED
+    done = subprocess.run(argv, capture_output=True, check=False)
+    assert done.stdout == b"out1\nerr\nout2\n" + run_done_mark("n1") + b"0\n"
+    assert b"err" not in done.stderr.replace(run_exit_mark("n1"), b"")
+    missing = run_argv(
+        "w:7", "n1", ("no-such-program-x",), ("bash: x: ", "nope", ""), True
+    )
+    gone = subprocess.run(missing, capture_output=True, check=False)
+    assert (gone.returncode, gone.stdout) == (
+        127,
+        b"bash: x: nope\n" + run_done_mark("n1") + b"127\n",
+    )
 
 
 # A program a signal ended gets no line at the end of its stdout, which may

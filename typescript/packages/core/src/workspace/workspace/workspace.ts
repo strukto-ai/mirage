@@ -2000,11 +2000,15 @@ export class Workspace {
         }
       }
       const shown = wholeLine ? judged : this.router.refuseDisagreeing(judged, placed)
+      // A mount command whose paths are a machine's own runs there, as its
+      // run hands it over, unless a coded file policy speaks for the
+      // session (`operandMachine`).
+      const filePolicy = await this.registry.policies.wantsFor('preVfs', session.sessionId)
       const said = explainedLine(
         line,
         shown,
         wholeLine ? judged : verdicts,
-        this.router.placements(shown, placed),
+        this.router.placements(shown, placed, filePolicy),
         reparse,
         wholeLine,
         opened,

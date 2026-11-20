@@ -19,7 +19,7 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted } from '../../../utils/abort.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import { currentCaller } from '../../../context/session_context.ts'
+import { bindCaller, currentCaller } from '../../../context/session_context.ts'
 import type { ProcessTraits } from '../../../execution/process/types.ts'
 import type { MachineName } from '../../../execution/types.ts'
 import { WORKSPACE_PROVIDERS } from '../../../runtime/constants.ts'
@@ -67,7 +67,11 @@ export function handedTokens(
  * stderr into `sink` as it arrives, where the statement it runs in writes (a
  * job's console, a redirect, a compound body), so it lands beside its stdout
  * and stays when the program is stopped; without one it lands on the result,
- * kept as it arrives all the same.
+ * kept as it arrives all the same. Where its stderr goes where its stdout
+ * goes (`2>&1`), the runtime is told so (`Caller.joinsErrors`): a machine
+ * joins the two where the program writes them, so they keep the order it
+ * wrote them in. `cwd` is the folder it runs from, null or absent for the
+ * session's own.
  */
 export async function runExternal(
   argv: Argv,
@@ -77,6 +81,7 @@ export async function runExternal(
   runtime: Runtime | null,
   signal?: AbortSignal,
   sink?: JobConsole,
+  cwd?: string | null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   if (runtime === null) {
     const denied = admissionDenial(argv.name)
@@ -100,7 +105,7 @@ export async function runExternal(
   const ctx: Context = {
     stdin,
     flags: process ? {} : { c: command },
-    cwd: PathSpec.fromStrPath(session.cwd),
+    cwd: PathSpec.fromStrPath(cwd ?? session.cwd),
     env: envSnapshot(session),
   }
   const node = new ExecutionNode({ command, exitCode: 0 })
@@ -114,14 +119,19 @@ export async function runExternal(
       said.push(new Uint8Array(chunk))
       await errors(chunk)
     }
-    try {
-      const result = await executeProgram(
+    const execute = (): Promise<RunResult> =>
+      executeProgram(
         runtime,
         argv.name,
         process ? tokens : [],
         { ...ctx, signal: stop },
         { kind, output, errors: told },
       )
+    try {
+      const result =
+        sink?.joinsErrors === true
+          ? await bindCaller({ ...currentCaller(), joinsErrors: true }, execute)
+          : await execute()
       node.stderr = concat(said)
       return result
     } finally {

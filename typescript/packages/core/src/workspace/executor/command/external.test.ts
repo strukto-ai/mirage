@@ -42,6 +42,7 @@ import { Consumer, lookup, lookupAll, SHELL_NAMES } from '../../lookup/index.ts'
 import { CAPTURABLE_BUILTINS } from '../../lookup/constants.ts'
 import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -889,4 +890,38 @@ it('records a program its cap stopped as 141', async () => {
     delete DEFAULT_COMMAND_LIMITS['endless-tool']
     await ws.close()
   }
+})
+
+// A program whose stderr goes where its stdout goes (`2>&1`) runs joined on
+// its machine, which writes the two into one stream in the order the program
+// wrote them; one whose redirects part them (`2>&1 >f`) runs as any other,
+// its streams Mirage's to route.
+describe('a joined program', () => {
+  it.each([
+    ['prog 2>&1', 'out\nerr\n', '', true],
+    ['prog', 'out\n', 'err\n', false],
+    ['prog 2>&1 >/dev/null', 'err\n', '', false],
+    ['{ prog; } 2>&1 | cat', 'out\nerr\n', '', true],
+    ['prog &> /data/o; cat /data/o', 'out\nerr\n', '', true],
+    ['{ prog < /dev/null; } 2>&1', 'out\nerr\n', '', true],
+  ])('runs %j joined on its machine as its redirects say', async (line, said, errs, joined) => {
+    const enc = new TextEncoder()
+    const box = new ScriptedMachine('box', () => ({
+      exitCode: 0,
+      stdout: enc.encode('out\n'),
+      stderr: enc.encode('err\n'),
+    }))
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: { box } },
+    )
+    try {
+      const result = await ws.shell(line)
+      const dec = new TextDecoder()
+      expect([dec.decode(result.stdout), dec.decode(result.stderr)]).toEqual([said, errs])
+      expect(box.joined).toEqual([joined])
+    } finally {
+      await ws.close()
+    }
+  })
 })

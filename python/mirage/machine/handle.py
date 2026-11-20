@@ -561,7 +561,9 @@ class MachineHandle:
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
-                run_argv(tag, nonce, run, missing),
+                run_argv(
+                    tag, nonce, run, missing, current_caller().joins_errors
+                ),
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
