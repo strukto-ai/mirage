@@ -1153,11 +1153,17 @@ class Workspace:
             )
         if not whole_line:
             judged = self._router.refuse_disagreeing(judged, placed)
+        # A mount command whose paths are a machine's own runs there, as
+        # its run hands it over, unless a coded file policy speaks for the
+        # session (``operand_machine``).
+        file_policy = await self._registry.policies.wants_for(
+            "pre_vfs", session.session_id
+        )
         said = explained_line(
             line,
             judged,
             judged if whole_line else verdicts,
-            self._router.placements(judged, placed),
+            self._router.placements(judged, placed, file_policy),
             whole_line,
             aliases,
             opened,

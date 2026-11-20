@@ -37,9 +37,18 @@ export const Consumer = Object.freeze({
 
 export type Consumer = (typeof Consumer)[keyof typeof Consumer]
 
+/**
+ * A program a runtime runs, from the folder it runs in there. `runtime` is
+ * null for one the line's placement refuses; `cwd` is the folder it runs
+ * from, null or absent for the session's own. A command whose every path is
+ * a machine's own and absolute runs there from `/` when the session's folder
+ * is not on that machine (`operandMachine`). Mirrors Python's
+ * `ExternalTarget`.
+ */
 export interface ExternalTarget {
   readonly kind: typeof Consumer.EXTERNAL
   readonly runtime: Runtime | null
+  readonly cwd?: string | null
 }
 
 export interface FunctionTarget {

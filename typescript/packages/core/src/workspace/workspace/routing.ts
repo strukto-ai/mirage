@@ -29,8 +29,9 @@ import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
-import { INTERPRETER_NAMES, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { INTERPRETER_NAMES, MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
+import { statedMachine } from '../lookup/machine.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -257,20 +258,22 @@ export class Router {
    * `preCommand` route of the command places it over the line's decision,
    * as its run does, and so does the route of a program a wrapper takes
    * along to a runtime (`programs`, the commands its run answers for,
-   * outermost first).
+   * outermost first). `filePolicy` says whether a coded file policy speaks
+   * for the session (`serving`).
    * Mirrors Python's `Router.placement_for`.
    */
   placementFor(
     one: Judged,
     line: RouteDecision<Runtime>,
     programs: readonly Judged[] = [],
+    filePolicy = true,
   ): string {
     const whole = wholeLineRuntime(line.bindings)
     if (whole !== null) return whole.name
     const placed = this.ownPlaced(one, line)
     const answer = this.wrapperAnswer(one, placed, programs)
-    if (answer?.kind !== 'route') return this.serving(one, placed)
-    return this.serving(one, this.overlaid(placed, answer))
+    if (answer?.kind !== 'route') return this.serving(one, placed, filePolicy)
+    return this.serving(one, this.overlaid(placed, answer), filePolicy)
   }
 
   /** A decision with a command's own `preCommand` route over it. */
@@ -359,14 +362,21 @@ export class Router {
   /**
    * `placementFor` for each of a line's judged commands, one a line runs in
    * turn (`eval`) under the placement a `preCommand` route gave the command
-   * running it, as its run keeps it. Mirrors Python's `Router.placements`.
+   * running it, as its run keeps it; `filePolicy` says whether a coded file
+   * policy speaks for the session (`serving`). Mirrors Python's
+   * `Router.placements`.
    */
-  placements(judged: readonly Judged[], decision: RouteDecision<Runtime>): (one: Judged) => string {
+  placements(
+    judged: readonly Judged[],
+    decision: RouteDecision<Runtime>,
+    filePolicy = true,
+  ): (one: Judged) => string {
     return (one) =>
       this.placementFor(
         one,
         this.outerPlaced(one, judged, decision),
         programsOf(one, judged, this.registry, this.namespace),
+        filePolicy,
       )
   }
 
@@ -396,9 +406,13 @@ export class Router {
    * command on its own, as `placementFor` answers it: a name a machine
    * captures runs there only when Mirage hands it over, as a program or an
    * interpreter, so a shell word such as `echo`, a function or an installed
-   * CLI stays in Mirage. Mirrors Python's `Router._serving`.
+   * CLI stays in Mirage. A mount command whose paths are one machine's own
+   * runs there whole, as far as its words tell (`statedMachine`), unless a
+   * coded file policy speaks for the session (`filePolicy`, its
+   * `wantsFor('preVfs')`), which keeps it in Mirage. Mirrors Python's
+   * `Router._serving`.
    */
-  private serving(one: Judged, placed: RouteDecision<Runtime>): string {
+  private serving(one: Judged, placed: RouteDecision<Runtime>, filePolicy = true): string {
     const command = one.judgment.command
     let decision = placed
     let fallback = placed.fallback
@@ -412,6 +426,20 @@ export class Router {
         placed,
       )
       decision = rerouted ?? placed
+      if (
+        consumer === Consumer.MOUNT ||
+        (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(command))
+      ) {
+        if (filePolicy) return ''
+        const held = statedMachine(
+          one.ctx.words ?? [],
+          one.ctx.cwd,
+          one.session,
+          this.registry,
+          this.namespace.sessionLinks(one.session),
+        )
+        return held === null ? '' : held.name
+      }
       if (
         consumer !== Consumer.EXTERNAL &&
         !(consumer === Consumer.SESSION && INTERPRETER_NAMES.has(command))

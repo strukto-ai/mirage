@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.config import Context
-from mirage.context import current_caller
+from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.process.types import ProcessTraits
 from mirage.execution.types import MachineName
@@ -81,6 +81,7 @@ async def run_external(
     registry: MountRegistry,
     entry: RuntimeIdentity | None,
     sink: JobConsole | None = None,
+    cwd: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage.
 
@@ -90,6 +91,20 @@ async def run_external(
     runs in writes (a job's console, a redirect, a compound body), so it
     lands beside its stdout and stays when the program is stopped;
     without one it lands on the result, kept as it arrives all the same.
+    Where its stderr goes where its stdout goes (``2>&1``), the runtime
+    is told so (``Caller.joins_errors``): a machine joins the two where
+    the program writes them, so they keep the order it wrote them in.
+
+    Args:
+        argv (Argv): the program's words.
+        stdin (ByteSource | None): what is piped into it.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and runtimes.
+        entry (RuntimeIdentity | None): the runtime; None for one the
+            line's placement refuses.
+        sink (JobConsole | None): where its stderr goes as it arrives.
+        cwd (str | None): the folder it runs from; None for the
+            session's own.
     """
     if entry is None:
         denied = admission_denial(argv.name)
@@ -113,7 +128,7 @@ async def run_external(
     process = isinstance(runtime, ProcessExecutorMixin)
     kind: ExecutionKind = "process" if process else "line"
     ctx = Context(
-        cwd=PathSpec.from_str_path(session.cwd),
+        cwd=PathSpec.from_str_path(session.cwd if cwd is None else cwd),
         env=env_snapshot(session),
         stdin=stdin,
         flags={} if process else {"c": command},
@@ -132,6 +147,11 @@ async def run_external(
             said.append(chunk)
             await errors(chunk)
 
+        joined = (
+            bind_caller(current_caller().changed({"joins_errors": True}))
+            if sink is not None and sink.joins_errors
+            else None
+        )
         try:
             result = await _execute_program(
                 runtime,
@@ -143,6 +163,8 @@ async def run_external(
                 told,
             )
         finally:
+            if joined is not None:
+                reset_caller(joined)
             await registry.settle(runtime)
         node.stderr = b"".join(said)
         return result

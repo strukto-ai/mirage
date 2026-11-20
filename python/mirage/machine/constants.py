@@ -515,6 +515,14 @@ RUN_WRAPPER = (
     'printf "\\036mirage-exit %s %s\\n" "$1" "$s" >&6; exit "$s"'
 )
 
+# ``RUN_WRAPPER`` for a program whose stderr goes where its stdout goes
+# (``2>&1``): the program, and the check that reports one the machine
+# cannot run, write stderr into stdout, as bash's redirect makes them, so
+# the two keep the order the program wrote them in.
+RUN_WRAPPER_JOINED = RUN_WRAPPER.replace(
+    "exec 2>&6 6>&-; ", "exec 2>&1 6>&-; ", 1
+)
+
 # Where a run's program starts in what ``run_argv`` builds: past
 # ``/bin/sh -c RUN_WRAPPER sh``, the run's own word, the three words a
 # program it cannot run is reported in, and the tag's assignment.
@@ -742,6 +750,7 @@ def run_argv(
     nonce: str,
     argv: Sequence[str],
     missing: tuple[str, str, str] = ("", "command not found", ""),
+    joined: bool = False,
 ) -> tuple[str, ...]:
     """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
 
@@ -752,11 +761,13 @@ def run_argv(
         argv (Sequence[str]): the program and its arguments.
         missing (tuple[str, str, str]): the words a program the machine
             cannot run is reported in (``PROGRAM_CHECK``).
+        joined (bool): the program writes its stderr into its stdout
+            (``RUN_WRAPPER_JOINED``).
     """
     return (
         "/bin/sh",
         "-c",
-        RUN_WRAPPER,
+        RUN_WRAPPER_JOINED if joined else RUN_WRAPPER,
         "sh",
         nonce,
         *missing,
@@ -793,7 +804,7 @@ def is_run(argv: Sequence[str]) -> bool:
     Args:
         argv (Sequence[str]): what an exec is given.
     """
-    return len(argv) > 2 and argv[2] == RUN_WRAPPER
+    return len(argv) > 2 and argv[2] in (RUN_WRAPPER, RUN_WRAPPER_JOINED)
 
 
 def run_tag(argv: Sequence[str]) -> str:

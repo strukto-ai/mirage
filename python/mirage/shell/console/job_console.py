@@ -43,6 +43,11 @@ class JobConsole:
             rebuilding a finished console from a snapshot.
     """
 
+    # Whether what this console takes on stderr goes where its stdout goes
+    # (``2>&1``): a redirect level's, set when its descriptors are opened;
+    # a job's own console keeps them apart.
+    joins_errors: bool = False
+
     def __init__(
         self, store: ConsoleStore | None = None, finished: bool = False
     ) -> None:

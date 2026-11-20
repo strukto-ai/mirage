@@ -489,6 +489,13 @@ export const RUN_WRAPPER =
   's=$?; [ "$s" -gt 128 ] || printf "\\036mirage-done %s %s\\n" "$1" "$s"; ' +
   'printf "\\036mirage-exit %s %s\\n" "$1" "$s" >&6; exit "$s"'
 
+// `RUN_WRAPPER` for a program whose stderr goes where its stdout goes
+// (`2>&1`): the program, and the check that reports one the machine cannot
+// run, write stderr into stdout, as bash's redirect makes them, so the two
+// keep the order the program wrote them in. Mirrors Python's
+// `RUN_WRAPPER_JOINED`.
+export const RUN_WRAPPER_JOINED = RUN_WRAPPER.replace('exec 2>&6 6>&-; ', 'exec 2>&1 6>&-; ')
+
 // Where a run's program starts in what `runArgv` builds: past
 // `/bin/sh -c RUN_WRAPPER sh`, the run's own word, the three words a program
 // it cannot run is reported in, and the tag's assignment.
@@ -707,14 +714,26 @@ export function fifoLine(name: string, prefixes: readonly string[]): string {
  * @param argv the program and its arguments.
  * @param missing the words a program the machine cannot run is reported in
  *   (`PROGRAM_CHECK`).
+ * @param joined the program writes its stderr into its stdout
+ *   (`RUN_WRAPPER_JOINED`).
  */
 export function runArgv(
   tag: string,
   nonce: string,
   argv: readonly string[],
   missing: readonly [string, string, string] = ['', 'command not found', ''],
+  joined = false,
 ): string[] {
-  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', nonce, ...missing, `${PROCESS}=${tag}`, ...argv]
+  return [
+    '/bin/sh',
+    '-c',
+    joined ? RUN_WRAPPER_JOINED : RUN_WRAPPER,
+    'sh',
+    nonce,
+    ...missing,
+    `${PROCESS}=${tag}`,
+    ...argv,
+  ]
 }
 
 /**
@@ -743,7 +762,7 @@ export function runExitMark(nonce: string): Uint8Array {
  * of Mirage's own lines (`runArgv`). Mirrors Python's `is_run`.
  */
 export function isRun(argv: readonly string[]): boolean {
-  return argv.length > 2 && argv[2] === RUN_WRAPPER
+  return argv.length > 2 && (argv[2] === RUN_WRAPPER || argv[2] === RUN_WRAPPER_JOINED)
 }
 
 /** The tag a program's run carries (`runArgv`). Mirrors Python's `run_tag`. */

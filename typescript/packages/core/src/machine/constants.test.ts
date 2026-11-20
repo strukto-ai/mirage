@@ -38,11 +38,13 @@ import {
   PROGRAM_CHECK,
   NOT_RUNNING_STATUS,
   RUN_PROGRAM_AT,
+  RUN_WRAPPER_JOINED,
   SSHFS_LINE,
   SSHFS_OPTIONS,
   TOOLS_PATH,
   darwinStart,
   decodeOutput,
+  isRun,
   mountField,
   machineDirLine,
   runArgv,
@@ -76,6 +78,29 @@ it('gives a run its words and says how its program ended', () => {
   expect([done.status, done.stdout.toString()]).toEqual([3, `a b||w:7|${ended}3\n`])
   const mark = new TextDecoder().decode(runExitMark('n1'))
   expect(done.stderr.toString().endsWith(`err\n${mark}3\n`)).toBe(true)
+})
+
+// A joined run (`2>&1`) writes the program's stderr into its stdout where the
+// program writes it, so the two keep its order; the wrapper's own pid and exit
+// lines stay on stderr, and the check that reports a program the machine
+// cannot run speaks on stdout too, as bash's redirect makes it.
+it('writes the stderr of a joined run into its stdout in order', () => {
+  const argv = runArgv(
+    'w:7',
+    'n1',
+    ['sh', '-c', 'echo out1; echo err >&2; echo out2'],
+    undefined,
+    true,
+  )
+  expect(isRun(argv) && argv[2] === RUN_WRAPPER_JOINED).toBe(true)
+  const done = spawnSync(argv[0] ?? '', argv.slice(1))
+  const ended = new TextDecoder().decode(runDoneMark('n1'))
+  expect(done.stdout.toString()).toBe(`out1\nerr\nout2\n${ended}0\n`)
+  const mark = new TextDecoder().decode(runExitMark('n1'))
+  expect(done.stderr.toString().replace(mark, '')).not.toContain('err')
+  const missing = runArgv('w:7', 'n1', ['no-such-program-x'], ['bash: x: ', 'nope', ''], true)
+  const gone = spawnSync(missing[0] ?? '', missing.slice(1))
+  expect([gone.status, gone.stdout.toString()]).toEqual([127, `bash: x: nope\n${ended}127\n`])
 })
 
 // A program a signal ended gets no line at the end of its stdout, which may

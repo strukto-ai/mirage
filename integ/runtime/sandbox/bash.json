@@ -3,7 +3,7 @@
     {
       "id": "each_line_answers_as_plain_bash_on_the_machine",
       "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
-      "note": "With the machine's disk at / and the machine taking @external, every line runs once in plain bash on the docker machine and once through Mirage, and the two answers must match byte for byte: program lookups, /usr/bin, a program the machine lacks under each wrapper, and the PATH and HOME a session starts with. Each step stands alone, since plain bash runs it in a shell of its own.",
+      "note": "With the machine's disk at / and the machine taking @external, every line runs once in plain bash on the docker machine and once through Mirage, and the two answers must match byte for byte: program lookups, /usr/bin, a program the machine lacks under each wrapper, the PATH and HOME a session starts with, a program's stderr joined into its stdout in the order it wrote them, and a command naming only the machine's own absolute paths from a folder of Mirage's own. Each step stands alone, since plain bash runs it in a shell of its own.",
       "runtimes": [
         "docker"
       ],
@@ -62,6 +62,14 @@
         {
           "command": "xargs which; echo rc=$?",
           "stdin": "perl\nnosuch\n",
+          "same_as_bash": true
+        },
+        {
+          "command": "perl -e '$|=1; print qq(out1\\n); print STDERR qq(err\\n); print qq(out2\\n)' 2>&1; { perl -e '$|=1; print STDERR qq(e1\\n); print qq(o1\\n)'; } 2>&1 | cat; perl -e 'print STDERR qq(only\\n); print qq(gone\\n)' 2>&1 >/dev/null; nosuch 2>&1 | cat",
+          "same_as_bash": true
+        },
+        {
+          "command": "cd /dev && ls -ld /bin | cut -c1-10 && ls /proc/self/fd | head -n 3",
           "same_as_bash": true
         },
         {

@@ -32,6 +32,10 @@ export class JobConsole {
   private readonly backing: ConsoleStore
   private finishedFlag: boolean
   private boundProcess: string | null = null
+  // Whether what this console takes on stderr goes where its stdout goes
+  // (`2>&1`): a redirect level's, set when its descriptors are opened; a
+  // job's own console keeps them apart.
+  joinsErrors = false
 
   /** The id of the process whose output this is, as text. */
   get process(): string | null {

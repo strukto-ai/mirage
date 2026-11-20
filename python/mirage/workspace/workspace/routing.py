@@ -47,9 +47,11 @@ from mirage.view.types import FileView, SessionView
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
+    MACHINE_ANSWERED,
     PROGRAM_WRAPPERS,
 )
 from mirage.workspace.lookup.lookup import routed_consumer, runs_wrapper
+from mirage.workspace.lookup.machine import stated_machine
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -363,6 +365,7 @@ class Router:
         one: Judged,
         decision: RouteDecision[RuntimeIdentity],
         programs: Sequence[Judged] = (),
+        file_policy: bool = True,
     ) -> str:
         """The machine that serves a command under a decision, as its run
         places it: the ``@external`` one for a program no name binds (a
@@ -377,6 +380,8 @@ class Router:
             decision (RouteDecision): the line's placement.
             programs (Sequence[Judged]): the commands a wrapper's run
                 answers for, outermost first.
+            file_policy (bool): whether a coded file policy speaks for
+                the session (``_serving``).
         """
         whole = whole_line_runtime(decision.bindings)
         if isinstance(whole, Runtime):
@@ -385,7 +390,7 @@ class Router:
         answer = self._wrapper_answer(one, decision, programs)
         if isinstance(answer, Route):
             decision = self._overlaid(decision, answer)
-        return self._serving(one, decision)
+        return self._serving(one, decision, file_policy)
 
     def _own_placed(
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
@@ -518,6 +523,7 @@ class Router:
         self,
         judged: Sequence[Judged],
         decision: RouteDecision[RuntimeIdentity],
+        file_policy: bool = True,
     ) -> Callable[[Judged], str]:
         """``placement_for`` for each of a line's judged commands, one a
         line runs in turn (``eval``) under the placement a
@@ -527,6 +533,8 @@ class Router:
         Args:
             judged (Sequence[Judged]): the line's judged commands.
             decision (RouteDecision): the line's placement.
+            file_policy (bool): whether a coded file policy speaks for
+                the session (``_serving``).
         """
         by_place = {one.occurrence: one for one in judged}
 
@@ -535,6 +543,7 @@ class Router:
                 one,
                 self._outer_placed(one, by_place, decision),
                 _programs_of(one, by_place, self._registry, self._namespace),
+                file_policy,
             )
 
         return placed
@@ -570,18 +579,27 @@ class Router:
         )
 
     def _serving(
-        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
+        self,
+        one: Judged,
+        decision: RouteDecision[RuntimeIdentity],
+        file_policy: bool = True,
     ) -> str:
         """The machine that serves a command under a decision that places
         each command on its own, as ``placement_for`` answers it: a name
         a machine captures runs there only when Mirage hands it over, as
         a program or an interpreter, so a shell word such as ``echo``, a
-        function or an installed CLI stays in Mirage.
+        function or an installed CLI stays in Mirage. A mount command
+        whose paths are one machine's own runs there whole, as far as its
+        words tell (``stated_machine``), unless a coded file policy speaks
+        for the session, which keeps it in Mirage.
 
         Args:
             one (Judged): the command's judgment and the session it was
                 judged in.
             decision (RouteDecision): the placement.
+            file_policy (bool): whether a coded file policy speaks for
+                the session (``wants_for("pre_vfs")``); the machine is
+                then left unnamed, as the run keeps the command.
         """
         command = one.judgment.command
         fallback = decision.fallback
@@ -594,6 +612,19 @@ class Router:
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = rerouted or decision
+            if consumer is Consumer.MOUNT or (
+                consumer is Consumer.NAMESPACE and command in MACHINE_ANSWERED
+            ):
+                if file_policy:
+                    return ""
+                held = stated_machine(
+                    one.ctx.words,
+                    one.ctx.cwd,
+                    one.session,
+                    self._registry,
+                    self._namespace.session_links(one.session),
+                )
+                return "" if held is None else held.name
             if consumer is not Consumer.EXTERNAL and not (
                 consumer is Consumer.SESSION and command in INTERPRETER_NAMES
             ):

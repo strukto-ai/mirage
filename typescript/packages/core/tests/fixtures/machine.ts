@@ -14,7 +14,7 @@
 
 import { MachineTable } from '../../src/execution/machine/table.ts'
 import { materialize, type ByteSource } from '../../src/io/types.ts'
-import { RUN_PROGRAM_AT, isRun } from '../../src/machine/constants.ts'
+import { RUN_PROGRAM_AT, RUN_WRAPPER_JOINED, isRun } from '../../src/machine/constants.ts'
 import { MachineHandle } from '../../src/machine/handle.ts'
 import { RemoteRuntime } from '../../src/runtime/machine/runtime.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../../src/runtime/types.ts'
@@ -45,6 +45,8 @@ export class ScriptedMachine extends MachineHandle {
   static override readonly provider = 'scripted'
   readonly lines: string[] = []
   readonly fed: (Uint8Array | null)[] = []
+  readonly cwds: string[] = []
+  readonly joined: boolean[] = []
 
   constructor(
     name: string,
@@ -63,10 +65,15 @@ export class ScriptedMachine extends MachineHandle {
     argv: readonly string[],
     stdin: ByteSource | null,
     _env: Record<string, string>,
-    _cwd: string,
+    cwd: string,
     output: OutputFn,
     errors: OutputFn,
   ): Promise<RunResult> {
+    const joined = isRun(argv) && argv[2] === RUN_WRAPPER_JOINED
+    if (isRun(argv)) {
+      this.cwds.push(cwd)
+      this.joined.push(joined)
+    }
     const run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     const line = run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
     const data = stdin === null ? null : await materialize(stdin)
@@ -74,7 +81,7 @@ export class ScriptedMachine extends MachineHandle {
     this.fed.push(data)
     const done = this.answer(line, data)
     if (done.stdout.length > 0) await output(done.stdout)
-    if (done.stderr.length > 0) await (this.joinsStreams ? output : errors)(done.stderr)
+    if (done.stderr.length > 0) await (this.joinsStreams || joined ? output : errors)(done.stderr)
     return { exitCode: done.exitCode }
   }
 }

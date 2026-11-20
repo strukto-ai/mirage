@@ -169,6 +169,9 @@ export interface Caller {
   // The machine the running command's program runs on, where a name its
   // redirects make lands; null for a command Mirage runs itself.
   readonly machine: MachineName | null
+  // Whether the running program's stderr goes where its stdout goes
+  // (`2>&1`), so a machine joins the two where the program writes them.
+  readonly joinsErrors: boolean
 }
 
 /**
@@ -226,6 +229,7 @@ const UNBOUND: Caller = {
   streamed: [],
   outputFile: null,
   machine: null,
+  joinsErrors: false,
 }
 
 const callerStorage = createAsyncContext<Caller>()

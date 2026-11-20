@@ -49,7 +49,6 @@ import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -118,6 +117,7 @@ import { expandBoundaryGlobs, globOptions, resolveGlobs } from '../expand/globs.
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
+import type { ExternalTarget } from '../lookup/types.ts'
 import {
   EXEC_WRAPPERS,
   MACHINE_ANSWERED,
@@ -1165,7 +1165,7 @@ async function runArgv(
     const denied = await guard([], stdin)
     if (denied !== null) return denied
     const [held] = await heldMachine(argv, deps, context, stdin)
-    if (held !== null) machine = held.machine
+    if (held?.runtime) machine = held.runtime.machine
   }
   const outer = currentCaller()
   if ((machine?.toString() ?? null) === (outer.machine?.toString() ?? null)) return run()
@@ -1220,9 +1220,9 @@ async function matched(
  * The machine a command runs on whole because its files are that machine's
  * own, with the words it runs with there: a program named by a path the
  * machine holds, or a mount command (or a namespace program the machine
- * answers) whose every path, each glob match included, is the machine's.
- * Null, with `argv`, for a command Mirage keeps. Mirrors Python's
- * `_held_machine`.
+ * answers) whose every path, each glob match included, is the machine's,
+ * and the folder it runs from there. Null, with `argv`, for a command Mirage
+ * keeps. Mirrors Python's `_held_machine`.
  */
 async function heldMachine(
   argv: Argv,
@@ -1230,24 +1230,22 @@ async function heldMachine(
   context: EvaluationContext,
   stdin: ByteSource | null,
   selected?: Consumer,
-): Promise<[RemoteRuntime | null, Argv]> {
+): Promise<[ExternalTarget | null, Argv]> {
   const { name } = argv
   const { session } = context
   const placed = context.frame.routing
   const { registry, namespace, dispatch } = deps
   if (placed === undefined) return [null, argv]
   if (name.includes('/')) {
-    return [
-      await programMachine(
-        name,
-        session,
-        registry,
-        namespace.sessionLinks(session),
-        dispatch,
-        stdin,
-      ),
-      argv,
-    ]
+    const held = await programMachine(
+      name,
+      session,
+      registry,
+      namespace.sessionLinks(session),
+      dispatch,
+      stdin,
+    )
+    return [held === null ? null : { kind: Consumer.EXTERNAL, runtime: held }, argv]
   }
   const consumer = selected ?? resolveTarget(name, argv.args, session, registry, placed).kind
   if (
@@ -1403,7 +1401,7 @@ async function bindCommand(
   const routing = context.frame.routing
   if (name.includes('/')) {
     const [held] = await heldMachine(argv, deps, context, stdin)
-    if (held !== null) return { argv, target: { kind: Consumer.EXTERNAL, runtime: held } }
+    if (held !== null) return { argv, target: held }
     const target =
       routing !== undefined && name.startsWith('/')
         ? resolveTarget(name, args, session, registry, routing)
@@ -1429,7 +1427,7 @@ async function bindCommand(
   // A CLI is selected and retained without yielding to its uninstaller.
   if (target.kind !== Consumer.CLI) {
     const [held, words] = await heldMachine(argv, deps, context, stdin, target.kind)
-    if (held !== null) return { argv: words, target: { kind: Consumer.EXTERNAL, runtime: held } }
+    if (held !== null) return { argv: words, target: held }
   }
   if (args[0] === '--help' && !isProgramInvocation(session)) {
     const answer = flagHelp(name)
@@ -1482,7 +1480,7 @@ async function runResolved(
   let operands = [...argv.operands]
 
   if (target.kind === Consumer.EXTERNAL)
-    return runExternal(argv, stdin, session, registry, target.runtime, signal, sink)
+    return runExternal(argv, stdin, session, registry, target.runtime, signal, sink, target.cwd)
   if (target.kind === 'path') {
     const absent = target.fallback
     const onTheRuntime =

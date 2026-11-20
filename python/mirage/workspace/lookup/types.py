@@ -44,7 +44,19 @@ class Consumer(Enum):
 
 @dataclass(frozen=True, slots=True)
 class ExternalTarget:
+    """A program a runtime runs, from the folder it runs in there.
+
+    Args:
+        runtime (RuntimeIdentity | None): the runtime; None for one the
+            line's placement refuses.
+        cwd (str | None): the folder it runs from; None for the
+            session's own. A command whose every path is a machine's own
+            and absolute runs there from ``/`` when the session's folder
+            is not on that machine (``operand_machine``).
+    """
+
     runtime: RuntimeIdentity | None
+    cwd: str | None = None
     kind: ClassVar[Consumer] = Consumer.EXTERNAL
 
 
