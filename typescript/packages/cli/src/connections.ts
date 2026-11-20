@@ -314,7 +314,7 @@ async function fill(
   )
   const unchosen = credentials.length > 0 && !credentials.some((c) => credentialGiven(c, given))
   const missing = missingRequired(spec, given)
-  const ask = unchosen && (!optional || process.stdin.isTTY === true)
+  const ask = unchosen && (!optional || process.stdin.isTTY)
   if (!ask && missing.length === 0) return
   if (!process.stdin.isTTY) {
     const named = ask ? [credentials.join(' or '), ...missing] : missing
