@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Mirage",
-  "description": "Mirage is a virtual terminal for AI agents. It virtualizes the shell, the filesystem, the CLIs and the machines, so AI agents can use a terminal everywhere.",
+  "description": "Mirage is a virtual terminal for AI agents, with a unified virtual filesystem, virtual CLIs and virtual machines behind one shell.",
   "colors": {
     "primary": "#0C0C0C",
     "light": "#FAFAFA",
