@@ -2320,7 +2320,7 @@ def _printf_target(args: Sequence[Word]) -> list[Word]:
             return list(args[at + 1 : at + 2])
         if word.value.startswith("-v"):
             rest = word.value[2:]
-            return [Word(rest, None if word.text is None else rest)]
+            return [Word(rest, rest)]
     return []
 
 

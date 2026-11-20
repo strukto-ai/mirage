@@ -2706,7 +2706,7 @@ function printfTarget(args: readonly Word[]): Word[] {
     if (value === '-v') return args.slice(at + 1, at + 2)
     if (value.startsWith('-v')) {
       const rest = value.slice(2)
-      return [{ raw: rest, text: word.text === null ? null : rest }]
+      return [{ raw: rest, text: rest }]
     }
   }
   return []
