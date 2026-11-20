@@ -36,8 +36,11 @@ import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import type { MachinePipe, MountType, Transport } from './types.ts'
 import type { OutputFn, PipeWriter, RunAnswer, RunResult } from '../runtime/types.ts'
 import {
+  APFS_UTIL,
   DARWIN_ADMIN_STATUS,
   DARWIN_MOUNT_GUARD,
+  DARWIN_PATH,
+  DARWIN_POINT_MARK,
   FSPROTO_SERVER_HINT,
   MACFUSE_KIND,
   MIRAGE_FUSE_FIND,
@@ -53,14 +56,8 @@ import {
   SSHFS_LINKS_OPTION,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
+  SYNTHETIC_CONF,
   UNMOUNT_WAIT_SECONDS,
-  darwinAdminHint,
-  darwinKillLine,
-  darwinMountTable,
-  darwinMountpointLine,
-  darwinRunningLine,
-  darwinTableLine,
-  darwinUnmountLine,
   machineDirLine,
   mountField,
 } from './constants.ts'
@@ -128,6 +125,60 @@ export function mountTable(text: string): Map<string, [string, string]> {
   return table
 }
 
+/**
+ * The Mac line that prints `mount`'s table, then each of `prefixes` behind
+ * `DARWIN_POINT_MARK` with the real path a mount on it shows at, as macOS
+ * resolves links (`/tmp` to `/private/tmp`). It reads each prefix's link
+ * and parent, never the prefix, so a stalled mount cannot hang it. Mirrors
+ * Python's `darwin_table_line`.
+ *
+ * @param prefixes the prefixes to resolve.
+ */
+export function darwinTableLine(prefixes: readonly string[]): string {
+  const words = prefixes.map((prefix) => singleQuote(prefix)).join(' ')
+  return (
+    `PATH=${DARWIN_PATH}; mount || exit 1; for p in ${words}; do q=$p; ` +
+    '[ -L "$q" ] && { t=$(readlink -- "$q"); ' +
+    'case $t in /*) q=$t;; *) q=${q%/*}/$t;; esac; }; ' +
+    'd=$(cd -- "${q%/*}/" 2>/dev/null && pwd -P) || d=${q%/*}; ' +
+    `printf '\\036point %s\\t%s\\n' "$p" "\${d%/}/\${q##*/}"; done`
+  )
+}
+
+/**
+ * `mountTable` for what `darwinTableLine` printed: each prefix's source and
+ * type, by the real path it mounts at, and each prefix's real path, `known`
+ * among them. A row is matched by that path, as a source can hold ` on /`;
+ * the last row at a path wins. Mirrors Python's `darwin_mount_table`.
+ *
+ * @param text the line's output.
+ * @param known real paths resolved before, by prefix.
+ */
+export function darwinMountTable(
+  text: string,
+  known: ReadonlyMap<string, string>,
+): [Map<string, [string, string]>, Map<string, string>] {
+  const lines = text.split('\n')
+  const points = new Map(known)
+  for (const line of lines) {
+    if (!line.startsWith(DARWIN_POINT_MARK)) continue
+    const rest = line.slice(DARWIN_POINT_MARK.length)
+    const tab = rest.indexOf('\t')
+    points.set(tab < 0 ? rest : rest.slice(0, tab), tab < 0 ? '' : rest.slice(tab + 1))
+  }
+  const rows = new Map<string, [string, string]>()
+  for (const [prefix, point] of points) {
+    const marker = ` on ${point} (`
+    for (const line of lines) {
+      const at = line.lastIndexOf(marker)
+      if (at < 0 || line.startsWith(DARWIN_POINT_MARK)) continue
+      const kind = (line.slice(at + marker.length).split(',')[0] ?? '').replace(/\)+$/, '')
+      rows.set(prefix, [line.slice(0, at), kind])
+    }
+  }
+  return [rows, points]
+}
+
 /** The mountpoints a machine could hold of `prefixes`. */
 function mountPaths(prefixes: Iterable<string>): Set<string> {
   const paths = new Set<string>()
@@ -189,6 +240,44 @@ function unmountLine(prefix: string): string {
 }
 
 /**
+ * `unmountLine` on a Mac: forced, as macOS cannot detach a mount lazily, at
+ * the mount's real path. Mirrors Python's `darwin_unmount_line`.
+ */
+function darwinUnmountLine(point: string): string {
+  const path = singleQuote(point)
+  return `umount -f ${path} 2>/dev/null || diskutil unmount force ${path}`
+}
+
+/**
+ * The Mac line that makes `prefix` a folder to mount on and prints its real
+ * path. A prefix whose top folder is missing from macOS's read-only root
+ * (`/data`) becomes a `/etc/synthetic.conf` link to the same name under
+ * `root`, made with `sudo -n`; without it the line exits
+ * `DARWIN_ADMIN_STATUS`. Mirrors Python's `darwin_mountpoint_line`.
+ *
+ * @param prefix the workspace prefix.
+ * @param root the folder the links lead into.
+ */
+function darwinMountpointLine(prefix: string, root: string): string {
+  const admin = String(DARWIN_ADMIN_STATUS)
+  return (
+    `PATH=${DARWIN_PATH}; p=${singleQuote(prefix)}; r=${singleQuote(root)}; ` +
+    'if ! mkdir -p -- "$p" 2>/dev/null; then t=${p#/}; t=/${t%%/*}; ' +
+    'if [ -e "$t" ] || [ -L "$t" ]; then mkdir -p -- "$p"; exit 1; fi; ' +
+    'mkdir -p -- "$r$t" || exit 1; ' +
+    `sudo -n true 2>/dev/null || exit ${admin}; ` +
+    `e=$(printf '%s\\t%s' "\${t#/}" "\${r#/}$t"); ` +
+    `grep -qxF -- "$e" ${SYNTHETIC_CONF} 2>/dev/null || ` +
+    `{ printf '%s\\n' "$e" | ` +
+    `sudo -n tee -a ${SYNTHETIC_CONF} >/dev/null; } ` +
+    `|| exit ${admin}; ` +
+    `sudo -n ${APFS_UTIL} -t >/dev/null 2>&1; ` +
+    `[ -L "$t" ] || exit ${admin}; ` +
+    'mkdir -p -- "$p" || exit 1; fi; cd -- "$p" && pwd -P'
+  )
+}
+
+/**
  * The pipe command that mounts `source` at `prefix` with sshfs, its errors in
  * `log`. It passes SSHFS_LINKS_OPTION only when the machine's sshfs names it in
  * its help, which reads no input, so the pipe's stream is sshfs's alone. Each
@@ -234,6 +323,26 @@ function unconfirmed(provider: string, prefix: string): string {
 }
 
 /**
+ * Why a Mac cannot have `prefix` yet, with the commands an administrator
+ * runs there once (`darwinMountpointLine`). Mirrors Python's
+ * `darwin_admin_hint`.
+ *
+ * @param provider the machine's provider, for the message.
+ * @param prefix the workspace prefix.
+ * @param root the folder the link leads into.
+ */
+export function darwinAdminHint(provider: string, prefix: string, root: string): string {
+  const top = '/' + (prefix.replace(/^\/+|\/+$/g, '').split('/')[0] ?? '')
+  return (
+    `${provider}: ${prefix} needs a folder ${top}, and macOS keeps its root ` +
+    'folder read-only; make it once as an administrator on the Mac, ' +
+    "then run the line again: printf '%s\\t%s\\n' " +
+    `${singleQuote(top.slice(1))} ${singleQuote(root.slice(1) + top)} ` +
+    `| sudo tee -a ${SYNTHETIC_CONF} && sudo ${APFS_UTIL} -t`
+  )
+}
+
+/**
  * The machine command that exits 0 while a program runs with `source` as
  * one of its arguments, as an sshfs serving it does, 1 once none does, and
  * 2 when it read no process at all. It reads `/proc`, never the mount, so a
@@ -251,6 +360,20 @@ export function runningLine(source: string): string {
 }
 
 /**
+ * `runningLine` on a Mac, which has no `/proc`: it reads `ps` and finds
+ * `source` as one of a program's space-separated words. Mirrors Python's
+ * `darwin_running_line`.
+ */
+export function darwinRunningLine(source: string): string {
+  return (
+    'ps -axww -o pid=,command= 2>/dev/null | ' +
+    `S=${singleQuote(source)} awk ` +
+    `'BEGIN { s = " " ENVIRON["S"] " " } { n++ } ` +
+    `index(" " $0 " ", s) { f = 1 } END { exit f ? 0 : n ? 1 : 2 }'`
+  )
+}
+
+/**
  * The machine command that kills every program with `source` as one of its
  * arguments, as an sshfs serving it has, reading `/proc` as `runningLine`
  * does, so it never kills itself. SIGKILL: what the server never answered
@@ -263,6 +386,20 @@ export function killLine(source: string): string {
     `S=${singleQuote(source.replaceAll('\n', '\x01'))} awk ` +
     `'BEGIN { s = ENVIRON["S"] } $0 == s { f = 1 } END { exit !f }' && ` +
     'kill -KILL "${p#/proc/}" 2>/dev/null; done; :'
+  )
+}
+
+/**
+ * `killLine` on a Mac, finding programs as `darwinRunningLine` does.
+ * Mirrors Python's `darwin_kill_line`.
+ */
+export function darwinKillLine(source: string): string {
+  return (
+    'for p in $(ps -axww -o pid=,command= 2>/dev/null | ' +
+    `S=${singleQuote(source)} awk ` +
+    `'BEGIN { s = " " ENVIRON["S"] " " } ` +
+    `index(" " $0 " ", s) { print $1 }'); ` +
+    'do kill -KILL "$p" 2>/dev/null; done; :'
   )
 }
 
@@ -299,6 +436,20 @@ interface Served {
   serving: Promise<void>
   ended: boolean
   failure: Error | null
+}
+
+/**
+ * Whether `source`, mounted at `prefix`, has the shape every workspace gives
+ * the mounts it serves, `<name>-<instance>-<n>:<prefix>`, so a Mac's macFUSE
+ * mount, whose type names no program, can be told for one of Mirage's.
+ * Mirrors Python's `mirage_source`.
+ *
+ * @param source a mount's source.
+ * @param prefix its mountpoint.
+ */
+export function mirageSource(source: string, prefix: string): boolean {
+  if (!source.endsWith(`:${prefix}`)) return false
+  return /.-[0-9a-f]{8}-[0-9]+$/.test(source.slice(0, source.length - prefix.length - 1))
 }
 
 /**
@@ -352,20 +503,6 @@ interface Served {
  * line until the machine holds every prefix, so one it mounts late is
  * guarded too.
  */
-/**
- * Whether `source`, mounted at `prefix`, has the shape every workspace gives
- * the mounts it serves, `<name>-<instance>-<n>:<prefix>`, so a Mac's macFUSE
- * mount, whose type names no program, can be told for one of Mirage's.
- * Mirrors Python's `mirage_source`.
- *
- * @param source a mount's source.
- * @param prefix its mountpoint.
- */
-export function mirageSource(source: string, prefix: string): boolean {
-  if (!source.endsWith(`:${prefix}`)) return false
-  return /.-[0-9a-f]{8}-[0-9]+$/.test(source.slice(0, source.length - prefix.length - 1))
-}
-
 export class MachineMounts {
   private session: SessionState | null = null
   // Each running line's write admission, and the served requests running on it.

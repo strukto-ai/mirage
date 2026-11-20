@@ -27,7 +27,7 @@ fn main() -> ExitCode {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn serve(source: &str, mountpoint: &str) -> ExitCode {
     use fs::{MirageFs, Note, Shared};
-    use fuser::{Config, INodeNo};
+    use fuser::INodeNo;
     use serde_json::{Map, json};
     use std::ffi::OsStr;
     use std::io;
@@ -64,9 +64,8 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    let config = Config::default();
     let fs = MirageFs::new(link.clone(), shared);
-    let (mounted, direct) = mount(fs, source, mountpoint, config);
+    let (mounted, direct) = mount(fs, source, mountpoint);
     let failed = |doing: &str, err: io::Error| {
         eprintln!("mirage-fuse: {doing} {mountpoint} failed: {err}");
         if direct {
@@ -127,10 +126,10 @@ fn mount(
     fs: fs::MirageFs,
     source: &str,
     mountpoint: &str,
-    mut config: fuser::Config,
 ) -> (std::io::Result<fuser::Session<fs::MirageFs>>, bool) {
-    use fuser::{MountOption, Session};
+    use fuser::{Config, MountOption, Session};
 
+    let mut config = Config::default();
     config.n_threads = Some(8);
     config.mount_options = vec![
         MountOption::FSName(source.to_string()),
@@ -152,21 +151,19 @@ fn mount(
     fs: fs::MirageFs,
     source: &str,
     mountpoint: &str,
-    mut config: fuser::Config,
 ) -> (std::io::Result<fuser::Session<fs::MirageFs>>, bool) {
+    let mut config = fuser::Config::default();
     config.n_threads = Some(1);
     match mount_macfuse(source, mountpoint) {
-        Ok(Ok(fd)) => (fuser::Session::from_fd(fs, fd, config.acl, config), true),
-        Ok(Err(err)) => (Err(err), true),
+        Ok(fd) => (fuser::Session::from_fd(fs, fd, config.acl, config), true),
         Err(err) => (Err(err), false),
     }
 }
 
-/// macFUSE's options for a mount: `fsname` names it as the
-/// host looks for it, it reads nothing ahead of a program, keeps Finder's
-/// `._` files and `com.apple` attributes out of the workspace, stays off
-/// the desktop, raises no dialog, and waits for the host as long as a call
-/// may take.
+/// macFUSE's options for a mount: `fsname` names it as the host looks for
+/// it, it reads nothing ahead of a program, keeps Finder's `._` files and
+/// `com.apple` attributes out of the workspace, stays off the desktop,
+/// raises no dialog, and waits for the host as long as a call may take.
 #[cfg(target_os = "macos")]
 const MACFUSE_OPTIONS: &str =
     "nosuid,noreadahead,noappledouble,noapplexattr,nobrowse,noalerts,daemon_timeout=600";
@@ -179,13 +176,9 @@ const MACFUSE_LIBRARY: &std::ffi::CStr = c"/usr/local/lib/libfuse.2.dylib";
 /// only now, so the binary runs and names its version on a Mac without
 /// macFUSE, and links nothing of it. libfuse's channel stays open until the
 /// process ends: macFUSE finishes the mount once the session answers the
-/// kernel's first request. An error when nothing was mounted; an inner one
-/// when the mount stands without a device to serve it.
+/// kernel's first request. An error leaves nothing mounted.
 #[cfg(target_os = "macos")]
-fn mount_macfuse(
-    source: &str,
-    mountpoint: &str,
-) -> std::io::Result<std::io::Result<std::os::fd::OwnedFd>> {
+fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd::OwnedFd> {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::io::{Error, ErrorKind};
     use std::os::fd::{FromRawFd, OwnedFd};
@@ -241,9 +234,10 @@ fn mount_macfuse(
     }
     let fd = unsafe { channel_fd(channel) };
     if fd < 0 {
-        return Ok(Err(Error::other("macFUSE gave the mount no device")));
+        unmount(mountpoint);
+        return Err(Error::other("macFUSE gave the mount no device"));
     }
-    Ok(Ok(unsafe { OwnedFd::from_raw_fd(fd) }))
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// Mount `/dev/fuse` at `mountpoint` as `fuse.mirage` when this process

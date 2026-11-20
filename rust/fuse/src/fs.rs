@@ -24,12 +24,6 @@ const S_IFIFO: u32 = 0o010000;
 const S_IFSOCK: u32 = 0o140000;
 const S_IFCHR: u32 = 0o020000;
 const S_IFBLK: u32 = 0o060000;
-/// The errno a missing extended attribute answers: Linux's ENODATA,
-/// macOS's ENOATTR.
-#[cfg(target_os = "linux")]
-const NO_XATTR: i32 = libc::ENODATA;
-#[cfg(target_os = "macos")]
-const NO_XATTR: i32 = libc::ENOATTR;
 /// How long the kernel and the client keep an answer the host gave no
 /// directive to keep: `KERNEL_CACHE_SECONDS`, as sshfs keeps one.
 const SHORT: Duration = Duration::from_secs(1);
@@ -299,7 +293,7 @@ fn errno(condition: &str) -> Errno {
         "EPIPE" => libc::EPIPE,
         "ESTALE" => libc::ESTALE,
         "ENOTSUP" | "EOPNOTSUPP" => libc::EOPNOTSUPP,
-        "ENODATA" | "ENOATTR" => NO_XATTR,
+        "ENODATA" | "ENOATTR" => return Errno::NO_XATTR,
         "ERANGE" => libc::ERANGE,
         "EAGAIN" => libc::EAGAIN,
         "ENOSYS" => libc::ENOSYS,

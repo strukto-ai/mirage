@@ -311,8 +311,13 @@ UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mirage-fuse
 
 #### A Mac
 
-A Mac reached over [SSH](/home/setup/machine/ssh) takes `mount_type:
-mirage`, not `ssh`. `mirage-fuse` mounts through
+<Note>
+  A Mac as a machine is experimental: its setup and behavior may still
+  change.
+</Note>
+
+A Mac reached over [SSH](/home/setup/machine/ssh) takes
+`mount_type: mirage`, not `ssh`. `mirage-fuse` mounts through
 [macFUSE](/home/setup/macos), which the Mac's owner installs once, its
 system extension allowed; Mirage cannot install it.
 

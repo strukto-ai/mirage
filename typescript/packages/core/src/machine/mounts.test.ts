@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -41,7 +49,6 @@ import {
   DARWIN_MOUNT_GUARD,
   DARWIN_PATH,
   DARWIN_POINT_MARK,
-  darwinAdminHint,
   isRun,
   MIRAGE_FUSE_LINE,
   MOUNT_GUARD,
@@ -53,6 +60,9 @@ import {
   UNMOUNT_WAIT_SECONDS,
 } from './constants.ts'
 import {
+  darwinAdminHint,
+  darwinMountTable,
+  darwinTableLine,
   killLine,
   mirageSource,
   mountTable,
@@ -526,6 +536,47 @@ describe('mountTable', () => {
       '/data': ['mirage-ab:/data', 'fuse.sshfs'],
       '/my notes': ['mirage-ab:/my notes', 'fuse.sshfs'],
     })
+  })
+})
+
+describe('darwinMountTable', () => {
+  it('names each prefix by its real path', () => {
+    const [rows, points] = darwinMountTable(
+      '/dev/disk3s1 on / (apfs, local, read-only, journaled)\n' +
+        'src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, ' +
+        'synchronous, nobrowse, mounted by u)\n' +
+        'src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n' +
+        `${DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n` +
+        `${DARWIN_POINT_MARK}/notes\t/notes\n`,
+      new Map([['/a on /b', '/a on /b']]),
+    )
+    expect(Object.fromEntries(rows)).toEqual({
+      '/data': ['src-1:/data', 'macfuse'],
+      '/a on /b': ['src-1:/a on /b', 'macfuse'],
+    })
+    expect(Object.fromEntries(points)).toEqual({
+      '/data': '/home/u/.mirage/mnt/data',
+      '/notes': '/notes',
+      '/a on /b': '/a on /b',
+    })
+  })
+
+  it.skipIf(process.platform !== 'darwin')('follows a link to its real path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-table-'))
+    try {
+      mkdirSync(join(dir, 'real'))
+      symlinkSync(join(dir, 'real'), join(dir, 'link'))
+      const line = darwinTableLine([`${dir}/link/ws`])
+      const [, points] = darwinMountTable(
+        spawnSync('/bin/sh', ['-c', line], { encoding: 'utf8' }).stdout,
+        new Map(),
+      )
+      expect(Object.fromEntries(points)).toEqual({
+        [`${dir}/link/ws`]: `${realpathSync(join(dir, 'real'))}/ws`,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

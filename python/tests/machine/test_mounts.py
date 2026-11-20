@@ -52,12 +52,14 @@ from mirage.machine.constants import (
     SSHFS_LINE,
     SSHFS_LINKS_OPTION,
     SSHFS_OPTIONS,
-    darwin_admin_hint,
     is_run,
 )
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import (
+    darwin_admin_hint,
+    darwin_mount_table,
+    darwin_table_line,
     kill_line,
     mirage_source,
     mount_table,
@@ -439,6 +441,41 @@ def test_mount_table_unescapes_paths_and_keeps_the_top_entry():
         "/data": ("mirage-ab:/data", "fuse.sshfs"),
         "/my notes": ("mirage-ab:/my notes", "fuse.sshfs"),
     }
+
+
+def test_a_macs_mount_table_names_each_prefix_by_its_real_path():
+    rows, points = darwin_mount_table(
+        "/dev/disk3s1 on / (apfs, local, read-only, journaled)\n"
+        "src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, "
+        "synchronous, nobrowse, mounted by u)\n"
+        "src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n"
+        f"{DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n"
+        f"{DARWIN_POINT_MARK}/notes\t/notes\n",
+        {"/a on /b": "/a on /b"},
+    )
+    assert rows == {
+        "/data": ("src-1:/data", "macfuse"),
+        "/a on /b": ("src-1:/a on /b", "macfuse"),
+    }
+    assert points == {
+        "/data": "/home/u/.mirage/mnt/data",
+        "/notes": "/notes",
+        "/a on /b": "/a on /b",
+    }
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac's mount")
+def test_a_macs_table_line_follows_a_link_to_its_real_path(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    done = subprocess.run(
+        ["/bin/sh", "-c", darwin_table_line([f"{tmp_path}/link/ws"])],
+        capture_output=True,
+        text=True,
+    )
+    _, points = darwin_mount_table(done.stdout, {})
+    assert points == {f"{tmp_path}/link/ws": f"{real.resolve()}/ws"}
 
 
 # A program carrying the source as an argument serves it, as sshfs does;

@@ -25,7 +25,6 @@ import pytest
 
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import (
-    DARWIN_POINT_MARK,
     ENCODE_OUTPUT,
     MIRAGE_FUSE_FIND,
     MIRAGE_FUSE_LINE,
@@ -38,9 +37,7 @@ from mirage.machine.constants import (
     SSHFS_LINE,
     SSHFS_OPTIONS,
     TOOLS_PATH,
-    darwin_mount_table,
     darwin_start,
-    darwin_table_line,
     decode_output,
     machine_dir_line,
     mount_field,
@@ -682,33 +679,6 @@ def test_mirage_fuse_line_fails_without_uv_or_npm(tmp_path):
     assert _mirage_fuse_line(tmp_path, []) == (1, [])
 
 
-def test_a_macs_mount_table_names_each_prefix_by_its_real_path():
-    rows, points = darwin_mount_table(
-        "/dev/disk3s1 on / (apfs, local, read-only, journaled)\n"
-        "src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, "
-        "synchronous, nobrowse, mounted by u)\n"
-        "map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n"
-        f"{DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n"
-        f"{DARWIN_POINT_MARK}/notes\t/notes\n",
-        {},
-    )
-    assert rows == {"/data": ("src-1:/data", "macfuse")}
-    assert points == {"/data": "/home/u/.mirage/mnt/data", "/notes": "/notes"}
-
-
-def test_a_macs_mount_table_keeps_a_source_holding_on_whole():
-    rows, points = darwin_mount_table(
-        "src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n"
-        "src-1:/c on /c (macfuse, nodev, mounted by u)\n",
-        {"/a on /b": "/a on /b", "/c": "/c"},
-    )
-    assert rows == {
-        "/a on /b": ("src-1:/a on /b", "macfuse"),
-        "/c": ("src-1:/c", "macfuse"),
-    }
-    assert points == {"/a on /b": "/a on /b", "/c": "/c"}
-
-
 MAC = pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac's ps")
 
 
@@ -716,16 +686,6 @@ def _sh(line):
     return subprocess.run(
         ["/bin/sh", "-c", line], capture_output=True, text=True
     )
-
-
-@MAC
-def test_a_macs_table_line_follows_a_link_to_its_real_path(tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
-    (tmp_path / "link").symlink_to(real)
-    done = _sh(darwin_table_line([f"{tmp_path}/link/ws"]))
-    _, points = darwin_mount_table(done.stdout, {})
-    assert points == {f"{tmp_path}/link/ws": f"{real.resolve()}/ws"}
 
 
 @MAC

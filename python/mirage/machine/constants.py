@@ -15,6 +15,7 @@
 import base64
 import re
 from collections.abc import Mapping, Sequence
+from typing import Literal
 
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
@@ -137,12 +138,16 @@ PIPE_SERVER_HINT = (
     "install with: pip install mirage-ai[ssh]"
 )
 
+# The type macOS's mount table gives every macFUSE mount, mirage-fuse's
+# among them.
+MACFUSE_KIND = "macfuse"
+
 # The mount types a machine's mount table gives a prefix a workspace served
 # it, each with the program that serves it.
 SERVED_KINDS: dict[str, str] = {
     "fuse.sshfs": "sshfs",
     "fuse.mirage": "mirage-fuse",
-    "macfuse": "macFUSE mount",
+    MACFUSE_KIND: "macFUSE mount",
 }
 
 # Finds the machine's mirage-fuse that speaks this host's fsproto, Mirage's
@@ -178,8 +183,8 @@ MIRAGE_FUSE_LINE = (
 )
 MIRAGE_FUSE_HINT = (
     "mount_type mirage needs a Linux machine, or a Mac with macFUSE, with "
-    "mirage-fuse speaking "
-    f"fsproto {FSPROTO_VERSION}, and it could not be installed: that takes "
+    f"mirage-fuse speaking fsproto {FSPROTO_VERSION}, and it could not be "
+    "installed: that takes "
     "uv or npm there; put it in the image (uv tool install "
     f"mirage-fuse=={MIRAGE_FUSE_VERSION} or npm install -g "
     f"@struktoai/mirage-fuse@{MIRAGE_FUSE_VERSION}), or use mount_type ssh"
@@ -233,6 +238,14 @@ PROGRAM_CHECK = (
     "else printf '%sPermission denied\\n' \"$1\" >&2; fi; exit 126;; esac"
 )
 
+# What both mount guards run once every mount checks out: the program
+# check (``PROGRAM_CHECK``) in a subshell, then the argv after `--`.
+GUARDED_EXEC = (
+    '( p=$1; w=$2; v=$3; shift 4; while [ "$1" != -- ]; do shift 4; done; '
+    'set -- "$p" "$w" "$v" "$2"; ' + PROGRAM_CHECK + " ) || exit $?; "
+    'shift 4; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
+)
+
 # A line in a machine holding mounts runs under this guard, inside its own
 # exec, so it checks the boot the program runs in: a machine that
 # restarted after the line was admitted has lost its mounts, and a program
@@ -245,11 +258,6 @@ PROGRAM_CHECK = (
 # run; then the program is checked. Both checks run in subshells, so their
 # names never reach the program's environment, and need only sh's
 # builtins, so a PATH with no tools still runs it.
-GUARDED_EXEC = (
-    '( p=$1; w=$2; v=$3; shift 4; while [ "$1" != -- ]; do shift 4; done; '
-    'set -- "$p" "$w" "$v" "$2"; ' + PROGRAM_CHECK + " ) || exit $?; "
-    'shift 4; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
-)
 MOUNT_GUARD = (
     "( t=$4; shift 4; "
     '[ -r "$t" ] || { printf \'%s\\n\' "$4" >&2; exit 126; }; '
@@ -261,9 +269,9 @@ MOUNT_GUARD = (
     "shift 4; done ) || exit 126; " + GUARDED_EXEC
 )
 
-# MOUNT_GUARD on a Mac, which has no mount table to read: it reads what
-# ``mount`` prints, ``<source> on <mountpoint> (<type>, ...)``, its words
-# as they are, and ignores $4.
+# ``MOUNT_GUARD`` on a Mac, which has no mount table file: it reads what
+# ``mount`` prints, ``<source> on <mountpoint> (<type>, ...)``, and
+# ignores $4.
 DARWIN_MOUNT_GUARD = (
     "( shift 4; t=$(/sbin/mount) || { printf '%s\\n' \"$4\" >&2; exit 126; }; "
     "n='\n'; "
@@ -274,10 +282,6 @@ DARWIN_MOUNT_GUARD = (
     "shift 4; done ) || exit 126; " + GUARDED_EXEC
 )
 
-# The type macOS's mount table gives every macFUSE mount, mirage-fuse's
-# among them.
-MACFUSE_KIND = "macfuse"
-
 # Marks the rows ``darwin_table_line`` prints after the mount table: a
 # prefix and its real path.
 DARWIN_POINT_MARK = "\x1epoint "
@@ -287,44 +291,39 @@ DARWIN_POINT_MARK = "\x1epoint "
 DARWIN_ADMIN_STATUS = 3
 
 # Where macOS reads the root folders it makes at boot, and the tool that
-# makes them without one.
+# makes them without a reboot.
 SYNTHETIC_CONF = "/etc/synthetic.conf"
 APFS_UTIL = "/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs.util"
 
 # The PATH a Mac's lines look tools up on.
 DARWIN_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-# What a Mac's process lines read, as ``/proc`` is read elsewhere: every
-# process's arguments, a line of ``DARWIN_SPLIT``, then every process with
-# its parent, state, CPU times, sizes, start and arguments, and its
-# environment after them where macOS shows one: not for its own programs
-# (``/bin/sh``, ``/bin/sleep``), so a run is also known by its program's
-# pid, which the wrapper reports (``darwin_runs``). The first list is how
-# the second's environment is told from its arguments: the wrapper takes
-# the tag as an argument, and shows in no scan. It fails when either
-# listing does.
+# What a Mac's process lines read in place of ``/proc``: every process's
+# arguments, a ``DARWIN_SPLIT`` line, then every process's parent, state,
+# CPU times, sizes, start and command with its environment (``ps -E``).
+# The first listing tells the environment from the arguments, so the run
+# wrapper, which takes the tag as an argument, never counts. macOS shows
+# no environment for its own programs, so a run is also known by its
+# program's pid (``darwin_runs``). It fails when either listing does.
 DARWIN_SPLIT = "--"
 DARWIN_PS = (
-    "{ LC_ALL=C ps -axww -o pid=,command= && echo -- && LC_ALL=C ps -axwwE "
+    f"{{ LC_ALL=C ps -axww -o pid=,command= && echo {DARWIN_SPLIT} && "
+    "LC_ALL=C ps -axwwE "
     "-o pid=,ppid=,state=,utime=,time=,vsz=,rss=,lstart=,command=; } 2>/dev/null"
 )
 
 
-def darwin_runs(exact: bool, show: str) -> str:
-    """The awk program that picks a run's processes out of what
-    ``DARWIN_PS`` prints: each whose environment holds the tag ``M``
-    names (the whole entry when ``exact``, else any tag it starts), each
-    ``K`` names (``pid@start`` words, as ``ids`` prints them) while it is
-    the process that started then, and each under one of those or under a
-    root ``R`` names (``pid:tag`` words), which takes that tag. ``show``
-    is what it prints: ``ids`` each picked pid with its start,
-    ``programs`` the pids whose parent was not picked, each space-led;
-    ``rows`` a line each as ``scan_line`` writes it, the start still as
-    ``ps`` writes it, ahead of the arguments.
+def darwin_runs(exact: bool, show: Literal["ids", "programs", "rows"]) -> str:
+    """The awk program that picks a run's processes out of ``DARWIN_PS``:
+    those whose environment holds the tag in ``M``, those ``K`` names
+    (``pid@start``) while each is still the process that started then,
+    and those under any of them or under a root ``R`` names (``pid:tag``).
 
     Args:
-        exact (bool): match the whole tag.
-        show (str): ``ids``, ``programs`` or ``rows``.
+        exact (bool): match ``M``'s whole tag, not any tag it starts.
+        show (Literal["ids", "programs", "rows"]): what it prints: each
+            pid with its start (``pid@start``), the pids whose parent was
+            not picked, or a ``scan_line`` row each.
     """
     accept = f'ENVIRON["M"] == "{PROCESS}=" t' if exact else "1"
     shown = {
@@ -396,148 +395,6 @@ def darwin_start(pid: str) -> str:
     return (
         'LC_ALL=C /bin/date -j -f "%a %b %e %T %Y" '
         f'"$(LC_ALL=C /bin/ps -o lstart= -p {pid})" +%s00'
-    )
-
-
-def darwin_table_line(prefixes: Sequence[str]) -> str:
-    """The Mac line that prints ``mount``'s table, then each of
-    ``prefixes`` behind ``DARWIN_POINT_MARK`` with the real path a mount
-    on it shows at: macOS resolves links, ``/tmp`` to ``/private/tmp``
-    and a root folder ``/etc/synthetic.conf`` links to its target. It
-    reads each prefix's link and its parent, never the prefix itself, so
-    a mount whose server stalled cannot hang it.
-
-    Args:
-        prefixes (Sequence[str]): the prefixes to resolve.
-    """
-    words = " ".join(single_quote(prefix) for prefix in prefixes)
-    return (
-        f"PATH={DARWIN_PATH}; mount || exit 1; for p in {words}; do q=$p; "
-        '[ -L "$q" ] && { t=$(readlink -- "$q"); '
-        "case $t in /*) q=$t;; *) q=${q%/*}/$t;; esac; }; "
-        'd=$(cd -- "${q%/*}/" 2>/dev/null && pwd -P) || d=${q%/*}; '
-        'printf \'\\036point %s\\t%s\\n\' "$p" "${d%/}/${q##*/}"; done'
-    )
-
-
-def darwin_mount_table(
-    text: str, known: Mapping[str, str]
-) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """What ``darwin_table_line`` printed: the source and type of each
-    prefix mounted at its real path, and each prefix's real path, those
-    ``known`` already among them. A row is found by the real path it
-    shows at, never split at its first `` on /``, which a source can hold;
-    the last row at a path wins.
-
-    Args:
-        text (str): the line's output.
-        known (Mapping[str, str]): real paths resolved before, by prefix.
-    """
-    lines = text.split("\n")
-    points = dict(known)
-    for line in lines:
-        if line.startswith(DARWIN_POINT_MARK):
-            prefix, _, point = line[len(DARWIN_POINT_MARK) :].partition("\t")
-            points[prefix] = point
-    rows: dict[str, tuple[str, str]] = {}
-    for prefix, point in points.items():
-        marker = f" on {point} ("
-        for line in lines:
-            at = line.rfind(marker)
-            if at >= 0 and not line.startswith(DARWIN_POINT_MARK):
-                kind = line[at + len(marker) :].split(",")[0].rstrip(")")
-                rows[prefix] = (line[:at], kind)
-    return rows, points
-
-
-def darwin_mountpoint_line(prefix: str, root: str) -> str:
-    """The Mac line that makes ``prefix`` a folder the line's user can
-    mount on and prints its real path. macOS keeps its root folder
-    read-only, so a prefix whose top folder is missing there (``/data``)
-    becomes a link ``/etc/synthetic.conf`` names, to a folder of the same
-    name under ``root``; that takes an administrator, so the line makes
-    it with ``sudo -n`` where it may, adding the row only once, and exits
-    ``DARWIN_ADMIN_STATUS`` where it may not.
-
-    Args:
-        prefix (str): the workspace prefix.
-        root (str): the folder the links lead into.
-    """
-    return (
-        f"PATH={DARWIN_PATH}; p={single_quote(prefix)}; r={single_quote(root)}; "
-        'if ! mkdir -p -- "$p" 2>/dev/null; then t=${p#/}; t=/${t%%/*}; '
-        'if [ -e "$t" ] || [ -L "$t" ]; then mkdir -p -- "$p"; exit 1; fi; '
-        'mkdir -p -- "$r$t" || exit 1; '
-        f"sudo -n true 2>/dev/null || exit {DARWIN_ADMIN_STATUS}; "
-        'e=$(printf \'%s\\t%s\' "${t#/}" "${r#/}$t"); '
-        f'grep -qxF -- "$e" {SYNTHETIC_CONF} 2>/dev/null || '
-        "{ printf '%s\\n' \"$e\" | "
-        f"sudo -n tee -a {SYNTHETIC_CONF} >/dev/null; }} "
-        f"|| exit {DARWIN_ADMIN_STATUS}; "
-        f"sudo -n {APFS_UTIL} -t >/dev/null 2>&1; "
-        f'[ -L "$t" ] || exit {DARWIN_ADMIN_STATUS}; '
-        'mkdir -p -- "$p" || exit 1; fi; cd -- "$p" && pwd -P'
-    )
-
-
-def darwin_admin_hint(provider: str, prefix: str, root: str) -> str:
-    """Why a Mac cannot have ``prefix`` yet, with the commands an
-    administrator runs there once (``darwin_mountpoint_line``).
-
-    Args:
-        provider (str): the machine's provider, for the message.
-        prefix (str): the workspace prefix.
-        root (str): the folder the link leads into.
-    """
-    top = "/" + prefix.strip("/").split("/")[0]
-    return (
-        f"{provider}: {prefix} needs a folder {top}, and macOS keeps its root "
-        "folder read-only; make it once as an administrator on the Mac, "
-        "then run the line again: printf '%s\\t%s\\n' "
-        f"{single_quote(top[1:])} {single_quote(root[1:] + top)} "
-        f"| sudo tee -a {SYNTHETIC_CONF} && sudo {APFS_UTIL} -t"
-    )
-
-
-def darwin_unmount_line(point: str) -> str:
-    """The Mac command that unmounts the mount at ``point``, forced, as
-    macOS cannot detach one lazily.
-
-    Args:
-        point (str): the mount's real path.
-    """
-    path = single_quote(point)
-    return f"umount -f {path} 2>/dev/null || diskutil unmount force {path}"
-
-
-def darwin_running_line(source: str) -> str:
-    """``running_line`` on a Mac, which has no ``/proc``: it reads ``ps``
-    and finds ``source`` as one of a program's space-separated words.
-
-    Args:
-        source (str): the mount's source.
-    """
-    return (
-        "ps -axww -o pid=,command= 2>/dev/null | "
-        f"S={single_quote(source)} awk "
-        '\'BEGIN { s = " " ENVIRON["S"] " " } { n++ } '
-        'index(" " $0 " ", s) { f = 1 } END { exit f ? 0 : n ? 1 : 2 }\''
-    )
-
-
-def darwin_kill_line(source: str) -> str:
-    """``kill_line`` on a Mac, finding programs as
-    ``darwin_running_line`` does.
-
-    Args:
-        source (str): the mount's source.
-    """
-    return (
-        "for p in $(ps -axww -o pid=,command= 2>/dev/null | "
-        f"S={single_quote(source)} awk "
-        '\'BEGIN { s = " " ENVIRON["S"] " " } '
-        'index(" " $0 " ", s) { print $1 }\'); '
-        'do kill -KILL "$p" 2>/dev/null; done; :'
     )
 
 
@@ -782,18 +639,18 @@ def stop_line(
 
     Each process whose environment holds the tag, found through
     ``/proc``, gets ``signum``, and what still runs a second later gets
-    KILL, so a program that ignores it stops too. A Mac shows few
-    environments, so there it is the run's program, ``root``, and what
-    runs under it (``darwin_runs``), and each process found first stays
-    in the run, while it is the one that started then, once its parent
-    exits, and while ``ps`` fails; one that fails before it found any,
-    or on its last look, exits 1, with no KILL sent unchecked. The tag is
-    matched as
+    KILL, so a program that ignores it stops too. The tag is matched as
     a whole entry, so ``w1:9`` never stops the run of ``w1:90``. The line
     exits 0 once it stopped them and ``NOT_RUNNING_STATUS`` when there were
     none. It looks tr and grep up on its own PATH (``TOOLS_PATH``) and
     exits 127 without them, so it needs only a POSIX shell, tr, grep and
     ``/proc``.
+
+    A Mac hides most environments, so there the run is ``root`` and what
+    runs under it (``darwin_runs``), each process kept by its pid and
+    start once found, so one whose parent exits stays in the run. A ``ps``
+    that fails before it found any, or on the last look, exits 1, so KILL
+    never reaches a pid the last ``ps`` did not check.
 
     Args:
         process (str): the id of the Mirage process the run is, as
@@ -948,12 +805,11 @@ def run_tag(argv: Sequence[str]) -> str:
     return argv[RUN_PROGRAM_AT - 1].partition("=")[2]
 
 
-# ``scan_line`` on a Mac: the same rows from ``ps -E``, a process's start
-# in hundredths of a second since the epoch (``darwin_start``), so the
-# figures row gives the time now for the seconds since boot and 100 for
-# the clock ticks a second; its CPU times in hundredths too, its virtual
-# size in bytes and its resident set in pages, as Linux counts them, and
-# idle (``I``) and uninterruptible (``U``) as Linux's ``S`` and ``D``.
+# ``scan_line`` on a Mac: the same rows from ``DARWIN_PS``, in Linux's
+# units. A start counts hundredths of a second since the epoch
+# (``darwin_start``), so the figures row gives the time now as the
+# seconds since boot and 100 clock ticks a second; idle (``I``) and
+# uninterruptible (``U``) read as Linux's ``S`` and ``D``.
 DARWIN_SCAN = (
     f"PATH={DARWIN_PATH}; o=$({DARWIN_PS}) || exit 1; "
     "b=$(pagesize 2>/dev/null) || b=4096; "
@@ -985,9 +841,8 @@ def scan_line(
     One row, ``SCAN_FACTS_MARK``, gives what turns those into
     usage: seconds since boot, clock ticks a second, the page size and
     the machine's memory in KiB. Nothing else is printed. It needs what
-    ``stop_line`` does. A Mac, which has no ``/proc``, is read with ``ps``
-    (``DARWIN_SCAN``), each run known by its program, as ``stop_line``
-    knows it there.
+    ``stop_line`` does. A Mac is read with ``ps`` (``DARWIN_SCAN``), each
+    run known by its program, as ``stop_line`` knows it there.
 
     Args:
         workspace (str): the workspace's id, which every tag starts
