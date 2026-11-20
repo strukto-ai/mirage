@@ -43,8 +43,8 @@ export interface GitHubVFSState {
  * names a commit, which cannot move; a GitHub Enterprise host behind
  * `baseUrl` is assumed to refuse them too.
  */
-function pinOf(ref: string | undefined): string | null {
-  if (ref === undefined) return null
+function pinOf(ref: string | null | undefined): string | null {
+  if (ref === undefined || ref === null) return null
   const lowered = ref.toLowerCase()
   return COMMIT_SHA.test(lowered) ? lowered : null
 }
@@ -78,18 +78,22 @@ export class GitHubVFS extends BaseVFS {
     this.listingsPin = pinOf(config.ref)
   }
 
+  // An unset field arrives as null from a Python snapshot and as undefined
+  // from TypeScript's; the account and accessor take neither.
   static async create(config: GitHubConfig): Promise<GitHubVFS> {
     const account = new GitHubAccount({
-      ...(config.token === undefined ? {} : { token: config.token }),
-      ...(config.app === undefined ? {} : { app: config.app }),
+      ...(config.token === undefined || config.token === null ? {} : { token: config.token }),
+      ...(config.app === undefined || config.app === null ? {} : { app: config.app }),
       ...(config.timeout === undefined ? {} : { timeout: config.timeout }),
-      ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
+      ...(config.baseUrl === undefined || config.baseUrl === null
+        ? {}
+        : { baseUrl: config.baseUrl }),
     })
     const accessor = new GitHubAccessor({
       account,
       owner: config.owner,
       repo: config.repo,
-      ...(config.ref === undefined ? {} : { ref: config.ref }),
+      ...(config.ref === undefined || config.ref === null ? {} : { ref: config.ref }),
     })
     return Promise.resolve(new GitHubVFS(config, accessor))
   }

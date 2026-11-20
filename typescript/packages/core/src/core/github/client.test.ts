@@ -118,6 +118,29 @@ describe('an anonymous transport', () => {
     expect(SEEN.map((seen) => seen.authorization)).toEqual([null, 'token t'])
   })
 
+  // On github.com, where the throttle is on: a spent limit lifts within the
+  // hour, so an anonymous call fails at once rather than sleeping until the
+  // reset and asking again, which would outlast this test.
+  it('fails at once on a spent rate limit', async () => {
+    const reset = Math.floor(Date.now() / 1000) + 3600
+    const calls = vi.fn(() =>
+      Promise.resolve(
+        new Response('{"message":"API rate limit exceeded"}', {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'x-ratelimit-limit': '60',
+            'x-ratelimit-remaining': '0',
+            'x-ratelimit-reset': String(reset),
+          },
+        }),
+      ),
+    )
+    globalThis.fetch = calls as typeof globalThis.fetch
+    await expect(new HttpGitHubTransport({}).get('/repos/o/r')).rejects.toThrow()
+    expect(calls).toHaveBeenCalledTimes(1)
+  })
+
   it('still refuses both a token and an app', () => {
     const app = { appId: 7, privateKey: 'k', installationId: 42 }
     expect(() => new HttpGitHubTransport({ token: 't', app })).toThrow(

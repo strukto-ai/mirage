@@ -70,15 +70,17 @@ export type GitHubAppAuth = z.infer<typeof GitHubAppAuth>
 /**
  * Refuse a GitHub config that names both credentials, and one that names
  * neither where a credential is `required`: a `gh` install needs a login,
- * while a mount of a public repository reads it with no credential.
+ * while a mount of a public repository reads it with no credential. A
+ * credential written as null, as a Python snapshot writes an unset one, is
+ * not named.
  */
 function checkAuth(
   required: boolean,
 ): (config: { token?: unknown; app?: unknown }, ctx: z.RefinementCtx) => void {
   const quantity = required ? 'exactly' : 'at most'
   return (config, ctx) => {
-    const hasToken = config.token !== undefined
-    const hasApp = config.app !== undefined
+    const hasToken = config.token !== undefined && config.token !== null
+    const hasApp = config.app !== undefined && config.app !== null
     if (hasToken && hasApp) {
       ctx.addIssue({
         code: 'custom',
@@ -97,22 +99,22 @@ export const GitHubConfig = z
   .object({
     ...TimeoutConfig.shape,
     token: secretStr()
-      .optional()
+      .nullish()
       .describe(
         'GitHub token: a personal access token, an OAuth token or an App installation token. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.',
       ),
-    app: GitHubAppAuth.optional().describe(
+    app: GitHubAppAuth.nullish().describe(
       'A GitHub App installation mirage mints and refreshes tokens for. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.',
     ),
     owner: z.string().describe('Repository owner, a user or an organization.'),
     repo: z.string().describe('Repository name.'),
     ref: z
       .string()
-      .optional()
+      .nullish()
       .describe(
         "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved on first use.",
       ),
-    baseUrl: z.string().optional().meta({
+    baseUrl: z.string().nullish().meta({
       description: 'GitHub API root; set it for GitHub Enterprise.',
       default: 'https://api.github.com',
     }),

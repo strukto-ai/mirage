@@ -38,16 +38,26 @@ function at(rel: string, prefix: string): PathSpec {
   })
 }
 
+function serve(files: Record<string, string>): FakeGitHub {
+  const gh = new FakeGitHub(files)
+  vi.stubGlobal('fetch', gh.fetch)
+  return gh
+}
+
+function anonymous(baseUrl?: string): GitHubAccessor {
+  return new GitHubAccessor({
+    account: new GitHubAccount(baseUrl === undefined ? {} : { baseUrl }),
+    owner: 'o',
+    repo: 'r',
+    ref: 'main',
+    defaultBranch: 'main',
+  })
+}
+
 describe('a read against the wire', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
-
-  function serve(files: Record<string, string>): FakeGitHub {
-    const gh = new FakeGitHub(files)
-    vi.stubGlobal('fetch', gh.fetch)
-    return gh
-  }
 
   // A read is handed its row; with none, or a folder's, it asks nothing.
   it.each<[string, FileStat | null, string]>([
@@ -183,22 +193,6 @@ describe('an anonymous read', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
-
-  function serve(files: Record<string, string>): FakeGitHub {
-    const gh = new FakeGitHub(files)
-    vi.stubGlobal('fetch', gh.fetch)
-    return gh
-  }
-
-  function anonymous(baseUrl?: string): GitHubAccessor {
-    return new GitHubAccessor({
-      account: new GitHubAccount(baseUrl === undefined ? {} : { baseUrl }),
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      defaultBranch: 'main',
-    })
-  }
 
   // Twin of test_an_anonymous_read_downloads_the_file_at_the_listed_commit:
   // with no credential on github.com each blob request would spend one of the
