@@ -53,7 +53,7 @@
 
 LLM 在终端环境中完成后训练，因此 AI Agent 最熟悉终端接口。但如今的终端绑定在单台机器和它的操作系统内核上，文件和计算都在同一台机器上。
 
-Mirage 是一个**面向 AI Agent 的虚拟终端**，它把终端接口与数据存储和计算机器分开。它虚拟化了 shell、文件系统、CLI 和机器。每个虚拟终端启动时只占用几 KB 内存，因此 AI Agent 可以在任何地方使用终端环境，包括应用内、移动应用、浏览器标签页、FastAPI 或 Express 服务器，甚至 Raspberry Pi 这样的边缘设备。
+Mirage 是一个**面向 AI Agent 的虚拟终端**，它把终端接口与数据存储和计算机器分开。它虚拟化了 shell、文件系统、CLI 和机器。每个虚拟终端启动时只占用 KB 级的内存，因此 AI Agent 可以在任何地方使用终端环境，包括应用内、移动应用、浏览器标签页、FastAPI 或 Express 服务器，甚至 Raspberry Pi 这样的边缘设备。
 
 <p align="center">
   <picture>
@@ -65,7 +65,7 @@ Mirage 是一个**面向 AI Agent 的虚拟终端**，它把终端接口与数�
 - **可控。** 每个 Agent 只能拿到它的 profile 允许的文件、命令、凭据和机器。
 - **可脚本化。** 整个终端用代码或一个配置文件定义，从文件系统、CLI 和机器到各项规则。
 - **托管式。** 状态存放在已有的基础设施上，例如 RAM、磁盘、Redis 或 S3，每条命令都会被记录，并可以导出为 OpenTelemetry trace。
-- **轻量。** 每个工作区只占用几 KB 内存，Mirage 从 shell 到每次服务调用都是异步的，因此一个进程可以同时服务许多 Agent。它几乎可以部署在任何地方，包括 Python 或 TypeScript 服务器、浏览器标签页、Cloudflare Worker 或 Raspberry Pi。
+- **轻量。** 每个工作区只占用 KB 级的内存，Mirage 从 shell 到每次服务调用都是异步的，因此一个进程可以同时服务许多 Agent。它几乎可以部署在任何地方，包括 Python 或 TypeScript 服务器、浏览器标签页、Cloudflare Worker 或 Raspberry Pi。
 
 <p align="center">
   <picture>

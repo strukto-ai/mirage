@@ -53,7 +53,7 @@
 
 Các LLM được hậu huấn luyện (post-train) trong môi trường terminal, nên giao diện mà AI agent quen thuộc nhất là terminal. Nhưng terminal ngày nay gắn với một máy duy nhất và nhân hệ điều hành của nó, với file và việc tính toán đều nằm trên chính máy đó.
 
-Mirage là **một terminal ảo cho AI agent**, tách giao diện terminal khỏi nơi lưu trữ dữ liệu và các máy tính toán. Nó ảo hóa shell, hệ thống file, các CLI và các máy. Mỗi terminal ảo khởi động chỉ với vài KB bộ nhớ, nên AI agent có thể dùng terminal ở mọi nơi, bên trong một ứng dụng, một ứng dụng di động, một tab trình duyệt, một server FastAPI hoặc Express, và cả một thiết bị biên như Raspberry Pi.
+Mirage là **một terminal ảo cho AI agent**, tách giao diện terminal khỏi nơi lưu trữ dữ liệu và các máy tính toán. Nó ảo hóa shell, hệ thống file, các CLI và các máy. Mỗi terminal ảo khởi động chỉ với bộ nhớ cỡ KB, nên AI agent có thể dùng terminal ở mọi nơi, bên trong một ứng dụng, một ứng dụng di động, một tab trình duyệt, một server FastAPI hoặc Express, và cả một thiết bị biên như Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -65,7 +65,7 @@ Mirage là **một terminal ảo cho AI agent**, tách giao diện terminal kh�
 - **Kiểm soát được.** Mỗi agent chỉ nhận được những file, lệnh, thông tin xác thực và máy mà profile của nó cho phép.
 - **Viết script được.** Toàn bộ terminal được định nghĩa bằng code hoặc một file cấu hình duy nhất, từ hệ thống file, CLI và máy cho tới các quy tắc.
 - **Được quản lý.** Trạng thái nằm trên hạ tầng sẵn có, như RAM, ổ đĩa, Redis hoặc S3, và mọi lệnh đều được ghi lại và có thể xuất ra dưới dạng trace OpenTelemetry.
-- **Nhẹ.** Mỗi workspace chỉ chiếm vài KB bộ nhớ và Mirage bất đồng bộ từ shell tới từng lời gọi dịch vụ, nên một tiến trình phục vụ được nhiều agent cùng lúc. Nó có thể được triển khai gần như ở mọi nơi, trên một server Python hoặc TypeScript, một tab trình duyệt, một Cloudflare Worker hoặc một Raspberry Pi.
+- **Nhẹ.** Mỗi workspace chỉ chiếm bộ nhớ cỡ KB và Mirage bất đồng bộ từ shell tới từng lời gọi dịch vụ, nên một tiến trình phục vụ được nhiều agent cùng lúc. Nó có thể được triển khai gần như ở mọi nơi, trên một server Python hoặc TypeScript, một tab trình duyệt, một Cloudflare Worker hoặc một Raspberry Pi.
 
 <p align="center">
   <picture>
