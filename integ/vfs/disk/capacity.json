@@ -30,8 +30,19 @@
       }
     },
     {
-      "id": "disk_capacity_chmod_recounts_before_deletion",
+      "id": "cp_no_clobber_refuses_inaccessible_destination",
       "seq": 4,
+      "targets": ["disk-capacity-permissions"],
+      "command": "cp -n /data/plain /data/locked/hidden; echo $?; chmod 755 /data/locked; wc -c < /data/locked/hidden; chmod 000 /data/locked",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n100\n",
+        "stderr": "cp: cannot stat '/data/locked/hidden': Permission denied\n"
+      }
+    },
+    {
+      "id": "disk_capacity_chmod_recounts_before_deletion",
+      "seq": 5,
       "targets": ["disk-capacity-permissions"],
       "command": "chmod 755 /data/locked; rm /data/locked/hidden; df -B1 /data | awk 'NR == 2 { print $3 }'; printf xx > /data/new; echo $?",
       "expect": {

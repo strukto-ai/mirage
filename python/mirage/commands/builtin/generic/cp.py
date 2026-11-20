@@ -56,6 +56,7 @@ from mirage.errors.types import (
     DotWalkLoop,
     DotWalkMissing,
     FsCondition,
+    NoMountError,
     OperationNotSupportedError,
     WalkDeclinedError,
 )
@@ -1096,7 +1097,7 @@ async def target_dir_error(
         condition = FsCondition.ELOOP
     except PermissionError:
         condition = FsCondition.EACCES
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, NoMountError):
         condition = FsCondition.ENOENT
     else:
         if info.type == FileType.DIRECTORY:
@@ -1151,7 +1152,7 @@ async def dest_kind(
         return False, False, FsCondition.ENOENT
     except PermissionError:
         return False, False, FsCondition.EACCES
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, NoMountError) as exc:
         _logger.debug("no destination at %s: %s", target.virtual, exc)
     else:
         return True, info.type == FileType.DIRECTORY, None
@@ -1218,7 +1219,7 @@ async def source_kind(
         return None, FsCondition.ELOOP
     except PermissionError:
         return None, FsCondition.EACCES
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, NoMountError) as exc:
         _logger.debug("no source at %s: %s", path.virtual, exc)
     else:
         return info.type, None
@@ -1477,7 +1478,7 @@ async def overwrite_gate(
         return True
     try:
         target_info = await stat(target)
-    except (FileNotFoundError, NotADirectoryError, ValueError):
+    except (FileNotFoundError, NotADirectoryError, NoMountError):
         return True
     if policy.no_clobber or policy.update == "none":
         return False
@@ -1487,12 +1488,12 @@ async def overwrite_gate(
     if policy.update == "older":
         try:
             src_info = await stat(src)
-        except (FileNotFoundError, NotADirectoryError, ValueError):
+        except (FileNotFoundError, NotADirectoryError, NoMountError):
             return True
         if copies is not None and policy.backup is None:
             try:
                 target_info = await dest_stat(stat, copies, target)
-            except (FileNotFoundError, NotADirectoryError, ValueError):
+            except (FileNotFoundError, NotADirectoryError, NoMountError):
                 return True
             except FS_ERRORS as exc:
                 # GNU names a link whose target its stat may not reach

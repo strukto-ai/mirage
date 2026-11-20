@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sqlite3
 from collections.abc import AsyncIterator
+from contextlib import closing
 
 import pytest
 
@@ -46,6 +48,7 @@ from mirage.types import (
 )
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.sql import SqlVFS
 from mirage.view.types import LinkView
 from mirage.workspace import Workspace
 
@@ -1157,5 +1160,50 @@ async def test_cp_makes_a_new_copy_with_the_source_mode_under_the_umask(
         result = await ws.shell(_CP_SETUP + line)
         assert (await result.materialize_stdout()).decode() == out
         assert result.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp -n /db/src/file /db/dst/file",
+        "cp --update=none /db/src/file /db/dst/file",
+        "cp --update=none-fail /db/src/file /db/dst/file",
+        "cp -u /db/src/file /db/dst/file",
+        "cp -i /db/src/file /db/dst/file",
+        "cp -rnT /db/src /db/dst",
+        "mv -n /db/src/file /db/dst/file",
+    ],
+)
+async def test_unreadable_destination_mtime_preserves_both_files(
+    tmp_path, command
+):
+    db = tmp_path / "fs.db"
+    ws = Workspace({"/db": SqlVFS(str(db))}, mode=MountMode.WRITE)
+    try:
+        setup = await ws.shell(
+            "mkdir /db/src /db/dst && printf new > /db/src/file "
+            "&& printf old > /db/dst/file"
+        )
+        assert setup.exit_code == 0
+    finally:
+        await ws.close()
+
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.execute(
+            "UPDATE fs_inode SET mtime = 300000000000 WHERE ino = ("
+            "SELECT file.ino FROM fs_dentry file JOIN fs_dentry dir "
+            "ON dir.ino = file.parent_ino "
+            "WHERE dir.name = 'dst' AND file.name = 'file')"
+        )
+    ws = Workspace({"/db": SqlVFS(str(db))}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(command, stdin=b"n\n")
+        assert result.exit_code == 1
+        assert b"out of range" in await result.materialize_stderr()
+        assert await ws.vfs.read("/db/src/file") == b"new"
+        assert await ws.vfs.read("/db/dst/file") == b"old"
     finally:
         await ws.close()
