@@ -35,7 +35,6 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ProcessTable } from '../../execution/process/table.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -159,14 +158,10 @@ function noCommand(): Promise<RedirectResult> {
 }
 
 async function recurseReassociated(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   redirects: readonly Redirect[],
   right: TSNodeLike,
-  signal: AbortSignal | undefined,
   processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
@@ -176,16 +171,11 @@ async function recurseReassociated(
 ): Promise<RedirectResult> {
   if (node.id !== right.id) return recurse(node, context, stdin, callStack, opts)
   return runRedirected(
+    opts?.sink === undefined ? deps : { ...deps, sink: opts.sink },
     recurse,
-    dispatch,
-    executeFn,
-    registry,
-    namespace,
     right,
     withOwnRedirects(right, redirects),
-    signal,
     processes,
-    opts?.sink,
     context,
     stdin,
     callStack,
@@ -198,14 +188,10 @@ async function recurseReassociated(
  * pipeline; every other node recurses normally.
  */
 async function recurseLifted(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   stages: PipelineStages,
   right: TSNodeLike,
-  signal: AbortSignal | undefined,
   processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
@@ -215,18 +201,13 @@ async function recurseLifted(
 ): Promise<RedirectResult> {
   if (node !== right) return recurse(node, context, stdin, callStack, opts)
   return runPipeline(
+    opts?.sink === undefined ? deps : { ...deps, sink: opts.sink },
     recurse,
-    dispatch,
-    executeFn,
-    registry,
-    namespace,
     stages,
     context,
     stdin,
     callStack,
-    signal,
     processes,
-    opts?.sink,
   )
 }
 
@@ -238,14 +219,10 @@ async function recurseLifted(
  * `recursePipeStderr`.
  */
 async function recurseStage(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   stages: PipelineStages,
   targets: readonly TSNodeLike[],
-  signal: AbortSignal | undefined,
   processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
@@ -256,39 +233,13 @@ async function recurseStage(
   const index = stages.commands.indexOf(node)
   const hoisted = index < 0 ? [] : (stages.redirects[index] ?? [])
   if (hoisted.length === 0) {
-    return recursePipeStderr(
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      namespace,
-      targets,
-      node,
-      context,
-      stdin,
-      callStack,
-      opts,
-    )
+    return recursePipeStderr(deps, recurse, targets, node, context, stdin, callStack, opts)
   }
   const bound = [...hoisted]
   if (targets.includes(node)) {
     bound.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
   }
-  return runRedirected(
-    recurse,
-    dispatch,
-    executeFn,
-    registry,
-    namespace,
-    node,
-    bound,
-    signal,
-    processes,
-    undefined,
-    context,
-    stdin,
-    callStack,
-  )
+  return runRedirected(deps, recurse, node, bound, processes, context, stdin, callStack)
 }
 
 /**
@@ -299,49 +250,34 @@ async function recurseStage(
  * negates the whole pipeline's status.
  */
 async function runPipeline(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   stages: PipelineStages,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  signal?: AbortSignal,
   processes?: ProcessTable,
-  sink?: JobConsole,
 ): Promise<RedirectResult> {
   const session = context.session
+  let bare = deps
+  if (deps.sink !== undefined) {
+    bare = { ...deps }
+    delete bare.sink
+  }
   if (stages.lead !== null) {
     const [left, op, right] = stages.lead
     const wrapped = recurseLifted.bind(
       null,
+      bare,
       recurse,
-      dispatch,
-      executeFn,
-      registry,
-      namespace,
       { ...stages, lead: null },
       right,
-      signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack, deps.executeFn)
   }
   const targets = stages.commands.filter((_, i) => stages.stderrFlags[i] === true)
-  const pipeRecurse = recurseStage.bind(
-    null,
-    recurse,
-    dispatch,
-    executeFn,
-    registry,
-    namespace,
-    stages,
-    targets,
-    signal,
-    processes,
-  )
+  const pipeRecurse = recurseStage.bind(null, bare, recurse, stages, targets, processes)
   const piped = (): Promise<RedirectResult> =>
     handlePipe(
       pipeRecurse,
@@ -350,11 +286,11 @@ async function runPipeline(
       context,
       stdin,
       callStack,
-      signal,
+      deps.signal,
       processes,
-      executeFn,
-      registry.io.bufferBytes,
-      sink,
+      deps.executeFn,
+      deps.registry.io.bufferBytes,
+      deps.sink,
     )
   const [stdout, io, execNode] = stages.negated
     ? await ignoringErrexit(context.session, piped)
@@ -406,34 +342,25 @@ async function negated(
  * follow.
  */
 async function runRedirected(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   command: TSNodeLike | null,
   redirects: Redirect[],
-  signal: AbortSignal | undefined,
   processes: ProcessTable | undefined,
-  sink: JobConsole | undefined,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<RedirectResult> {
   const session = context.session
+  const { dispatch, executeFn, registry, namespace, sink } = deps
   if (command !== null && command.type === NT.REDIRECTED_STATEMENT) {
     const [inner, own] = getRedirects(command)
     return runRedirected(
+      deps,
       recurse,
-      dispatch,
-      executeFn,
-      registry,
-      namespace,
       inner,
       [...own, ...redirects],
-      signal,
       processes,
-      sink,
       context,
       stdin,
       callStack,
@@ -454,32 +381,27 @@ async function runRedirected(
     // and subshell bodies keep the whole-body redirect (bash group
     // semantics).
     const [left, op, right] = getListParts(command)
-    const wrapped = recurseReassociated.bind(
-      null,
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      namespace,
-      redirects,
-      right,
-      signal,
-      processes,
-    )
+    let bare = deps
+    if (deps.sink !== undefined) {
+      bare = { ...deps }
+      delete bare.sink
+    }
+    const wrapped = recurseReassociated.bind(null, bare, recurse, redirects, right, processes)
     return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
   }
   if (command !== null && command.type === NT.PIPELINE) {
+    let bare = deps
+    if (deps.sink !== undefined) {
+      bare = { ...deps }
+      delete bare.sink
+    }
     return runPipeline(
+      bare,
       recurse,
-      dispatch,
-      executeFn,
-      registry,
-      namespace,
       getPipelineStages(command, redirects),
       context,
       stdin,
       callStack,
-      signal,
       processes,
     )
   }
@@ -490,16 +412,11 @@ async function runRedirected(
     const inner = getNegatedCommand(command)
     const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
       runRedirected(
+        deps,
         recurse,
-        dispatch,
-        executeFn,
-        registry,
-        namespace,
         inner,
         inner === null ? redirects : withOwnRedirects(inner, redirects),
-        signal,
         processes,
-        sink,
         context,
         stdin,
         callStack,
@@ -679,11 +596,8 @@ function redirectGate(
 }
 
 async function recursePipeStderr(
+  deps: ExecuteNodeDeps,
   recurse: Recurse,
-  dispatch: DispatchFn,
-  executeFn: ExecuteFn,
-  registry: MountRegistry,
-  namespace: Namespace,
   targets: readonly TSNodeLike[],
   node: TSNodeLike,
   context: EvaluationContext,
@@ -696,21 +610,11 @@ async function recursePipeStderr(
   }
   const [command, redirects] = getRedirects(node)
   redirects.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
-  return runRedirected(
-    recurse,
-    dispatch,
-    executeFn,
-    registry,
-    namespace,
-    command,
-    redirects,
-    undefined,
-    undefined,
-    opts?.sink,
-    context,
-    stdin,
-    callStack,
-  )
+  const bare: ExecuteNodeDeps = { ...deps }
+  delete bare.signal
+  delete bare.sink
+  if (opts?.sink !== undefined) bare.sink = opts.sink
+  return runRedirected(bare, recurse, command, redirects, undefined, context, stdin, callStack)
 }
 
 /**
@@ -1298,22 +1202,19 @@ async function executeNodeBody(
     return drained(sink, ...(await recurse(node, context, stdin, callStack, { ownDiagnostics })))
   }
 
+  const captured: ExecuteNodeDeps = { ...captureDeps, executeFn }
+  const called: ExecuteNodeDeps = sink === undefined ? captured : { ...captured, sink }
   const redirected = (
     command: TSNodeLike | null,
     redirects: Redirect[],
     to: JobConsole | undefined,
   ): Promise<RedirectResult> =>
     runRedirected(
+      to === sink ? called : to === undefined ? captured : { ...captured, sink: to },
       recurse,
-      dispatch,
-      executeFn,
-      registry,
-      deps.namespace,
       command,
       redirects,
-      deps.signal,
       jobTable.processes,
-      to,
       context,
       stdin,
       callStack,
@@ -1338,14 +1239,10 @@ async function executeNodeBody(
       pending.length > 0 && last !== undefined
         ? (child, current, given, stack, options) =>
             recurseReassociated(
+              captured,
               recurse,
-              dispatch,
-              executeFn,
-              registry,
-              deps.namespace,
               pending,
               last,
-              deps.signal,
               jobTable.processes,
               child,
               current,
@@ -1430,18 +1327,13 @@ async function executeNodeBody(
     // are read the way bash reads them rather than as the parse nested
     // them (see getPipelineStages).
     const ran = await runPipeline(
+      called,
       recurse,
-      dispatch,
-      executeFn,
-      registry,
-      deps.namespace,
       getPipelineStages(node),
       context,
       stdin,
       callStack,
-      deps.signal,
       jobTable.processes,
-      sink,
     )
     return sink === undefined ? ran : drained(sink, ...ran)
   }
