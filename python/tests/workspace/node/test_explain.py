@@ -1181,6 +1181,70 @@ async def test_a_policy_refuses_what_a_whole_line_gate_cannot_read(scripted):
         await ws.close()
 
 
+ANOTHER_SPELLING = (
+    "env -C tmp hostname",
+    "env --chdir tmp hostname",
+    "env --chd tmp hostname",
+    "env -a x hostname",
+    "env --argv0 x hostname",
+    "env -vC tmp hostname",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_whole_line_gate_reads_what_another_spelling_runs(coded):
+    # Each line runs hostname on the machine by a spelling the gate
+    # follows, so a deny of hostname refuses it, in code or as a rule.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else {"commands": {"hostname": "deny"}}},
+        policies=[_NoHostname()] if coded else [],
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line in ANOTHER_SPELLING:
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code == 126, line
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            )
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_env_option_cluster_hands_its_value_the_rest_of_it():
+    # GNU getopt gives `-Cu` the value `u`, so env runs `tmp`: an allow
+    # list naming env and hostname refuses it and admits `-C tmp hostname`.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={
+            "r": {
+                "commands": {"*": "deny", "env": "allow", "hostname": "allow"}
+            }
+        },
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        refused = await ws.shell("env -Cu tmp hostname", session_id="s")
+        assert refused.exit_code == 126
+        admitted = await ws.shell("env -C tmp hostname", session_id="s")
+        assert admitted.exit_code == 0
+        assert box.lines == ["env -C tmp hostname"]
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_whole_line_runs_as_typed_with_no_policy_at_pre_command():
     # Mirage's own pre_command policies and a policy with no say at

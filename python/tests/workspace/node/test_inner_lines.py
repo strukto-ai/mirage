@@ -74,6 +74,19 @@ def _argv(inner: InnerLine) -> list[str]:
         ("env", ["--split-string=rm /x"], [("none", None, False)]),
         ("env", ["-iS", "rm /x"], [("none", None, False)]),
         ("env", ["-uPATHS", "rm"], [("argv", ["rm"], False)]),
+        # -C and -a take a value as -u does, and the first of them in a
+        # cluster takes the rest of it: `-Cu tmp` changes to `u`.
+        ("env", ["-C", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-a", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-vC", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-Cu", "tmp", "rm"], [("argv", ["tmp", "rm"], False)]),
+        ("env", ["-ua", "x", "rm"], [("argv", ["x", "rm"], False)]),
+        ("env", ["--chdir", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--chd", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--chdir=tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--argv0", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--arg", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--uns", "HOME", "rm"], [("argv", ["rm"], False)]),
         ("ionice", ["-c", "3", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         ("time", ["-p", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         # Operands the runtime appends: stdin items, matched paths.

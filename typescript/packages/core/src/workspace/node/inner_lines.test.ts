@@ -74,6 +74,19 @@ describe('innerLines', () => {
     ['env', ['--split-string=rm /x'], [['none', null, false]]],
     ['env', ['-iS', 'rm /x'], [['none', null, false]]],
     ['env', ['-uPATHS', 'rm'], [['argv', ['rm'], false]]],
+    // -C and -a take a value as -u does, and the first of them in a cluster
+    // takes the rest of it: `-Cu tmp` changes to `u`.
+    ['env', ['-C', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-a', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-vC', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-Cu', 'tmp', 'rm'], [['argv', ['tmp', 'rm'], false]]],
+    ['env', ['-ua', 'x', 'rm'], [['argv', ['x', 'rm'], false]]],
+    ['env', ['--chdir', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--chd', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--chdir=tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--argv0', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--arg', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--uns', 'HOME', 'rm'], [['argv', ['rm'], false]]],
     ['ionice', ['-c', '3', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     ['time', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     // Operands the runtime appends: stdin items, matched paths.

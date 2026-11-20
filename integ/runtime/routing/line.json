@@ -684,6 +684,63 @@
           }
         }
       ]
+    },
+    {
+      "id": "whole_line_spellings",
+      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "hostname": "deny"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "env -C tmp hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env -a x hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env --chdir tmp hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env -vC tmp echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:env -vC tmp echo hi\n"
+          }
+        }
+      ]
     }
   ]
 }

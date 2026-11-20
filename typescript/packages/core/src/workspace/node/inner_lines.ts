@@ -149,6 +149,7 @@ export function innerReadable(inner: InnerLine): boolean {
 
 const FIND_EXEC: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 const ENV_FLAGS: ReadonlySet<string> = new Set(['-i', '--ignore-environment', '-0', '--null', '-'])
+const ENV_VALUED = ['unset', 'chdir', 'argv0'] as const
 
 function tail(args: readonly Word[], count: number): Word[] {
   return count > 0 ? args.slice(args.length - count) : []
@@ -195,6 +196,21 @@ function splits(word: string): boolean {
   return false
 }
 
+// Whether an `env` option word takes the next word as its value: a detached
+// `--unset`, `--chdir` or `--argv0` (or a prefix of one), or a cluster whose
+// first of `u`, `C`, `a` ends it, since getopt hands such a letter the rest of
+// its cluster when there is one.
+function takesNext(word: string): boolean {
+  if (word.startsWith('--')) {
+    const [name = '', ...value] = word.slice(2).split('=')
+    return value.length === 0 && name !== '' && ENV_VALUED.some((long) => long.startsWith(name))
+  }
+  for (let at = 1; at < word.length; at++) {
+    if ('uCa'.includes(word[at] ?? '')) return at === word.length - 1
+  }
+  return false
+}
+
 function envInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length) {
@@ -204,17 +220,12 @@ function envInner(args: readonly Word[]): InnerLine[] {
       break
     }
     if (splits(word)) return [UNREADABLE]
-    if (ENV_FLAGS.has(word) || word.startsWith('--unset=')) {
+    if (ENV_FLAGS.has(word)) {
       i += 1
       continue
     }
-    if (word === '-u' || word === '--unset') {
-      i += 2
-      continue
-    }
     if (word.startsWith('-') && word.length > 1) {
-      // A cluster ending in `u` takes the next word as the name.
-      i += word.endsWith('u') ? 2 : 1
+      i += takesNext(word) ? 2 : 1
       continue
     }
     break

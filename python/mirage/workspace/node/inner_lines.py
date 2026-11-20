@@ -180,6 +180,7 @@ class InnerLine:
 
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-0", "--null", "-"})
+_ENV_VALUED = ("unset", "chdir", "argv0")
 
 
 def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
@@ -234,6 +235,26 @@ def _splits(word: str) -> bool:
     return False
 
 
+def _takes_next(word: str) -> bool:
+    """Whether an ``env`` option word takes the next word as its value:
+    a detached ``--unset``, ``--chdir`` or ``--argv0`` (or a prefix of
+    one), or a cluster whose first of ``u``, ``C``, ``a`` ends it, since
+    getopt hands such a letter the rest of its cluster when there is one.
+
+    Args:
+        word (str): one option word.
+    """
+    if word.startswith("--"):
+        name, eq, _ = word[2:].partition("=")
+        return not eq and any(
+            long.startswith(name) for long in _ENV_VALUED if name
+        )
+    for at, flag in enumerate(word[1:], 1):
+        if flag in "uCa":
+            return at == len(word) - 1
+    return False
+
+
 def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``,
     read the way the tree's ``env`` builtin reads it."""
@@ -245,15 +266,11 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
             break
         if _splits(word):
             return [InnerLine()]
-        if word in _ENV_FLAGS or word.startswith("--unset="):
+        if word in _ENV_FLAGS:
             i += 1
             continue
-        if word in ("-u", "--unset"):
-            i += 2
-            continue
         if word.startswith("-") and len(word) > 1:
-            # A cluster ending in `u` takes the next word as the name.
-            i += 2 if word.endswith("u") else 1
+            i += 2 if _takes_next(word) else 1
             continue
         break
     while (

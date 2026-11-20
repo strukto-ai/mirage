@@ -223,6 +223,15 @@ const HIDDEN_HOSTNAME = [
   'env hostnam?',
 ] as const
 
+const ANOTHER_SPELLING = [
+  'env -C tmp hostname',
+  'env --chdir tmp hostname',
+  'env --chd tmp hostname',
+  'env -a x hostname',
+  'env --argv0 x hostname',
+  'env -vC tmp hostname',
+] as const
+
 /** Every command an explained tree holds, nested scopes included. */
 function commands(node: ShellNode): CommandExplanation[] {
   return node.children.flatMap((child) =>
@@ -951,6 +960,57 @@ describe('prejudge', () => {
     },
     30_000,
   )
+
+  it.each([false, true])(
+    'reads what another spelling runs on a whole line (coded %s)',
+    async (coded) => {
+      // Each line runs hostname on the machine by a spelling the gate follows,
+      // so a deny of hostname refuses it, in code or as a rule.
+      const box = new LineBox()
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: {
+            r: SessionProfile(coded ? {} : { commands: { hostname: 'deny' } }),
+          },
+          policies: coded ? [noHostname] : [],
+          machines: [box],
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'r' })
+      for (const line of ANOTHER_SPELLING) {
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        expect([line, ran.exitCode]).toEqual([line, 126])
+        expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
+      }
+      expect(box.lines).toEqual([])
+    },
+    30_000,
+  )
+
+  it('hands an env option cluster its value from the rest of it', async () => {
+    // GNU getopt gives `-Cu` the value `u`, so env runs `tmp`: an allow list
+    // naming env and hostname refuses it and admits `-C tmp hostname`.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: {
+          r: SessionProfile({ commands: { '*': 'deny', env: 'allow', hostname: 'allow' } }),
+        },
+        machines: [box],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    expect((await w.shell('env -Cu tmp hostname', { sessionId: 's' })).exitCode).toBe(126)
+    expect((await w.shell('env -C tmp hostname', { sessionId: 's' })).exitCode).toBe(0)
+    expect(box.lines).toEqual(['env -C tmp hostname'])
+  })
 
   it('runs a whole line as typed with no policy at preCommand', async () => {
     // Mirage's own preCommand policies and a policy with no say at preCommand
