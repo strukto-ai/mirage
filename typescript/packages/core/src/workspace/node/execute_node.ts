@@ -61,7 +61,13 @@ import {
   readRow,
   withOwnRedirects,
 } from '../../shell/helpers.ts'
-import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
+import {
+  NodeKind,
+  nodeKind,
+  pipelineTransparent,
+  ScopeKind,
+  scopeKind,
+} from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
@@ -625,7 +631,7 @@ async function recursePipeStderr(
  */
 function namesProcessSub(word: TSNodeLike): boolean {
   if (word.type === NT.PROCESS_SUBSTITUTION) return true
-  if (word.type === NT.COMMAND_SUBSTITUTION) return false
+  if (scopeKind(word) === ScopeKind.SUBSTITUTION) return false
   return word.children.some((child) => namesProcessSub(child))
 }
 
@@ -1157,6 +1163,7 @@ async function executeNodeBody(
   // ambient frame cannot identify this node's nested evaluations.
   const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { context, ...opts })
   const kind = nodeKind(node)
+  const scope = scopeKind(node, kind)
   // A root run on a caller's frames is the caller's own line (eval,
   // source, an alias, `$( )`); one given none is a shell of its own.
   const inline = callStack !== null
@@ -1287,7 +1294,7 @@ async function executeNodeBody(
     }
   }
 
-  if (kind === NodeKind.PIPELINE) {
+  if (scope === ScopeKind.PIPELINE) {
     // `! a | b` parses as pipeline(negated_command(a), b), and a redirect
     // followed by `|` closes over everything to its left, so the stages
     // are read the way bash reads them rather than as the parse nested
@@ -1322,7 +1329,7 @@ async function executeNodeBody(
     return sink === undefined ? ran : drained(sink, ...ran)
   }
 
-  if (kind === NodeKind.SUBSHELL) {
+  if (scope === ScopeKind.FORK) {
     return forkSubshell(captureDeps, sink, executeFn, node, context, stdin, callStack)
   }
 
@@ -1340,16 +1347,14 @@ async function executeNodeBody(
     return handleIf(run, branches, elseBody, context, executeFn, callStack)
   }
 
-  if (kind === NodeKind.CFOR) {
-    const [exprs, body] = getCforParts(node)
-    return callStack.loop(() => handleCfor(run, exprs, body, context, executeFn, callStack))
-  }
-
-  if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
-    return runFor(deps, kind, node, run, context, stdin, callStack, executeFn, sink)
-  }
-
-  if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
+  if (scope === ScopeKind.REPEATED) {
+    if (kind === NodeKind.CFOR) {
+      const [exprs, body] = getCforParts(node)
+      return callStack.loop(() => handleCfor(run, exprs, body, context, executeFn, callStack))
+    }
+    if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
+      return runFor(deps, kind, node, run, context, stdin, callStack, executeFn, sink)
+    }
     const [test, body] = getWhileParts(node)
     return callStack.loop(() =>
       handleWhile(run, test, body, context, executeFn, callStack, kind === NodeKind.UNTIL),
@@ -1363,7 +1368,7 @@ async function executeNodeBody(
     return handleCase(run, word, getCaseItems(node), context, executeFn, callStack)
   }
 
-  if (kind === NodeKind.FUNCTION_DEF) {
+  if (scope === ScopeKind.DEFERRED) {
     return defineFunction(node, session, deps.handed ?? null)
   }
 

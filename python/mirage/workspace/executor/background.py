@@ -79,7 +79,12 @@ from mirage.shell.helpers import (
     get_text,
     is_backgrounded,
 )
-from mirage.shell.node_kind import NodeKind, node_kind, simple_command
+from mirage.shell.node_kind import (
+    NodeKind,
+    background_pipeline,
+    node_kind,
+    simple_command,
+)
 from mirage.shell.parse.names import command_args, command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.signals import (
@@ -762,7 +767,7 @@ async def handle_background(
     # (`run_program`). A builtin or a function its shell runs (`f &`) ends
     # with that program on INT, as bash's shell does of an INT its child
     # died of.
-    piped = command is not None and command.type == NT.PIPELINE
+    piped = background_pipeline(left)
     one_command = command is not None and command.type == NT.COMMAND
     ends = one_command and not forks(command, session)
     in_place = (one_command and not ends) or (

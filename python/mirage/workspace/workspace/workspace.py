@@ -224,6 +224,7 @@ from mirage.workspace.mount.write_policy import (
     coerce_write_policy,
 )
 from mirage.workspace.node.explain import (
+    JudgmentMode,
     explain_line,
     explain_redirects,
     explained_line,
@@ -1065,12 +1066,11 @@ class Workspace:
         aliases = expanding_aliases(session)
         ast = parse(line, aliases)
         verdicts = await explain_line(
-            ast, session, self._registry, self._namespace, every=False
+            ast, session, self._registry, self._namespace, JudgmentMode.PREPASS
         )
         opened = explain_redirects(
             ast, session, self._registry, self._namespace
         )
-        pipefail = bool(session.shell_options.get("pipefail"))
         if holds([one.judgment for one in verdicts]):
             # The run leaves a held line on its static bindings for the
             # gate to answer (``Router.decide``), whole when they take it
@@ -1082,7 +1082,9 @@ class Workspace:
                 session,
                 self._registry,
                 self._namespace,
-                whole_line=whole_line,
+                JudgmentMode.EXPLAIN_WHOLE_LINE
+                if whole_line
+                else JudgmentMode.EXPLAIN,
             )
             return explained_line(
                 line,
@@ -1101,7 +1103,7 @@ class Workspace:
                 whole_line,
                 aliases,
                 opened,
-                pipefail,
+                session=session,
             )
         answers, placed = await self._router.placement(
             line,
@@ -1121,12 +1123,19 @@ class Workspace:
             session,
             self._registry,
             self._namespace,
-            whole_line=whole_line,
+            JudgmentMode.EXPLAIN_WHOLE_LINE
+            if whole_line
+            else JudgmentMode.EXPLAIN,
         )
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda one: "", aliases=aliases
+                line,
+                judged,
+                verdicts,
+                lambda one: "",
+                aliases=aliases,
+                session=session,
             )
             return dataclasses.replace(
                 said,
@@ -1152,7 +1161,7 @@ class Workspace:
             whole_line,
             aliases,
             opened,
-            pipefail,
+            session=session,
         )
         if whole_line and said.outcome is Outcome.ALLOW:
             # A command routed off the runtime that runs the line whole

@@ -43,6 +43,12 @@ console.log(r.outcome, r.exitCode, r.stderr) // deny 126 rm: Permission denied
 `explain.vfs` takes the same calls as `session.vfs`:
 `await explain.vfs.read("/data/a.txt")`.
 
+In the workspace shell, the `cd` in `true | cd /data; cat ./file` runs in a child shell by default.
+With `lastpipe` already enabled and job control disabled, the final pipeline
+stage runs in the current shell. Explain then resolves `./file` to
+`/data/file`, just as execution does. If an earlier command on the line
+can change those options, the shell resolves the uncertain path when it runs.
+
 ## Where to ask
 
 | Entry point | A line | A VFS call |
@@ -75,6 +81,7 @@ row with its outcome.
 ## What it cannot see
 
 - `post_` methods, since nothing comes back to judge.
+- The exit-status prediction uses the session’s initial `pipefail` setting. Changing it on the same line can change the status returned by execution.
 - The file calls of a line, which happen only as it runs: explain the VFS
   call itself to see its `pre_vfs` answer.
 - A hidden path explains like any path no rule names, so explain never

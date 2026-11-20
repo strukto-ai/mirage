@@ -39,7 +39,7 @@ import { parse } from '../../shell/parse/parse.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
-import { explainLine, type Judgment } from './explain.ts'
+import { explainLine, JudgmentMode, type Judgment } from './explain.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -133,7 +133,7 @@ async function judged(
           w.registry,
           w.namespace,
           (text) => parse(text),
-          wholeLine,
+          wholeLine ? JudgmentMode.EXPLAIN_WHOLE_LINE : JudgmentMode.EXPLAIN,
         ),
       ),
   )
@@ -1099,6 +1099,48 @@ describe('prejudge', () => {
     expect(box.lines).toEqual([line])
   })
 
+  it.each([null, '/data/file', '/data/d/file'])(
+    'judges both guest pipeline destinations regardless of workspace options: %s',
+    async (sealed) => {
+      const box = new LineBox()
+      const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+      open.push(w)
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: {
+            cat:
+              sealed === null
+                ? 'allow'
+                : ['allow', { decision: 'deny', paths: [sealed], reason: 'sealed' }],
+          },
+        }),
+      })
+      const session = w.getSession('s')
+      session.cwd = '/data/d'
+      const line = ': | cd /data; cat ./file'
+      for (const [lastpipe, monitor] of [
+        [false, false],
+        [true, false],
+        [true, true],
+      ] as const) {
+        session.shopts.lastpipe = lastpipe
+        session.shellOptions.monitor = monitor
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        if (sealed === null) {
+          expect([said.outcome, ran.exitCode]).toEqual([Outcome.ALLOW, 0])
+        } else {
+          expect([said.outcome, said.reason, ran.decision?.reason]).toEqual([
+            Outcome.DENY,
+            'sealed',
+            'sealed',
+          ])
+        }
+      }
+      expect(box.lines).toEqual(sealed === null ? [line, line, line] : [])
+    },
+  )
+
   it('has a coded policy judge a whole line where it may stand', async () => {
     // With no rule in force a coded policy is a whole line's only gate: it
     // was shown only the cwd a skipped cd predicted, nothing at all for a name
@@ -1360,6 +1402,135 @@ describe('prejudge', () => {
 })
 
 describe('prejudge scope', () => {
+  it.each([
+    ['{ cd /data; cat inside; };', '/data/after'],
+    ['(cd /data; cat inside);', '/after'],
+    ['{ cd /data; cat inside; } &', '/after'],
+    [': | { cd /data; cat inside; };', '/after'],
+    ['echo $(cd /data; cat inside);', '/after'],
+    ['echo <(cd /data; cat inside);', '/after'],
+  ])('keeps the cwd of %s in its shell', async (statement, following) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    const said = await judged(w, `${statement} cat after`)
+    expect(said.filter((one) => one.command === 'cat').map((one) => one.paths)).toEqual([
+      ['/data/inside'],
+      [following],
+    ])
+  })
+
+  it('follows the last pipeline stage with lastpipe and no job control', async () => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    expect((await w.shell('shopt -s lastpipe')).exitCode).toBe(0)
+    const line = ': | { cd /data; }; cat ./file'
+    expect((await judged(w, line)).at(-1)?.paths).toEqual(['/data/file'])
+    expect(DEC.decode((await w.shell(': | { cd /data; }; pwd')).stdout)).toBe('/data\n')
+    await w.shell('cd /; set -m')
+    expect((await judged(w, line)).at(-1)?.paths).toEqual(['/file'])
+    expect(DEC.decode((await w.shell(': | { cd /data; }; pwd')).stdout)).toBe('/\n')
+  })
+
+  it.each([
+    ': | cd /data; cat ./file; shopt -u lastpipe',
+    '(shopt -u lastpipe); : | cd /data; cat ./file',
+    'echo $(shopt -u lastpipe); : | cd /data; cat ./file',
+    'set -- -m; : | cd /data; cat ./file',
+    'shopt -- lastpipe -u; : | cd /data; cat ./file',
+  ])('keeps lastpipe known at the cat in %s', async (line) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    expect((await w.shell('shopt -s lastpipe')).exitCode).toBe(0)
+    const said = commands((await w.explain(line)).node).find((one) => one.command === 'cat')
+    expect(said?.words.at(-1)?.path?.virtual).toBe('/data/file')
+  })
+
+  it.each([
+    ['shopt -u -- lastpipe', true, '/data/file', 'outer'],
+    ['builtin -- shopt -u lastpipe', true, '/data/file', 'outer'],
+    ['"$cmd" -u lastpipe', true, '/data/file', 'outer'],
+    ['set -m', true, '/data/file', 'outer'],
+    ['set -o monitor', true, '/data/file', 'outer'],
+    ['set -o "$option"', true, '/data/file', 'outer'],
+    ['shopt -s lastpipe', false, '/data/d/file', 'inner'],
+  ])('defers relative prepass judgments after %s', async (toggle, enabled, sealed, expected) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('mkdir /data/d; printf outer > /data/d/file; printf inner > /data/file')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { cat: ['allow', { decision: 'deny', paths: [sealed], reason: 'sealed' }] },
+      }),
+    })
+    const setup = `cd /data/d; option=monitor; cmd=shopt; shopt -${enabled ? 's' : 'u'} lastpipe`
+    expect((await w.shell(setup, { sessionId: 's' })).exitCode).toBe(0)
+    const line = `${toggle}; : | cd /data; cat ./file`
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.outcome, ran.exitCode, DEC.decode(ran.stdout)]).toEqual([
+      Outcome.ALLOW,
+      0,
+      expected,
+    ])
+  })
+
+  it.each([false, true])(
+    'defers option changes by a function defined on the same line: %s',
+    async (sameLine) => {
+      const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('mkdir /data/d; printf outer > /data/d/file')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: {
+            cat: ['allow', { decision: 'deny', paths: ['/data/file'], reason: 'sealed' }],
+          },
+        }),
+      })
+      const define = 'setoff() { shopt -u lastpipe; }; '
+      await w.shell(`cd /data/d; shopt -s lastpipe; ${sameLine ? ':' : define}`, { sessionId: 's' })
+      const line = `${sameLine ? define : ''}setoff; : | cd /data; cat ./file`
+      const said = await w.explain(line, 's')
+      const cat = commands(said.node).find((one) => one.command === 'cat')
+      expect(cat?.words.at(-1)?.path).toBeNull()
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([said.outcome, ran.exitCode, DEC.decode(ran.stdout)]).toEqual([
+        Outcome.ALLOW,
+        0,
+        'outer',
+      ])
+    },
+  )
+
+  it('lets the stages of an async pipeline start in their own shell scope', async () => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('shopt -s lastpipe')
+    const line = ': | { : | cd /data; cat ./file; } & cat ./file'
+    const said = await judged(w, line)
+    expect(said.filter((one) => one.command === 'cat').map((one) => one.paths)).toEqual([
+      ['/data/file'],
+      ['/file'],
+    ])
+  })
+
+  it.each([
+    [': | { sort() { :; }; };', Outcome.ALLOW],
+    ['{ sort() { :; }; } | :;', Outcome.DENY],
+    [': | { sort() { :; }; } &', Outcome.DENY],
+  ])('tracks function definitions through lastpipe in %s', async (definition, outcome) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({ commands: { '*': 'deny', ':': 'allow', shopt: 'allow' } }),
+    })
+    expect((await w.shell('shopt -s lastpipe', { sessionId: 's' })).exitCode).toBe(0)
+    const line = `${definition} sort /data/file`
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.outcome, said.exitCode]).toEqual([outcome, ran.exitCode])
+  })
+
   it('moves the commands inside a subshell when it begins with a cd', async () => {
     // The sibling test pins that the cd does not escape the subshell.
     // This one pins the other half: inside it, the cd still applies, so
@@ -1839,6 +2010,41 @@ describe('explain answers and the op form', () => {
       await ws.close()
     }
   })
+
+  it.each([false, true])(
+    'reports policies after a denial with whole-line mode %s',
+    async (wholeLine) => {
+      const calls: string[] = []
+      class RecordedAskRm extends AskRm {
+        override preCommand(ctx: CommandContext): Action | null {
+          calls.push(ctx.command)
+          return super.preCommand(ctx)
+        }
+      }
+      const box = new LineBox()
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: wholeLine ? MountMode.EXEC : MountMode.WRITE,
+          policies: [new DenyRm(), new RecordedAskRm()],
+          machines: wholeLine ? [box] : [],
+        },
+      )
+      open.push(w)
+      const line = 'rm /data/x'
+      const [rm] = commands((await w.explain(line)).node)
+      expect(rm?.answers).toEqual([
+        { kind: 'deny', reason: 'no', policy: 'DenyRm' },
+        { kind: 'ask', reason: 'sign-off', policy: 'RecordedAskRm' },
+      ])
+      expect(calls).toEqual(['rm'])
+      calls.length = 0
+      expect((await w.shell(line)).decision?.reason).toBe('no')
+      expect(calls).toEqual([])
+      expect(box.lines).toEqual([])
+      expect(w.decisions.pending()).toEqual([])
+    },
+  )
 
   it('explains a policy that fails as a deny', async () => {
     const ws = new Workspace(

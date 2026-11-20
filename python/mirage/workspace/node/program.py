@@ -31,7 +31,12 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
-from mirage.shell.helpers import get_text, same_line, source_row
+from mirage.shell.helpers import (
+    get_text,
+    is_backgrounded,
+    same_line,
+    source_row,
+)
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.constants import PARSED_WORDS
 from mirage.shell.types import NodeType as NT
@@ -320,11 +325,7 @@ async def _run_program(
             echoed_row = last
 
         last_row = child.end_point[0]
-        if (
-            not reread
-            and i + 1 < len(children)
-            and children[i + 1].type == NT.BACKGROUND
-        ):
+        if not reread and is_backgrounded(child):
             try:
                 stdout, io, last_exec = await handle_background(
                     recurse,

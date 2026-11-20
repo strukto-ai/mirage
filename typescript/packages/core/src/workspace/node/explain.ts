@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { voiceName } from '../../context/session_context.ts'
+import { currentCaller, voiceName } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
@@ -40,11 +40,24 @@ import {
   inputSubstitutionRedirect,
   getCaseItems,
   getCaseWord,
+  getIfBranches,
+  getFunctionName,
+  isBackgrounded,
   getParts,
   getText,
   literalWord,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
+import {
+  backgroundPipeline,
+  connectionRunsRight,
+  NodeKind,
+  nodeKind,
+  pipelineStageForks,
+  ScopeKind,
+  scopeKind,
+} from '../../shell/node_kind.ts'
+import { parseOptionWord } from '../../shell/options.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
@@ -52,6 +65,7 @@ import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
+import { scanOptions } from '../executor/builtins/getopt.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -103,28 +117,6 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 export const UNREADABLE_LINES = 'runs lines the gate cannot read'
 
 /**
- * Nodes that run their commands in a child shell: a `cd` inside one
- * applies to the rest of that child and is gone when it exits. A
- * pipeline is not here because it forks per segment, not once.
- */
-const FORK_SCOPES: ReadonlySet<string> = new Set([
-  NodeType.SUBSHELL,
-  NodeType.COMMAND_SUBSTITUTION,
-  NodeType.PROCESS_SUBSTITUTION,
-])
-
-/**
- * Nodes whose body may run again from where it ended, or later than where it
- * stands: a `cd` in one moves the commands before it too.
- */
-const REPEATED_SCOPES: ReadonlySet<string> = new Set([
-  NodeType.FOR_STATEMENT,
-  NodeType.C_STYLE_FOR_STATEMENT,
-  NodeType.WHILE_STATEMENT,
-  NodeType.FUNCTION_DEFINITION,
-])
-
-/**
  * Commands that move the shell's cwd where the walk cannot follow: a line
  * run in this shell, and the directory stack.
  */
@@ -151,12 +143,6 @@ const SHAPES: ReadonlyMap<string, string> = new Map([
   [NodeType.WHILE_STATEMENT, 'group'],
   [NodeType.CASE_STATEMENT, 'group'],
   [NodeType.FUNCTION_DEFINITION, 'group'],
-])
-
-/** The nodes whose body a nested line evaluates on its own. Mirrors the Python SUBSTITUTIONS. */
-const SUBSTITUTIONS: ReadonlySet<string> = new Set([
-  NodeType.COMMAND_SUBSTITUTION,
-  NodeType.PROCESS_SUBSTITUTION,
 ])
 
 /** How strict an outcome is, for a line's summary: the strictest part of the line speaks for it. Mirrors the Python STRICTNESS. */
@@ -245,8 +231,8 @@ export interface Judgment {
  * stand, where a `cd` before it was skipped or failed.
  */
 export interface Walked {
-  readonly words: Word[]
-  readonly redirects: Word[]
+  readonly words: readonly Word[]
+  readonly redirects: readonly Word[]
   readonly session: SessionState
   readonly occurrence: Occurrence
   readonly intrinsic?: boolean
@@ -254,6 +240,8 @@ export interface Walked {
   readonly stdin?: Uint8Array | null
   readonly stated?: boolean
   readonly elsewhere?: readonly SessionState[]
+  readonly open?: boolean
+  readonly pipeline?: PipelineWalk | undefined
 }
 
 /**
@@ -480,6 +468,19 @@ function lineDecision(
   return null
 }
 
+/** How a static read asks the policy chain and where its judgment is used. */
+export const JudgmentMode = {
+  PREPASS: 'prepass',
+  EXPLAIN: 'explain',
+  WHOLE_LINE: 'whole_line',
+  EXPLAIN_WHOLE_LINE: 'explain_whole_line',
+} as const
+export type JudgmentMode = (typeof JudgmentMode)[keyof typeof JudgmentMode]
+
+function takesWholeLine(mode: JudgmentMode): boolean {
+  return mode === JudgmentMode.WHOLE_LINE || mode === JudgmentMode.EXPLAIN_WHOLE_LINE
+}
+
 /**
  * Judge one command and whatever lines it runs in turn, each with its
  * occurrence, one at a time, so a reader that stops at a refusal never asks
@@ -493,38 +494,27 @@ function lineDecision(
  * runs. For a runtime that takes the line whole this is the gate itself
  * (`admitLine`), so what `explain` says about such a line is what its
  * admission does: a deny first, then what the runtime would do past the gate
- * (`lineDecision`), then an ask. `stated` is whether the words reach here as
- * the gate will read them; false under a command the runtime completes,
- * since a line built from its words (`eval`) or run on its operands
- * (`xargs`) is completed with them. `wholeLine` is whether a runtime takes
- * the line whole, where this is the only gate; the executor judges each
- * command again once its words are expanded. `lost` is whether a `cd` the
- * walk could not follow ran before the command, as `Walked` carries it; a
- * whole line still shows the chain what its words name where the walk last
- * knew the shell, since no gate judges them once it runs.
- * `every` asks every policy past a Deny, for `explain`; `rulesOnly` asks the
- * profile's rules alone, for a pass that judges a line before it runs, since
- * a policy's own `preCommand` is asked once, by the gate that runs the
- * command. `open` says the runtime appends operands the gate cannot read
- * (`xargs`, `find -exec`, `mapfile -C`).
+ * (`lineDecision`), then an ask.
  */
 async function* judgeWords(
-  words: readonly Word[],
-  occurrence: Occurrence,
-  session: SessionState,
+  item: Walked,
+  mode: JudgmentMode,
   registry: MountRegistry,
   namespace: Namespace | null,
   reparse: (line: string) => TSNodeLike,
-  redirectWords: readonly Word[] = [],
-  stated = true,
-  intrinsic = false,
-  wholeLine = false,
-  lost = false,
-  every = false,
-  stdin: Uint8Array | null = null,
-  rulesOnly = true,
-  open = false,
 ): AsyncGenerator<Judged> {
+  const {
+    words,
+    occurrence,
+    session,
+    redirects: redirectWords,
+    stated = true,
+    intrinsic = false,
+    lost = false,
+    stdin = null,
+    open = false,
+  } = item
+  const wholeLine = takesWholeLine(mode)
   const head = words[0]
   if (head === undefined) return
   const rules = session.commands
@@ -562,8 +552,8 @@ async function* judgeWords(
     redirects,
     intrinsic,
     unread,
-    every,
-    rulesOnly,
+    mode === JudgmentMode.EXPLAIN || mode === JudgmentMode.EXPLAIN_WHOLE_LINE,
+    mode === JudgmentMode.PREPASS,
     occurrence.source,
   )
   // After a lost cd, a relative path names no file the pass can place.
@@ -633,6 +623,10 @@ async function* judgeWords(
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete innerSession.aliases[masked]
   }
+  const pipeline =
+    item.pipeline === undefined || name === 'sh' || name === 'bash'
+      ? undefined
+      : { ...item.pipeline }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {
@@ -643,31 +637,26 @@ async function* judgeWords(
         namespace,
         reparse,
         lineFrame(inner.line, occurrence),
-        literal && !inner.open,
-        wholeLine,
-        lost,
-        every,
-        rulesOnly,
-        inner.open,
+        mode,
+        { stated: literal && !inner.open, lost, open: inner.open, pipeline },
       )
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
       yield* judgeWords(
-        inner.argv,
-        within,
-        innerSession,
+        {
+          words: inner.argv,
+          redirects: [],
+          occurrence: within,
+          session: innerSession,
+          stated: literal && !inner.open,
+          lost,
+          open: inner.open,
+          pipeline,
+        },
+        mode,
         registry,
         namespace,
         reparse,
-        [],
-        literal && !inner.open,
-        false,
-        wholeLine,
-        lost,
-        every,
-        null,
-        rulesOnly,
-        inner.open,
       )
     }
   }
@@ -711,6 +700,82 @@ function seeded(
   return forked
 }
 
+interface PipelineWalk {
+  readonly wholeLine: boolean
+  readonly background: boolean
+  optionsMayChange: boolean
+  functions: ReadonlySet<string>
+}
+
+/** Detect option edits the walk cannot assume ran, or successfully changed the shell. */
+function changesPipelineOptions(
+  words: readonly Word[],
+  session: SessionState,
+  pipeline: PipelineWalk,
+): boolean {
+  const first = words[0]
+  if (first === undefined) return false
+  const name = first.text
+  if (
+    name === null ||
+    first.glob === true ||
+    pipeline.functions.has(name) ||
+    Object.hasOwn(session.functions, name)
+  )
+    return true
+  let index = 0
+  while (words[index]?.text === 'builtin' || words[index]?.text === 'command') {
+    index += words[index + 1]?.text === '--' ? 2 : 1
+  }
+  const head = words[index]?.text
+  if (head === null || words[index]?.glob === true) return true
+  if (head !== 'shopt' && head !== 'set') return false
+  const operands = words.slice(index + 1)
+  if (operands.some((word) => word.text === null || word.glob === true)) return true
+  const args = operands.map(wordValue)
+  if (head === 'shopt') {
+    const scan = scanOptions(args, 'pqosu')
+    const option = scan.letters.includes('o') ? 'monitor' : 'lastpipe'
+    return (
+      scan.bad === null &&
+      scan.letters.includes('s') !== scan.letters.includes('u') &&
+      scan.operands.includes(option)
+    )
+  }
+  for (let i = 0; i < args.length;) {
+    const arg = args[i]
+    if (arg === undefined) break
+    const word = parseOptionWord(arg, args[i + 1] ?? null)
+    if (word === null) break
+    if (word.settings.some(([option]) => option === 'monitor')) return true
+    i += word.consumed
+  }
+  return false
+}
+
+function pipelineWalk(wholeLine = false): PipelineWalk {
+  return {
+    wholeLine,
+    background: !wholeLine && currentCaller().process?.pipeline === true,
+    // A runtime taking a raw line does not receive the workspace shell's options.
+    optionsMayChange: wholeLine,
+    functions: new Set(),
+  }
+}
+
+function stageForks(
+  last: boolean,
+  session: SessionState,
+  pipeline: PipelineWalk,
+  possible = false,
+): boolean {
+  return pipelineStageForks(last, {
+    lastpipe: pipeline.optionsMayChange ? possible : session.shopts.lastpipe === true,
+    monitor: pipeline.optionsMayChange ? !possible : session.shellOptions.monitor === true,
+    backgroundPipeline: pipeline.background,
+  })
+}
+
 /**
  * Every command under one node, in source order, each with the session
  * it is judged in; returns the session the node leaves behind.
@@ -718,10 +783,9 @@ function seeded(
  * A `cd` reaches the commands after it, and how far is the whole
  * question. Pinned against bash: `( )`, `$( )` and `<( )` run their
  * contents in a child shell, so a `cd` inside one applies to the rest of
- * that child and is gone when it exits; a pipeline forks once per
- * segment, so a `cd` in one segment reaches neither the next segment nor
- * the line; `&` backgrounds into a fork; and a brace group or an `if`
- * body does not fork at all, so its `cd` does escape. Reading a subshell
+ * that child and is gone when it exits; a pipeline forks its stages,
+ * except for a last stage running in the caller through `lastpipe`.
+ * A job runs in a fork, while a brace group or `if` body shares its shell. Reading a subshell
  * as "no `cd` applies" rather than "no `cd` escapes" judged
  * `(cd d && tar -c ..)` at the wrong directory, which made `..` read as
  * a mount root.
@@ -736,12 +800,13 @@ function* walkSubstitution(
   homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
+  pipeline: PipelineWalk,
   lost: boolean,
   elsewhere: readonly SessionState[],
 ): Walk {
   const redirect = inputSubstitutionRedirect(tree)
   if (redirect === null) {
-    return yield* walkNode(tree, session, homes, frame, reparse, lost, elsewhere)
+    return yield* walkNode(tree, session, homes, frame, reparse, pipeline, lost, elsewhere)
   }
   const target = redirect.targetNode as TSNodeLike
   yield {
@@ -752,8 +817,9 @@ function* walkSubstitution(
     intrinsic: true,
     lost,
     elsewhere,
+    pipeline,
   }
-  yield* walkNode(target, session, homes, frame, reparse, lost, elsewhere)
+  yield* walkNode(target, session, homes, frame, reparse, pipeline, lost, elsewhere)
   return [session, lost, elsewhere]
 }
 
@@ -763,10 +829,16 @@ function* walkNode(
   homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
+  pipeline: PipelineWalk,
   lost = false,
   elsewhere: readonly SessionState[] = [],
 ): Walk {
-  if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
+  const scope = scopeKind(node)
+  if (scope === ScopeKind.DEFERRED) {
+    frame = definitionFrame(node, frame)
+    pipeline.functions = new Set([...pipeline.functions, getFunctionName(node)])
+    pipeline = { ...pipeline }
+  }
   const opened =
     OPENERS.has(node.type) || (node.type === NodeType.COMMAND && getText(node).startsWith('exec'))
       ? openedBy(node, homes)
@@ -782,6 +854,7 @@ function* walkNode(
       occurrence: occurrenceIn(node, frame),
       lost,
       elsewhere,
+      pipeline,
     }
   }
   if (node.type === NodeType.TEST_COMMAND) {
@@ -798,10 +871,11 @@ function* walkNode(
         lost,
         stated: test.stated,
         elsewhere,
+        pipeline,
       }
     }
     for (const child of node.children) {
-      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
+      yield* walkNode(child, session, homes, frame, reparse, pipeline, lost, elsewhere)
     }
     return [session, lost, elsewhere]
   }
@@ -817,16 +891,21 @@ function* walkNode(
         occurrence: occurrenceIn(node, frame),
         lost,
         elsewhere: elsewhere.map((e) => seeded(node, e, homes)),
+        pipeline,
       }
       walked = afterCd(words, session, lost, elsewhere)
     }
     // A substitution among the words runs in its own shell.
     for (const child of node.children) {
-      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
+      yield* walkNode(child, session, homes, frame, reparse, pipeline, lost, elsewhere)
+    }
+    if (!pipeline.optionsMayChange) {
+      pipeline.optionsMayChange = changesPipelineOptions(words, session, pipeline)
     }
     return walked
   }
-  if (FORK_SCOPES.has(node.type)) {
+  if (scope === ScopeKind.FORK || scope === ScopeKind.SUBSTITUTION) {
+    const childPipeline = { ...pipeline, background: false }
     // A substitution's body is walked in a frame of its own: the nested
     // line that evaluates it parses the body alone, under the
     // substitution's node, and the commands in it have to be placed
@@ -843,6 +922,7 @@ function* walkNode(
           homes,
           inner,
           reparse,
+          childPipeline,
           lost,
           elsewhere,
         )
@@ -852,20 +932,79 @@ function* walkNode(
     const inner = bodyFrame(node, frame)
     if (node.type === NodeType.COMMAND_SUBSTITUTION && inner !== null) {
       const body = { ...inner, base: 0 }
-      yield* walkSubstitution(reparse(inner.text), session, homes, body, reparse, lost, elsewhere)
+      yield* walkSubstitution(
+        reparse(inner.text),
+        session,
+        homes,
+        body,
+        reparse,
+        childPipeline,
+        lost,
+        elsewhere,
+      )
       return [session, lost, elsewhere]
     }
-    yield* walkChildren(node, session, homes, inner ?? frame, reparse, lost, elsewhere)
+    yield* walkChildren(
+      node,
+      session,
+      homes,
+      inner ?? frame,
+      reparse,
+      childPipeline,
+      lost,
+      elsewhere,
+    )
     return [session, lost, elsewhere]
   }
-  if (node.type === NodeType.PIPELINE) {
-    for (const child of node.children) {
-      yield* walkNode(child, session, homes, frame, reparse, lost, elsewhere)
+  if (scope === ScopeKind.PIPELINE) {
+    const stages = node.namedChildren
+    let ended: Stand = [session, lost, elsewhere]
+    for (const [index, child] of stages.entries()) {
+      const last = index === stages.length - 1
+      const forked = stageForks(last, session, pipeline)
+      const childPipeline = forked ? { ...pipeline, background: false } : pipeline
+      const after = yield* walkNode(
+        child,
+        session,
+        homes,
+        frame,
+        reparse,
+        childPipeline,
+        lost,
+        elsewhere,
+      )
+      if (!forked) {
+        ended = after
+      } else if (
+        pipeline.optionsMayChange &&
+        !stageForks(last, session, pipeline, true) &&
+        (after[0] !== session || after[1] !== lost)
+      ) {
+        // The final stage may change the caller's cwd. The workspace has a
+        // live command gate. For a whole line, judge every cwd we can place.
+        if (pipeline.wholeLine && !after[1]) {
+          const places = new Map<string, SessionState>()
+          for (const place of [...elsewhere, after[0], ...after[2]]) {
+            if (place.cwd !== session.cwd && !places.has(place.cwd)) places.set(place.cwd, place)
+          }
+          ended =
+            places.size <= PLACES_LIMIT
+              ? [session, lost, [...places.values()]]
+              : [session, true, elsewhere]
+        } else {
+          ended = [session, true, elsewhere]
+        }
+      }
     }
-    return [session, lost, elsewhere]
+    return ended
   }
-  if (REPEATED_SCOPES.has(node.type) && moves(node, session, homes)) lost = true
-  return yield* walkChildren(node, session, homes, frame, reparse, lost, elsewhere)
+  if (
+    (scope === ScopeKind.REPEATED || scope === ScopeKind.DEFERRED) &&
+    moves(node, session, homes, pipeline)
+  ) {
+    lost = true
+  }
+  return yield* walkChildren(node, session, homes, frame, reparse, pipeline, lost, elsewhere)
 }
 
 /**
@@ -879,22 +1018,38 @@ function moves(
   node: TSNodeLike,
   session: SessionState,
   homes: Readonly<Record<string, string>> | null,
+  pipeline: PipelineWalk,
 ): boolean {
-  const stack = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (FORK_SCOPES.has(current.type) || current.type === NodeType.PIPELINE) continue
+  const stack: [TSNodeLike, boolean][] = [[node, false]]
+  let movedInLastStage = false
+  let changesOptions = false
+  for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
+    const [current, needsLastpipe] = entry
+    const scope = scopeKind(current)
+    if (scope === ScopeKind.FORK || scope === ScopeKind.SUBSTITUTION) continue
+    if (scope === ScopeKind.PIPELINE) {
+      const last = current.namedChildren.at(-1)
+      if (last !== undefined && !pipeline.background) {
+        stack.push([last, needsLastpipe || stageForks(true, session, pipeline, true)])
+      }
+      continue
+    }
     if (current.type === NodeType.COMMAND) {
       const words = wordsOf(current, homes)
       if (words.length > 0) {
+        changesOptions ||= changesPipelineOptions(words, session, pipeline)
         const [moved, lost] = afterCd(words, session, false, [])
-        if (lost || moved !== session) return true
+        if (lost || moved !== session) {
+          if (!needsLastpipe) return true
+          movedInLastStage = true
+        }
       }
     }
-    const children = current.children
-    for (const item of children.filter((_, index) => children[index + 1]?.type !== '&'))
-      stack.push(item)
+    for (const child of current.children) {
+      if (!isBackgrounded(child)) stack.push([child, needsLastpipe])
+    }
   }
-  return false
+  return movedInLastStage && changesOptions
 }
 
 /**
@@ -907,17 +1062,27 @@ function* walkChildren(
   homes: Readonly<Record<string, string>> | null,
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
+  pipeline: PipelineWalk,
   lost: boolean,
   elsewhere: readonly SessionState[],
 ): Walk {
   let walked: Stand = [session, lost, elsewhere]
-  const children = node.children
-  for (let index = 0; index < children.length; index += 1) {
-    const child = children[index]
-    if (child === undefined) continue
-    const ended = yield* walkNode(child, walked[0], homes, frame, reparse, walked[1], walked[2])
-    if (children[index + 1]?.type === '&') continue
-    walked = ended
+  for (const child of node.children) {
+    const background = isBackgrounded(child)
+    const childPipeline = background
+      ? { ...pipeline, background: backgroundPipeline(child) }
+      : pipeline
+    const ended = yield* walkNode(
+      child,
+      walked[0],
+      homes,
+      frame,
+      reparse,
+      childPipeline,
+      walked[1],
+      walked[2],
+    )
+    if (!background) walked = ended
   }
   return walked
 }
@@ -987,6 +1152,7 @@ function* walkedLine(
   frame: Frame | null = null,
   lost = false,
   opens = false,
+  pipeline = pipelineWalk(),
 ): Generator<Walked> {
   const homes = tildeHomes(session)
   for (const item of walkNode(
@@ -995,6 +1161,7 @@ function* walkedLine(
     homes,
     frame ?? rootFrame(root, null),
     reparse,
+    pipeline,
     lost,
   )) {
     if (item.words.length > 0 || opens) yield item
@@ -1112,21 +1279,7 @@ export async function lineJudgments(
     if (item.words[0]?.text === null) continue
     await budget.run()
     const explained: Judged[] = []
-    for await (const one of judgeWords(
-      item.words,
-      item.occurrence,
-      item.session,
-      registry,
-      namespace,
-      reparse,
-      item.redirects,
-      item.stated ?? true,
-      item.intrinsic,
-      false,
-      item.lost,
-      false,
-      item.stdin,
-    )) {
+    for await (const one of judgeWords(item, JudgmentMode.PREPASS, registry, namespace, reparse)) {
       explained.push(one)
     }
     judged.push([item, explained])
@@ -1319,11 +1472,7 @@ export async function admitLine(
     namespace,
     reparse,
     rootFrame(root, handed?.origin ?? null),
-    true,
-    true,
-    false,
-    false,
-    false,
+    JudgmentMode.WHOLE_LINE,
   )) {
     const refused =
       (await admitted(one, registry, handed, signal)) ??
@@ -1482,19 +1631,11 @@ async function commandRefused(
 ): Promise<boolean> {
   const explained: Judged[] = []
   for await (const one of judgeWords(
-    item.words,
-    item.occurrence,
-    item.session,
+    { ...item, intrinsic: false },
+    JudgmentMode.PREPASS,
     registry,
     namespace,
     reparse,
-    item.redirects,
-    item.stated ?? true,
-    false,
-    false,
-    item.lost,
-    false,
-    item.stdin,
   )) {
     explained.push(one)
   }
@@ -1633,12 +1774,8 @@ export function holds(judgments: readonly Judgment[]): boolean {
  * something, since a line nobody typed must not consume a grant or put
  * a question to a host.
  *
- * The words are read literally, as `admitLine` reads them, so nothing is
- * expanded and no `$( )` runs. `wholeLine` is whether a runtime takes the
- * line whole, which reads it as typed; the executor's gate reads each
- * command once expanded. `every` asks every policy, as each command's
- * explanation shows them; false asks the profile's rules alone, as the
- * run does before any of the line runs, which is what holds it.
+ * The words are read literally, as `admitLine` reads them. The prepass asks
+ * the profile's rules alone. Both explanation modes ask every policy.
  */
 export async function explainLine(
   root: TSNodeLike,
@@ -1646,8 +1783,7 @@ export async function explainLine(
   registry: MountRegistry,
   namespace: Namespace | null,
   reparse: (line: string) => TSNodeLike,
-  wholeLine = false,
-  every = true,
+  mode: JudgmentMode = JudgmentMode.EXPLAIN,
 ): Promise<Judged[]> {
   const judged: Judged[] = []
   for await (const one of judgeLine(
@@ -1657,11 +1793,7 @@ export async function explainLine(
     namespace,
     reparse,
     rootFrame(root, null),
-    true,
-    wholeLine,
-    false,
-    every,
-    !every,
+    mode,
   )) {
     judged.push(one)
   }
@@ -1701,9 +1833,9 @@ export function explainedLine(
   verdicts: readonly Judged[],
   placedOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
-  wholeLine = false,
-  opened: readonly Opened[] = [],
-  pipefail = false,
+  wholeLine: boolean,
+  opened: readonly Opened[],
+  session: SessionState,
 ): ShellExplanation {
   const scopes: Scope[] = []
   for (const one of judged) {
@@ -1782,7 +1914,7 @@ export function explainedLine(
     list.push(open.judgment)
     redirects.set(span, list)
   }
-  const traced = lineStatus(tree, commands, redirects, pipefail)
+  const traced = lineStatus(tree, commands, redirects, session)
   const parts = inLineOrder(
     judged.filter((one, i) => !callsFunction(one, keys[i] ?? null, traced)),
     opened,
@@ -1915,8 +2047,9 @@ function lineStatus(
   tree: TSNodeLike,
   commands: ReadonlyMap<string, readonly Judgment[]>,
   redirects: ReadonlyMap<string, readonly Judgment[]>,
-  pipefail: boolean,
+  session: SessionState,
 ): Traced {
+  const homes = tildeHomes(session)
   const ran: Judgment[] = []
   const calls = new Set<string>()
   const reached = new Set<string>()
@@ -1932,23 +2065,27 @@ function lineStatus(
     ran.push(first)
     return first.exitCode
   }
-  const forked = (nodes: readonly TSNodeLike[], runs: boolean): number => {
+  const forked = (run: () => number): number => {
     const kept = new Set(defined)
-    const code = statements(nodes, runs)
+    const code = run()
     defined.clear()
     for (const name of kept) defined.add(name)
     return code
   }
-  const statements = (nodes: readonly TSNodeLike[], runs: boolean): number => {
+  const statements = (
+    nodes: readonly TSNodeLike[],
+    runs: boolean,
+    pipeline: PipelineWalk,
+  ): number => {
     let code = 0
-    for (const [i, node] of nodes.entries()) {
+    for (const node of nodes) {
       if (node.isNamed !== true || INERT.has(node.type)) continue
-      if (nodes[i + 1]?.type === NodeType.BACKGROUND) {
-        // A job: the shell does not wait on it, and it forks.
-        forked([node], false)
+      if (isBackgrounded(node)) {
+        // The owning statement has consumed the `&`; walk the job body once.
+        forked(() => status(node, false, { ...pipeline, background: backgroundPipeline(node) }))
         code = 0
       } else {
-        code = status(node, runs)
+        code = status(node, runs, pipeline)
       }
     }
     return code
@@ -1973,34 +2110,54 @@ function lineStatus(
     }
     return refused(kept, runs)
   }
-  const status = (node: TSNodeLike, runs: boolean): number => {
-    const kind = node.type
+  const status = (node: TSNodeLike, runs: boolean, pipeline: PipelineWalk): number => {
+    const kind = nodeKind(node)
+    const scope = scopeKind(node, kind)
     const span = spanOf(node)
     const start = node.startIndex ?? 0
     if (!at.has(start)) at.set(start, new Set(defined))
     const code = refused(redirects.get(span) ?? [], runs)
     if (code !== 0) return code
-    if (kind === NodeType.COMMAND || kind === NodeType.TEST_COMMAND) {
-      for (const sub of substitutions(node.children)) status(sub, runs)
-      return command(span, runs)
+    if (kind === NodeKind.COMMAND || kind === NodeKind.TEST) {
+      for (const sub of substitutions(node.children)) status(sub, runs, pipeline)
+      const code = command(span, runs)
+      if (kind === NodeKind.COMMAND && !pipeline.optionsMayChange) {
+        const head = node.namedChildren.find((child) => child.type === NodeType.COMMAND_NAME)
+        const name = head === undefined ? null : literalWord(head)
+        if (
+          name === 'shopt' ||
+          name === 'set' ||
+          name === 'command' ||
+          name === 'builtin' ||
+          (name !== null &&
+            (pipeline.functions.has(name) || Object.hasOwn(session.functions, name)))
+        ) {
+          pipeline.optionsMayChange = changesPipelineOptions(
+            wordsOf(node, homes),
+            session,
+            pipeline,
+          )
+        }
+      }
+      return code
     }
-    if (kind === NodeType.REDIRECTED_STATEMENT) {
-      for (const sub of substitutions(node.namedChildren.slice(1))) status(sub, runs)
+    if (kind === NodeKind.REDIRECT) {
+      for (const sub of substitutions(node.namedChildren.slice(1))) status(sub, runs, pipeline)
       const body = node.namedChildren[0]
       if (body === undefined || REDIRECT_TYPES.has(body.type)) return 0
-      return status(body, runs)
+      return status(body, runs, pipeline)
     }
-    if (kind === NodeType.LIST) {
+    if (kind === NodeKind.LIST) {
       const left = node.children[0]
       const op = node.children[1]
       const right = node.children[node.children.length - 1]
       if (left === undefined || op === undefined || right === undefined) return 0
-      const code = status(left, runs)
-      const goes = (op.type === NodeType.AND) === (code === 0)
-      const later = status(right, runs && goes)
+      const code = status(left, runs, pipeline)
+      const goes = connectionRunsRight(op.type, code)
+      const later = status(right, runs && goes, pipeline)
       return goes ? later : code
     }
-    if (kind === NodeType.PIPELINE) {
+    if (scope === ScopeKind.PIPELINE) {
       const stages = [...node.namedChildren]
       const first = stages[0]
       const negated = first?.type === NodeType.NEGATED_COMMAND
@@ -2008,73 +2165,77 @@ function lineStatus(
         const inner = first.namedChildren[first.namedChildren.length - 1]
         if (inner !== undefined) stages[0] = inner
       }
-      const codes = stages.map((stage) => forked([stage], runs))
-      const last = pipefail
-        ? ([...codes].reverse().find((c) => c !== 0) ?? 0)
-        : (codes[codes.length - 1] ?? 0)
+      const codes = stages.map((stage, index) =>
+        !stageForks(index === stages.length - 1, session, pipeline)
+          ? status(stage, runs, pipeline)
+          : forked(() => status(stage, runs, { ...pipeline, background: false })),
+      )
+      const last =
+        session.shellOptions.pipefail === true
+          ? ([...codes].reverse().find((c) => c !== 0) ?? 0)
+          : (codes[codes.length - 1] ?? 0)
       return negated ? (last !== 0 ? 0 : 1) : last
     }
-    if (kind === NodeType.NEGATED_COMMAND) return statements(node.children, runs) !== 0 ? 0 : 1
-    if (FORK_SCOPES.has(kind)) return forked(node.children, runs)
-    if (kind === NodeType.IF_STATEMENT) {
-      const branches = [
-        clause(node),
-        ...node.namedChildren.filter((c) => c.type === NodeType.ELIF_CLAUSE).map(clause),
-      ]
+    if (kind === NodeKind.NEGATED) return statements(node.children, runs, pipeline) !== 0 ? 0 : 1
+    if (scope === ScopeKind.FORK || scope === ScopeKind.SUBSTITUTION)
+      return forked(() => statements(node.children, runs, { ...pipeline, background: false }))
+    if (kind === NodeKind.IF) {
+      const [branches, elseBody] = getIfBranches(node)
       let code = 0
       let taken = false
       for (const [head, body] of branches) {
         const live = runs && !taken
-        const hit = statements(head, live) === 0 && live
-        const result = statements(body, hit)
+        const hit = statements(head, live, pipeline) === 0 && live
+        const result = statements(body, hit, pipeline)
         if (hit) {
           code = result
           taken = true
         }
       }
-      for (const child of node.namedChildren) {
-        if (child.type !== NodeType.ELSE_CLAUSE) continue
+      if (elseBody !== null) {
         const live = runs && !taken
-        const result = statements(child.children, live)
+        const result = statements(elseBody, live, pipeline)
         if (live) code = result
       }
       return code
     }
-    if (kind === NodeType.WHILE_STATEMENT) {
+    if (scope === ScopeKind.REPEATED && (kind === NodeKind.WHILE || kind === NodeKind.UNTIL)) {
       const loop = node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP)
       const head = node.children.filter((c) => c.type !== NodeType.DO_GROUP)
-      const until = node.children[0]?.type === NodeType.UNTIL
-      const entered = runs && (statements(head, runs) === 0) !== until
-      const code = statements(loop, entered)
+      const until = kind === NodeKind.UNTIL
+      const entered = runs && (statements(head, runs, pipeline) === 0) !== until
+      const code = statements(loop, entered, pipeline)
       return entered ? code : 0
     }
-    if (kind === NodeType.FUNCTION_DEFINITION) {
-      const name = node.namedChildren.find((c) => c.type === NodeType.WORD)
-      if (runs && name !== undefined) {
-        defined.add(getText(name))
-        starts.set(getText(name), [...(starts.get(getText(name)) ?? []), node.startIndex ?? 0])
+    if (scope === ScopeKind.DEFERRED) {
+      const name = getFunctionName(node)
+      pipeline.functions = new Set([...pipeline.functions, name])
+      if (runs) {
+        defined.add(name)
+        starts.set(name, [...(starts.get(name) ?? []), node.startIndex ?? 0])
       }
       return 0
     }
-    if (kind === NodeType.CASE_STATEMENT) {
+    if (kind === NodeKind.CASE) {
       const arm = caseArm(node)
       let code = 0
       for (const [index, [, body]] of getCaseItems(node).entries()) {
         const hit = runs && index === arm
-        const result = statements(body, hit)
+        const result = statements(body, hit, pipeline)
         if (hit) code = result
       }
       return code
     }
-    if (kind === NodeType.FOR_STATEMENT || kind === NodeType.C_STYLE_FOR_STATEMENT) {
+    if (scope === ScopeKind.REPEATED) {
       return statements(
         node.namedChildren.filter((c) => c.type === NodeType.DO_GROUP),
         runs,
+        pipeline,
       )
     }
-    return statements(node.children, runs)
+    return statements(node.children, runs, pipeline)
   }
-  const exitCode = status(tree, true)
+  const exitCode = status(tree, true, pipelineWalk())
   const bodies = new Map<number, ReadonlySet<string>>()
   for (const [name, places] of starts) {
     for (const start of places) bodies.set(start, seen.get(name) ?? new Set<string>())
@@ -2090,34 +2251,13 @@ function lineStatus(
 function substitutions(nodes: readonly TSNodeLike[]): TSNodeLike[] {
   const found: TSNodeLike[] = []
   for (const node of nodes) {
-    if (
-      node.type === NodeType.COMMAND_SUBSTITUTION ||
-      node.type === NodeType.PROCESS_SUBSTITUTION
-    ) {
+    if (scopeKind(node) === ScopeKind.SUBSTITUTION) {
       found.push(node)
     } else {
       found.push(...substitutions(node.children))
     }
   }
   return found
-}
-
-/**
- * An `if` or `elif`'s condition and the body it guards, as two lists of
- * parsed children; the branches after it are left out. Mirrors the Python
- * `_clause`.
- */
-function clause(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
-  const head: TSNodeLike[] = []
-  const body: TSNodeLike[] = []
-  let into = head
-  for (const child of node.children) {
-    if (child.type === 'then') into = body
-    else if (child.type !== NodeType.ELIF_CLAUSE && child.type !== NodeType.ELSE_CLAUSE) {
-      into.push(child)
-    }
-  }
-  return [head, body]
 }
 
 /**
@@ -2300,7 +2440,7 @@ function scopeNode(
       if (ones.length === 0) return [{ type: 'command', text: getText(node), children: kids }]
       return ones.map((one, i) => commandOf(one, getText(node), i === 0 ? kids : [], placedOf))
     }
-    if (SUBSTITUTIONS.has(node.type)) return take(start, end)
+    if (scopeKind(node) === ScopeKind.SUBSTITUTION) return take(start, end)
     const inner = node.namedChildren.flatMap(convert)
     const shape = SHAPES.get(node.type)
     return shape === undefined ? inner : [{ type: shape, text: getText(node), children: inner }]
@@ -2345,15 +2485,8 @@ function commandOf(
 /**
  * Every command of a line judged, in the order the gate reads them, each
  * with its place on the line, one at a time as `judgeWords` yields them.
- * `frame` is the scope the line is read in; `stated` is whether the line's
- * text reaches here as the gate will read it, and `wholeLine` whether a
- * runtime takes it whole, as `judgeWords` takes them; `lost` is whether the
- * line begins with its cwd lost, as a line a command runs after such a `cd`
- * does; `every` asks every policy past a Deny, for `explain`, and
- * `rulesOnly` the profile's rules alone; `open` says the runtime appends
- * operands the gate cannot read to the line (`mapfile -C`'s callback, which
- * runs with the index and the record after it), as `judgeWords` takes it
- * for each of its commands.
+ * Nested lines can start with an unknown cwd, or with words or operands
+ * the runtime will complete where they run.
  */
 async function* judgeLine(
   root: TSNodeLike,
@@ -2362,34 +2495,30 @@ async function* judgeLine(
   namespace: Namespace | null,
   reparse: (line: string) => TSNodeLike,
   frame: Frame,
-  stated = true,
-  wholeLine = false,
-  lost = false,
-  every = false,
-  rulesOnly = true,
-  open = false,
+  mode: JudgmentMode,
+  {
+    stated = true,
+    lost = false,
+    open = false,
+    pipeline = pipelineWalk(takesWholeLine(mode)),
+  }: {
+    stated?: boolean
+    lost?: boolean
+    open?: boolean
+    pipeline?: PipelineWalk | undefined
+  } = {},
 ): AsyncGenerator<Judged> {
   const judged = (item: Walked, place: SessionState): AsyncGenerator<Judged> =>
     judgeWords(
-      item.words,
-      item.occurrence,
-      place,
+      { ...item, session: place, stated: stated && item.stated !== false, open },
+      mode,
       registry,
       namespace,
       reparse,
-      item.redirects,
-      stated && (item.stated ?? true),
-      item.intrinsic,
-      wholeLine,
-      item.lost,
-      every,
-      item.stdin,
-      rulesOnly,
-      open,
     )
-  for (const item of walkedLine(root, session, reparse, frame, lost)) {
+  for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline)) {
     const elsewhere = item.elsewhere ?? []
-    if (!wholeLine || elsewhere.length === 0) {
+    if (!takesWholeLine(mode) || elsewhere.length === 0) {
       yield* judged(item, item.session)
       continue
     }
