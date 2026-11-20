@@ -117,13 +117,25 @@ jobs:
           cache-suffix: install-${{ steps.week.outputs.week }}
           cargo-profile: release
 
+      # One wheel for every install below. uv builds a project directory
+      # afresh on each `uv pip install .`, so each extra was a maturin build
+      # of its own, and a fat-LTO link whenever cargo found anything stale:
+      # twenty of those outran the job's timeout.
+      - name: Build the wheel
+        working-directory: python
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+          wheels=("$RUNNER_TEMP"/wheel/mirage_ai-*.whl)
+          test -f "${wheels[0]}"
+          echo "MIRAGE_WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+
       - name: Base install (no extras)
         working-directory: python
         run: |
           for ver in 3.12; do
             rm -rf .venv-min
             uv venv --python "$ver" .venv-min
-            uv pip install --python .venv-min/bin/python .
+            uv pip install --python .venv-min/bin/python "$MIRAGE_WHEEL"
             .venv-min/bin/python - <<'PY'
           import importlib.util
           banned = ["numpy", "pypdfium2", "PIL", "mfusepy", "opendal", "aioboto3",
@@ -194,7 +206,7 @@ jobs:
             echo "::group::${extra} (${pyver})"
             rm -rf .venv-x
             if uv venv --python "$pyver" .venv-x \
-                && uv pip install --python .venv-x/bin/python ".[${extra}]" \
+                && uv pip install --python .venv-x/bin/python "mirage-ai[${extra}] @ file://${MIRAGE_WHEEL}" \
                 && .venv-x/bin/python -c "import importlib; importlib.import_module('${module}'); print('OK: ${module}')"; then
               :
             else
