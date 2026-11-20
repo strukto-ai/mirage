@@ -19,7 +19,7 @@
     <a href="https://docs.mirage.strukto.ai" alt="Documentation">
         <img src="https://img.shields.io/badge/mirage-docs-0C0C0C?labelColor=F0ECE2" /></a>
     <a href="https://github.com/strukto-ai/mirage/releases" alt="Status">
-        <img src="https://img.shields.io/badge/status-preview-0C0C0C?labelColor=F0ECE2" alt="Status: preview" /></a>
+        <img src="https://img.shields.io/badge/status-experimental-0C0C0C?labelColor=F0ECE2" alt="Status: experimental" /></a>
     <a href="https://www.strukto.ai" alt="Website">
         <img src="https://img.shields.io/badge/made by-strukto.ai-0C0C0C?labelColor=F0ECE2" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="License">
