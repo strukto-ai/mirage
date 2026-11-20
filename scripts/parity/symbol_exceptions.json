@@ -1,5 +1,5 @@
 {
- "baseline": 711,
+ "baseline": 707,
  "modules": {
   "commands/cli/builtin/ast_grep/engine": {
    "typescript_only": {
