@@ -352,6 +352,20 @@ interface Served {
  * line until the machine holds every prefix, so one it mounts late is
  * guarded too.
  */
+/**
+ * Whether `source`, mounted at `prefix`, has the shape every workspace gives
+ * the mounts it serves, `<name>-<instance>-<n>:<prefix>`, so a Mac's macFUSE
+ * mount, whose type names no program, can be told for one of Mirage's.
+ * Mirrors Python's `mirage_source`.
+ *
+ * @param source a mount's source.
+ * @param prefix its mountpoint.
+ */
+export function mirageSource(source: string, prefix: string): boolean {
+  if (!source.endsWith(`:${prefix}`)) return false
+  return /.-[0-9a-f]{8}-[0-9]+$/.test(source.slice(0, source.length - prefix.length - 1))
+}
+
 export class MachineMounts {
   private session: SessionState | null = null
   // Each running line's write admission, and the served requests running on it.
@@ -874,7 +888,11 @@ export class MachineMounts {
     return [...this.owned].sort(compareCodePoints).find((p) => !this.own.has(p)) ?? null
   }
 
-  /** Whether another workspace's sshfs or mirage-fuse still serves `prefix`. */
+  /**
+   * Whether another workspace's sshfs or mirage-fuse still serves `prefix`. A
+   * Mac's macFUSE mount no workspace made is taken as served, as no program
+   * can be told for its server.
+   */
   private async held(
     prefix: string,
     present: ReadonlyMap<string, [string, string]>,
@@ -882,6 +900,7 @@ export class MachineMounts {
   ): Promise<boolean> {
     const [source, kind] = present.get(prefix) ?? ['', '']
     if (!SERVED_KINDS.has(kind) || this.ours(source, prefix)) return false
+    if (kind === MACFUSE_KIND && !mirageSource(source, prefix)) return true
     const found = await this.run(
       this.darwin === true ? darwinRunningLine(source) : runningLine(source),
       signal,
@@ -1078,7 +1097,8 @@ export class MachineMounts {
       if (made.exitCode === DARWIN_ADMIN_STATUS) {
         throw new Error(darwinAdminHint(this.provider, prefix, root))
       }
-      const point = said(made.stdout).split(/\r?\n/).at(-1) ?? ''
+      const out = made.stdout === null ? '' : DECODER.decode(made.stdout).replace(/\n$/, '')
+      const point = out.slice(out.lastIndexOf('\n') + 1)
       if (made.exitCode !== 0 || !point) {
         throw new Error(
           `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,

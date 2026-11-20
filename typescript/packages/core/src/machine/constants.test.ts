@@ -751,12 +751,9 @@ onMac('a Mac', () => {
       expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(0)
       await settled(program)
       expect(sh(stopLine('w1:9', 15, { pid, started })).status).toBe(NOT_RUNNING_STATUS)
-      expect([wrapper.exitCode, wrapper.signalCode, other.exitCode, other.signalCode]).toEqual([
-        null,
-        null,
-        null,
-        null,
-      ])
+      for (const child of [wrapper, other]) {
+        expect(sh(`ps -o state= -p ${String(child.pid ?? 0)}`).stdout.trim()).toMatch(/^[^Z]/)
+      }
     } finally {
       for (const child of [wrapper, other, program]) child.kill('SIGKILL')
       await Promise.all([wrapper, other, program].map((child) => settled(child)))

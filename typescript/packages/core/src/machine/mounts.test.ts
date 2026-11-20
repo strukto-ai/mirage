@@ -54,6 +54,7 @@ import {
 } from './constants.ts'
 import {
   killLine,
+  mirageSource,
   mountTable,
   registerPipeServer,
   runningLine,
@@ -1922,6 +1923,31 @@ describe('MachineMounts on a Mac', () => {
     expect(DEC.decode(result.stderr)).toBe(
       'fake: /data is no longer mounted in the machine (did it restart?); the line did not run\n',
     )
+    await ws.close()
+  })
+
+  it('tells a source a workspace names', () => {
+    expect(mirageSource('w1-box-0a1b2c3d-4:/data', '/data')).toBe(true)
+    expect(mirageSource('w1-box-0a1b2c3d-4:/data', '/other')).toBe(false)
+    expect(mirageSource('cryptomator@vault:/data', '/data')).toBe(false)
+    expect(mirageSource('-0a1b2c3d-4:/data', '/data')).toBe(false)
+  })
+
+  it('leaves a macFUSE mount no workspace made', async () => {
+    const mac = new FakeMac('mirage', ['/data', '/my notes'])
+    mac.table.set('/home/u/.mirage/mnt/data', ['vault', 'macfuse'])
+    const ws = workspace(mac)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      1,
+      'fake: another macFUSE mount serves /data in this machine; ' +
+        'give this workspace a machine of its own\n',
+    ])
+    expect(Object.fromEntries(mac.table)).toEqual({
+      '/home/u/.mirage/mnt/data': ['vault', 'macfuse'],
+    })
+    expect(mac.commands.filter((c) => c.startsWith('umount'))).toEqual([])
     await ws.close()
   })
 

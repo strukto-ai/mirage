@@ -456,8 +456,8 @@ def darwin_mountpoint_line(prefix: str, root: str) -> str:
     read-only, so a prefix whose top folder is missing there (``/data``)
     becomes a link ``/etc/synthetic.conf`` names, to a folder of the same
     name under ``root``; that takes an administrator, so the line makes
-    it with ``sudo -n`` where it may and exits ``DARWIN_ADMIN_STATUS``
-    where it may not.
+    it with ``sudo -n`` where it may, adding the row only once, and exits
+    ``DARWIN_ADMIN_STATUS`` where it may not.
 
     Args:
         prefix (str): the workspace prefix.
@@ -469,8 +469,11 @@ def darwin_mountpoint_line(prefix: str, root: str) -> str:
         'if [ -e "$t" ] || [ -L "$t" ]; then mkdir -p -- "$p"; exit 1; fi; '
         'mkdir -p -- "$r$t" || exit 1; '
         f"sudo -n true 2>/dev/null || exit {DARWIN_ADMIN_STATUS}; "
-        'printf \'%s\\t%s\\n\' "${t#/}" "${r#/}$t" | '
-        f"sudo -n tee -a {SYNTHETIC_CONF} >/dev/null || exit {DARWIN_ADMIN_STATUS}; "
+        'e=$(printf \'%s\\t%s\' "${t#/}" "${r#/}$t"); '
+        f'grep -qxF -- "$e" {SYNTHETIC_CONF} 2>/dev/null || '
+        "{ printf '%s\\n' \"$e\" | "
+        f"sudo -n tee -a {SYNTHETIC_CONF} >/dev/null; }} "
+        f"|| exit {DARWIN_ADMIN_STATUS}; "
         f"sudo -n {APFS_UTIL} -t >/dev/null 2>&1; "
         f'[ -L "$t" ] || exit {DARWIN_ADMIN_STATUS}; '
         'mkdir -p -- "$p" || exit 1; fi; cd -- "$p" && pwd -P'
@@ -783,7 +786,8 @@ def stop_line(
     environments, so there it is the run's program, ``root``, and what
     runs under it (``darwin_runs``), and each process found first stays
     in the run, while it is the one that started then, once its parent
-    exits. The tag is matched as
+    exits, and while ``ps`` fails; one that fails before it found any
+    exits 1. The tag is matched as
     a whole entry, so ``w1:9`` never stops the run of ``w1:90``. The line
     exits 0 once it stopped them and ``NOT_RUNNING_STATUS`` when there were
     none. It looks tr and grep up on its own PATH (``TOOLS_PATH``) and
@@ -808,8 +812,9 @@ def stop_line(
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
         '&& l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
-        f"else PATH={DARWIN_PATH}; k=; {darwin_roots(mine)}"
-        f'left() {{ k=$({DARWIN_PS} | M="$m" R="$r" K="$k" awk '
+        f"else PATH={DARWIN_PATH}; k=; l=; {darwin_roots(mine)}"
+        f'left() {{ o=$({DARWIN_PS}) || {{ [ -n "$l" ] || exit 1; return 0; }}; '
+        'k=$(printf \'%s\\n\' "$o" | M="$m" R="$r" K="$k" awk '
         f"'{darwin_runs(True, 'ids')}'); r=; l=; "
         'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; '
         f"left || exit {NOT_RUNNING_STATUS}; kill -{signum} $l 2>/dev/null; "
