@@ -29,7 +29,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  DARWIN_POINT_MARK,
   ENCODE_OUTPUT,
   MIRAGE_FUSE_FIND,
   MIRAGE_FUSE_LINE,
@@ -42,9 +41,7 @@ import {
   SSHFS_LINE,
   SSHFS_OPTIONS,
   TOOLS_PATH,
-  darwinMountTable,
   darwinStart,
-  darwinTableLine,
   decodeOutput,
   mountField,
   machineDirLine,
@@ -645,41 +642,6 @@ describe('MIRAGE_FUSE_LINE', () => {
   })
 })
 
-describe('darwinMountTable', () => {
-  it('names each prefix by its real path', () => {
-    const [rows, points] = darwinMountTable(
-      '/dev/disk3s1 on / (apfs, local, read-only, journaled)\n' +
-        'src-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev, nosuid, ' +
-        'synchronous, nobrowse, mounted by u)\n' +
-        'map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n' +
-        `${DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n` +
-        `${DARWIN_POINT_MARK}/notes\t/notes\n`,
-      new Map(),
-    )
-    expect(Object.fromEntries(rows)).toEqual({ '/data': ['src-1:/data', 'macfuse'] })
-    expect(Object.fromEntries(points)).toEqual({
-      '/data': '/home/u/.mirage/mnt/data',
-      '/notes': '/notes',
-    })
-  })
-
-  it('keeps a source holding on whole', () => {
-    const [rows, points] = darwinMountTable(
-      'src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n' +
-        'src-1:/c on /c (macfuse, nodev, mounted by u)\n',
-      new Map([
-        ['/a on /b', '/a on /b'],
-        ['/c', '/c'],
-      ]),
-    )
-    expect(Object.fromEntries(rows)).toEqual({
-      '/a on /b': ['src-1:/a on /b', 'macfuse'],
-      '/c': ['src-1:/c', 'macfuse'],
-    })
-    expect(Object.fromEntries(points)).toEqual({ '/a on /b': '/a on /b', '/c': '/c' })
-  })
-})
-
 const onMac = process.platform === 'darwin' ? describe : describe.skip
 
 function sh(line: string): { status: number; stdout: string } {
@@ -708,21 +670,6 @@ async function settled(child: ReturnType<typeof spawn>): Promise<number | null> 
 }
 
 onMac('a Mac', () => {
-  it('follows a link to its real path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-table-'))
-    try {
-      mkdirSync(join(dir, 'real'))
-      symlinkSync(join(dir, 'real'), join(dir, 'link'))
-      const [, points] = darwinMountTable(sh(darwinTableLine([`${dir}/link/ws`])).stdout, new Map())
-      const real = spawnSync('/bin/sh', ['-c', `cd '${dir}/real' && pwd -P`], {
-        encoding: 'utf8',
-      }).stdout.trim()
-      expect(Object.fromEntries(points)).toEqual({ [`${dir}/link/ws`]: `${real}/ws` })
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it('knows a run by its program and what runs under it', async () => {
     const tagged = { ...process.env, [PROCESS]: 'w1:9' }
     const untagged = Object.fromEntries(

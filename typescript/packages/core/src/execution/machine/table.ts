@@ -220,33 +220,23 @@ export class MachineTable {
       if (machine !== undefined && reached(processes, machine).toString() !== host)
         machinesToScan.add(machine.toString())
     }
-    const wanted = [...runs].filter(
-      ([tag, record]) =>
-        record.machinePid !== null && (live.has(tag) || unscanned.has(tag) || foundTags.has(tag)),
-    )
+    const roots = new Map<string, Map<number, readonly [string, number]>>()
+    for (const [tag, record] of runs) {
+      const pid = record.machinePid
+      if (pid === null || !(live.has(tag) || unscanned.has(tag) || foundTags.has(tag))) continue
+      const machine = reached(processes, record.machine).toString()
+      const group = roots.get(machine) ?? new Map<number, readonly [string, number]>()
+      group.set(pid.pid, [tag, pid.started])
+      roots.set(machine, group)
+    }
     const scans: [MachineName, Promise<MachineProcess[]>][] = this.handles()
       .filter((handle) => handle.executing || machinesToScan.has(handle.machine.toString()))
-      .map((handle) => {
-        const roots = new Map<number, readonly [string, number]>()
-        for (const [tag, record] of wanted) {
-          if (
-            record.machinePid !== null &&
-            reached(processes, record.machine).toString() === handle.machine.toString()
-          )
-            roots.set(record.machinePid.pid, [tag, record.machinePid.started])
-        }
-        return [handle.machine, handle.status(workspace, roots)]
-      })
+      .map((handle) => [
+        handle.machine,
+        handle.status(workspace, roots.get(handle.machine.toString())),
+      ])
     if (this.scanHost !== null) {
-      const groups = new Map<number, readonly [string, number]>()
-      for (const [tag, record] of runs) {
-        if (
-          reached(processes, record.machine).toString() === host &&
-          record.machinePid !== null &&
-          (live.has(tag) || unscanned.has(tag) || foundTags.has(tag))
-        )
-          groups.set(record.machinePid.pid, [tag, record.machinePid.started])
-      }
+      const groups = roots.get(host) ?? new Map<number, readonly [string, number]>()
       if (groups.size > 0 || machinesToScan.has(host))
         scans.push([processes.machine, this.scanHost(groups)])
     }

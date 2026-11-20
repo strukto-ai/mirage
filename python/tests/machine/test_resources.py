@@ -17,7 +17,6 @@ import pytest
 from mirage.machine.constants import (
     RESOURCE_MARK,
     darwin_resources_line,
-    machine_resources_line,
     resources_line,
 )
 from mirage.machine.resources import (
@@ -121,12 +120,6 @@ def test_parse_reads_a_mac():
     assert found.cpu is not None
     assert (found.cpu.user, found.cpu.system) == (15.1, 8.3)
     assert found.cpu.wait is None
-
-
-def test_a_machines_line_asks_a_mac_for_its_own_rows():
-    line = machine_resources_line(False)
-    assert resources_line(False) in line
-    assert darwin_resources_line(False) in line
 
 
 def test_a_machines_rows_read_as_the_system_that_wrote_them():

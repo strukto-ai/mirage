@@ -17,7 +17,14 @@ import importlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Iterable, Sequence
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextvars import Context
 from typing import Any, TypeVar
 
@@ -30,8 +37,11 @@ from mirage.context import (
 )
 from mirage.errors.fs import strerror_of
 from mirage.machine.constants import (
+    APFS_UTIL,
     DARWIN_ADMIN_STATUS,
     DARWIN_MOUNT_GUARD,
+    DARWIN_PATH,
+    DARWIN_POINT_MARK,
     MACFUSE_KIND,
     MIRAGE_FUSE_FIND,
     MIRAGE_FUSE_HINT,
@@ -46,14 +56,8 @@ from mirage.machine.constants import (
     SSHFS_LINKS_OPTION,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
+    SYNTHETIC_CONF,
     UNMOUNT_WAIT_SECONDS,
-    darwin_admin_hint,
-    darwin_kill_line,
-    darwin_mount_table,
-    darwin_mountpoint_line,
-    darwin_running_line,
-    darwin_table_line,
-    darwin_unmount_line,
     machine_dir_line,
     mount_field,
 )
@@ -127,6 +131,55 @@ def mount_table(text: str) -> dict[str, tuple[str, str]]:
                 fields[2],
             )
     return table
+
+
+def darwin_table_line(prefixes: Sequence[str]) -> str:
+    """The Mac line that prints ``mount``'s table, then each of
+    ``prefixes`` behind ``DARWIN_POINT_MARK`` with the real path a mount
+    on it shows at, as macOS resolves links (``/tmp`` to ``/private/tmp``).
+    It reads each prefix's link and parent, never the prefix, so a stalled
+    mount cannot hang it.
+
+    Args:
+        prefixes (Sequence[str]): the prefixes to resolve.
+    """
+    words = " ".join(single_quote(prefix) for prefix in prefixes)
+    return (
+        f"PATH={DARWIN_PATH}; mount || exit 1; for p in {words}; do q=$p; "
+        '[ -L "$q" ] && { t=$(readlink -- "$q"); '
+        "case $t in /*) q=$t;; *) q=${q%/*}/$t;; esac; }; "
+        'd=$(cd -- "${q%/*}/" 2>/dev/null && pwd -P) || d=${q%/*}; '
+        'printf \'\\036point %s\\t%s\\n\' "$p" "${d%/}/${q##*/}"; done'
+    )
+
+
+def darwin_mount_table(
+    text: str, known: Mapping[str, str]
+) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
+    """``mount_table`` for what ``darwin_table_line`` printed: each
+    prefix's source and type, by the real path it mounts at, and each
+    prefix's real path, ``known`` among them. A row is matched by that
+    path, as a source can hold `` on /``; the last row at a path wins.
+
+    Args:
+        text (str): the line's output.
+        known (Mapping[str, str]): real paths resolved before, by prefix.
+    """
+    lines = text.split("\n")
+    points = dict(known)
+    for line in lines:
+        if line.startswith(DARWIN_POINT_MARK):
+            prefix, _, point = line[len(DARWIN_POINT_MARK) :].partition("\t")
+            points[prefix] = point
+    rows: dict[str, tuple[str, str]] = {}
+    for prefix, point in points.items():
+        marker = f" on {point} ("
+        for line in lines:
+            at = line.rfind(marker)
+            if at >= 0 and not line.startswith(DARWIN_POINT_MARK):
+                kind = line[at + len(marker) :].split(",")[0].rstrip(")")
+                rows[prefix] = (line[:at], kind)
+    return rows, points
 
 
 def said(data: bytes | None) -> str:
@@ -224,6 +277,45 @@ def unmount_line(prefix: str) -> str:
     return f"fusermount3 -uz {path} || fusermount -uz {path}"
 
 
+def darwin_unmount_line(point: str) -> str:
+    """``unmount_line`` on a Mac: forced, as macOS cannot detach a mount
+    lazily, at the mount's real path.
+
+    Args:
+        point (str): the mount's real path.
+    """
+    path = single_quote(point)
+    return f"umount -f {path} 2>/dev/null || diskutil unmount force {path}"
+
+
+def darwin_mountpoint_line(prefix: str, root: str) -> str:
+    """The Mac line that makes ``prefix`` a folder to mount on and prints
+    its real path. A prefix whose top folder is missing from macOS's
+    read-only root (``/data``) becomes a ``/etc/synthetic.conf`` link to
+    the same name under ``root``, made with ``sudo -n``; without it the
+    line exits ``DARWIN_ADMIN_STATUS``.
+
+    Args:
+        prefix (str): the workspace prefix.
+        root (str): the folder the links lead into.
+    """
+    return (
+        f"PATH={DARWIN_PATH}; p={single_quote(prefix)}; r={single_quote(root)}; "
+        'if ! mkdir -p -- "$p" 2>/dev/null; then t=${p#/}; t=/${t%%/*}; '
+        'if [ -e "$t" ] || [ -L "$t" ]; then mkdir -p -- "$p"; exit 1; fi; '
+        'mkdir -p -- "$r$t" || exit 1; '
+        f"sudo -n true 2>/dev/null || exit {DARWIN_ADMIN_STATUS}; "
+        'e=$(printf \'%s\\t%s\' "${t#/}" "${r#/}$t"); '
+        f'grep -qxF -- "$e" {SYNTHETIC_CONF} 2>/dev/null || '
+        "{ printf '%s\\n' \"$e\" | "
+        f"sudo -n tee -a {SYNTHETIC_CONF} >/dev/null; }} "
+        f"|| exit {DARWIN_ADMIN_STATUS}; "
+        f"sudo -n {APFS_UTIL} -t >/dev/null 2>&1; "
+        f'[ -L "$t" ] || exit {DARWIN_ADMIN_STATUS}; '
+        'mkdir -p -- "$p" || exit 1; fi; cd -- "$p" && pwd -P'
+    )
+
+
 def mirage_fuse_line(source: str, prefix: str, log: str) -> str:
     """The pipe command that mounts ``source`` at ``prefix`` with
     mirage-fuse, found in Mirage's folder on the machine or on its PATH
@@ -291,6 +383,25 @@ def unconfirmed(provider: str, prefix: str) -> str:
     )
 
 
+def darwin_admin_hint(provider: str, prefix: str, root: str) -> str:
+    """Why a Mac cannot have ``prefix`` yet, with the commands an
+    administrator runs there once (``darwin_mountpoint_line``).
+
+    Args:
+        provider (str): the machine's provider, for the message.
+        prefix (str): the workspace prefix.
+        root (str): the folder the link leads into.
+    """
+    top = "/" + prefix.strip("/").split("/")[0]
+    return (
+        f"{provider}: {prefix} needs a folder {top}, and macOS keeps its root "
+        "folder read-only; make it once as an administrator on the Mac, "
+        "then run the line again: printf '%s\\t%s\\n' "
+        f"{single_quote(top[1:])} {single_quote(root[1:] + top)} "
+        f"| sudo tee -a {SYNTHETIC_CONF} && sudo {APFS_UTIL} -t"
+    )
+
+
 def running_line(source: str) -> str:
     """The machine command that exits 0 while a program runs with
     ``source`` as one of its arguments, as an sshfs serving it does, 1
@@ -312,6 +423,21 @@ def running_line(source: str) -> str:
     )
 
 
+def darwin_running_line(source: str) -> str:
+    """``running_line`` on a Mac, which has no ``/proc``: it reads ``ps``
+    and finds ``source`` as one of a program's space-separated words.
+
+    Args:
+        source (str): the mount's source.
+    """
+    return (
+        "ps -axww -o pid=,command= 2>/dev/null | "
+        f"S={single_quote(source)} awk "
+        '\'BEGIN { s = " " ENVIRON["S"] " " } { n++ } '
+        'index(" " $0 " ", s) { f = 1 } END { exit f ? 0 : n ? 1 : 2 }\''
+    )
+
+
 def kill_line(source: str) -> str:
     """The machine command that kills every program with ``source`` as
     one of its arguments, as an sshfs serving it has, reading ``/proc`` as
@@ -328,6 +454,22 @@ def kill_line(source: str) -> str:
         f"S={single_quote(source.replace(chr(10), chr(1)))} awk "
         "'BEGIN { s = ENVIRON[\"S\"] } $0 == s { f = 1 } END { exit !f }' "
         '&& kill -KILL "${p#/proc/}" 2>/dev/null; done; :'
+    )
+
+
+def darwin_kill_line(source: str) -> str:
+    """``kill_line`` on a Mac, finding programs as
+    ``darwin_running_line`` does.
+
+    Args:
+        source (str): the mount's source.
+    """
+    return (
+        "for p in $(ps -axww -o pid=,command= 2>/dev/null | "
+        f"S={single_quote(source)} awk "
+        '\'BEGIN { s = " " ENVIRON["S"] " " } '
+        'index(" " $0 " ", s) { print $1 }\'); '
+        'do kill -KILL "$p" 2>/dev/null; done; :'
     )
 
 
