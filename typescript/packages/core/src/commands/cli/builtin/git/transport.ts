@@ -37,6 +37,7 @@ import {
 } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -159,7 +160,7 @@ export function displayUrl(url: string): string {
       shown =
         scheme[0] + host.slice(host.lastIndexOf('@') + 1) + (slash < 0 ? '' : rest.slice(slash))
   }
-  shown = shown.replace(/\/+$/, '')
+  shown = rstripSlash(shown)
   return shown.endsWith('.git') && shown.length > 4 ? shown.slice(0, -4) : shown
 }
 
@@ -325,7 +326,7 @@ export class HttpTransport implements Transport {
    *   empty for none
    */
   constructor(url: string, headers: Record<string, string>, credentials: Record<string, string>) {
-    this.url = url.replace(/\/+$/, '')
+    this.url = rstripSlash(url)
     this.headers = { 'User-Agent': USER_AGENT, ...headers }
     this.credentials = credentials
     this.configured = 'Authorization' in headers
@@ -500,7 +501,7 @@ export async function openTransport(
   const path = PathSpec.fromStrPath(raw, undefined, start)
   for (const suffix of REPO_SUFFIXES) {
     const candidate = PathSpec.fromStrPath(
-      (path.dotted ?? path.virtual).replace(/\/+$/, '') + suffix,
+      rstripSlash(path.dotted ?? path.virtual) + suffix,
       undefined,
       '/',
     )

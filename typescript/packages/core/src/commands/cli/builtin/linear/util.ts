@@ -24,6 +24,7 @@ import { materialize, type ByteSource } from '../../../../io/types.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { firstText } from '../../operand.ts'
 import { enoent } from '../../../../errors/fs.ts'
+import { rstripNewlines } from '../../../../utils/text.ts'
 
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
 const DEC = new TextDecoder()
@@ -122,7 +123,7 @@ export async function textOrStdin(
   if (stdin !== null) {
     // Piped text ends with the pipe's newline (echo body | ...); the
     // API body should not.
-    return DEC.decode(await materialize(stdin)).replace(/\n+$/, '')
+    return rstripNewlines(DEC.decode(await materialize(stdin)))
   }
   throw new Error(errorMessage)
 }

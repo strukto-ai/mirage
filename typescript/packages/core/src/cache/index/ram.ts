@@ -26,6 +26,7 @@ import {
   type LookupResult,
 } from './config.ts'
 import { IndexCacheStore } from './store.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * A folder's tombstones map each child its last full knowledge named to
@@ -331,7 +332,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   private rememberDirectory(vfsPath: string): void {
-    vfsPath = vfsPath.replace(/\/+$/, '')
+    vfsPath = rstripSlash(vfsPath)
     if (vfsPath === '') return
     const parent = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     const flags = this.folderFlags.get(parent)

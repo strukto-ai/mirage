@@ -48,6 +48,7 @@ import { lsModeString, styledTime } from '../utils/formatting.ts'
 import { sortByVersion } from './ls.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, posixMode } from '../../../utils/stat_view.ts'
+import { rstripChars } from '../../../utils/text.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 const RECURSIVE_MARK = '  [recursive, not followed]'
@@ -296,7 +297,7 @@ function gitignoreLines(text: string, base: string): Ignore[] {
     if (negated) line = line.slice(1)
     if (line.startsWith('\\')) line = line.slice(1)
     const directory = line.endsWith('/')
-    line = line.replace(/\/+$/, '')
+    line = rstripSlash(line)
     if (line === '') continue
     const anchored = line.includes('/')
     rules.push({ pattern: line.replace(/^\/+/, ''), base, negated, directory, anchored })
@@ -460,7 +461,7 @@ function letsFilesThrough(flags: TreeFlags, root: string, directory: string): bo
   const parts = text.split('/')
   return typed
     .split('|')
-    .some((part) => part === '' || segmentsMatch(parts, part.replace(/\/+$/, '').split('/'), fits))
+    .some((part) => part === '' || segmentsMatch(parts, rstripSlash(part).split('/'), fits))
 }
 
 function nameMatcher(rules: readonly Ignore[]): AnyTailMatcher | null {
@@ -879,7 +880,7 @@ function siText(bytes: number): string {
   // rounds a tie up.
   const [whole = '0', fraction = ''] = value.toFixed(60).split('.')
   const kept = fraction.slice(0, digits)
-  const rest = fraction.slice(digits).replace(/0+$/, '')
+  const rest = rstripChars(fraction.slice(digits), '0')
   const up = rest > '5' || (rest === '5' && Number((whole + kept).slice(-1)) % 2 === 1)
   const rounded = (BigInt(whole + kept) + (up ? 1n : 0n)).toString().padStart(digits + 1, '0')
   const text = digits === 0 ? rounded : `${rounded.slice(0, -1)}.${rounded.slice(-1)}`

@@ -41,7 +41,7 @@ export function linkLocation(links: LinkView, virtual: string): string {
   const name = virtual.slice(cut + 1)
   if (name === '') return links.resolve(virtual)
   const head = virtual.slice(0, cut)
-  return `${links.resolve(head === '' ? '/' : head).replace(/\/+$/, '')}/${name}`
+  return `${rstripSlash(links.resolve(head === '' ? '/' : head))}/${name}`
 }
 
 /**
@@ -165,7 +165,7 @@ function orEloop(resolve: (virtual: string) => string, virtual: string): string 
 /** Whether the mount at `prefix` is the one serving `virtual`; every path is
  * where no mount table says otherwise. Mirrors Python's serves. */
 export function serves(mounts: MountView | undefined, prefix: string, virtual: string): boolean {
-  return mounts === undefined || mounts.rootOf(virtual).replace(/\/+$/, '') === prefix
+  return mounts === undefined || rstripSlash(mounts.rootOf(virtual)) === prefix
 }
 
 /**

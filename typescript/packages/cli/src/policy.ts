@@ -26,6 +26,7 @@ import {
   show,
   type Output,
 } from './output.ts'
+import { rstripNewlines } from '@struktoai/mirage-core/utils/text'
 
 interface PolicyBody {
   name: string
@@ -148,7 +149,7 @@ async function listCmd(): Promise<void> {
 
 async function getCmd(name: string, opts: { output?: Output }): Promise<void> {
   const got = (await call('GET', ref(name))) as PolicyBody
-  await show(got, opts.output, () => got.source.replace(/\n+$/, ''))
+  await show(got, opts.output, () => rstripNewlines(got.source))
 }
 
 async function updateCmd(name: string, opts: { source: string }): Promise<void> {

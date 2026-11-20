@@ -18,6 +18,7 @@ import { materialize } from '../../../../io/types.ts'
 import { parseAddresses } from '../../../../core/email/mime.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 import { SYSTEM_IDS, type IdSource } from '../../../../utils/ids.ts'
+import { rstripNewlines } from '../../../../utils/text.ts'
 
 type SourceMode = 'reply' | 'forward'
 export type PostingStyle = 'top' | 'bottom' | 'none'
@@ -108,11 +109,11 @@ export function composeBody(
   signature: string,
   style: PostingStyle,
 ): string {
-  const written = userBody.replace(/\n+$/, '')
+  const written = rstripNewlines(userBody)
   const trimmed = sourceText.trim()
   const quoteLines: string[] = []
   if (trimmed !== '') {
-    if (headline !== '') quoteLines.push(headline.replace(/\n+$/, ''))
+    if (headline !== '') quoteLines.push(rstripNewlines(headline))
     for (const line of trimmed.split(/\r?\n/)) {
       quoteLines.push(line.startsWith('>') ? `>${line}` : `> ${line}`)
     }
@@ -124,7 +125,7 @@ export function composeBody(
   else if (style === 'bottom') body = `${quote}\n\n${written}`
   else body = `${written}\n\n${quote}`
   if (signature.trim() !== '') {
-    body += `\n\n${SIGNATURE_DELIM}${signature.replace(/\n+$/, '')}`
+    body += `\n\n${SIGNATURE_DELIM}${rstripNewlines(signature)}`
   }
   return body
 }

@@ -36,6 +36,7 @@ import { Files } from '../workspace/files.ts'
 import type { RecentChanges } from '../mount/changes.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 /** Local workspace entry points captured for one execution, never guest
  * globals. They run as `caller`, the caller the execution was captured
@@ -180,7 +181,7 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
       .map((e) => e.path),
   )
   for (const [prefix, mode] of session.mountModes ?? []) if (mode !== 'exec') entries.push(prefix)
-  const mounts = new Map(prefixes.map((p) => [p.replace(/\/+$/, '') || '/', p]))
+  const mounts = new Map(prefixes.map((p) => [rstripSlash(p) || '/', p]))
   if (!mounts.has('/')) mounts.set('/', '/')
   const restricted = new Set<string>()
   for (const entry of entries) {

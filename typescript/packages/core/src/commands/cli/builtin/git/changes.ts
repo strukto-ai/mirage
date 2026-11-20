@@ -32,6 +32,7 @@ import type { ConflictedEntry, IndexEntry, IndexState, StatusEntry, WorkTree } f
 import type { Files } from '../../../../workspace/files.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 const UNCHANGED = ' '
 export const MODIFIED = 'M'
@@ -568,7 +569,7 @@ export async function collect(
   ])
   const found = await scan(vfs, repo.location, tracked, mode, showIgnored, roots)
   const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
-  const at = (name: string): PathSpec => repo.location.worktree.join(name.replace(/\/+$/, ''))
+  const at = (name: string): PathSpec => repo.location.worktree.join(rstripSlash(name))
   const row = (
     name: string,
     indexStatus: string,

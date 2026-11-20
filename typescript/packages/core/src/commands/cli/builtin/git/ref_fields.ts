@@ -25,6 +25,7 @@ import {
   type RefItem,
   type RefObject,
 } from './types.ts'
+import { rstripChars } from '../../../../utils/text.ts'
 
 /** The fewest hex digits an abbreviated id keeps, whatever width is asked. */
 export const MINIMUM_ABBREV = 4
@@ -580,7 +581,7 @@ export function sanitizeSubject(subject: string): string {
       gap = true
     }
   }
-  return out.join('').replace(/[.-]+$/, '')
+  return rstripChars(out.join(''), '.-')
 }
 
 /** `contents:lines=<n>`: the first lines from the subject on, each after the first indented four spaces. */

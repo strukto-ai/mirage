@@ -24,7 +24,7 @@ import type {
   StaleWriteError,
   WalkDeclinedError,
 } from './types.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 
 // Accepts a PathSpec (reads .rawPath, the word's spelling, which defaults
 // to .virtual) or a bare virtual-path string. Taking a structural shape
@@ -97,14 +97,14 @@ export function staleWrite(path: string | { virtual: string }, landed = false): 
  */
 export function innerSuffix(operand: { virtual: string }, err: unknown): string {
   const name = (err as { virtualPath?: unknown } | null | undefined)?.virtualPath
-  const base = operand.virtual.replace(/\/+$/, '')
+  const base = rstripSlash(operand.virtual)
   if (typeof name !== 'string' || !name.startsWith(`${base}/`)) return ''
   return name.slice(base.length)
 }
 
 /** An operand as typed, or naming the file inside it that failed. Mirrors Python's `with_inner`. */
 export function withInner(raw: string, inner: string): string {
-  return inner === '' ? raw : raw.replace(/\/+$/, '') + inner
+  return inner === '' ? raw : rstripSlash(raw) + inner
 }
 
 // Python's twin is `except StaleWriteError`.

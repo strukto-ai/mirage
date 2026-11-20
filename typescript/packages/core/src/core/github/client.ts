@@ -29,6 +29,8 @@ import { ApiError } from '../api/errors.ts'
 import { AppTokens, appMinter, type MintedToken } from './app.ts'
 import type { GitHubAppAuth } from './config.ts'
 import { API_BASE, API_VERSION, GRAPHQL_PATH, RAW_MEDIA_TYPE } from './constants.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import { rstripChars } from '../../utils/text.ts'
 
 // A rate limit is a wait, not a failure, but an unbounded wait is a hang;
 // three attempts is what octokit's own docs use for an unattended client.
@@ -118,7 +120,7 @@ function escapeRoute(path: string): string {
  *   string: the URL GraphQL queries are posted to.
  */
 export function graphqlUrl(baseUrl: string): string {
-  const base = baseUrl.replace(/\/+$/, '')
+  const base = rstripSlash(baseUrl)
   return base.endsWith('/api/v3') ? `${base.slice(0, -'/v3'.length)}/graphql` : `${base}/graphql`
 }
 
@@ -366,11 +368,12 @@ function decoded(body: Uint8Array, contentType: string): unknown {
   const [type = '', ...parameters] = contentType.split(';')
   const mime = type.trim().toLowerCase()
   const parameter = parameters.find((part) => part.trim().toLowerCase().startsWith('charset='))
-  const charset = parameter
-    ?.slice(parameter.indexOf('=') + 1)
-    .trim()
-    .replace(/^"+|"+$/g, '')
-    .toLowerCase()
+  const charset =
+    parameter === undefined
+      ? undefined
+      : rstripChars(parameter.slice(parameter.indexOf('=') + 1).trim(), '"')
+          .replace(/^"+/, '')
+          .toLowerCase()
   if (mime === '') return new TextDecoder().decode(body)
   if (mime === 'application/json' || mime === 'application/scim+json') {
     const text = new TextDecoder().decode(body)

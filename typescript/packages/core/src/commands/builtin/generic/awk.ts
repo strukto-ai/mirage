@@ -27,6 +27,7 @@ import { StreamHost } from '../utils/stream_host.ts'
 import { fsStrerror, isEnotdir, isMissingPath } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { mountsOf, mountRoot } from '../utils/links.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -70,7 +71,7 @@ export function servedHere(ctx: Context, path: PathSpec): boolean {
   const mounts = mountsOf(ctx)
   if (mounts === undefined) return true
   const home = mountRoot(ctx)
-  return mounts.rootOf(path.virtual).replace(/\/+$/, '') === home
+  return rstripSlash(mounts.rootOf(path.virtual)) === home
 }
 
 /** Run the program, yielding standard output as it settles. */

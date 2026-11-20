@@ -41,7 +41,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { FOLDER_FREE, KEYWORDS } from './constants.ts'
 import { lookupAll } from './lookup.ts'
@@ -550,7 +550,7 @@ export function binProgram(
   }
   const entry = registry.tryMountFor(target)
   if (entry === null || !(entry.vfs instanceof BinViewVFS)) return null
-  const name = mountKey(target, entry.prefix).replace(/^\/+|\/+$/g, '')
+  const name = stripSlash(mountKey(target, entry.prefix))
   if (name === '' || name.includes('/')) return null
   if (lookupMachine(name, session, registry, routing, true) === null) return null
   return name

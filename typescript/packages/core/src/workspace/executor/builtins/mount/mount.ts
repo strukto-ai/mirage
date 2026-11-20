@@ -23,6 +23,7 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { UNLISTED_MOUNTS } from '../constants.ts'
 import { fail, ok, parseLine } from '../shared.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 // The mount options a mode reads as: the ladder's READ cannot write and only
 // EXEC lets the interpreters run a script, which is what ro, rw and noexec say
@@ -92,12 +93,12 @@ export function handleMount(
     .filter(
       (m) =>
         !UNLISTED_MOUNTS.has(m.prefix) &&
-        pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'),
+        pathVisible(session.visibility, rstripSlash(m.prefix) || '/'),
     )
     .filter((m) => types === undefined || matchType(m.vfs.name, types))
     .map(
       (m) =>
-        `${m.vfs.name} on ${m.prefix.replace(/\/+$/, '') || '/'} type ${m.vfs.name} ` +
+        `${m.vfs.name} on ${rstripSlash(m.prefix) || '/'} type ${m.vfs.name} ` +
         `(${MODE_OPTIONS[m.effectiveMode(session)]})\n`,
     )
   return ok('mount', lines.length > 0 ? encodeText(lines.join('')) : null)

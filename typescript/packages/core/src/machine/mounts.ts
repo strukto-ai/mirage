@@ -19,7 +19,7 @@ import {
   type Caller,
 } from '../context/session_context.ts'
 import { strerrorOf } from '../errors/fs.ts'
-import { rstripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
@@ -61,6 +61,7 @@ import {
   machineDirLine,
   mountField,
 } from './constants.ts'
+import { rstripChars } from '../utils/text.ts'
 
 export const logger: { debug?: (message: string) => void } = {}
 
@@ -172,7 +173,7 @@ export function darwinMountTable(
     for (const line of lines) {
       const at = line.lastIndexOf(marker)
       if (at < 0 || line.startsWith(DARWIN_POINT_MARK)) continue
-      const kind = (line.slice(at + marker.length).split(',')[0] ?? '').replace(/\)+$/, '')
+      const kind = rstripChars(line.slice(at + marker.length).split(',')[0] ?? '', ')')
       rows.set(prefix, [line.slice(0, at), kind])
     }
   }
@@ -332,7 +333,7 @@ function unconfirmed(provider: string, prefix: string): string {
  * @param root the folder the link leads into.
  */
 export function darwinAdminHint(provider: string, prefix: string, root: string): string {
-  const top = '/' + (prefix.replace(/^\/+|\/+$/g, '').split('/')[0] ?? '')
+  const top = '/' + (stripSlash(prefix).split('/')[0] ?? '')
   return (
     `${provider}: ${prefix} needs a folder ${top}, and macOS keeps its root ` +
     'folder read-only; make it once as an administrator on the Mac, ' +

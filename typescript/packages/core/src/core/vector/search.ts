@@ -19,6 +19,7 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { floatOption, intOption, textOption, validateOptions } from '../../vfs/search.ts'
 import type { SearchOps } from '../../vfs/types.ts'
 import type { VectorTree } from './types.ts'
+import { rstripNewlines } from '../../utils/text.ts'
 
 const DEC = new TextDecoder()
 
@@ -56,7 +57,7 @@ export async function searchRowsOutput<A extends Accessor>(
       '/',
     )
     const header = ranked ? `${path}:${Number(rank).toFixed(4)}` : path
-    blocks.push([path, `${header}\n${DEC.decode(body).replace(/\n+$/, '')}`])
+    blocks.push([path, `${header}\n${rstripNewlines(DEC.decode(body))}`])
   }
   return blocks
 }

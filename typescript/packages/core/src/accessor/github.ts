@@ -17,6 +17,7 @@ import type { GhConfig } from '../core/github/config.ts'
 import { API_BASE, RAW_BASE } from '../core/github/constants.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 import { Accessor } from './base.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 /**
  * One GitHub account: credential, API base and the transport its calls ride. A gh
@@ -36,7 +37,7 @@ export class GitHubAccount extends Accessor {
 
   /** The REST base its calls go to: github.com's when none is set. */
   get apiBase(): string {
-    return (this.config.baseUrl ?? API_BASE).replace(/\/+$/, '')
+    return rstripSlash(this.config.baseUrl ?? API_BASE)
   }
 
   /** Whether it holds neither a token nor an App, so its calls carry no Authorization. */

@@ -21,6 +21,7 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView } from '../../../view/types.ts'
 import { UsageError } from '../../errors.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 // The conditions under which a guard's path reaches no directory to walk.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
@@ -86,14 +87,14 @@ export class WalkBudget {
   }
 
   private folderOf(directory: string): string {
-    const top = this.operand.virtual.replace(/\/+$/, '')
-    const root = (this.mounts?.rootOf(directory) ?? '/').replace(/\/+$/, '')
+    const top = rstripSlash(this.operand.virtual)
+    const root = rstripSlash(this.mounts?.rootOf(directory) ?? '/')
     if (root.startsWith(`${top}/`)) return root
     return top === '' ? '/' : top
   }
 
   private stop(folder: string, limit: number): void {
-    const top = this.operand.virtual.replace(/\/+$/, '') || '/'
+    const top = rstripSlash(this.operand.virtual) || '/'
     const at = folder === top ? this.operand : PathSpec.fromStrPath(folder)
     const line = new WalkLimitError(at, limit).message
     if (!this.stopped.includes(line)) this.stopped.push(line)
@@ -274,14 +275,14 @@ export function treeWalk<D, S>(
   const covering = (virtual: string): [string, string] | null => {
     for (const root of roots.keys()) {
       if (virtual === root) return [root, '']
-      const base = root.replace(/\/+$/, '') + '/'
+      const base = rstripSlash(root) + '/'
       if (virtual.startsWith(base)) return [root, virtual.slice(base.length)]
     }
     return null
   }
   const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
     await budget.run()
-    const virtual = path.virtual.replace(/\/+$/, '') || '/'
+    const virtual = rstripSlash(path.virtual) || '/'
     if (subtreeLimit !== undefined) {
       let last = ancestors.at(-1)
       while (
@@ -320,7 +321,7 @@ export function treeWalk<D, S>(
       const [root, rel] = hit
       const listing = roots.get(root)?.[1].get(rel)
       if (listing !== undefined) {
-        const base = root.replace(/\/+$/, '') + '/'
+        const base = rstripSlash(root) + '/'
         return listing.map((name) => base + name) as D
       }
     } else if (answerable(path) && path.pattern === null) {
@@ -329,7 +330,7 @@ export function treeWalk<D, S>(
       }
       const answer = levels.get(virtual)
       if (answer != null) {
-        const base = virtual.replace(/\/+$/, '') + '/'
+        const base = rstripSlash(virtual) + '/'
         return answer[1].map((name) => base + name) as D
       }
     }
@@ -337,7 +338,7 @@ export function treeWalk<D, S>(
   }
   const treeStat: WalkCall<S> = async (path, nofollow) => {
     await budget.run()
-    const virtual = path.virtual.replace(/\/+$/, '') || '/'
+    const virtual = rstripSlash(path.virtual) || '/'
     const hit = answerable(path) ? covering(virtual) : null
     if (hit !== null && hit[1] !== '') {
       const found = roots.get(hit[0])?.[0].get(hit[1])

@@ -58,7 +58,7 @@ export async function* ownedScopes(
     const child = new PathSpec({
       virtual,
       directory: virtual,
-      vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
+      vfsPath: stripSlash(virtual),
       rawPath: respellOne(virtual, path.virtual, path.rawPath),
     })
     yield* ownedScopes(child, dispatch, vfs, admit, true)
@@ -83,7 +83,7 @@ export function mountStarts(path: PathSpec, vfs: Files | undefined): PathSpec[] 
         new PathSpec({
           virtual: root,
           directory: root,
-          vfsPath: root.replace(/^\/+|\/+$/g, ''),
+          vfsPath: stripSlash(root),
           rawPath: respellOne(root, path.virtual, path.rawPath),
         }),
     ),

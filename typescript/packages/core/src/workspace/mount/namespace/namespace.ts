@@ -311,12 +311,12 @@ export class Namespace {
     paths: readonly string[],
     excluded: readonly string[] = [],
   ): Promise<number> {
-    const roots = new Set(paths.map((path) => path.replace(/\/+$/, '') || '/'))
-    const protectedPaths = new Set(excluded.map((path) => path.replace(/\/+$/, '') || '/'))
+    const roots = new Set(paths.map((path) => rstripSlash(path) || '/'))
+    const protectedPaths = new Set(excluded.map((path) => rstripSlash(path) || '/'))
     const doomed: string[] = []
     for (const [key, meta] of this.nodeTable) {
       if (meta.target !== undefined) continue
-      const lineage = ['/', ...ancestors(key), key.replace(/\/+$/, '') || '/']
+      const lineage = ['/', ...ancestors(key), rstripSlash(key) || '/']
       if (
         lineage.some((path) => roots.has(path)) &&
         !lineage.some((path) => protectedPaths.has(path))

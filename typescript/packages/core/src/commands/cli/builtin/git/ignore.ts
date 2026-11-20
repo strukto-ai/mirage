@@ -117,7 +117,9 @@ export function parseRules(text: string): Rule[] {
   for (const [index, raw] of text.split('\n').entries()) {
     // Trailing whitespace is not part of a pattern unless it was escaped, and a
     // blank or commented line is not a pattern at all.
-    let line = raw.replace(/\r$/, '').replace(/(?<!\\)\s+$/, '')
+    let line = raw.replace(/\r$/, '')
+    const kept = line.trimEnd().length
+    line = line.slice(0, line[kept - 1] === '\\' ? kept + 1 : kept)
     if (line === '' || line.startsWith('#')) continue
     const spelled = line
     const negated = line.startsWith('!')

@@ -171,7 +171,7 @@ async function targetMounts(
     .filter(
       (m) =>
         !UNLISTED_MOUNTS.has(m.prefix) &&
-        pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'),
+        pathVisible(session.visibility, rstripSlash(m.prefix) || '/'),
     )
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return [ordered, []]

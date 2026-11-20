@@ -30,6 +30,7 @@ import { respellOne } from '../../../../utils/path.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { mountView } from '../../utils/links.ts'
+import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 
 // The tests whose verdict on one entry decides what the walk reads below it,
 // or that read a listing a mount boundary splits: no mount's own find can
@@ -68,15 +69,11 @@ export function shifted(expr: FindExpr, depth: number, alone = false): FindExpr 
  * through the dispatcher.
  */
 export function joints(path: PathSpec, starts: readonly PathSpec[]): PathSpec[] {
-  const base = path.virtual.replace(/\/+$/, '')
+  const base = rstripSlash(path.virtual)
   const roots = new Set(starts.slice(1).map((s) => s.virtual))
   const between = new Set<string>()
   for (const root of roots) {
-    const parts = root
-      .slice(base.length)
-      .replace(/^\/+|\/+$/g, '')
-      .split('/')
-      .slice(0, -1)
+    const parts = stripSlash(root.slice(base.length)).split('/').slice(0, -1)
     for (let end = 1; end <= parts.length; end++) {
       between.add(`${base}/${parts.slice(0, end).join('/')}`)
     }
@@ -89,7 +86,7 @@ export function joints(path: PathSpec, starts: readonly PathSpec[]): PathSpec[] 
         new PathSpec({
           virtual,
           directory: virtual,
-          vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
+          vfsPath: stripSlash(virtual),
           rawPath: respellOne(virtual, path.virtual, path.rawPath),
         }),
     )
@@ -158,7 +155,7 @@ export async function runFind(
     limited: FindExpr
   }[] = []
   paths.forEach((path, index) => {
-    const base = path.virtual.replace(/\/+$/, '')
+    const base = rstripSlash(path.virtual)
     const starts = mountStarts(path, vfs)
     const steps: [PathSpec, boolean][] = [
       ...starts.map((start): [PathSpec, boolean] => [start, false]),

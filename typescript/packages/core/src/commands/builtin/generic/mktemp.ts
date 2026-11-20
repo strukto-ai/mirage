@@ -24,6 +24,7 @@ import { eexist, fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { type IdSource, SystemIdSource, randomBelow } from '../../../utils/ids.ts'
+import { rstripChars } from '../../../utils/text.ts'
 
 const ENC = new TextEncoder()
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -79,7 +80,7 @@ export function planTemplate(
     )
   }
   const body = template.slice(0, template.length - suffix.length)
-  const xCount = body.length - body.replace(/X+$/, '').length
+  const xCount = body.length - rstripChars(body, 'X').length
   if (xCount < 3) {
     throw new UsageError(`mktemp: too few X's in template '${quoteText(template)}'`, 1)
   }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { rstripNewlines } from './text.ts'
+import { rstripChars, rstripNewlines } from './text.ts'
 
 describe('rstripNewlines', () => {
   const SAMPLES = ['', 'a', 'a\n', 'a\n\n\n', '\n\n', 'a\nb\n', 'line1\nline2', '\n\na\n']
@@ -26,5 +26,15 @@ describe('rstripNewlines', () => {
     expect(rstripNewlines('a\nb\n\n')).toBe('a\nb')
     expect(rstripNewlines('a \n')).toBe('a ')
     expect(rstripNewlines('a\t')).toBe('a\t')
+  })
+})
+
+describe('rstripChars', () => {
+  it('strips any trailing run of the given characters', () => {
+    expect(rstripChars('a\\b//\\', '\\/')).toBe('a\\b')
+    expect(rstripChars('XaXXX', 'X')).toBe('Xa')
+    expect(rstripChars('v1.-.', '.-')).toBe('v1')
+    expect(rstripChars('===', '=')).toBe('')
+    expect(rstripChars('ab', 'c')).toBe('ab')
   })
 })

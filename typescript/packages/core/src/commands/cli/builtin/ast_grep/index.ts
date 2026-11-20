@@ -31,6 +31,7 @@ import { Argument, CommandSpec, UsageStyle } from '../../../spec/types.ts'
 import { CLI, CLIHandler, DefaultCommandRoot } from '../../types.ts'
 import { AstGrepConfig } from './config.ts'
 import { processor } from './engine.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 const LANGUAGES = new Map([
   ['js', 'JavaScript'],
@@ -146,7 +147,7 @@ async function* files(
       const selected: [PathSpec, string][] = []
       for (const child of children as string[]) {
         if (!budget.spend(path.virtual)) break
-        const name = child.replace(/\/+$/, '').split('/').pop() ?? ''
+        const name = rstripSlash(child).split('/').pop() ?? ''
         selected.push([
           PathSpec.fromStrPath(child),
           display ? display.replace(/\/$/, '') + '/' + name : name,
