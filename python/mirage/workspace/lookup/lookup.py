@@ -41,7 +41,13 @@ from mirage.workspace.lookup.constants import (
     SHELL_ONLY_BUILTINS,
     read_wrapper,
 )
-from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.lookup.types import (
+    CliTarget,
+    CommandTarget,
+    Consumer,
+    ExternalTarget,
+    FunctionTarget,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 
@@ -172,6 +178,17 @@ def _is_native(runtime: RuntimeIdentity | None, name: str) -> bool:
     )
 
 
+def target_consumer(target: CommandTarget) -> Consumer:
+    return target if isinstance(target, Consumer) else target.kind
+
+
+def external_target(
+    name: str, bindings: Mapping[str, RuntimeIdentity | None]
+) -> ExternalTarget:
+    """A named binding, including an explicit refusal, precedes the catch-all."""
+    return ExternalTarget(bindings.get(name, bindings.get(EXTERNAL_COMMANDS)))
+
+
 def routed_consumer(
     name: str,
     args: Sequence[str],
@@ -189,6 +206,19 @@ def routed_consumer(
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
     """
+    return target_consumer(
+        resolve_target(name, args, session, registry, routing)
+    ), routing
+
+
+def resolve_target(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
+) -> CommandTarget:
+    """Select the winning registration under the current placement."""
     if (
         name == MACHINE_VIEW
         and routing is not None
@@ -196,8 +226,8 @@ def routed_consumer(
         and runs_programs(routing.bindings)
         and picks_machine(args)
     ):
-        return Consumer.SESSION, routing
-    return lookup(name, session, registry, routing), routing
+        return Consumer.SESSION
+    return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
 
 
 def runs_on_machine(
@@ -325,33 +355,12 @@ def runs_wrapper(
     return name in RUNNERS or read_wrapper(name, args)[0] is not None
 
 
-def _function_first(name: str, session: SessionState) -> bool:
-    """Whether a function of the name runs ahead of every other layer.
-
-    bash finds a function before a builtin or a file on PATH, so one
-    shadows ``timeout``, ``env`` or ``echo`` there. The shell's own words
-    (``SHELL_ONLY_BUILTINS``: cd, export, type) still beat one here,
-    though bash lets a function shadow those too. A program run
-    (``timeout 1 sleep 0``) is not one either: the program is exec'd
-    and never sees a function (``_layers`` puts it last there).
-
-    Args:
-        name (str): expanded command name.
-        session (SessionState): shell session (function table).
-    """
-    return (
-        name in session.functions
-        and name not in SHELL_ONLY_BUILTINS
-        and not is_program_invocation(session)
-    )
-
-
 def _layers(
     name: str,
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None = None,
-) -> Iterator[Consumer]:
+) -> Iterator[CommandTarget]:
     """Yield every layer holding the name, most-preferred first.
 
     The one place precedence is written down: ``lookup`` reads the first
@@ -375,53 +384,48 @@ def _layers(
     bound = bindings.get(name)
     native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
-    first = _function_first(name, session)
-    # A program run execs the program, so a function answers only a
-    # name no other layer holds (``timeout 1 f``).
-    last = (
-        name in session.functions
-        and not first
-        and is_program_invocation(session)
-    )
-    if first:
+    body = session.functions.get(name)
+    # A program invocation considers a function only after all program layers.
+    as_program = body is not None and is_program_invocation(session)
+    if body is not None and not as_program and name not in SHELL_ONLY_BUILTINS:
         found = True
-        yield Consumer.FUNCTION
+        yield FunctionTarget(body)
     if name in SHELL_NAMES and (
         name not in MACHINE_ONLY_BUILTINS or runs_programs(bindings)
     ):
         found = True
         yield (
-            Consumer.EXTERNAL
+            ExternalTarget(bound)
             if (native or refused) and name in CAPTURABLE_BUILTINS
             else Consumer.SESSION
         )
     if name in NAMESPACE_COMMANDS:
         found = True
         yield Consumer.NAMESPACE
-    if name in session.functions and not first and not last:
+    if body is not None and not as_program and name in SHELL_ONLY_BUILTINS:
         found = True
-        yield Consumer.FUNCTION
-    if registry.clis.get(name) is not None:
+        yield FunctionTarget(body)
+    if (install := registry.clis.get(name)) is not None:
         found = True
-        yield Consumer.CLI
+        yield CliTarget(install)
     if (native or refused) and name not in SHELL_NAMES:
         found = True
-        yield Consumer.EXTERNAL
+        yield ExternalTarget(bound)
     if (
         name in ROUTED_COMMANDS
         or registry.mount_for_command(runs_as(name, registry)) is not None
     ):
         found = True
         yield Consumer.MOUNT
-    if last:
+    if body is not None and as_program:
         found = True
-        yield Consumer.FUNCTION
+        yield FunctionTarget(body)
     fallback = bindings.get(EXTERNAL_COMMANDS)
     fallback_native = isinstance(
         fallback, (LineExecutorMixin, ProcessExecutorMixin)
     )
     if not found and name not in bindings and (fallback_native or refused):
-        yield Consumer.EXTERNAL
+        yield ExternalTarget(fallback)
 
 
 def lookup(
@@ -467,7 +471,9 @@ def lookup(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
-    return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
+    return target_consumer(
+        next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
+    )
 
 
 def lookup_all(
@@ -489,7 +495,10 @@ def lookup_all(
         routing (RouteDecision | None): the line's placement; None
             outside a line, where the static bindings answer.
     """
-    return list(_layers(name, session, registry, routing))
+    return [
+        target_consumer(target)
+        for target in _layers(name, session, registry, routing)
+    ]
 
 
 def program(
@@ -521,7 +530,8 @@ def program(
     """
     if "/" in name or name in KEYWORDS:
         return None
-    for consumer in _layers(name, session, registry):
+    for target in _layers(name, session, registry):
+        consumer = target_consumer(target)
         if consumer is Consumer.FUNCTION:
             continue
         if consumer is Consumer.SESSION and name in SHELL_ONLY_BUILTINS:

@@ -55,7 +55,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
-import { routedConsumer, runsOnMachine, runsWrapper } from './lookup.ts'
+import { resolveTarget, routedConsumer, runsOnMachine, runsWrapper } from './lookup.ts'
 import { buildRuntime } from '../../runtime/table.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 
@@ -187,6 +187,8 @@ describe('lookup', () => {
     const { session, ws } = fixture()
     ws.registerCli('prog', cliTree())
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.CLI)
+    const target = resolveTarget('prog', [], session, ws.registry)
+    expect(target.kind === Consumer.CLI && target.install).toBe(ws.registry.clis.get('prog'))
   })
 
   it('function shadows an installed CLI', () => {
@@ -194,6 +196,28 @@ describe('lookup', () => {
     ws.registerCli('prog', cliTree())
     session.functions.prog = 'prog() { :; }'
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
+    expect(resolveTarget('prog', [], session, ws.registry)).toEqual({
+      kind: Consumer.FUNCTION,
+      body: 'prog() { :; }',
+    })
+  })
+
+  it('keeps named, fallback and refused runtime bindings distinct', () => {
+    const named = new Sandbox()
+    const fallback = new Sandbox()
+    const ws = new Workspace({ '/': new RAMVFS() }, { machines: [named] })
+    const session = new SessionState({ sessionId: 't' })
+    const bindings = { gcc: named, [EXTERNAL_COMMANDS]: fallback }
+    const routing = { bindings, fallback: null }
+    const selected = resolveTarget('gcc', [], session, ws.registry, routing)
+    expect(selected.kind === Consumer.EXTERNAL && selected.runtime).toBe(named)
+    const other = resolveTarget('unregistered', [], session, ws.registry, routing)
+    expect(other.kind === Consumer.EXTERNAL && other.runtime).toBe(fallback)
+    const refused = { ...routing, bindings: { ...bindings, gcc: null } }
+    expect(resolveTarget('gcc', [], session, ws.registry, refused)).toEqual({
+      kind: Consumer.EXTERNAL,
+      runtime: null,
+    })
   })
 
   it('an unregistered CLI routes UNKNOWN', async () => {
