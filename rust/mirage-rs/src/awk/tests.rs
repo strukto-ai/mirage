@@ -150,6 +150,10 @@ fn strings_and_regexes() {
         run("{print match($0, /ab|abcd/), RLENGTH}", "xabcd\n"),
         "2 4\n"
     );
+    assert_eq!(
+        run("BEGIN{print \"ab\\\ncd\"} /x\\\n/{print \"hit\"}", "x\n"),
+        "abcd\nhit\n"
+    );
 }
 
 #[test]
@@ -274,6 +278,30 @@ fn exit_and_errors() {
             "line 2: runaway string constant \"abc ...",
         ),
         ("/abc", "line 1: runaway regular expression /abc ..."),
+        ("/ab\\/cd", "line 1: runaway regular expression /ab/cd ..."),
+        (
+            "/a\\/b\\/c\\/d\\/e\\/f",
+            "line 1: runaway regular expression /a/b/c/d/e/ ...",
+        ),
+        ("/ab\\\ncd", "line 1: runaway regular expression /abcd ..."),
+        ("/ab\\\\", "line 1: runaway regular expression /ab\\\\ ..."),
+        ("/ab\\", "line 1: runaway regular expression /ab ..."),
+        (
+            "BEGIN{print \"ab\\\\",
+            "line 1: runaway string constant \"ab\\\\ ...",
+        ),
+        (
+            "BEGIN{print \"ab\\\\\\",
+            "line 1: runaway string constant \"ab\\\\ ...",
+        ),
+        (
+            "BEGIN{print \"ab\\\ncd\nx",
+            "line 1: runaway string constant \"abcd ...",
+        ),
+        (
+            "BEGIN{print \"\\/\\/\\/\\/\\/\\/x",
+            "line 1: runaway string constant \"\\/\\/\\/\\/\\/ ...",
+        ),
     ] {
         let ran = run_with(program, &[], "", &[]);
         assert_eq!(

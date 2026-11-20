@@ -532,42 +532,43 @@ function linkText(walk: Walk, path: PathSpec): string | null {
  * How diff names an entry's type when two differ: an empty regular file is
  * a `regular empty file` (diffutils 3.10). Mirrors Python's `_kind_name`.
  */
-async function kindName(walk: Walk, path: PathSpec, kind: FileType): Promise<string> {
-  const named = TYPE_NAMES.get(kind)
+function kindName(row: FileStat): string {
+  const named = TYPE_NAMES.get(row.type)
   if (named !== undefined) return named
-  return (await walk.stat(path)).size === 0 ? 'regular empty file' : 'regular file'
+  return row.size === 0 ? 'regular empty file' : 'regular file'
 }
 
 /**
- * What diff says of a pair one or both of which is a link it reads as itself:
- * nothing for two holding one path, `Symbolic links ... differ` for two holding
- * different ones, and the two types otherwise. Mirrors Python's `_link_pair`.
+ * What diff says of a pair one or both of which is a link it reads as itself,
+ * and whether the pair differs: two holding one path are equal (named
+ * identical under `-s`), two holding different ones are `Symbolic links ...
+ * differ`, and a link beside anything else names the two types. `rows` holds
+ * the stat of each side that is no link. Mirrors Python's `_link_pair`.
  */
-async function linkPair(
+function linkPair(
   walk: Walk,
   a: PathSpec,
   b: PathSpec,
   texts: readonly [string | null, string | null],
-): Promise<Uint8Array | null> {
+  rows: readonly [FileStat | null, FileStat | null],
+): [Uint8Array | null, boolean] {
   if (texts[0] !== null && texts[1] !== null) {
-    if (texts[0] === texts[1]) return null
-    return ENC.encode(`Symbolic links ${a.rawPath} and ${b.rawPath} differ\n`)
+    if (texts[0] !== texts[1])
+      return [ENC.encode(`Symbolic links ${a.rawPath} and ${b.rawPath} differ\n`), true]
+    if (!walk.flags.identical) return [null, false]
+    const said = `Files ${labelled(walk, a, 0)} and ${labelled(walk, b, 1)} are identical\n`
+    return [ENC.encode(said), false]
   }
-  const names: string[] = []
-  for (const [path, text] of [
-    [a, texts[0]],
-    [b, texts[1]],
-  ] as const) {
-    names.push(
-      text !== null ? 'symbolic link' : await kindName(walk, path, (await walk.stat(path)).type),
-    )
-  }
-  return ENC.encode(
-    `File ${a.rawPath} is a ${names[0] ?? ''} while file ${b.rawPath} is a ${names[1] ?? ''}\n`,
-  )
+  const names = rows.map((row) => (row === null ? 'symbolic link' : kindName(row)))
+  return [
+    ENC.encode(
+      `File ${a.rawPath} is a ${names[0] ?? ''} while file ${b.rawPath} is a ${names[1] ?? ''}\n`,
+    ),
+    true,
+  ]
 }
 
-async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
+async function entryRow(walk: Walk, path: PathSpec): Promise<FileStat | null> {
   let row: FileStat
   try {
     row = await walk.stat(path)
@@ -580,7 +581,7 @@ async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
     walk.trouble.push(ENC.encode(`diff: ${path.rawPath}: ${posixPhrase('ENOENT')}\n`))
     return null
   }
-  return row.type
+  return row
 }
 
 /**
@@ -632,17 +633,28 @@ async function diffDirs(
       inA ? linkText(walk, childA) : null,
       inB ? linkText(walk, childB) : null,
     ] as const
-    if (inA && inB && (texts[0] !== null || texts[1] !== null)) {
-      const said = await linkPair(walk, childA, childB, texts)
-      if (said !== null) {
-        parts.push(said)
-        differ = true
+    if (texts[0] !== null || texts[1] !== null) {
+      // -N reads no link's peer as empty: GNU names the missing one.
+      if (!inA || !inB) {
+        const lost = inA ? childB : childA
+        walk.trouble.push(ENC.encode(`diff: ${lost.rawPath}: ${posixPhrase('ENOENT')}\n`))
+        continue
       }
+      const peers = [
+        texts[0] === null ? await entryRow(walk, childA) : null,
+        texts[1] === null ? await entryRow(walk, childB) : null,
+      ] as const
+      if (texts.some((text, i) => text === null && peers[i] === null)) continue
+      const [said, changed] = linkPair(walk, childA, childB, texts, peers)
+      if (said !== null) parts.push(said)
+      differ ||= changed
       continue
     }
-    const kindA = inA ? await entryKind(walk, childA) : null
-    const kindB = inB ? await entryKind(walk, childB) : null
-    if ((inA && kindA === null) || (inB && kindB === null)) continue
+    const rowA = inA ? await entryRow(walk, childA) : null
+    const rowB = inB ? await entryRow(walk, childB) : null
+    if ((inA && rowA === null) || (inB && rowB === null)) continue
+    const kindA = rowA?.type ?? null
+    const kindB = rowB?.type ?? null
     const aDir = kindA === FileType.DIRECTORY
     const bDir = kindB === FileType.DIRECTORY
     const gone: Absent = [!inA, !inB]
@@ -676,11 +688,11 @@ async function diffDirs(
           ),
         )
       for (const chunk of pair.output) parts.push(chunk)
-    } else if (kindA !== null && kindB !== null) {
+    } else if (rowA !== null && rowB !== null) {
       differ = true
       parts.push(
         ENC.encode(
-          `File ${childA.rawPath} is a ${await kindName(walk, childA, kindA)} while file ${childB.rawPath} is a ${await kindName(walk, childB, kindB)}\n`,
+          `File ${childA.rawPath} is a ${kindName(rowA)} while file ${childB.rawPath} is a ${kindName(rowB)}\n`,
         ),
       )
     }
@@ -688,8 +700,8 @@ async function diffDirs(
   return differ
 }
 
-async function missing(stat: StatFn, path: PathSpec): Promise<boolean> {
-  if (isStdin(path)) return false
+async function missing(stat: StatFn, path: PathSpec, allowed: boolean): Promise<boolean> {
+  if (!allowed || isStdin(path)) return false
   try {
     await stat(path)
   } catch (err) {
@@ -697,6 +709,26 @@ async function missing(stat: StatFn, path: PathSpec): Promise<boolean> {
     throw err
   }
   return false
+}
+
+/**
+ * GNU's report when neither operand is there, -N or not: each one named;
+ * null when either is. Mirrors Python's `_both_missing`.
+ */
+async function bothMissing(stat: StatFn, paths: readonly PathSpec[]): Promise<Uint8Array | null> {
+  const said: Uint8Array[] = []
+  for (const path of paths) {
+    if (isStdin(path)) return null
+    try {
+      await stat(path)
+    } catch (err) {
+      if (!isEnoent(err) || !isFsError(err)) return null
+      said.push(formatFsError('diff', err, [path]))
+      continue
+    }
+    return null
+  }
+  return concat(said)
 }
 
 async function excludedPatterns(
@@ -770,8 +802,12 @@ export async function diffGeneric(
     }
     const texts = [linkText(walk, p0), linkText(walk, p1)] as const
     if (texts[0] !== null || texts[1] !== null) {
-      const said = await linkPair(walk, p0, p1, texts)
-      return [said, new IOResult({ exitCode: said === null ? 0 : 1 })]
+      const rows = [
+        texts[0] === null ? await walk.stat(p0) : null,
+        texts[1] === null ? await walk.stat(p1) : null,
+      ] as const
+      const [said, changed] = linkPair(walk, p0, p1, texts, rows)
+      return [said, new IOResult({ exitCode: changed ? 1 : 0 })]
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {
@@ -784,22 +820,14 @@ export async function diffGeneric(
         ]
       }
     }
-    // Two missing operands are both reported, -N or not; one -N names reads
-    // as empty beside one that is there.
-    const gone = [await missing(stat, p0), await missing(stat, p1)] as const
-    const absent: Absent = [gone[0] && flags.newFirst, gone[1] && flags.newFile]
-    if (gone[0] && gone[1]) {
-      const lines: Uint8Array[] = []
-      for (const path of paths) {
-        try {
-          await stat(path)
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          lines.push(formatFsError('diff', err, [path]))
-        }
-      }
-      return [null, new IOResult({ exitCode: 2, stderr: concat(lines) })]
-    }
+    // A missing operand -N reads as empty only beside one that is there:
+    // two missing ones are both reported.
+    const absent: Absent = [
+      await missing(stat, p0, flags.newFirst),
+      await missing(stat, p1, flags.newFile),
+    ]
+    const said = absent[0] && absent[1] ? await bothMissing(stat, paths) : null
+    if (said !== null) return [null, new IOResult({ exitCode: 2, stderr: said })]
     if (flags.recursive && !absent[0] && !absent[1]) {
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
@@ -846,8 +874,13 @@ export async function diffGeneric(
       ]
     }
     // GNU diff reserves exit 1 for "files differ"; trouble (a missing or
-    // unreadable operand) is exit 2.
-    return [null, new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, errorPaths) })]
+    // unreadable operand) is exit 2. Only a failed read asks whether the other
+    // operand is gone too, so a plain pair costs no stat.
+    const said = isEnoent(err) ? await bothMissing(stat, paths) : null
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: said ?? formatFsError('diff', err, errorPaths) }),
+    ]
   } finally {
     await owned?.close()
   }

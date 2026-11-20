@@ -99,23 +99,39 @@ impl Lexer<'_> {
     }
 
     /// mawk 1.3.4's report of a string or expression its line or the
-    /// program ends inside: the line it opened on, and its first ten
-    /// bytes as typed, short of a backslash that ends the program.
+    /// program ends inside: the line it opened on and its first ten bytes
+    /// as read, a backslash-newline dropped, `\/` read as `/` in an
+    /// expression and a lone backslash that ends the program left out.
     fn runaway(&self, start: usize, what: &[u8]) -> Vec<u8> {
         let line = self.src[..start].iter().filter(|&&c| c == b'\n').count() + 1;
-        let body = &self.src[start + 1..];
-        let end = body.iter().position(|&c| c == b'\n').unwrap_or(body.len());
-        let mut shown = &body[..end];
-        if end == body.len() && shown.last() == Some(&b'\\') {
-            shown = &shown[..shown.len() - 1];
+        let regex = self.src[start] == b'/';
+        let mut shown = Vec::new();
+        let mut pos = start + 1;
+        while shown.len() < 10 {
+            pos += match (self.at(pos), self.at(pos + 1)) {
+                (None | Some(b'\n'), _) | (Some(b'\\'), None) => break,
+                (Some(b'\\'), Some(b'\n')) => 2,
+                (Some(b'\\'), Some(b'/')) if regex => {
+                    shown.push(b'/');
+                    2
+                }
+                (Some(b'\\'), Some(next)) => {
+                    shown.extend_from_slice(&[b'\\', next]);
+                    2
+                }
+                (Some(c), _) => {
+                    shown.push(c);
+                    1
+                }
+            };
         }
-        let shown = &shown[..shown.len().min(10)];
+        shown.truncate(10);
         [
             format!("awk: line {line}: runaway ").as_bytes(),
             what,
             b" ",
             &self.src[start..=start],
-            shown,
+            &shown,
             b" ...",
         ]
         .concat()
@@ -150,12 +166,11 @@ impl Lexer<'_> {
                     return Ok(());
                 }
                 b'\n' => return Err(self.runaway(start, b"string constant")),
-                b'\\' => {
-                    if self.pos + 1 >= self.src.len() {
-                        return Err(self.runaway(start, b"string constant"));
-                    }
-                    self.pos = read_escape(self.src, self.pos + 1, &mut out);
-                }
+                b'\\' => match self.at(self.pos + 1) {
+                    None => return Err(self.runaway(start, b"string constant")),
+                    Some(b'\n') => self.pos += 2,
+                    Some(_) => self.pos = read_escape(self.src, self.pos + 1, &mut out),
+                },
                 _ => {
                     out.push(c);
                     self.pos += 1;
@@ -177,14 +192,15 @@ impl Lexer<'_> {
                     return Ok(());
                 }
                 b'\n' => return Err(self.runaway(start, b"regular expression")),
-                // Only `\/` collapses here; every other escape belongs to
-                // the expression, which needs its backslash.
+                // `\/` collapses and a backslash-newline joins two lines;
+                // every other escape belongs to the expression, which needs
+                // its backslash.
                 b'\\' if self.pos + 1 < self.src.len() => {
-                    let next = self.src[self.pos + 1];
-                    if next != b'/' {
-                        out.push(b'\\');
+                    match self.src[self.pos + 1] {
+                        b'\n' => {}
+                        b'/' => out.push(b'/'),
+                        next => out.extend_from_slice(&[b'\\', next]),
                     }
-                    out.push(next);
                     self.pos += 2;
                 }
                 _ => {
