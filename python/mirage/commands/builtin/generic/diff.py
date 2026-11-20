@@ -487,11 +487,29 @@ def _link_pair(
     names = [
         "symbolic link" if row is None else _kind_name(row) for row in rows
     ]
-    said = (
-        f"File {_name(path_a)} is a {names[0]} while file "
-        f"{_name(path_b)} is a {names[1]}\n"
+    return _mismatch(walk, paths, (names[0], names[1])), True
+
+
+def _mismatch(
+    walk: _Walk, paths: tuple[PathSpec, PathSpec], names: tuple[str, str]
+) -> bytes:
+    """GNU's report of a pair of two types, each side under its --label.
+
+    Args:
+        walk (_Walk): the parsed line.
+        paths (tuple[PathSpec, PathSpec]): the two entries.
+        names (tuple[str, str]): each one's type name.
+    """
+    return (
+        f"File {_labelled(walk, paths[0], 0)} is a {names[0]} while file "
+        f"{_labelled(walk, paths[1], 1)} is a {names[1]}\n"
+    ).encode()
+
+
+def _no_such(path: PathSpec) -> bytes:
+    return (
+        f"diff: {_name(path)}: {posix_phrase(FsCondition.ENOENT)}\n".encode()
     )
-    return said.encode(), True
 
 
 async def _entry_row(walk: _Walk, path: PathSpec) -> FileStat | None:
@@ -514,9 +532,7 @@ async def _entry_row(walk: _Walk, path: PathSpec) -> FileStat | None:
         )
         return None
     if row.type == FileType.SYMLINK:
-        walk.trouble.append(
-            f"diff: {_name(path)}: {posix_phrase(FsCondition.ENOENT)}\n".encode()
-        )
+        walk.trouble.append(_no_such(path))
         return None
     return row
 
@@ -584,10 +600,7 @@ async def _diff_dirs(
         if texts != (None, None):
             # -N reads no link's peer as empty: GNU names the missing one.
             if not (in_a and in_b):
-                lost = _name(child_b if in_a else child_a)
-                walk.trouble.append(
-                    f"diff: {lost}: {posix_phrase(FsCondition.ENOENT)}\n".encode()
-                )
+                walk.trouble.append(_no_such(child_b if in_a else child_a))
                 continue
             peers = (
                 None
@@ -656,49 +669,32 @@ async def _diff_dirs(
             assert row_a is not None and row_b is not None
             differ = True
             parts.append(
-                (
-                    f"File {_name(child_a)} is a {_kind_name(row_a)} while "
-                    f"file {_name(child_b)} is a {_kind_name(row_b)}\n"
-                ).encode()
+                _mismatch(
+                    walk,
+                    (child_a, child_b),
+                    (_kind_name(row_a), _kind_name(row_b)),
+                )
             )
     return differ
 
 
-async def _missing(
-    stat_fn: Callable[..., Awaitable[FileStat]], path: PathSpec, allowed: bool
-) -> bool:
-    if not allowed or is_stdin(path):
-        return False
-    try:
-        await stat_fn(path)
-    except FileNotFoundError:
-        return True
-    return False
-
-
-async def _both_missing(
-    stat_fn: Callable[..., Awaitable[FileStat]], paths: list[PathSpec]
-) -> bytes | None:
-    """GNU's report when neither operand is there, -N or not: each one
-    named; None when either is.
+async def _operand_row(
+    walk: _Walk, stat_fn: Callable[..., Awaitable[FileStat]], path: PathSpec
+) -> FileStat | None:
+    """An operand's stat as diff reads it: a link it reads as itself is
+    its own row; None for one that is not there.
 
     Args:
+        walk (_Walk): the comparison's links and parsed line.
         stat_fn (Callable[..., Awaitable[FileStat]]): the operands' stat.
-        paths (list[PathSpec]): the two operands.
+        path (PathSpec): the operand.
     """
-    said: list[bytes] = []
-    for path in paths:
-        if is_stdin(path):
-            return None
-        try:
-            await stat_fn(path)
-        except FileNotFoundError as exc:
-            said.append(format_fs_error("diff", exc, [path]))
-        except FS_ERRORS:
-            return None
-        else:
-            return None
-    return b"".join(said)
+    if _link_text(walk, path) is not None and walk.links is not None:
+        return walk.links.stat_at(path.virtual)
+    try:
+        return await stat_fn(path)
+    except FileNotFoundError:
+        return None
 
 
 async def _excluded_patterns(
@@ -760,43 +756,65 @@ async def diff(
             zone=zone,
             size_of=size_of,
         )
+        # GNU stats both operands before it reads either: a missing one
+        # is named at once, and a directory beside anything else stands
+        # for its entry of that one's name.
+        rows = [await _operand_row(walk, stat_fn, path) for path in paths]
+        if rows[0] is None and rows[1] is None:
+            return None, IOResult(
+                exit_code=2, stderr=_no_such(paths[0]) + _no_such(paths[1])
+            )
+        kinds = [None if row is None else row.type for row in rows]
+        if any(dashes) and not all(dashes):
+            if kinds[1 if dashes[0] else 0] == FileType.DIRECTORY:
+                return None, IOResult(
+                    exit_code=2,
+                    stderr=b"diff: cannot compare '-' to a directory\n",
+                )
+        dirs = [kind == FileType.DIRECTORY for kind in kinds]
+        entry_side: int | None = None
+        if None not in kinds and dirs[0] != dirs[1]:
+            entry_side = 0 if dirs[0] else 1
+            entry = _child_spec(
+                paths[entry_side], gnu_basename(_name(paths[1 - entry_side]))
+            )
+            paths = [entry, paths[1]] if entry_side == 0 else [paths[0], entry]
+            rows[entry_side] = await _operand_row(walk, stat_fn, entry)
         texts = (_link_text(walk, paths[0]), _link_text(walk, paths[1]))
+        # -N reads a missing operand as empty, but neither beside a link
+        # read as itself nor as a directory's entry: GNU names those.
+        absent = (
+            rows[0] is None and flags.new_first and texts[1] is None,
+            rows[1] is None and flags.new_file and texts[0] is None,
+        )
+        for side, (path, row) in enumerate(zip(paths, rows)):
+            if row is None and (not absent[side] or side == entry_side):
+                return None, IOResult(exit_code=2, stderr=_no_such(path))
         if texts != (None, None):
-            rows = [
-                None if text is not None else await walk.stat_fn(path)
-                for path, text in zip(paths, texts)
-            ]
             said, differ = _link_pair(
-                walk, (paths[0], paths[1]), texts, (rows[0], rows[1])
+                walk,
+                (paths[0], paths[1]),
+                texts,
+                (
+                    None if texts[0] is not None else rows[0],
+                    None if texts[1] is not None else rows[1],
+                ),
             )
             return (
                 None if said is None else _output([said]),
                 IOResult(exit_code=1 if differ else 0),
             )
-        if any(dashes) and not all(dashes):
-            other = paths[1] if dashes[0] else paths[0]
-            if (await stat_fn(other)).type == FileType.DIRECTORY:
-                return None, IOResult(
-                    exit_code=2,
-                    stderr=b"diff: cannot compare '-' to a directory\n",
+        if entry_side is not None:
+            row_a, row_b = rows
+            assert row_a is not None and row_b is not None
+            if FileType.DIRECTORY in (row_a.type, row_b.type):
+                said = _mismatch(
+                    walk,
+                    (paths[0], paths[1]),
+                    (_kind_name(row_a), _kind_name(row_b)),
                 )
-        # A missing operand -N reads as empty only beside one that is
-        # there: two missing ones are both reported.
-        absent = (
-            await _missing(stat_fn, paths[0], flags.new_first),
-            await _missing(stat_fn, paths[1], flags.new_file),
-        )
-        said = await _both_missing(stat_fn, paths) if all(absent) else None
-        if said is not None:
-            return None, IOResult(exit_code=2, stderr=said)
-        both_dirs = False
-        if flags.recursive and not any(absent):
-            both_dirs = (
-                await stat_fn(paths[0])
-            ).type == FileType.DIRECTORY and (
-                await stat_fn(paths[1])
-            ).type == FileType.DIRECTORY
-        if both_dirs:
+                return _output([said]), IOResult(exit_code=1)
+        if flags.recursive and all(dirs):
             for path in paths:
                 await before_full_walk(dispatch, path, "diff")
             output: list[ByteSource] = []
@@ -819,18 +837,10 @@ async def diff(
         )
     except FS_ERRORS as exc:
         # GNU diff reserves exit 1 for "files differ"; trouble (a missing
-        # or unreadable operand) is exit 2. Only a failed read asks
-        # whether the other operand is gone too, so a plain pair costs no
-        # stat.
-        said = (
-            await _both_missing(stat_fn, paths)
-            if isinstance(exc, FileNotFoundError)
-            else None
-        )
+        # or unreadable operand) is exit 2.
         return None, IOResult(
             exit_code=2,
-            stderr=said
-            or format_fs_error("diff", exc, [*paths, *flags.exclude_from]),
+            stderr=format_fs_error("diff", exc, [*paths, *flags.exclude_from]),
         )
     finally:
         if owned is not None:

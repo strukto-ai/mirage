@@ -134,6 +134,32 @@ async def test_two_stdin_operands_are_one_file():
 
 
 @pytest.mark.asyncio
+async def test_a_missing_operand_is_named_before_either_is_read():
+    async def unread(path: PathSpec) -> bytes:
+        raise AssertionError(f"read {path.virtual}")
+
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/gone":
+            raise FileNotFoundError(
+                2, "No such file or directory", path.virtual
+            )
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    out, io = await diff(
+        [_operand("slow", "/d/slow"), _operand("gone", "/d/gone")],
+        stream=unread,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(),
+    )
+    assert (out, io.exit_code, io.stderr) == (
+        None,
+        2,
+        b"diff: gone: No such file or directory\n",
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_read_failing_mid_stream_is_trouble_and_closes_its_input():
     closed: list[str] = []
 

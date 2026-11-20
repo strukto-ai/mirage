@@ -483,11 +483,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -r -X /data/dn/nope /data/dn/c /data/dn/d",
+      "command": "diff -r -X /data/dn/nope /data/dn/c /data/dn/d; diff -X /data/dn/nope /data/dn/m1 /data/dn/m2",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "diff: /data/dn/nope: No such file or directory\n"
+        "stderr": "diff: /data/dn/nope: No such file or directory\ndiff: /data/dn/nope: No such file or directory\n"
       }
     },
     {
@@ -518,11 +518,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -s /data/dn/s1 /data/dn/s2; diff --report-identical-files -q /data/dn/s1 /data/dn/s2",
+      "command": "diff -s /data/dn/s1 /data/dn/s2; diff --report-identical-files -q /data/dn/s1 /data/dn/s2; diff -s /data/dn/x/k /data/dn/y; echo rc=$?; diff /data/dn/y /data/dn/s1; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "Files /data/dn/s1 and /data/dn/s2 are identical\nFiles /data/dn/s1 and /data/dn/s2 are identical\n",
-        "stderr": ""
+        "stdout": "Files /data/dn/s1 and /data/dn/s2 are identical\nFiles /data/dn/s1 and /data/dn/s2 are identical\nFiles /data/dn/x/k and /data/dn/y/k are identical\nrc=0\nrc=2\n",
+        "stderr": "diff: /data/dn/y/s1: No such file or directory\n"
       }
     },
     {
