@@ -24,7 +24,8 @@ import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
-import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
+import { executeNode } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
 
 function decode(b: Uint8Array | null): string {

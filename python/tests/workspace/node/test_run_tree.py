@@ -21,9 +21,9 @@ from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.run_tree import (
     run_command_tree as _run_command_tree,
 )

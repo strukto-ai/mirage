@@ -23,7 +23,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
-import { type ExecuteNodeDeps } from './execute_node.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import { runCommandTree } from './run_tree.ts'
 
 function buildDeps(registry: MountRegistry): ExecuteNodeDeps {

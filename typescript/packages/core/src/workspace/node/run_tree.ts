@@ -35,7 +35,8 @@ import { expandRedirect } from '../expand/redirects.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { admit, Admitted } from './admission.ts'
-import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
+import { executeNode } from './execute_node.ts'
 import { claimantFor } from './occurrence.ts'
 
 export async function runCommandTree(

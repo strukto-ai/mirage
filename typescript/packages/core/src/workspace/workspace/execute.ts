@@ -98,8 +98,8 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { runsOnMachine } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import { withHandOff } from '../node/execute_node.ts'
-import type { ExecuteNodeDeps } from '../node/execute_node.ts'
+import { withHandOff } from '../executor/deps.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import {
   admitLine,
   lineHeld,

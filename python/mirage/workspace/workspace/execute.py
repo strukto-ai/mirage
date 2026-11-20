@@ -81,6 +81,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import start_shell
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import Unwinding, ended
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,
@@ -91,7 +92,6 @@ from mirage.workspace.history.line import LineHistory
 from mirage.workspace.lookup.lookup import runs_on_machine
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.explain import (
     Judged,
     Walked,

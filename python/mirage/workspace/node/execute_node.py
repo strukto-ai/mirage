@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from functools import partial
 from typing import Any, Unpack
 
@@ -39,7 +38,6 @@ from mirage.context.session_context import (
     redirect_syntax_for,
 )
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobTable
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -117,6 +115,7 @@ from mirage.workspace.executor.control import (
     handle_select,
     handle_while,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps, with_opts
 from mirage.workspace.executor.pipes import (
     handle_connection,
     handle_pipe,
@@ -862,123 +861,6 @@ def _redirect_gate(
         return None, io, node
 
     return gate
-
-
-@dataclass(frozen=True, slots=True)
-class ExecuteNodeDeps:
-    """What the node walk runs against, one value per subtree.
-
-    A subtree's value is derived with ``dataclasses.replace``, never
-    changed in place. The entry point for nested lines is stored unbound
-    and bound on read to the subtree's own hand-off, event and line, so
-    the hand-off a subtree's gates read and the one its nested lines run
-    under are one fact.
-
-    Args:
-        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        job_table (JobTable): background job management.
-        entry (Callable[..., Any]): the nested-line entry point, with
-            ``handed``, ``cancel`` and ``line_handle`` left unbound.
-        cancel (asyncio.Event | None): event used to abort mid-flight.
-        handed (HandOff | None): the hand-off this subtree runs on.
-        line_handle (LineHandle | None): the line this subtree runs in;
-            None makes each node a line of its own.
-        sink (JobConsole | None): where the subtree writes as it runs.
-    """
-
-    dispatch: DispatchFn
-    registry: MountRegistry
-    namespace: Namespace
-    job_table: JobTable
-    entry: Callable[..., Any]
-    cancel: asyncio.Event | None = None
-    handed: HandOff | None = None
-    line_handle: LineHandle | None = None
-    sink: JobConsole | None = None
-
-    @property
-    def execute_fn(self) -> ExecuteFn:
-        """The entry point bound to this subtree's hand-off, event and
-        line, which every line the subtree evaluates runs through."""
-        return partial(
-            self.entry,
-            handed=self.handed,
-            cancel=self.cancel,
-            line_handle=self.line_handle,
-        )
-
-
-def with_hand_off(
-    deps: ExecuteNodeDeps, handed: HandOff | None
-) -> ExecuteNodeDeps:
-    """The same dependencies on another hand-off, which the gates and the
-    nested lines of the subtree both read.
-
-    Args:
-        deps (ExecuteNodeDeps): the subtree's dependencies.
-        handed (HandOff | None): the hand-off it runs on instead.
-    """
-    return replace(deps, handed=handed)
-
-
-def with_opts(base: ExecuteNodeDeps, opts: ExecuteNodeOpts) -> ExecuteNodeDeps:
-    """Layer a caller's overrides on the walker's dependencies.
-
-    A key decides by its presence: ``cancel=None`` runs the subtree with
-    no event, as a background job runs without its line's. A job list
-    given in place of the bound one is a background job's own, as bash's
-    forked job starts with none of its shell's, so a bare ``wait`` in it
-    never waits on itself; the lines it runs (``eval``, ``source``, its
-    EXIT action) see that list too. ``ends_shell`` and
-    ``own_diagnostics`` are the walker's to read, not dependencies.
-
-    The walk calls this at every node, so the value is built once
-    whatever the number of overrides, and the walker's own is returned
-    when no override differs from it.
-
-    Args:
-        base (ExecuteNodeDeps): the walker's dependencies.
-        opts (ExecuteNodeOpts): the caller's overrides.
-
-    Raises:
-        TypeError: a key that names no override.
-    """
-    if not opts:
-        return base
-    if not ExecuteNodeOpts.__optional_keys__.issuperset(opts):
-        unknown = min(opts.keys() - ExecuteNodeOpts.__optional_keys__)
-        raise TypeError(f"execute_node: no option named {unknown!r}")
-    sink = opts["sink"] if "sink" in opts else base.sink
-    cancel = opts["cancel"] if "cancel" in opts else base.cancel
-    line_handle = (
-        opts["line_handle"] if "line_handle" in opts else base.line_handle
-    )
-    jobs = opts.get("job_table")
-    deps = base
-    if (
-        jobs is not None
-        or sink is not base.sink
-        or cancel is not base.cancel
-        or line_handle is not base.line_handle
-    ):
-        deps = ExecuteNodeDeps(
-            base.dispatch,
-            base.registry,
-            base.namespace,
-            base.job_table if jobs is None else jobs,
-            base.entry
-            if jobs is None
-            else partial(base.entry, job_table=jobs),
-            cancel,
-            base.handed,
-            line_handle,
-            sink,
-        )
-    if "handed" in opts:
-        deps = with_hand_off(deps, opts["handed"])
-    return deps
 
 
 async def execute_node(
