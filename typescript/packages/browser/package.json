@@ -1,7 +1,7 @@
 {
   "name": "@struktoai/mirage-browser",
   "version": "0.1.0-alpha.3",
-  "description": "A Virtual Terminal for AI Agents",
+  "description": "A virtual terminal for AI agents, with a unified virtual filesystem, virtual CLIs and virtual machines behind one shell",
   "keywords": [
     "virtual-terminal",
     "bash",
