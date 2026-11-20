@@ -1782,6 +1782,9 @@ async def run_resolved(
             ExecutionNode(command=name, exit_code=code, stderr=err),
         )
     if isinstance(target, ExternalTarget):
+        unread = _unreadable(name, session) if "/" in name else None
+        if unread is not None:
+            return _refused(" ".join([name, *argv.args]), unread)
         return await run_external(
             argv, stdin, session, registry, target.runtime, sink, target.cwd
         )

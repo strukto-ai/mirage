@@ -2287,8 +2287,12 @@ it('leaves a relative path after a cd the pass lost to the gate', async () => {
     { mode: MountMode.EXEC, machines: { m: { provider: 'in_process', runtime: 'monty' } } },
   )
   open.push(w)
+  // Read against the directory the pass last knew, ./python3 named the
+  // /usr/bin program, which a closed tree refuses.
   w.createSession('s', {
-    profile: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
+    profile: SessionProfile({
+      commands: { '*': 'deny', cd: 'allow', echo: 'allow', printf: 'allow' },
+    }),
   })
   await w.shell("printf 'echo harmless\\n' > /data/python3; cd /usr/bin", { sessionId: 's' })
   const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })

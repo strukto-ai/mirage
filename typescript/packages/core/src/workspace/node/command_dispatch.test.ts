@@ -575,6 +575,19 @@ const SPELLED = [
   'ln -s /usr/bin/python3 /py && nice /py -c 1',
 ]
 
+class NoSuch implements Policy {
+  preCommand(ctx: CommandContext): Deny | null {
+    return ctx.command === 'nosuch' ? { kind: 'deny', reason: 'no' } : null
+  }
+}
+
+const UNLISTED = [
+  '/usr/bin/nosuch -c 1',
+  '/bin/nosuch -c 1',
+  'nice /usr/bin/nosuch -c 1',
+  'timeout 1 nice -n 3 /usr/bin/nosuch -c 1',
+]
+
 const NO_PYTHON_PROFILES = {
   default: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
 }
@@ -665,20 +678,86 @@ describe('a wrapper over a path-spelled program', () => {
     }
   })
 
-  // Only a listed /usr/bin file is a program; any other path is the machine's
-  // own file under a wrapper as on the plain path, which only an allow list
-  // refuses.
-  it('leaves a path the view does not list to the machine', async () => {
+  // The machine execs a path Mirage does not list, so a deny of the program's
+  // name, in code or as a rule, refuses the path under any wrapper, and
+  // explain says of it what it says of the name.
+  it.each(['policy', 'profile'] as const)(
+    'judges a path the view does not list by its name too (%s)',
+    async (by) => {
+      const ws = spelledWs(
+        by === 'policy'
+          ? { policies: [new NoSuch()] }
+          : { profiles: { default: SessionProfile({ commands: { nosuch: 'deny' } }) } },
+      )
+      try {
+        expect(text((await ws.shell('/usr/bin/other -c 1')).stdout)).toBe('b\n')
+        for (const line of UNLISTED) {
+          const io = await ws.shell(line)
+          expect([line, io.exitCode, text(io.stdout)]).toEqual([line, 126, ''])
+          const named = line.replace('/usr/bin/', '').replace('/bin/', '')
+          const said = await ws.explain(line)
+          expect(said.exitCode).toBe((await ws.explain(named)).exitCode)
+        }
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('asks for a path the view does not list by its name', async () => {
     const ws = spelledWs({
       profiles: {
-        default: SessionProfile({ commands: { nosuch: { decision: 'deny', reason: 'no' } } }),
+        default: SessionProfile({ commands: { nosuch: { decision: 'ask', reason: 'nod' } } }),
       },
     })
     try {
-      const bare = await ws.shell('/usr/bin/nosuch -c 1')
-      const io = await ws.shell('nice /usr/bin/nosuch -c 1')
-      expect([io.exitCode, text(io.stdout)]).toEqual([bare.exitCode, text(bare.stdout)])
-      expect(text(bare.stdout)).toBe('b\n')
+      expect((await ws.shell('/usr/bin/nosuch -c 1')).exitCode).toBe(126)
+      const pending = ws.decisions.pending()
+      expect(pending).toHaveLength(1)
+      await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
+      const ran = await ws.shell('/usr/bin/nosuch -c 1')
+      expect([ran.exitCode, text(ran.stdout)]).toEqual([0, 'b\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // The path runs where its own words place it: a route of its file's name
+  // places that name, not the path.
+  it('does not move a path by a route of its name', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          a: new Named('a', { captures: [EXTERNAL_COMMANDS] }),
+          c: new Named('c', { captures: [EXTERNAL_COMMANDS] }),
+        },
+        policies: [new Routes({ nosuch: { kind: 'route', machine: 'c' } })],
+      },
+    )
+    try {
+      expect(text((await ws.shell('nosuch -c 1')).stdout)).toBe('c\n')
+      expect(text((await ws.shell('/opt/nosuch -c 1')).stdout)).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Only a named entry speaks for a path's name: a closed tree's root does not
+  // refuse a script Mirage runs line by line, and naming `ls` does not admit a
+  // path that ends in it.
+  it('grants nothing by a path’s name that a closed tree withholds', async () => {
+    const ws = spelledWs({
+      profiles: {
+        default: SessionProfile({ commands: { '*': 'deny', echo: 'allow', ls: 'allow' } }),
+      },
+    })
+    try {
+      await ws.shell("echo 'echo hi' > /s.sh")
+      const ran = await ws.shell('/s.sh')
+      expect([ran.exitCode, text(ran.stdout)]).toEqual([0, 'hi\n'])
+      expect((await ws.shell('/opt/ls')).exitCode).toBe(126)
     } finally {
       await ws.close()
     }

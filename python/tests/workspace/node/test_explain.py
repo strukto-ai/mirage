@@ -2723,7 +2723,8 @@ async def test_a_usr_bin_path_keeps_the_operands_xargs_appends_unread():
 @pytest.mark.asyncio
 async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
     # Read against the directory the pass last knew, ./python3 named the
-    # /usr/bin program and refused a harmless script in /data.
+    # /usr/bin program, which a closed tree refuses, and refused a harmless
+    # script in /data.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -2733,7 +2734,12 @@ async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
         ws.create_session(
             "s",
             profile={
-                "commands": {"python3": {"decision": "deny", "reason": "no"}}
+                "commands": {
+                    "*": "deny",
+                    "cd": "allow",
+                    "echo": "allow",
+                    "printf": "allow",
+                }
             },
         )
         await ws.shell(

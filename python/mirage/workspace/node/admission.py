@@ -111,7 +111,7 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     WRITING_PROGRAMS,
 )
-from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.lookup import lookup, path_program
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (
@@ -500,6 +500,33 @@ def _writes(
     return False
 
 
+def _program_named(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+) -> str | None:
+    """The name a path-spelled command's program is judged by too: a
+    machine execs the path, so a rule or a coded check naming the program
+    speaks for it there. None for a word with no slash, and for a
+    ``/usr/bin`` path Mirage runs as its program by name
+    (``path_program``), judged by that name when it is dispatched.
+
+    Args:
+        name (str): the command word, as typed.
+        session (SessionState): the session running it.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        namespace (Namespace | None): the link table.
+    """
+    if "/" not in name:
+        return None
+    base = name.rsplit("/", 1)[1]
+    links = None if namespace is None else namespace.session_links(session)
+    if not base or path_program(name, session, registry, links) is not None:
+        return None
+    return base
+
+
 async def gate(
     name: str,
     args: list[str],
@@ -634,6 +661,24 @@ async def gate(
     said = await registry.policies.answers(
         "pre_command", ctx, every, rules_only
     )
+    named = _program_named(name, session, registry, namespace)
+    if named is not None:
+        # Only a named entry speaks (no tree root), so a name grants nothing;
+        # the path's run is placed by its own words, so a route of the name
+        # does not move it.
+        own = read_line(registry, named, args, operands, session.cwd, env)
+        program_ctx = dataclasses.replace(
+            ctx,
+            command=named,
+            tool=False,
+            tokens=own.tokens,
+            program=own.program,
+            read=own.read,
+        )
+        by_name = await registry.policies.answers(
+            "pre_command", program_ctx, every, rules_only
+        )
+        said = (*said, *(a for a in by_name if isinstance(a, (Deny, Ask))))
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(

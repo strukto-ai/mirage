@@ -71,6 +71,7 @@ import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
 import { INTERPRETER_NAMES, WRITING_PROGRAMS } from '../lookup/constants.ts'
+import { pathProgram } from '../lookup/lookup.ts'
 import {
   Consumer,
   isTool,
@@ -485,6 +486,25 @@ function writes(
   })
 }
 
+/**
+ * The name a path-spelled command's program is judged by too: a machine execs
+ * the path, so a rule or a coded check naming the program speaks for it there.
+ * Null for a word with no slash, and for a `/usr/bin` path Mirage runs as its
+ * program by name (`pathProgram`), judged by that name when it is dispatched.
+ */
+function programNamed(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+): string | null {
+  if (!name.includes('/')) return null
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  const links = namespace === null ? null : namespace.sessionLinks(session)
+  if (base === '' || pathProgram(name, session, registry, links) !== null) return null
+  return base
+}
+
 export async function gate(
   name: string,
   args: readonly string[],
@@ -552,6 +572,23 @@ export async function gate(
     ...registry.policies.views?.(session.sessionId, session),
   }
   const answers = [...(await registry.policies.answers('preCommand', ctx, every, rulesOnly))]
+  const named = programNamed(name, session, registry, namespace)
+  if (named !== null) {
+    // Only a named entry speaks (no tree root), so a name grants nothing; the
+    // path's run is placed by its own words, so a route of the name does not
+    // move it.
+    const own = readLine(registry, named, args, operands, session.cwd, env, sessionAccess(session))
+    const programCtx: CommandContext = {
+      ...ctx,
+      command: named,
+      tool: false,
+      tokens: [...own.tokens],
+      program: [...own.program],
+      read: own.read,
+    }
+    const byName = await registry.policies.answers('preCommand', programCtx, every, rulesOnly)
+    answers.push(...byName.filter((a) => a.kind === 'deny' || a.kind === 'ask'))
+  }
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
