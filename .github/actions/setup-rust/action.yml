@@ -20,11 +20,19 @@ inputs:
 runs:
   using: composite
   steps:
+    # The toolchain file covers only what runs under rust/. maturin runs
+    # cargo from python/, where rustup fell back to the runner image's own
+    # default, and that differs between images GitHub rolls out side by
+    # side: a mirage._rs build cached on one image compiled from scratch on
+    # the other. Making the pin the default gives every cargo in the job the
+    # compiler the cache keys name.
     - name: Install the pinned toolchain
       if: env.MIRAGE_RUST_READY != 'true'
       shell: bash
       working-directory: rust
-      run: rustup toolchain install
+      run: |
+        rustup toolchain install
+        rustup default "$(rustup show active-toolchain | cut -d' ' -f1)"
 
     - name: Cache cargo and rust/target
       if: env.MIRAGE_RUST_READY != 'true'
