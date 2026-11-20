@@ -312,15 +312,18 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
       ['-c', 'setsid sleep 300 & echo $!; sleep 301 & echo $!; sleep 302 & echo $!'],
       { env: { ...process.env, [PROCESS]: tag }, detached: true },
     )
-    let text = ''
-    program.stdout.on('data', (d: Buffer) => {
-      text += d.toString()
+    const pids = new Promise<number[]>((resolve) => {
+      let text = ''
+      program.stdout.on('data', (d: Buffer) => {
+        text += d.toString()
+        const lines = text.split('\n').filter(Boolean).map(Number)
+        if (lines.length >= 3) resolve(lines.slice(0, 3))
+      })
     })
-    await new Promise((resolve) => program.once('exit', resolve))
-    const [kept, hung, stopped] = text.split('\n').filter(Boolean).map(Number) as [
-      number,
-      number,
-      number,
+    const exited = new Promise((resolve) => program.once('exit', resolve))
+    const [[kept, hung, stopped]] = (await Promise.all([pids, exited])) as [
+      [number, number, number],
+      unknown,
     ]
     const ended = (pid: number): boolean => {
       let stat: string

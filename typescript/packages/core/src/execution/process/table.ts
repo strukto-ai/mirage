@@ -6,7 +6,7 @@ import { PLAIN_TRAITS, type Process, type ProcessRunner, type ProcessTraits } fr
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineName, type MachineResources, ProcessId } from '../types.ts'
-import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
+import { SIGCONT, SIGHUP, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 import { SignalStop } from '../../utils/abort.ts'
@@ -260,12 +260,20 @@ export class ProcessTable {
   /**
    * Request cancellation of every live runner whose parent is `pid` or
    * an ancestor further up, so grandchildren are reached after an
-   * intermediate runner has exited.
+   * intermediate runner has exited. A hangup stays in `pid`'s session: a
+   * runner `setsid` gave a session of its own (`leader`), and what it
+   * started, never takes it, as a terminal's hangup never reaches another
+   * session.
    *
    * @param signal what the stop stands for, as the parent's.
    */
   terminateChildren(pid: number, signal = 9): void {
-    for (const child of this.under(pid)) child.terminate(signal)
+    const own =
+      this.runners.get(pid)?.handle.record.leader ?? this.history.get(pid)?.record.leader ?? null
+    for (const child of this.under(pid)) {
+      if (signal === SIGHUP && (child.record.leader ?? null) !== own) continue
+      child.terminate(signal)
+    }
   }
 
   /**

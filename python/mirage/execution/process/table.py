@@ -27,7 +27,7 @@ from mirage.execution.types import (
     MachineResources,
     ProcessId,
 )
-from mirage.shell.constants import SIGCONT, SIGKILL, SIGSTOP
+from mirage.shell.constants import SIGCONT, SIGHUP, SIGKILL, SIGSTOP
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
 
@@ -336,13 +336,28 @@ class ProcessTable:
 
         A runner is under ``pid`` when ``pid`` is its parent or an
         ancestor further up, so grandchildren are reached after an
-        intermediate runner has exited.
+        intermediate runner has exited. A hangup stays in ``pid``'s
+        session: a runner ``setsid`` gave a session of its own
+        (``leader``), and what it started, never takes it, as a
+        terminal's hangup never reaches another session.
 
         Args:
             pid (int): the parent or ancestor.
             signal (int): what the stop stands for, as the parent's.
         """
+        with self._lock:
+            live = self._live.get(pid)
+            ended = self._ended.get(pid)
+        own = (
+            live[1].record.leader
+            if live is not None
+            else ended[1].leader
+            if ended is not None
+            else None
+        )
         for child in self._under(pid):
+            if signal == SIGHUP and child.record.leader != own:
+                continue
             child.terminate(signal)
 
     async def scan(self) -> None:

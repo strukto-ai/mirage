@@ -277,11 +277,12 @@ describe('ShellExecution', () => {
     }
   })
 
-  it('hangup spares a job setsid moved out of the session', async () => {
+  it('hangup spares a child setsid moved out of the session', async () => {
     const ws = new Workspace({})
     try {
       ws.createSession('s1')
-      await ws.shell('setsid sleep 60 & sleep 61 &', { sessionId: 's1' })
+      const line = 'setsid sleep 60 & sleep 61'
+      const execution = await ws.shell(line, { sessionId: 's1', stream: true })
       const jobs = (): Map<string, ProcessHandle> =>
         new Map(
           [...ws.processTable.live()]
@@ -289,13 +290,15 @@ describe('ShellExecution', () => {
             .map((p) => [p.record.command, p]),
         )
       let found = jobs()
-      for (let i = 0; i < 500 && !(found.has('sleep 60') && found.has('sleep 61')); i++) {
+      for (let i = 0; i < 500 && !(found.has(line) && found.has('sleep 60')); i++) {
         await new Promise((resolve) => setTimeout(resolve, 10))
         found = jobs()
       }
-      expect([...found.keys()].sort()).toEqual(['sleep 60', 'sleep 61'])
-      await ws.hangup('s1')
-      expect(found.get('sleep 61')?.signal).toBe(1)
+      expect([...found.keys()].sort()).toEqual(['setsid sleep 60 & sleep 61', 'sleep 60'])
+      expect(await ws.hangup('s1')).toBe(1)
+      await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
+      await execution.close()
+      expect(found.get(line)?.signal).toBe(1)
       expect(found.get('sleep 60')?.signal ?? null).toBeNull()
       expect([...ws.processTable.live()]).toContain(found.get('sleep 60'))
     } finally {

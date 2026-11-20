@@ -16,7 +16,7 @@ import { PassThrough } from 'node:stream'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
-import type { ServerChannel } from 'ssh2'
+import type { ClientChannel, ServerChannel } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry } from '../registry.ts'
 import {
@@ -105,9 +105,17 @@ describe('command channels', () => {
   it('are hung up when a terminal drops with input left unread', async () => {
     const h = await startHarness()
     const client = await connect(h)
-    client.exec('sleep 30', { pty: true }, (err, stream) => {
-      if (err === undefined) stream.write('a'.repeat(3 * 1024 * 1024))
+    const stream = await new Promise<ClientChannel>((resolve, reject) => {
+      client.exec('sleep 30', { pty: true }, (err, opened) => {
+        if (err !== undefined) reject(err)
+        else resolve(opened)
+      })
     })
+    for (let i = 0; i < 500 && sshSessions(h).length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(sshSessions(h)).toHaveLength(1)
+    stream.write('a'.repeat(3 * 1024 * 1024))
     await new Promise((r) => setTimeout(r, 500))
     ;(client as unknown as { _sock: { destroy(): void } })._sock.destroy()
     await untilSessionsClose(h)
