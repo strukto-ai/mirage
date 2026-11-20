@@ -71,6 +71,10 @@ def _class_source(shown: str, text: str, i: int) -> tuple[str, int]:
             return prefix + "".join(members) + "]", i + 1
         first = False
         if i + 2 < len(text) and text[i + 1] == "-" and text[i + 2] != "]":
+            if ch > text[i + 2]:
+                raise glob_error(
+                    shown, f"invalid range; '{ch}' > '{text[i + 2]}'"
+                )
             members.append(re.escape(ch) + "-" + re.escape(text[i + 2]))
             i += 3
             continue

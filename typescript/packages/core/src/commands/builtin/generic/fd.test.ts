@@ -266,4 +266,47 @@ describe('fdGeneric', () => {
     )
     expect(out[1]).toBe('link/b.txt\n')
   })
+  it('refuses what it reads once its options parse', async () => {
+    const out = await run(
+      SETUP,
+      'cd /w/r && fd -j 0 x; echo $?',
+      "cd /w/r && fd -X './{/.}' a.ts; echo $?",
+      'cd /w/r && fd -X echo {} {/} a.ts; echo $?',
+      "cd /w/r && fd -E '[z-a]' x; echo $?",
+    )
+    const usage = '\n\nUsage: fd [OPTIONS] [pattern] [path]...'
+    expect(out[1]).toBe(
+      "2\nerror: invalid value '0' for '--threads <num>': number would be zero for non-zero type" +
+        HINT,
+    )
+    expect(out[2]).toBe(
+      `2\nerror: First argument of exec-batch is expected to be a fixed executable${usage}${HINT}`,
+    )
+    expect(out[3]).toBe(`2\nerror: Only one placeholder allowed for batch commands${usage}${HINT}`)
+    expect(out[4]).toBe(
+      "1\n[fd error]: Malformed exclude pattern: error parsing glob '![z-a]': invalid range; 'z' > 'a'\n",
+    )
+  })
+
+  it('reads a bare --strip-cwd-prefix as always', async () => {
+    const out = await run(SETUP, 'cd /w/r && fd -0 --strip-cwd-prefix c.py | od -c | head -1')
+    expect(out[1]).toBe('0000000   s   r   c   /   s   u   b   /   c   .   p   y  \\0\n')
+  })
+
+  it('charges a linked mount its own walk limit', async () => {
+    const capped = new RAMVFS()
+    capped.walkLimit = 2
+    const ws = new Workspace({ '/': new RAMVFS(), '/m': capped }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /m/d /w && touch /m/d/a /m/d/b /m/d/c && ln -s /m/d /w/l')
+      const io = await ws.shell('fd -L . /w')
+      expect(io.exitCode).toBe(1)
+      expect(new TextDecoder().decode(io.stdout)).toBe('/w/l/\n/w/l/a\n/w/l/b\n')
+      expect(new TextDecoder().decode(io.stderr)).toBe(
+        '[fd error]: /m: stopped after 2 files (walk_limit); narrow the path\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
 })

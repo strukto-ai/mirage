@@ -21,20 +21,14 @@ import { shellJoin } from '../../../shell/join.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { gnuBasename as basename } from '../../../utils/path.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import {
-  FileType,
-  LineFacts,
-  PathSpec,
-  type FileStat,
-  type ReaddirFn,
-  type StatFn,
-} from '../../../types.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { FileType, LineFacts, PathSpec, type FileStat, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND } from '../../spec/constants.ts'
 import { FlagView, specFlagNames } from '../../spec/flag_view.ts'
-import { clapConflict, clapShown } from '../../spec/usage.ts'
+import { clapConflict, clapShown, clapUsage } from '../../spec/usage.ts'
 import { FileTypes } from '../rg_filetypes.ts'
 import {
   type IgnoreSources,
@@ -48,8 +42,8 @@ import { type Haystack, WalkFilter, walkHaystacks } from '../rg_scan.ts'
 import { type RgFlags, type Tally, smartCaseFolds } from '../rg_search.ts'
 import { type RgProgram, openRg, streamHaystack } from '../rg_stream.ts'
 import { dispatchOf, linkResolver, mountRoot, mountsOf } from '../utils/links.ts'
-import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
-import { WalkBudget } from '../utils/tree.ts'
+import { vfsStatPath } from '../utils/paths.ts'
+import { WalkBudget, type WalkCall } from '../utils/tree.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { ignoreReader, parseFlags as rgFlags } from './rg.ts'
 
@@ -308,10 +302,15 @@ export function parseFlags(fl: FlagView, texts: readonly string[]): FdFlags {
   let maxResults = count(fl, 'max_results', '--max-results <count>')
   if (last(fl, 'max_results', 'args_1') === 'args_1') maxResults = 1
   if (maxResults === 0) maxResults = null
-  count(fl, 'threads', '--threads <num>')
+  if (count(fl, 'threads', '--threads <num>') === 0)
+    throw clapError(
+      "invalid value '0' for '--threads <num>': number would be zero for non-zero type",
+    )
   const execCommands = commands(fl, 'exec', '--exec <cmd>...')
   const batchCommands = commands(fl, 'exec_batch', '--exec-batch <cmd>...')
   refuseConflicts(typedArguments(fl))
+  for (const words of batchCommands ?? []) refuseBatch(words)
+  const strip = fl.raw('strip_cwd_prefix')
   return {
     pattern,
     syntax,
@@ -332,8 +331,23 @@ export function parseFlags(fl: FlagView, texts: readonly string[]): FdFlags {
     quiet: fl.asBool('quiet'),
     execCommands,
     batchCommands,
-    stripPrefix: fl.asStr('strip_cwd_prefix') ?? 'auto',
+    stripPrefix: strip === true ? 'always' : typeof strip === 'string' ? strip : 'auto',
   }
+}
+
+/**
+ * Refuse an -X command fd refuses once its options are read: one with a
+ * placeholder in more than one word, or in the program's. Mirrors Python's
+ * _refuse_batch.
+ */
+function refuseBatch(words: readonly string[]): void {
+  const holders = words.filter((word) => word.search(PLACEHOLDER) !== -1)
+  let reason: string
+  if (holders.length > 1) reason = 'Only one placeholder allowed for batch commands'
+  else if ((words[0] ?? '').search(PLACEHOLDER) !== -1)
+    reason = 'First argument of exec-batch is expected to be a fixed executable'
+  else return
+  throw clapError(`${reason}\n\n${clapUsage('fd', '[OPTIONS]')}`)
 }
 
 /**
@@ -615,7 +629,7 @@ export async function fdGeneric(
   texts: string[],
   ctx: Context,
   stat: StatFn,
-  readdir: ReaddirFn,
+  readdir: WalkCall<string[]>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('fd'))
   let f: FdFlags
@@ -641,7 +655,8 @@ export async function fdGeneric(
  * fd's walk and output once its flags parsed. -E is rooted at the first
  * search path, as fd roots its overrides. A result limit walks the roots as
  * typed, each directory in name order, and stops once it is met. Each
- * operand's walk stops at its mounts' `walkLimit`, reported in fd's voice.
+ * operand's walk stops at its mounts' `walkLimit`, reported in fd's voice; a
+ * directory -L reaches outside the operand counts against its own mount.
  * Mirrors Python's _search.
  */
 async function search(
@@ -650,12 +665,16 @@ async function search(
   matcher: Matcher,
   ctx: Context,
   stat: StatFn,
-  readdir: ReaddirFn,
+  readdir: WalkCall<string[]>,
 ): Promise<CommandFnResult> {
   const dispatch = dispatchOf(ctx)
   const cwd = ctx.cwd.virtual
   const mounts = mountsOf(ctx)
-  const rd = mountParentReaddir((p: string) => readdir(toPathspec(p)), mounts, mountRoot(ctx))
+  const rd = mountParentReaddir(
+    (p: string, limit?: number) => readdir(toPathspec(p), false, limit),
+    mounts,
+    mountRoot(ctx),
+  )
   const st = mountParentStat((p: string) => stat(toPathspec(p)), mounts)
   const err: Uint8Array[] = []
   const roots: [PathSpec, string][] = []
@@ -678,13 +697,22 @@ async function search(
     err.push(encodeText('[fd error]: No valid search paths given.\n'))
     return [null, new IOResult({ exitCode: 1, stderr: concat(err) })]
   }
-  const walk = new WalkFilter(
-    new Overrides(
+  let excludes: Overrides
+  try {
+    excludes = new Overrides(
       f.excludes.map((glob) => `!${glob}`),
       [],
       false,
       walkCandidate(roots[0]?.[1] ?? '', cwd),
-    ),
+    )
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error
+    const reason = error.message.replace(/^rg: /, '')
+    err.push(encodeText(`[fd error]: Malformed exclude pattern: ${reason}\n`))
+    return [null, new IOResult({ exitCode: 1, stderr: concat(err) })]
+  }
+  const walk = new WalkFilter(
+    excludes,
     new FileTypes([], []),
     f.hidden,
     f.maxDepth,
@@ -699,17 +727,44 @@ async function search(
   const reader = ignoreReader(dispatch)
   const ignore = reader === null ? null : { sources: f.sources, reader }
   const found: Result[] = []
-  const readdirPath = vfsReaddirPath(ctx.vfs)
   const statPath = vfsStatPath(ctx.vfs)
+  const beyond = new Map<string, WalkBudget>()
   for (const [root, shownRoot] of roots) {
     const home = mounts?.rootOf(root.virtual) ?? null
     const budget = new WalkBudget(root, mounts ?? null)
     const crosses = (path: string): boolean =>
       mounts !== undefined && home !== null && mounts.rootOf(path) !== home
-    const listed = async (path: string): Promise<string[]> =>
-      readdirPath !== undefined && crosses(path) ? readdirPath(path) : rd(path)
+    const listed = async (path: string, limit?: number): Promise<string[]> => {
+      if (dispatch !== undefined && crosses(path)) {
+        const [entries] = await dispatch(
+          'readdir',
+          PathSpec.fromStrPath(path, undefined, '/'),
+          [],
+          limit === undefined ? {} : { limit },
+        )
+        return [...(entries as string[])]
+      }
+      return rd(path, limit)
+    }
     const walkRd = (path: string): Promise<string[]> =>
-      budget.listing((directory) => listed(directory.virtual), PathSpec.fromStrPath(path))
+      budget.listing(
+        (directory, _nofollow, limit) => listed(directory.virtual, limit),
+        PathSpec.fromStrPath(path),
+      )
+    const top = rstripSlash(root.virtual)
+    const linkRd = (path: string): Promise<string[]> => {
+      if (resolver === null) return Promise.resolve([])
+      let spent = budget
+      if (mounts !== undefined && !(path === top || path.startsWith(`${top}/`))) {
+        const at = rstripSlash(mounts.rootOf(path)) || '/'
+        spent = beyond.get(at) ?? new WalkBudget(PathSpec.fromStrPath(at), mounts)
+        beyond.set(at, spent)
+      }
+      return spent.listing(
+        (directory, _nofollow, limit) => resolver.readdir(directory.virtual, limit),
+        PathSpec.fromStrPath(path),
+      )
+    }
     const walkSt = async (path: string): Promise<FileStat> => {
       if (statPath !== undefined && crosses(path)) {
         const at = await statPath(path)
@@ -733,6 +788,8 @@ async function search(
       true,
       ignore,
       true,
+      null,
+      linkRd,
     )) {
       if (await kept(hit, f, matcher, cwd, listed)) {
         found.push({
@@ -746,6 +803,8 @@ async function search(
     for (const line of budget.stopped) if (!stopped.includes(line)) stopped.push(line)
     if (found.length > 0 && (f.quiet || found.length === limit)) break
   }
+  for (const far of beyond.values())
+    for (const line of far.stopped) if (!stopped.includes(line)) stopped.push(line)
   for (const line of warnings) console.debug(`fd: ${line}`)
   for (const line of stopped) err.push(encodeText(`[fd error]: ${line}\n`))
   if (f.quiet)

@@ -333,6 +333,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     sort: values.sort,
     sortReverse: values.sort_reverse,
     noMessages: last(fl, 'no_messages', 'messages') === 'no_messages',
+    noIgnoreMessages: last(fl, 'no_ignore_messages', 'ignore_messages') === 'no_ignore_messages',
     threads: values.threads,
     text: binaryMode === 'text',
     encoding: values.encoding,
@@ -628,7 +629,7 @@ async function noted(
   f: RgFlags,
 ): Promise<[ByteSource | null, IOResult]> {
   const [out, io] = result
-  if (notes.length > 0 && !f.noMessages)
+  if (notes.length > 0 && !(f.noMessages || f.noIgnoreMessages === true))
     io.stderr = concat([
       formatRecords(notes),
       io.stderr === null ? new Uint8Array() : await materialize(io.stderr),
@@ -905,6 +906,14 @@ export async function* haystacks(
   }
 }
 
+// What a search prints on stderr: the ignore files' word unless
+// --no-ignore-messages silences it, then the warnings, nothing under
+// --no-messages. Mirrors Python's _stderr_lines.
+function stderrLines(f: RgFlags, notes: readonly string[], warnings: readonly string[]): string[] {
+  if (f.noMessages) return []
+  return [...(f.noIgnoreMessages === true ? [] : notes), ...warnings]
+}
+
 // --files: every path the search would read, and nothing searched. `notes`
 // is the ignore files' word, printed ahead of the warnings with the exit
 // status untouched.
@@ -925,7 +934,7 @@ async function* listFiles(
     }
   } finally {
     io.exitCode = exitCodeFor(selected, warnings.length > 0, f.quiet)
-    const shown = f.noMessages ? [] : [...notes, ...warnings]
+    const shown = stderrLines(f, notes, warnings)
     if (shown.length > 0) io.stderr = concat([await materialize(io.stderr), formatRecords(shown)])
   }
 }
@@ -1152,7 +1161,7 @@ async function* searchAll(
     // skipped counts as one without a match, though no listing names it.
     if (f.filesWithoutMatch && !f.quiet) selected = printed || skipped
     let code = exitCodeFor(selected, warnings.length > 0, f.quiet)
-    const shown = f.noMessages ? [] : [...notes, ...warnings]
+    const shown = stderrLines(f, notes, warnings)
     if (implicit && searched === 0) {
       // An error whatever --no-messages says, which only silences it.
       if (!f.noMessages) shown.push(NOTHING_SEARCHED)

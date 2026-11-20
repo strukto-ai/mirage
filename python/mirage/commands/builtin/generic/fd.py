@@ -51,7 +51,7 @@ from mirage.commands.builtin.utils.links import (
     mount_root,
     mounts_of,
 )
-from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.builtin.utils.wrap import (
     mount_parent_readdir,
@@ -63,7 +63,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView, spec_flag_names
-from mirage.commands.spec.usage import clap_conflict, clap_shown
+from mirage.commands.spec.usage import clap_conflict, clap_shown, clap_usage
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
 from mirage.io.stream import drain, yield_bytes
@@ -389,10 +389,17 @@ def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
         max_results = 1
     if max_results == 0:
         max_results = None
-    _count(fl, "threads", "--threads <num>")
+    if _count(fl, "threads", "--threads <num>") == 0:
+        raise _clap_error(
+            "invalid value '0' for '--threads <num>': number would be zero "
+            "for non-zero type"
+        )
     exec_commands = _commands(fl, "exec", "--exec <cmd>...")
     batch_commands = _commands(fl, "exec_batch", "--exec-batch <cmd>...")
     _refuse_conflicts(_typed_arguments(fl))
+    for words in batch_commands or ():
+        _refuse_batch(words)
+    strip = fl.raw("strip_cwd_prefix")
     return FdFlags(
         pattern=pattern,
         syntax=syntax,
@@ -415,8 +422,36 @@ def parse_flags(fl: FlagView, texts: Sequence[str]) -> FdFlags:
         quiet=fl.as_bool("quiet"),
         exec_commands=exec_commands,
         batch_commands=batch_commands,
-        strip_prefix=fl.as_str("strip_cwd_prefix") or "auto",
+        strip_prefix=(
+            "always"
+            if strip is True
+            else strip
+            if isinstance(strip, str)
+            else "auto"
+        ),
     )
+
+
+def _refuse_batch(words: Sequence[str]) -> None:
+    """Refuse an -X command fd refuses once its options are read: one
+    with a placeholder in more than one word, or in the program's.
+
+    Args:
+        words (Sequence[str]): the command as typed.
+
+    Raises:
+        UsageError: the command, in fd's words under clap's frame.
+    """
+    holders = [word for word in words if _PLACEHOLDER.search(word)]
+    if len(holders) > 1:
+        reason = "Only one placeholder allowed for batch commands"
+    elif words and _PLACEHOLDER.search(words[0]):
+        reason = (
+            "First argument of exec-batch is expected to be a fixed executable"
+        )
+    else:
+        return
+    raise _clap_error(f"{reason}\n\n{clap_usage('fd', '[OPTIONS]')}")
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
@@ -763,9 +798,9 @@ async def _search(
     """fd's walk and output once its flags parsed. -E is rooted at the
     first search path, as fd roots its overrides. A result limit walks
     the roots as typed, each directory in name order, and stops once it
-    is met.
-    Each operand's walk stops at its mounts' ``walk_limit``, reported in
-    fd's voice.
+    is met. Each operand's walk stops at its mounts' ``walk_limit``,
+    reported in fd's voice; a directory -L reaches outside the operand
+    counts against its own mount.
 
     Args:
         paths (list[PathSpec]): the search paths; none searches the cwd.
@@ -779,7 +814,9 @@ async def _search(
     cwd = ctx.cwd.virtual
     mounts = mounts_of(ctx)
     rd = mount_parent_readdir(
-        lambda path: readdir(to_pathspec(path)), mounts, mount_root(ctx)
+        lambda path, limit=None: readdir(to_pathspec(path), limit=limit),
+        mounts,
+        mount_root(ctx),
     )
     st = mount_parent_stat(lambda path: stat(to_pathspec(path)), mounts)
     err = bytearray()
@@ -803,13 +840,21 @@ async def _search(
     if not roots:
         err.extend(b"[fd error]: No valid search paths given.\n")
         return None, IOResult(exit_code=1, stderr=bytes(err))
-    walk = WalkFilter(
-        Overrides(
+    try:
+        excludes = Overrides(
             [f"!{glob}" for glob in f.excludes],
             [],
             False,
             walk_candidate(roots[0][1], cwd),
-        ),
+        )
+    except UsageError as exc:
+        reason = str(exc).removeprefix("rg: ")
+        err.extend(
+            encode_text(f"[fd error]: Malformed exclude pattern: {reason}\n")
+        )
+        return None, IOResult(exit_code=1, stderr=bytes(err))
+    walk = WalkFilter(
+        excludes,
         FileTypes([], []),
         f.hidden,
         f.max_depth,
@@ -824,8 +869,8 @@ async def _search(
     reader = ignore_reader(dispatch)
     ignore = None if reader is None else (f.sources, reader)
     found: list[_Result] = []
-    readdir_path = vfs_readdir_path(ctx.vfs)
     stat_path = vfs_stat_path(ctx.vfs)
+    beyond: dict[str, WalkBudget] = {}
     for root, shown_root in roots:
         home = None if mounts is None else mounts.root_of(root.virtual)
         budget = WalkBudget(root, mounts)
@@ -837,18 +882,46 @@ async def _search(
                 and mounts.root_of(path) != home
             )
 
-        async def listed(path: str, home: str | None = home) -> list[str]:
-            if readdir_path is not None and crosses(path, home):
-                return await readdir_path(path)
-            return await rd(path)
+        async def listed(
+            path: str, limit: int | None = None, home: str | None = home
+        ) -> list[str]:
+            if dispatch is not None and crosses(path, home):
+                spec = PathSpec.from_str_path(path, cwd="/")
+                if limit is None:
+                    entries, _ = await dispatch("readdir", spec)
+                else:
+                    entries, _ = await dispatch("readdir", spec, limit=limit)
+                return list(entries)
+            return list(await rd(path, limit))
 
         async def walk_rd(
             path: str,
-            listed: Callable[[str], Awaitable[list[str]]] = listed,
+            listed: Callable[..., Awaitable[list[str]]] = listed,
             budget: WalkBudget = budget,
         ) -> list[str]:
             return await budget.listing(
-                lambda directory, **_: listed(directory.virtual),
+                lambda directory, limit=None: listed(directory.virtual, limit),
+                PathSpec.from_str_path(path),
+            )
+
+        async def link_rd(
+            path: str, budget: WalkBudget = budget, top: str = root.virtual
+        ) -> list[str]:
+            links = resolver
+            if links is None:
+                return []
+            base = top.rstrip("/")
+            if mounts is not None and not (
+                path == base or path.startswith(base + "/")
+            ):
+                at = mounts.root_of(path).rstrip("/") or "/"
+                budget = beyond.setdefault(
+                    at, WalkBudget(PathSpec.from_str_path(at), mounts)
+                )
+            return await budget.listing(
+                lambda directory, limit=None: links.readdir(
+                    directory.virtual, limit
+                ),
                 PathSpec.from_str_path(path),
             )
 
@@ -875,6 +948,7 @@ async def _search(
             True,
             ignore,
             entries=True,
+            link_readdir=link_rd,
         ):
             if await _kept(hit, f, matcher, cwd, listed):
                 is_dir = (
@@ -887,6 +961,8 @@ async def _search(
         stopped.extend(line for line in budget.stopped if line not in stopped)
         if found and (f.quiet or len(found) == limit):
             break
+    for far in beyond.values():
+        stopped.extend(line for line in far.stopped if line not in stopped)
     for line in warnings:
         logger.debug("fd: %s", line)
     for line in stopped:

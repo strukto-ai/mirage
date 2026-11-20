@@ -183,15 +183,21 @@ class _FilesReader:
         self._max_memory = max_memory
 
     async def read(self, path: str) -> bytes | None:
-        """A file's bytes, None when no file stands there.
+        """A file's bytes, None when no file stands there or it cannot
+        be read: ast-grep's walker goes on past an ignore file it cannot
+        read.
 
         Args:
             path (str): the file's virtual path.
         """
         file = PathSpec.from_str_path(path)
-        if not await self._vfs.is_file(file):
+        try:
+            if not await self._vfs.is_file(file):
+                return None
+            return await _read(self._vfs, file, self._max_memory)
+        except FS_ERRORS as exc:
+            logger.debug("ast-grep: cannot read %s: %s", path, exc)
             return None
-        return await _read(self._vfs, file, self._max_memory)
 
     async def names(self, dir_: str) -> frozenset[str] | None:
         """A directory's entry names, None when it cannot be listed.

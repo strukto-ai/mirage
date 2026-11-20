@@ -38,17 +38,21 @@
         "disk",
         "redis"
       ],
-      "command": "(cd /data/fdw && fd x nosuch; echo \"rc=$?\"; fd . nosuch docs; echo \"rc=$?\"; fd -t q; echo \"rc=$?\"; fd --hid; echo \"rc=$?\"; fd '['; echo \"rc=$?\"; fd -q -x echo {} a.ts; echo \"rc=$?\"; fd a src --strip-cwd-prefix; echo \"rc=$?\"; printf '[1\\n*.py\\n' > /data/fdw/bad && fd -t f --ignore-file /data/fdw/bad . src; echo \"rc=$?\"; rm /data/fdw/bad)",
+      "command": "(cd /data/fdw && fd x nosuch; echo \"rc=$?\"; fd . nosuch docs; echo \"rc=$?\"; fd -t q; echo \"rc=$?\"; fd --hid; echo \"rc=$?\"; fd '['; echo \"rc=$?\"; fd -q -x echo {} a.ts; echo \"rc=$?\"; fd a src --strip-cwd-prefix; echo \"rc=$?\"; printf '[1\\n*.py\\n' > /data/fdw/bad && fd -t f --ignore-file /data/fdw/bad . src; echo \"rc=$?\"; rm /data/fdw/bad; fd -j 0 x; echo \"rc=$?\"; fd -X echo {} {/}; echo \"rc=$?\"; fd -E '[z-a]' x; echo \"rc=$?\"; fd -0 --strip-cwd-prefix c.py | tr '\\0' '\\n')",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\ndocs/README.md\nrc=0\nrc=2\nrc=2\nrc=1\nrc=2\nrc=2\nsrc/a.ts\nrc=0\n",
-        "stderr": "[fd error]: Search path 'nosuch' is not a directory.\n[fd error]: No valid search paths given.\n[fd error]: Search path 'nosuch' is not a directory.\nerror: invalid value 'q' for '--type <filetype>'\n  [possible values: file, directory, symlink, block-device, char-device, executable, empty, socket, pipe]\n\nFor more information, try '--help'.\nerror: unexpected argument '--hid' found\n\n  tip: a similar argument exists: '--hidden'\n\nUsage: fd --hidden [pattern] [path]...\n\nFor more information, try '--help'.\n[fd error]: regex parse error:\n    [\n    ^\nerror: unclosed character class\n\nNote: You can use the '--fixed-strings' option to search for a literal string instead of a regular expression. Alternatively, you can also use the '--glob' option to match on a glob pattern.\nerror: the argument '--quiet' cannot be used with:\n  --exec <cmd>...\n  --exec-batch <cmd>...\n  --list-details\n\nUsage: fd --quiet [pattern] [path]...\n\nFor more information, try '--help'.\nerror: the argument '[path]...' cannot be used with '--strip-cwd-prefix[=<when>]'\n\nUsage: fd <pattern> <path>...\n\nFor more information, try '--help'.\n[fd error]: Malformed pattern in custom ignore file. /data/fdw/bad: line 1: error parsing glob '[1': unclosed character class; missing ']'.\n"
+        "stdout": "rc=1\ndocs/README.md\nrc=0\nrc=2\nrc=2\nrc=1\nrc=2\nrc=2\nsrc/a.ts\nrc=0\nrc=2\nrc=2\nrc=1\nsrc/sub/c.py\n",
+        "stderr": "[fd error]: Search path 'nosuch' is not a directory.\n[fd error]: No valid search paths given.\n[fd error]: Search path 'nosuch' is not a directory.\nerror: invalid value 'q' for '--type <filetype>'\n  [possible values: file, directory, symlink, block-device, char-device, executable, empty, socket, pipe]\n\nFor more information, try '--help'.\nerror: unexpected argument '--hid' found\n\n  tip: a similar argument exists: '--hidden'\n\nUsage: fd --hidden [pattern] [path]...\n\nFor more information, try '--help'.\n[fd error]: regex parse error:\n    [\n    ^\nerror: unclosed character class\n\nNote: You can use the '--fixed-strings' option to search for a literal string instead of a regular expression. Alternatively, you can also use the '--glob' option to match on a glob pattern.\nerror: the argument '--quiet' cannot be used with:\n  --exec <cmd>...\n  --exec-batch <cmd>...\n  --list-details\n\nUsage: fd --quiet [pattern] [path]...\n\nFor more information, try '--help'.\nerror: the argument '[path]...' cannot be used with '--strip-cwd-prefix[=<when>]'\n\nUsage: fd <pattern> <path>...\n\nFor more information, try '--help'.\n[fd error]: Malformed pattern in custom ignore file. /data/fdw/bad: line 1: error parsing glob '[1': unclosed character class; missing ']'.\nerror: invalid value '0' for '--threads <num>': number would be zero for non-zero type\n\nFor more information, try '--help'.\nerror: Only one placeholder allowed for batch commands\n\nUsage: fd [OPTIONS] [pattern] [path]...\n\nFor more information, try '--help'.\n[fd error]: Malformed exclude pattern: error parsing glob '![z-a]': invalid range; 'z' > 'a'\n"
       },
       "flags": [
         "type",
         "quiet",
         "strip_cwd_prefix",
-        "ignore_file"
+        "ignore_file",
+        "threads",
+        "exec_batch",
+        "exclude",
+        "print0"
       ]
     }
   ]

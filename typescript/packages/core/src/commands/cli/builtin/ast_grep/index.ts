@@ -183,9 +183,16 @@ function walkOf(off: ReadonlySet<string>, vfs: Files, maxMemory: number): Walk {
     },
     hidden: off.has('hidden'),
     reader: {
+      // ast-grep's walker goes on past an ignore file it cannot read.
       read: async (path) => {
         const file = PathSpec.fromStrPath(path)
-        return (await vfs.isFile(file)) ? read(vfs, file, maxMemory) : null
+        try {
+          return (await vfs.isFile(file)) ? await read(vfs, file, maxMemory) : null
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          console.debug(`ast-grep: cannot read ${path}: ${String(error)}`)
+          return null
+        }
       },
       names: async (dir) => {
         try {

@@ -258,11 +258,13 @@ describe('IgnoreStack', () => {
 
 describe('IgnoreRules with a line that does not compile', () => {
   it('keeps the lines around it', () => {
-    const rules = new IgnoreRules(['[', '*.log', '# note', '{'])
+    const rules = new IgnoreRules(['[', '*.log', '# note', '{', '[z-a]', '[a-c]x'])
     expect(rules.verdict('a.log', false)).toBe(Verdict.IGNORE)
+    expect(rules.verdict('bx', false)).toBe(Verdict.IGNORE)
     expect(rules.errors).toEqual([
       "line 1: error parsing glob '[': unclosed character class; missing ']'",
       "line 4: error parsing glob '{': unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)",
+      "line 5: error parsing glob '[z-a]': invalid range; 'z' > 'a'",
     ])
   })
 })

@@ -125,8 +125,13 @@ export class LinkResolver {
   }
 
   /** A directory's entries through the dispatcher, links among them. */
-  async readdir(virtual: string): Promise<string[]> {
-    const [entries] = await this.dispatch('readdir', PathSpec.fromStrPath(virtual))
+  async readdir(virtual: string, limit?: number): Promise<string[]> {
+    const [entries] = await this.dispatch(
+      'readdir',
+      PathSpec.fromStrPath(virtual),
+      [],
+      limit === undefined ? {} : { limit },
+    )
     return [...(entries as string[])]
   }
 

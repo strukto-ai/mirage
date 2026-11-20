@@ -460,6 +460,21 @@ describe('rg walks under the ignore files of each directory', () => {
     ])
   })
 
+  it('silences only the ignore files under --no-ignore-messages', async () => {
+    const out = await lines(
+      'mkdir -p /w/m/d && cd /w/m && echo t > d/c.txt && ' +
+        "printf '[z-a]\\n' > .ignore && printf '[\\n' > d/.ignore",
+      'cd /w/m && rg --files --no-ignore-messages --ignore-file nosuch',
+      'cd /w/m/d && rg --files --no-ignore-messages',
+    )
+    expect(out[1]).toEqual(['d/c.txt\n', '', 0])
+    expect(out[2]).toEqual([
+      'c.txt\n',
+      "rg: /w/m/.ignore: line 1: error parsing glob '[z-a]': invalid range; 'z' > 'a'\n",
+      2,
+    ])
+  })
+
   it('keeps a repository above without its rules', async () => {
     const out = await lines(
       'mkdir -p /w/q/.git /w/q/sub && cd /w/q && touch sub/keep sub/drop sub/top && ' +

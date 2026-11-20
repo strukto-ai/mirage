@@ -291,7 +291,9 @@ export function onOtherMount(rootOf: MountRoot, home: string, path: string): boo
  * in ripgrep's words and skipped. `notes` collects ripgrep's word on a
  * walked directory's ignore-file line that does not compile, which leaves the
  * exit status alone (null logs it); a directory above the operand reports its
- * own into `warnings`, an error. Mirrors Python's walk_haystacks.
+ * own into `warnings`, an error. `linkReaddir` lists a directory the walk
+ * reached through a link (null lists it through `resolver`). Mirrors
+ * Python's walk_haystacks.
  */
 export async function* walkHaystacks(
   readdirFn: AsyncReaddirFn,
@@ -309,6 +311,7 @@ export async function* walkHaystacks(
   ignore: { readonly sources: IgnoreSources; readonly reader: IgnoreReader } | null = null,
   entries = false,
   notes: string[] | null = null,
+  linkReaddir: AsyncReaddirFn | null = null,
 ): AsyncGenerator<Haystack> {
   const walker = new Walker(
     readdirFn,
@@ -325,6 +328,7 @@ export async function* walkHaystacks(
     ignore?.reader ?? null,
     entries,
     notes,
+    linkReaddir,
   )
   const stack = ignore === null ? null : await rootStack(root, ignore.sources, ignore.reader)
   if (stack !== null) {
@@ -356,6 +360,8 @@ class Walker {
     readonly entries = false,
     // Collects a walked directory's ignore-file lines that do not compile.
     readonly notes: string[] | null = null,
+    // Lists a directory reached through a link; null lists it through `resolver`.
+    readonly linkReaddir: AsyncReaddirFn | null = null,
   ) {}
 
   // A link as an entry of its own, when the walk lists entries and its
@@ -446,7 +452,10 @@ class Walker {
     const resolver = linked ? this.resolver : null
     let entries: string[]
     try {
-      entries = resolver !== null ? await resolver.readdir(here) : await this.readdirFn(here)
+      entries =
+        resolver !== null
+          ? await (this.linkReaddir ?? ((path: string) => resolver.readdir(path)))(here)
+          : await this.readdirFn(here)
     } catch (err) {
       if (!isWalkError(err)) throw err
       this.warn(walkErrorLine(chain[0]?.[1] ?? here, err, this.parallel))

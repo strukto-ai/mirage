@@ -309,3 +309,61 @@ async def test_fd_matches_ignore_rules_on_the_path_it_walked():
         "cd /w/L/repo && fd -L -t f",
     )
     assert out[1] == "link/b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_refuses_what_it_reads_once_its_options_parse():
+    out = await _run(
+        SETUP,
+        "cd /w/r && fd -j 0 x; echo $?",
+        "cd /w/r && fd -X './{/.}' a.ts; echo $?",
+        "cd /w/r && fd -X echo {} {/} a.ts; echo $?",
+        "cd /w/r && fd -E '[z-a]' x; echo $?",
+    )
+    usage = "\n\nUsage: fd [OPTIONS] [pattern] [path]..."
+    assert out[1] == (
+        "2\nerror: invalid value '0' for '--threads <num>': number would be "
+        f"zero for non-zero type{CLAP_HINT}"
+    )
+    assert out[2] == (
+        "2\nerror: First argument of exec-batch is expected to be a fixed "
+        f"executable{usage}{CLAP_HINT}"
+    )
+    assert out[3] == (
+        "2\nerror: Only one placeholder allowed for batch commands"
+        f"{usage}{CLAP_HINT}"
+    )
+    assert out[4] == (
+        "1\n[fd error]: Malformed exclude pattern: error parsing glob "
+        "'![z-a]': invalid range; 'z' > 'a'\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fd_reads_a_bare_strip_cwd_prefix_as_always():
+    out = await _run(
+        SETUP, "cd /w/r && fd -0 --strip-cwd-prefix c.py | od -c | head -1"
+    )
+    assert out[1] == (
+        "0000000   s   r   c   /   s   u   b   /   c   .   p   y  \\0\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fd_charges_a_linked_mount_its_own_walk_limit():
+    capped = RAMVFS()
+    capped.walk_limit = 2
+    ws = Workspace({"/": RAMVFS(), "/m": capped}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "mkdir -p /m/d /w && touch /m/d/a /m/d/b /m/d/c && ln -s /m/d /w/l"
+        )
+        io = await ws.shell("fd -L . /w")
+        assert io.exit_code == 1
+        assert io.stdout == b"/w/l/\n/w/l/a\n/w/l/b\n"
+        assert io.stderr == (
+            b"[fd error]: /m: stopped after 2 files (walk_limit); "
+            b"narrow the path\n"
+        )
+    finally:
+        await ws.close()

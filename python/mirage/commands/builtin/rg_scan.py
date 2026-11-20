@@ -407,6 +407,7 @@ async def walk_haystacks(
     ignore: tuple[IgnoreSources, IgnoreReader] | None = None,
     entries: bool = False,
     notes: list[str] | None = None,
+    link_readdir: AsyncReaddirFn | None = None,
 ) -> AsyncIterator[Haystack]:
     """The files a walk of one directory operand searches, in walk order.
 
@@ -448,6 +449,8 @@ async def walk_haystacks(
             directory's ignore-file line that does not compile, which
             leaves the exit status alone; None logs it. A directory above
             the operand reports its own into ``warnings``, an error.
+        link_readdir (AsyncReaddirFn | None): lists a directory the walk
+            reached through a link; None lists it through ``resolver``.
     """
     walker = _Walker(
         readdir_fn,
@@ -464,6 +467,7 @@ async def walk_haystacks(
         None if ignore is None else ignore[1],
         entries,
         notes,
+        link_readdir,
     )
     stack = None if ignore is None else await root_stack(root, *ignore)
     if stack is not None:
@@ -499,6 +503,8 @@ class _Walker:
         entries (bool): yield every kept entry, not regular files alone.
         notes (list[str] | None): collects a walked directory's
             ignore-file lines that do not compile; None logs them.
+        link_readdir (AsyncReaddirFn | None): lists a directory reached
+            through a link; None lists it through ``resolver``.
     """
 
     readdir_fn: AsyncReaddirFn
@@ -515,6 +521,7 @@ class _Walker:
     reader: IgnoreReader | None = None
     entries: bool = False
     notes: list[str] | None = None
+    link_readdir: AsyncReaddirFn | None = None
 
     def link_entry(
         self,
@@ -655,7 +662,7 @@ class _Walker:
         resolver = self.resolver if linked else None
         try:
             if resolver is not None:
-                entries = await resolver.readdir(here)
+                entries = await (self.link_readdir or resolver.readdir)(here)
             else:
                 entries = await self.readdir_fn(here)
         except WALK_ERRORS as exc:

@@ -23,11 +23,10 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const fd: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const readdir = (p: PathSpec): Promise<string[]> => files.readdir(p)
   const stat = (p: PathSpec): Promise<FileStat> => files.stat(p)
   const [levelReaddir, levelStat] = treeWalk<string[], FileStat>(
     files.readTree,
-    readdir,
+    files.readdir,
     stat,
     false,
     files.signal,

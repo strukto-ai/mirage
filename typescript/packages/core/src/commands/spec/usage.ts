@@ -679,7 +679,11 @@ export function clapConflict(
   return `the argument '${first}' cannot be used with${against}\n\n${usage}`
 }
 
-function clapUsage(cmdName: string, used: string): string {
+/**
+ * clap's usage line for a builtin: `used` (the arguments it names, or
+ * `[OPTIONS]`) before the operands' slots. Mirrors Python's clap_usage.
+ */
+export function clapUsage(cmdName: string, used: string): string {
   const compiled = compileSpec(specOf(cmdName))
   const slots = compiled.positional.map((operand) => operandSlot(operand))
   if (compiled.rest !== null) slots.push(operandSlot(compiled.rest, true))

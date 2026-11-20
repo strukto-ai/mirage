@@ -87,6 +87,8 @@ export interface RgFlags {
   sort: string | null
   sortReverse: boolean
   noMessages: boolean
+  // Silences what the ignore files say about themselves.
+  noIgnoreMessages?: boolean
   // The regex engine: `default` (ripgrep's own), `pcre2` or `auto`.
   engine: string
   // Unicode mode for either engine, on unless --no-unicode (or its alias

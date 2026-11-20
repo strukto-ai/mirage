@@ -620,6 +620,23 @@ async def test_rg_keeps_the_rules_around_a_bad_ignore_line():
 
 
 @pytest.mark.asyncio
+async def test_rg_no_ignore_messages_silences_only_the_ignore_files():
+    out = await _lines(
+        "mkdir -p /w/m/d && cd /w/m && echo t > d/c.txt"
+        " && printf '[z-a]\\n' > .ignore && printf '[\\n' > d/.ignore",
+        "cd /w/m && rg --files --no-ignore-messages --ignore-file nosuch",
+        "cd /w/m/d && rg --files --no-ignore-messages",
+    )
+    assert out[1] == ("d/c.txt\n", "", 0)
+    assert out[2] == (
+        "c.txt\n",
+        "rg: /w/m/.ignore: line 1: error parsing glob '[z-a]': invalid "
+        "range; 'z' > 'a'\n",
+        2,
+    )
+
+
+@pytest.mark.asyncio
 async def test_rg_keeps_a_repository_above_without_its_rules():
     out = await _lines(
         "mkdir -p /w/q/.git /w/q/sub && cd /w/q && touch sub/keep sub/drop"

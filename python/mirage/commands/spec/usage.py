@@ -838,7 +838,14 @@ def clap_conflict(
     return f"the argument '{first}' cannot be used with{against}\n\n{usage}"
 
 
-def _clap_usage(cmd_name: str, used: str) -> str:
+def clap_usage(cmd_name: str, used: str) -> str:
+    """clap's usage line for a builtin: ``used`` (the arguments it names,
+    or ``[OPTIONS]``) before the operands' slots.
+
+    Args:
+        cmd_name (str): the command name.
+        used (str): what the line names ahead of the operands.
+    """
     compiled = compile_spec(SPECS[cmd_name])
     slots = [operand_slot(operand) for operand in compiled.positional]
     if compiled.rest is not None:
@@ -874,7 +881,7 @@ def clap_unknown_option(cmd_name: str, token: str) -> tuple[bytes, int]:
             used = _clap_display(opt)
     text = (
         f"{clap_unexpected_argument(name)}\n\n  {tip}\n\n"
-        f"{_clap_usage(cmd_name, used)}{CLAP_FOOTER}"
+        f"{clap_usage(cmd_name, used)}{CLAP_FOOTER}"
     )
     return encode_text(text), usage_exit_code(cmd_name)
 

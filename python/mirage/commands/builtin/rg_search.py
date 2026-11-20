@@ -37,7 +37,8 @@ class RgFlags:
     -E: auto, none, or the WHATWG name of the encoding a label named.
     regex_size_limit and dfa_size_limit are ripgrep's compile limits in
     bytes, None for its own. ignore_sources is which ignore files the walk
-    reads, after --no-ignore and its kin.
+    reads, after --no-ignore and its kin. no_ignore_messages silences what
+    the ignore files say about themselves.
     """
 
     ignore_case: bool
@@ -92,6 +93,7 @@ class RgFlags:
     sort_reverse: bool
     no_messages: bool
     null_data: bool = False
+    no_ignore_messages: bool = False
     crlf: bool = False
     multiline: bool = False
     multiline_dotall: bool = False

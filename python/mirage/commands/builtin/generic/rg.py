@@ -418,6 +418,8 @@ def parse_flags(fl: FlagView) -> RgFlags:
         sort=values["sort"],
         sort_reverse=values["sort_reverse"],
         no_messages=_last(fl, "no_messages", "messages") == "no_messages",
+        no_ignore_messages=_last(fl, "no_ignore_messages", "ignore_messages")
+        == "no_ignore_messages",
         threads=values["threads"],
         text=binary_mode == "text",
         encoding=values["encoding"],
@@ -770,9 +772,26 @@ async def _noted(
         f (RgFlags): the parsed flags.
     """
     out, io = result
-    if notes and not f.no_messages:
+    if notes and not (f.no_messages or f.no_ignore_messages):
         io.stderr = format_records(notes) + (await materialize(io.stderr))
     return out, io
+
+
+def _stderr_lines(
+    f: RgFlags, notes: Sequence[str], warnings: Sequence[str]
+) -> list[str]:
+    """What a search prints on stderr: the ignore files' word unless
+    --no-ignore-messages silences it, then the warnings, nothing under
+    --no-messages.
+
+    Args:
+        f (RgFlags): the parsed flags.
+        notes (Sequence[str]): the ignore files' word.
+        warnings (Sequence[str]): what could not be read.
+    """
+    if f.no_messages:
+        return []
+    return [*(() if f.no_ignore_messages else notes), *warnings]
 
 
 async def _up_to_damage(
@@ -1149,7 +1168,7 @@ async def _list_files(
     finally:
         await close_quietly(found)
         io.exit_code = exit_code_for(selected, bool(warnings), f.quiet)
-        shown = [] if f.no_messages else [*notes, *warnings]
+        shown = _stderr_lines(f, notes, warnings)
         if shown:
             io.stderr = await materialize(io.stderr) + format_records(shown)
 
@@ -1412,7 +1431,7 @@ async def _search_all(
             # without a match, though no listing names it.
             selected = printed or skipped
         code = exit_code_for(selected, bool(warnings), f.quiet)
-        shown = [] if f.no_messages else [*notes, *warnings]
+        shown = _stderr_lines(f, notes, warnings)
         if implicit and searched == 0:
             # An error whatever --no-messages says, which only silences it.
             if not f.no_messages:

@@ -77,7 +77,10 @@ function classSource(shown: string, text: string, i: number, fold = false): [str
     }
     first = false
     if (i + 2 < text.length && text[i + 1] === '-' && text[i + 2] !== ']') {
-      members.push(classPart(ch, text[i + 2] ?? '', fold))
+      const end = text[i + 2] ?? ''
+      if ((ch.codePointAt(0) ?? 0) > (end.codePointAt(0) ?? 0))
+        throw globError(shown, `invalid range; '${ch}' > '${end}'`)
+      members.push(classPart(ch, end, fold))
       i += 3
       continue
     }
