@@ -328,6 +328,53 @@ class MountCore:
             return self._root
         return self._root + path
 
+    async def client_path(self, path: str) -> str:
+        """Walk dots against the client's root before mapping into the workspace.
+
+        The dispatcher checks and follows each directory consumed by a dot.
+        The operation still gets the final name and its trailing slash.
+
+        Args:
+            path (str): absolute or root-relative client spelling.
+        """
+        parts: list[str] = []
+        for part in path.split("/"):
+            if not part:
+                continue
+            if part not in (".", ".."):
+                parts.append(part)
+            elif parts:
+                prefix = "/" + "/".join(parts)
+                if not is_dir(await self.stat(prefix)):
+                    raise enotdir(path)
+                prefix = self._client_identity(prefix)
+                if part == "..":
+                    prefix = posixpath.dirname(prefix)
+                parts = prefix[1:].split("/") if prefix != "/" else []
+        name = "/" + "/".join(parts)
+        if parts and path.endswith("/"):
+            name += "/"
+        return name
+
+    async def canonical_client_path(self, path: str) -> str:
+        """Return the client's absolute name, following an existing final link.
+
+        Args:
+            path (str): absolute or root-relative client spelling.
+        """
+        name = await self.client_path(path)
+        if await self._row_or_none(name) is None:
+            return name.rstrip("/") or "/"
+        return self._client_identity(name)
+
+    def _client_identity(self, path: str) -> str:
+        resolved = self.identity(path)
+        if resolved == self._root:
+            return "/"
+        if not resolved.startswith(self._root + "/"):
+            raise enoent(path)
+        return resolved[len(self._root) :]
+
     def attrs(self, s: FileStat, size: int | None = None) -> MountAttrs:
         """The POSIX attrs for one stat row, the way a guest's stat reads
         it (``runtime/files.py:stat_row``).
@@ -2009,7 +2056,7 @@ class MountCore:
         try:
             if follow:
                 return posixpath.normpath(reader.follow(virtual))
-            return reader.follow_parent(virtual)
+            return reader.follow_parent(virtual).rstrip("/") or "/"
         finally:
             if token is not None:
                 reset_caller(token)

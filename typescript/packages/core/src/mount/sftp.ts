@@ -18,7 +18,6 @@ import { registerPipeServer } from '../machine/mounts.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import { posixNormpath } from '../utils/path.ts'
 import { fileMode, S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -105,11 +104,6 @@ export function longname(name: string, a: Attributes): string {
   const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
   const month = MONTHS[when.getMonth()] ?? ''
   return `${permissions}    1 ${String(a.uid).padEnd(8)} ${String(a.gid).padEnd(8)} ${String(a.size).padStart(8)} ${month} ${day} ${time} ${name}`
-}
-
-/** A client path as a workspace path: absolute, normalized, never above `/`. */
-export function workspacePath(path: string): string {
-  return posixNormpath('/' + path)
 }
 
 async function exists(core: MountCore, path: string): Promise<boolean> {
@@ -222,7 +216,9 @@ export class MirageSFTPServer {
       this.serve(id, () => this.fstat(id, handle))
     })
     s.on('SETSTAT', (id: number, path: string, attrs: Partial<Attributes>) => {
-      this.serve(id, () => this.simple(id, (core) => setAttrs(core, workspacePath(path), attrs)))
+      this.serve(id, () =>
+        this.simple(id, async (core) => setAttrs(core, await core.clientPath(path), attrs)),
+      )
     })
     s.on('FSETSTAT', (id: number, handle: Uint8Array, attrs: Partial<Attributes>) => {
       this.serve(id, () => {
@@ -251,18 +247,20 @@ export class MirageSFTPServer {
       this.serve(id, () => this.close(id, handle))
     })
     s.on('REMOVE', (id: number, path: string) => {
-      this.serve(id, () => this.simple(id, (core) => core.unlink(workspacePath(path))))
+      this.serve(id, () =>
+        this.simple(id, async (core) => core.unlink(await core.clientPath(path))),
+      )
     })
     s.on('MKDIR', (id: number, path: string, attrs: Partial<Attributes>) => {
       this.serve(id, () =>
-        this.simple(id, (core) => core.mkdir(workspacePath(path), modeOf(attrs))),
+        this.simple(id, async (core) => core.mkdir(await core.clientPath(path), modeOf(attrs))),
       )
     })
     s.on('RMDIR', (id: number, path: string) => {
-      this.serve(id, () => this.simple(id, (core) => core.rmdir(workspacePath(path))))
+      this.serve(id, () => this.simple(id, async (core) => core.rmdir(await core.clientPath(path))))
     })
     s.on('RENAME', (id: number, oldPath: string, newPath: string) => {
-      this.serve(id, () => this.rename(id, workspacePath(oldPath), workspacePath(newPath)))
+      this.serve(id, () => this.rename(id, oldPath, newPath))
     })
     s.on('READLINK', (id: number, path: string) => {
       this.serve(id, () => this.readlink(id, path))
@@ -273,7 +271,7 @@ export class MirageSFTPServer {
     s.on('SYMLINK', (id: number, linkPath: string, targetPath: string) => {
       if (this.passiveSshfs) [linkPath, targetPath] = [targetPath, linkPath]
       this.serve(id, () =>
-        this.simple(id, (core) => core.symlink(targetPath, workspacePath(linkPath))),
+        this.simple(id, async (core) => core.symlink(targetPath, await core.clientPath(linkPath))),
       )
     })
     s.on('EXTENDED', (id: number, name: string, data?: Uint8Array) => {
@@ -285,7 +283,9 @@ export class MirageSFTPServer {
         return
       }
       this.serve(id, () =>
-        this.simple(id, (core) => core.rename(workspacePath(from), workspacePath(to))),
+        this.simple(id, async (core) =>
+          core.rename(await core.clientPath(from), await core.clientPath(to)),
+        ),
       )
     })
     return new Promise((resolve, reject) => {
@@ -356,14 +356,14 @@ export class MirageSFTPServer {
   }
 
   private async realpath(id: number, path: string): Promise<void> {
-    await this.mount()
-    const p = workspacePath(path)
+    const core = await this.mount()
+    const p = await core.canonicalClientPath(path)
     this.sftp.name(id, [{ filename: p, longname: p, attrs: {} as Attributes }])
   }
 
   private async stat(id: number, path: string, follow: boolean): Promise<void> {
     const core = await this.mount()
-    const p = workspacePath(path)
+    const p = await core.clientPath(path)
     this.sftp.attrs(id, toAttrs(await core.getattr(p, follow)))
   }
 
@@ -375,7 +375,7 @@ export class MirageSFTPServer {
 
   private async opendir(id: number, path: string): Promise<void> {
     const core = await this.mount()
-    const p = workspacePath(path)
+    const p = await core.clientPath(path)
     if (((await core.getattr(p)).mode & S_IFMT) !== S_IFDIR) throw enotdir(p)
     this.sftp.handle(id, this.addHandle({ kind: 'dir', path: p, done: false }))
   }
@@ -404,7 +404,7 @@ export class MirageSFTPServer {
     attrs: Partial<Attributes>,
   ): Promise<void> {
     const core = await this.mount()
-    const path = workspacePath(filename)
+    const path = await core.clientPath(filename)
     // The open's effect is the core's (create, exclusive, truncate), and a
     // directory refuses it, as SFTP opens files only.
     const creates = (flags & OPEN.CREAT) !== 0
@@ -468,14 +468,16 @@ export class MirageSFTPServer {
   // SFTP v3's rename refuses to replace an existing target.
   private async rename(id: number, oldPath: string, newPath: string): Promise<void> {
     const core = await this.mount()
-    if (await exists(core, newPath)) throw eexist(newPath)
-    await core.rename(oldPath, newPath)
+    const from = await core.clientPath(oldPath)
+    const to = await core.clientPath(newPath)
+    if (await exists(core, to)) throw eexist(to)
+    await core.rename(from, to)
     this.sftp.status(id, STATUS.OK)
   }
 
   private async readlink(id: number, path: string): Promise<void> {
     const core = await this.mount()
-    const target = await core.readlink(workspacePath(path))
+    const target = await core.readlink(await core.clientPath(path))
     this.sftp.name(id, [{ filename: target, longname: target, attrs: {} as Attributes }])
   }
 
