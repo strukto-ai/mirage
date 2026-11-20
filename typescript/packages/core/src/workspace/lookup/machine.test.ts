@@ -104,6 +104,22 @@ describe('operand routing', () => {
     await ws.close()
   })
 
+  it.each(['tar -xf /tmp/a.tar', 'find /tmp -exec cat a.py \\;', 'wc -l /tmp/a.py'])(
+    "runs %j, which may use its folder, only from the machine's",
+    async (line) => {
+      const files = new FakeFiles({ '/tmp/a.py': 'x', '/tmp/a.tar': 'x' }, [
+        ...TOOLS,
+        'find',
+        'tar',
+      ])
+      const ws = one(files, { '/data': new RAMVFS() })
+      await ws.shell(`cd /data && ${line}`)
+      const name = line.split(' ')[0]
+      expect(files.ran.filter((r) => r.split(' ')[0] === name)).toEqual([])
+      await ws.close()
+    },
+  )
+
   it('names in explain the machine the run hands a command to', async () => {
     const files = new FakeFiles({ '/tmp/a.py': 'x' }, TOOLS)
     const ws = one(files, { '/data': new RAMVFS() })
@@ -117,6 +133,10 @@ describe('operand routing', () => {
     expect(await placed('cat /tmp/a.py')).toEqual([['cat', 'box']])
     expect(await placed('ls')).toEqual([['ls', '']])
     expect(await placed('cat /tmp/a.py /data/b')).toEqual([['cat', '']])
+    expect(await placed('wc -l /tmp/a.py')).toEqual([['wc', '']])
+    await ws.shell('cd /tmp')
+    expect(await placed('find /tmp -exec cat /tmp/a.py \\;')).toEqual([['find', 'box']])
+    expect(await placed('find /tmp -exec cat /data/b \\;')).toEqual([['find', '']])
     await ws.close()
   })
 

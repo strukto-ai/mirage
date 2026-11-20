@@ -847,8 +847,9 @@ async def test_a_program_its_cap_stopped_is_recorded_as_141(monkeypatch):
 
 # A program whose stderr goes where its stdout goes (`2>&1`) runs joined on
 # its machine, which writes the two into one stream in the order the
-# program wrote them; one whose redirects part them (`2>&1 >f`) runs as
-# any other, its streams Mirage's to route.
+# program wrote them; one whose redirects part them (`2>&1 >f`, or an
+# `exec 2>f` inside the group) runs as any other, its streams Mirage's to
+# route.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("line", "said", "errs", "joined"),
@@ -859,6 +860,13 @@ async def test_a_program_its_cap_stopped_is_recorded_as_141(monkeypatch):
         ("{ prog; } 2>&1 | cat", "out\nerr\n", "", True),
         ("prog &> /data/o; cat /data/o", "out\nerr\n", "", True),
         ("{ prog < /dev/null; } 2>&1", "out\nerr\n", "", True),
+        (
+            "{ exec 2>/data/e; prog; } 2>&1; echo -; cat /data/e",
+            "out\n-\nerr\n",
+            "",
+            False,
+        ),
+        ("{ exec 2>&-; prog; } 2>&1", "out\n", "", False),
     ],
 )
 async def test_a_joined_program_runs_joined_on_its_machine(

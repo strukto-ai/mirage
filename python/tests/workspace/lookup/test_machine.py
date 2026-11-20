@@ -107,6 +107,29 @@ async def test_absolute_paths_run_there_from_root_off_the_machine_s_folders():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "tar -xf /tmp/a.tar",
+        r"find /tmp -exec cat a.py \;",
+        "wc -l /tmp/a.py",
+    ],
+)
+async def test_a_command_that_may_use_its_folder_runs_only_from_the_machine_s(
+    line,
+):
+    files = FakeFiles(
+        {"/tmp/a.py": b"x", "/tmp/a.tar": b"x"},
+        programs=(*TOOLS, "find", "tar"),
+    )
+    ws = one(files, {"/data": RAMVFS()})
+    await ws.shell(f"cd /data && {line}")
+    name = line.split()[0]
+    assert [r for r in files.ran if r.split()[0] == name] == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_explain_names_the_machine_the_run_hands_a_command_to():
     files = FakeFiles({"/tmp/a.py": b"x"}, programs=TOOLS)
     ws = one(files, {"/data": RAMVFS()})
@@ -119,6 +142,12 @@ async def test_explain_names_the_machine_the_run_hands_a_command_to():
     assert await placed("cat /tmp/a.py") == [("cat", "box")]
     assert await placed("ls") == [("ls", "")]
     assert await placed("cat /tmp/a.py /data/b") == [("cat", "")]
+    assert await placed("wc -l /tmp/a.py") == [("wc", "")]
+    await ws.shell("cd /tmp")
+    assert await placed(r"find /tmp -exec cat /tmp/a.py \;") == [
+        ("find", "box")
+    ]
+    assert await placed(r"find /tmp -exec cat /data/b \;") == [("find", "")]
     await ws.close()
 
 
