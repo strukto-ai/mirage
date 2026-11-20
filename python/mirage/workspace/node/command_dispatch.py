@@ -153,10 +153,13 @@ from mirage.workspace.lookup.constants import (
     PROGRAM_WRAPPERS,
 )
 from mirage.workspace.lookup.lookup import (
+    external_target,
     lookup,
     program_runtime,
+    resolve_target,
     routed_consumer,
     runs_wrapper,
+    target_consumer,
 )
 from mirage.workspace.lookup.machine import (
     bin_program,
@@ -165,6 +168,7 @@ from mirage.workspace.lookup.machine import (
     program_machine,
     several_machines,
 )
+from mirage.workspace.lookup.types import ExternalTarget
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -1694,9 +1698,7 @@ async def _route_argv(
                 stdin,
                 session,
                 registry,
-                dataclasses.replace(
-                    placed, bindings={**placed.bindings, name: held}
-                ),
+                held,
                 sink,
             )
 
@@ -1714,7 +1716,12 @@ async def _route_argv(
             )
             if program is None:
                 return await run_external(
-                    argv, stdin, session, registry, placed, sink
+                    argv,
+                    stdin,
+                    session,
+                    registry,
+                    external_target(name, placed.bindings).runtime,
+                    sink,
                 )
             marked = set_program_invocation(session, f"{shell_voice()}{name}")
             try:
@@ -1723,7 +1730,7 @@ async def _route_argv(
                     stdin,
                     session,
                     registry,
-                    placed,
+                    external_target(program, placed.bindings).runtime,
                     sink,
                 )
             finally:
@@ -1775,14 +1782,13 @@ async def _route_argv(
             sink,
         )
 
-    consumer, routing = routed_consumer(
-        name, argv.args, session, registry, context.frame.routing
-    )
-    if consumer is Consumer.EXTERNAL:
-        assert routing is not None
+    routing = context.frame.routing
+    target = resolve_target(name, argv.args, session, registry, routing)
+    if isinstance(target, ExternalTarget):
         return await run_external(
-            argv, stdin, session, registry, routing, sink
+            argv, stdin, session, registry, target.runtime, sink
         )
+    consumer = target_consumer(target)
     # A mount command whose every path is one machine's own runs there
     # whole, with the machine's own output, as does a namespace program
     # asking after the machine's own links. A glob's matches are checked
@@ -1807,9 +1813,7 @@ async def _route_argv(
                 stdin,
                 session,
                 registry,
-                dataclasses.replace(
-                    routing, bindings={**routing.bindings, name: machine}
-                ),
+                machine,
                 sink,
             )
 
@@ -1913,9 +1917,7 @@ async def _route_argv(
             None,
             session,
             registry,
-            dataclasses.replace(
-                routing, bindings={**routing.bindings, name: machine}
-            ),
+            machine,
             sink,
         )
 

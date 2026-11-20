@@ -34,7 +34,9 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
+from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import argv as argv_module
+from mirage.workspace.expand.argv import Argv
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup_all
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS
 from mirage.workspace.lookup.lookup import lookup
@@ -128,6 +130,24 @@ async def workspace(*args, **kwargs):
         yield ws
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_external_executes_the_bound_runtime_with_its_original_tokens():
+    configured, selected = ProcessProbe(), ProcessProbe()
+    async with workspace({"/": RAMVFS()}, machines=[configured]) as ws:
+        argv = Argv(
+            "native tool", ("a b", ""), ("a b", ""), ("native", "tool")
+        )
+        stdout, io, node = await run_external(
+            argv, None, SessionState("test"), ws.registry, selected
+        )
+        assert await materialize(stdout) == b"GPU ready\nother\n"
+        assert (io.exit_code, node.exit_code) == (0, 0)
+        assert [r.argv for r in selected.requests] == [
+            ("native", "tool", "a b", "")
+        ]
+        assert not configured.requests
 
 
 @pytest.mark.asyncio
