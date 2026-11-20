@@ -111,6 +111,7 @@ class NodeType(StrEnum):
     VARIABLE_NAME = "variable_name"
     SIMPLE_EXPANSION = "simple_expansion"
     EXPANSION = "expansion"
+    SUBSCRIPT = "subscript"
     COMMAND_SUBSTITUTION = "command_substitution"
     ARITHMETIC_EXPANSION = "arithmetic_expansion"
     CONCATENATION = "concatenation"

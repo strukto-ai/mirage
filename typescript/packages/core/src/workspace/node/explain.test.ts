@@ -28,6 +28,8 @@ import type {
 } from '../../policy/index.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
+import { VarAttr } from '../../shell/variable.ts'
+import { seedVar, setAttr } from '../session/state.ts'
 import { DryRun } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
@@ -242,6 +244,30 @@ const ANOTHER_SPELLING = [
   'hash -p /bin/hostname ls; ls',
   'enable -f /data/x.so hostname',
   'alias x=hostname\nx',
+  "read PS4 <<< '$(hostname)'; set -x; :",
+  "printf -v PS4 '$(hostname)'; set -x; :",
+  'mapfile -t PS4 <<< x; set -x; :',
+  'for PS4 in x; do set -x; :; done',
+  'declare -n r=PS4; r=x; set -x; :',
+  'read BASH_ENV <<< /data/e; bash -c :',
+  "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+  'bash -ic :',
+  'bash -lc :',
+  'sh --login -c :',
+  "PS4[0]='$(hostname)'; set -x; :",
+  "read 'PS4[0]' <<< x; set -x; :",
+  'read -a PS4 <<< x; set -x; :',
+  "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
+  'declare -n r; r=PS4; r=x; set -x; :',
+  'v=PS4; printf -v "$v" x; set -x; :',
+  'BASH_CMDS[ls]=/bin/hostname; ls',
+  'BASH_ALIASES[x]=hostname\nx',
+  'bash -c -l :',
+  'bash -c -x hostname',
+  'env -a -bash bash -c :',
+  'exec -l bash -c :',
+  'exec -a -bash bash -c :',
+  'a=x=hostname; alias "$a"\nx',
 ] as const
 
 const STILL_RUNS = [
@@ -249,6 +275,23 @@ const STILL_RUNS = [
   'trap - EXIT; trap -p',
   'coproc echo hi',
   'hash -r; alias',
+  'ENV=production echo hi',
+  'printf PS4',
+  "bash -c 'echo hi'",
+  "bash -c ': -l'",
+  'exec -a name echo hi',
+] as const
+
+// Lines a rule leaves alone (a coded policy refuses their `$` words).
+const STILL_RUNS_UNDER_RULES = [
+  'read -r line < /data/f',
+  'printf -v x %s y',
+  'for f in a b; do echo hi; done',
+  'declare -i n=1',
+  'g() { local x=1; }; g',
+  'read -p "Name: $USER " ans < /data/f',
+  'getopts ":ab:" opt "$@"',
+  'export -n FOO',
 ] as const
 
 /** Every command an explained tree holds, nested scopes included. */
@@ -1006,10 +1049,11 @@ describe('prejudge', () => {
         expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
       }
       expect(box.lines).toEqual([])
-      for (const line of STILL_RUNS) {
+      const still = [...STILL_RUNS, ...(coded ? [] : STILL_RUNS_UNDER_RULES)]
+      for (const line of still) {
         expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
       }
-      expect(box.lines).toEqual([...STILL_RUNS])
+      expect(box.lines).toEqual(still)
     },
     30_000,
   )
@@ -1038,6 +1082,38 @@ describe('prejudge', () => {
     expect(ran.exitCode).toBe(126)
     expect([said.exitCode, said.stderr]).toEqual([126, DEC.decode(ran.stderr)])
     expect(box.lines).toEqual([])
+  })
+
+  // The machine's shell gets the session's exported environment, so a hook an
+  // earlier line exported runs there on a line that reads clean.
+  it.each([
+    ['PS4', false],
+    ['PS4', true],
+    ['BASH_FUNC_ls%%', false],
+    ['BASH_FUNC_ls%%', true],
+  ] as const)('holds a whole line while the session exports %s (coded %s)', async (name, coded) => {
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: {
+          r: SessionProfile(coded ? {} : { commands: { hostname: 'deny' } }),
+        },
+        policies: coded ? [noHostname] : [],
+        machines: [box],
+      },
+    )
+    open.push(w)
+    const session = w.createSession('s', { profile: 'r' })
+    seedVar(session, name, '$(hostname)')
+    expect((await w.shell('set -x; :', { sessionId: 's' })).exitCode).toBe(0)
+    setAttr(session, name, VarAttr.Export)
+    const said = await w.explain('set -x; :', 's')
+    const ran = await w.shell('set -x; :', { sessionId: 's' })
+    expect(ran.exitCode).toBe(126)
+    expect([said.exitCode, said.stderr]).toEqual([126, DEC.decode(ran.stderr)])
+    expect(box.lines).toEqual(['set -x; :'])
   })
 
   it('hands an env option cluster its value from the rest of it', async () => {
@@ -1289,11 +1365,19 @@ describe('prejudge', () => {
         'cat //data/secret.txt',
         'diff --from-file=/data/secret.txt /data/pub',
         'diff --to-file=/data/secret.txt /data/pub',
+        'read HOME <<< /data; cat ~/secret.txt',
+        'printf -v HOME /data; cat ~/secret.txt',
+        'dd if=~/secret.txt',
+        'env -C /data cat secret.txt',
+        'env --chdir=/data cat secret.txt',
+        'HOME[0]=/data; cat ~/secret.txt',
+        'declare -n h; h=HOME; h=/data; cat ~/secret.txt',
         ...(coded
           ? [
               'find /data/pub -fprint /data/secret.txt',
               'find /data/pub -fprint0 /data/secret.txt',
               'find /data/pub -fls /data/secret.txt',
+              'find -O3 /data/pub -fprint /data/secret.txt',
             ]
           : []),
       ]
@@ -1308,10 +1392,16 @@ describe('prejudge', () => {
         ])
       }
       expect(box.lines).toEqual([])
-      for (const line of ['cat ~/secret.txt', 'cat ~root/secret.txt']) {
+      const still = [
+        'cat ~/secret.txt',
+        'cat ~root/secret.txt',
+        'env -C /data cat other.txt',
+        'echo x="a:~"',
+      ]
+      for (const line of still) {
         expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
       }
-      expect(box.lines).toEqual(['cat ~/secret.txt', 'cat ~root/secret.txt'])
+      expect(box.lines).toEqual(still)
     },
     30_000,
   )

@@ -94,6 +94,7 @@ def _argv(inner: InnerLine) -> list[str]:
         ("trap", ["--", "rm /x", "INT", "TERM"], [("line", "rm /x", False)]),
         ("trap", ["-", "EXIT"], []),
         ("trap", ["2", "3"], []),
+        ("trap", ["\u0663", "INT"], [("line", "\u0663", False)]),
         ("trap", ["EXIT"], []),
         ("trap", ["-p", "EXIT"], []),
         ("trap", ["-l"], []),
@@ -110,7 +111,19 @@ def _argv(inner: InnerLine) -> list[str]:
         ("alias", ["ll"], []),
         ("env", ["PS4=$(rm)", "bash", "-xc", ":"], [("none", None, False)]),
         ("env", ["-i", "BASH_ENV=/x", "sh"], [("none", None, False)]),
-        ("env", ["ENV=/x", "sh"], [("none", None, False)]),
+        ("env", ["ENV=/x", "sh"], [("argv", ["sh"], False)]),
+        ("env", ["BASH_FUNC_ls%%=() { rm; }", "ls"], [("none", None, False)]),
+        ("bash", ["-ic", "rm /x"], [("none", None, False)]),
+        ("sh", ["-l", "-c", "rm /x"], [("none", None, False)]),
+        ("bash", ["--login", "-c", "rm /x"], [("none", None, False)]),
+        ("bash", ["-o", "vi", "-lc", "rm /x"], [("none", None, False)]),
+        ("bash", ["-c", "rm /x", "-i"], [("line", "rm /x", False)]),
+        ("bash", ["-c", "-l", "rm /x"], [("none", None, False)]),
+        ("bash", ["-c", "-x", "rm /x"], [("none", None, False)]),
+        ("env", ["-a", "-sh", "sh"], [("none", None, False)]),
+        ("env", ["--argv0=-sh", "sh"], [("none", None, False)]),
+        ("exec", ["-l", "bash"], [("none", None, False)]),
+        ("exec", ["-a", "-bash", "bash"], [("none", None, False)]),
         ("time", ["-p", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         # Operands the runtime appends: stdin items, matched paths.
         ("xargs", ["-n", "1", "rm", "-f"], [("argv", ["rm", "-f"], True)]),
@@ -162,6 +175,7 @@ def test_inner_words_keep_what_the_gate_could_not_read():
     assert inner.line == 'rm "$p"'
     (inner,) = inner_lines("bash", [*_words("-c"), dynamic, *_words("rm /x")])
     assert not inner.readable
+    assert inner_lines("alias", [Word('"$a"', None)]) == [InnerLine()]
     assert inner_lines("bash", [*_words("--version"), dynamic]) == []
     (inner,) = inner_lines("sh", [*_words("-c", "echo safe"), dynamic])
     assert inner.line == "echo safe"

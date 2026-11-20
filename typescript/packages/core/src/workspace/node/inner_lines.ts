@@ -18,6 +18,7 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
+import { BASH_LONG_OPTIONS } from '../executor/builtins/script/constants.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 import { readWrapper } from '../lookup/constants.ts'
 import { lookup, pathProgram } from '../lookup/lookup.ts'
@@ -134,6 +135,8 @@ export interface InnerLine {
   readonly line: string | null
   readonly argv: readonly Word[]
   readonly open: boolean
+  /** The folder the command runs in, as `cd` would take it (`env -C`). */
+  readonly chdir?: Word | null
 }
 
 const UNREADABLE: InnerLine = { line: null, argv: [], open: false }
@@ -151,7 +154,21 @@ const FIND_EXEC: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-ok
 const ENV_FLAGS: ReadonlySet<string> = new Set(['-i', '--ignore-environment', '-0', '--null', '-'])
 const ENV_VALUED = ['unset', 'chdir', 'argv0'] as const
 // Variables a whole line's shell expands or sources on its own.
-export const HOOK_VARS: ReadonlySet<string> = new Set(['PS4', 'BASH_ENV', 'ENV'])
+export const HOOK_VARS: ReadonlySet<string> = new Set([
+  'PS4',
+  'BASH_ENV',
+  'BASH_CMDS',
+  'BASH_ALIASES',
+])
+
+/**
+ * Whether a variable sets what a whole line's shell runs on its own: one it
+ * expands or sources (`HOOK_VARS`), or a function bash imports from the
+ * environment (`BASH_FUNC_NAME%%`).
+ */
+export function isHook(name: string): boolean {
+  return HOOK_VARS.has(name) || name.startsWith('BASH_FUNC_')
+}
 
 function tail(args: readonly Word[], count: number): Word[] {
   return count > 0 ? args.slice(args.length - count) : []
@@ -170,13 +187,20 @@ function commandInner(args: readonly Word[]): InnerLine[] {
 }
 
 // `exec [-cl] [-a name] [command [arg ...]]`.
+// `exec [-cl] [-a name] [command [arg ...]]`; `-l`, or a name starting with
+// `-`, starts a shell as a login shell, which sources rc files the gate cannot
+// read.
 function execInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length && valueAt(args, i).startsWith('-')) {
     const word = valueAt(args, i)
     i += 1
     if (word === '--') break
-    if (word.endsWith('a')) i += 1
+    if (word.includes('l')) return [UNREADABLE]
+    if (word.endsWith('a')) {
+      if (valueAt(args, i).startsWith('-')) return [UNREADABLE]
+      i += 1
+    }
   }
   return asArgv(args.slice(i))
 }
@@ -213,7 +237,28 @@ function takesNext(word: string): boolean {
   return false
 }
 
+// The folder an `env` option word sends its command to: `-C`'s or
+// `--chdir`'s value, attached or the next word; null for any other option.
+function valueOf(word: Word, after: Word | null, letter: string, long: string): Word | null {
+  const value = wordValue(word)
+  let attached: string
+  if (value.startsWith('--')) {
+    const [name = '', ...rest] = value.slice(2).split('=')
+    if (name === '' || !long.startsWith(name)) return null
+    if (rest.length === 0) return after
+    attached = rest.join('=')
+  } else {
+    let at = 0
+    while (at < value.length && !'uCa'.includes(value[at] ?? '')) at += 1
+    if (at === 0 || at === value.length || value[at] !== letter) return null
+    attached = value.slice(at + 1)
+    if (attached === '') return after
+  }
+  return { raw: attached, text: word.text === null ? null : attached }
+}
+
 function envInner(args: readonly Word[]): InnerLine[] {
+  let chdir: Word | null = null
   let i = 0
   while (i < args.length) {
     const word = valueAt(args, i)
@@ -227,6 +272,13 @@ function envInner(args: readonly Word[]): InnerLine[] {
       continue
     }
     if (word.startsWith('-') && word.length > 1) {
+      const current = args[i]
+      if (current !== undefined) {
+        chdir = valueOf(current, args[i + 1] ?? null, 'C', 'chdir') ?? chdir
+        const argv0 = valueOf(current, args[i + 1] ?? null, 'a', 'argv0')
+        // A leading `-` in argv0 makes a shell a login shell.
+        if (argv0 !== null && wordValue(argv0).startsWith('-')) return [UNREADABLE]
+      }
       i += takesNext(word) ? 2 : 1
       continue
     }
@@ -235,10 +287,11 @@ function envInner(args: readonly Word[]): InnerLine[] {
   while (i < args.length) {
     const word = valueAt(args, i)
     if (!word.includes('=') || word.startsWith('=')) break
-    if (HOOK_VARS.has(word.split('=', 1)[0] ?? '')) return [UNREADABLE]
+    if (isHook(word.split('=', 1)[0] ?? '')) return [UNREADABLE]
     i += 1
   }
-  return asArgv(args.slice(i))
+  const rest = args.slice(i)
+  return rest.length > 0 ? [{ line: null, argv: rest, open: false, chdir }] : []
 }
 
 // The operands of a shell builtin with a spec, as Words; null when the
@@ -322,6 +375,31 @@ function argvInner(args: readonly Word[]): InnerLine[] {
 // parse refuses are lines the gate cannot read, since a real bash takes
 // options mirage does not (`--restricted`, `-O extglob`) and still runs the
 // program.
+/**
+ * Whether a shell's startup options make it interactive or a login shell
+ * (`-i`, `-l`, `--login`), which sources rc files (`ENV`, `~/.bashrc`,
+ * `~/.profile`) the gate cannot read.
+ */
+function startsRc(words: readonly string[]): boolean {
+  let skip = false
+  for (const word of words) {
+    if (skip) {
+      skip = false
+      continue
+    }
+    if (word === '-' || word === '--' || !word.startsWith('-')) return false
+    if (word.startsWith('--')) {
+      if (word === '--login') return true
+      skip = BASH_LONG_OPTIONS.get(word.slice(2)) === true
+      continue
+    }
+    if (word.includes('i') || word.includes('l')) return true
+    if (word.includes('c')) return false
+    skip = 'oO'.includes(word.at(-1) ?? '')
+  }
+  return false
+}
+
 function shellInner(args: readonly Word[]): InnerLine[] {
   // Expansion can erase or split a word, shifting an option's value
   // onto --version or -c. Only a literal prefix can establish what
@@ -331,26 +409,16 @@ function shellInner(args: readonly Word[]): InnerLine[] {
     if (word.text === null || word.glob) break
     literal.push(word.text)
   }
+  if (startsRc(literal)) return [UNREADABLE]
   const parsed = parseBashArgs(literal)
   if (parsed.help || parsed.version) return []
+  // bash reads options after `-c` up to the program; mirage's parse takes the
+  // next word.
+  if (parsed.script?.startsWith('-') === true) return [UNREADABLE]
   if (parsed.script !== null) return [{ line: parsed.script, argv: [], open: false }]
   return [UNREADABLE]
 }
 
-/**
- * The lines a command runs on the words it was given, for the words
- * that run other words.
- *
- * The table is the workspace shell's own re-dispatchers (every builtin
- * that hands a constructed line back to the evaluator: `eval`, `source`,
- * `command`, `env`, `timeout`, `xargs`, `mapfile -C`, `sh`/`bash`, an
- * executed path) plus the classic prefix runners a real shell has and
- * the workspace shell does not (`builtin`, `exec`, `nohup`, `nice`,
- * `time`, `find -exec`). A whole-line runtime is a real shell, so
- * anything else that
- * can run a command (an interpreter's `-c`, `make`, `git` hooks) is the
- * runtime's own world: a closed tree is the closed form there.
- */
 // `trap [-lp] [[ACTION] CONDITION...]`: the action is a line the shell runs
 // when a condition fires. `-` or a number first resets the conditions, a lone
 // operand resets it, and an option only lists.
@@ -373,6 +441,20 @@ function loads(args: readonly Word[], letter: string): InnerLine[] {
   return []
 }
 
+/**
+ * The lines a command runs on the words it was given, for the words
+ * that run other words.
+ *
+ * The table is the workspace shell's own re-dispatchers (every builtin
+ * that hands a constructed line back to the evaluator: `eval`, `source`,
+ * `command`, `env`, `timeout`, `xargs`, `mapfile -C`, `sh`/`bash`, an
+ * executed path) plus the classic prefix runners a real shell has and
+ * the workspace shell does not (`builtin`, `exec`, `nohup`, `nice`,
+ * `time`, `find -exec`). A whole-line runtime is a real shell, so
+ * anything else that
+ * can run a command (an interpreter's `-c`, `make`, `git` hooks) is the
+ * runtime's own world: a closed tree is the closed form there.
+ */
 export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
   if (head.includes('/')) return [UNREADABLE]
   switch (head) {
@@ -419,9 +501,11 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
       return loads(args, 'f')
     case 'alias':
       // A whole line's shell expands a later word to the value.
-      return args
-        .map(wordValue)
-        .some((w) => w.includes('=') && !w.startsWith('=') && !w.startsWith('-'))
+      return args.some(
+        (w) =>
+          w.text === null ||
+          (w.text.includes('=') && !w.text.startsWith('=') && !w.text.startsWith('-')),
+      )
         ? [UNREADABLE]
         : []
     default:

@@ -72,7 +72,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { tildeHomes } from '../session/shell_dirs.ts'
-import { envIsReadonly, seedVar, setAttr } from '../session/state.ts'
+import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
 import {
   admitRedirect,
   classifiedWords,
@@ -90,6 +90,7 @@ import {
 import {
   HOOK_VARS,
   innerLines,
+  isHook,
   programLines,
   innerReadable,
   readWord,
@@ -117,6 +118,18 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 // see into: a sourced file, a script, a bash option mirage does not read.
 export const UNREADABLE_LINES = 'runs lines the gate cannot read'
 export const HOME_VAR: ReadonlySet<string> = new Set(['HOME'])
+// Builtins that store into the variables they name, with their options that
+// take a value.
+const STORES: ReadonlyMap<string, string> = new Map([
+  ['read', 'adinNptu'],
+  ['mapfile', 'dnOsuCc'],
+  ['readarray', 'dnOsuCc'],
+  ['getopts', ''],
+])
+// The declarations whose `-n` makes a nameref (`export -n` unexports).
+const NAMEREFS: ReadonlySet<string> = new Set(['declare', 'typeset', 'local'])
+// An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
+const ASSIGNED_TILDE = /^[A-Za-z_][A-Za-z0-9_]*=(?:[^~'"\\]*[:=])?~/
 
 /**
  * Commands that move the shell's cwd where the walk cannot follow: a line
@@ -644,14 +657,19 @@ async function* judgeWords(
       )
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
+      // `env -C` runs its command where `cd` would have gone.
+      const [place, moved] =
+        inner.chdir === undefined || inner.chdir === null
+          ? [innerSession, lost]
+          : afterCd([{ raw: 'cd', text: 'cd' }, inner.chdir], innerSession, lost, [])
       yield* judgeWords(
         {
           words: inner.argv,
           redirects: [],
           occurrence: within,
-          session: innerSession,
+          session: place,
           stated: literal && !inner.open,
-          lost,
+          lost: moved,
           open: inner.open,
           pipeline,
         },
@@ -2518,22 +2536,27 @@ async function* judgeLine(
       namespace,
       reparse,
     )
-  const hooked = takesWholeLine(mode) ? assignmentTo(root, HOOK_VARS) : null
+  // What the machine's shell runs on its own: a hook set on the line, or one
+  // the session's environment hands it.
+  const hooked = takesWholeLine(mode) ? written(root, HOOK_VARS) : null
+  const carried = takesWholeLine(mode)
+    ? (Object.keys(envSnapshot(session)).find(isHook) ?? null)
+    : null
   if (
-    hooked !== null &&
+    (hooked !== null || carried !== null) &&
     (hasRules(session.commands) ||
       (await registry.policies.wantsFor('preCommand', session.sessionId, true)))
   ) {
-    const name = getText(hooked.children[0] ?? hooked)
+    const [node, name] = hooked ?? [root, carried ?? '']
     yield {
       judgment: denied(name, UNREADABLE_LINES),
-      occurrence: occurrenceIn(hooked, frame),
+      occurrence: occurrenceIn(node, frame),
       stated: false,
     }
     return
   }
   let homes = tildeHomes(session)
-  if (takesWholeLine(mode) && assignmentTo(typedLine(root, frame, reparse), HOME_VAR) !== null) {
+  if (takesWholeLine(mode) && written(typedLine(root, frame, reparse), HOME_VAR) !== null) {
     // The machine's shell expands a later `~` with the HOME it was set.
     homes = Object.fromEntries(Object.entries(homes).filter(([name]) => name !== ''))
   }
@@ -2574,33 +2597,130 @@ function typedLine(
  * names what only the machine's shell can say.
  */
 function machineWord(word: Word): Word {
-  if (word.text !== null && word.raw.startsWith('~') && word.text.startsWith('~')) {
+  if (word.text === null) return word
+  if ((word.raw.startsWith('~') && word.text.startsWith('~')) || ASSIGNED_TILDE.test(word.raw)) {
     return { ...word, text: null }
   }
   return word
 }
 
 /**
- * The first assignment anywhere on a line (a prefix, a declaration, a function
- * body or a substitution's included) to one of `names`, null when there is
- * none.
+ * The first node anywhere on a line (a function body or a substitution's
+ * included) that sets one of `names`, with the name: an assignment, a loop
+ * variable, a `declare -n` aimed at one, or a builtin storing into one (`read`,
+ * `mapfile`, `readarray`, `getopts`, `printf -v`); null when there is none.
  */
-function assignmentTo(root: TSNodeLike, names: ReadonlySet<string>): TSNodeLike | null {
+function written(
+  root: TSNodeLike,
+  names: ReadonlySet<string>,
+): readonly [TSNodeLike, string] | null {
   const stack: TSNodeLike[] = [root]
   while (stack.length > 0) {
     const node = stack.pop()
     if (node === undefined) break
-    const first = node.children[0]
-    if (
-      node.type === NodeType.VARIABLE_ASSIGNMENT &&
-      first !== undefined &&
-      names.has(getText(first))
-    ) {
-      return node
-    }
+    const name = sets(node, names)
+    if (name !== null) return [node, name]
     stack.push(...[...node.children].reverse())
   }
   return null
+}
+
+/** The one of `names` a node sets itself, null when it sets none. */
+/**
+ * The one of `names` a node sets itself (an element of it included), null
+ * when it sets none. A node setting a variable the gate cannot name (a
+ * `declare -n` nameref, a store into a word only the run expands) answers with
+ * its command's name.
+ */
+function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
+  const kids = node.children
+  if (node.type === NodeType.EXPANSION && !kids.some((k) => k.type === ':=' || k.type === '=')) {
+    return null
+  }
+  if (
+    node.type === NodeType.VARIABLE_ASSIGNMENT ||
+    node.type === NodeType.FOR_STATEMENT ||
+    node.type === NodeType.EXPANSION
+  ) {
+    for (let kid of kids.slice(0, 3)) {
+      if (kid.type === NodeType.SUBSCRIPT && kid.children[0] !== undefined) kid = kid.children[0]
+      if (kid.type === NodeType.VARIABLE_NAME && names.has(getText(kid))) return getText(kid)
+    }
+    return null
+  }
+  if (node.type === NodeType.DECLARATION_COMMAND) {
+    const flags = kids.filter((k) => k.type === NodeType.WORD).map(getText)
+    const named = flags.some((f) => f.startsWith('-') && f.includes('n'))
+    const head = kids[0] === undefined ? '' : getText(kids[0])
+    return named && NAMEREFS.has(head) ? head : null
+  }
+  if (node.type !== NodeType.COMMAND) return null
+  let words = wordsOf(node, null)
+  const first = words[0] === undefined ? '' : wordValue(words[0])
+  if (first === 'command' || first === 'builtin') words = words.slice(1)
+  if (words[0] === undefined) return null
+  const head = wordValue(words[0])
+  let targets: Word[]
+  if (head === 'printf') {
+    targets = []
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i]
+      if (word === undefined || !wordValue(word).startsWith('-v')) continue
+      if (wordValue(word) !== '-v') {
+        const text = word.text === null ? null : wordValue(word).slice(2)
+        targets.push({ raw: word.raw.slice(2), text })
+      } else {
+        const next = words[i + 1]
+        if (next !== undefined) targets.push(next)
+      }
+    }
+  } else if (STORES.has(head)) {
+    targets = stored(head, words.slice(1))
+  } else {
+    return null
+  }
+  for (const word of targets) {
+    if (word.text === null) return head
+    const name = word.text.split('[', 1)[0] ?? ''
+    if (names.has(name)) return name
+  }
+  return null
+}
+
+/**
+ * The words a storing builtin stores into: `read`'s operands and its `-a`
+ * array, `mapfile`'s array, `getopts`'s name after its optstring; an option's
+ * value is no target.
+ */
+function stored(head: string, args: readonly Word[]): Word[] {
+  const valued = STORES.get(head) ?? ''
+  const targets: Word[] = []
+  let i = 0
+  while (i < args.length) {
+    const word = args[i]
+    if (word === undefined) break
+    const value = wordValue(word)
+    if (!value.startsWith('-') || value === '-') break
+    i += 1
+    if (value === '--') break
+    for (let at = 1; at < value.length; at++) {
+      if (!valued.includes(value[at] ?? '')) continue
+      const rest = value.slice(at + 1)
+      let given: Word | null = null
+      if (rest !== '') {
+        given = { raw: rest, text: word.text === null ? null : rest }
+      } else {
+        given = args[i] ?? null
+        i += 1
+      }
+      if (value[at] === 'a' && given !== null) targets.push(given)
+      break
+    }
+  }
+  let operands = args.slice(i)
+  if (head === 'getopts') operands = operands.slice(1, 2)
+  else if (head !== 'read') operands = operands.slice(0, 1)
+  return [...targets, ...operands]
 }
 
 /**

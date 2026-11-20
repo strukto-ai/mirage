@@ -94,6 +94,7 @@ describe('innerLines', () => {
     ['trap', ['--', 'rm /x', 'INT', 'TERM'], [['line', 'rm /x', false]]],
     ['trap', ['-', 'EXIT'], []],
     ['trap', ['2', '3'], []],
+    ['trap', ['\u0663', 'INT'], [['line', '\u0663', false]]],
     ['trap', ['EXIT'], []],
     ['trap', ['-p', 'EXIT'], []],
     ['trap', ['-l'], []],
@@ -110,7 +111,19 @@ describe('innerLines', () => {
     ['alias', ['ll'], []],
     ['env', ['PS4=$(rm)', 'bash', '-xc', ':'], [['none', null, false]]],
     ['env', ['-i', 'BASH_ENV=/x', 'sh'], [['none', null, false]]],
-    ['env', ['ENV=/x', 'sh'], [['none', null, false]]],
+    ['env', ['ENV=/x', 'sh'], [['argv', ['sh'], false]]],
+    ['env', ['BASH_FUNC_ls%%=() { rm; }', 'ls'], [['none', null, false]]],
+    ['bash', ['-ic', 'rm /x'], [['none', null, false]]],
+    ['sh', ['-l', '-c', 'rm /x'], [['none', null, false]]],
+    ['bash', ['--login', '-c', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-o', 'vi', '-lc', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-c', 'rm /x', '-i'], [['line', 'rm /x', false]]],
+    ['bash', ['-c', '-l', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-c', '-x', 'rm /x'], [['none', null, false]]],
+    ['env', ['-a', '-sh', 'sh'], [['none', null, false]]],
+    ['env', ['--argv0=-sh', 'sh'], [['none', null, false]]],
+    ['exec', ['-l', 'bash'], [['none', null, false]]],
+    ['exec', ['-a', '-bash', 'bash'], [['none', null, false]]],
     ['time', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     // Operands the runtime appends: stdin items, matched paths.
     ['xargs', ['-n', '1', 'rm', '-f'], [['argv', ['rm', '-f'], true]]],
@@ -159,6 +172,8 @@ describe('innerLines', () => {
     expect(line?.line).toBe('rm "$p"')
     const [unknown] = innerLines('bash', [...words('-c'), dynamic, ...words('rm /x')])
     expect(unknown && innerReadable(unknown)).toBe(false)
+    const [alias] = innerLines('alias', [{ raw: '"$a"', text: null }])
+    expect(alias && innerReadable(alias)).toBe(false)
     expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
     const [stable] = innerLines('sh', [...words('-c', 'echo safe'), dynamic])
     expect(stable?.line).toBe('echo safe')

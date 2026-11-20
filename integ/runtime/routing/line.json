@@ -687,7 +687,7 @@
     },
     {
       "id": "whole_line_spellings",
-      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f and an assignment to PS4, BASH_ENV or ENV set what the shell runs later where the gate cannot read it.",
+      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f, PS4 or BASH_ENV set by an assignment or a builtin that stores into it, a BASH_FUNC_ function handed through env, and an interactive or login shell set what the shell runs later where the gate cannot read it; ENV is no hook outside an interactive shell.",
       "world": {
         "machines": {
           "echobox": {
@@ -781,12 +781,68 @@
             "exit": 0,
             "stdout": "box:trap 'echo bye' EXIT; echo hi\n"
           }
+        },
+        {
+          "command": "read PS4 <<< x; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "env: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash -ic :",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "ENV=production echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:ENV=production echo hi\n"
+          }
+        },
+        {
+          "command": "PS4[0]=x; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "BASH_CMDS[ls]=/bin/hostname; ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "BASH_CMDS: Permission denied\n"
+          }
+        },
+        {
+          "command": "exec -l bash -c :",
+          "expect": {
+            "exit": 126,
+            "stderr": "exec: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash -c -x hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
         }
       ]
     },
     {
       "id": "whole_line_paths",
-      "note": "A path rule on a line run whole reads the file the machine's shell opens: a `~` once the line sets HOME, or for a user Mirage does not know, is refused as a word only the machine can expand, and `//` is `/`.",
+      "note": "A path rule on a line run whole reads the file the machine's shell opens: a `~` once the line sets HOME, or for a user Mirage does not know, is refused as a word only the machine can expand, and `//` is `/`; env -C runs its command in its folder, and a `~` after an assignment-shaped word's `=` is the machine's to expand.",
       "world": {
         "machines": {
           "echobox": {
@@ -849,6 +905,20 @@
           "expect": {
             "exit": 0,
             "stdout": "box:cat ~/secret.txt\n"
+          }
+        },
+        {
+          "command": "env -C /ram cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "dd if=~/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "dd: Permission denied\n"
           }
         }
       ]

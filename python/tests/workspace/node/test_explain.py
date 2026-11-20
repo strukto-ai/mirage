@@ -49,9 +49,11 @@ from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.console import ConsoleStore
 from mirage.shell.parse import parse
+from mirage.shell.variable import VarAttr
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.node.explain import Judgment, JudgmentMode, explain_line
+from mirage.workspace.session.state import seed_var, set_attr
 
 
 async def _judged(
@@ -1200,6 +1202,30 @@ ANOTHER_SPELLING = (
     "hash -p /bin/hostname ls; ls",
     "enable -f /data/x.so hostname",
     "alias x=hostname\nx",
+    "read PS4 <<< '$(hostname)'; set -x; :",
+    "printf -v PS4 '$(hostname)'; set -x; :",
+    "mapfile -t PS4 <<< x; set -x; :",
+    "for PS4 in x; do set -x; :; done",
+    "declare -n r=PS4; r=x; set -x; :",
+    "read BASH_ENV <<< /data/e; bash -c :",
+    "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+    "bash -ic :",
+    "bash -lc :",
+    "sh --login -c :",
+    "PS4[0]='$(hostname)'; set -x; :",
+    "read 'PS4[0]' <<< x; set -x; :",
+    "read -a PS4 <<< x; set -x; :",
+    "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
+    "declare -n r; r=PS4; r=x; set -x; :",
+    'v=PS4; printf -v "$v" x; set -x; :',
+    "BASH_CMDS[ls]=/bin/hostname; ls",
+    "BASH_ALIASES[x]=hostname\nx",
+    "bash -c -l :",
+    "bash -c -x hostname",
+    "env -a -bash bash -c :",
+    "exec -l bash -c :",
+    "exec -a -bash bash -c :",
+    'a=x=hostname; alias "$a"\nx',
 )
 
 STILL_RUNS = (
@@ -1207,6 +1233,23 @@ STILL_RUNS = (
     "trap - EXIT; trap -p",
     "coproc echo hi",
     "hash -r; alias",
+    "ENV=production echo hi",
+    "printf PS4",
+    "bash -c 'echo hi'",
+    "bash -c ': -l'",
+    "exec -a name echo hi",
+)
+
+# Lines a rule leaves alone (a coded policy refuses their `$` words).
+STILL_RUNS_UNDER_RULES = (
+    "read -r line < /data/f",
+    "printf -v x %s y",
+    "for f in a b; do echo hi; done",
+    "declare -i n=1",
+    "g() { local x=1; }; g",
+    'read -p "Name: $USER " ans < /data/f',
+    'getopts ":ab:" opt "$@"',
+    "export -n FOO",
 )
 
 
@@ -1234,9 +1277,10 @@ async def test_a_whole_line_gate_reads_what_another_spelling_runs(coded):
                 await ran.stderr_str(),
             )
         assert box.lines == []
-        for line in STILL_RUNS:
+        still = STILL_RUNS + (() if coded else STILL_RUNS_UNDER_RULES)
+        for line in still:
             assert (await ws.shell(line, session_id="s")).exit_code == 0, line
-        assert box.lines == list(STILL_RUNS)
+        assert box.lines == list(still)
     finally:
         await ws.close()
 
@@ -1270,6 +1314,34 @@ async def test_an_allow_list_holds_against_a_line_another_spelling_runs(
         assert ran.exit_code == 126
         assert (said.exit_code, said.stderr) == (126, await ran.stderr_str())
         assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["PS4", "BASH_FUNC_ls%%"])
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_hook_the_session_exports_holds_a_whole_line(name, coded):
+    # The machine's shell gets the session's exported environment, so a
+    # hook an earlier line exported runs there on a line that reads clean.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else {"commands": {"hostname": "deny"}}},
+        policies=[_NoHostname()] if coded else [],
+        machines=[box],
+    )
+    try:
+        session = ws.create_session("s", profile="r")
+        seed_var(session, name, "$(hostname)")
+        assert (await ws.shell("set -x; :", session_id="s")).exit_code == 0
+        set_attr(session, name, VarAttr.EXPORT)
+        said = await ws.explain("set -x; :", "s")
+        ran = await ws.shell("set -x; :", session_id="s")
+        assert ran.exit_code == 126
+        assert (said.exit_code, said.stderr) == (126, await ran.stderr_str())
+        assert box.lines == ["set -x; :"]
     finally:
         await ws.close()
 
@@ -1498,11 +1570,19 @@ MACHINE_PATHS = (
     "cat //data/secret.txt",
     "diff --from-file=/data/secret.txt /data/pub",
     "diff --to-file=/data/secret.txt /data/pub",
+    "read HOME <<< /data; cat ~/secret.txt",
+    "printf -v HOME /data; cat ~/secret.txt",
+    "dd if=~/secret.txt",
+    "env -C /data cat secret.txt",
+    "env --chdir=/data cat secret.txt",
+    "HOME[0]=/data; cat ~/secret.txt",
+    "declare -n h; h=HOME; h=/data; cat ~/secret.txt",
 )
 MACHINE_WRITES = (
     "find /data/pub -fprint /data/secret.txt",
     "find /data/pub -fprint0 /data/secret.txt",
     "find /data/pub -fls /data/secret.txt",
+    "find -O3 /data/pub -fprint /data/secret.txt",
 )
 
 
@@ -1529,9 +1609,15 @@ async def test_a_path_check_reads_the_file_a_whole_line_opens(coded):
                 await ran.stderr_str(),
             ), line
         assert box.lines == []
-        for line in ("cat ~/secret.txt", "cat ~root/secret.txt"):
+        still = (
+            "cat ~/secret.txt",
+            "cat ~root/secret.txt",
+            "env -C /data cat other.txt",
+            'echo x="a:~"',
+        )
+        for line in still:
             assert (await ws.shell(line, session_id="s")).exit_code == 0
-        assert box.lines == ["cat ~/secret.txt", "cat ~root/secret.txt"]
+        assert box.lines == list(still)
     finally:
         await ws.close()
 

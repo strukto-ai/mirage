@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+import re
 from collections.abc import (
     AsyncIterator,
     Callable,
@@ -109,6 +110,7 @@ from mirage.workspace.node.inner_lines import (
     InnerLine,
     Word,
     inner_lines,
+    is_hook,
     program_lines,
     read_word,
     reads_of_test,
@@ -128,7 +130,12 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import tilde_homes
-from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
+from mirage.workspace.session.state import (
+    env_is_readonly,
+    env_snapshot,
+    seed_var,
+    set_attr,
+)
 
 # How the explanation tree names a parse node that shapes a line; a node
 # not here (a redirected or negated statement) is read through.
@@ -193,6 +200,18 @@ PLACES_LIMIT = 8
 # see into: a sourced file, a script, a bash option mirage does not read.
 UNREADABLE_LINES = "runs lines the gate cannot read"
 HOME_VAR = frozenset({"HOME"})
+# Builtins that store into the variables they name, with their options
+# that take a value.
+_STORES = {
+    "read": "adinNptu",
+    "mapfile": "dnOsuCc",
+    "readarray": "dnOsuCc",
+    "getopts": "",
+}
+# The declarations whose `-n` makes a nameref (`export -n` unexports).
+_NAMEREFS = frozenset({"declare", "typeset", "local"})
+# An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
+_ASSIGNED_TILDE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?:[^~'\"\\]*[:=])?~")
 
 
 class JudgmentMode(StrEnum):
@@ -755,14 +774,20 @@ async def _judge_words(
             within = whole_occurrence(
                 argv_frame([w.value for w in argv], occurrence)
             )
+            place, moved = inner_session, lost
+            if inner.chdir is not None:
+                # `env -C` runs its command where `cd` would have gone.
+                place, moved, _ = _after_cd(
+                    [Word("cd", "cd"), inner.chdir], inner_session, lost, ()
+                )
             async for one in _judge_words(
                 Walked(
                     argv,
                     (),
-                    inner_session,
+                    place,
                     within,
                     stated=stated and not inner.open,
-                    lost=lost,
+                    lost=moved,
                     open_=inner.open,
                     pipeline=pipeline,
                 ),
@@ -2122,21 +2147,27 @@ async def _judge_line(
         # The runtime receives the line, cwd and environment. Its shell
         # options are independent of the workspace's.
         pipeline = _PipelineWalk(guest=True)
-    hooked = _assignment_to(ast, HOOK_VARS) if whole_line else None
-    if hooked is not None and (
+    # What the machine's shell runs on its own: a hook set on the line, or
+    # one the session's environment hands it.
+    hooked = _written(ast, HOOK_VARS) if whole_line else None
+    carried = (
+        next((n for n in env_snapshot(session) if is_hook(n)), None)
+        if whole_line
+        else None
+    )
+    if (hooked is not None or carried is not None) and (
         has_rules(session.commands)
         or await registry.policies.wants_for(
             "pre_command", session.session_id, coded_only=True
         )
     ):
+        node, name = hooked if hooked is not None else (ast, str(carried))
         yield Judged(
-            _denied(get_text(hooked.children[0]), UNREADABLE_LINES),
-            occurrence_in(hooked, frame),
-            False,
+            _denied(name, UNREADABLE_LINES), occurrence_in(node, frame), False
         )
         return
     homes = tilde_homes(session)
-    if whole_line and _assignment_to(_typed_line(ast, frame), HOME_VAR):
+    if whole_line and _written(_typed_line(ast, frame), HOME_VAR):
         # The machine's shell expands a later `~` with the HOME it was set.
         homes = {name: home for name, home in homes.items() if name}
     for item in _walked_line(
@@ -2178,15 +2209,19 @@ def _machine_word(word: Word) -> Word:
     Args:
         word (Word): the word as the walk read it.
     """
-    if word.text is not None and word.raw[:1] == word.text[:1] == "~":
+    if word.text is None:
+        return word
+    if word.raw[:1] == word.text[:1] == "~" or _ASSIGNED_TILDE.match(word.raw):
         return Word(word.raw, None, word.glob)
     return word
 
 
-def _assignment_to(ast: Any, names: frozenset[str]) -> Any | None:
-    """The first assignment anywhere on a line (a prefix, a declaration, a
-    function body or a substitution's included) to one of ``names``,
-    None when there is none.
+def _written(ast: Any, names: frozenset[str]) -> tuple[Any, str] | None:
+    """The first node anywhere on a line (a function body or a
+    substitution's included) that sets one of ``names``, with the name:
+    an assignment, a loop variable, a ``declare -n`` aimed at one, or a
+    builtin storing into one (``read``, ``mapfile``, ``readarray``,
+    ``getopts``, ``printf -v``); None when there is none.
 
     Args:
         ast (Any): the parsed root node.
@@ -2195,14 +2230,111 @@ def _assignment_to(ast: Any, names: frozenset[str]) -> Any | None:
     stack = [ast]
     while stack:
         node = stack.pop()
-        if (
-            node.type == NodeType.VARIABLE_ASSIGNMENT
-            and node.children
-            and get_text(node.children[0]) in names
-        ):
-            return node
+        name = _sets(node, names)
+        if name is not None:
+            return node, name
         stack.extend(reversed(node.children))
     return None
+
+
+def _sets(node: Any, names: frozenset[str]) -> str | None:
+    """The one of ``names`` a node sets itself (an element of it
+    included), None when it sets none. A node setting a variable the gate
+    cannot name (a ``declare -n`` nameref, a store into a word only the
+    run expands) answers with its command's name.
+
+    Args:
+        node (Any): one parsed node.
+        names (frozenset[str]): the variables asked about.
+    """
+    kids = node.children
+    if node.type == NodeType.EXPANSION and not any(
+        k.type in (":=", "=") for k in kids
+    ):
+        return None
+    if node.type in (
+        NodeType.VARIABLE_ASSIGNMENT,
+        NodeType.FOR_STATEMENT,
+        NodeType.EXPANSION,
+    ):
+        for kid in kids[:3]:
+            if kid.type == NodeType.SUBSCRIPT and kid.children:
+                kid = kid.children[0]
+            if kid.type == NodeType.VARIABLE_NAME and get_text(kid) in names:
+                return get_text(kid)
+        return None
+    if node.type == NodeType.DECLARATION_COMMAND:
+        flags = [get_text(k) for k in kids if k.type == NodeType.WORD]
+        named = any(f[:1] == "-" and "n" in f for f in flags)
+        head = get_text(kids[0]) if kids else ""
+        return head if named and head in _NAMEREFS else None
+    if node.type != NodeType.COMMAND:
+        return None
+    words = _words_of(node, None)
+    if [w.value for w in words[:1]] in (["command"], ["builtin"]):
+        words = words[1:]
+    if not words:
+        return None
+    head = words[0].value
+    if head == "printf":
+        words = [
+            nxt
+            for word, nxt in zip(words[1:], words[2:])
+            if word.value == "-v"
+        ] + [
+            Word(w.raw[2:], None if w.text is None else w.value[2:])
+            for w in words[1:]
+            if w.value.startswith("-v") and w.value != "-v"
+        ]
+    elif head in _STORES:
+        words = _stored(head, words[1:])
+    else:
+        return None
+    for word in words:
+        if word.text is None:
+            return head
+        if word.text.split("[", 1)[0] in names:
+            return word.text.split("[", 1)[0]
+    return None
+
+
+def _stored(head: str, args: Sequence[Word]) -> list[Word]:
+    """The words a storing builtin stores into: ``read``'s operands and
+    its ``-a`` array, ``mapfile``'s array, ``getopts``'s name after its
+    optstring; an option's value is no target.
+
+    Args:
+        head (str): the builtin, one of ``_STORES``.
+        args (Sequence[Word]): the words after it.
+    """
+    valued = _STORES[head]
+    targets: list[Word] = []
+    i = 0
+    while i < len(args) and args[i].value[:1] == "-" and args[i].value != "-":
+        word = args[i]
+        i += 1
+        if word.value == "--":
+            break
+        for at, flag in enumerate(word.value[1:], 1):
+            if flag not in valued:
+                continue
+            rest = word.value[at + 1 :]
+            value = (
+                Word(rest, None if word.text is None else rest)
+                if rest
+                else (args[i] if i < len(args) else None)
+            )
+            if not rest:
+                i += 1
+            if flag == "a" and value is not None:
+                targets.append(value)
+            break
+    operands = list(args[i:])
+    if head == "getopts":
+        operands = operands[1:2]
+    elif head != "read":
+        operands = operands[:1]
+    return [*targets, *operands]
 
 
 def _strictest(places: list[list[Judged]]) -> list[Judged]:

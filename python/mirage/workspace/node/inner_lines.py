@@ -23,6 +23,9 @@ from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
+from mirage.workspace.executor.builtins.script.constants import (
+    BASH_LONG_OPTIONS,
+)
 from mirage.workspace.lookup.constants import read_wrapper
 from mirage.workspace.lookup.lookup import lookup, path_program
 from mirage.workspace.lookup.types import Consumer
@@ -166,11 +169,14 @@ class InnerLine:
         open (bool): whether the runtime appends operands the gate
             cannot read (``xargs``'s items, ``find``'s ``{}`` paths,
             the index and record ``mapfile -C`` hands its callback).
+        chdir (Word | None): the folder the command runs in, as ``cd``
+            would take it (``env -C``); None for the caller's own.
     """
 
     line: str | None = None
     argv: tuple[Word, ...] = ()
     open: bool = False
+    chdir: Word | None = None
 
     @property
     def readable(self) -> bool:
@@ -182,7 +188,18 @@ _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-0", "--null", "-"})
 _ENV_VALUED = ("unset", "chdir", "argv0")
 # Variables a whole line's shell expands or sources on its own.
-HOOK_VARS = frozenset({"PS4", "BASH_ENV", "ENV"})
+HOOK_VARS = frozenset({"PS4", "BASH_ENV", "BASH_CMDS", "BASH_ALIASES"})
+
+
+def is_hook(name: str) -> bool:
+    """Whether a variable sets what a whole line's shell runs on its own:
+    one it expands or sources (``HOOK_VARS``), or a function bash imports
+    from the environment (``BASH_FUNC_NAME%%``).
+
+    Args:
+        name (str): the variable's name.
+    """
+    return name in HOOK_VARS or name.startswith("BASH_FUNC_")
 
 
 def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
@@ -204,14 +221,20 @@ def _command_inner(args: Sequence[Word]) -> list[InnerLine]:
 
 
 def _exec_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``exec [-cl] [-a name] [command [arg ...]]``."""
+    """``exec [-cl] [-a name] [command [arg ...]]``; ``-l``, or a name
+    starting with ``-``, starts a shell as a login shell, which sources
+    rc files the gate cannot read."""
     i = 0
     while i < len(args) and args[i].value.startswith("-"):
         word = args[i].value
         i += 1
         if word == "--":
             break
+        if "l" in word:
+            return [InnerLine()]
         if word.endswith("a"):
+            if i < len(args) and args[i].value.startswith("-"):
+                return [InnerLine()]
             i += 1
     rest = tuple(args[i:])
     return [InnerLine(argv=rest)] if rest else []
@@ -257,9 +280,39 @@ def _takes_next(word: str) -> bool:
     return False
 
 
+def _value_of(
+    word: Word, after: Word | None, letter: str, long: str
+) -> Word | None:
+    """An ``env`` option word's value for ``-letter`` or ``--long``,
+    attached or the next word; None for any other option.
+
+    Args:
+        word (Word): one option word.
+        after (Word | None): the word after it.
+        letter (str): the short option, ``C`` or ``a``.
+        long (str): the long option, ``chdir`` or ``argv0``.
+    """
+    value = word.value
+    if value.startswith("--"):
+        name, eq, attached = value[2:].partition("=")
+        if not name or not long.startswith(name):
+            return None
+        if not eq:
+            return after
+    else:
+        at = next((at for at, f in enumerate(value) if f in "uCa"), 0)
+        if not at or value[at] != letter:
+            return None
+        attached = value[at + 1 :]
+        if not attached:
+            return after
+    return Word(attached, None if word.text is None else attached)
+
+
 def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``,
     read the way the tree's ``env`` builtin reads it."""
+    chdir: Word | None = None
     i = 0
     while i < len(args):
         word = args[i].value
@@ -272,6 +325,12 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
             i += 1
             continue
         if word.startswith("-") and len(word) > 1:
+            after = args[i + 1] if i + 1 < len(args) else None
+            chdir = _value_of(args[i], after, "C", "chdir") or chdir
+            argv0 = _value_of(args[i], after, "a", "argv0")
+            if argv0 is not None and argv0.value.startswith("-"):
+                # A leading `-` in argv0 makes a shell a login shell.
+                return [InnerLine()]
             i += 2 if _takes_next(word) else 1
             continue
         break
@@ -280,11 +339,11 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         and "=" in args[i].value
         and not args[i].value.startswith("=")
     ):
-        if args[i].value.partition("=")[0] in HOOK_VARS:
+        if is_hook(args[i].value.partition("=")[0]):
             return [InnerLine()]
         i += 1
     rest = tuple(args[i:])
-    return [InnerLine(argv=rest)] if rest else []
+    return [InnerLine(argv=rest, chdir=chdir)] if rest else []
 
 
 def _spec_operands(name: str, args: Sequence[Word]) -> tuple[Word, ...] | None:
@@ -383,7 +442,8 @@ def _trap_inner(args: Sequence[Word]) -> list[InnerLine]:
     if first.startswith("-") and first not in ("-", "--"):
         return []
     rest = args[1:] if first == "--" else args
-    if len(rest) < 2 or rest[0].value == "-" or rest[0].value.isdigit():
+    action = rest[0].value if rest else ""
+    if len(rest) < 2 or action == "-" or action.isascii() and action.isdigit():
         return []
     return [InnerLine(line=rest[0].value)]
 
@@ -415,6 +475,34 @@ def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
+def _starts_rc(words: Sequence[str]) -> bool:
+    """Whether a shell's startup options make it interactive or a login
+    shell (``-i``, ``-l``, ``--login``), which sources rc files (``ENV``,
+    ``~/.bashrc``, ``~/.profile``) the gate cannot read.
+
+    Args:
+        words (Sequence[str]): the words after ``sh`` or ``bash``.
+    """
+    skip = False
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        if word in ("-", "--") or not word.startswith("-"):
+            return False
+        if word.startswith("--"):
+            if word == "--login":
+                return True
+            skip = bool(BASH_LONG_OPTIONS.get(word[2:]))
+            continue
+        if "i" in word or "l" in word:
+            return True
+        if "c" in word:
+            return False
+        skip = word[-1] in "oO"
+    return False
+
+
 def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``sh``/``bash``: ``-c`` names the program and ``--help`` or
     ``--version`` runs nothing; a script file, a program read from stdin
@@ -429,9 +517,15 @@ def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
         if word.text is None or word.glob:
             break
         literal.append(word.text)
+    if _starts_rc(literal):
+        return [InnerLine()]
     parsed = parse_bash_args(literal)
     if parsed.help or parsed.version:
         return []
+    if parsed.script is not None and parsed.script.startswith("-"):
+        # bash reads options after `-c` up to the program; mirage's parse
+        # takes the next word.
+        return [InnerLine()]
     if parsed.script is not None:
         return [InnerLine(line=parsed.script)]
     return [InnerLine()]
@@ -495,7 +589,9 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
     if head == "enable":
         return _loads(args, "f")
     if head == "alias" and any(
-        "=" in w.value and not w.value.startswith(("=", "-")) for w in args
+        w.text is None
+        or ("=" in w.value and not w.value.startswith(("=", "-")))
+        for w in args
     ):
         # A whole line's shell expands a later word to the value.
         return [InnerLine()]
