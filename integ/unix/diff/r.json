@@ -66,10 +66,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crd/x/sub /data/crd/y/sub && echo a > /data/crd/x/sub/f && echo b > /data/crd/y/sub/f && echo same > /data/crd/x/g && echo same > /data/crd/y/g && (cd /data/crd && diff -r x y); echo rc=$?; (cd /data/crd && diff -r -y -W 20 x y; diff -r -y -W 20 --suppress-common-lines x y)",
+      "command": "mkdir -p /data/crd/x/sub /data/crd/y/sub && echo a > /data/crd/x/sub/f && echo b > /data/crd/y/sub/f && echo same > /data/crd/x/g && echo same > /data/crd/y/g && (cd /data/crd && diff -r x y); echo rc=$?; (cd /data/crd && diff -r -y -W 20 x y; diff -r -y -W 20 --suppress-common-lines x y); (cd /data/crd && mkdir x/t y/u && touch y/t && echo z > x/u && diff -r x y | grep while; ln -s x/g l1 && ln -s x/sub/f l3 && diff --no-dereference l1 l3; echo rc=$?; diff --no-dereference l1 x/g; echo rc=$?; ln -s g x/v && ln -s sub/f y/v && diff -r --no-dereference x y | grep -E \"while|Symbolic\"; echo rc=$?)",
       "expect": {
-        "exit": 1,
-        "stdout": "diff -r x/sub/f y/sub/f\n1c1\n< a\n---\n> b\nrc=1\ndiff -r -y -W 20 x/g y/g\nsame\tsame\ndiff -r -y -W 20 x/sub/f y/sub/f\na     |\tb\ndiff -r -y -W 20 --suppress-common-lines x/sub/f y/sub/f\na     |\tb\n",
+        "exit": 0,
+        "stdout": "diff -r x/sub/f y/sub/f\n1c1\n< a\n---\n> b\nrc=1\ndiff -r -y -W 20 x/g y/g\nsame\tsame\ndiff -r -y -W 20 x/sub/f y/sub/f\na     |\tb\ndiff -r -y -W 20 --suppress-common-lines x/sub/f y/sub/f\na     |\tb\nFile x/t is a directory while file y/t is a regular empty file\nFile x/u is a regular file while file y/u is a directory\nSymbolic links l1 and l3 differ\nrc=1\nFile l1 is a symbolic link while file x/g is a regular file\nrc=1\nFile x/t is a directory while file y/t is a regular empty file\nFile x/u is a regular file while file y/u is a directory\nSymbolic links x/v and y/v differ\nrc=0\n",
         "stderr": ""
       },
       "flags": [

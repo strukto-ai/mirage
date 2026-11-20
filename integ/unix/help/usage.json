@@ -176,7 +176,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "grep: option requires an argument -- 'e'\nTry 'grep --help' for more information.\n"
+        "stderr": "grep: option requires an argument -- 'e'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
       },
       "flags": []
     }

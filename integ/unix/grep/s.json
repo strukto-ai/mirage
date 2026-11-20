@@ -146,7 +146,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\n"
+        "stderr": "grep: unrecognized option '--bogus'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
       },
       "flags": [
         "s"

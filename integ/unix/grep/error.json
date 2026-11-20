@@ -31,7 +31,7 @@
       "command": "grep --bogus world /data/a.txt 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stdout": "grep: unrecognized option '--bogus'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ncode=2\n",
         "stderr": ""
       },
       "flags": [
@@ -69,7 +69,7 @@
       "command": "grep --cache /c world /data/a.txt 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: unrecognized option '--cache'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stdout": "grep: unrecognized option '--cache'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ncode=2\n",
         "stderr": ""
       },
       "flags": [
@@ -107,7 +107,7 @@
       "command": "grep -Y world /data/a.txt 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: invalid option -- 'Y'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stdout": "grep: invalid option -- 'Y'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ncode=2\n",
         "stderr": ""
       },
       "flags": [
@@ -145,7 +145,7 @@
       "command": "grep -m 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: option requires an argument -- 'm'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stdout": "grep: option requires an argument -- 'm'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ncode=2\n",
         "stderr": ""
       },
       "flags": [
@@ -639,7 +639,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "grep: option '--co' is ambiguous; possibilities: '--context' '--color' '--colour' '--count'\nTry 'grep --help' for more information.\n"
+        "stderr": "grep: option '--co' is ambiguous; possibilities: '--context' '--color' '--colour' '--count'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
       }
     },
     {

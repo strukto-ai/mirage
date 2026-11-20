@@ -28,11 +28,20 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
+import {
+  FileType,
+  Follow,
+  LINK_TARGET_KEY,
+  LineFacts,
+  type FileStat,
+  PathSpec,
+  type ReaddirFn,
+  type StatFn,
+} from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
-import type { StatPath } from '../../../view/types.ts'
+import type { LinkView, StatPath } from '../../../view/types.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -89,6 +98,8 @@ export interface DiffFlags {
   readonly identical: boolean
   readonly exclude: readonly string[]
   readonly excludeFrom: readonly PathSpec[]
+  /** --no-dereference compares a link as itself: by the path it holds. */
+  readonly noDereference: boolean
 }
 
 // Each output style and the options that ask for it.
@@ -212,6 +223,7 @@ export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): DiffFl
     identical: fl.asBool('report_identical_files'),
     exclude: fl.asList('exclude'),
     excludeFrom: fl.asPaths('exclude_from'),
+    noDereference: fl.asBool('no_dereference'),
   }
 }
 
@@ -232,11 +244,24 @@ interface Walk {
   real: ((virtual: string) => string) | null
   // A regular file's size, null when unknown, for -q to answer unread.
   sizeOf: ((p: PathSpec) => Promise<number | null>) | null
+  // The namespace's links, which --no-dereference reads as themselves.
+  links: LinkView | undefined
 }
 
 type Absent = readonly [boolean, boolean]
 
 const PRESENT: Absent = [false, false]
+
+// How diff names each type but a regular file, which it calls a regular
+// file or a regular empty file by its size (diffutils 3.10).
+const TYPE_NAMES: ReadonlyMap<FileType, string> = new Map([
+  [FileType.DIRECTORY, 'directory'],
+  [FileType.SYMLINK, 'symbolic link'],
+  [FileType.CHAR_DEVICE, 'character special file'],
+  [FileType.BLOCK_DEVICE, 'block special file'],
+  [FileType.FIFO, 'fifo'],
+  [FileType.SOCKET, 'socket'],
+])
 
 // The characters GNU diff spells as a C escape in a header name. Any other
 // control character is three octal digits.
@@ -490,6 +515,58 @@ async function entries(walk: Walk, path: PathSpec, absent: boolean): Promise<Set
 // `trouble`, for one it cannot stat or a link that leads nowhere. GNU names
 // each such entry on each side and goes on with the rest, the pair left
 // uncompared (exit 2). Mirrors Python's _entry_kind.
+/**
+ * The path a link holds, where diff reads links as themselves
+ * (`--no-dereference`); null for anything else. Mirrors Python's
+ * `_link_text`.
+ */
+function linkText(walk: Walk, path: PathSpec): string | null {
+  if (!walk.flags.noDereference || walk.links === undefined || isStdin(path)) return null
+  const row = walk.links.statAt(path.virtual)
+  if (row?.type !== FileType.SYMLINK) return null
+  const target = row.extra[LINK_TARGET_KEY]
+  return typeof target === 'string' ? target : ''
+}
+
+/**
+ * How diff names an entry's type when two differ: an empty regular file is
+ * a `regular empty file` (diffutils 3.10). Mirrors Python's `_kind_name`.
+ */
+async function kindName(walk: Walk, path: PathSpec, kind: FileType): Promise<string> {
+  const named = TYPE_NAMES.get(kind)
+  if (named !== undefined) return named
+  return (await walk.stat(path)).size === 0 ? 'regular empty file' : 'regular file'
+}
+
+/**
+ * What diff says of a pair one or both of which is a link it reads as itself:
+ * nothing for two holding one path, `Symbolic links ... differ` for two holding
+ * different ones, and the two types otherwise. Mirrors Python's `_link_pair`.
+ */
+async function linkPair(
+  walk: Walk,
+  a: PathSpec,
+  b: PathSpec,
+  texts: readonly [string | null, string | null],
+): Promise<Uint8Array | null> {
+  if (texts[0] !== null && texts[1] !== null) {
+    if (texts[0] === texts[1]) return null
+    return ENC.encode(`Symbolic links ${a.rawPath} and ${b.rawPath} differ\n`)
+  }
+  const names: string[] = []
+  for (const [path, text] of [
+    [a, texts[0]],
+    [b, texts[1]],
+  ] as const) {
+    names.push(
+      text !== null ? 'symbolic link' : await kindName(walk, path, (await walk.stat(path)).type),
+    )
+  }
+  return ENC.encode(
+    `File ${a.rawPath} is a ${names[0] ?? ''} while file ${b.rawPath} is a ${names[1] ?? ''}\n`,
+  )
+}
+
 async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
   let row: FileStat
   try {
@@ -551,6 +628,18 @@ async function diffDirs(
     }
     const childA = childSpec(dirA, name)
     const childB = childSpec(dirB, name)
+    const texts = [
+      inA ? linkText(walk, childA) : null,
+      inB ? linkText(walk, childB) : null,
+    ] as const
+    if (inA && inB && (texts[0] !== null || texts[1] !== null)) {
+      const said = await linkPair(walk, childA, childB, texts)
+      if (said !== null) {
+        parts.push(said)
+        differ = true
+      }
+      continue
+    }
     const kindA = inA ? await entryKind(walk, childA) : null
     const kindB = inB ? await entryKind(walk, childB) : null
     if ((inA && kindA === null) || (inB && kindB === null)) continue
@@ -587,18 +676,11 @@ async function diffDirs(
           ),
         )
       for (const chunk of pair.output) parts.push(chunk)
-    } else if (aDir) {
+    } else if (kindA !== null && kindB !== null) {
       differ = true
       parts.push(
         ENC.encode(
-          `File ${childA.rawPath} is a directory while file ${childB.rawPath} is a regular file\n`,
-        ),
-      )
-    } else {
-      differ = true
-      parts.push(
-        ENC.encode(
-          `File ${childA.rawPath} is a regular file while file ${childB.rawPath} is a directory\n`,
+          `File ${childA.rawPath} is a ${await kindName(walk, childA, kindA)} while file ${childB.rawPath} is a ${await kindName(walk, childB, kindB)}\n`,
         ),
       )
     }
@@ -606,8 +688,8 @@ async function diffDirs(
   return differ
 }
 
-async function missing(stat: StatFn, path: PathSpec, allowed: boolean): Promise<boolean> {
-  if (!allowed || isStdin(path)) return false
+async function missing(stat: StatFn, path: PathSpec): Promise<boolean> {
+  if (isStdin(path)) return false
   try {
     await stat(path)
   } catch (err) {
@@ -629,6 +711,13 @@ async function excludedPatterns(
   return patterns
 }
 
+/**
+ * A diff line follows its operands' links, unless `--no-dereference`
+ * compares each link as itself. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return fl.asBool('no_dereference') ? new LineFacts({ follows: Follow.NONE }) : new LineFacts()
+}
 export async function diffGeneric(
   flags: DiffFlags,
   paths: PathSpec[],
@@ -677,6 +766,12 @@ export async function diffGeneric(
       trouble,
       real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
       sizeOf,
+      links,
+    }
+    const texts = [linkText(walk, p0), linkText(walk, p1)] as const
+    if (texts[0] !== null || texts[1] !== null) {
+      const said = await linkPair(walk, p0, p1, texts)
+      return [said, new IOResult({ exitCode: said === null ? 0 : 1 })]
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {
@@ -689,13 +784,11 @@ export async function diffGeneric(
         ]
       }
     }
-    // A missing operand -N reads as empty only beside one that is there:
-    // two missing ones are both reported.
-    const absent: Absent = [
-      await missing(stat, p0, flags.newFirst),
-      await missing(stat, p1, flags.newFile),
-    ]
-    if (absent[0] && absent[1]) {
+    // Two missing operands are both reported, -N or not; one -N names reads
+    // as empty beside one that is there.
+    const gone = [await missing(stat, p0), await missing(stat, p1)] as const
+    const absent: Absent = [gone[0] && flags.newFirst, gone[1] && flags.newFile]
+    if (gone[0] && gone[1]) {
       const lines: Uint8Array[] = []
       for (const path of paths) {
         try {

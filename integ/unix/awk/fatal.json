@@ -133,11 +133,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\n' | awk '{print \"abc}'",
+      "command": "printf 'a\\n' | awk '{print \"abc}'; awk '/abc' </dev/null",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "awk: syntax error: unterminated string\n"
+        "stderr": "awk: line 1: runaway string constant \"abc} ...\nawk: line 1: runaway regular expression /abc ...\n"
       }
     },
     {

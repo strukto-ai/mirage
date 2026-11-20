@@ -98,6 +98,29 @@ impl Lexer<'_> {
         self.src.get(pos).copied()
     }
 
+    /// mawk 1.3.4's report of a string or expression its line or the
+    /// program ends inside: the line it opened on, and its first ten
+    /// bytes as typed, short of a backslash that ends the program.
+    fn runaway(&self, start: usize, what: &[u8]) -> Vec<u8> {
+        let line = self.src[..start].iter().filter(|&&c| c == b'\n').count() + 1;
+        let body = &self.src[start + 1..];
+        let end = body.iter().position(|&c| c == b'\n').unwrap_or(body.len());
+        let mut shown = &body[..end];
+        if end == body.len() && shown.last() == Some(&b'\\') {
+            shown = &shown[..shown.len() - 1];
+        }
+        let shown = &shown[..shown.len().min(10)];
+        [
+            format!("awk: line {line}: runaway ").as_bytes(),
+            what,
+            b" ",
+            &self.src[start..=start],
+            shown,
+            b" ...",
+        ]
+        .concat()
+    }
+
     fn push(&mut self, kind: Kind, text: &[u8]) {
         self.tokens.push(Token {
             kind,
@@ -116,6 +139,7 @@ impl Lexer<'_> {
     }
 
     fn string(&mut self) -> Result<(), Vec<u8>> {
+        let start = self.pos;
         self.pos += 1;
         let mut out = Vec::new();
         while let Some(c) = self.at(self.pos) {
@@ -125,10 +149,10 @@ impl Lexer<'_> {
                     self.push(Kind::String, &out);
                     return Ok(());
                 }
-                b'\n' => return Err(error(b"newline in string")),
+                b'\n' => return Err(self.runaway(start, b"string constant")),
                 b'\\' => {
                     if self.pos + 1 >= self.src.len() {
-                        return Err(error(b"unterminated string"));
+                        return Err(self.runaway(start, b"string constant"));
                     }
                     self.pos = read_escape(self.src, self.pos + 1, &mut out);
                 }
@@ -138,10 +162,11 @@ impl Lexer<'_> {
                 }
             }
         }
-        Err(error(b"unterminated string"))
+        Err(self.runaway(start, b"string constant"))
     }
 
     fn ere(&mut self) -> Result<(), Vec<u8>> {
+        let start = self.pos;
         self.pos += 1;
         let mut out = Vec::new();
         while let Some(c) = self.at(self.pos) {
@@ -151,7 +176,7 @@ impl Lexer<'_> {
                     self.push(Kind::Ere, &out);
                     return Ok(());
                 }
-                b'\n' => return Err(error(b"newline in regex")),
+                b'\n' => return Err(self.runaway(start, b"regular expression")),
                 // Only `\/` collapses here; every other escape belongs to
                 // the expression, which needs its backslash.
                 b'\\' if self.pos + 1 < self.src.len() => {
@@ -168,7 +193,7 @@ impl Lexer<'_> {
                 }
             }
         }
-        Err(error(b"unterminated regex"))
+        Err(self.runaway(start, b"regular expression"))
     }
 
     fn number(&mut self) {

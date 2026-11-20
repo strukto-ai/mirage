@@ -32,12 +32,14 @@ import {
   RG_FLAG_NAMES,
   USAGE_EXIT,
   USAGE_HINT_PREFIX,
+  USAGE_LINE,
   USAGE_PAGE,
   ZGREP_UNSUPPORTED_LONG,
   ZGREP_UNSUPPORTED_SHORT,
 } from './constants.ts'
 import { specOf } from './builtins.ts'
 import { helpPage } from './standard.ts'
+import { SYNOPSES } from './synopsis.ts'
 import { CommandName } from './types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { rstripNewlines } from '../../utils/text.ts'
@@ -198,6 +200,7 @@ export function unknownOptionError(
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
   }
+  if (builtin && cmdName === 'zgrep') return unknownOptionError('grep', token)
   if (builtin && COMPARE_PROGRAMS[cmdName] !== undefined) {
     return unknownOptionError(COMPARE_PROGRAMS[cmdName], token)
   }
@@ -524,7 +527,8 @@ export function usageHint(cmdName: string, builtin = true): string {
     const page = helpPage(cmdName, specOf(cmdName))
     return rstripNewlines(page.slice(page.indexOf('Usage: ')))
   }
-  const prefix = builtin && USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
+  let prefix = builtin && USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
+  if (builtin && USAGE_LINE.has(cmdName)) prefix = `Usage: ${SYNOPSES[cmdName] ?? cmdName}\n`
   return `${prefix}Try '${cmdName} --help' for more information.`
 }
 

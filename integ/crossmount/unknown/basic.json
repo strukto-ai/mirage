@@ -31,7 +31,7 @@
       "command": "grep --bogus s /data/a.txt /data2/xm.txt 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stdout": "grep: unrecognized option '--bogus'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ncode=2\n",
         "stderr": ""
       }
     }

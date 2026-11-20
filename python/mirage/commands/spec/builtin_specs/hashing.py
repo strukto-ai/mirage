@@ -78,6 +78,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-r", "--recursive", action="store_true"),
             Argument("-N", "--new-file", action="store_true"),
             Argument("--unidirectional-new-file", action="store_true"),
+            Argument("--no-dereference", action="store_true"),
             Argument("-x", "--exclude", action="append"),
             Argument("-X", "--exclude-from", type="path", action="append"),
             Argument("-s", "--report-identical-files", action="store_true"),

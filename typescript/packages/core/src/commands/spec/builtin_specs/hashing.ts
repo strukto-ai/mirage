@@ -95,6 +95,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-r', '--recursive'], { action: 'store_true' }),
       new Argument(['-N', '--new-file'], { action: 'store_true' }),
       new Argument('--unidirectional-new-file', { action: 'store_true' }),
+      new Argument('--no-dereference', { action: 'store_true' }),
       new Argument(['-x', '--exclude'], { action: 'append' }),
       new Argument(['-X', '--exclude-from'], { action: 'append', type: 'path' }),
       new Argument(['-s', '--report-identical-files'], { action: 'store_true' }),

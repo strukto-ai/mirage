@@ -74,7 +74,7 @@ describe('unknownOptionError', () => {
   it('short options report the char', () => {
     const [msg, code] = unknownOptionError('grep', 'Y')
     expect(td.decode(msg)).toBe(
-      "grep: invalid option -- 'Y'\nTry 'grep --help' for more information.\n",
+      "grep: invalid option -- 'Y'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n",
     )
     expect(code).toBe(2)
   })
@@ -300,6 +300,7 @@ describe('ambiguousOptionError', () => {
     const [msg, code] = ambiguousOptionError('grep', '--c', ['--context', '--color', '--count'])
     expect(new TextDecoder().decode(msg)).toBe(
       "grep: option '--c' is ambiguous; possibilities: '--context' '--color' '--count'\n" +
+        'Usage: grep [OPTION]... PATTERNS [FILE]...\n' +
         "Try 'grep --help' for more information.\n",
     )
     expect(code).toBe(2)
@@ -455,6 +456,7 @@ describe('unexpectedValueError', () => {
     const [msg, code] = unexpectedValueError('grep', '--byte-offset=2')
     expect(new TextDecoder().decode(msg)).toBe(
       "grep: option '--byte-offset' doesn't allow an argument\n" +
+        'Usage: grep [OPTION]... PATTERNS [FILE]...\n' +
         "Try 'grep --help' for more information.\n",
     )
     expect(code).toBe(2)

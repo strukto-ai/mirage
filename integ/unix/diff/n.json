@@ -133,11 +133,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -N /data/dn/m1 /data/dn/m2",
+      "command": "diff -N /data/dn/m1 /data/dn/m2; diff /data/dn/m1 /data/dn/m2",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "diff: /data/dn/m1: No such file or directory\ndiff: /data/dn/m2: No such file or directory\n"
+        "stderr": "diff: /data/dn/m1: No such file or directory\ndiff: /data/dn/m2: No such file or directory\ndiff: /data/dn/m1: No such file or directory\ndiff: /data/dn/m2: No such file or directory\n"
       }
     },
     {

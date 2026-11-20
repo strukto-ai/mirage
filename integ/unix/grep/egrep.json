@@ -73,7 +73,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\nrc=2\ngrep\ngrep\n1\nrc=2\n",
-        "stderr": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ngrep: option requires an argument -- 'e'\nTry 'grep --help' for more information.\n"
+        "stderr": "grep: unrecognized option '--bogus'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\ngrep: option requires an argument -- 'e'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
       },
       "flags": [
         "V",

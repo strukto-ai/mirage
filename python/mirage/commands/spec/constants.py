@@ -856,6 +856,11 @@ USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch", "xz", "unxz"})
 # spec.
 USAGE_PAGE = frozenset({"sed", "bzip2", "bunzip2"})
 
+# Commands that print their synopsis line above the `Try '--help'` line
+# after every usage error: grep 3.11, whose zgrep, egrep and rgrep hand
+# their option errors to it.
+USAGE_LINE = frozenset({"grep"})
+
 # The programs zcmp and zdiff run, whose refusal of an option they do not
 # know is theirs, not the wrapper's.
 COMPARE_PROGRAMS = {"zcmp": "cmp", "zdiff": "diff"}
