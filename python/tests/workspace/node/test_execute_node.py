@@ -13,35 +13,31 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import replace
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from mirage.commands.config import Context
 from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.policy import HandOff
 from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.parse import parse
 from mirage.types import MountMode, PathSpec
+from mirage.utils.ids import SeededIdSource
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.node.execute_node import (
-    ExecuteNodeDeps,
-    with_hand_off,
-    with_opts,
-)
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
+from mirage.workspace.workspace import Workspace
 
 
 def execute_node(dispatch, registry, job_table, execute_fn, *args, **kwargs):
@@ -411,6 +407,103 @@ def test_subshell_isolates_cwd():
     session = _session(cwd="/start")
     _exec("(cd /other)", session=session, dispatch=dispatch)
     assert session.cwd == "/start"
+
+
+async def _shell_stdout(line: str) -> str:
+    """Run a line in a fresh RAM workspace and return its stdout.
+
+    Args:
+        line (str): the shell line.
+    """
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(line)
+        return await io.stdout_str()
+    finally:
+        await ws.close()
+
+
+def test_subshell_eval_lists_the_subshells_jobs():
+    out = _run(_shell_stdout("( sleep 0.2 & eval jobs )"))
+    assert out == "[1]+  Running                 sleep 0.2 &\n"
+
+
+def test_subshell_eval_wait_waits_on_the_subshells_jobs():
+    out = _run(
+        _shell_stdout("( (sleep 0.2; echo late) & eval wait; echo done )")
+    )
+    assert out == "late\ndone\n"
+
+
+def test_subshell_eval_sees_no_job_started_outside():
+    out = _run(_shell_stdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )"))
+    assert out == "done\n"
+
+
+def test_subshell_backtick_read_sees_only_its_jobs():
+    out = _run(
+        _shell_stdout(
+            "printf 'ok\\n' > /f; sleep 2 & "
+            "( sleep 1 & echo `< $(jobs > /jobs; echo /f)`; wait; cat /jobs )"
+        )
+    )
+    assert out == "ok\n[1]+  Running                 sleep 1 &\n"
+
+
+def test_subshell_backtick_read_sees_no_job_started_outside():
+    out = _run(
+        _shell_stdout(
+            "printf 'ok\\n' > /f; sleep 2 & "
+            "( echo `< $(jobs > /jobs; echo /f)`; cat /jobs )"
+        )
+    )
+    assert out == "ok\n"
+
+
+def test_subshell_exit_action_sees_only_its_jobs():
+    out = _run(
+        _shell_stdout(
+            "sleep 2 & ( sleep 1 & trap 'eval jobs; eval wait; echo done' EXIT )"
+        )
+    )
+    assert out == "[1]+  Running                 sleep 1 &\ndone\n"
+
+
+def test_subshell_evaluates_a_line_on_the_typed_lines_handle():
+    reg, _ = _mock_registry()
+    execute_fn = AsyncMock(return_value=IOResult())
+    handle = LineHandle(LineId("line_typed"), "test", "( eval echo hi )")
+    context = EvaluationContext(_session())
+    context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
+    deps = ExecuteNodeDeps(
+        _mock_dispatch(),
+        reg,
+        Namespace(reg),
+        JobTable(),
+        execute_fn,
+        line_handle=handle,
+    )
+    _run(_execute_node(deps, parse("( eval echo hi )"), context))
+    assert execute_fn.call_args.kwargs["line_handle"] is handle
+
+
+async def _draw_after(line: str) -> str:
+    """Run a line in a seeded workspace and return the next id it draws.
+
+    Args:
+        line (str): the shell line.
+    """
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, ids=SeededIdSource(5))
+    try:
+        await ws.shell(line)
+        return ws.registry.ids.uuid7()
+    finally:
+        await ws.close()
+
+
+def test_subshell_statements_draw_no_line_id():
+    after_subshell = _run(_draw_after("( true; true; true )"))
+    assert after_subshell == _run(_draw_after("true"))
 
 
 # ── function definition ────────────────────────
@@ -3062,37 +3155,3 @@ def test_cd_tilde():
     dispatch.side_effect = FileNotFoundError("not found")
     _, io, _, session, _, _ = _exec("cd ~", session=session, dispatch=dispatch)
     assert session.cwd == "/"
-
-
-# ── ExecuteNodeDeps ─────────────────────────────────
-
-
-def _deps(**fields):
-    registry = MountRegistry()
-    return ExecuteNodeDeps(
-        _mock_dispatch(),
-        registry,
-        Namespace(registry),
-        JobTable(),
-        AsyncMock(return_value=IOResult()),
-        **fields,
-    )
-
-
-def test_with_opts_cancel_none_clears_the_event():
-    deps = _deps(cancel=asyncio.Event())
-    assert with_opts(deps, {"cancel": None}).cancel is None
-
-
-def test_with_opts_unknown_key_raises():
-    with pytest.raises(TypeError, match="jobs"):
-        with_opts(_deps(), {"jobs": JobTable()})
-
-
-def test_execute_fn_follows_the_hand_off():
-    deps = _deps(handed=HandOff())
-    handed = HandOff()
-    for derived in (replace(deps, handed=handed), with_hand_off(deps, handed)):
-        deps.entry.reset_mock()
-        _run(derived.execute_fn("true", session_id="test"))
-        assert deps.entry.call_args.kwargs["handed"] is handed

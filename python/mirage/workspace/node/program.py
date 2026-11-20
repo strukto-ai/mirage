@@ -21,15 +21,11 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
-from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.pipe import BytePipe
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import active_records
-from mirage.policy.decisions import Decisions
-from mirage.policy.types import HandOff
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -52,6 +48,7 @@ from mirage.workspace.executor.control import (
     Unwinding,
     carried,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.statement import (
     as_written,
     errexit_acts,
@@ -105,6 +102,7 @@ class StatementRecorder(Recorder):
 
 
 async def execute_program(
+    deps: ExecuteNodeDeps,
     recurse: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
     ],
@@ -112,22 +110,16 @@ async def execute_program(
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    dispatch: DispatchFn | None = None,
-    handed: HandOff | None = None,
-    decisions: Decisions | None = None,
-    sink: JobConsole | None = None,
     inline: bool = False,
-    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated).
 
-    ``dispatch`` is the dispatcher, threaded so an active ``exec`` redirect
-    can send each statement's output to its file; None (a nested loop
-    that is not the program root) leaves output undiverted. ``handed``
-    and ``decisions`` are the line's hand-off and its ledger, for a
-    background job to borrow. ``sink`` takes each statement's output as
-    it finishes, in the order it was written, instead of the result.
+    The value's ``dispatch`` is threaded so an active ``exec`` redirect
+    can send each statement's output to its file. Its ``handed`` and
+    its registry's ``decisions`` are the line's hand-off and its ledger,
+    for a background job to borrow. Its ``sink`` takes each statement's
+    output as it finishes, in the order it was written, instead of the
+    result.
     The outermost program of a session's line routes what a statement
     wrote to the session's terminal through a copy (``exec 3>&1``); a
     nested one (``eval``, ``source``) leaves that to it. An ``inline``
@@ -141,6 +133,15 @@ async def execute_program(
     runs. ``set -v`` echoes each input line once, as the first statement
     on it runs, from the line after the last one echoed, comments and
     blank lines included, so ``set -v; echo a`` echoes nothing.
+
+    Args:
+        deps (ExecuteNodeDeps): what the program runs against.
+        recurse (Callable): the node recursion.
+        node (TSNodeLike): the program node.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
+        inline (bool): whether the program runs on its caller's frames.
     """
     session = context.session
     # Every program loop is one parse, which is the unit bash's alias
@@ -167,19 +168,14 @@ async def execute_program(
     session._line_open = True
     try:
         return await _run_program(
+            deps,
             recurse,
             node,
             context,
             stdin,
             call_stack,
-            job_table,
-            dispatch,
-            handed,
-            decisions,
-            sink,
             session.terminal if root else None,
             inline,
-            execute_fn,
         )
     finally:
         (
@@ -245,6 +241,7 @@ async def _drained(
 
 
 async def _run_program(
+    deps: ExecuteNodeDeps,
     recurse: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
     ],
@@ -252,15 +249,15 @@ async def _run_program(
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    dispatch: DispatchFn | None = None,
-    handed: HandOff | None = None,
-    decisions: Decisions | None = None,
-    sink: JobConsole | None = None,
     own: StreamOwner | None = None,
     inline: bool = False,
-    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    job_table = deps.job_table
+    dispatch = deps.dispatch
+    handed = deps.handed
+    decisions = deps.registry.decisions
+    sink = deps.sink
+    execute_fn = deps.execute_fn
     session = context.session
     children = node.children
     all_stdout: list[Any] = []

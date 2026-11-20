@@ -58,7 +58,6 @@ import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
-import type { JobTable } from '../../execution/job/index.ts'
 import type { MachineName } from '../../execution/types.ts'
 import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
@@ -102,6 +101,7 @@ import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/c
 import { runExternal } from '../executor/command/external.ts'
 import { argumentListTooLong } from '../executor/command/handler.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs, globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
@@ -472,6 +472,7 @@ async function purgeRemoved(
 }
 
 export async function executeCommand(
+  deps: ExecuteNodeDeps,
   recurse: (
     n: TSNodeLike,
     s: EvaluationContext,
@@ -479,31 +480,16 @@ export async function executeCommand(
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
   ) => Promise<RedirectResult>,
-  dispatch: DispatchFn,
-  registry: MountRegistry,
-  namespace: Namespace,
-  executeFn: ExecuteFn,
   node: TSNodeLike,
   context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  signal?: AbortSignal,
-  // The line's parse scope; only alias expansion needs it, and each
-  // expansion parses in a fork released when it ends. Absent means an
-  // alias is stored and printed but never expanded.
-  parser?: ParseScope,
-  // The agent the line is attributed to, which an approval request names.
-  // The line's hand-off, which its gate claims on and runs on.
-  handed?: HandOff,
-  // Where a command that runs statements of its own (a function body, a
-  // nested shell) writes them as they finish.
-  sink?: JobConsole,
   // Filled with the words the command expanded to, so the caller knows what
   // the head ran as.
   expanded?: ExpandedWords,
 ): Promise<RedirectResult> {
   const session = context.session
+  const { registry, executeFn, parser, handed, sink } = deps
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
 
@@ -643,22 +629,14 @@ export async function executeCommand(
   let settling: OutputState | null = null
   try {
     const [stdout, io, execNode] = await runCommandBody(
+      deps,
       recurse,
-      dispatch,
-      registry,
-      namespace,
-      executeFn,
       node,
       nonPrefixParts,
       context,
       stdinIn,
       callStack,
-      jobTable,
-      signal,
-      handed,
       seedPrefix,
-      sink,
-      parser,
       expanded,
       new Set(prefixAssignments.map(([k]) => k)),
     )
@@ -756,42 +734,37 @@ function writeRefused(err: PolicyDenied, command: string): RedirectResult {
 }
 
 async function runCommandBody(
+  deps: ExecuteNodeDeps,
   recurse: (
     n: TSNodeLike,
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<RedirectResult>,
-  dispatch: DispatchFn,
-  registry: MountRegistry,
-  namespace: Namespace,
-  executeFnIn: ExecuteFn,
   node: TSNodeLike,
   parts: TSNodeLike[],
   context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  signalIn?: AbortSignal,
-  handed?: HandOff,
   seedPrefix?: (command: string) => void,
-  sink?: JobConsole,
-  parser?: ParseScope,
   expanded?: ExpandedWords,
   assigned: ReadonlySet<string> = new Set(),
 ): Promise<RedirectResult> {
   const session = context.session
   const stdin = stdinIn
+  const { registry, namespace, sink } = deps
   // A background job's kill channel rides the session; fold it in so
   // builtins (sleep) and the mount layer observe the kill.
-  const signal = mergeSignals(signalIn, context.frame.abortSignal)
+  const signal = mergeSignals(deps.signal, context.frame.abortSignal)
   // The command's place on the line, as the pass computed it, and the
   // entry point its nested evaluations re-enter through: a word that runs a
   // line (eval, source, xargs) is bound to this node, and a substitution
   // names its own node when it calls, so every nested line stands under
   // the node its text came from.
-  const claimant = claimantFor(node, handed)
-  const executeFn: ExecuteFn = (cmd, opts) => executeFnIn(cmd, { node, ...opts })
+  const claimant = claimantFor(node, deps.handed)
+  const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { node, ...opts })
+  const argvDeps: ExecuteNodeDeps = { ...deps, executeFn }
+  if (signal !== undefined) argvDeps.signal = signal
 
   const argv = await ownWords(
     node,
@@ -808,23 +781,16 @@ async function runCommandBody(
     xtrace = false
   }
   const [ranStdout, io, execNode] = await runArgv(
+    argvDeps,
     recurse,
-    dispatch,
-    registry,
-    namespace,
-    executeFn,
     argv,
     context,
     stdin,
     callStack,
-    jobTable,
-    signal,
     readRow(node),
     redirectPathsFor(node),
     claimant,
-    sink,
     redirectRunnerFor(node),
-    parser,
     seedPrefix,
     assigned,
   )
@@ -861,22 +827,17 @@ async function runCommandBody(
 }
 
 async function runArgv(
+  deps: ExecuteNodeDeps,
   recurse: (
     n: TSNodeLike,
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<RedirectResult>,
-  dispatch: DispatchFn,
-  registry: MountRegistry,
-  namespace: Namespace,
-  executeFn: ExecuteFn,
   argv: Argv,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  signal?: AbortSignal,
   // The row the shell began reading the command on within its parse
   // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
   // commands of one read keep the aliases it began with.
@@ -888,15 +849,14 @@ async function runArgv(
   redirects: readonly PathSpec[] = [],
   // The line's hand-off, which its gate claims on and runs on.
   claimant: Claimant | null = null,
-  sink?: JobConsole,
   // Applies ordered redirects after command word expansion.
   runner: RedirectRunner | null = null,
-  parser?: ParseScope,
   seedPrefix?: (name: string) => void,
   assigned: ReadonlySet<string> = new Set(),
 ): Promise<RedirectResult> {
   const session = context.session
   const name = argv.name
+  const { dispatch, registry, namespace, executeFn, signal, sink } = deps
 
   // A glob whose directory holds a child mount cannot be pushed down to
   // one backend: the mount root is a child of that directory but its keys
@@ -983,25 +943,15 @@ async function runArgv(
     // policies bind in the same window, whether or not a gate judged the
     // line, so the command tier's policy guard can fire preVfs for the
     // backend I/O a handler performs.
-    const run = (nested: ExecuteFn = executeFn) =>
-      routeArgv(
-        recurse,
-        dispatch,
-        registry,
-        namespace,
-        nested,
-        argv,
-        context,
-        given,
-        callStack,
-        jobTable,
-        signal,
-        row,
-        claimant?.line ?? null,
-        output,
-        parser,
-        admitted,
-      )
+    const run = (nested: ExecuteFn = executeFn) => {
+      let routedDeps = deps
+      if (nested !== executeFn || output !== sink) {
+        routedDeps = { ...deps, executeFn: nested }
+        if (output === undefined) delete routedDeps.sink
+        else routedDeps.sink = output
+      }
+      return routeArgv(routedDeps, recurse, argv, context, given, callStack, row, admitted)
+    }
     // A preCommand route places this command, and what it runs, over the
     // line's placement for its run alone: the lines it runs (`eval`) keep
     // the command's placement, not the line's.
@@ -1410,29 +1360,22 @@ async function wrappedVerdict(
 }
 
 async function routeArgv(
+  deps: ExecuteNodeDeps,
   recurse: (
     n: TSNodeLike,
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<RedirectResult>,
-  dispatchIn: DispatchFn,
-  registry: MountRegistry,
-  namespace: Namespace,
-  executeFn: ExecuteFn,
   argv: Argv,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  signal: AbortSignal | undefined,
   row: number,
-  handed: HandOff | null,
-  sink?: JobConsole,
-  parser?: ParseScope,
   admission: EntryGate | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
+  const { registry, namespace, executeFn, jobTable, signal, sink, parser } = deps
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
   // Every handler below reaches the dispatcher through this one function,
@@ -1440,7 +1383,7 @@ async function routeArgv(
   // between its operands (`rm l1 l2` with the first unlink held past
   // the grace), and a walk the index answers yields often enough for the
   // abort or timeout to fire.
-  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
+  const dispatch = guardDispatch(deps.dispatch, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
@@ -1508,16 +1451,11 @@ async function routeArgv(
           }
         : undefined
     return handleExecPath(
-      dispatch,
-      executeFn,
+      { ...deps, dispatch },
       name,
       args,
       context,
-      registry,
-      namespace,
       stdin,
-      sink,
-      jobTable ?? undefined,
       callStack,
       onTheRuntime,
     )
@@ -1628,7 +1566,7 @@ async function routeArgv(
         executeFn,
         ...(parser === undefined ? {} : { parser }),
         ...(sink === undefined ? {} : { sink }),
-        ...(jobTable === null ? {} : { jobTable }),
+        jobTable,
       })
     } catch (err) {
       // A value a builtin stores into an `-i` name did not evaluate: bash
@@ -1729,20 +1667,12 @@ async function routeArgv(
 
   // Default: mount-dispatched command
   const [source, io, execNode] = await handleCommand(
+    { ...deps, dispatch },
     recurse,
-    dispatch,
-    registry,
     dispatchArgv.words,
     context,
     stdin,
     callStack,
-    jobTable,
-    namespace,
-    executeFn,
-    handed ?? null,
-    signal,
-    sink,
-    parser,
     admission,
   )
 

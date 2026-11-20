@@ -46,7 +46,7 @@ export type ExecuteFn = (
     session?: SessionState
     stdin?: ByteSource | null
     signal?: AbortSignal
-    node?: TSNodeLike
+    node?: TSNodeLike | undefined
     span?: readonly [number, number]
     handed?: HandOff
     substitution?: boolean

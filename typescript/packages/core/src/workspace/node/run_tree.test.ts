@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EvaluationContext } from '../evaluation.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../execution/job/index.ts'
@@ -23,7 +23,8 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
-import { type ExecuteNodeDeps } from './execute_node.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { runCommandTree } from './run_tree.ts'
 
 function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
@@ -36,8 +37,6 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
     namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
     jobTable,
     executeFn,
-    workspaceId: 'test-ws',
-    registerCloser: (): void => undefined,
   }
 }
 
@@ -64,5 +63,40 @@ describe('runCommandTree', () => {
       new EvaluationContext(new SessionState({ sessionId: 'test', cwd: '/' })),
     )
     expect(io.exitCode).not.toBe(0)
+  })
+})
+
+describe('runCommandTree under a cancelled line', () => {
+  const slow = 'touch /data/started; sleep 0.3; touch /data/late; echo /data/f'
+
+  async function filesAfterCancel(line: string): Promise<string[]> {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell("printf 'hello\\n' > /data/f")
+      const abort = new AbortController()
+      const running = ws.shell(line, { signal: abort.signal })
+      await vi.waitFor(() => ws.vfs.read('/data/started'), { interval: 5 })
+      abort.abort()
+      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const io = await ws.shell('ls /data')
+      return new TextDecoder().decode(io.stdout).split(/\s+/).filter(Boolean)
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('stops the substitution in a backtick read', async () => {
+    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual([
+      'f',
+      'started',
+    ])
+  })
+
+  it('stops the substitution in a $( ) read', async () => {
+    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual([
+      'f',
+      'started',
+    ])
   })
 })

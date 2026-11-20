@@ -12,8 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
+
 import pytest
 
+from mirage import Action, CommandContext, Policy
+from mirage.policy import Ask, Outcome
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff, Occurrence, Scope
 from mirage.shell.constants import NESTING_MAX
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -73,3 +79,151 @@ async def test_a_sourced_file_is_not_a_function_level():
         "echo g > /r/s.sh; FUNCNEST=2; g() { echo g; }; f() { source /r/s.sh; }; f"
     )
     assert (out, err, code) == ("g\n", "", 0)
+
+
+class _AskTouch(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Ask("touch") if ctx.command == "touch" else None
+
+
+def _place(at: Occurrence | None) -> list[str]:
+    texts = []
+    while at is not None:
+        texts.append(at.source[at.start : at.end])
+        at = at.parent
+    return texts
+
+
+def _under(handed: HandOff | None) -> list[str | None]:
+    origins: list[str | None] = []
+    while handed is not None:
+        at = handed.origin
+        origins.append(None if at is None else at.source[at.start : at.end])
+        handed = handed.parent
+    return origins
+
+
+async def _judged(
+    line: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], list[tuple[str, list[str], list[str | None]]]]:
+    """Run ``line`` with every ``touch`` asked about once, and report the
+    asks and, for each time the ledger judged one, where it stood and the
+    origins of the hand-offs it was judged under, innermost first.
+
+    Args:
+        line (str): the line to run.
+        monkeypatch (pytest.MonkeyPatch): wraps the ledger's resolve.
+    """
+    asks: list[str] = []
+    judged: list[tuple[str, list[str], list[str | None]]] = []
+    resolve = Decisions.resolve
+
+    async def recorded(self, ctx, ask, cancel=None, claimant=None):
+        assert claimant is not None
+        judged.append(
+            (
+                " ".join(ctx.argv),
+                _place(claimant.occurrence),
+                _under(claimant.line),
+            )
+        )
+        return await resolve(self, ctx, ask, cancel, claimant)
+
+    async def on_ask(record):
+        asks.append(" ".join(record.argv))
+        return dataclasses.replace(
+            record, outcome=Outcome.ALLOW, scope=Scope.ONCE
+        )
+
+    monkeypatch.setattr(Decisions, "resolve", recorded)
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[_AskTouch()],
+        on_ask=on_ask,
+    )
+    try:
+        await ws.shell(line)
+    finally:
+        await ws.close()
+    return asks, judged
+
+
+@pytest.mark.asyncio
+async def test_a_return_action_set_in_a_body_is_judged_like_the_body(
+    monkeypatch,
+):
+    body = "f() { trap 'touch /data/r' RETURN; touch /data/b; }"
+    asks, judged = await _judged(f"{body}; f; f", monkeypatch)
+    assert asks == ["/data/b", "/data/r"]
+    assert (
+        judged
+        == [
+            ("/data/b", ["touch /data/b", body], [body, None]),
+            ("/data/r", ["touch /data/r"], [None, body, None]),
+        ]
+        * 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_err_action_a_body_fires_is_judged_under_the_body(
+    monkeypatch,
+):
+    body = "f() { false; }"
+    asks, judged = await _judged(
+        f"set -E; trap 'touch /data/e' ERR; {body}; f; f", monkeypatch
+    )
+    assert asks == ["/data/e"]
+    assert (
+        judged
+        == [
+            ("/data/e", ["touch /data/e"], [None, body, None]),
+            ("/data/e", ["touch /data/e"], [None, None]),
+        ]
+        * 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_err_action_inside_an_if_stands_where_the_body_one_does(
+    monkeypatch,
+):
+    body = "f() { false; if :; then false; fi; }"
+    asks, judged = await _judged(
+        f"set -E; trap 'touch /data/e' ERR; {body}; f; f", monkeypatch
+    )
+    assert asks == ["/data/e"]
+    assert (
+        judged
+        == [
+            ("/data/e", ["touch /data/e"], [None, body, None]),
+            ("/data/e", ["touch /data/e"], [None, body, None]),
+            ("/data/e", ["touch /data/e"], [None, None]),
+        ]
+        * 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_trap_outside_any_function_is_judged_on_the_line(
+    monkeypatch,
+):
+    asks, judged = await _judged(
+        "trap 'touch /data/e' ERR; f() { :; }; f; false; false", monkeypatch
+    )
+    assert asks == ["/data/e"]
+    assert judged == [("/data/e", ["touch /data/e"], [None, None])] * 2
+
+
+@pytest.mark.asyncio
+async def test_one_return_action_text_set_by_two_functions_asks_once_for_both(
+    monkeypatch,
+):
+    asks, judged = await _judged(
+        "f() { trap 'touch /data/r' RETURN; }; "
+        "g() { trap 'touch /data/r' RETURN; }; f; g",
+        monkeypatch,
+    )
+    assert asks == ["/data/r"]
+    assert [where for _, where, _ in judged] == [["touch /data/r"]] * 2

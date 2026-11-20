@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import current_caller
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.machine.constants import stop_signal
@@ -26,7 +27,10 @@ from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -36,6 +40,28 @@ class FakeNode:
         self.text = text
         self.is_named = True
         self.type = "command"
+
+
+async def no_line(*_args, **_kw):
+    raise AssertionError("nothing to run")
+
+
+async def no_dispatch(*_args, **_kw):
+    raise AssertionError("dispatch should not have been called")
+
+
+def bare_deps() -> ExecuteNodeDeps:
+    """A real registry, namespace and job table over one RAM mount, with
+    a dispatcher and an entry point that fail the test if called."""
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMVFS(), MountMode.WRITE)
+    return ExecuteNodeDeps(
+        dispatch=no_dispatch,
+        registry=registry,
+        namespace=Namespace(registry),
+        job_table=JobTable(),
+        entry=no_line,
+    )
 
 
 @pytest.mark.asyncio
@@ -115,6 +141,7 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
         )
 
     await handle_subshell(
+        bare_deps(),
         execute_node,
         [FakeNode("a"), FakeNode("b")],
         child_context(EvaluationContext(session)),

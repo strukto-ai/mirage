@@ -81,6 +81,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import start_shell
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import Unwinding, ended
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,
@@ -91,7 +92,6 @@ from mirage.workspace.history.line import LineHistory
 from mirage.workspace.lookup.lookup import runs_on_machine
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.node.execute_node import ExecuteNodeDeps
 from mirage.workspace.node.explain import (
     Judged,
     Walked,
@@ -275,6 +275,7 @@ async def recurse(
     records = opts.pop("records", None)
     read = opts.pop("read", None)
     began = opts.pop("started", None)
+    jobs = opts.get("job_table") or ws.job_table
     if handed is None:
         inner = None
     elif node is None:
@@ -317,12 +318,13 @@ async def recurse(
                     ws.dispatch,
                     ws.registry,
                     ws.namespace,
-                    ws.job_table,
+                    jobs,
                     partial(
                         recurse,
                         ws,
                         routing_decision=routing_decision,
                         nested=nested,
+                        job_table=jobs,
                     ),
                     cancel=cancel,
                     handed=inner,
@@ -391,8 +393,7 @@ async def recurse(
         # and it ends when its jobs do. They are its own jobs.
         session.job_output = capture.jobs
         session.job_waits = waits
-        caller = opts.get("job_table") or ws.job_table
-        opts["job_table"] = caller.child(caller)
+        opts["job_table"] = jobs.child(jobs)
         if opts.get("sink") is not None:
             await capture.attach(opts["sink"])
         opts["sink"] = capture

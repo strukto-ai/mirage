@@ -36,10 +36,11 @@ from mirage.shell.helpers import get_text, input_substitution_redirect
 from mirage.types import PathSpec, Producer
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.scope import _to_scope
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand.redirects import expand_redirect
 from mirage.workspace.node.admission import Refused, admit
-from mirage.workspace.node.execute_node import ExecuteNodeDeps, execute_node
+from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.node.occurrence import claimant_for
 from mirage.workspace.types import ExecutionNode
 

@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from functools import partial
 from typing import Any, Unpack
 
@@ -39,7 +38,6 @@ from mirage.context.session_context import (
     redirect_syntax_for,
 )
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobTable
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -48,7 +46,6 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
-from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -117,6 +114,7 @@ from mirage.workspace.executor.control import (
     handle_select,
     handle_while,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps, with_opts
 from mirage.workspace.executor.pipes import (
     handle_connection,
     handle_pipe,
@@ -188,11 +186,8 @@ STREAMING_KINDS = frozenset(
 
 
 async def _recurse_reassociated(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     redirects: list[Redirect],
     processes: ProcessTable | None,
     right: TSNodeLike,
@@ -211,11 +206,8 @@ async def _recurse_reassociated(
     ran, so cwd changes apply). Every other node recurses normally.
 
     Args:
+        deps (ExecuteNodeDeps): what the redirected operand runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         redirects (list): parsed redirects hoisted off the list.
         processes (ProcessTable | None): where the stages run as
             managed processes.
@@ -224,22 +216,21 @@ async def _recurse_reassociated(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        sink (JobConsole | None): where this call's output goes as it
+            arrives, None to return it.
     """
+    deps = with_opts(deps, {"sink": sink})
     if node.id != right.id:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     return await _run_redirected(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         right,
         with_own_redirects(right, redirects),
         processes,
         context,
         stdin,
         call_stack,
-        sink=sink,
     )
 
 
@@ -259,11 +250,8 @@ async def _no_command(
 
 
 async def _recurse_lifted(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     processes: ProcessTable | None,
     right: TSNodeLike,
@@ -278,11 +266,8 @@ async def _recurse_lifted(
     pipeline; every other node recurses normally.
 
     Args:
+        deps (ExecuteNodeDeps): what the pipeline runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline, its lead already taken.
         processes (ProcessTable | None): where the stages run as
             managed processes.
@@ -291,30 +276,26 @@ async def _recurse_lifted(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        sink (JobConsole | None): where this call's output goes as it
+            arrives, None to return it.
     """
+    deps = with_opts(deps, {"sink": sink})
     if node is not right:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     return await _run_pipeline(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         stages,
         context,
         stdin,
         call_stack,
         processes,
-        sink,
     )
 
 
 async def _recurse_stage(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
     processes: ProcessTable | None,
@@ -333,11 +314,8 @@ async def _recurse_stage(
     gets that ``2>&1`` from ``_recurse_pipe_stderr``.
 
     Args:
+        deps (ExecuteNodeDeps): what the stage runs against.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline being run.
         targets (list[Any]): the stages a ``|&`` follows.
         processes (ProcessTable | None): where the stages run as
@@ -348,6 +326,7 @@ async def _recurse_stage(
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): the stage's pipe console.
     """
+    deps = with_opts(deps, {"sink": sink})
     for command, hoisted in zip(stages.commands, stages.redirects):
         if command is not node or not hoisted:
             continue
@@ -357,11 +336,8 @@ async def _recurse_stage(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
         return await _run_redirected(
+            with_opts(deps, {"sink": None}),
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             node,
             bound,
             processes,
@@ -370,32 +346,25 @@ async def _recurse_stage(
             call_stack,
         )
     return await _recurse_pipe_stderr(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         targets,
         node,
         context,
         stdin,
         call_stack,
-        sink=sink,
+        sink=deps.sink,
     )
 
 
 async def _run_pipeline(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     stages: PipelineStages,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     processes: ProcessTable | None = None,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
 
@@ -405,29 +374,24 @@ async def _run_pipeline(
     the list's. A leading ``!`` negates the whole pipeline's status.
 
     Args:
+        deps (ExecuteNodeDeps): what the pipeline runs against; its
+            sink is where the output goes as it arrives.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline's stages.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         processes (ProcessTable | None): where the stages run as
             managed processes.
-        sink (JobConsole | None): where the output goes as it arrives.
     """
+    execute_fn = deps.execute_fn
     session = context.session
     if stages.lead is not None:
         left, op, right = stages.lead
         wrapped = partial(
             _recurse_lifted,
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             replace(stages, lead=None),
             processes,
             right,
@@ -451,11 +415,8 @@ async def _run_pipeline(
     ]
     pipe_recurse = partial(
         _recurse_stage,
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         stages,
         targets,
         processes,
@@ -470,8 +431,8 @@ async def _run_pipeline(
             call_stack,
             processes,
             execute_fn,
-            registry.io.buffer_bytes,
-            sink,
+            deps.registry.io.buffer_bytes,
+            deps.sink,
         )
     if stages.negated:
         io = IOResult(
@@ -485,11 +446,8 @@ async def _run_pipeline(
 
 
 async def _recurse_pipe_stderr(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     targets: list[Any],
     node: TSNodeLike,
     context: EvaluationContext,
@@ -498,25 +456,22 @@ async def _recurse_pipe_stderr(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    deps = with_opts(deps, {"sink": sink})
     if node not in targets or node_kind(node) != NodeKind.REDIRECT:
-        return await recurse(node, context, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     command, redirects = get_redirects(node)
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
     return await _run_redirected(
+        deps,
         recurse,
-        dispatch,
-        execute_fn,
-        registry,
-        namespace,
         command,
         redirects,
         None,
         context,
         stdin,
         call_stack,
-        sink=sink,
     )
 
 
@@ -557,19 +512,14 @@ async def _negated(
 
 
 async def _run_redirected(
+    deps: ExecuteNodeDeps,
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    execute_fn: ExecuteFn,
-    registry: MountRegistry,
-    namespace: Namespace,
     command: TSNodeLike | None,
     redirects: list[Redirect],
     processes: ProcessTable | None,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    *,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a redirected statement: the command under its redirects.
 
@@ -580,11 +530,10 @@ async def _run_redirected(
     command they follow.
 
     Args:
+        deps (ExecuteNodeDeps): what the statement runs against; its
+            sink is where the redirect writes what it routes as it goes,
+            None to return it.
         recurse (Callable): the plain execute_node recursion.
-        dispatch (DispatchFn): VFS op dispatcher.
-        execute_fn (Callable): recursive execute (for expansions).
-        registry (MountRegistry): mount registry.
-        namespace (Namespace): namespace links for redirect pathname expansion.
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
@@ -593,25 +542,24 @@ async def _run_redirected(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
-        sink (JobConsole | None): where the redirect writes what it
-            routes as it goes, None to return it.
     """
+    dispatch = deps.dispatch
+    sink = deps.sink
+    execute_fn = deps.execute_fn
+    registry = deps.registry
+    namespace = deps.namespace
     session = context.session
     if command is not None and command.type == NT.REDIRECTED_STATEMENT:
         inner, own = get_redirects(command)
         return await _run_redirected(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             inner,
             [*own, *redirects],
             processes,
             context,
             stdin,
             call_stack,
-            sink=sink,
         )
     if command is not None and command.type == NT.FUNCTION_DEFINITION:
         # The redirects belong to the function, applied at each call
@@ -629,11 +577,8 @@ async def _run_redirected(
         left, op, right = get_list_parts(command)
         wrapped = partial(
             _recurse_reassociated,
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             redirects,
             processes,
             right,
@@ -650,11 +595,8 @@ async def _run_redirected(
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
+            with_opts(deps, {"sink": None}),
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             get_pipeline_stages(command, redirects),
             context,
             stdin,
@@ -668,11 +610,8 @@ async def _run_redirected(
         inner = get_negated_command(command)
         with ignoring_errexit(session):
             stdout, io, exec_node = await _run_redirected(
+                deps,
                 recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
                 inner,
                 redirects
                 if inner is None
@@ -681,7 +620,6 @@ async def _run_redirected(
                 context,
                 stdin,
                 call_stack,
-                sink=sink,
             )
         return await _negated(
             stdout, io, exec_node, context, command if inner is None else inner
@@ -862,123 +800,6 @@ def _redirect_gate(
         return None, io, node
 
     return gate
-
-
-@dataclass(frozen=True, slots=True)
-class ExecuteNodeDeps:
-    """What the node walk runs against, one value per subtree.
-
-    A subtree's value is derived with ``dataclasses.replace``, never
-    changed in place. The entry point for nested lines is stored unbound
-    and bound on read to the subtree's own hand-off, event and line, so
-    the hand-off a subtree's gates read and the one its nested lines run
-    under are one fact.
-
-    Args:
-        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        job_table (JobTable): background job management.
-        entry (Callable[..., Any]): the nested-line entry point, with
-            ``handed``, ``cancel`` and ``line_handle`` left unbound.
-        cancel (asyncio.Event | None): event used to abort mid-flight.
-        handed (HandOff | None): the hand-off this subtree runs on.
-        line_handle (LineHandle | None): the line this subtree runs in;
-            None makes each node a line of its own.
-        sink (JobConsole | None): where the subtree writes as it runs.
-    """
-
-    dispatch: DispatchFn
-    registry: MountRegistry
-    namespace: Namespace
-    job_table: JobTable
-    entry: Callable[..., Any]
-    cancel: asyncio.Event | None = None
-    handed: HandOff | None = None
-    line_handle: LineHandle | None = None
-    sink: JobConsole | None = None
-
-    @property
-    def execute_fn(self) -> ExecuteFn:
-        """The entry point bound to this subtree's hand-off, event and
-        line, which every line the subtree evaluates runs through."""
-        return partial(
-            self.entry,
-            handed=self.handed,
-            cancel=self.cancel,
-            line_handle=self.line_handle,
-        )
-
-
-def with_hand_off(
-    deps: ExecuteNodeDeps, handed: HandOff | None
-) -> ExecuteNodeDeps:
-    """The same dependencies on another hand-off, which the gates and the
-    nested lines of the subtree both read.
-
-    Args:
-        deps (ExecuteNodeDeps): the subtree's dependencies.
-        handed (HandOff | None): the hand-off it runs on instead.
-    """
-    return replace(deps, handed=handed)
-
-
-def with_opts(base: ExecuteNodeDeps, opts: ExecuteNodeOpts) -> ExecuteNodeDeps:
-    """Layer a caller's overrides on the walker's dependencies.
-
-    A key decides by its presence: ``cancel=None`` runs the subtree with
-    no event, as a background job runs without its line's. A job list
-    given in place of the bound one is a background job's own, as bash's
-    forked job starts with none of its shell's, so a bare ``wait`` in it
-    never waits on itself; the lines it runs (``eval``, ``source``, its
-    EXIT action) see that list too. ``ends_shell`` and
-    ``own_diagnostics`` are the walker's to read, not dependencies.
-
-    The walk calls this at every node, so the value is built once
-    whatever the number of overrides, and the walker's own is returned
-    when no override differs from it.
-
-    Args:
-        base (ExecuteNodeDeps): the walker's dependencies.
-        opts (ExecuteNodeOpts): the caller's overrides.
-
-    Raises:
-        TypeError: a key that names no override.
-    """
-    if not opts:
-        return base
-    if not ExecuteNodeOpts.__optional_keys__.issuperset(opts):
-        unknown = min(opts.keys() - ExecuteNodeOpts.__optional_keys__)
-        raise TypeError(f"execute_node: no option named {unknown!r}")
-    sink = opts["sink"] if "sink" in opts else base.sink
-    cancel = opts["cancel"] if "cancel" in opts else base.cancel
-    line_handle = (
-        opts["line_handle"] if "line_handle" in opts else base.line_handle
-    )
-    jobs = opts.get("job_table")
-    deps = base
-    if (
-        jobs is not None
-        or sink is not base.sink
-        or cancel is not base.cancel
-        or line_handle is not base.line_handle
-    ):
-        deps = ExecuteNodeDeps(
-            base.dispatch,
-            base.registry,
-            base.namespace,
-            base.job_table if jobs is None else jobs,
-            base.entry
-            if jobs is None
-            else partial(base.entry, job_table=jobs),
-            cancel,
-            base.handed,
-            line_handle,
-            sink,
-        )
-    if "handed" in opts:
-        deps = with_hand_off(deps, opts["handed"])
-    return deps
 
 
 async def execute_node(
@@ -1205,8 +1026,9 @@ async def _fork_subshell(
 ) -> RedirectResult:
     """Run a subshell, its own shell, as bash forks one.
 
-    Each statement of the body is a line of its own, and its nested
-    lines keep the entry point's job list.
+    The statements of the body run on the line's handle, as part of
+    the line. The lines it evaluates (``eval``, ``source``, ``$( )``, its
+    EXIT action) see the subshell's job list, as bash's do.
 
     Args:
         deps (ExecuteNodeDeps): what the subshell node runs against.
@@ -1221,10 +1043,8 @@ async def _fork_subshell(
     # see them; the parent's table never does), mirroring bash's
     # forked process.
     sub_table = deps.job_table.child()
-    sub_recurse = partial(
-        execute_node,
-        replace(deps, job_table=sub_table, sink=None, line_handle=None),
-    )
+    sub_deps = with_opts(deps, {"job_table": sub_table})
+    sub_recurse = partial(execute_node, replace(sub_deps, sink=None))
     child = child_context(context)
     as_program = is_program_invocation(session)
     results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
@@ -1236,17 +1056,12 @@ async def _fork_subshell(
         )
         try:
             result = await handle_subshell(
+                sub_deps,
                 sub_recurse,
                 list(node.children),
                 child,
                 stdin,
                 cs,
-                sub_table,
-                deps.dispatch,
-                deps.handed,
-                deps.registry.decisions,
-                sink=deps.sink,
-                execute_fn=deps.execute_fn,
             )
             results.append(result)
             return result[1].exit_code
@@ -1575,18 +1390,14 @@ async def _execute_node_body(
         to: JobConsole | None,
     ) -> Awaitable[RedirectResult]:
         return _run_redirected(
+            with_opts(deps, {"sink": to}),
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             command,
             redirects,
-            job_table.processes if job_table is not None else None,
+            job_table.processes,
             context,
             stdin,
             cs,
-            sink=to,
         )
 
     if kind == NodeKind.TIMED:
@@ -1608,30 +1419,22 @@ async def _execute_node_body(
                 return await redirected(None, list(pending), sink)
             program_recurse = partial(
                 _recurse_reassociated,
+                deps,
                 recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
                 list(pending),
-                job_table.processes if job_table is not None else None,
+                job_table.processes,
                 statements[-1],
             )
         # A root run in a caller's frame is the caller's own line (eval,
         # an alias); one given none is a shell of its own.
         return await execute_program(
+            deps,
             program_recurse,
             node,
             context,
             stdin,
             cs,
-            job_table,
-            dispatch,
-            handed,
-            registry.decisions,
-            sink=sink,
             inline=call_stack is not None,
-            execute_fn=execute_fn,
         )
 
     if kind == NodeKind.COMMAND and not any(
@@ -1656,19 +1459,12 @@ async def _execute_node_body(
         try:
             async with command_scope():
                 ran = await execute_command(
+                    deps,
                     recurse,
-                    dispatch,
-                    registry,
-                    namespace,
-                    execute_fn,
                     node,
                     context,
                     stdin,
                     cs,
-                    job_table,
-                    cancel=cancel,
-                    handed=handed,
-                    sink=sink,
                     expanded=expanded,
                 )
             return ran if sink is None else await drained(sink, *ran)
@@ -1695,17 +1491,13 @@ async def _execute_node_body(
         # the stages are read the way bash reads them rather than as the
         # parse nested them (see get_pipeline_stages).
         ran = await _run_pipeline(
+            deps,
             recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
             get_pipeline_stages(node),
             context,
             stdin,
             cs,
-            job_table.processes if job_table is not None else None,
-            sink,
+            job_table.processes,
         )
         return ran if sink is None else await drained(sink, *ran)
 
@@ -1734,15 +1526,11 @@ async def _execute_node_body(
 
     run_body = partial(
         execute_body,
+        deps,
         stream,
         context=context,
         stdin=stdin,
         call_stack=cs,
-        job_table=job_table,
-        handed=handed,
-        decisions=registry.decisions,
-        execute_fn=execute_fn,
-        sink=sink,
     )
 
     if kind == NodeKind.COMPOUND:

@@ -17,16 +17,12 @@ import { clearProgramInvocation, sessionVoice } from '../../../context/session_c
 import { share } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { Decisions } from '../../../policy/decisions.ts'
 import type { HandOff } from '../../../policy/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
-import type { JobConsole } from '../../../shell/console/index.ts'
 import { NESTING_MAX } from '../../../shell/constants.ts'
 import { DiscardSignal, ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
 import { parseFunction } from '../../../shell/helpers.ts'
-import type { JobTable } from '../../../execution/job/index.ts'
-import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
@@ -38,6 +34,7 @@ import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
 import { isCountWord } from '../builtins/shared.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
+import { withHandOff, type ExecuteNodeDeps } from '../deps.ts'
 import { executeBody, returning } from '../control.ts'
 import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteNodeFn } from './types.ts'
@@ -55,24 +52,21 @@ function funcnestLimit(session: SessionState): number {
 }
 
 export async function runShellFunction(
+  deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
   cmdName: string,
   source: string,
-  parser: ParseScope,
   restParts: readonly (string | PathSpec)[],
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null = null,
-  handed: HandOff | null = null,
-  decisions: Decisions | null = null,
-  // Where each statement writes as it finishes, undefined to return the
-  // body's output.
-  sink?: JobConsole,
-  // Runs a trap action as a line of the shell; null where nothing can.
-  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
+  const parser = deps.parser
+  if (parser === undefined) throw new Error('function invocation requires a parse scope')
   const session = context.session
+  const { sink } = deps
+  const handed = deps.handed ?? null
+  const decisions = deps.registry.decisions
   const cs = callStack ?? new CallStack(session.shellNesting)
   // bash refuses the call before it enters the function, and abandons the
   // rest of the line as it does after an expansion error.
@@ -155,7 +149,11 @@ export async function runShellFunction(
   const origin = site?.origin ?? null
   const nested: HandOff | null =
     handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
-  const bodyHanded = nested ?? handed
+
+  const outer = nested === null ? deps : withHandOff(deps, nested)
+  const reach = outer.executeFn
+  const executeFn: ExecuteFn = (cmd, opts) => reach(cmd, { ...opts, node: undefined })
+  const bodyDeps: ExecuteNodeDeps = { ...outer, executeFn }
 
   const run: ExecuteNodeFn =
     sink === undefined && nested === null
@@ -175,18 +173,7 @@ export async function runShellFunction(
       let io: IOResult
       let lastExec: ExecutionNode
       try {
-        ;[stdout, io, lastExec] = await executeBody(
-          run,
-          body,
-          context,
-          bodyStdin,
-          cs,
-          jobTable,
-          bodyHanded,
-          decisions,
-          executeFn,
-          sink ?? null,
-        )
+        ;[stdout, io, lastExec] = await executeBody(bodyDeps, run, body, context, bodyStdin, cs)
       } catch (err) {
         if (!(err instanceof ReturnSignal)) throw err
         stdout = err.stdout
@@ -216,7 +203,7 @@ export async function runShellFunction(
     ] = outerParse
     session.aliasView = outerView
     session.aliasExpansion = outerExpansion
-    if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
+    if (nested !== null) decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames

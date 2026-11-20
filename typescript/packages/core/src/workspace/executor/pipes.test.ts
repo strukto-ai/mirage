@@ -29,9 +29,28 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
+import type { ExecuteNodeDeps } from './deps.ts'
+import { JobTable } from '../../execution/job/index.ts'
+import { Namespace } from '../mount/namespace/namespace.ts'
+import { MountRegistry } from '../mount/registry.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { makeIntegrationWS } from '../../../tests/workspace/fixtures/integration_fixture.ts'
+
+function buildDeps(): ExecuteNodeDeps {
+  const registry = new MountRegistry({ '/ram': new RAMVFS() }, MountMode.WRITE)
+  return {
+    dispatch: () => {
+      throw new Error('dispatch should not have been called')
+    },
+    registry,
+    namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
+    jobTable: new JobTable(),
+    executeFn: () => {
+      throw new Error('executeFn should not have been called')
+    },
+  }
+}
 
 function node(text: string): TSNodeLike {
   return { type: 'command', text, children: [], namedChildren: [], isNamed: true }
@@ -285,6 +304,7 @@ describe('handleSubshell', () => {
       ])
     }
     const [stdout, io] = await handleSubshell(
+      buildDeps(),
       execute,
       [node('a'), node('b')],
       childContext(new EvaluationContext(s)),
@@ -306,7 +326,12 @@ describe('handleSubshell', () => {
         new ExecutionNode({ command: nd.text, exitCode: code }),
       ])
     }
-    await handleSubshell(execute, [node('a'), node('b')], childContext(new EvaluationContext(s)))
+    await handleSubshell(
+      buildDeps(),
+      execute,
+      [node('a'), node('b')],
+      childContext(new EvaluationContext(s)),
+    )
     expect(seen).toEqual([0, 7])
     expect(s.lastExitCode).toBe(0)
   })

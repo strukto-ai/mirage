@@ -2481,13 +2481,9 @@ export class Workspace {
       records: this.records,
       jobTable: this.jobTable,
       lineTable: this.lineTable,
-      workspaceId: this.wsId,
       runtimes: this.runtimeWorld,
       router: this.router,
       secretSources: () => this.secretSources(),
-      registerCloser: (fn) => {
-        this.closers.push(fn)
-      },
       execute: (cmd, opts) => this.executeInternal(cmd, opts),
     }
   }

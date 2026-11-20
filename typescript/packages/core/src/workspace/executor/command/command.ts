@@ -46,14 +46,13 @@ import {
 } from '../../../context/session_context.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { framed, mountVoice } from './handler.ts'
-import type { EntryGate, HandOff } from '../../../policy/types.ts'
+import type { EntryGate } from '../../../policy/types.ts'
 import { parseFind, type FindExpr } from '../../../rs/find.ts'
 import { encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 import type { JobTable } from '../../../execution/job/index.ts'
-import type { ParseScope } from '../../../shell/parse/scope.ts'
 import { Follow, PathSpec } from '../../../types.ts'
 import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -62,6 +61,7 @@ import type { FollowOperands, SessionView, StatPath } from '../../../view/types.
 import type { EvaluationContext } from '../../evaluation.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
+import type { ExecuteNodeDeps } from '../deps.ts'
 import { Files } from '../../files.ts'
 import { EXEC_WRAPPERS, MACHINE_VIEW } from '../../lookup/constants.ts'
 import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
@@ -823,24 +823,17 @@ function spanning(
 }
 
 export async function handleCommand(
+  deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
-  dispatch: CallerDispatchFn,
-  registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  jobTable: JobTable | null = null,
-  namespace?: Namespace,
-  executeFn?: ExecuteFn,
-  handed: HandOff | null = null,
-  signal?: AbortSignal,
-  // Where a function body writes its statements as they finish.
-  sink?: JobConsole,
-  parser?: ParseScope,
   admission: EntryGate | null = getAdmission(),
 ): Promise<RedirectResult> {
   const session = context.session
+  const { registry, jobTable, namespace, executeFn, signal, sink } = deps
+  let dispatch: CallerDispatchFn = deps.dispatch
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
@@ -856,7 +849,6 @@ export async function handleCommand(
   const machineHandler = MACHINE_HANDLERS[cmdName]
   if (
     machineHandler !== undefined &&
-    jobTable !== null &&
     (cmdName === 'free' ||
       runsPrograms(context.frame.routing?.bindings ?? registry.runtimeBindings)) &&
     !(cmdName === 'nproc' && parts.some((p) => p === '--help' || p === '--version')) &&
@@ -874,7 +866,6 @@ export async function handleCommand(
   }
   if (
     JOB_BUILTINS.has(cmdName) &&
-    jobTable !== null &&
     lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
   ) {
     const textParts = parts.map((p) =>
@@ -904,21 +895,15 @@ export async function handleCommand(
     funcBody !== undefined &&
     lookup(cmdName, session, registry, context.frame.routing ?? undefined) === Consumer.FUNCTION
   ) {
-    if (parser === undefined) throw new Error('function invocation requires a parse scope')
     return runShellFunction(
+      deps,
       executeNode,
       cmdName,
       funcBody,
-      parser,
       parts.slice(1),
       context,
       stdin,
       callStack,
-      jobTable,
-      handed,
-      registry.decisions,
-      sink,
-      executeFn ?? null,
     )
   }
 
@@ -927,14 +912,14 @@ export async function handleCommand(
   const commandFiles = (follow: FollowOperands | null): Files =>
     new Files(
       dispatch,
-      namespace === undefined ? null : namespace.readers(() => session.visibility),
+      namespace.readers(() => session.visibility),
       null,
       { follow, ledger: false },
     )
   const cliContext = (vfs: Files): CLIContext => {
     const cliSignal = mergeSignals(signal, context.frame.abortSignal)
     return {
-      ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, cliSignal) } : {}),
+      shell: nestedShell(executeFn, session, cliSignal),
       ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
       commandLimits: registry.commandLimits,
       ids: registry.ids,
@@ -983,20 +968,23 @@ export async function handleCommand(
     parts = [runs, option, ...parts.slice(1)]
   }
 
-  const follow =
-    namespace !== undefined
-      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts, session.cwd)
-      : undefined
-  const files = commandFiles(follow ?? null)
+  const follow = operandFollow(
+    namespace.sessionLinks(session),
+    dispatch,
+    cmdName,
+    parts,
+    session.cwd,
+  )
+  const files = commandFiles(follow)
   const runCtx: RunOnMountCtx = {
     admission,
     ...(signal !== undefined ? { signal } : {}),
-    ...(follow !== undefined ? { follow } : {}),
+    follow,
     registry,
     context,
     dispatch,
-    ...(namespace !== undefined ? { namespace } : {}),
-    ...(executeFn !== undefined ? { executeFn } : {}),
+    namespace,
+    executeFn,
     ...(sink !== undefined ? { sink } : {}),
   }
 

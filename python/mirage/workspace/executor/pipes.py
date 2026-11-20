@@ -23,7 +23,7 @@ from mirage.context import (
     set_current_evaluation,
     while_paused,
 )
-from mirage.execution.job import JobTable, JobWaits
+from mirage.execution.job import JobWaits
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
@@ -35,9 +35,6 @@ from mirage.io.stream import (
     discard_streams,
 )
 from mirage.io.types import ByteSource, materialize
-from mirage.policy.decisions import Decisions
-from mirage.policy.types import HandOff
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
@@ -72,6 +69,7 @@ from mirage.workspace.executor.control import (
     carried,
     ended,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -555,6 +553,7 @@ async def _subshell_ended(
 
 
 async def handle_subshell(
+    deps: ExecuteNodeDeps,
     execute_node: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
     ],
@@ -562,16 +561,21 @@ async def handle_subshell(
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    job_table: JobTable | None = None,
-    dispatch: DispatchFn | None = None,
-    handed: HandOff | None = None,
-    decisions: Decisions | None = None,
-    sink: JobConsole | None = None,
-    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a subshell's body in the child shell its caller made.
 
+    The value's ``job_table`` is the subshell's private job table (bash
+    forks: the parent's table never sees these jobs). Its ``dispatch``
+    lets a subshell honor an `exec` redirect the way the program loop
+    does; a subshell is a child shell, so its redirects leave the parent
+    unchanged. Its ``sink`` is where each statement's output goes as it
+    finishes; the body is a shell of its own, which routes what it wrote
+    to its terminal through a copy, so a program nested in it (``$( )``,
+    ``eval``) leaves that to it. Its ``execute_fn`` runs the subshell's
+    own EXIT action as it ends, bound to its private job table.
+
     Args:
+        deps (ExecuteNodeDeps): what the subshell's body runs against.
         execute_node (Callable): recursion bound to the subshell's own
             job table, so `wait`/`kill`/`jobs` inside see its jobs.
         body (list[TSNodeLike]): ALL subshell children, including
@@ -580,18 +584,13 @@ async def handle_subshell(
         context (EvaluationContext): the process owner's isolated child session.
         stdin (ByteSource | None): input stream.
         call_stack (CallStack | None): function-call scope, if any.
-        job_table (JobTable | None): the subshell's private job table
-            (bash forks: the parent's table never sees these jobs).
-        dispatch (DispatchFn | None): the dispatcher, so a subshell honors
-            an `exec` redirect the way the program loop does. A subshell
-            is a child shell, so its redirects leave the parent unchanged.
-        sink (JobConsole | None): where each statement's output goes as
-            it finishes; the body is a shell of its own, which routes
-            what it wrote to its terminal through a copy, so a program
-            nested in it (``$( )``, ``eval``) leaves that to it.
-        execute_fn (Callable[..., Any] | None): runs the subshell's own
-            EXIT action as it ends.
     """
+    job_table = deps.job_table
+    dispatch = deps.dispatch
+    handed = deps.handed
+    decisions = deps.registry.decisions
+    sink = deps.sink
+    execute_fn = deps.execute_fn
     session = context.session
     inherit_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
@@ -599,10 +598,6 @@ async def handle_subshell(
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
     call_stack = (call_stack or CallStack()).fork(loops=False, paren=True)
-    # The subshell's actions run as its own lines: their `wait` and
-    # `jobs` see the subshell's jobs, not the caller's.
-    if execute_fn is not None and job_table is not None:
-        execute_fn = partial(execute_fn, job_table=job_table)
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="()", exit_code=0)
@@ -620,7 +615,7 @@ async def handle_subshell(
         # leak to the parent.
         is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
         armed = err_trap_armed(session)
-        if is_bg and job_table is not None:
+        if is_bg:
             try:
                 stdout, io, last_exec = await handle_background(
                     execute_node,

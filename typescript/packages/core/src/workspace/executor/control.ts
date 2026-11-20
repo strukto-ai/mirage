@@ -19,15 +19,12 @@ import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import type { HandOff } from '../../policy/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { Recorder } from '../../shell/descriptors.ts'
 import { ArithError, ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import type { JobTable } from '../../execution/job/index.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { traceLine } from '../../shell/xtrace.ts'
 import type { Item, Shell, ShellSlot, ShellTask, ShellTreeNode } from '../../rs/shell.ts'
@@ -45,6 +42,7 @@ import { drive } from '../session/task.ts'
 import { ExecutionNode } from '../types.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
+import type { ExecuteNodeDeps } from './deps.ts'
 import { runProgram, runStatement } from './background.ts'
 import {
   errexitActs,
@@ -84,28 +82,30 @@ export class ContinueSignal extends LoopSignal {}
  * `case` arm, a function body.
  *
  * A statement ending in `&` is launched as a job through `runStatement`
- * rather than run inline; `jobTable` is the job plane it needs. The ERR
- * action answers a failing statement, its output landed
- * through `sink` when the body writes to one, and `set -e` stops the list.
- * `bound` is `fd0Binding` as the construct running the list started, so an
- * `exec <&-` in a loop body reaches the next test. A comment leaves `$?` as
- * it was, and a `break` or `continue` records its own status as it leaves
- * (bash leaves `${PIPESTATUS[@]}` at `0`).
+ * rather than run inline, on the value's job table, with the value's
+ * hand-off for the claims it inherits. The ERR action answers a failing
+ * statement through the value's `executeFn`, so it is judged under the same
+ * hand-off as the list; its output lands through the value's `sink` when the
+ * body writes to one, and `set -e` stops the list. `bound` is `fd0Binding`
+ * as the construct running the list started, so an `exec <&-` in a loop
+ * body reaches the next test. A comment leaves `$?` as it was, and a
+ * `break` or `continue` records its own status as it leaves (bash leaves
+ * `${PIPESTATUS[@]}` at `0`).
  */
 export async function executeBody(
+  deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  handed: HandOff | null,
-  decisions: Decisions | null,
-  executeFn: ExecuteFn | null = null,
-  sink: JobConsole | null = null,
   bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
   leading: Uint8Array = new Uint8Array(),
 ): Promise<RedirectResult> {
+  const { jobTable, executeFn } = deps
+  const handed = deps.handed ?? null
+  const decisions = deps.registry.decisions
+  const sink = deps.sink ?? null
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()

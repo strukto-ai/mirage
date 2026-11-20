@@ -98,8 +98,8 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { runsOnMachine } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import { withHandOff } from '../node/execute_node.ts'
-import type { ExecuteNodeDeps } from '../node/execute_node.ts'
+import { withHandOff, withOpts } from '../executor/deps.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import {
   admitLine,
   lineHeld,
@@ -153,11 +153,9 @@ export interface ExecuteEnv {
   records: OpRecord[]
   jobTable: JobTable
   lineTable: LineTable
-  workspaceId: string
   runtimes: Runtimes
   router: Router
   secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
-  registerCloser(fn: () => Promise<void>): void
   execute(cmd: string, options: ExecuteOptions): Promise<ExecuteResult>
 }
 
@@ -637,14 +635,17 @@ function recurse(
           // shows: the read runs with no sink, the line's terminal least
           // of all.
           const [stdout, io] = await runCommandTree(
-            withHandOff(
+            withOpts(
               {
                 ...deps(),
                 parser: substitutionParser,
                 ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
                 ...(opts.lineHandle !== undefined ? { lineHandle: opts.lineHandle } : {}),
               },
-              innerOpts.handed ?? handed,
+              {
+                handed: innerOpts.handed ?? handed,
+                ...(jobs === undefined ? {} : { jobTable: jobs }),
+              },
             ),
             substitutionTree,
             innerContext,
@@ -1137,13 +1138,9 @@ async function runPreparedLine(
             namespace: env.namespace,
             jobTable: options.jobTable ?? env.jobTable,
             executeFn,
-            workspaceId: env.workspaceId,
             lineHandle:
               options.lineHandle ??
               new LineHandle(newLineId(env.registry.ids), targetSession.sessionId, command),
-            registerCloser: (fn: () => Promise<void>) => {
-              env.registerCloser(fn)
-            },
             // Alias expansion rewrites the head word and reads the result as a
             // fresh line, whose parse the line's scope holds.
             parser,

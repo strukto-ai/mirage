@@ -18,14 +18,11 @@ from typing import Any
 
 from mirage._rs import Shell, ShellNode, ShellTask
 from mirage.commands.builtin.utils.strtol import atoi
-from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied
-from mirage.policy.decisions import Decisions
-from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -44,6 +41,7 @@ from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import run_program, run_statement
 from mirage.workspace.executor.builtins.read.read import read_reply
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.statement import (
     errexit_acts,
     fd0_binding,
@@ -71,16 +69,12 @@ BodyRun = Callable[
 
 
 async def execute_body(
+    deps: ExecuteNodeDeps,
     execute_node: BodyRun,
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable | None,
-    handed: HandOff | None,
-    decisions: Decisions | None,
-    execute_fn: Callable[..., Any] | None = None,
-    sink: JobConsole | None = None,
     bound: tuple[SharedInput | None, bool] | None = None,
     leading: bytes = b"",
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -88,16 +82,34 @@ async def execute_body(
     body, a ``case`` arm, a function body.
 
     A statement ending in ``&`` is launched as a job through
-    ``run_statement`` rather than run inline; ``job_table`` is the
-    job plane it needs. The ERR action answers a
-    failing statement, its output landed through ``sink`` when the body
-    writes to one, and ``set -e`` stops the list. ``bound`` is
-    ``fd0_binding`` as the construct running the list started, so an
-    ``exec <&-`` in a loop body reaches the next test. A comment leaves
-    ``$?`` as it was, and a ``break`` or ``continue`` records its own
-    status as it leaves (bash leaves ``${PIPESTATUS[@]}`` at ``0``).
-    ``leading`` is stderr that goes out before the first statement.
+    ``run_statement`` rather than run inline, on the value's job table,
+    with the value's hand-off for the claims it inherits. The ERR action
+    answers a failing statement through the value's ``execute_fn``, so
+    it is judged under the same hand-off as the list; its output lands
+    through the value's ``sink`` when the body writes to one, and
+    ``set -e`` stops the list. A comment leaves ``$?`` as it was, and a
+    ``break`` or ``continue`` records its own status as it leaves (bash
+    leaves ``${PIPESTATUS[@]}`` at ``0``).
+
+    Args:
+        deps (ExecuteNodeDeps): what the list runs against.
+        execute_node (BodyRun): the executor's statement runner.
+        body (list[TSNodeLike]): the statements.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input the statements read in turn.
+        call_stack (CallStack | None): shell call stack.
+        bound (tuple[SharedInput | None, bool] | None): ``fd0_binding``
+            as the construct running the list started, so an ``exec
+            <&-`` in a loop body reaches the next test; None reads it
+            now.
+        leading (bytes): stderr that goes out before the first
+            statement.
     """
+    job_table = deps.job_table
+    handed = deps.handed
+    decisions = deps.registry.decisions
+    execute_fn = deps.execute_fn
+    sink = deps.sink
     session = context.session
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()

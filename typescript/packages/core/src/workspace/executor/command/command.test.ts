@@ -24,10 +24,12 @@ import { MountMode, PathSpec } from '../../../types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { EvaluationContext } from '../../evaluation.ts'
+import { Namespace } from '../../mount/namespace/namespace.ts'
 import { MountRegistry } from '../../mount/registry.ts'
 import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { handleCommand } from './command.ts'
+import type { ExecuteNodeDeps } from '../deps.ts'
 import type { ExecuteNodeFn } from './types.ts'
 
 function treeFallbackRegistry(): MountRegistry {
@@ -148,9 +150,8 @@ describe('handleCommand — mount tree fallback', () => {
         ])
       }
       const [stdout, io] = await handleCommand(
+        buildDeps(registry),
         NEVER_EXECUTE,
-        NEVER_DISPATCH,
-        registry,
         ['remote', 'send'],
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
@@ -172,9 +173,8 @@ describe('handleCommand — mount tree fallback', () => {
         }),
       )
       const [stdout, io] = await handleCommand(
+        buildDeps(registry),
         NEVER_EXECUTE,
-        NEVER_DISPATCH,
-        registry,
         ['remote', 'put'],
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
@@ -190,9 +190,8 @@ describe('handleCommand — mount tree fallback', () => {
     const registry = treeFallbackRegistry()
     registry.mountForPrefix('/longer').mode = MountMode.READ
     const [stdout, io] = await handleCommand(
+      buildDeps(registry),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      registry,
       ['remote', verb],
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
@@ -205,9 +204,8 @@ describe('handleCommand — mount tree fallback', () => {
     async (...argv) => {
       const registry = treeFallbackRegistry()
       const [stdout, io] = await handleCommand(
+        buildDeps(registry),
         NEVER_EXECUTE,
-        NEVER_DISPATCH,
-        registry,
         ['remote', ...argv],
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
@@ -222,9 +220,8 @@ describe('handleCommand — mount tree fallback', () => {
     const registry = treeFallbackRegistry()
     const session = new SessionState({ sessionId: 'test' })
     const [, refused] = await handleCommand(
+      buildDeps(registry),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      registry,
       ['remote', 'put'],
       routed(new EvaluationContext(session)),
     )
@@ -235,9 +232,8 @@ describe('handleCommand — mount tree fallback', () => {
     )
     session.cwd = '/short'
     const [stdout, io] = await handleCommand(
+      buildDeps(registry),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      registry,
       ['remote', 'put'],
       routed(new EvaluationContext(session)),
     )
@@ -270,6 +266,18 @@ const NEVER_DISPATCH: DispatchFn = () => {
   throw new Error('dispatch should not have been called')
 }
 
+function buildDeps(registry: MountRegistry, jobTable = new JobTable()): ExecuteNodeDeps {
+  return {
+    dispatch: NEVER_DISPATCH,
+    registry,
+    namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
+    jobTable,
+    executeFn: () => {
+      throw new Error('executeFn should not have been called')
+    },
+  }
+}
+
 function decode(b: Uint8Array | null): string {
   if (b === null) return ''
   return new TextDecoder().decode(b)
@@ -279,9 +287,8 @@ describe('handleCommand — command not found', () => {
   it('returns exit 127 when no mount has the command', async () => {
     const reg = new MountRegistry({ '/ram': new StubVFS('ram') }, MountMode.WRITE)
     const [, io, exec] = await handleCommand(
+      buildDeps(reg),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['nope'],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -310,9 +317,8 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     mount.register(cmd)
 
     const [stdout, io, exec] = await handleCommand(
+      buildDeps(reg),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['cat', PathSpec.fromStrPath('/ram/x')],
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
@@ -345,9 +351,8 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     mount.register(cmd)
 
     await handleCommand(
+      buildDeps(reg),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['head', '-n', '5', PathSpec.fromStrPath('/ram/x')],
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
@@ -373,9 +378,8 @@ describe('handleCommand — cross-mount', () => {
     if (cmd === undefined) throw new Error('cmd missing')
     mount.register(cmd)
     const [, io, exec] = await handleCommand(
+      buildDeps(reg),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['mycmd', PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -390,14 +394,10 @@ describe('handleCommand — job builtins', () => {
     const reg = new MountRegistry({ '/ram': new StubVFS('ram') }, MountMode.WRITE)
     const jt = new JobTable()
     const [, io] = await handleCommand(
+      buildDeps(reg, jt),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['jobs'],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      jt,
     )
     expect(io.exitCode).toBe(0)
   })
@@ -406,14 +406,10 @@ describe('handleCommand — job builtins', () => {
     const reg = new MountRegistry({ '/ram': new StubVFS('ram') }, MountMode.WRITE)
     const jt = new JobTable()
     const [, io] = await handleCommand(
+      buildDeps(reg, jt),
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      reg,
       ['kill', '999'],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      jt,
     )
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toMatch(/No such process/)

@@ -18,11 +18,8 @@ import { CAPACITY } from '../../io/pipe.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
-import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ProcessTable } from '../../execution/process/table.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
 import { isAborting } from '../../errors/fs.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
@@ -31,7 +28,7 @@ import { Channel } from '../../shell/console/types.ts'
 import { FD_STDIN, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import type { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
-import { type JobTable, JobWaits } from '../../execution/job/index.ts'
+import { JobWaits } from '../../execution/job/index.ts'
 import { simpleCommand } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -40,6 +37,7 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { concat } from '../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { ExecuteFn } from '../expand/types.ts'
+import type { ExecuteNodeDeps } from './deps.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
@@ -489,46 +487,38 @@ async function subshellEnded(
  * `body` is ALL subshell children, including the `&` tokens that mark
  * background statements (named-only lists would run `a & b`
  * synchronously and never set `$!`). Background jobs live in the
- * subshell's private `jobTable` (bash forks: the parent's table never
+ * subshell's private `deps.jobTable` (bash forks: the parent's table never
  * sees them), and `executeNode` is bound to that same table so
- * `wait`/`kill`/`jobs` inside the body resolve against it.
+ * `wait`/`kill`/`jobs` inside the body resolve against it. `deps.dispatch`
+ * lets the subshell honor an `exec` redirect the way the program loop does;
+ * the subshell is a child shell, so the redirect it installs is discarded
+ * when the body ends. `deps.handed` is the line's hand-off, for a background
+ * job to borrow, with the registry's `decisions` as its ledger. `deps.sink`
+ * takes each statement's output as it finishes; the body is a shell of its
+ * own, which routes what it wrote to its terminal through a copy, so a
+ * program nested in it (`$( )`, `eval`) leaves that to it. `deps.executeFn`
+ * runs the subshell's own EXIT action as it ends, bound to its private job table.
  */
 export async function handleSubshell(
+  deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  jobTable: JobTable | null = null,
-  // The dispatcher, so a subshell honors an `exec` redirect the way the
-  // program loop does. A subshell is a child shell, so the redirect it
-  // installs belongs to the child and is discarded when the body
-  // ends.
-  dispatch?: DispatchFn,
-  // The line's hand-off and its ledger, for a background job to borrow.
-  handed: HandOff | null = null,
-  decisions: Decisions | null = null,
-  // Where each statement's output goes as it finishes; the body is a shell
-  // of its own, which routes what it wrote to its terminal through a copy,
-  // so a program nested in it (`$( )`, `eval`) leaves that to it.
-  sink: JobConsole | null = null,
-  // Runs the subshell's own EXIT action as it ends.
-  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
+  const { dispatch, jobTable, executeFn } = deps
+  const decisions = deps.registry.decisions
+  const handed = deps.handed ?? null
+  const sink = deps.sink ?? null
   inheritTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.lineOpen = true
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
   callStack = (callStack ?? new CallStack()).fork(false, true)
-  // The subshell's actions run as its own lines: their `wait` and `jobs`
-  // see the subshell's jobs, not the caller's.
-  const runAction: ExecuteFn | null =
-    executeFn === null
-      ? null
-      : (action, opts) =>
-          executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) })
+  const runAction: ExecuteFn = (action, opts) => executeFn(action, { ...opts, session })
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })
@@ -545,7 +535,7 @@ export async function handleSubshell(
     // no-ops. The child owns the option, so it cannot leak to the parent.
     const isBg = body[i + 1]?.type === NT.BACKGROUND
     const armed = errTrapArmed(session)
-    if (isBg && jobTable !== null) {
+    if (isBg) {
       let launched: RedirectResult
       try {
         launched = await handleBackground(

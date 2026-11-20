@@ -15,9 +15,11 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.shell.errors import ExitSignal
@@ -27,10 +29,10 @@ from mirage.workspace.executor.control import (
     _absorbed,
     carried,
     execute_body,
-    handle_if,
     handle_while,
     take_stdout,
 )
+from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -46,32 +48,21 @@ def node(text: str) -> FakeNode:
     return FakeNode(text=text)
 
 
-def bg(text: str) -> FakeNode:
-    """A body statement whose terminator is ``&``.
-
-    Its text is bytes, as a parsed node's is, because the job
-    launcher names the job through ``get_text``.
-    """
-    return FakeNode(
-        text=text.encode(), next_sibling=FakeNode(text="&", type="&")
-    )
+async def no_line(*_args, **_kw):
+    raise AssertionError("nothing to run")
 
 
 def runner(execute, sess: SessionState):
     return partial(
         execute_body,
+        ExecuteNodeDeps(
+            None, SimpleNamespace(decisions=None), None, JobTable(), no_line
+        ),
         execute,
         context=EvaluationContext(sess),
         stdin=None,
         call_stack=None,
-        job_table=None,
-        handed=None,
-        decisions=None,
     )
-
-
-async def no_line(*_args, **_kw):
-    raise AssertionError("nothing to run")
 
 
 def result(stdout=None, exit_code=0):
@@ -132,23 +123,6 @@ async def test_while_runs_until_its_condition_fails():
     )
     assert turns == 10002
     assert await materialize(io.stderr) == b""
-
-
-@pytest.mark.asyncio
-async def test_body_ampersand_without_a_job_table_fails_loud():
-    async def execute(n, *_args, **_kw):
-        return result()
-
-    sess = SessionState(session_id="test")
-    with pytest.raises(RuntimeError, match="job table"):
-        await handle_if(
-            runner(execute, sess),
-            [([node("c")], [bg("x")])],
-            None,
-            EvaluationContext(sess),
-            no_line,
-            None,
-        )
 
 
 @pytest.mark.asyncio

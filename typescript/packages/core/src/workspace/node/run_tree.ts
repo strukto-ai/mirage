@@ -27,15 +27,18 @@ import { Terminal } from '../../shell/console/index.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import { expandRedirect } from '../expand/redirects.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { admit, Admitted } from './admission.ts'
-import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
+import { executeNode } from './execute_node.ts'
 import { claimantFor } from './occurrence.ts'
 
 export async function runCommandTree(
@@ -60,10 +63,19 @@ export async function runCommandTree(
   if (redirect === null) {
     result = await executeNode(deps, node, context, stdin, callStack)
   } else {
+    const { signal, lineHandle } = deps
+    const executeFn: ExecuteFn = (cmd, opts) => {
+      const merged = mergeSignals(signal, opts.signal)
+      return deps.executeFn(cmd, {
+        ...(lineHandle !== undefined ? { lineHandle } : {}),
+        ...opts,
+        ...(merged !== undefined ? { signal: merged } : {}),
+      })
+    }
     const expanded = await expandRedirect(
       redirect,
       context,
-      deps.executeFn,
+      executeFn,
       deps.registry,
       null,
       false,
