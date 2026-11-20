@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EvaluationContext } from '../evaluation.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../execution/job/index.ts'
@@ -67,17 +67,17 @@ describe('runCommandTree', () => {
 })
 
 describe('runCommandTree under a cancelled line', () => {
-  const slow = 'sleep 0.3; touch /data/late; echo /data/f'
+  const slow = 'touch /data/started; sleep 0.3; touch /data/late; echo /data/f'
 
   async function filesAfterCancel(line: string): Promise<string[]> {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell("printf 'hello\\n' > /data/f")
       const abort = new AbortController()
-      setTimeout(() => {
-        abort.abort()
-      }, 50)
-      await expect(ws.shell(line, { signal: abort.signal })).rejects.toThrow()
+      const running = ws.shell(line, { signal: abort.signal })
+      await vi.waitFor(() => ws.vfs.read('/data/started'), { interval: 5 })
+      abort.abort()
+      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
       await new Promise((resolve) => setTimeout(resolve, 500))
       const io = await ws.shell('ls /data')
       return new TextDecoder().decode(io.stdout).split(/\s+/).filter(Boolean)
@@ -87,10 +87,10 @@ describe('runCommandTree under a cancelled line', () => {
   }
 
   it('stops the substitution in a backtick read', async () => {
-    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual(['f'])
+    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual(['f', 'started'])
   })
 
   it('stops the substitution in a $( ) read', async () => {
-    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual(['f'])
+    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual(['f', 'started'])
   })
 })
