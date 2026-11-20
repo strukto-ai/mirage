@@ -230,6 +230,25 @@ const ANOTHER_SPELLING = [
   'env -a x hostname',
   'env --argv0 x hostname',
   'env -vC tmp hostname',
+  'trap hostname EXIT',
+  "trap 'hostname' DEBUG; :",
+  'coproc hostname',
+  "PS4='$(hostname)'; set -x; :",
+  "export PS4='$(hostname)'; set -x; :",
+  'BASH_ENV=/data/e bash -c :',
+  'ENV=/data/e sh -i',
+  "env PS4='$(hostname)' bash -xc :",
+  `eval "PS4='\\$(hostname)'"; set -x; :`,
+  'hash -p /bin/hostname ls; ls',
+  'enable -f /data/x.so hostname',
+  'alias x=hostname\nx',
+] as const
+
+const STILL_RUNS = [
+  "trap 'rm -f /data/t' EXIT; echo hi",
+  'trap - EXIT; trap -p',
+  'coproc echo hi',
+  'hash -r; alias',
 ] as const
 
 /** Every command an explained tree holds, nested scopes included. */
@@ -987,9 +1006,39 @@ describe('prejudge', () => {
         expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
       }
       expect(box.lines).toEqual([])
+      for (const line of STILL_RUNS) {
+        expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
+      }
+      expect(box.lines).toEqual([...STILL_RUNS])
     },
     30_000,
   )
+
+  it.each([
+    ['trap hostname EXIT', ['trap', 'echo']],
+    ["PS4='$(hostname)'; set -x; echo hi", ['set', 'echo', ':']],
+    ['coproc hostname', ['coproc']],
+  ] as const)('holds an allow list against what %s runs', async (line, allowed) => {
+    // A trap's action, a coproc's command and a PS4 the trace expands are what
+    // the line runs: a closed list that names none of them refuses.
+    const box = new LineBox()
+    const commands = { '*': 'deny', ...Object.fromEntries(allowed.map((n) => [n, 'allow'])) }
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: { r: SessionProfile({ commands }) },
+        machines: [box],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(126)
+    expect([said.exitCode, said.stderr]).toEqual([126, DEC.decode(ran.stderr)])
+    expect(box.lines).toEqual([])
+  })
 
   it('hands an env option cluster its value from the rest of it', async () => {
     // GNU getopt gives `-Cu` the value `u`, so env runs `tmp`: an allow list

@@ -181,6 +181,8 @@ class InnerLine:
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-0", "--null", "-"})
 _ENV_VALUED = ("unset", "chdir", "argv0")
+# Variables a whole line's shell expands or sources on its own.
+HOOK_VARS = frozenset({"PS4", "BASH_ENV", "ENV"})
 
 
 def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
@@ -278,6 +280,8 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         and "=" in args[i].value
         and not args[i].value.startswith("=")
     ):
+        if args[i].value.partition("=")[0] in HOOK_VARS:
+            return [InnerLine()]
         i += 1
     rest = tuple(args[i:])
     return [InnerLine(argv=rest)] if rest else []
@@ -367,6 +371,39 @@ def _time_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
+def _trap_inner(args: Sequence[Word]) -> list[InnerLine]:
+    """``trap [-lp] [[ACTION] CONDITION...]``: the action is a line the
+    shell runs when a condition fires. ``-`` or a number first resets the
+    conditions, a lone operand resets it, and an option only lists.
+
+    Args:
+        args (Sequence[Word]): the words after ``trap``.
+    """
+    first = args[0].value if args else ""
+    if first.startswith("-") and first not in ("-", "--"):
+        return []
+    rest = args[1:] if first == "--" else args
+    if len(rest) < 2 or rest[0].value == "-" or rest[0].value.isdigit():
+        return []
+    return [InnerLine(line=rest[0].value)]
+
+
+def _loads(args: Sequence[Word], letter: str) -> list[InnerLine]:
+    """A builtin whose option ``letter`` loads what a later word runs from
+    a file the gate cannot read (``hash -p``, ``enable -f``).
+
+    Args:
+        args (Sequence[Word]): the words after the builtin.
+        letter (str): the loading option.
+    """
+    for word in args:
+        if word.value == "--" or not word.value.startswith("-"):
+            break
+        if letter in word.value[1:]:
+            return [InnerLine()]
+    return []
+
+
 def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``builtin`` runs the remaining words verbatim, after an optional
     leading ``--``.
@@ -449,6 +486,19 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _wrapper_inner(head, args)
     if head == "time":
         return _time_inner(args)
+    if head == "trap":
+        return _trap_inner(args)
+    if head == "coproc":
+        return [InnerLine(argv=tuple(args))] if args else []
+    if head == "hash":
+        return _loads(args, "p")
+    if head == "enable":
+        return _loads(args, "f")
+    if head == "alias" and any(
+        "=" in w.value and not w.value.startswith(("=", "-")) for w in args
+    ):
+        # A whole line's shell expands a later word to the value.
+        return [InnerLine()]
     return []
 
 

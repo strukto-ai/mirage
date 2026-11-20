@@ -687,7 +687,7 @@
     },
     {
       "id": "whole_line_spellings",
-      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it.",
+      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f and an assignment to PS4, BASH_ENV or ENV set what the shell runs later where the gate cannot read it.",
       "world": {
         "machines": {
           "echobox": {
@@ -738,6 +738,48 @@
           "expect": {
             "exit": 0,
             "stdout": "box:env -vC tmp echo hi\n"
+          }
+        },
+        {
+          "command": "trap hostname EXIT",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "coproc hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "PS4='$(hostname)'; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "hash -p /bin/hostname ls; ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "hash: Permission denied\n"
+          }
+        },
+        {
+          "command": "alias x=hostname\nx",
+          "expect": {
+            "exit": 126,
+            "stderr": "alias: Permission denied\n"
+          }
+        },
+        {
+          "command": "trap 'echo bye' EXIT; echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:trap 'echo bye' EXIT; echo hi\n"
           }
         }
       ]

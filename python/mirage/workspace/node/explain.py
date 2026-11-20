@@ -105,6 +105,7 @@ from mirage.workspace.node.admission import (
     unowned_redirects,
 )
 from mirage.workspace.node.inner_lines import (
+    HOOK_VARS,
     InnerLine,
     Word,
     inner_lines,
@@ -2114,6 +2115,19 @@ async def _judge_line(
         # The runtime receives the line, cwd and environment. Its shell
         # options are independent of the workspace's.
         pipeline = _PipelineWalk(guest=True)
+    hooked = _assignment_to(ast, HOOK_VARS) if whole_line else None
+    if hooked is not None and (
+        has_rules(session.commands)
+        or await registry.policies.wants_for(
+            "pre_command", session.session_id, coded_only=True
+        )
+    ):
+        yield Judged(
+            _denied(get_text(hooked.children[0]), UNREADABLE_LINES),
+            occurrence_in(hooked, frame),
+            False,
+        )
+        return
     for item in _walked_line(ast, session, frame, lost, pipeline=pipeline):
         if not whole_line or not item.elsewhere:
             async for one in judged(item, item.session):
@@ -2125,6 +2139,28 @@ async def _judge_line(
         ]
         for one in _strictest(places):
             yield one
+
+
+def _assignment_to(ast: Any, names: frozenset[str]) -> Any | None:
+    """The first assignment anywhere on a line (a prefix, a declaration, a
+    function body or a substitution's included) to one of ``names``,
+    None when there is none.
+
+    Args:
+        ast (Any): the parsed root node.
+        names (frozenset[str]): the variables asked about.
+    """
+    stack = [ast]
+    while stack:
+        node = stack.pop()
+        if (
+            node.type == NodeType.VARIABLE_ASSIGNMENT
+            and node.children
+            and get_text(node.children[0]) in names
+        ):
+            return node
+        stack.extend(reversed(node.children))
+    return None
 
 
 def _strictest(places: list[list[Judged]]) -> list[Judged]:

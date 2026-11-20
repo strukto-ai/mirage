@@ -88,6 +88,7 @@ import {
   type Refused,
 } from './admission.ts'
 import {
+  HOOK_VARS,
   innerLines,
   programLines,
   innerReadable,
@@ -2516,6 +2517,20 @@ async function* judgeLine(
       namespace,
       reparse,
     )
+  const hooked = takesWholeLine(mode) ? assignmentTo(root, HOOK_VARS) : null
+  if (
+    hooked !== null &&
+    (hasRules(session.commands) ||
+      (await registry.policies.wantsFor('preCommand', session.sessionId, true)))
+  ) {
+    const name = getText(hooked.children[0] ?? hooked)
+    yield {
+      judgment: denied(name, UNREADABLE_LINES),
+      occurrence: occurrenceIn(hooked, frame),
+      stated: false,
+    }
+    return
+  }
   for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline)) {
     const elsewhere = item.elsewhere ?? []
     if (!takesWholeLine(mode) || elsewhere.length === 0) {
@@ -2530,6 +2545,29 @@ async function* judgeLine(
     }
     yield* strictest(places)
   }
+}
+
+/**
+ * The first assignment anywhere on a line (a prefix, a declaration, a function
+ * body or a substitution's included) to one of `names`, null when there is
+ * none.
+ */
+function assignmentTo(root: TSNodeLike, names: ReadonlySet<string>): TSNodeLike | null {
+  const stack: TSNodeLike[] = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node === undefined) break
+    const first = node.children[0]
+    if (
+      node.type === NodeType.VARIABLE_ASSIGNMENT &&
+      first !== undefined &&
+      names.has(getText(first))
+    ) {
+      return node
+    }
+    stack.push(...[...node.children].reverse())
+  }
+  return null
 }
 
 /**

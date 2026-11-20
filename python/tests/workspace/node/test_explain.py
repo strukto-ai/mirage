@@ -1188,6 +1188,25 @@ ANOTHER_SPELLING = (
     "env -a x hostname",
     "env --argv0 x hostname",
     "env -vC tmp hostname",
+    "trap hostname EXIT",
+    "trap 'hostname' DEBUG; :",
+    "coproc hostname",
+    "PS4='$(hostname)'; set -x; :",
+    "export PS4='$(hostname)'; set -x; :",
+    "BASH_ENV=/data/e bash -c :",
+    "ENV=/data/e sh -i",
+    "env PS4='$(hostname)' bash -xc :",
+    "eval \"PS4='\\$(hostname)'\"; set -x; :",
+    "hash -p /bin/hostname ls; ls",
+    "enable -f /data/x.so hostname",
+    "alias x=hostname\nx",
+)
+
+STILL_RUNS = (
+    "trap 'rm -f /data/t' EXIT; echo hi",
+    "trap - EXIT; trap -p",
+    "coproc echo hi",
+    "hash -r; alias",
 )
 
 
@@ -1214,6 +1233,42 @@ async def test_a_whole_line_gate_reads_what_another_spelling_runs(coded):
                 ran.exit_code,
                 await ran.stderr_str(),
             )
+        assert box.lines == []
+        for line in STILL_RUNS:
+            assert (await ws.shell(line, session_id="s")).exit_code == 0, line
+        assert box.lines == list(STILL_RUNS)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, allowed",
+    [
+        ("trap hostname EXIT", ("trap", "echo")),
+        ("PS4='$(hostname)'; set -x; echo hi", ("set", "echo", ":")),
+        ("coproc hostname", ("coproc",)),
+    ],
+)
+async def test_an_allow_list_holds_against_a_line_another_spelling_runs(
+    line, allowed
+):
+    # A trap's action, a coproc's command and a PS4 the trace expands are
+    # what the line runs: a closed list that names none of them refuses.
+    box = _LineBox()
+    commands = {"*": "deny", **{name: "allow" for name in allowed}}
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"commands": commands}},
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert ran.exit_code == 126
+        assert (said.exit_code, said.stderr) == (126, await ran.stderr_str())
         assert box.lines == []
     finally:
         await ws.close()

@@ -150,6 +150,8 @@ export function innerReadable(inner: InnerLine): boolean {
 const FIND_EXEC: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 const ENV_FLAGS: ReadonlySet<string> = new Set(['-i', '--ignore-environment', '-0', '--null', '-'])
 const ENV_VALUED = ['unset', 'chdir', 'argv0'] as const
+// Variables a whole line's shell expands or sources on its own.
+export const HOOK_VARS: ReadonlySet<string> = new Set(['PS4', 'BASH_ENV', 'ENV'])
 
 function tail(args: readonly Word[], count: number): Word[] {
   return count > 0 ? args.slice(args.length - count) : []
@@ -233,6 +235,7 @@ function envInner(args: readonly Word[]): InnerLine[] {
   while (i < args.length) {
     const word = valueAt(args, i)
     if (!word.includes('=') || word.startsWith('=')) break
+    if (HOOK_VARS.has(word.split('=', 1)[0] ?? '')) return [UNREADABLE]
     i += 1
   }
   return asArgv(args.slice(i))
@@ -348,6 +351,28 @@ function shellInner(args: readonly Word[]): InnerLine[] {
  * can run a command (an interpreter's `-c`, `make`, `git` hooks) is the
  * runtime's own world: a closed tree is the closed form there.
  */
+// `trap [-lp] [[ACTION] CONDITION...]`: the action is a line the shell runs
+// when a condition fires. `-` or a number first resets the conditions, a lone
+// operand resets it, and an option only lists.
+function trapInner(args: readonly Word[]): InnerLine[] {
+  const first = args.length > 0 ? valueAt(args, 0) : ''
+  if (first.startsWith('-') && first !== '-' && first !== '--') return []
+  const rest = first === '--' ? args.slice(1) : args
+  const action = rest.length > 0 ? valueAt(rest, 0) : ''
+  if (rest.length < 2 || action === '-' || /^[0-9]+$/.test(action)) return []
+  return [{ line: action, argv: [], open: false }]
+}
+
+// A builtin whose option `letter` loads what a later word runs from a file
+// the gate cannot read (`hash -p`, `enable -f`).
+function loads(args: readonly Word[], letter: string): InnerLine[] {
+  for (const word of args.map(wordValue)) {
+    if (word === '--' || !word.startsWith('-')) break
+    if (word.slice(1).includes(letter)) return [UNREADABLE]
+  }
+  return []
+}
+
 export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
   if (head.includes('/')) return [UNREADABLE]
   switch (head) {
@@ -384,6 +409,21 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
       return wrapperInner(head, args)
     case 'time':
       return timeInner(args)
+    case 'trap':
+      return trapInner(args)
+    case 'coproc':
+      return asArgv(args)
+    case 'hash':
+      return loads(args, 'p')
+    case 'enable':
+      return loads(args, 'f')
+    case 'alias':
+      // A whole line's shell expands a later word to the value.
+      return args
+        .map(wordValue)
+        .some((w) => w.includes('=') && !w.startsWith('=') && !w.startsWith('-'))
+        ? [UNREADABLE]
+        : []
     default:
       return []
   }

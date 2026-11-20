@@ -65,6 +65,10 @@ or in the session's profile, such a line exits 126 when it holds a word only
 the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
 line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
 the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
+So does a line that sets what the machine's shell runs later in a way Mirage
+cannot read: an alias definition, `hash -p`, `enable -f`, or an assignment to
+`PS4`, `BASH_ENV` or `ENV`. A `trap` action and a `coproc` command are judged
+as commands of the line.
 
 ## post_command
 
