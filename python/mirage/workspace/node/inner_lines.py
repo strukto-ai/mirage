@@ -500,8 +500,6 @@ def _starts_rc(words: Sequence[str]) -> bool:
             continue
         if "i" in word or "l" in word:
             return True
-        if "c" in word:
-            return False
         skip = word[-1] in "oO"
     return False
 
@@ -525,10 +523,6 @@ def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
     parsed = parse_bash_args(literal)
     if parsed.help or parsed.version:
         return []
-    if parsed.script is not None and parsed.script.startswith("-"):
-        # bash reads options after `-c` up to the program; mirage's parse
-        # takes the next word.
-        return [InnerLine()]
     if parsed.script is not None:
         return [InnerLine(line=parsed.script)]
     return [InnerLine()]

@@ -397,7 +397,6 @@ function startsRc(words: readonly string[]): boolean {
       continue
     }
     if (word.includes('i') || word.includes('l')) return true
-    if (word.includes('c')) return false
     skip = 'oO'.includes(word.at(-1) ?? '')
   }
   return false
@@ -415,9 +414,6 @@ function shellInner(args: readonly Word[]): InnerLine[] {
   if (startsRc(literal)) return [UNREADABLE]
   const parsed = parseBashArgs(literal)
   if (parsed.help || parsed.version) return []
-  // bash reads options after `-c` up to the program; mirage's parse takes the
-  // next word.
-  if (parsed.script?.startsWith('-') === true) return [UNREADABLE]
   if (parsed.script !== null) return [{ line: parsed.script, argv: [], open: false }]
   return [UNREADABLE]
 }

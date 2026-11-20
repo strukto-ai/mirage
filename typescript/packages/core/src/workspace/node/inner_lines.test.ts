@@ -120,7 +120,7 @@ describe('innerLines', () => {
     ['bash', ['-o', 'vi', '-lc', 'rm /x'], [['none', null, false]]],
     ['bash', ['-c', 'rm /x', '-i'], [['line', 'rm /x', false]]],
     ['bash', ['-c', '-l', 'rm /x'], [['none', null, false]]],
-    ['bash', ['-c', '-x', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-c', '-x', 'rm /x'], [['line', 'rm /x', false]]],
     ['env', ['-a', '-sh', 'sh'], [['none', null, false]]],
     ['env', ['--argv0=-sh', 'sh'], [['none', null, false]]],
     ['exec', ['-l', 'bash'], [['none', null, false]]],

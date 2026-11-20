@@ -120,7 +120,7 @@ def _argv(inner: InnerLine) -> list[str]:
         ("bash", ["-o", "vi", "-lc", "rm /x"], [("none", None, False)]),
         ("bash", ["-c", "rm /x", "-i"], [("line", "rm /x", False)]),
         ("bash", ["-c", "-l", "rm /x"], [("none", None, False)]),
-        ("bash", ["-c", "-x", "rm /x"], [("none", None, False)]),
+        ("bash", ["-c", "-x", "rm /x"], [("line", "rm /x", False)]),
         ("env", ["-a", "-sh", "sh"], [("none", None, False)]),
         ("env", ["--argv0=-sh", "sh"], [("none", None, False)]),
         ("exec", ["-l", "bash"], [("none", None, False)]),
