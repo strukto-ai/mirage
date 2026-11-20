@@ -24,6 +24,7 @@ import { Glob } from '../rs/glob.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
+import { rstripChars } from './text.ts'
 
 /**
  * Opt in by assigning a debug sink, as Python's module logger is off until
@@ -132,7 +133,7 @@ export function globSpan(pattern: string | null | undefined): [string, string] |
  * that cuts the prefix first; separators trailing the literal are ignored.
  */
 export function literalSpan(literal: string): [string, string] | null {
-  const fields = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(literal.replace(/[_-]+$/, ''))
+  const fields = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(rstripChars(literal, '_-'))
   if (fields === null) return null
   const [, y, m, d] = fields
   const year = Number(y)

@@ -27,6 +27,7 @@ import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './con
 import { MountCore } from './core.ts'
 import { messageCondition } from './errors.ts'
 import type { MountAttrs, ServedPrefix } from './types.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -117,14 +118,14 @@ function child(dir: string, name: string): string {
 
 /** Whether a change at `path` reaches what is under `prefix`. */
 function overlaps(path: string, prefix: string): boolean {
-  const a = path.replace(/\/+$/, '')
-  const b = prefix.replace(/\/+$/, '')
+  const a = rstripSlash(path)
+  const b = rstripSlash(prefix)
   return a === b || b.startsWith(`${a}/`) || a.startsWith(`${b}/`)
 }
 
 /** Whether `path` is `prefix` or inside it. */
 function under(path: string, prefix: string): boolean {
-  const base = prefix.replace(/\/+$/, '')
+  const base = rstripSlash(prefix)
   return base === '' || path === base || path.startsWith(`${base}/`)
 }
 

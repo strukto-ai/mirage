@@ -464,7 +464,7 @@ export function verbosity(fl: FlagView): string | null {
 // An entry of a walked operand as GNU names it: the operand as typed, then
 // the entry's path below it.
 export function walkedName(typed: string, root: PathSpec, path: PathSpec): string {
-  let below = path.virtual.slice(root.virtual.replace(/\/+$/, '').length)
+  let below = path.virtual.slice(rstripSlash(root.virtual).length)
   if (typed.endsWith('/')) below = below.replace(/^\/+/, '')
   return typed + below
 }

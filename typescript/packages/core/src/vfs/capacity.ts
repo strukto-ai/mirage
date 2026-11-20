@@ -18,6 +18,7 @@ import type { ByteSource } from '../io/types.ts'
 import { type CapacityResult, CapacityState, type PathSpec } from '../types.ts'
 import { parseLimit } from '../utils/size.ts'
 import { VFSConfigError } from './errors.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 /** The bytes at a path, a directory's included; 0 for none. */
 export type SizeOf = (path: PathSpec) => Promise<number>
@@ -130,8 +131,8 @@ export class StorageUsage {
 }
 
 function overlaps(a: PathSpec, b: PathSpec): boolean {
-  const x = a.vfsPath.replace(/\/+$/, '')
-  const y = b.vfsPath.replace(/\/+$/, '')
+  const x = rstripSlash(a.vfsPath)
+  const y = rstripSlash(b.vfsPath)
   return x === y || x.startsWith(y + '/') || y.startsWith(x + '/')
 }
 

@@ -27,6 +27,7 @@ import { GIT } from '../git/index.ts'
 import { splitMarked } from '../git/util.ts'
 import { GIST_ORIGIN, GITHUB_HOST } from './constants.ts'
 import { checkHost, webOrigin } from './host.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 /**
  * The Authorization git sends GitHub for the install's token: Basic with the
@@ -89,7 +90,7 @@ export async function gistCloneCmd(
   if (spec === undefined) {
     return usageRefusal('cannot clone: gist argument required', 'gist clone', ctx)
   }
-  const gist = (spec.replace(/\/+$/, '').split('/').at(-1) ?? '').replace(/\.git$/, '')
+  const gist = (rstripSlash(spec).split('/').at(-1) ?? '').replace(/\.git$/, '')
   const origin = webOrigin(accessor)
   const host = origin === `https://${GITHUB_HOST}` ? GIST_ORIGIN : `${origin}/gist`
   return clone(accessor, `${host}/${gist}.git`, [...names.slice(1), ...gitflags], ctx, host)

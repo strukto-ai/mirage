@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_PORT, LOOPBACK } from '../../vfs/redis/constants.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 // Name the Redis server and database a URL reaches, one way. Two mounts of
 // one keyspace must compare equal however their URLs are spelled, or a move
@@ -25,7 +26,7 @@ export function serverLocation(url: string): string {
   const parts = new URL(url)
   const query = parts.searchParams.get('db')
   if (parts.protocol === 'unix:') return `unix:${parts.pathname}/${query ?? '0'}`
-  const db = query ?? (parts.pathname.replace(/^\/+|\/+$/g, '') || '0')
+  const db = query ?? (stripSlash(parts.pathname) || '0')
   // The scheme is ignored on purpose: one host and port is one store.
   let host = (parts.hostname.replace(/^\[|\]$/g, '') || 'localhost').toLowerCase()
   if (LOOPBACK.has(host)) host = 'localhost'

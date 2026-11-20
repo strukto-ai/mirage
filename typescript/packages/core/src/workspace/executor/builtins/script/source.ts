@@ -32,6 +32,7 @@ import { builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { readScriptText, scriptError } from './script.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 /**
  * The file `source` reads, as `BASH_SOURCE` names it, and its text: a name
@@ -48,7 +49,7 @@ async function sourceFile(
     const search = visibleEnv(session).PATH
     if (search !== undefined) {
       for (const directory of search.split(':')) {
-        const candidate = directory ? directory.replace(/\/+$/, '') + '/' + name : name
+        const candidate = directory ? rstripSlash(directory) + '/' + name : name
         try {
           return [candidate, await readScriptText(dispatch, candidate, session.cwd)]
         } catch (error) {

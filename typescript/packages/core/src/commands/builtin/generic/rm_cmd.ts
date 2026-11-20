@@ -20,6 +20,7 @@ import { missingOperandError } from '../../spec/usage.ts'
 import { descendantPath } from '../utils/paths.ts'
 import { parent } from '../../../utils/path.ts'
 import type { MountView } from '../../../view/types.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
 // -f, and a missing-operand usage error otherwise (coreutils 9.7). Mirrors
@@ -81,7 +82,7 @@ export async function removeTree(
     }
     let cleared = true
     for (const name of names) {
-      const child = descendantPath(root, name.replace(/\/+$/, ''))
+      const child = descendantPath(root, rstripSlash(name))
       if (roots.has(child.virtual)) continue
       let info: FileStat
       try {
@@ -96,7 +97,7 @@ export async function removeTree(
       const gone = await remove(child, info.type === FileType.DIRECTORY)
       cleared = cleared && gone
     }
-    if (!cleared || mountParents.has(path.virtual.replace(/\/+$/, '') || '/')) return false
+    if (!cleared || mountParents.has(rstripSlash(path.virtual) || '/')) return false
     try {
       await ops.rmdir(path)
     } catch (err) {

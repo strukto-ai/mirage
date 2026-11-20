@@ -41,6 +41,7 @@ import { EBADF, EINVAL, ELOOP, ENOENT, ENOTDIR, EPIPE, ESPIPE, LINK_REFUSAL, OK 
 import { packDirent } from './list.ts'
 import { filetypeOf, packFdstat, packFilestat, packPrestat } from './stat.ts'
 import { INTERRUPTED_STATUS } from '../../shell/constants.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -271,7 +272,7 @@ export class WasiFs {
     }
     const lexical = posixNormpath(joined)
     let requested = parts.includes('..') && normed !== lexical ? joined : lexical
-    if (trailing && requested !== '/') requested = `${requested.replace(/\/+$/, '')}/`
+    if (trailing && requested !== '/') requested = `${rstripSlash(requested)}/`
     return requested.startsWith('/') ? requested : `/${requested}`
   }
 

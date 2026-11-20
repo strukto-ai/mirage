@@ -31,6 +31,7 @@ import type { SessionState } from '../session/session.ts'
 import { ASKS, CHANGES, INTRO, READS, REFUSED, WALKS } from './constants.ts'
 import type { Change } from './types.ts'
 import { lineFacts } from '../lookup/index.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 const SHARED: ReadonlySet<string> = new Set(
   [...GENERIC_COMMANDS, ...GENERAL_COMMANDS].map((c) => c.name),
@@ -88,7 +89,7 @@ function allowed(
 ): boolean {
   const [command, ...argv] = words
   if (command === undefined) return true
-  const paths = inside ? [PathSpec.fromStrPath(`${cwd.replace(/\/+$/, '')}/<file>`)] : []
+  const paths = inside ? [PathSpec.fromStrPath(`${rstripSlash(cwd)}/<file>`)] : []
   const facts = lineFacts(command, words, cwd)
   let tokens: readonly string[]
   let program: readonly string[]
@@ -406,10 +407,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       mode === mount.mode &&
       mount.vfs.vfsMd.trim() !== ''
     ) {
-      const layout = mount.vfs.vfsMd
-        .replaceAll('{prefix}', prefix)
-        .replace(/^\n+|\n+$/g, '')
-        .trimEnd()
+      const layout = mount.vfs.vfsMd.replaceAll('{prefix}', prefix).replace(/^\n+/, '').trimEnd()
       // A backtick or line break in the prefix could close a code span or
       // fence it is put in, so such a layout stays text.
       layouts.push(

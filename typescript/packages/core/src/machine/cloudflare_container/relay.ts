@@ -30,6 +30,7 @@ import type {
   RelayRequest,
   RelaySocket,
 } from './types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * The object a text frame carries, or null for a frame that is not one. Its
@@ -302,7 +303,7 @@ export class RelayContainer implements Container {
     url: string,
     private readonly token: string,
   ) {
-    this.base = url.replace(/\/+$/, '')
+    this.base = rstripSlash(url)
   }
 
   /** Start the container when it is not running; a refusal fails with the relay's words. */

@@ -23,7 +23,7 @@ import { systemNow } from '../../../utils/clock.ts'
 import { epochToIso, isoTimestamp } from '../../../utils/dates.ts'
 import { respelled } from '../../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import {
   GZIP_KNOWN_SUFFIXES,
   GZIP_LIST_HEAD,
@@ -40,6 +40,7 @@ import type { LinkResolver } from '../utils/links.ts'
 import { descendantPath, isImplicitDir } from '../utils/paths.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { beforeFullWalk } from '../utils/tree.ts'
+import { rstripChars } from '../../../utils/text.ts'
 
 export type SetAttrsFn = (path: PathSpec, fields: SetAttrFields) => Promise<unknown>
 
@@ -106,7 +107,7 @@ function retries(path: PathSpec, missing: unknown, suffix: string): PathSpec[] {
   const typed = path.rawPath
   const here = `/${stripSlash(path.virtual)}`
   if (typed === '') {
-    const base = here.replace(/\/+$/, '') + '/'
+    const base = rstripSlash(here) + '/'
     return suffixes.map((s) => respelled(PathSpec.fromStrPath(base + s), s))
   }
   const last = typed.slice(typed.lastIndexOf('/') + 1)
@@ -282,7 +283,7 @@ export function gzipRatio(size: number, compressed: number, header: number): str
   const saved = size === 0 ? 0 : (100 * (size - (compressed - header))) / size
   const [whole = '0', fraction = ''] = Math.abs(saved).toFixed(60).split('.')
   const digit = Number(fraction[0] ?? '0')
-  const rest = fraction.slice(1).replace(/0+$/, '')
+  const rest = rstripChars(fraction.slice(1), '0')
   const up = rest > '5' || (rest === '5' && digit % 2 === 1)
   const text = (BigInt(whole) * 10n + BigInt(digit) + (up ? 1n : 0n)).toString().padStart(2, '0')
   const sign = saved < 0 ? '-' : ''
@@ -393,7 +394,7 @@ export async function* walked(
       return
     }
     for (const name of names) {
-      const child = descendantPath(root, name.replace(/\/+$/, ''))
+      const child = descendantPath(root, rstripSlash(name))
       if (await isDirectory(stat, readdir, child)) yield* below(stat, readdir, root, child)
       else yield child
     }

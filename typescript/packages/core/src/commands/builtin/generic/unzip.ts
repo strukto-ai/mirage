@@ -28,6 +28,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { extractDest } from './archive/extract.ts'
 import { StreamHost, hostedStream } from '../utils/stream_host.ts'
+import { rstripNewlines } from '../../../utils/text.ts'
 
 const ENC = new TextEncoder()
 // Info-ZIP answers an option it does not know with its usage block and exit
@@ -126,7 +127,7 @@ function patterns(
  */
 function usageBlock(): string {
   const page = helpPage('unzip', specOf('unzip'))
-  return page.slice(page.indexOf('Usage: ')).replace(/\n+$/, '')
+  return rstripNewlines(page.slice(page.indexOf('Usage: ')))
 }
 
 /**

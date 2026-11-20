@@ -19,6 +19,7 @@ import type { ByteWindow } from '../../utils/ranges.ts'
 import { API_SEGMENTS, MAX_RETRIES, RESOLVE_SEGMENTS, RETRY_STATUSES } from './constants.ts'
 import { lstripSlash, rstripSlash } from '../../utils/slash.ts'
 import { ApiError } from '../api/errors.ts'
+import { rstripChars } from '../../utils/text.ts'
 
 export const RETRY: RetryPolicy = {
   statuses: RETRY_STATUSES,
@@ -318,7 +319,7 @@ export async function hubBytesTagged(
 export function etagValue(raw: string): string {
   let value = raw.trim()
   if (value.startsWith('W/')) value = value.slice(2)
-  return value.replace(/^"+|"+$/g, '')
+  return rstripChars(value, '"').replace(/^"+/, '')
 }
 
 /**

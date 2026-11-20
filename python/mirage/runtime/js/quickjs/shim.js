@@ -216,7 +216,7 @@
     }
     const b64 = btoa(latin1(bytes, start, end))
     if (e === 'base64') return b64
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return rstrip(b64, '=').replace(/\+/g, '-').replace(/\//g, '_')
   }
   const view = (data) =>
     ArrayBuffer.isView(data)
@@ -315,9 +315,14 @@
       .join('\\' + q)
     return q + body + q
   }
+  function rstrip(s, c) {
+    let end = s.length
+    while (end > 0 && s[end - 1] === c) end--
+    return s.slice(0, end)
+  }
   function errorText(e) {
     const head = String(e)
-    const stack = typeof e.stack === 'string' ? e.stack.replace(/\s+$/, '') : ''
+    const stack = typeof e.stack === 'string' ? e.stack.trimEnd() : ''
     if (stack === '' || stack.startsWith(head)) return stack || head
     return head + '\n' + stack
   }
@@ -527,15 +532,15 @@
     dirname(p) {
       p = String(p)
       if (p === '') return '.'
-      const s = p.replace(/\/+$/, '')
+      const s = rstrip(p, '/')
       if (s === '') return '/'
       const i = s.lastIndexOf('/')
       if (i < 0) return '.'
-      return s.slice(0, i).replace(/\/+$/, '') || '/'
+      return rstrip(s.slice(0, i), '/') || '/'
     },
     basename(p, ext) {
       if (ext !== undefined && String(p) === ext) return ''
-      const s = String(p).replace(/\/+$/, '')
+      const s = rstrip(String(p), '/')
       let b = s.slice(s.lastIndexOf('/') + 1)
       if (ext !== undefined && b !== ext && b.endsWith(ext)) {
         b = b.slice(0, b.length - ext.length)

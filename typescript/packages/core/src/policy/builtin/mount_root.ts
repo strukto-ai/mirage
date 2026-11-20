@@ -20,6 +20,7 @@ import { expandTableLong } from '../../commands/spec/compile.ts'
 import { GNU_LONG_OPTIONS } from '../../commands/spec/long_options.ts'
 import type { PathSpec } from '../../types.ts'
 import { ebusy, eexist, einval, eisdir } from '../../errors/fs.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * Spot ln's -s/--symbolic by raw token scan. Same reason as
@@ -165,7 +166,7 @@ export function rmRootRefusal(
   preserve: boolean,
 ): Deny {
   const raw = path.rawPath
-  const last = raw.replace(/\/+$/, '').split('/').at(-1) ?? ''
+  const last = rstripSlash(raw).split('/').at(-1) ?? ''
   if (recursive && (last === '.' || last === '..')) {
     return deny(`refusing to remove '.' or '..' directory: skipping '${raw}'`, einval(path))
   }
@@ -223,8 +224,8 @@ function mvDestination(
     return operands.length === 2 && operands[1] !== undefined ? operands[1].rawPath : '?'
   }
   const parent = target ?? operands[operands.length - 1]?.rawPath ?? ''
-  const name = source.rawPath.replace(/\/+$/, '').split('/').at(-1) ?? ''
-  return `${parent.replace(/\/+$/, '')}/${name}`
+  const name = rstripSlash(source.rawPath).split('/').at(-1) ?? ''
+  return `${rstripSlash(parent)}/${name}`
 }
 
 /**

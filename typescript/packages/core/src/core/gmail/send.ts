@@ -15,11 +15,12 @@
 import { encodeBase64 } from '../../utils/base64.ts'
 import { type TokenManager, gmailBase, googlePost } from '../google/client.ts'
 import { extractHeader, getMessageProcessed, getMessageRaw } from './messages.ts'
+import { rstripChars } from '../../utils/text.ts'
 
 const ENC = new TextEncoder()
 
 function base64UrlEncode(bytes: Uint8Array): string {
-  return encodeBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return rstripChars(encodeBase64(bytes), '=').replace(/\+/g, '-').replace(/\//g, '_')
 }
 
 function buildMime(headers: Record<string, string>, body: string): string {

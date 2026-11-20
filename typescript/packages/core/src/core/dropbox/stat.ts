@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
@@ -55,7 +55,7 @@ export async function tree(
     if (err instanceof DropboxApiError && err.status === 409) return null
     throw err
   }
-  const base = folder.toLowerCase().replace(/\/+$/, '')
+  const base = rstripSlash(folder.toLowerCase())
   const depthOf = (e: DropboxEntry): number => (e.path_lower ?? '').split('/').length
   const places = new Map<string, string>([[base, '']])
   const found = new Map<string, FileStat>()

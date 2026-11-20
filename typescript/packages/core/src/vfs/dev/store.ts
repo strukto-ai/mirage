@@ -20,7 +20,7 @@ import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
 import { nowIso } from '../../utils/dates.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StorageUsage } from '../capacity.ts'
 import { RAMFiles, type RAMAttrs } from '../ram/store.ts'
@@ -73,7 +73,7 @@ export class DevFiles extends PipeFiles {
   }
 
   holdsPipe(key: string): boolean {
-    const under = key.replace(/\/+$/, '') + '/'
+    const under = rstripSlash(key) + '/'
     return [...this.visibleInputs().keys()].some((k) => k === key || k.startsWith(under))
   }
 

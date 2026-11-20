@@ -25,6 +25,7 @@ import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
 import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
 import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { rstripChars } from '@struktoai/mirage-core/utils/text'
 
 const FALLBACK_PROMPT = 'mirage$ '
 
@@ -324,7 +325,7 @@ export class ShellChannel {
         if (this.live()) stampInterrupt(this.entry.runner.ws, this.sessionId)
         continue
       }
-      const line = decoder.decode(item).replace(/[\r\n]+$/, '')
+      const line = rstripChars(decoder.decode(item), '\r\n')
       if (line.trim() === '') continue
       status = await this.run(line)
       if (endsShell(line) || !this.live()) return status

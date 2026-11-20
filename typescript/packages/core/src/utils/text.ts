@@ -17,3 +17,9 @@ export function rstripNewlines(s: string): string {
   while (end > 0 && s.charCodeAt(end - 1) === 10) end--
   return s.slice(0, end)
 }
+
+export function rstripChars(s: string, chars: string): string {
+  let end = s.length
+  while (end > 0 && chars.includes(s.charAt(end - 1))) end--
+  return s.slice(0, end)
+}

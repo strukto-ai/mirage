@@ -28,7 +28,7 @@ import {
   posixMode,
 } from '../utils/stat_view.ts'
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
-import { rstripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { CycleError, normDir, resolvePath } from '../utils/path.ts'
 import { READ_CHUNK } from './handles/constants.ts'
 import type { OpenMode } from './handles/index.ts'
@@ -481,7 +481,7 @@ export class RuntimeFiles {
   serves(path: string): boolean {
     if (this.prefixes().length === 0 || this.mountOf(path) !== null) return true
     let directory = '/'
-    for (const name of path.replace(/^\/+|\/+$/g, '').split('/')) {
+    for (const name of stripSlash(path).split('/')) {
       if (this.resolver.linkChildren(directory).has(name)) return true
       directory = directory.replace(/\/$/, '') + '/' + name
     }

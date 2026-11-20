@@ -31,6 +31,7 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { cobraRefusal, setsValueFlag } from '../../cobra.ts'
 import { APP_TOKEN_MASK, CONNECT_HINT, GITHUB_HOST } from './constants.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 type Request = Readonly<Record<string, unknown>>
 
@@ -50,7 +51,7 @@ export function checkHost(accessor: GitHubAccount, host: string | null): void {
 /** The origin the install's GitHub serves its pages and git from. */
 export function webOrigin(accessor: GitHubAccount): string {
   const base = accessor.config.baseUrl
-  if (base === undefined || base.replace(/\/+$/, '') === API_BASE) {
+  if (base === undefined || rstripSlash(base) === API_BASE) {
     return `https://${GITHUB_HOST}`
   }
   let url: URL

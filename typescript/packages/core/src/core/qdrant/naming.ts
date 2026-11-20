@@ -20,6 +20,7 @@ import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { valueText } from '../render/json.ts'
 import { fieldValue } from './payload.ts'
 import type { QdrantRow } from './types.ts'
+import { rstripChars } from '../../utils/text.ts'
 
 const ENC = new TextEncoder()
 
@@ -41,7 +42,7 @@ export function groupName(value: unknown, basename = false): string {
   if (!basename) return PATH_SAFE.encode(name)
   const withoutFragment = name.split('#', 1)[0] ?? name
   const withoutQuery = withoutFragment.split('?', 1)[0] ?? withoutFragment
-  const trimmed = withoutQuery.replace(/[\\/]+$/, '')
+  const trimmed = rstripChars(withoutQuery, '\\/')
   const parts = trimmed.replace(/\\/g, '/').split('/')
   const leaf = parts[parts.length - 1] ?? ''
   const segment = PATH_SAFE.encode(leaf === '' ? name : leaf)

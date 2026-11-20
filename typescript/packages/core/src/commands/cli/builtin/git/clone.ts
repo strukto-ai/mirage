@@ -40,6 +40,7 @@ import { isLocal, openTransport, type Advertisement, type Transport } from './tr
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 // How C's atoi and strtol(..., 0) read a number, which is how git reads
@@ -68,8 +69,8 @@ export function transportDepth(text: string): number {
 
 /** The directory git names a clone after when none is given. */
 export function defaultDirectory(url: string): string {
-  let path = url.replace(/\/+$/, '')
-  if (path.endsWith('/.git')) path = path.slice(0, -'/.git'.length).replace(/\/+$/, '')
+  let path = rstripSlash(url)
+  if (path.endsWith('/.git')) path = rstripSlash(path.slice(0, -'/.git'.length))
   if (path.endsWith('.git')) path = path.slice(0, -'.git'.length)
   return path.split(/[/:]/).at(-1) ?? path
 }
@@ -185,7 +186,7 @@ export async function clone(
   const local = isLocal(url)
   // git records a local path as the directory it ran in joined to the path as
   // typed, not normalized.
-  const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
+  const stored = !local || url.startsWith('/') ? url : `${rstripSlash(start.virtual)}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
     notes += await populate(ctx, transport, target, stored, local, typed)
@@ -197,7 +198,7 @@ export async function clone(
       if (fresh) await removeTree(vfs, target)
       else
         for (const entry of await readNames(vfs, target)) {
-          const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
+          const child = rstripSlash(entry).split('/').at(-1) ?? ''
           if (child) await removeTree(vfs, target.join(child))
         }
     }
