@@ -180,8 +180,11 @@ def describe(
         and session is not None
         and name in session.functions
     ):
+        body = session.functions[name]
         return f"{name} is a function\n" + stored_function_text(
-            name, session.functions[name], body_alias_values(session, name)
+            name,
+            body,
+            body_alias_values(session, session.function_site(name, body)),
         )
     if kind is NameKind.FILE:
         return f"{name} is {program_file(name)}"

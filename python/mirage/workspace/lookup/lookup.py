@@ -206,9 +206,23 @@ def routed_consumer(
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
     """
-    return target_consumer(
-        resolve_target(name, args, session, registry, routing)
-    ), routing
+    if _machine_view(name, args, routing):
+        return Consumer.SESSION, routing
+    return lookup(name, session, registry, routing), routing
+
+
+def _machine_view(
+    name: str,
+    args: Sequence[str],
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> bool:
+    return (
+        name == MACHINE_VIEW
+        and routing is not None
+        and name not in routing.bindings
+        and runs_programs(routing.bindings)
+        and picks_machine(args)
+    )
 
 
 def resolve_target(
@@ -220,13 +234,10 @@ def resolve_target(
 ) -> CommandTarget:
     """Select the winning registration under the current placement."""
     target = _first_target(name, session, registry, routing)
-    if (
-        name == MACHINE_VIEW
-        and not isinstance(target, FunctionTarget)
-        and routing is not None
-        and name not in routing.bindings
-        and runs_programs(routing.bindings)
-        and picks_machine(args)
+    # A machine view overrides native or mount execution. Keep a CLI's
+    # installation: a glob can spell a selector but classify as a path.
+    if (isinstance(target, ExternalTarget) or target is Consumer.MOUNT) and (
+        _machine_view(name, args, routing)
     ):
         return Consumer.SESSION
     return target
@@ -392,7 +403,7 @@ def _layers(
     as_program = body is not None and is_program_invocation(session)
     if body is not None and not as_program and name not in SHELL_ONLY_BUILTINS:
         found = True
-        yield FunctionTarget(body)
+        yield FunctionTarget(body, session.function_site(name, body))
     if name in SHELL_NAMES and (
         name not in MACHINE_ONLY_BUILTINS or runs_programs(bindings)
     ):
@@ -407,7 +418,7 @@ def _layers(
         yield Consumer.NAMESPACE
     if body is not None and not as_program and name in SHELL_ONLY_BUILTINS:
         found = True
-        yield FunctionTarget(body)
+        yield FunctionTarget(body, session.function_site(name, body))
     if (install := registry.clis.get(name)) is not None:
         found = True
         yield CliTarget(install)
@@ -422,7 +433,7 @@ def _layers(
         yield Consumer.MOUNT
     if body is not None and as_program:
         found = True
-        yield FunctionTarget(body)
+        yield FunctionTarget(body, session.function_site(name, body))
     fallback = bindings.get(EXTERNAL_COMMANDS)
     fallback_native = isinstance(
         fallback, (LineExecutorMixin, ProcessExecutorMixin)

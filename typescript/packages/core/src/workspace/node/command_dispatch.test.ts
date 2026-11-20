@@ -382,6 +382,41 @@ class Named extends MachineHandle {
   }
 }
 
+it('runs a function shadowing the machine view', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    { machines: { a: new Named('a', { captures: ['gcc'] }) } },
+  )
+  try {
+    const result = await ws.shell('lscpu() { echo function; }; lscpu')
+    expect([result.stdoutText, result.exitCode]).toEqual(['function\n', 0])
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each(['top', 'uptime'])(
+  'tries the mount for a known %s when placement removes its machine',
+  async (name) => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        machines: { a: new Named('a', { captures: ['@line'] }) },
+        routePolicy: () => 'workspace',
+      },
+    )
+    try {
+      const result = await ws.shell(name)
+      expect([result.exitCode, result.stderrText]).toEqual([
+        127,
+        `bash: line 1: ${name}: command not found`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
 class HostnameOn implements Policy {
   constructor(private readonly machine: string) {}
 

@@ -212,7 +212,8 @@ export function routedConsumer(
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
 ): [Consumer, RouteDecision<Runtime> | undefined] {
-  return [resolveTarget(name, args, session, registry, routing).kind, routing]
+  if (machineView(name, args, routing)) return [Consumer.SESSION, routing]
+  return [lookup(name, session, registry, routing), routing]
 }
 
 function targetConsumer(target: CommandTarget): Consumer {
@@ -235,16 +236,28 @@ export function resolveTarget(
   routing?: RouteDecision<Runtime>,
 ): CommandTarget {
   const target = firstTarget(name, session, registry, routing)
+  // A glob can spell a machine selector but classify as a path. Keep the
+  // installed CLI available when the machine-view handler declines it.
   if (
+    (target.kind === Consumer.EXTERNAL || target.kind === Consumer.MOUNT) &&
+    machineView(name, args, routing)
+  )
+    return { kind: Consumer.SESSION }
+  return target
+}
+
+function machineView(
+  name: string,
+  args: readonly string[],
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  return (
     name === MACHINE_VIEW &&
-    target.kind !== Consumer.FUNCTION &&
     routing !== undefined &&
     !Object.hasOwn(routing.bindings, name) &&
     runsPrograms(routing.bindings) &&
     picksMachine(args)
   )
-    return { kind: Consumer.SESSION }
-  return target
 }
 
 /**
@@ -314,7 +327,7 @@ function* layers(
   const asProgram = body !== undefined && isProgramInvocation(session)
   if (body !== undefined && !asProgram && !SHELL_ONLY_BUILTINS.has(name)) {
     found = true
-    yield { kind: Consumer.FUNCTION, body }
+    yield { kind: Consumer.FUNCTION, body, site: session.functionSite(name, body) }
   }
   if (SHELL_NAMES.has(name) && (!MACHINE_ONLY_BUILTINS.has(name) || runsPrograms(bindings))) {
     found = true
@@ -328,7 +341,7 @@ function* layers(
   }
   if (body !== undefined && !asProgram && SHELL_ONLY_BUILTINS.has(name)) {
     found = true
-    yield { kind: Consumer.FUNCTION, body }
+    yield { kind: Consumer.FUNCTION, body, site: session.functionSite(name, body) }
   }
   const install = registry.clis.get(name)
   if (install !== null) {
@@ -345,7 +358,7 @@ function* layers(
   }
   if (body !== undefined && asProgram) {
     found = true
-    yield { kind: Consumer.FUNCTION, body }
+    yield { kind: Consumer.FUNCTION, body, site: session.functionSite(name, body) }
   }
   const fallback = Object.hasOwn(bindings, EXTERNAL_COMMANDS)
     ? bindings[EXTERNAL_COMMANDS]

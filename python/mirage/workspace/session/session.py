@@ -762,8 +762,8 @@ class SessionState:
         views = {}
         files = {}
         for name, source in self.functions.items():
-            site = self._function_sites.get(name)
-            if site is None or site.source != source:
+            site = self.function_site(name, source)
+            if site is None:
                 continue
             if site.aliases is not None:
                 views[name] = dict(site.aliases)
@@ -1308,6 +1308,16 @@ class SessionState:
             errexit_ignored=False,
         )
         return child
+
+    def function_site(self, name: str, body: str) -> FunctionSite | None:
+        """Return the site recorded for this definition, if present.
+
+        Args:
+            name (str): the function's name.
+            body (str): the definition being read.
+        """
+        site = self._function_sites.get(name)
+        return site if site is not None and site.source == body else None
 
     def remove_function(self, name: str) -> None:
         """Remove a function with its definition site and export mark.

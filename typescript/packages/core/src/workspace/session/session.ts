@@ -938,6 +938,12 @@ export class SessionState {
     return child
   }
 
+  /** The site recorded for this definition, if present. */
+  functionSite(name: string, body: string): FunctionSite | null {
+    const site = this.functionSites.get(name)
+    return site?.source === body ? site : null
+  }
+
   /** Remove a function with its definition site and export mark. */
   removeFunction(name: string): void {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
@@ -1172,8 +1178,8 @@ export class SessionState {
     const views = ownRecord<Record<string, string>>()
     const files = ownRecord<string>()
     for (const [name, source] of Object.entries(this.functions)) {
-      const site = this.functionSites.get(name)
-      if (site?.source !== source) continue
+      const site = this.functionSite(name, source)
+      if (site === null) continue
       if (site.aliases != null) views[name] = { ...site.aliases }
       if (site.name !== undefined && site.name !== 'environment') files[name] = site.name
     }

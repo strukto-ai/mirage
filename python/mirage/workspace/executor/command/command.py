@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
@@ -48,7 +48,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.rs.find import FindExpr, parse_find
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, RuntimeIdentity
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
@@ -88,6 +88,13 @@ from mirage.workspace.executor.command.cli import (
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
 from mirage.workspace.executor.command.handler import framed, mount_voice
+from mirage.workspace.executor.command.resolved import (
+    CommandWorker,
+    HandlerTarget,
+    MountTarget,
+    ResolvedCommand,
+    WorkerTarget,
+)
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     default_cwd_operand,
@@ -126,17 +133,12 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
 from mirage.workspace.lookup import (
-    JOB_BUILTINS,
     Consumer,
     line_facts,
-    runs_as,
 )
-from mirage.workspace.lookup.constants import EXEC_WRAPPERS, MACHINE_VIEW
-from mirage.workspace.lookup.lookup import (
-    lookup,
-    picks_machine,
-    runs_programs,
-)
+from mirage.workspace.lookup.constants import MACHINE_VIEW
+from mirage.workspace.lookup.lookup import lookup, picks_machine, runs_programs
+from mirage.workspace.lookup.types import CliTarget, FunctionTarget
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -150,9 +152,12 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
 
-# One handler per JOB_BUILTINS member but ps, which also takes the
-# workspace user; lookup already narrowed the name.
-JOB_HANDLERS = {
+if TYPE_CHECKING:
+    from mirage.workspace.expand.argv import Argv
+
+
+JOB_HANDLERS: dict[str, CommandWorker] = {
+    "ps": handle_ps,
     "wait": handle_wait,
     "kill": handle_kill,
     "jobs": handle_jobs,
@@ -165,7 +170,7 @@ JOB_HANDLERS = {
 
 # The builtins that report on the machines programs run on; ``nproc``
 # answers for them only once there are any.
-MACHINE_HANDLERS = {
+MACHINE_HANDLERS: dict[str, CommandWorker] = {
     "free": handle_free,
     "uptime": handle_uptime,
     "top": handle_top,
@@ -173,6 +178,34 @@ MACHINE_HANDLERS = {
     "hostname": handle_hostname,
     "lscpu": handle_lscpu,
 }
+
+
+def command_worker(
+    argv: "Argv",
+    bindings: Mapping[str, RuntimeIdentity | None],
+) -> CommandWorker | None:
+    """Select a job or machine-view handler for the admitted words.
+
+    Args:
+        argv (Argv): the expanded words.
+        bindings (Mapping[str, RuntimeIdentity | None]): the current placement.
+    """
+    name = argv.name
+    machine = MACHINE_HANDLERS.get(name)
+    if (
+        machine is not None
+        and (name == "free" or runs_programs(bindings))
+        and not (
+            name == "nproc"
+            and {"--help", "--version"}.intersection(argv.operands)
+        )
+        and (
+            name not in ("hostname", MACHINE_VIEW)
+            or picks_machine([str(p) for p in argv.operands])
+        )
+    ):
+        return machine
+    return JOB_HANDLERS.get(name)
 
 
 def spelled_words(parts: list[str | PathSpec]) -> tuple[str, ...]:
@@ -997,7 +1030,7 @@ def _spanning(
 async def handle_command(
     deps: ExecuteNodeDeps,
     execute_node: ExecuteNodeFn,
-    parts: list[str | PathSpec],
+    command: ResolvedCommand[HandlerTarget],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -1014,7 +1047,8 @@ async def handle_command(
         deps (ExecuteNodeDeps): what the command runs against.
         execute_node (ExecuteNodeFn): the node recursion, for a
             function body.
-        parts (list[str | PathSpec]): the classified command words.
+        command (ResolvedCommand[HandlerTarget]): the classified words
+            and selected worker.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream.
         call_stack (CallStack | None): shell call stack.
@@ -1026,11 +1060,13 @@ async def handle_command(
     execute_fn = deps.execute_fn
     sink = deps.sink
     session = context.session
+    parts = command.argv.words
+    target = command.target
     if not parts:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
     view = session_view(session, diagnostics=context.frame.diagnostics)
-    cmd_name = str(parts[0])
+    cmd_name = command.argv.name
     cmd_str = " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in parts
     )
@@ -1042,66 +1078,29 @@ async def handle_command(
         session.cwd,
     )
 
-    # Job builtins
-    if (
-        cmd_name in JOB_BUILTINS
-        and lookup(cmd_name, session, registry, context.frame.routing)
-        is not Consumer.FUNCTION
-    ):
+    if isinstance(target, WorkerTarget):
         text_parts = [
             (p.raw_path or p.virtual) if isinstance(p, PathSpec) else p
             for p in parts
         ]
-        if cmd_name == "ps":
-            return await handle_ps(job_table, text_parts, session, view)
-        return await JOB_HANDLERS[cmd_name](
-            job_table, text_parts, session, view
-        )
+        return await target.handler(job_table, text_parts, session, view)
 
-    if (
-        cmd_name in MACHINE_HANDLERS
-        and (
-            cmd_name == "free"
-            or runs_programs(
-                context.frame.routing.bindings
-                if context.frame.routing is not None
-                else registry.runtime_bindings
-            )
-        )
-        and not (cmd_name == "nproc" and {"--help", "--version"} & set(parts))
-        and (
-            cmd_name not in ("hostname", MACHINE_VIEW)
-            or picks_machine([str(part) for part in parts[1:]])
-        )
-        and lookup(cmd_name, session, registry, context.frame.routing)
-        != Consumer.FUNCTION
-    ):
-        return await MACHINE_HANDLERS[cmd_name](
-            job_table,
-            [
-                (p.raw_path or p.virtual) if isinstance(p, PathSpec) else p
-                for p in parts
-            ],
-            session,
-            view,
-        )
-
-    # Shell functions, where one is what the name runs (a program run
-    # execs the program instead)
-    if (
-        cmd_name in session.functions
-        and lookup(cmd_name, session, registry, context.frame.routing)
-        is Consumer.FUNCTION
-    ):
+    if isinstance(target, FunctionTarget):
         return await run_shell_function(
             deps,
             execute_node,
             cmd_name,
+            target,
             parts,
             context,
             stdin,
             call_stack,
         )
+
+    if target is Consumer.UNKNOWN:
+        shown = session.vars.shell.shown(cmd_name)
+        err = encode_text(f"{shell_voice()}{shown}: command not found\n")
+        return _failed(cmd_str, NOT_FOUND_STATUS, err)
 
     dispatch = made_by_command(dispatch)
     files = Files(
@@ -1129,8 +1128,8 @@ async def handle_command(
     # works on files rather than an API (`git`) reaches them through
     # `ctx.vfs`, the session's files made by the command; the rest
     # never look.
-    cli_install = registry.clis.get(cmd_name)
-    if cli_install is not None:
+    if isinstance(target, CliTarget):
+        cli_install = target.install
         return await handle_cli(
             cli_install,
             parts,
@@ -1150,19 +1149,11 @@ async def handle_command(
 
     # A wrapper execs the program it names, past every function and CLI;
     # the session's command trees judge the name it typed.
-    typed = cmd_name
-    if runs_as(cmd_name, registry) != cmd_name:
-        cmd_name, option = EXEC_WRAPPERS[cmd_name]
+    if not isinstance(target, MountTarget):
+        assert_never(target)
+    if target.wrapper is not None:
+        cmd_name, option = target.wrapper
         parts = [cmd_name, option, *parts[1:]]
-
-    # Unknown name: nobody registers it; fail like bash before any
-    # backend work. The admission policies (fired upstream at the
-    # dispatch chokepoint) stay ahead of this so protective refusals
-    # keep their specific messages.
-    if lookup(typed, session, registry) is Consumer.UNKNOWN:
-        shown = session.vars.shell.shown(typed)
-        err = encode_text(f"{shell_voice()}{shown}: command not found\n")
-        return _failed(cmd_str, NOT_FOUND_STATUS, err)
 
     async def run_tree(
         mount: MountEntry, cli: CLI, prepared_leaf: LeafCall | None = None

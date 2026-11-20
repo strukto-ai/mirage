@@ -556,6 +556,8 @@ workspace buffer settings, belong to the core and TypeScript filters
 explicitly, and to the broad runtime filters.
 Their shared lifecycle cases cover ordered byte events, final status, session
 mutations, output before completion, cancellation and early consumer closure.
+Changes to the mirrored `workspace/executor/command/resolved` modules select
+the whole-host and runtime jobs through their existing source globs.
 The mirrored `server/mcp/progress` modules also belong to those filters; the
 access corpus checks progress over HTTP SSE and the CLI's stdio relay.
 

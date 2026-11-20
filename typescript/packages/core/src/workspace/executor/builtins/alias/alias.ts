@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FunctionSite } from '../../../session/functions.ts'
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
@@ -188,19 +189,20 @@ export function expandingAliases(session: SessionState): ReadonlySet<string> {
  * The alias names a stored function's body is read with
  * (`bodyAliasValues`). Mirrors Python's body_aliases.
  */
-export function bodyAliases(session: SessionState, name: string): ReadonlySet<string> {
-  return new Set(bodyAliasValues(session, name).keys())
+export function bodyAliases(session: SessionState, site: FunctionSite | null): ReadonlySet<string> {
+  return new Set(bodyAliasValues(session, site).keys())
 }
 
 /**
- * The aliases a stored function's body is read with, by name: the ones its
+ * The aliases a stored function's body is read with: the ones its
  * definition saw, or the session's own for a definition that kept none (one
  * restored from a stored session). Mirrors Python's body_alias_values.
  */
-export function bodyAliasValues(session: SessionState, name: string): Map<string, string> {
-  const site = session.functionSites.get(name)
-  if (site !== undefined && site.source === session.functions[name] && site.aliases != null)
-    return new Map(Object.entries(site.aliases))
+export function bodyAliasValues(
+  session: SessionState,
+  site: FunctionSite | null,
+): Map<string, string> {
+  if (site?.aliases != null) return new Map(Object.entries(site.aliases))
   return new Map(aliasesOn(session) ? Object.entries(session.aliases) : [])
 }
 

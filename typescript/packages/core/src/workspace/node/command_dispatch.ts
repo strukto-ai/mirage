@@ -97,7 +97,17 @@ import {
 } from '../executor/builtins/index.ts'
 import type { LinkPlan, LnFlags } from '../executor/builtins/links/ln.ts'
 import { BUILTINS } from '../executor/builtins/table.ts'
-import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
+import {
+  commandWorker,
+  fillTreeEnv,
+  handleCommand,
+  madeByCommand,
+} from '../executor/command/command.ts'
+import {
+  NAMESPACE_PROGRAMS,
+  NamespaceProgram,
+  type ResolvedCommand,
+} from '../executor/command/resolved.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { argumentListTooLong } from '../executor/command/handler.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
@@ -107,13 +117,18 @@ import { expandBoundaryGlobs, globOptions, resolveGlobs } from '../expand/globs.
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import {
+  EXEC_WRAPPERS,
+  MACHINE_ANSWERED,
+  MACHINE_ONLY_BUILTINS,
+  PROGRAM_WRAPPERS,
+} from '../lookup/constants.ts'
 import {
   externalTarget,
-  lookup,
   programRuntime,
   resolveTarget,
-  routedConsumer,
+  runsAs,
+  runsPrograms,
   runsWrapper,
 } from '../lookup/lookup.ts'
 import {
@@ -299,9 +314,9 @@ async function runAlias(
   return null
 }
 
-/** Run a program that lives above the mounts, null for any other. Mirrors Python's _run_namespace_program. */
+/** Run a program that lives above the mounts. Mirrors Python's _run_namespace_program. */
 async function runNamespaceProgram(
-  name: string,
+  operation: NamespaceProgram,
   namespace: Namespace,
   made: DispatchFn,
   registry: MountRegistry,
@@ -312,50 +327,38 @@ async function runNamespaceProgram(
   linksElsewhere:
     | ((plans: LinkPlan[], flags: LnFlags) => Promise<RedirectResult | null>)
     | null = null,
-): Promise<RedirectResult | null> {
-  // Symlinks are namespace-backed: not bash builtins, not mount commands.
-  // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
-  // which falls through to the mount command.
-  if (name === 'ln') {
-    return await handleLn(namespace, made, session, operands, linksElsewhere)
-  }
-  if (name === 'readlink') {
-    return await handleReadlink(namespace, made, session, operands)
-  }
+): Promise<RedirectResult> {
+  switch (operation) {
+    case NamespaceProgram.LN:
+      return handleLn(namespace, made, session, operands, linksElsewhere)
+    case NamespaceProgram.READLINK:
+      return handleReadlink(namespace, made, session, operands)
 
-  // Extended attributes: the dispatcher's node table and the backend's own
-  // facts; they read -h themselves.
-  if (name === 'getfattr') {
-    return await handleGetfattr(namespace, made, session, operands)
-  }
-  if (name === 'setfattr') {
-    return await handleSetfattr(made, session, operands, stdin)
-  }
+    // Extended attributes: the dispatcher's node table and the backend's own
+    // facts; they read -h themselves.
+    case NamespaceProgram.GETFATTR:
+      return handleGetfattr(namespace, made, session, operands)
+    case NamespaceProgram.SETFATTR:
+      return handleSetfattr(made, session, operands, stdin)
 
-  // Metadata commands (namespace-routed: resolve-then-setattr with
-  // overlay fallback; they run their own link follow).
-  if (name === 'chmod') {
-    return handleChmod(namespace, made, session, operands)
-  }
-  if (name === 'chown') {
-    return handleChown(namespace, made, session, operands)
-  }
-  if (name === 'chgrp') {
-    return handleChgrp(namespace, made, session, operands)
-  }
-  if (name === 'touch') {
-    return handleTouch(namespace, made, session, operands)
-  }
+    // Metadata commands (namespace-routed: resolve-then-setattr with
+    // overlay fallback; they run their own link follow).
+    case NamespaceProgram.CHMOD:
+      return handleChmod(namespace, made, session, operands)
+    case NamespaceProgram.CHOWN:
+      return handleChown(namespace, made, session, operands)
+    case NamespaceProgram.CHGRP:
+      return handleChgrp(namespace, made, session, operands)
+    case NamespaceProgram.TOUCH:
+      return handleTouch(namespace, made, session, operands)
 
-  // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
-  // never fabricates numbers).
-  if (name === 'df') {
-    return handleDf(registry, session, made, operands)
+    // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
+    // never fabricates numbers).
+    case NamespaceProgram.DF:
+      return handleDf(registry, session, made, operands)
+    case NamespaceProgram.MOUNT:
+      return handleMount(registry, session, operands)
   }
-  if (name === 'mount') {
-    return handleMount(registry, session, operands)
-  }
-  return null
 }
 
 /** Act on the link operands `rm`, `unlink` and `mv` name: the operands left, the refused links' lines, and the answer when no operand is left for the command. Mirrors Python's _strip_links. */
@@ -950,14 +953,16 @@ async function runArgv(
     // policies bind in the same window, whether or not a gate judged the
     // line, so the command tier's policy guard can fire preVfs for the
     // backend I/O a handler performs.
-    const run = (nested: ExecuteFn = executeFn) => {
-      let routedDeps = deps
-      if (nested !== executeFn || output !== sink) {
-        routedDeps = { ...deps, executeFn: nested }
-        if (output === undefined) delete routedDeps.sink
-        else routedDeps.sink = output
+    const run = async (nested: ExecuteFn = executeFn) => {
+      const routedDeps = {
+        ...deps,
+        executeFn: nested,
+        dispatch: guardDispatch(dispatch, mergeSignals(signal, context.frame.abortSignal)),
       }
-      return routeArgv(routedDeps, recurse, argv, context, given, callStack, row, admitted)
+      if (output === undefined) delete routedDeps.sink
+      else routedDeps.sink = output
+      const command = await bindCommand(argv, routedDeps, context, given)
+      return runResolved(routedDeps, recurse, command, context, given, callStack, row, admitted)
     }
     // A preCommand route places this command, and what it runs, over the
     // line's placement for its run alone: the lines it runs (`eval`) keep
@@ -1142,16 +1147,7 @@ async function runArgv(
   if ((runner !== null || redirects.length > 0) && severalMachines(registry)) {
     const denied = await guard([], stdin)
     if (denied !== null) return denied
-    const [held] = await heldMachine(
-      name,
-      argv,
-      session,
-      registry,
-      namespace,
-      dispatch,
-      stdin,
-      context.frame.routing,
-    )
+    const [held] = await heldMachine(argv, deps, context, stdin)
     if (held !== null) machine = held.machine
   }
   const outer = currentCaller()
@@ -1212,21 +1208,31 @@ async function matched(
  * `_held_machine`.
  */
 async function heldMachine(
-  name: string,
   argv: Argv,
-  session: SessionState,
-  registry: MountRegistry,
-  namespace: Namespace,
-  dispatch: DispatchFn,
+  deps: ExecuteNodeDeps,
+  context: EvaluationContext,
   stdin: ByteSource | null,
-  placed: RouteDecision<Runtime> | undefined,
+  selected?: Consumer,
 ): Promise<[RemoteRuntime | null, Argv]> {
+  const { name } = argv
+  const { session } = context
+  const placed = context.frame.routing
+  const { registry, namespace, dispatch } = deps
   if (placed === undefined) return [null, argv]
-  const links = namespace.sessionLinks(session)
   if (name.includes('/')) {
-    return [await programMachine(name, session, registry, links, dispatch, stdin), argv]
+    return [
+      await programMachine(
+        name,
+        session,
+        registry,
+        namespace.sessionLinks(session),
+        dispatch,
+        stdin,
+      ),
+      argv,
+    ]
   }
-  const [consumer] = routedConsumer(name, argv.args, session, registry, placed)
+  const consumer = selected ?? resolveTarget(name, argv.args, session, registry, placed).kind
   if (
     !(
       consumer === Consumer.MOUNT ||
@@ -1234,6 +1240,7 @@ async function heldMachine(
     )
   )
     return [null, argv]
+  const links = namespace.sessionLinks(session)
   let machine = await operandMachine(argv, session, registry, links, stdin)
   if (machine === null) return [null, argv]
   const words = await matched(argv, session, registry, namespace)
@@ -1366,7 +1373,68 @@ async function wrappedVerdict(
   return routes
 }
 
-async function routeArgv(
+async function bindCommand(
+  argv: Argv,
+  deps: ExecuteNodeDeps,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+): Promise<ResolvedCommand> {
+  const { name, args } = argv
+  const { session } = context
+  const { registry } = deps
+  const routing = context.frame.routing
+  if (name.includes('/')) {
+    const [held] = await heldMachine(argv, deps, context, stdin)
+    if (held !== null) return { argv, target: { kind: Consumer.EXTERNAL, runtime: held } }
+    const target =
+      routing !== undefined && name.startsWith('/')
+        ? resolveTarget(name, args, session, registry, routing)
+        : null
+    const fallback = target?.kind === Consumer.EXTERNAL && target.runtime !== null ? target : null
+    return { argv, target: { kind: 'path', fallback } }
+  }
+  if (UNSUPPORTED_BUILTINS.has(name)) {
+    const answer = args[0] === '--help' ? flagHelp(name) : null
+    if (answer !== null) return { argv, target: { kind: 'result', result: answer } }
+    return { argv, target: { kind: 'unsupported' } }
+  }
+  const target = resolveTarget(name, args, session, registry, routing)
+  if (runsWrapper(name, args, session, registry, routing, target.kind)) {
+    return { argv, target: { kind: 'wrapper' } }
+  }
+
+  if (target.kind === Consumer.EXTERNAL) {
+    if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
+    return { argv, target }
+  }
+  if (target.kind === Consumer.FUNCTION) return { argv, target }
+  const [held, words] = await heldMachine(argv, deps, context, stdin, target.kind)
+  if (held !== null) return { argv: words, target: { kind: Consumer.EXTERNAL, runtime: held } }
+  if (args[0] === '--help' && !isProgramInvocation(session)) {
+    const answer = flagHelp(name)
+    if (answer !== null) return { argv, target: { kind: 'result', result: answer } }
+  }
+  const builtin = BUILTINS.get(name)
+  if (builtin !== undefined) return { argv, target: { kind: 'builtin', handler: builtin } }
+  const operation = NAMESPACE_PROGRAMS.get(name)
+  if (operation !== undefined) return { argv, target: { kind: 'namespace', operation } }
+  const handler = commandWorker(argv, routing?.bindings ?? registry.runtimeBindings)
+  if (handler !== undefined) return { argv, target: { kind: 'worker', handler } }
+
+  if (target.kind === Consumer.CLI) return { argv, target }
+  // A machine-only builtin visible at install time still tries the mount
+  // implementation when placement takes away the last machine.
+  if (
+    target.kind === Consumer.UNKNOWN &&
+    !(MACHINE_ONLY_BUILTINS.has(name) && runsPrograms(registry.runtimeBindings))
+  ) {
+    return { argv, target: { kind: 'unknown' } }
+  }
+  const wrapper = runsAs(name, registry) === name ? null : (EXEC_WRAPPERS.get(name) ?? null)
+  return { argv, target: { kind: 'mount', wrapper } }
+}
+
+async function runResolved(
   deps: ExecuteNodeDeps,
   recurse: (
     n: TSNodeLike,
@@ -1374,7 +1442,7 @@ async function routeArgv(
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<RedirectResult>,
-  argv: Argv,
+  command: ResolvedCommand,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
@@ -1382,44 +1450,19 @@ async function routeArgv(
   admission: EntryGate | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
-  const { registry, namespace, executeFn, jobTable, signal, sink, parser } = deps
-  // The half of `runArgv` past the gate, split out so the gate's verdict
-  // can be bound around it.
-  // Every handler below reaches the dispatcher through this one function,
-  // so a line whose caller was already released starts no further op
-  // between its operands (`rm l1 l2` with the first unlink held past
-  // the grace), and a walk the index answers yields often enough for the
-  // abort or timeout to fire.
-  const dispatch = guardDispatch(deps.dispatch, mergeSignals(signal, context.frame.abortSignal))
+  const { registry, namespace, executeFn, jobTable, dispatch, signal, sink, parser } = deps
+  let { argv } = command
+  const { target } = command
   const name = argv.name
-  const args = [...argv.args]
+  const routing = context.frame.routing
   let operands = [...argv.operands]
 
-  // Path execution: bash hands a slash-carrying head word to the
-  // loader, never to command lookup: no builtin, function, or CLI can
-  // claim it. After the admission gate so a policy sees the line like
-  // any other.
-  if (name.includes('/')) {
-    const placed = context.frame.routing
-    // A program file one machine holds at its own path runs there.
-    const held =
-      placed === undefined
-        ? null
-        : await programMachine(
-            name,
-            session,
-            registry,
-            namespace.sessionLinks(session),
-            dispatch,
-            stdin,
-          )
-    if (held !== null && placed !== undefined)
-      return runExternal(argv, stdin, session, registry, held, signal, sink)
+  if (target.kind === Consumer.EXTERNAL)
+    return runExternal(argv, stdin, session, registry, target.runtime, signal, sink)
+  if (target.kind === 'path') {
+    const absent = target.fallback
     const onTheRuntime =
-      placed !== undefined &&
-      name.startsWith('/') &&
-      lookup(name, session, registry, placed) === Consumer.EXTERNAL &&
-      !runtimeRefused(name, session, registry, placed)
+      absent !== null && routing !== undefined
         ? async (): Promise<RedirectResult> => {
             const unread = unreadable(name, session)
             if (unread !== null) return refused([name, ...argv.args].join(' '), unread)
@@ -1428,18 +1471,10 @@ async function routeArgv(
               session,
               registry,
               namespace.sessionLinks(session),
-              placed,
+              routing,
             )
             if (program === null) {
-              return runExternal(
-                argv,
-                stdin,
-                session,
-                registry,
-                externalTarget(name, placed.bindings).runtime,
-                signal,
-                sink,
-              )
+              return runExternal(argv, stdin, session, registry, absent.runtime, signal, sink)
             }
             return setProgramInvocation(
               session,
@@ -1449,7 +1484,7 @@ async function routeArgv(
                   stdin,
                   session,
                   registry,
-                  externalTarget(program, placed.bindings).runtime,
+                  externalTarget(program, routing.bindings).runtime,
                   signal,
                   sink,
                 ),
@@ -1457,36 +1492,22 @@ async function routeArgv(
             )
           }
         : undefined
-    return handleExecPath(
-      { ...deps, dispatch },
-      name,
-      args,
-      context,
-      stdin,
-      callStack,
-      onTheRuntime,
-    )
+    return handleExecPath(deps, name, [...argv.args], context, stdin, callStack, onTheRuntime)
   }
 
-  // Unsupported bash builtins. Constructs the parser accepts but the
-  // executor cannot honor. Returning a clear error lets LLMs detect a
-  // capability gap instead of treating it as a missing binary; `bg` and
-  // `fg` say what bash -c says, which has no job control either.
-  if (UNSUPPORTED_BUILTINS.has(name)) {
-    const helped = argv.args[0] === '--help' ? flagHelp(name) : null
-    if (helped !== null) return helped
+  if (target.kind === 'result') return target.result
+  if (target.kind === 'unsupported') {
     const noControl = name === 'bg' || name === 'fg'
     const code = noControl ? 1 : 2
     const why = noControl ? 'no job control' : 'not supported'
-    const err = encodeText(`${shellVoice()}${name}: ${why}\n`)
+    const stderr = encodeText(`${shellVoice()}${name}: ${why}\n`)
     return [
       null,
-      new IOResult({ exitCode: code, stderr: err }),
-      new ExecutionNode({ command: name, exitCode: code, stderr: err }),
+      new IOResult({ exitCode: code, stderr }),
+      new ExecutionNode({ command: name, exitCode: code, stderr }),
     ]
   }
-
-  if (runsWrapper(name, argv.args, session, registry, context.frame.routing)) {
+  if (target.kind === 'wrapper') {
     return handleWrapper(
       executeFn,
       name,
@@ -1499,54 +1520,9 @@ async function routeArgv(
     )
   }
 
-  const routing = context.frame.routing
-  const target = resolveTarget(name, argv.args, session, registry, routing)
-  const consumer = target.kind
-  if (target.kind === Consumer.EXTERNAL) {
-    return runExternal(argv, stdin, session, registry, target.runtime, signal, sink)
-  }
-  // A mount command whose every path is one machine's own runs there whole,
-  // with the machine's own output. A glob's matches are checked too, since
-  // one may be a link only Mirage holds.
-  if (
-    routing !== undefined &&
-    (consumer === Consumer.MOUNT || (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name)))
-  ) {
-    const [machine, words] = await heldMachine(
-      name,
-      argv,
-      session,
-      registry,
-      namespace,
-      dispatch,
-      stdin,
-      context.frame.routing,
-    )
-    if (machine !== null) return runExternal(words, stdin, session, registry, machine, signal, sink)
-  }
-
-  // A function of a builtin's or a namespace program's name runs in its
-  // place (`timeout() { ...; }`), as bash finds a function first; the
-  // arms below are the builtin's and the program's.
-  const shadowed = consumer === Consumer.FUNCTION
-
-  // `--help` as a builtin's first word: bash answers it with the builtin's
-  // help and status 2 before the builtin reads its options, the job
-  // builtins included. A program run (`find -exec printf --help`) is the
-  // program's own, not this.
-  if (argv.args[0] === '--help' && !shadowed && !isProgramInvocation(session)) {
-    const answered = flagHelp(name)
-    if (answered !== null) return answered
-  }
-
-  // Shell builtins. One lookup: every executor-run builtin word maps to
-  // a handler that takes the whole invocation, so the arms live beside
-  // their workers (builtins/<word>/) rather than here. Job builtins and
-  // the interpreters are not in the table; they route below.
-  const builtin = shadowed ? undefined : BUILTINS.get(name)
-  if (builtin !== undefined) {
+  if (target.kind === 'builtin') {
     try {
-      return await builtin({
+      return await target.handler({
         argv,
         context,
         stdin,
@@ -1589,44 +1565,43 @@ async function routeArgv(
   // The programs below run here rather than on a mount, and every op one
   // issues is the program's, as a mount command's is: a rule scoped to it
   // reaches what `chmod -R` walks into, not only its operands.
-  const made = madeByCommand(dispatch, admission)
-
-  // Links landing in one machine's own folder are made there, so its
-  // programs follow them.
-  const lnOnMachine = async (plans: LinkPlan[], flags: LnFlags): Promise<RedirectResult | null> => {
-    if (routing === undefined) return null
-    const machine = await linkMachine(
-      plans.map((plan) => [
-        plan.linkAbs,
-        resolvePath(wordText(plan.source), flags.symbolic ? parent(plan.linkAbs) : session.cwd),
-      ]),
-      flags.symbolic,
-      session,
-      registry,
-      namespace.sessionLinks(session),
-    )
-    if (machine === null) return null
-    return runExternal(argv, null, session, registry, machine, signal, sink)
-  }
-
-  const program = shadowed
-    ? null
-    : await runNamespaceProgram(
-        name,
-        namespace,
-        made,
-        registry,
+  if (target.kind === 'namespace') {
+    // Links landing in one machine's own folder are made there, so its
+    // programs follow them.
+    const lnOnMachine = async (
+      plans: LinkPlan[],
+      flags: LnFlags,
+    ): Promise<RedirectResult | null> => {
+      if (routing === undefined) return null
+      const machine = await linkMachine(
+        plans.map((plan) => [
+          plan.linkAbs,
+          resolvePath(wordText(plan.source), flags.symbolic ? parent(plan.linkAbs) : session.cwd),
+        ]),
+        flags.symbolic,
         session,
-        operands,
-        stdin,
-        lnOnMachine,
+        registry,
+        namespace.sessionLinks(session),
       )
-  if (program !== null) return program
+      if (machine === null) return null
+      return runExternal(argv, null, session, registry, machine, signal, sink)
+    }
+
+    return runNamespaceProgram(
+      target.operation,
+      namespace,
+      madeByCommand(dispatch, admission),
+      registry,
+      session,
+      operands,
+      stdin,
+      lnOnMachine,
+    )
+  }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
   // the link entry itself (lstat semantics).
   let linkErrors: string[] = []
-  let dispatchArgv = argv
   if (namespace.nodes.size > 0) {
     const [rest, errors, early] = await stripLinks(
       name,
@@ -1639,7 +1614,7 @@ async function routeArgv(
     if (early !== null) return early
     operands = rest
     linkErrors = errors
-    dispatchArgv = argv.withOperands(operands)
+    argv = argv.withOperands(operands)
   }
 
   // What rm's bookkeeping may drop is read before rm runs: removing a
@@ -1650,11 +1625,10 @@ async function routeArgv(
       ? rmUnseen(namespace, session, operands)
       : { kept: new Map<string, Set<string>>(), hidden: new Set<string>() }
 
-  // Default: mount-dispatched command
   const [source, io, execNode] = await handleCommand(
-    { ...deps, dispatch },
+    deps,
     recurse,
-    dispatchArgv.words,
+    { argv, target },
     context,
     stdin,
     callStack,

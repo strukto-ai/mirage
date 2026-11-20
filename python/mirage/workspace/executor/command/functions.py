@@ -41,6 +41,7 @@ from mirage.workspace.executor.traps import (
     lift_function_traps,
     restore_function_traps,
 )
+from mirage.workspace.lookup.types import FunctionTarget
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
 from mirage.workspace.session.functions import called_lines
@@ -68,6 +69,7 @@ async def run_shell_function(
     deps: ExecuteNodeDeps,
     execute_node: ExecuteNodeFn,
     cmd_name: str,
+    target: FunctionTarget,
     parts: list[str | PathSpec],
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -96,6 +98,7 @@ async def run_shell_function(
         deps (ExecuteNodeDeps): what the call runs against.
         execute_node (ExecuteNodeFn): the executor's statement runner.
         cmd_name (str): the function's name (already resolved).
+        target (FunctionTarget): the selected definition and its site.
         parts (list[str | PathSpec]): classified command words; the
             tail becomes the function's positional arguments as typed.
         context (EvaluationContext): session whose env/arrays host the locals.
@@ -127,11 +130,12 @@ async def run_shell_function(
     # copy for the call's own frame, as bash's.
     text_args = [word_text(p) for p in parts[1:]]
     check_env(session, 0, args_bytes(text_args), frames_bytes(cs))
+    site = target.site
     scope = ParseScope()
     try:
         func_body = parse_function(
-            session.functions[cmd_name],
-            partial(scope.parse, aliases=body_aliases(session, cmd_name)),
+            target.body,
+            partial(scope.parse, aliases=body_aliases(session, site)),
         )
     except BaseException:
         scope.release()
@@ -172,9 +176,6 @@ async def run_shell_function(
     outer_view = session._alias_view
     outer_expansion = session._alias_expansion
     session._alias_expansion = None
-    site = session._function_sites.get(cmd_name)
-    if site is not None and site.source != session.functions[cmd_name]:
-        site = None
     if site is None:
         session._parse_seq += 1
         mark = (session._parse_seq, 0)

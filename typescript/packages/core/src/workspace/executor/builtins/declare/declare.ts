@@ -106,12 +106,13 @@ export function functionLines(
   for (const name of names) {
     const flags = functionFlags(session, name)
     if (bodies) {
+      const body = session.functions[name] ?? ''
       lines.push(
         storedFunctionText(
           name,
-          session.functions[name] ?? '',
+          body,
           parser,
-          bodyAliasValues(session, name),
+          bodyAliasValues(session, session.functionSite(name, body)),
         ),
       )
       if (marks && flags !== 'f') lines.push(`declare -${flags} ${name}`)

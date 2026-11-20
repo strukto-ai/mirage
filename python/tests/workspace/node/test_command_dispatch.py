@@ -410,6 +410,38 @@ class Named(MachineHandle):
         return RunResult(exit_code=0)
 
 
+@pytest.mark.asyncio
+async def test_function_shadows_the_default_lscpu_machine_view():
+    ws = Workspace(
+        {"/": RAMVFS()}, machines={"a": Named("a", {"captures": ["gcc"]})}
+    )
+    try:
+        result = await ws.shell("lscpu() { echo function; }; lscpu")
+        assert (result.stdout, result.exit_code) == (b"function\n", 0)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["top", "uptime"])
+async def test_known_machine_builtin_with_no_placed_machine_tries_the_mount(
+    name,
+):
+    ws = Workspace(
+        {"/": RAMVFS()},
+        machines={"a": Named("a", {"captures": ["@line"]})},
+        route_policy=lambda ctx: "workspace",
+    )
+    try:
+        result = await ws.shell(name)
+        assert (result.exit_code, result.stderr) == (
+            127,
+            f"bash: line 1: {name}: command not found".encode(),
+        )
+    finally:
+        await ws.close()
+
+
 class HostnameOn(Policy):
     def __init__(self, machine: str) -> None:
         self.machine = machine

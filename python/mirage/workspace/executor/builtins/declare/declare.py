@@ -129,11 +129,14 @@ def function_lines(
     for name in names:
         flags = function_flags(session, name)
         if bodies:
+            body = session.functions[name]
             lines.append(
                 stored_function_text(
                     name,
-                    session.functions[name],
-                    body_alias_values(session, name),
+                    body,
+                    body_alias_values(
+                        session, session.function_site(name, body)
+                    ),
                 )
             )
             if marks and flags != "f":
