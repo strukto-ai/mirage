@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '../../commands/config.ts'
 import { materialize } from '../../io/types.ts'
 import { MachineHandle } from '../../machine/handle.ts'
@@ -406,7 +406,9 @@ it.each(['top', 'uptime'])(
       },
     )
     try {
+      const resolveMount = vi.spyOn(ws.registry, 'invocationMount')
       const result = await ws.shell(name)
+      expect(resolveMount).toHaveBeenCalledWith(name, [], '/', [], expect.anything())
       expect([result.exitCode, result.stderrText]).toEqual([
         127,
         `bash: line 1: ${name}: command not found`,

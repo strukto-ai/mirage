@@ -134,7 +134,7 @@ describe('external program capture', () => {
     const selected = new ProcessProbe()
     const ws = workspace(configured)
     try {
-      const argv = new Argv('native', ['a b', ''], ['a b', ''])
+      const argv = new Argv('native tool', ['a b', ''], ['a b', ''], ['native', 'tool'])
       const [out, io, node] = await runExternal(
         argv,
         null,
@@ -142,9 +142,9 @@ describe('external program capture', () => {
         ws.registry,
         selected,
       )
-      await materialize(out)
+      expect(DEC.decode(await materialize(out))).toBe('GPU ready\nother\n')
       expect([io.exitCode, node.exitCode]).toEqual([0, 0])
-      expect(selected.requests.map((r) => r.argv)).toEqual([['native', 'a b', '']])
+      expect(selected.requests.map((r) => r.argv)).toEqual([['native', 'tool', 'a b', '']])
       expect(configured.requests).toHaveLength(0)
     } finally {
       await ws.close()
