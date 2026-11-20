@@ -439,7 +439,32 @@ async function* oneEmptyChunk(): AsyncGenerator<Uint8Array> {
   yield new Uint8Array()
 }
 
+async function* aAndB(): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield ENC.encode('a\nb\n')
+}
+
 describe('--from-file and --to-file', () => {
+  // Stdin handed in as bytes is read once: -X drains it, so the comparison
+  // reads `-` as empty (diffutils 3.10: `0a1,2`, exit 1).
+  it('shares one stdin cursor between exclusions and comparisons', async () => {
+    const [out, io] = await diffRun(
+      [operand('x', '/d/x')],
+      {
+        flags: { from_file: [DASH], exclude_from: [DASH] },
+        stdin: ENC.encode('a\n'),
+        cwd: PathSpec.fromStrPath('/'),
+      },
+      () => aAndB(),
+      readdir,
+      (p: PathSpec) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE })),
+    )
+    expect([
+      new TextDecoder().decode(await materialize(out ?? new Uint8Array())),
+      io.exitCode,
+    ]).toEqual(['0a1,2\n> a\n> b\n', 1])
+  })
+
   it('closes the comparisons before one that fails', async () => {
     let closed = 0
     let calls = 0

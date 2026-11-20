@@ -590,6 +590,28 @@ async def _file_stat(path: PathSpec) -> FileStat:
     return FileStat(name=path.virtual, type=FileType.FILE)
 
 
+async def _a_and_b(path: PathSpec):
+    yield b"a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_exclusions_and_comparisons_share_one_stdin_cursor():
+    # Stdin handed in as bytes is read once: -X drains it, so the
+    # comparison reads `-` as empty (diffutils 3.10: `0a1,2`, exit 1).
+    out, io = await diff(
+        [_operand("x", "/d/x")],
+        stream=_a_and_b,
+        readdir_fn=_readdir,
+        stat_fn=_file_stat,
+        flags=DiffFlags(
+            from_file=_operand("-", "/d/-"),
+            exclude_from=(_operand("-", "/d/-"),),
+        ),
+        stdin=b"a\n",
+    )
+    assert (await materialize(out), io.exit_code) == (b"0a1,2\n> a\n> b\n", 1)
+
+
 @pytest.mark.asyncio
 async def test_a_from_file_comparison_that_fails_closes_the_ones_before():
     closed: list[bool] = []
