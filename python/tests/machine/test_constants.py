@@ -841,7 +841,8 @@ def _ended(pid: int) -> bool:
 
 # Once the run's program has exited, a hangup still spares what setsid
 # moved out of the session, even once that session's leader has exited
-# too, and a stopped process is continued so the hangup ends it.
+# too (a zombie or reaped), and a stopped process is continued so the
+# hangup ends it.
 @pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
 def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
     tag = f"{uuid.uuid4().hex}:9"
@@ -849,20 +850,23 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
         [
             "/bin/sh",
             "-c",
-            "setsid sleep 300 & echo $!; sleep 301 & echo $!; "
-            "sleep 302 & echo $!; setsid sh -c 'sleep 303 & echo $!'",
+            "setsid sleep 300 & echo k $!; sleep 301 & echo h $!; "
+            "sleep 302 & echo s $!; setsid sh -c 'sleep 303 & echo o $!'; "
+            'sh -c \'setsid sh -c "sleep 304 & echo z \\$!" & '
+            "exec sleep 305' &",
         ],
         env={**os.environ, PROCESS: tag},
         stdout=subprocess.PIPE,
         start_new_session=True,
     )
     assert program.stdout is not None
-    kept, hung, stopped, orphan = (
-        int(program.stdout.readline()) for _ in range(4)
-    )
+    pids: dict[str, int] = {}
+    for _ in range(5):
+        label, pid = program.stdout.readline().split()
+        pids[label.decode()] = int(pid)
     program.wait(timeout=5)
     try:
-        os.kill(stopped, 19)
+        os.kill(pids["s"], 19)
         done = subprocess.run(
             ["/bin/sh", "-c", stop_line(tag, 1, MachinePid(program.pid, 0.0))],
             check=False,
@@ -870,11 +874,11 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
         )
         assert done.returncode == 0
         for _ in range(50):
-            if _ended(hung) and _ended(stopped):
+            if _ended(pids["h"]) and _ended(pids["s"]):
                 break
             time.sleep(0.1)
-        assert _ended(hung) and _ended(stopped)
-        assert not _ended(kept) and not _ended(orphan)
+        assert _ended(pids["h"]) and _ended(pids["s"])
+        assert not any(_ended(pids[k]) for k in ("k", "o", "z"))
     finally:
         subprocess.run(
             ["/bin/sh", "-c", stop_line(tag)], check=False, timeout=10

@@ -670,7 +670,7 @@ def stop_line(
     session can no longer be read, so the hangup reaches a process only
     when its session's leader is ``root`` or a live process outside the
     run: a session another process of the run leads, or whose leader has
-    exited, is what ``setsid`` leaves.
+    exited (a zombie too), is what ``setsid`` leaves.
 
     Args:
         process (str): the id of the Mirage process the run is, as
@@ -701,6 +701,8 @@ def stop_line(
         "command -v grep >/dev/null || exit 127; "
         'sid() { q=; read -r t 2>/dev/null < "/proc/$1/stat" || return 1; '
         't=${t##*")"}; set -- $t; q=$4; }; '
+        'up() { read -r t 2>/dev/null < "/proc/$1/stat" || return 1; '
+        't=${t##*")"}; set -- $t; [ "$1" != Z ] && [ "$1" != X ]; }; '
         f"{own}"
         "left() { a=; l=; for p in /proc/[0-9]*; do "
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
@@ -708,7 +710,7 @@ def stop_line(
         'for p in $a; do if [ -n "$s" ]; then '
         '{ sid $p && [ "$q" = "$s" ]; } || continue; '
         'elif [ -n "$g" ]; then sid $p || continue; '
-        'if [ "$q" != "$z" ]; then [ -d "/proc/$q" ] || continue; '
+        'if [ "$q" != "$z" ]; then up $q || continue; '
         'case " $a " in *" $q "*) continue ;; esac; fi; fi; '
         'l="$l $p"; done; [ -n "$l" ]; }; '
         f"else PATH={DARWIN_PATH}; k=; l=; {darwin_roots(mine)}"

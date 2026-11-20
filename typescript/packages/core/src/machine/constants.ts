@@ -634,7 +634,8 @@ export const PIPE_SIGNAL = 13
  * it. Once `root` has exited its session can no longer be read, so the
  * hangup reaches a process only when its session's leader is `root` or a
  * live process outside the run: a session another process of the run
- * leads, or whose leader has exited, is what `setsid` leaves.
+ * leads, or whose leader has exited (a zombie too), is what `setsid`
+ * leaves.
  *
  * @param process the id of the Mirage process the run is, as `PROCESS`
  *   carries it.
@@ -660,6 +661,8 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     'command -v grep >/dev/null || exit 127; ' +
     'sid() { q=; read -r t 2>/dev/null < "/proc/$1/stat" || return 1; ' +
     't=${t##*")"}; set -- $t; q=$4; }; ' +
+    'up() { read -r t 2>/dev/null < "/proc/$1/stat" || return 1; ' +
+    't=${t##*")"}; set -- $t; [ "$1" != Z ] && [ "$1" != X ]; }; ' +
     own +
     'left() { a=; l=; for p in /proc/[0-9]*; do ' +
     'tr \'\\000\' \'\\n\' < "$p/environ" 2>/dev/null | grep -qxF "$m" ' +
@@ -667,7 +670,7 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     'for p in $a; do if [ -n "$s" ]; then ' +
     '{ sid $p && [ "$q" = "$s" ]; } || continue; ' +
     'elif [ -n "$g" ]; then sid $p || continue; ' +
-    'if [ "$q" != "$z" ]; then [ -d "/proc/$q" ] || continue; ' +
+    'if [ "$q" != "$z" ]; then up $q || continue; ' +
     'case " $a " in *" $q "*) continue ;; esac; fi; fi; ' +
     'l="$l $p"; done; [ -n "$l" ]; }; ' +
     `else PATH=${DARWIN_PATH}; k=; l=; ${darwinRoots(mine)}` +
