@@ -867,6 +867,18 @@ async def test_a_program_its_cap_stopped_is_recorded_as_141(monkeypatch):
             False,
         ),
         ("{ exec 2>&-; prog; } 2>&1", "out\n", "", False),
+        (
+            "exec >/data/l; prog 2>&1; exec >&2; cat /data/l",
+            "",
+            "out\nerr\n",
+            True,
+        ),
+        (
+            "{ exec 2>/data/e; { prog; } >&1; } 2>&1; echo -; cat /data/e",
+            "out\n-\nerr\n",
+            "",
+            False,
+        ),
     ],
 )
 async def test_a_joined_program_runs_joined_on_its_machine(

@@ -654,6 +654,9 @@ function openDescriptors(
 /**
  * The recorder a command's output goes through, bound to its files. Mirrors
  * Python's `_output_recorder`.
+ *
+ * @param session the session, whose `exec` bindings an enclosing join holds
+ *   under.
  */
 function outputRecorder(
   dispatch: DispatchFn,
@@ -663,6 +666,7 @@ function outputRecorder(
   sink: JobConsole | undefined,
   command: TSNodeLike | null,
   follow: ((path: string) => string) | null,
+  session: SessionState,
 ): PipeRecorder {
   const streams = new Map<Channel, PathSpec>()
   const forward = new Map<Channel, Channel>()
@@ -690,7 +694,10 @@ function outputRecorder(
   const err = outputs.get(2)
   recorder.joinsErrors =
     out !== CLOSED &&
-    (err === out || (out === TO_STDOUT && err === TO_STDERR && sink?.joinsErrors === true))
+    (err === out ||
+      (out === TO_STDOUT &&
+        err === TO_STDERR &&
+        sink?.joined(session.execStdout, session.execStderr) === true))
   for (const file of files) {
     if (file.source !== null) continue
     for (const [fd, channel] of [
@@ -1242,7 +1249,7 @@ async function runRedirects(
     if (failure !== null) return failure
   }
   redirects = expanded
-  const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow)
+  const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow, session)
   const streamed: Caller['streamed'] = [
     ...currentCaller().streamed,
     ...[...new Set(recorder.bound.values())].map(
@@ -1289,6 +1296,7 @@ async function runRedirects(
     Object.keys(unbound).map((field) => [field, session[field as keyof typeof unbound]]),
   )
   Object.assign(session, unbound)
+  recorder.execStreams = [session.execStdout, session.execStderr]
   const depth = session.shadowed.length
   session.shadowed.push(...shadowed)
   try {

@@ -45,8 +45,11 @@ class JobConsole:
 
     # Whether what this console takes on stderr goes where its stdout goes
     # (``2>&1``): a redirect level's, set when its descriptors are opened;
-    # a job's own console keeps them apart.
+    # a job's own console keeps them apart. The session's ``exec`` stdout
+    # and stderr bindings as the level began running, which the join holds
+    # under (``joined``).
     joins_errors: bool = False
+    exec_streams: tuple[str | None, str | None] = (None, None)
 
     def __init__(
         self, store: ConsoleStore | None = None, finished: bool = False
@@ -59,6 +62,21 @@ class JobConsole:
     def process(self) -> str | None:
         """The id of the process whose output this is, as text."""
         return self._process
+
+    def joined(self, exec_stdout: str | None, exec_stderr: str | None) -> bool:
+        """Whether a program writing here now writes its stderr where its
+        stdout goes: the level joined the two, and no ``exec`` it ran since
+        pointed either elsewhere (``{ exec 2>f; prog; } 2>&1``). A binding
+        made before the level stays under it (``exec >log; prog 2>&1``).
+
+        Args:
+            exec_stdout (str | None): the session's ``exec`` stdout binding.
+            exec_stderr (str | None): its ``exec`` stderr binding.
+        """
+        return self.joins_errors and self.exec_streams == (
+            exec_stdout,
+            exec_stderr,
+        )
 
     def pipe_for(self, channel: Channel) -> BytePipe | None:
         """The pipe that reads what this console takes on ``channel``,

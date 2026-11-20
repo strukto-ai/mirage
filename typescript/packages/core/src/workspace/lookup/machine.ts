@@ -267,8 +267,8 @@ function folderFree(name: string): boolean {
 /**
  * Every path a command names, absolute, with whether any of them depends on
  * the folder it runs from: an operand typed relative, an option's path the
- * folder changes, or no path at all (`ls` lists the folder). Mirrors Python's
- * `_named_paths`.
+ * folder changes, or no path operand at all (`ls` and `grep -r -f /tmp/p x`
+ * read the folder). Mirrors Python's `_named_paths`.
  *
  * @param argv the command.
  * @param cwd the session's folder.
@@ -279,7 +279,7 @@ function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
   const children = childPaths(argv.name, argv.args, cwd)
   const paths = operands.map((w) => unmarkGlobs(w.virtual))
   const relative =
-    paths.length + options.length + children.length === 0 ||
+    paths.length === 0 ||
     operands.some((w) => !w.rawPath.startsWith('/')) ||
     options.join('\0') !== optionPaths(argv, '/').join('\0')
   return [[...paths, ...options, ...children], relative]
@@ -374,7 +374,8 @@ export function statedMachine(
     .map((w) => w.text)
   const children = childPaths(name, args, cwd)
   const relative =
-    named.length + children.length === 0 || named.some((p) => !p.rawPath.startsWith('/'))
+    !words.some((w) => w.kind === WordKind.OPERAND && w.path !== null) ||
+    named.some((p) => !p.rawPath.startsWith('/'))
   const scopes: [string, boolean][] = [
     ...named.map((p): [string, boolean] => [unmarkGlobs(p.virtual), true]),
     ...children.map((c): [string, boolean] => [c, true]),

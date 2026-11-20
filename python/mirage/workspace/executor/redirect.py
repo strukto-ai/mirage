@@ -844,6 +844,7 @@ def _output_recorder(
     sink: JobConsole | None,
     command: TSNodeLike | None,
     follow: Callable[[str], str] | None,
+    session: SessionState,
 ) -> PipeRecorder:
     """The recorder a command's output goes through, bound to its files.
 
@@ -855,6 +856,8 @@ def _output_recorder(
         sink (JobConsole | None): the enclosing console, if any.
         command (TSNodeLike | None): the redirected command, if any.
         follow (Callable[[str], str] | None): resolves a path's links.
+        session (SessionState): the session, whose ``exec`` bindings an
+            enclosing join holds under.
     """
     streams: dict[Channel, PathSpec] = {}
     forward: dict[Channel, Channel] = {}
@@ -879,7 +882,7 @@ def _output_recorder(
             outputs[1] is _TO_STDOUT
             and outputs[2] is _TO_STDERR
             and sink is not None
-            and sink.joins_errors
+            and sink.joined(session.exec_stdout, session.exec_stderr)
         )
     )
     for file in files:
@@ -1581,7 +1584,7 @@ async def _handle_redirect(
     files, piped, targets = opened.files, opened.piped, opened.targets
 
     recorder = _output_recorder(
-        dispatch, outputs, files, piped, sink, command, follow
+        dispatch, outputs, files, piped, sink, command, follow, session
     )
     unwound: Exception | None = None
     refused = False
@@ -1652,6 +1655,7 @@ async def _handle_redirect(
     held = {field: getattr(session, field) for field in unbound}
     for field, value in unbound.items():
         setattr(session, field, value)
+    recorder.exec_streams = (session.exec_stdout, session.exec_stderr)
     depth = len(session.shadowed)
     session.shadowed.extend(shadowed)
     cancelled: asyncio.CancelledError | CommandTimeoutError | None = None
