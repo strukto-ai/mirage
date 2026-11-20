@@ -857,7 +857,7 @@ async function forkSubshell(
   callStack: CallStack,
 ): Promise<RedirectResult> {
   const session = context.session
-  const { dispatch, registry, jobTable } = deps
+  const { registry, jobTable } = deps
   // A subshell is its own shell: background jobs started inside live
   // in a private job table (`$!`/`wait`/`kill` in the body see them;
   // the parent's table never does), mirroring bash's forked process.
@@ -888,6 +888,17 @@ async function forkSubshell(
       opts?.ownDiagnostics !== false,
       opts?.endsShell === true,
     )
+  const subshellDeps: ExecuteNodeDeps = {
+    ...deps,
+    jobTable: subTable,
+    // Its EXIT action runs as the subshell, which a stop ends.
+    executeFn: (cmd, opts) =>
+      executeFn(cmd, {
+        ...opts,
+        signal: opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
+      }),
+  }
+  if (sink !== undefined) subshellDeps.sink = sink
   const child = childContext(context)
   const asProgram = isProgramInvocation(session)
   let subshellRan: RedirectResult | undefined
@@ -903,23 +914,13 @@ async function forkSubshell(
   const run = async (): Promise<number> => {
     const body = () =>
       handleSubshell(
+        subshellDeps,
         subRecurse,
         node.children,
         child,
         stdin,
         callStack,
-        subTable,
-        dispatch,
-        deps.handed ?? null,
         registry.decisions,
-        sink ?? null,
-        // Its EXIT action runs as the subshell, which a stop ends.
-        (cmd, opts) =>
-          executeFn(cmd, {
-            ...opts,
-            signal:
-              opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
-          }),
       )
     try {
       subshellRan = await setCurrentEvaluation(child, () =>
@@ -1251,20 +1252,7 @@ async function executeNodeBody(
               options,
             )
         : recurse
-    return executeProgram(
-      programRecurse,
-      node,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      dispatch,
-      deps.handed ?? null,
-      registry.decisions,
-      sink ?? null,
-      inline,
-      executeFn,
-    )
+    return executeProgram(called, programRecurse, node, context, stdin, callStack, inline)
   }
 
   if (kind === NodeKind.COMMAND && !node.children.some((c) => c.type === NT.COMMAND_NAME)) {

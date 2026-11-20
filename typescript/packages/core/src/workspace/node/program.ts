@@ -19,16 +19,12 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { activeRecords } from '../../observe/context.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
-import type { HandOff } from '../../policy/types.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { getText, sameLine, sourceRow } from '../../shell/helpers.ts'
-import type { JobTable } from '../../execution/job/index.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { PARSED_WORDS } from '../../shell/parse/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -39,6 +35,7 @@ import type { EvaluationContext } from '../evaluation.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { divertStatement, divertedFile } from '../executor/builtins/exec/index.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
+import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
 import { handleBackground, runProgram as runForked } from '../executor/background.ts'
 import {
@@ -128,19 +125,18 @@ async function drained([source, io, ran]: RedirectResult): Promise<RedirectResul
 /**
  * Execute program node (root / semicolon-separated).
  *
- * `dispatch` is the dispatcher, threaded so an active `exec` redirect can
- * send each statement's output to its file; undefined (a nested loop that
- * is not the program root) leaves output undiverted. `handed` and
- * `decisions` are the line's hand-off and its ledger, for a background job
- * to borrow. `sink` takes each statement's output as it finishes, in the
- * order it was written, instead of the result. The outermost program of a
+ * `deps.dispatch` is the dispatcher, threaded so an active `exec` redirect
+ * can send each statement's output to its file. `deps.handed` and the
+ * registry's `decisions` are the line's hand-off and its ledger, for a
+ * background job to borrow. `deps.sink` takes each statement's output as it
+ * finishes, in the order it was written, instead of the result. The outermost program of a
  * session's line routes what a statement wrote to the session's terminal
  * through a copy (`exec 3>&1`); a nested one (`eval`, `source`) leaves that
  * to it. An `inline` program runs on its caller's frames (`eval`, `source`,
  * an alias, `$( )`), so an `exit`, `return`, `break` or `continue` goes on
  * into the caller, after what the program wrote; any other program is a
  * shell of its own and ends there, running its EXIT action through
- * `executeFn`. Either resumes at its next line after an error that
+ * `deps.executeFn`. Either resumes at its next line after an error that
  * discards one, unless it runs in a child shell. `set -n` stops the loop at
  * the next statement, so a later `set +n` never runs. `set -v` echoes each
  * input line once, as the first statement on it runs, from the line after
@@ -149,18 +145,13 @@ async function drained([source, io, ran]: RedirectResult): Promise<RedirectResul
  * is skipped.
  */
 export async function executeProgram(
+  deps: ExecuteNodeDeps,
   recurse: ExecuteNodeFn,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable,
-  dispatch?: DispatchFn,
-  handed: HandOff | null = null,
-  decisions: Decisions | null = null,
-  sink: JobConsole | null = null,
   inline = false,
-  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   // Every program loop is one parse, which is the unit bash's alias rule
@@ -186,19 +177,14 @@ export async function executeProgram(
   session.lineOpen = true
   try {
     return await runProgram(
+      deps,
       recurse,
       node,
       context,
       stdin,
       callStack,
-      jobTable,
-      dispatch,
-      handed,
-      decisions,
-      sink,
       root ? session.terminal : null,
       inline,
-      executeFn,
     )
   } finally {
     ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineRows, session.lineNode] =
@@ -211,21 +197,20 @@ export async function executeProgram(
 }
 
 async function runProgram(
+  deps: ExecuteNodeDeps,
   recurse: ExecuteNodeFn,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable,
-  dispatch?: DispatchFn,
-  handed: HandOff | null = null,
-  decisions: Decisions | null = null,
-  sink: JobConsole | null = null,
   own: StreamOwner | null = null,
   inline = false,
-  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
+  const { dispatch, jobTable, executeFn } = deps
+  const handed = deps.handed ?? null
+  const decisions = deps.registry.decisions
+  const sink = deps.sink ?? null
   const children = node.children
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
@@ -374,7 +359,7 @@ async function runProgram(
       mergedIo = await mergedIo.merge(io)
       mergedIo = await land(
         await runErrTrap(
-          executeFn ?? null,
+          executeFn,
           child,
           io.exitCode,
           session,

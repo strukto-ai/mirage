@@ -832,7 +832,7 @@ export async function handleCommand(
   admission: EntryGate | null = getAdmission(),
 ): Promise<RedirectResult> {
   const session = context.session
-  const { registry, jobTable, namespace, executeFn, signal, sink, parser } = deps
+  const { registry, jobTable, namespace, executeFn, signal, sink } = deps
   let dispatch: CallerDispatchFn = deps.dispatch
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -895,21 +895,15 @@ export async function handleCommand(
     funcBody !== undefined &&
     lookup(cmdName, session, registry, context.frame.routing ?? undefined) === Consumer.FUNCTION
   ) {
-    if (parser === undefined) throw new Error('function invocation requires a parse scope')
     return runShellFunction(
+      deps,
       executeNode,
       cmdName,
       funcBody,
-      parser,
       parts.slice(1),
       context,
       stdin,
       callStack,
-      jobTable,
-      deps.handed ?? null,
-      registry.decisions,
-      sink,
-      executeFn,
     )
   }
 
