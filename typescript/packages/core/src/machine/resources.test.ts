@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { darwinResourcesLine, RESOURCE_MARK as M, resourcesLine } from './constants.ts'
+import {
+  darwinResourcesLine,
+  machineResourcesLine,
+  RESOURCE_MARK as M,
+  resourcesLine,
+} from './constants.ts'
 import { parseDarwinResources, parseMachineResources, parseResources } from './resources.ts'
 
 const LINUX = `${M} cpus 5 8
@@ -100,7 +105,10 @@ describe('resources', () => {
     expect([found.cpu?.user, found.cpu?.system, found.cpu?.wait]).toEqual([15.1, 8.3, null])
   })
 
-  it('reads rows as the system that wrote them', () => {
+  it('asks and reads a machine as a Mac or Linux', () => {
+    const line = machineResourcesLine(false)
+    expect(line).toContain(resourcesLine(false))
+    expect(line).toContain(darwinResourcesLine(false))
     expect(parseMachineResources(DARWIN, 'm')).toEqual(parseDarwinResources(DARWIN, 'm'))
     expect(parseMachineResources(LINUX, 'm')).toEqual(parseResources(LINUX, 'm'))
   })
