@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Awaitable, Sequence
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, TypedDict, Unpack
 
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.word_choice import WordChoices
+from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy.types import CommandRead, CommandWord, Grammar, HandOff
@@ -24,8 +27,32 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.workspace.session import SessionState
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.types import ExecutionNode
+
+
+class ExecuteNodeOpts(TypedDict, total=False):
+    """What a caller overrides for the subtree it runs; a key left out
+    keeps the walker's own value, a key given as None sets none.
+
+    Args:
+        line_handle (LineHandle): the line the subtree runs in.
+        sink (JobConsole | None): where the subtree writes as it runs.
+        cancel (asyncio.Event | None): the event that aborts it.
+        handed (HandOff | None): the hand-off it runs on.
+        job_table (JobTable): the job list it and the lines it runs use.
+        ends_shell (bool): the subtree is the whole of a child shell,
+            which runs its EXIT action when it ends.
+        own_diagnostics (bool): whether it flushes its own diagnostics.
+    """
+
+    line_handle: LineHandle
+    sink: JobConsole | None
+    cancel: asyncio.Event | None
+    handed: HandOff | None
+    job_table: JobTable
+    ends_shell: bool
+    own_diagnostics: bool
 
 
 class ExecuteNodeFn(Protocol):
@@ -39,12 +66,10 @@ class ExecuteNodeFn(Protocol):
     def __call__(
         self,
         node: TSNodeLike,
-        session: SessionState,
+        context: EvaluationContext,
         stdin: ByteSource | None,
         call_stack: CallStack,
-        *,
-        sink: JobConsole | None = None,
-        handed: HandOff | None = None,
+        **opts: Unpack[ExecuteNodeOpts],
     ) -> Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]: ...
 
 
