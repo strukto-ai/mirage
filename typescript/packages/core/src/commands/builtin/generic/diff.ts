@@ -710,18 +710,27 @@ async function diffDirs(
 }
 
 /**
- * An operand's stat as diff reads it: a link it reads as itself is its own
- * row; null for one that is not there. Mirrors Python's `_operand_row`.
+ * An operand's stat as diff reads it, and the error that stat met. A link
+ * diff reads as itself is its own row; any other link is followed, and one
+ * that leads nowhere is null, as a missing operand is, with no error, since
+ * -N may read either as empty. Mirrors Python's `_operand_row`.
  */
-async function operandRow(walk: Walk, stat: StatFn, path: PathSpec): Promise<FileStat | null> {
+async function operandRow(
+  walk: Walk,
+  stat: StatFn,
+  path: PathSpec,
+): Promise<[FileStat | null, Uint8Array | null]> {
   if (linkText(walk, path) !== null && walk.links !== undefined)
-    return walk.links.statAt(path.virtual) ?? null
+    return [walk.links.statAt(path.virtual) ?? null, null]
+  let row: FileStat
   try {
-    return await stat(path)
+    row = await (isStdin(path) ? stat(path) : walk.stat(path))
   } catch (err) {
-    if (isEnoent(err)) return null
+    if (isEnoent(err)) return [null, null]
+    if (isFsError(err)) return [null, formatFsError('diff', err, [path])]
     throw err
   }
+  return [row.type === FileType.SYMLINK ? null : row, null]
 }
 
 async function excludedPatterns(
@@ -796,12 +805,15 @@ export async function diffGeneric(
     // GNU stats both operands before it reads either: a missing one is named
     // at once, and a directory beside anything else stands for its entry of
     // that one's name.
-    const rows: [FileStat | null, FileStat | null] = [
-      await operandRow(walk, stat, p0),
-      await operandRow(walk, stat, p1),
-    ]
-    if (rows[0] === null && rows[1] === null)
-      return [null, new IOResult({ exitCode: 2, stderr: concat([noSuch(p0), noSuch(p1)]) })]
+    const probes = [await operandRow(walk, stat, p0), await operandRow(walk, stat, p1)] as const
+    const rows: [FileStat | null, FileStat | null] = [probes[0][0], probes[1][0]]
+    if ((rows[0] === null && rows[1] === null) || probes.some(([, said]) => said !== null)) {
+      // GNU names every operand it could not stat, -N or not.
+      const lines = probes.map(
+        ([row, said], i) => said ?? (row === null ? noSuch(i === 0 ? p0 : p1) : new Uint8Array()),
+      )
+      return [null, new IOResult({ exitCode: 2, stderr: concat(lines) })]
+    }
     const dirs = rows.map((row) => row?.type === FileType.DIRECTORY)
     if (dash0 !== dash1 && dirs[dash0 ? 1 : 0] === true) {
       return [
@@ -817,7 +829,9 @@ export async function diffGeneric(
       const side = dirs[0] === true ? 0 : 1
       const entry = childSpec(operands[side], gnuBasename(operands[side === 0 ? 1 : 0].rawPath))
       operands = side === 0 ? [entry, p1] : [p0, entry]
-      rows[side] = await operandRow(walk, stat, entry)
+      const [row, said] = await operandRow(walk, stat, entry)
+      if (said !== null) return [null, new IOResult({ exitCode: 2, stderr: said })]
+      rows[side] = row
       entrySide = side
     }
     const [a, b] = operands

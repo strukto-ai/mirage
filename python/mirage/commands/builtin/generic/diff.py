@@ -680,21 +680,28 @@ async def _diff_dirs(
 
 async def _operand_row(
     walk: _Walk, stat_fn: Callable[..., Awaitable[FileStat]], path: PathSpec
-) -> FileStat | None:
-    """An operand's stat as diff reads it: a link it reads as itself is
-    its own row; None for one that is not there.
+) -> tuple[FileStat | None, bytes]:
+    """An operand's stat as diff reads it, and the error that stat met.
+
+    A link diff reads as itself is its own row; any other link is
+    followed, and one that leads nowhere is None, as a missing operand
+    is, with no error, since -N may read either as empty.
 
     Args:
         walk (_Walk): the comparison's links and parsed line.
-        stat_fn (Callable[..., Awaitable[FileStat]]): the operands' stat.
+        stat_fn (Callable[..., Awaitable[FileStat]]): the operands' own
+            stat, which answers for stdin.
         path (PathSpec): the operand.
     """
     if _link_text(walk, path) is not None and walk.links is not None:
-        return walk.links.stat_at(path.virtual)
+        return walk.links.stat_at(path.virtual), b""
     try:
-        return await stat_fn(path)
+        row = await (stat_fn if is_stdin(path) else walk.stat_fn)(path)
     except FileNotFoundError:
-        return None
+        return None, b""
+    except FS_ERRORS as exc:
+        return None, format_fs_error("diff", exc, [path])
+    return (None if row.type == FileType.SYMLINK else row), b""
 
 
 async def _excluded_patterns(
@@ -759,10 +766,16 @@ async def diff(
         # GNU stats both operands before it reads either: a missing one
         # is named at once, and a directory beside anything else stands
         # for its entry of that one's name.
-        rows = [await _operand_row(walk, stat_fn, path) for path in paths]
-        if rows[0] is None and rows[1] is None:
+        probes = [await _operand_row(walk, stat_fn, path) for path in paths]
+        rows = [row for row, _ in probes]
+        if (rows[0] is None and rows[1] is None) or any(e for _, e in probes):
+            # GNU names every operand it could not stat, -N or not.
             return None, IOResult(
-                exit_code=2, stderr=_no_such(paths[0]) + _no_such(paths[1])
+                exit_code=2,
+                stderr=b"".join(
+                    said or (_no_such(path) if row is None else b"")
+                    for path, (row, said) in zip(paths, probes)
+                ),
             )
         kinds = [None if row is None else row.type for row in rows]
         if any(dashes) and not all(dashes):
@@ -779,7 +792,9 @@ async def diff(
                 paths[entry_side], gnu_basename(_name(paths[1 - entry_side]))
             )
             paths = [entry, paths[1]] if entry_side == 0 else [paths[0], entry]
-            rows[entry_side] = await _operand_row(walk, stat_fn, entry)
+            rows[entry_side], error = await _operand_row(walk, stat_fn, entry)
+            if error:
+                return None, IOResult(exit_code=2, stderr=error)
         texts = (_link_text(walk, paths[0]), _link_text(walk, paths[1]))
         # -N reads a missing operand as empty, but neither beside a link
         # read as itself nor as a directory's entry: GNU names those.
