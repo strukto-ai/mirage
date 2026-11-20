@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import inspect
 import io
 import stat
@@ -26,6 +27,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.errors.fs import strerror_of
 from mirage.mount.constants import POSIX_RENAME
+from mirage.mount.core import MountCore
 from mirage.mount.sftp import (
     MirageSFTPServer,
     PipeServer,
@@ -82,6 +84,56 @@ def test_every_host_reaching_method_is_overridden():
         "asyncssh.SFTPServer serves the host filesystem from these; "
         f"override them on MirageSFTPServer: {exposed}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("root", ["", "/export"])
+async def test_sftp_walks_the_client_path_from_its_root(root):
+    ws = Workspace({root or "/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        for directory in ("left", "right", "right/deep"):
+            await ws.vfs.mkdir(f"{root}/{directory}")
+        await ws.vfs.write(f"{root}/left/marker", b"left")
+        await ws.vfs.write(f"{root}/right/marker", b"physical")
+        await ws.vfs.write(f"{root}/marker", b"root")
+        if root:
+            await ws.vfs.write("/marker", b"workspace")
+        await ws.vfs.symlink(f"{root}/left/jump", "../right/deep")
+
+        async def make_core():
+            return MountCore(ws.vfs, root_prefix=root)
+
+        sftp = MirageSFTPServer(None, make_core)
+        assert (await sftp.stat(b"/left/jump/../marker")).size == 8
+        assert (await sftp.stat(b"left/jump/../marker")).size == 8
+        assert await sftp.realpath(b"/left/jump/../marker") == b"/right/marker"
+        assert (await sftp.stat(b"/left/jump/../../../marker")).size == 4
+        assert (await sftp.stat(b"/../../marker")).size == 4
+        assert stat.S_ISDIR((await sftp.stat(b"/left/jump/../")).permissions)
+
+        for path, code in (
+            (b"/left/missing/../marker", errno.ENOENT),
+            (b"/left/marker/", errno.ENOTDIR),
+        ):
+            with pytest.raises(OSError) as error:
+                await sftp.stat(path)
+            assert error.value.errno == code
+
+        await sftp.remove(b"/left/jump/../marker")
+        assert await ws.vfs.read(f"{root}/left/marker") == b"left"
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.stat(f"{root}/right/marker")
+
+        handle = await sftp.open(
+            b"/left/marker", asyncssh.FXF_READ, asyncssh.SFTPAttrs()
+        )
+        try:
+            await sftp.rename(b"/left/", b"/moved/")
+            assert await sftp.read(handle, 0, 4) == b"left"
+        finally:
+            await sftp.close(handle)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.parametrize(

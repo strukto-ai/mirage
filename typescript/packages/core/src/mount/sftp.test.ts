@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { currentCaller, bindCaller } from '../context/session_context.ts'
 import { strerrorOf } from '../errors/fs.ts'
@@ -19,8 +20,9 @@ import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { OPEN, POSIX_RENAME, STATUS } from './constants.ts'
-import type { MountCore } from './core.ts'
-import { PipeServer, longname, toAttrs, workspacePath } from './sftp.ts'
+import { MountCore } from './core.ts'
+import { MirageSFTPServer, PipeServer, longname, toAttrs } from './sftp.ts'
+import type { SftpChannel } from './sftp.ts'
 
 // SFTP v3 packet types the pipe tests speak.
 const FXP_INIT = 1
@@ -164,14 +166,75 @@ function client() {
   }
 }
 
-describe('helpers', () => {
-  it('normalize client paths without ever leaving /', () => {
-    expect(workspacePath('.')).toBe('/')
-    expect(workspacePath('/d/../d/./sub/')).toBe('/d/sub')
-    expect(workspacePath('/../../etc')).toBe('/etc')
-    expect(workspacePath('//abs')).toBe('/abs')
-  })
+it.each(['', '/export'])('walks SFTP client paths from root %j', async (root) => {
+  const ws = new Workspace({ [root || '/']: new RAMVFS() }, { mode: MountMode.WRITE })
+  const events = new EventEmitter()
+  const channel: SftpChannel = {
+    on: (event, listener) =>
+      events.on(event, (...args: unknown[]) => Reflect.apply(listener, undefined, args)),
+    attrs: (_id, attrs) => events.emit('reply', { size: attrs.size, mode: attrs.mode }),
+    name: (_id, names) => events.emit('reply', names[0]?.filename),
+    status: (_id, code, message) => events.emit('reply', { code, message }),
+    handle: vi.fn(),
+    data: vi.fn(),
+    end: vi.fn(),
+  }
+  const request = (operation: string, ...paths: string[]): Promise<unknown> =>
+    new Promise((resolve) => {
+      events.once('reply', resolve)
+      events.emit(operation, 1, ...paths)
+    })
+  const core = new MountCore(ws.vfs, { rootPrefix: root })
+  const server = new MirageSFTPServer(channel, async () => core)
+  const served = server.attach()
+  try {
+    for (const directory of ['left', 'right', 'right/deep'])
+      await ws.vfs.mkdir(`${root}/${directory}`)
+    const encode = (value: string) => new TextEncoder().encode(value)
+    await ws.vfs.write(`${root}/left/marker`, encode('left'))
+    await ws.vfs.write(`${root}/right/marker`, encode('physical'))
+    await ws.vfs.write(`${root}/marker`, encode('root'))
+    if (root !== '') await ws.vfs.write('/marker', encode('workspace'))
+    await ws.vfs.symlink(`${root}/left/jump`, '../right/deep')
 
+    await expect(request('STAT', '/left/jump/../marker')).resolves.toMatchObject({ size: 8 })
+    await expect(request('STAT', 'left/jump/../marker')).resolves.toMatchObject({ size: 8 })
+    await expect(request('REALPATH', '/left/jump/../marker')).resolves.toBe('/right/marker')
+    await expect(request('REALPATH', '.')).resolves.toBe('/')
+    await expect(request('REALPATH', '/../../not-created')).resolves.toBe('/not-created')
+    await expect(request('STAT', '/left/jump/../../../marker')).resolves.toMatchObject({ size: 4 })
+    await expect(request('STAT', '/../../marker')).resolves.toMatchObject({ size: 4 })
+    await expect(request('STAT', '/left/jump/../')).resolves.toMatchObject({ mode: 0o40755 })
+    await expect(request('STAT', '/left/missing/../marker')).resolves.toMatchObject({
+      code: STATUS.NO_SUCH_FILE,
+    })
+    await expect(request('STAT', '/left/marker/')).resolves.toMatchObject({
+      code: STATUS.FAILURE,
+    })
+
+    await expect(request('REMOVE', '/left/jump/../marker')).resolves.toMatchObject({
+      code: STATUS.OK,
+    })
+    expect(await ws.vfs.read(`${root}/left/marker`)).toEqual(encode('left'))
+    await expect(ws.vfs.stat(`${root}/right/marker`)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const handle = await core.open('/left/marker')
+    try {
+      await expect(request('RENAME', '/left/', '/moved/')).resolves.toMatchObject({
+        code: STATUS.OK,
+      })
+      expect(await core.read('/moved/marker', handle, 0, 4)).toEqual(encode('left'))
+    } finally {
+      await core.release(handle)
+    }
+  } finally {
+    events.emit('end')
+    await served
+    await ws.close()
+  }
+})
+
+describe('helpers', () => {
   it('carry mode, size and whole-second times', () => {
     const when = new Date(1_700_000_001_500)
     const attrs = toAttrs({

@@ -34,7 +34,7 @@ import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
 import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
-import { posixNormpath } from '../utils/path.ts'
+import { parent, posixNormpath } from '../utils/path.ts'
 import { sliceWindow } from '../utils/ranges.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
@@ -176,6 +176,43 @@ export class MountCore {
   resolve(path: string): string {
     if (this.root === '') return path
     return path === '/' ? this.root : this.root + path
+  }
+
+  /** Walk dots against the client's root. The dispatcher checks and follows
+   * each directory consumed by a dot. The operation still gets the final name
+   * and its trailing slash.
+   */
+  async clientPath(path: string): Promise<string> {
+    let parts: string[] = []
+    for (const part of path.split('/')) {
+      if (part === '') continue
+      if (part !== '.' && part !== '..') {
+        parts.push(part)
+      } else if (parts.length > 0) {
+        let prefix = '/' + parts.join('/')
+        if (!isDir(await this.stat(prefix))) throw enotdir(path)
+        prefix = this.clientIdentity(prefix)
+        if (part === '..') prefix = parent(prefix)
+        parts = prefix === '/' ? [] : prefix.slice(1).split('/')
+      }
+    }
+    let name = '/' + parts.join('/')
+    if (parts.length > 0 && path.endsWith('/')) name += '/'
+    return name
+  }
+
+  /** The client's absolute name, following an existing final link. */
+  async canonicalClientPath(path: string): Promise<string> {
+    const name = await this.clientPath(path)
+    if ((await this.rowOrNull(name)) === null) return rstripSlash(name) || '/'
+    return this.clientIdentity(name)
+  }
+
+  private clientIdentity(path: string): string {
+    const resolved = this.identity(path)
+    if (resolved === this.root) return '/'
+    if (!resolved.startsWith(this.root + '/')) throw enoent(path)
+    return resolved.slice(this.root.length)
   }
 
   /**
@@ -1117,7 +1154,9 @@ export class MountCore {
     // An op on the entry itself (unlink, rename, lsetattr) names the link,
     // which may loop: only the links above it are followed.
     const resolved = (): string =>
-      follow ? posixNormpath(reader.follow(virtual)) : reader.followParent(virtual)
+      follow
+        ? posixNormpath(reader.follow(virtual))
+        : rstripSlash(reader.followParent(virtual)) || '/'
     // Judged as the bound session judges every op (`op`): outside it the
     // facade's session is the default one, whose profile may hide a link
     // this session's handles were opened through.
