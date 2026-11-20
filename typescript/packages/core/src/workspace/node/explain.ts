@@ -572,17 +572,19 @@ async function* judgeWords(
     occurrence.source,
   )
   // After a lost cd, a relative path names no file the pass can place.
-  const inners = runsFunction(name, session, registry)
-    ? []
-    : lost && !name.startsWith('/')
-      ? innerLines(name, words.slice(1))
-      : programLines(
-          words,
-          session,
-          registry,
-          namespace === null ? null : namespace.sessionLinks(session),
-          open,
-        )
+  // Mirage's shell judges a trap's action when it fires.
+  const inners =
+    runsFunction(name, session, registry) || (name === 'trap' && !wholeLine)
+      ? []
+      : lost && !name.startsWith('/')
+        ? innerLines(name, words.slice(1))
+        : programLines(
+            words,
+            session,
+            registry,
+            namespace === null ? null : namespace.sessionLinks(session),
+            open,
+          )
   const coded =
     wholeLine && (await registry.policies.wantsFor('preCommand', session.sessionId, true))
   const refused =
@@ -2556,7 +2558,11 @@ async function* judgeLine(
     return
   }
   let homes = tildeHomes(session)
-  if (takesWholeLine(mode) && written(typedLine(root, frame, reparse), HOME_VAR) !== null) {
+  if (
+    takesWholeLine(mode) &&
+    (written(root, HOME_VAR) !== null ||
+      written(typedLine(root, frame, reparse), HOME_VAR) !== null)
+  ) {
     // The machine's shell expands a later `~` with the HOME it was set.
     homes = Object.fromEntries(Object.entries(homes).filter(([name]) => name !== ''))
   }
@@ -2656,24 +2662,20 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
   }
   if (node.type !== NodeType.COMMAND) return null
   let words = wordsOf(node, null)
-  const first = words[0] === undefined ? '' : wordValue(words[0])
-  if (first === 'command' || first === 'builtin') words = words.slice(1)
+  while (words[0] !== undefined && ['command', 'builtin'].includes(wordValue(words[0]))) {
+    words = words.slice(1)
+    while (words[0] !== undefined) {
+      const option = wordValue(words[0])
+      if (!option.startsWith('-') || option === '-') break
+      words = words.slice(1)
+      if (option === '--') break
+    }
+  }
   if (words[0] === undefined) return null
   const head = wordValue(words[0])
   let targets: Word[]
   if (head === 'printf') {
-    targets = []
-    for (let i = 1; i < words.length; i++) {
-      const word = words[i]
-      if (word === undefined || !wordValue(word).startsWith('-v')) continue
-      if (wordValue(word) !== '-v') {
-        const text = word.text === null ? null : wordValue(word).slice(2)
-        targets.push({ raw: word.raw.slice(2), text })
-      } else {
-        const next = words[i + 1]
-        if (next !== undefined) targets.push(next)
-      }
-    }
+    targets = printfTarget(words.slice(1))
   } else if (STORES.has(head)) {
     targets = stored(head, words.slice(1))
   } else {
@@ -2685,6 +2687,25 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
     if (names.has(name)) return name
   }
   return null
+}
+
+/**
+ * The variable `printf -v` stores into, read off its options before the
+ * format; none when it prints.
+ */
+function printfTarget(args: readonly Word[]): Word[] {
+  for (let at = 0; at < args.length; at++) {
+    const word = args[at]
+    if (word === undefined) break
+    const value = wordValue(word)
+    if (!value.startsWith('-') || value === '-' || value === '--') return []
+    if (value === '-v') return args.slice(at + 1, at + 2)
+    if (value.startsWith('-v')) {
+      const rest = value.slice(2)
+      return [{ raw: rest, text: word.text === null ? null : rest }]
+    }
+  }
+  return []
 }
 
 /**

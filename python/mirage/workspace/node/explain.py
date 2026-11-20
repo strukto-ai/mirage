@@ -687,6 +687,9 @@ async def _judge_words(
             open_,
         )
     )
+    if name == "trap" and not whole_line:
+        # Mirage's shell judges a trap's action when it fires.
+        inners = []
     coded = whole_line and await registry.policies.wants_for(
         "pre_command", session.session_id, coded_only=True
     )
@@ -2167,7 +2170,9 @@ async def _judge_line(
         )
         return
     homes = tilde_homes(session)
-    if whole_line and _written(_typed_line(ast, frame), HOME_VAR):
+    if whole_line and (
+        _written(ast, HOME_VAR) or _written(_typed_line(ast, frame), HOME_VAR)
+    ):
         # The machine's shell expands a later `~` with the HOME it was set.
         homes = {name: home for name, home in homes.items() if name}
     for item in _walked_line(
@@ -2271,21 +2276,18 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
     if node.type != NodeType.COMMAND:
         return None
     words = _words_of(node, None)
-    if [w.value for w in words[:1]] in (["command"], ["builtin"]):
+    while words and words[0].value in ("command", "builtin"):
         words = words[1:]
+        while words and words[0].value[:1] == "-" and words[0].value != "-":
+            ended = words[0].value == "--"
+            words = words[1:]
+            if ended:
+                break
     if not words:
         return None
     head = words[0].value
     if head == "printf":
-        words = [
-            nxt
-            for word, nxt in zip(words[1:], words[2:])
-            if word.value == "-v"
-        ] + [
-            Word(w.raw[2:], None if w.text is None else w.value[2:])
-            for w in words[1:]
-            if w.value.startswith("-v") and w.value != "-v"
-        ]
+        words = _printf_target(words[1:])
     elif head in _STORES:
         words = _stored(head, words[1:])
     else:
@@ -2296,6 +2298,24 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
         if word.text.split("[", 1)[0] in names:
             return word.text.split("[", 1)[0]
     return None
+
+
+def _printf_target(args: Sequence[Word]) -> list[Word]:
+    """The variable ``printf -v`` stores into, read off its options
+    before the format; none when it prints.
+
+    Args:
+        args (Sequence[Word]): the words after ``printf``.
+    """
+    for at, word in enumerate(args):
+        if word.value[:1] != "-" or word.value in ("-", "--"):
+            return []
+        if word.value == "-v":
+            return list(args[at + 1 : at + 2])
+        if word.value.startswith("-v"):
+            rest = word.value[2:]
+            return [Word(rest, None if word.text is None else rest)]
+    return []
 
 
 def _stored(head: str, args: Sequence[Word]) -> list[Word]:

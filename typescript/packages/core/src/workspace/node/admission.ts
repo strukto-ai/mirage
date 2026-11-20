@@ -534,17 +534,11 @@ export async function gate(
   await budget.run()
   const facts = lineFacts(name, [name, ...operands], session.cwd)
   const follows = facts.follows !== Follow.NONE
+  const links =
+    namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null
   const paths = seen(
     session,
-    linePaths(
-      name,
-      reading,
-      follows,
-      namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
-      session.cwd,
-      implied,
-      redirects,
-    ),
+    linePaths(name, reading, follows, links, session.cwd, implied, redirects),
     unread,
   )
   const words = seenWords(session, contextWords(name, reading, redirects), unread)
@@ -577,7 +571,17 @@ export async function gate(
     // Only a named entry speaks (no tree root), so a name grants nothing; the
     // path's run is placed by its own words, so a route of the name does not
     // move it.
-    const own = readLine(registry, named, args, operands, session.cwd, env, sessionAccess(session))
+    // Its words are classified by the program's own grammar.
+    const classified = (await classifiedWords(named, args, session, registry)).slice(1)
+    const own = readLine(
+      registry,
+      named,
+      args,
+      classified,
+      session.cwd,
+      env,
+      sessionAccess(session),
+    )
     const programCtx: CommandContext = {
       ...ctx,
       command: named,
@@ -585,6 +589,12 @@ export async function gate(
       tokens: [...own.tokens],
       program: [...own.program],
       read: own.read,
+      paths: seen(
+        session,
+        linePaths(named, own, follows, links, session.cwd, implied, redirects),
+        unread,
+      ),
+      words: seenWords(session, contextWords(named, own, redirects), unread),
     }
     const byName = await registry.policies.answers('preCommand', programCtx, every, rulesOnly)
     answers.push(...byName.filter((a) => a.kind === 'deny' || a.kind === 'ask'))

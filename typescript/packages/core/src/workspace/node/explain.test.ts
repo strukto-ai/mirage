@@ -257,6 +257,7 @@ const ANOTHER_SPELLING = [
   "PS4[0]='$(hostname)'; set -x; :",
   "read 'PS4[0]' <<< x; set -x; :",
   'read -a PS4 <<< x; set -x; :',
+  "command -p printf -v PS4 '$(hostname)'; set -x; :",
   "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
   'declare -n r; r=PS4; r=x; set -x; :',
   'v=PS4; printf -v "$v" x; set -x; :',
@@ -280,6 +281,7 @@ const STILL_RUNS = [
   "bash -c 'echo hi'",
   "bash -c ': -l'",
   'exec -a name echo hi',
+  "printf '%s\\n' -v PS4",
 ] as const
 
 // Lines a rule leaves alone (a coded policy refuses their `$` words).
@@ -1371,6 +1373,7 @@ describe('prejudge', () => {
         'env -C /data cat secret.txt',
         'env --chdir=/data cat secret.txt',
         'HOME[0]=/data; cat ~/secret.txt',
+        "bash -c 'HOME=/data; cat ~/secret.txt'",
         'declare -n h; h=HOME; h=/data; cat ~/secret.txt',
         ...(coded
           ? [

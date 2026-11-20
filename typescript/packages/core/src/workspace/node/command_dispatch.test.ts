@@ -722,6 +722,25 @@ describe('a wrapper over a path-spelled program', () => {
     }
   })
 
+  // A bare operand is a path only by the program's grammar, so the name pass
+  // reads `secret.txt` as the file `cat` opens.
+  it('reads a path program’s own paths by its name', async () => {
+    const ws = spelledWs({
+      profiles: {
+        default: SessionProfile({
+          commands: { cat: { decision: 'deny', reason: 'r', paths: ['/secret.txt'] } },
+        }),
+      },
+    })
+    try {
+      const r = await ws.shell('/opt/cat secret.txt')
+      expect([r.exitCode === 0, text(r.stdout)]).toEqual([false, ''])
+      expect(text((await ws.shell('/opt/cat other.txt')).stdout)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   // The path runs where its own words place it: a route of its file's name
   // places that name, not the path.
   it('does not move a path by a route of its name', async () => {

@@ -605,20 +605,15 @@ async def gate(
     await budget.run()
     facts = line_facts(name, [name, *operands], session.cwd)
     follows = facts.follows is not Follow.NONE
+    links = (
+        namespace.session_links(session)
+        if namespace is not None and namespace.nodes
+        else None
+    )
     paths = _seen(
         session,
         line_paths(
-            name,
-            reading,
-            follows,
-            (
-                namespace.session_links(session)
-                if namespace is not None and namespace.nodes
-                else None
-            ),
-            session.cwd,
-            implied,
-            redirects,
+            name, reading, follows, links, session.cwd, implied, redirects
         ),
         unread,
     )
@@ -666,7 +661,11 @@ async def gate(
         # Only a named entry speaks (no tree root), so a name grants nothing;
         # the path's run is placed by its own words, so a route of the name
         # does not move it.
-        own = read_line(registry, named, args, operands, session.cwd, env)
+        # Its words are classified by the program's own grammar.
+        classified = await classified_words(named, args, session, registry)
+        own = read_line(
+            registry, named, args, classified[1:], session.cwd, env
+        )
         program_ctx = dataclasses.replace(
             ctx,
             command=named,
@@ -674,6 +673,16 @@ async def gate(
             tokens=own.tokens,
             program=own.program,
             read=own.read,
+            paths=_seen(
+                session,
+                line_paths(
+                    named, own, follows, links, session.cwd, implied, redirects
+                ),
+                unread,
+            ),
+            words=_seen_words(
+                session, context_words(named, own, redirects), unread
+            ),
         )
         by_name = await registry.policies.answers(
             "pre_command", program_ctx, every, rules_only

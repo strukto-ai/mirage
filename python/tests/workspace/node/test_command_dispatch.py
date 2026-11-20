@@ -696,6 +696,23 @@ async def test_a_path_the_view_does_not_list_is_asked_by_its_name():
 
 
 @pytest.mark.asyncio
+async def test_a_path_s_name_reads_the_program_s_own_paths():
+    # A bare operand is a path only by the program's grammar, so the name
+    # pass reads `secret.txt` as the file `cat` opens.
+    deny = {
+        "cat": {"decision": "deny", "reason": "r", "paths": ["/secret.txt"]}
+    }
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        r = await ws.shell("/opt/cat secret.txt")
+        assert r.exit_code != 0
+        assert r.stdout == b""
+        assert (await ws.shell("/opt/cat other.txt")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_route_of_a_path_s_name_does_not_move_the_path():
     # The path runs where its own words place it: a route of its file's
     # name places that name, not the path.
