@@ -934,6 +934,10 @@ def with_opts(base: ExecuteNodeDeps, opts: ExecuteNodeOpts) -> ExecuteNodeDeps:
     EXIT action) see that list too. ``ends_shell`` and
     ``own_diagnostics`` are the walker's to read, not dependencies.
 
+    The walk calls this at every node, so the value is built once
+    whatever the number of overrides, and the walker's own is returned
+    when no override differs from it.
+
     Args:
         base (ExecuteNodeDeps): the walker's dependencies.
         opts (ExecuteNodeOpts): the caller's overrides.
@@ -943,20 +947,34 @@ def with_opts(base: ExecuteNodeDeps, opts: ExecuteNodeOpts) -> ExecuteNodeDeps:
     """
     if not opts:
         return base
-    unknown = opts.keys() - ExecuteNodeOpts.__optional_keys__
-    if unknown:
-        raise TypeError(f"execute_node: no option named {min(unknown)!r}")
-    deps = base
-    if "sink" in opts:
-        deps = replace(deps, sink=opts["sink"])
-    if "cancel" in opts:
-        deps = replace(deps, cancel=opts["cancel"])
-    if "line_handle" in opts:
-        deps = replace(deps, line_handle=opts["line_handle"])
+    if not ExecuteNodeOpts.__optional_keys__.issuperset(opts):
+        unknown = min(opts.keys() - ExecuteNodeOpts.__optional_keys__)
+        raise TypeError(f"execute_node: no option named {unknown!r}")
+    sink = opts["sink"] if "sink" in opts else base.sink
+    cancel = opts["cancel"] if "cancel" in opts else base.cancel
+    line_handle = (
+        opts["line_handle"] if "line_handle" in opts else base.line_handle
+    )
     jobs = opts.get("job_table")
-    if jobs is not None:
-        deps = replace(
-            deps, job_table=jobs, entry=partial(deps.entry, job_table=jobs)
+    deps = base
+    if (
+        jobs is not None
+        or sink is not base.sink
+        or cancel is not base.cancel
+        or line_handle is not base.line_handle
+    ):
+        deps = ExecuteNodeDeps(
+            base.dispatch,
+            base.registry,
+            base.namespace,
+            base.job_table if jobs is None else jobs,
+            base.entry
+            if jobs is None
+            else partial(base.entry, job_table=jobs),
+            cancel,
+            base.handed,
+            line_handle,
+            sink,
         )
     if "handed" in opts:
         deps = with_hand_off(deps, opts["handed"])
@@ -1508,8 +1526,10 @@ async def _execute_node_body(
         # The command whose line bash numbers diagnostics and `$LINENO` by.
         session._line_node = node
     execute_fn = deps.execute_fn
-    recurse = partial(
-        execute_node, deps if sink is None else replace(deps, sink=None)
+    recurse = (
+        partial(execute_node, deps)
+        if sink is None
+        else partial(execute_node, deps, sink=None)
     )
 
     kind = node_kind(node)
