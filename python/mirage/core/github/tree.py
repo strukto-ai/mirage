@@ -320,17 +320,21 @@ def reseat_tree(
     accessor: GitHubAccessor,
     tree: dict[str, TreeEntry],
     truncated: bool,
+    head: str | None,
 ) -> None:
-    """Replace the accessor's tree with one response.
+    """Replace the accessor's tree, and the commit it names, with one
+    response.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.
         tree (dict[str, TreeEntry]): the recursive tree just fetched.
         truncated (bool): whether GitHub truncated it.
+        head (str | None): the commit it was listed at.
     """
     accessor.truncated = truncated
     accessor.tree = tree
     accessor.tree_loaded = True
+    accessor.head = head
 
 
 async def refresh_tree(
@@ -356,7 +360,7 @@ async def refresh_tree(
     # A drop while GitHub answered may be for the very write this tree
     # predates, so it is handed back but not kept.
     if generation == accessor.generation:
-        reseat_tree(accessor, tree, truncated)
+        reseat_tree(accessor, tree, truncated, head)
     return None if truncated else (tree, head)
 
 

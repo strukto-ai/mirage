@@ -41,20 +41,30 @@ class GitHubAppAuth(BaseModel):
     `{"contents": "read"}`. Unset grants all the installation has."""
 
 
-def _require_one(token: SecretStr | None, app: GitHubAppAuth | None) -> None:
-    """Refuse a GitHub config that names both credentials or neither.
+def _check_auth(
+    token: SecretStr | None, app: GitHubAppAuth | None, required: bool
+) -> None:
+    """Refuse a GitHub config that names both credentials, and one that
+    names neither where a credential is required.
 
     Args:
         token (SecretStr | None): the fixed token.
         app (GitHubAppAuth | None): the App installation.
+        required (bool): whether neither is refused too: a `gh` install
+            needs a login, while a mount of a public repository reads it
+            with no credential.
 
     Raises:
-        ValueError: both or neither were set.
+        ValueError: both were set, or neither where one is required.
     """
-    if (token is None) == (app is None):
-        got = "both" if token is not None else "neither"
+    quantity = "exactly" if required else "at most"
+    if token is not None and app is not None:
         raise ValueError(
-            f"GitHub auth takes exactly one of token or app; got {got}"
+            f"GitHub auth takes {quantity} one of token or app; got both"
+        )
+    if required and token is None and app is None:
+        raise ValueError(
+            f"GitHub auth takes {quantity} one of token or app; got neither"
         )
 
 
@@ -63,10 +73,12 @@ class GitHubConfig(TimeoutConfig):
 
     token: SecretStr | None = None
     """GitHub token: a personal access token, an OAuth token or an App
-    installation token. Exactly one of `token` and `app` is set."""
+    installation token. At most one of `token` and `app` is set; with
+    neither, the mount reads a public repository anonymously."""
     app: GitHubAppAuth | None = None
     """A GitHub App installation mirage mints and refreshes tokens for.
-    Exactly one of `token` and `app` is set."""
+    At most one of `token` and `app` is set; with neither, the mount reads
+    a public repository anonymously."""
     owner: str | None = None
     """Repository owner, a user or an organization. Required unless the
     `GitHubVFS` constructor is given `owner`."""
@@ -86,7 +98,7 @@ class GitHubConfig(TimeoutConfig):
 
     @model_validator(mode="after")
     def _one_credential(self) -> "GitHubConfig":
-        _require_one(self.token, self.app)
+        _check_auth(self.token, self.app, required=False)
         return self
 
 
@@ -109,5 +121,5 @@ class GhConfig(TimeoutConfig):
 
     @model_validator(mode="after")
     def _one_credential(self) -> "GhConfig":
-        _require_one(self.token, self.app)
+        _check_auth(self.token, self.app, required=True)
         return self

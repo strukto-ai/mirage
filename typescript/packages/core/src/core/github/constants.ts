@@ -13,6 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const API_BASE = 'https://api.github.com'
+// Where github.com serves a file's bytes at a commit with no credential. Its
+// downloads do not count against the REST API's hourly limit, which allows
+// an anonymous caller 60 requests, and it answers any origin, so a page can
+// read it.
+export const RAW_BASE = 'https://raw.githubusercontent.com'
 export const API_VERSION = '2022-11-28'
 export const SCOPE_WARN = 100
 // GitHub's code search does not index a file at or over this size.

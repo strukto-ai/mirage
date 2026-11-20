@@ -14,13 +14,14 @@
 
 import { HttpGitHubTransport, type GitHubTransport } from '../core/github/client.ts'
 import type { GhConfig } from '../core/github/config.ts'
-import { API_BASE } from '../core/github/constants.ts'
+import { API_BASE, RAW_BASE } from '../core/github/constants.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 import { Accessor } from './base.ts'
 
 /**
  * One GitHub account: credential, API base and the transport its calls ride. A gh
- * install's accessor, and the account a github mount holds.
+ * install's accessor, and the account a github mount holds. A mount's may name
+ * neither credential, to read a public repository anonymously.
  */
 export class GitHubAccount extends Accessor {
   transport: GitHubTransport
@@ -36,6 +37,21 @@ export class GitHubAccount extends Accessor {
   /** The REST base its calls go to: github.com's when none is set. */
   get apiBase(): string {
     return (this.config.baseUrl ?? API_BASE).replace(/\/+$/, '')
+  }
+
+  /** Whether it holds neither a token nor an App, so its calls carry no Authorization. */
+  get anonymous(): boolean {
+    return this.config.token === undefined && this.config.app === undefined
+  }
+
+  /**
+   * Where a file's bytes are downloaded instead of asked by blob:
+   * raw.githubusercontent.com for an anonymous account on github.com, whose
+   * blob requests would each spend the REST limit; null for an account with a
+   * credential, or on a GitHub Enterprise host. Mirrors Python's `raw_base`.
+   */
+  get rawBase(): string | null {
+    return this.anonymous && this.apiBase === API_BASE ? RAW_BASE : null
   }
 
   /**
@@ -93,6 +109,8 @@ export class GitHubAccessor extends Accessor {
   // listing, so it is as fresh as the last one.
   truncated: boolean
   tree: Record<string, TreeEntry>
+  // The commit that tree was listed at, null until a listing names one.
+  head: string | null
   // Bumped by forget, so a tree GitHub answered before the drop is handed
   // back to its caller but not reseated.
   generation = 0
@@ -105,6 +123,7 @@ export class GitHubAccessor extends Accessor {
     defaultBranch?: string
     truncated?: boolean
     tree?: Record<string, TreeEntry>
+    head?: string
   }) {
     super()
     this.account = opts.account
@@ -115,6 +134,7 @@ export class GitHubAccessor extends Accessor {
     this.treeLoaded = opts.tree !== undefined
     this.truncated = opts.truncated ?? false
     this.tree = opts.tree ?? {}
+    this.head = opts.head ?? null
   }
 
   get isDefaultBranch(): boolean {
@@ -129,5 +149,6 @@ export class GitHubAccessor extends Accessor {
     this.treeLoaded = false
     this.treePending = null
     this.truncated = false
+    this.head = null
   }
 }

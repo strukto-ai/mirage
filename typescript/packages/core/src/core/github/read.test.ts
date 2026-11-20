@@ -22,6 +22,7 @@ import { read, readMany, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { GitHubVFS } from '../../vfs/github/github.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
@@ -175,5 +176,117 @@ describe('a read against the wire', () => {
       await ws.close()
     }
     expect([gh.count('blob'), gh.count('graphql')]).toEqual([1, 1])
+  })
+})
+
+describe('an anonymous read', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function serve(files: Record<string, string>): FakeGitHub {
+    const gh = new FakeGitHub(files)
+    vi.stubGlobal('fetch', gh.fetch)
+    return gh
+  }
+
+  function anonymous(baseUrl?: string): GitHubAccessor {
+    return new GitHubAccessor({
+      account: new GitHubAccount(baseUrl === undefined ? {} : { baseUrl }),
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+    })
+  }
+
+  // Twin of test_an_anonymous_read_downloads_the_file_at_the_listed_commit:
+  // with no credential on github.com each blob request would spend one of the
+  // 60 an hour the REST API allows, so a file is downloaded instead, at the
+  // commit its listing named even after the branch moved on.
+  it('downloads the file at the listed commit', async () => {
+    const gh = serve({ 'src/a b.txt': 'payload' })
+    const accessor = anonymous()
+    const path = at('src/a b.txt', '/gh')
+    const row = await entryAt(readdir, accessor, path)
+    const listed = await gh.head()
+    gh.set('src/a b.txt', 'moved on')
+    const [[data, streamed], records] = await recordingScope(async () => {
+      const whole = await read(accessor, path, row)
+      const chunks: Uint8Array[] = []
+      for await (const chunk of readStream(accessor, path, row)) chunks.push(chunk)
+      return [whole, chunks] as const
+    })
+    expect(DEC.decode(data)).toBe('payload')
+    expect(streamed.map((c) => DEC.decode(c)).join('')).toBe('payload')
+    const sha = await blobSha('payload')
+    expect(records.map((r) => r.fingerprint)).toEqual([sha, sha])
+    expect(gh.count('blob')).toBe(0)
+    expect(
+      gh.log.filter(([route, raw]) => route === 'raw' && raw === `${listed}/src/a b.txt`),
+    ).toHaveLength(2)
+    expect(new Set(gh.authorizations)).toEqual(new Set([null]))
+  })
+
+  // Twin of test_an_anonymous_read_of_an_older_row_asks_its_blob.
+  it('asks the blob of a row the listed tree no longer holds', async () => {
+    const gh = serve({ 'a.txt': 'old' })
+    const accessor = anonymous()
+    const path = at('a.txt', '/gh')
+    const row = await entryAt(readdir, accessor, path)
+    gh.set('a.txt', 'new')
+    await readdir(accessor, at('', '/gh'))
+    expect(DEC.decode(await read(accessor, path, row))).toBe('old')
+    expect([gh.count('blob'), gh.count('raw')]).toEqual([1, 0])
+  })
+
+  // Twin of test_a_read_off_github_com_or_with_a_token_asks_the_blob.
+  it.each(['enterprise', 'token'])(
+    'asks the blob off github.com or with a token (%s)',
+    async (kind) => {
+      const gh = serve({ 'a.txt': 'x' })
+      const accessor =
+        kind === 'token'
+          ? new GitHubAccessor({
+              account: new GitHubAccount({ token: 't' }),
+              owner: 'o',
+              repo: 'r',
+              ref: 'main',
+              defaultBranch: 'main',
+            })
+          : anonymous(gh.url)
+      const path = at('a.txt', '/gh')
+      const row = await entryAt(readdir, accessor, path)
+      expect(DEC.decode(await read(accessor, path, row))).toBe('x')
+      expect([gh.count('blob'), gh.count('raw')]).toEqual([1, 0])
+    },
+  )
+
+  // Twin of test_an_anonymous_read_many_asks_nothing: GraphQL refuses a call
+  // with no credential, so a batch leaves each file to its own read.
+  it('reads no batch', async () => {
+    const gh = serve({ 'a.txt': 'alpha' })
+    const accessor = anonymous()
+    const path = at('a.txt', '/gh')
+    const handed = [{ entry: await entryAt(readdir, accessor, path) }]
+    expect((await readMany(accessor, [path], 1 << 20, handed)).size).toBe(0)
+    expect(gh.count('graphql')).toBe(0)
+  })
+
+  // Twin of test_cat_reads_a_public_repository_with_no_credential.
+  it('lets cat read a public repository with no credential', async () => {
+    const gh = serve(
+      Object.fromEntries(['a', 'b', 'c', 'd'].map((name) => [`${name}.txt`, `${name}\n`])),
+    )
+    const vfs = await GitHubVFS.create({ owner: 'o', repo: 'r' })
+    const ws = new Workspace({ '/gh': vfs })
+    try {
+      const result = await ws.shell('cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt')
+      expect(result.stdoutText).toBe('a\nb\nc\nd\n')
+    } finally {
+      await ws.close()
+    }
+    expect([gh.count('blob'), gh.count('graphql'), gh.count('raw')]).toEqual([0, 0, 4])
+    expect(new Set(gh.authorizations)).toEqual(new Set([null]))
   })
 })

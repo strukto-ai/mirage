@@ -164,13 +164,20 @@ def check_rules(
         if parsed.scheme != "https" or not parsed.netloc:
             raise invalid("url must be the MCP server's https URL")
     # GitHub authenticates with a token or as an App, never both: no one
-    # field is required, so the rule is the pair's.
+    # field is required, so the rule is the pair's. A mount may name
+    # neither to read a public repository; gh needs a login.
     if (kind, type) in (("vfs", "github"), ("cli", "gh")):
         token = "token" in named
-        if token == any(name.startswith("app.") for name in named):
-            got = "both" if token else "neither"
+        app = any(name.startswith("app.") for name in named)
+        required = kind == "cli"
+        quantity = "exactly" if required else "at most"
+        if token and app:
             raise invalid(
-                f"{type} takes exactly one of token or app; got {got}"
+                f"{type} takes {quantity} one of token or app; got both"
+            )
+        if required and not token and not app:
+            raise invalid(
+                f"{type} takes {quantity} one of token or app; got neither"
             )
 
 

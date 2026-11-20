@@ -143,6 +143,11 @@ export class Snapshot {
  *
  * Truncating a shallow listing (`truncatedDirs`) is defensive, not
  * measured: no single directory sampled was large enough to truncate.
+ *
+ * On raw.githubusercontent.com it serves a file at a commit it answered, as
+ * `/{owner}/{repo}/{commit}/{path}`, its bytes as they are and a symlink's
+ * its link text (measured 2026-11-19), 404 for a file the commit does not
+ * hold.
  */
 function holdsWord(text: string, word: string): boolean {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -174,6 +179,8 @@ export class FakeGitHub {
   // The most bytes of a blob GraphQL answers as text.
   graphqlTextLimit = 1 << 20
   readonly log: [string, string][] = []
+  // The Authorization each request carried, null for none.
+  readonly authorizations: (string | null)[] = []
   readonly history = new Map<string, Snapshot>()
   readonly trees = new Map<string, [Snapshot, string]>()
   private readonly blobs = new Map<string, Uint8Array>()
@@ -375,6 +382,18 @@ export class FakeGitHub {
     return json(200, { sha, size: data.length, encoding: 'base64', content: btoa(binary) })
   }
 
+  private async raw(rest: string): Promise<Response> {
+    const cut = rest.indexOf('/')
+    const commit = rest.slice(0, cut)
+    const path = decodeURIComponent(rest.slice(cut + 1))
+    this.log.push(['raw', `${commit}/${path}`])
+    const refused = this.refused('raw')
+    if (refused !== null) return refused
+    const data = (await this.commit(commit))?.files.get(path)
+    if (data === undefined) return new Response('404: Not Found', { status: 404 })
+    return new Response(data.slice(), { headers: { 'content-type': 'text/plain' } })
+  }
+
   // GraphQL answers a repository's `object(oid:)` aliases with each blob's
   // text, which is not measured: a blob that is not UTF-8 comes back with
   // each bad byte replaced, and `isTruncated` is set past `graphqlTextLimit`
@@ -440,6 +459,10 @@ export class FakeGitHub {
     const req = new Request(input, init)
     const url = new URL(req.url)
     const path = url.pathname
+    this.authorizations.push(req.headers.get('authorization'))
+    const download = /^\/[^/]+\/[^/]+\/(.+)$/.exec(path)
+    if (url.host === 'raw.githubusercontent.com' && download !== null)
+      return this.raw(download[1] ?? '')
     if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) {
       this.log.push(['repo', ''])
       return this.refused('repo') ?? json(200, { default_branch: this.ref })

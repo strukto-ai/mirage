@@ -198,3 +198,111 @@ async def test_cat_reads_ahead_its_operands_in_one_query():
         finally:
             await ws.close()
         assert (gh.count("blob"), gh.count("graphql")) == (1, 1)
+
+
+def _on_github_com(gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mirage.accessor.github.API_BASE", gh.url)
+    monkeypatch.setattr("mirage.accessor.github.RAW_BASE", gh.url + "/raw")
+
+
+def _anonymous(base_url: str | None = None) -> GitHubAccessor:
+    config = GitHubConfig(owner="o", repo="r", ref="main", base_url=base_url)
+    return GitHubVFS(config).accessor
+
+
+# With no credential on github.com each blob request would spend one of the
+# 60 an hour the REST API allows, so a file is downloaded instead, at the
+# commit its listing named even after the branch moved on.
+@pytest.mark.asyncio
+async def test_an_anonymous_read_downloads_the_file_at_the_listed_commit(
+    monkeypatch,
+):
+    data = b"payload"
+    with serve(FakeGitHub(files={"src/a b.txt": data})) as gh:
+        _on_github_com(gh, monkeypatch)
+        accessor = _anonymous()
+        path = _at("src/a b.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
+        listed = gh.head()
+        gh.files["src/a b.txt"] = b"moved on"
+        scope = RecordingScope()
+        try:
+            assert await read(accessor, path, row) == data
+            streamed = [c async for c in read_stream(accessor, path, row)]
+        finally:
+            scope.close()
+        assert b"".join(streamed) == data
+        assert [r.fingerprint for r in scope.records] == [blob_sha(data)] * 2
+        assert gh.count("blob") == 0
+        assert gh.log.count(("raw", f"{listed}/src/a b.txt")) == 2
+
+
+# A row the accessor's tree no longer holds names a blob that commit lacks,
+# so it is asked by sha as before.
+@pytest.mark.asyncio
+async def test_an_anonymous_read_of_an_older_row_asks_its_blob(monkeypatch):
+    with serve(FakeGitHub(files={"a.txt": b"old"})) as gh:
+        _on_github_com(gh, monkeypatch)
+        accessor = _anonymous()
+        path = _at("a.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
+        gh.files["a.txt"] = b"new"
+        await readdir(accessor, _at("", "/gh"))
+        assert await read(accessor, path, row) == b"old"
+        assert (gh.count("blob"), gh.count("raw")) == (1, 0)
+
+
+# A GitHub Enterprise host has no raw.githubusercontent.com, and a token
+# reads blobs as it always has.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("credential", ["enterprise", "token"])
+async def test_a_read_off_github_com_or_with_a_token_asks_the_blob(
+    monkeypatch, credential
+):
+    with serve(FakeGitHub(files={"a.txt": b"x"})) as gh:
+        if credential == "token":
+            _on_github_com(gh, monkeypatch)
+            accessor = GitHubVFS(
+                GitHubConfig(token="t", owner="o", repo="r", ref="main")
+            ).accessor
+        else:
+            accessor = _anonymous(base_url=gh.url)
+        path = _at("a.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
+        assert await read(accessor, path, row) == b"x"
+        assert (gh.count("blob"), gh.count("raw")) == (1, 0)
+
+
+# GraphQL refuses a call with no credential, so a batch asks nothing and
+# leaves each file to its own read.
+@pytest.mark.asyncio
+async def test_an_anonymous_read_many_asks_nothing(monkeypatch):
+    with serve(FakeGitHub(files={"a.txt": b"alpha"})) as gh:
+        _on_github_com(gh, monkeypatch)
+        accessor = _anonymous()
+        path = _at("a.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
+        assert await read_many(accessor, [path], 1 << 20, [row]) == {}
+        assert gh.count("graphql") == 0
+
+
+@pytest.mark.asyncio
+async def test_cat_reads_a_public_repository_with_no_credential(monkeypatch):
+    files = {f"{name}.txt": f"{name}\n".encode() for name in "abcd"}
+    with serve(FakeGitHub(files=files)) as gh:
+        _on_github_com(gh, monkeypatch)
+        config = GitHubConfig(owner="o", repo="r")
+        ws = Workspace({"/gh": GitHubVFS(config)})
+        try:
+            result = await ws.shell(
+                "cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt"
+            )
+            assert await result.stdout_str() == "a\nb\nc\nd\n"
+        finally:
+            await ws.close()
+        assert (gh.count("blob"), gh.count("graphql"), gh.count("raw")) == (
+            0,
+            0,
+            4,
+        )
+        assert set(gh.authorizations) == {None}

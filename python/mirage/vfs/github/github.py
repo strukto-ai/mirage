@@ -108,8 +108,13 @@ class GitHubVFS(BaseVFS):
         caller holding the answers (a test, a snapshot restore) can skip
         the hydration; they are not fetched when omitted.
 
+        The account's ``GhConfig`` is built from ``config`` unvalidated:
+        ``config`` was checked already, and a mount, unlike a ``gh``
+        install, may name neither credential to read a public repository.
+
         Args:
-            config (GitHubConfig): token, base URL and defaults.
+            config (GitHubConfig): token or App (neither for a public
+                repository), base URL and defaults.
             owner (str | None): repository owner; falls back to
                 ``config.owner``.
             repo (str | None): repository name; falls back to
@@ -141,7 +146,7 @@ class GitHubVFS(BaseVFS):
         self._configured_ref = ref
         self.accessor = GitHubAccessor(
             GitHubAccount(
-                GhConfig(
+                GhConfig.model_construct(
                     token=config.token,
                     app=config.app,
                     base_url=config.base_url,

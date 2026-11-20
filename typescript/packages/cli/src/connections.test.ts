@@ -115,9 +115,16 @@ describe('mirage vfs against a daemon', () => {
     const r = await run(['cli', 'create', 'm', '--type', 'mcp'])
     expect(r.code).toBe(2)
     expect(r.err).toContain('missing required fields: url')
-    const gh = await run(['vfs', 'create', 'g', ...GH])
+    const gh = await run(['cli', 'create', 'g', '--type', 'gh'])
     expect(gh.code).toBe(2)
     expect(gh.err).toContain('missing required fields: token or app')
+  })
+
+  it('creates a github mount with no credential', async () => {
+    const made = await run(['vfs', 'create', 'g', ...GH])
+    expect(made.err).toBe('')
+    expect(made.code).toBe(0)
+    expect((await store.revealEntry('vfs', 'g')).sealed).toEqual({})
   })
 
   it('reads a secret file, keeps fields on update and removes one with --unset', async () => {
@@ -136,8 +143,8 @@ describe('mirage vfs against a daemon', () => {
     expect((await store.revealEntry('vfs', 'gh')).sealed).toEqual({ token: 't2' })
     expect((await run(['vfs', 'get', 'gh', '-o', 'json'])).code).toBe(2)
     const unset = await run(['vfs', 'update', 'gh', '--unset', 'token'])
-    expect(unset.code).toBe(2)
-    expect(unset.err).toContain('github takes exactly one of token or app; got neither')
+    expect(unset.code).toBe(0)
+    expect((await store.revealEntry('vfs', 'gh')).sealed).toEqual({})
     rmSync(dir, { recursive: true, force: true })
   })
 

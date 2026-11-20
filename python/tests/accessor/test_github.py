@@ -16,6 +16,7 @@ import pytest
 
 from mirage import Workspace
 from mirage.commands.cli.builtin.gh import GH
+from mirage.core.github.constants import RAW_BASE
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.vfs.github import GitHubConfig, GitHubVFS
 from mirage.vfs.ram import RAMVFS
@@ -77,9 +78,30 @@ def test_forget_drops_the_tree_so_the_next_listing_fetches_it():
         "a.txt": TreeEntry(path="a.txt", type="blob", sha="s", size=1)
     }
     accessor.tree_loaded = accessor.truncated = True
+    accessor.head = "c0ffee"
     accessor.forget()
-    assert (accessor.tree, accessor.tree_loaded, accessor.truncated) == (
-        {},
-        False,
-        False,
-    )
+    assert (
+        accessor.tree,
+        accessor.tree_loaded,
+        accessor.truncated,
+        accessor.head,
+    ) == ({}, False, False, None)
+
+
+# Only an anonymous account on github.com downloads files: a credential
+# reads blobs as before, and an Enterprise host has no raw host to ask.
+@pytest.mark.parametrize(
+    ("config", "anonymous", "raw_base"),
+    [
+        ({}, True, RAW_BASE),
+        ({"base_url": "https://api.github.com/"}, True, RAW_BASE),
+        ({"base_url": "https://ghe.test/api/v3"}, True, None),
+        ({"token": "t"}, False, None),
+    ],
+)
+def test_only_an_anonymous_account_on_github_com_downloads_files(
+    config, anonymous, raw_base
+):
+    vfs = GitHubVFS(GitHubConfig(owner="o", repo="r", **config))
+    assert vfs.accessor.account.anonymous is anonymous
+    assert vfs.accessor.account.raw_base == raw_base

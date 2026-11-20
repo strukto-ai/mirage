@@ -239,13 +239,18 @@ describe('pkcs8Key', () => {
 describe('GitHub auth config', () => {
   const repo = { owner: 'o', repo: 'r' }
 
+  it('lets a mount take at most one credential', () => {
+    expect(() => parseConfigWithSchema(GitHubConfig, { ...repo, token: 't', app: app() })).toThrow(
+      'at most one of token or app; got both',
+    )
+    const anonymous = parseConfigWithSchema(GitHubConfig, repo)
+    expect([anonymous.token, anonymous.app]).toEqual([undefined, undefined])
+  })
+
   it.each([
     ['both', { token: 't', app: app() }],
     ['neither', {}],
-  ])('refuses %s', (got, auth) => {
-    expect(() => parseConfigWithSchema(GitHubConfig, { ...repo, ...auth })).toThrow(
-      `exactly one of token or app; got ${got}`,
-    )
+  ])('makes gh take exactly one credential, refusing %s', (got, auth) => {
     expect(() => GhConfig.parse(auth)).toThrow(`exactly one of token or app; got ${got}`)
   })
 

@@ -73,6 +73,20 @@
       }
     },
     {
+      "id": "github_reads_a_public_repository_with_no_credential",
+      "vfs": "github",
+      "config": {
+        "owner": "o",
+        "repo": "r"
+      },
+      "expect": {
+        "state": {
+          "owner": "o",
+          "repo": "r"
+        }
+      }
+    },
+    {
       "id": "google_access_token_is_a_credential",
       "vfs": "gdrive",
       "config": {

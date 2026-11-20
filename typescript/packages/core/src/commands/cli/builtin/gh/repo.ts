@@ -37,7 +37,7 @@ export async function tokenHeader(accessor: GitHubAccount): Promise<Record<strin
   const token =
     accessor.transport.token === undefined
       ? (accessor.config.token ?? '')
-      : await accessor.transport.token()
+      : ((await accessor.transport.token()) ?? '')
   return { Authorization: `Basic ${btoa(`x-access-token:${token}`)}` }
 }
 

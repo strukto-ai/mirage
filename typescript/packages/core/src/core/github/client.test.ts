@@ -21,7 +21,10 @@ import {
   type GitHubTransport,
   graphqlUrl,
   HttpGitHubTransport,
+  rawUrl,
+  streamRaw,
 } from './client.ts'
+import { RAW_BASE } from './constants.ts'
 import { fetchDirTree, fetchDirPage, fetchTree } from './tree.ts'
 
 interface Seen {
@@ -30,6 +33,8 @@ interface Seen {
   body: string | null
   contentType: string | null
   accept: string | null
+  authorization: string | null
+  apiVersion: string | null
 }
 
 const SEEN: Seen[] = []
@@ -54,6 +59,8 @@ beforeEach(() => {
       body: typeof init?.body === 'string' ? init.body : null,
       contentType: req.headers.get('content-type'),
       accept: req.headers.get('accept'),
+      authorization: req.headers.get('authorization'),
+      apiVersion: req.headers.get('x-github-api-version'),
     })
     return Promise.resolve(
       new Response(REPLY.body === '' ? null : REPLY.body, {
@@ -93,6 +100,60 @@ describe('graphqlUrl', () => {
       'GET https://ghe.example/api/v3/repos/o/r',
       'GET https://ghe.example/api/v3/graphql',
     ])
+  })
+})
+
+async function drained(source: AsyncIterable<Uint8Array>): Promise<string> {
+  let text = ''
+  for await (const chunk of source) text += new TextDecoder().decode(chunk)
+  return text
+}
+
+describe('an anonymous transport', () => {
+  // A mount of a public repository names neither credential, and its calls
+  // carry no Authorization at all rather than an empty one.
+  it('sends no Authorization', async () => {
+    await new HttpGitHubTransport({ baseUrl: 'https://api.example.test' }).get('/repos/o/r')
+    await transport().get('/repos/o/r')
+    expect(SEEN.map((seen) => seen.authorization)).toEqual([null, 'token t'])
+  })
+
+  it('still refuses both a token and an app', () => {
+    const app = { appId: 7, privateKey: 'k', installationId: 42 }
+    expect(() => new HttpGitHubTransport({ token: 't', app })).toThrow(
+      'at most one of token or app; got both',
+    )
+  })
+})
+
+describe('raw downloads', () => {
+  const url = 'https://raw.githubusercontent.com/o/r/c0ffee/a.txt'
+
+  it('names the commit and encodes each segment', () => {
+    expect(rawUrl(RAW_BASE, 'o', 'r', 'c0ffee', 'docs/a b#?%.md')).toBe(
+      'https://raw.githubusercontent.com/o/r/c0ffee/docs/a%20b%23%3F%25.md',
+    )
+  })
+
+  // A download asks with no credential and no API header, whatever the
+  // transport holds, so a page's request needs no CORS preflight.
+  it('asks with a bare GET', async () => {
+    REPLY = { status: 200, body: 'bytes' }
+    expect(await drained(streamRaw(transport(), url))).toBe('bytes')
+    expect(SEEN).toMatchObject([{ url, method: 'GET', authorization: null, apiVersion: null }])
+  })
+
+  it('raises a missing file with its status', async () => {
+    REPLY = { status: 404, body: '404: Not Found', reason: 'Not Found' }
+    await expect(drained(streamRaw(transport(), url))).rejects.toMatchObject({
+      name: 'GitHubApiError',
+      status: 404,
+    })
+  })
+
+  it('refuses a transport that cannot download', async () => {
+    const bare = { get: vi.fn(), request: vi.fn() } as unknown as GitHubTransport
+    await expect(drained(streamRaw(bare, url))).rejects.toThrow('cannot download')
   })
 })
 

@@ -5,7 +5,7 @@ icon: github
 ---
 
 `GitHubVFS` mounts one repository at a branch, tag or commit as read-only
-files, read through GitHub's [REST API](https://docs.github.com/en/rest). Set up the token as in [GitHub setup](/home/setup/github).
+files, read through GitHub's [REST API](https://docs.github.com/en/rest). Set up the token as in [GitHub setup](/home/setup/github); a public repository needs none.
 
 ## Install
 
@@ -45,10 +45,10 @@ Enterprise. A GitHub App can replace `token`; see
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
 <ResponseField name="token" type={"str"} post={["secret"]}>
-  GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set.
+  GitHub token: a personal access token, an OAuth token or an App installation token. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.
 </ResponseField>
 <ResponseField name="app" type={"object"}>
-  A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set.
+  A GitHub App installation mirage mints and refreshes tokens for. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.
 </ResponseField>
 <ResponseField name="owner" type={"str"}>
   Repository owner, a user or an organization. Required unless the `GitHubVFS` constructor is given `owner`.
@@ -68,12 +68,19 @@ Fields marked secret are redacted in snapshots.
 
 ## Authentication
 
-The mount takes exactly one of `token` and `app`.
+The mount takes at most one of `token` and `app`.
 
+- **None:** with neither, the mount reads a public repository anonymously.
+  File reads come from `raw.githubusercontent.com` at the commit the tree
+  listing named, so they do not count against the REST API's rate limit, and
+  `grep -rw` and `rg -w` read every file, since code search takes no
+  anonymous requests. The tree listing, and the default branch lookup when
+  `ref` is unset, still cost REST requests: 60 an hour per IP address without
+  credentials. On GitHub Enterprise, anonymous reads go through the REST API,
+  one request per file.
 - **Token:** a fine-grained personal access token with read-only **Contents**
   on the repository, or a classic token with the `repo` scope for a private
-  repository. A public repository still needs a token; one with no scopes
-  reads it.
+  repository. A token raises the REST limit to 5,000 requests an hour.
 - **GitHub App:** with `app`, Mirage mints the App's installation tokens
   itself and replaces each before its hour runs out, so a long-lived mount
   keeps reading. `repositories` and `permissions` narrow every token it mints.
@@ -149,10 +156,11 @@ GitHub answers these commands through its own API, so fewer files are read.
 See [Integration](/home/integration/overview).
 
 - `grep -rw` and `rg -w`: GitHub code search names the files to read when the
-  scope holds more than 100 files, the mounted ref is the default branch (the
-  only one code search indexes), the tree was listed in full and the search
-  returns every hit (100 at most). Otherwise every file is read. Code search
-  can miss recent pushes, and files it never indexes are always read.
+  mount has a credential, the scope holds more than 100 files, the mounted
+  ref is the default branch (the only one code search indexes), the tree was
+  listed in full and the search returns every hit (100 at most). Otherwise
+  every file is read. Code search can miss recent pushes, and files it never
+  indexes are always read.
 - `find`: one recursive tree listing.
 - `du`: one recursive tree listing.
 - `ls -R` and `tree`: one recursive tree listing.

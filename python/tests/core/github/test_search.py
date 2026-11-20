@@ -28,6 +28,7 @@ from mirage.core.github.tree_entry import TreeEntry
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import Limit, MountMode, PathSpec, ReadSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.github import GitHubConfig, GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
@@ -690,6 +691,49 @@ async def test_files_containing_judges_the_tree_it_loads(
     )
     assert out is None
     mock_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_files_containing_asks_nothing_of_an_anonymous_account(
+    mock_search, monkeypatch
+):
+    # Code search refuses a call with no credential, so it is not asked, and
+    # neither is the tree its scope count would load.
+    loads: list[GitHubAccessor] = []
+
+    async def load(accessor: GitHubAccessor) -> None:
+        loads.append(accessor)
+
+    monkeypatch.setattr("mirage.core.github.search.ensure_tree", load)
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
+    accessor = GitHubVFS(
+        GitHubConfig(owner="acme", repo="proj", ref="main")
+    ).accessor
+    out = await files_containing(
+        accessor, "needle", [PathSpec.from_str_path("/")]
+    )
+    assert out is None
+    mock_search.assert_not_awaited()
+    assert loads == []
+
+
+@pytest.mark.asyncio
+async def test_an_anonymous_mount_scans_instead_of_searching(monkeypatch):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
+    line = "grep -rw import /gh"
+    with serve(FakeGitHub(files=dict(REPO))) as hub:
+        monkeypatch.setattr("mirage.accessor.github.API_BASE", hub.url)
+        monkeypatch.setattr(
+            "mirage.accessor.github.RAW_BASE", hub.url + "/raw"
+        )
+        got = await _run(
+            build_vfs("github", {"owner": "o", "repo": "r"}), line
+        )
+    assert got == await _run(_ram(), line)
+    assert [hub.count(r) for r in ("search", "blob", "graphql")] == [0, 0, 0]
+    downloaded = {raw.split("/", 1)[1] for r, raw in hub.log if r == "raw"}
+    assert downloaded == set(REPO)
 
 
 @pytest.mark.asyncio

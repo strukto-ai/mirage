@@ -15,6 +15,7 @@
 import { expect, it } from 'vitest'
 import { GH } from '../commands/cli/builtin/gh/index.ts'
 import { CLIRegistry } from '../workspace/cli/registry.ts'
+import { RAW_BASE } from '../core/github/constants.ts'
 import { Accessor } from './base.ts'
 import { GitHubAccessor, GitHubAccount } from './github.ts'
 
@@ -59,6 +60,19 @@ it('forget drops the tree so the next listing fetches it', () => {
   const mount = new GitHubAccessor({ account, owner: 'o', repo: 'r', ref: 'm', defaultBranch: 'm' })
   mount.tree = { 'a.txt': { path: 'a.txt', type: 'blob', sha: 's', size: 1 } }
   mount.truncated = true
+  mount.head = 'c0ffee'
   mount.forget()
-  expect([mount.tree, mount.truncated]).toEqual([{}, false])
+  expect([mount.tree, mount.truncated, mount.head]).toEqual([{}, false, null])
+})
+
+// Only an anonymous account on github.com downloads files: a credential reads
+// blobs as before, and an Enterprise host has no raw host to ask.
+it.each<[{ token?: string; baseUrl?: string }, boolean, string | null]>([
+  [{}, true, RAW_BASE],
+  [{ baseUrl: 'https://api.github.com/' }, true, RAW_BASE],
+  [{ baseUrl: 'https://ghe.test/api/v3' }, true, null],
+  [{ token: 't' }, false, null],
+])('only an anonymous account on github.com downloads files (%j)', (config, anonymous, rawBase) => {
+  const account = new GitHubAccount(config)
+  expect([account.anonymous, account.rawBase]).toEqual([anonymous, rawBase])
 })

@@ -83,6 +83,23 @@ describe('filesContaining', () => {
     expect(await filesContaining(accessor, 'needle', [root()])).toBeNull()
     expect(search).not.toHaveBeenCalled()
   })
+
+  // Twin of test_files_containing_asks_nothing_of_an_anonymous_account: code
+  // search refuses a call with no credential, so it is not asked, and neither
+  // is the tree its scope count would load.
+  it('asks nothing of an anonymous account', async () => {
+    const asked = vi.fn<() => Promise<unknown>>()
+    const transport: GitHubTransport = { get: asked, request: asked }
+    const accessor = new GitHubAccessor({
+      account: new GitHubAccount({}, transport),
+      owner: 'acme',
+      repo: 'proj',
+      ref: 'main',
+      defaultBranch: 'main',
+    })
+    expect(await filesContaining(accessor, 'needle', [root()])).toBeNull()
+    expect(asked).not.toHaveBeenCalled()
+  })
 })
 
 // Twin of the search_code tests in python/tests/core/github/test_search.py.

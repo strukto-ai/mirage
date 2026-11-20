@@ -130,9 +130,25 @@ def test_missing_required_fields_are_named_without_a_terminal(daemon):
     r = run("cli", "create", "m", "--type", "mcp", stdin="")
     assert r.exit_code == 2
     assert "missing required fields: url" in r.output
-    r = run("vfs", "create", "g", "--type", "github", "--set", "owner=o")
+    r = run("cli", "create", "g", "--type", "gh", stdin="")
     assert r.exit_code == 2
     assert "missing required fields: token or app" in r.output
+
+
+def test_a_github_mount_needs_no_credential(daemon, store):
+    r = run(
+        "vfs",
+        "create",
+        "g",
+        "--type",
+        "github",
+        "--set",
+        "owner=o",
+        "--set",
+        "repo=r",
+    )
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "g") == {}
 
 
 @pytest.fixture
@@ -144,10 +160,23 @@ def terminal(monkeypatch):
     )
 
 
-def test_a_terminal_chooses_the_github_token(daemon, store, terminal):
-    r = run(
-        "vfs", "create", "g", "--type", "github", stdin="nope\ntoken\nghp_t\n"
-    )
+def test_a_terminal_chooses_the_gh_token(daemon, store, terminal):
+    r = run("cli", "create", "g", "--type", "gh", stdin="nope\ntoken\nghp_t\n")
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "cli", "g") == {"token": "ghp_t"}
+
+
+def test_a_terminal_leaves_a_github_mount_public(daemon, store, terminal):
+    args = ("--set", "owner=o", "--set", "repo=r")
+    r = run("vfs", "create", "g", "--type", "github", *args, stdin="\n")
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "g") == {}
+
+
+def test_a_terminal_gives_a_github_mount_a_token(daemon, store, terminal):
+    args = ("--set", "owner=o", "--set", "repo=r")
+    answers = "nope\ntoken\nghp_t\n"
+    r = run("vfs", "create", "g", "--type", "github", *args, stdin=answers)
     assert r.exit_code == 0, r.output
     assert sealed(store, "vfs", "g") == {"token": "ghp_t"}
 
@@ -224,8 +253,8 @@ def test_update_keeps_fields_and_unset_removes_them(daemon, store):
     got = json.loads(run("vfs", "get", "gh").output)
     assert got["config"] == {"owner": "o"}
     r = run("vfs", "update", "gh", "--unset", "token")
-    assert r.exit_code == 2
-    assert "github takes exactly one of token or app; got neither" in r.output
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "gh") == {}
 
 
 def test_a_file_names_the_secrets_to_read(daemon, store, tmp_path: Path):

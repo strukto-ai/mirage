@@ -124,13 +124,11 @@ describe('entries router', () => {
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'ghp_x' })
     await call(app, 'PUT', '/v1/vfs/github', { fields: { owner: 'o', repo: 'r', token: 'ghp_y' } })
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'ghp_y' })
-    const required = await call(app, 'PUT', '/v1/vfs/github', {
+    const anonymous = await call(app, 'PUT', '/v1/vfs/github', {
       fields: { owner: 'o', repo: 'r', token: null },
     })
-    expect(required).toMatchObject({
-      status: 400,
-      body: { error: { message: 'github takes exactly one of token or app; got neither' } },
-    })
+    expect(anonymous.status).toBe(200)
+    expect((await call(app, 'GET', '/v1/vfs/github')).body.sealed).toEqual([])
     await call(app, 'POST', '/v1/clis', {
       name: 'mcp1',
       type: 'mcp',
@@ -148,12 +146,8 @@ describe('entries router', () => {
     const cases: [unknown, string][] = [
       [{ type: 'nope', fields: {} }, 'type must be a vfs: '],
       [
-        { type: 'github', fields: { owner: 'o', repo: 'r' } },
-        'github takes exactly one of token or app; got neither',
-      ],
-      [
         { type: 'github', fields: { ...GITHUB.fields, ...APP } },
-        'github takes exactly one of token or app; got both',
+        'github takes at most one of token or app; got both',
       ],
       [
         { type: 'github', fields: { owner: 'o', repo: 'r', 'app.app_id': '7' } },
@@ -183,6 +177,17 @@ describe('entries router', () => {
       fields: { owner: 'o', repo: 'r', ...APP },
     })
     expect(asApp.status).toBe(201)
+    const gh = await call(app, 'POST', '/v1/clis', { name: 'g', type: 'gh', fields: {} })
+    expect(gh).toMatchObject({
+      status: 400,
+      body: { error: { message: 'gh takes exactly one of token or app; got neither' } },
+    })
+    const anonymous = await call(app, 'POST', '/v1/vfs', {
+      name: 'public',
+      type: 'github',
+      fields: { owner: 'o', repo: 'r' },
+    })
+    expect(anonymous.status).toBe(201)
   })
 
   it('refuses a pointer until its store is saved', async () => {

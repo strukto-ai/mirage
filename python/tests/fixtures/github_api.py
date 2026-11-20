@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aiohttp import web
+from aiohttp.typedefs import Handler
 
 from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -137,6 +138,11 @@ class FakeGitHub:
     measured: no single directory in the sampled repositories was large
     enough to truncate.
 
+    Under ``/raw`` it also stands in for raw.githubusercontent.com: a file
+    at a commit it answered, as ``/raw/{owner}/{repo}/{commit}/{path}``,
+    its bytes as they are and a symlink's its link text (measured
+    2026-11-19), 404 for a file the commit does not hold.
+
     GraphQL answers a repository's ``object(oid:)`` aliases with each
     blob's text, which is not measured: a blob that is not UTF-8 comes back
     with each bad byte replaced, and ``isTruncated`` is set past
@@ -169,6 +175,8 @@ class FakeGitHub:
         graphql_text_limit (int): the most bytes of a blob GraphQL
             answers as text.
         log (list): ``(route, raw segment)`` for every request.
+        authorizations (list): the Authorization each request carried,
+            None for none.
         history (dict): commit sha to the files it named.
         trees (dict): tree sha to the files and the folder it named.
     """
@@ -186,6 +194,7 @@ class FakeGitHub:
     fail: dict[str, tuple[int, str]] = field(default_factory=dict)
     graphql_text_limit: int = 1 << 20
     log: list[tuple[str, str]] = field(default_factory=list)
+    authorizations: list[str | None] = field(default_factory=list)
     blobs: dict[str, bytes] = field(default_factory=dict)
     history: dict[str, Snapshot] = field(default_factory=dict)
     trees: dict[str, tuple[Snapshot, str]] = field(default_factory=dict)
@@ -451,6 +460,18 @@ class FakeGitHub:
             }
         )
 
+    async def raw(self, request: web.Request) -> web.Response:
+        commit = request.match_info["commit"]
+        path = request.match_info["path"]
+        self.log.append(("raw", f"{commit}/{path}"))
+        refused = self._failure("raw")
+        if refused is not None:
+            return refused
+        snap = self._commit(commit)
+        if snap is None or path not in snap.files:
+            return web.Response(status=404, text="404: Not Found")
+        return web.Response(body=snap.files[path], content_type="text/plain")
+
     async def graphql(self, request: web.Request) -> web.Response:
         variables = (await request.json())["variables"]
         oids = {
@@ -477,13 +498,21 @@ class FakeGitHub:
 
 
 def _app(hub: FakeGitHub) -> web.Application:
-    app = web.Application()
+    @web.middleware
+    async def note(
+        request: web.Request, handler: Handler
+    ) -> web.StreamResponse:
+        hub.authorizations.append(request.headers.get("Authorization"))
+        return await handler(request)
+
+    app = web.Application(middlewares=[note])
     repo = "/repos/{owner}/{repo}"
     app.router.add_get(repo, hub.repo)
     app.router.add_get(repo + "/git/trees/{segment:[^/]+}", hub.tree)
     app.router.add_get(repo + "/git/blobs/{sha}", hub.blob)
     app.router.add_get("/search/code", hub.search_code)
     app.router.add_post("/graphql", hub.graphql)
+    app.router.add_get("/raw/{owner}/{repo}/{commit}/{path:.+}", hub.raw)
     return app
 
 

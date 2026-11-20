@@ -130,14 +130,16 @@ async function scopeFiles(accessor: GitHubAccessor, under: readonly PathSpec[]):
 /**
  * The files under `under` that may hold the whole word `text`.
  *
- * Code search answers only where it can vouch for the whole scope: more
- * than `SCOPE_WARN` files (fewer are cheaper to read), a tree the API did
- * not truncate, the default branch (the only one code search indexes), a
- * word the search grammar reads as plain terms (`searchSafe`), and an
- * answer that is the whole set (`narrowPaths`, which adds back every file
- * the search never indexes). An empty answer is not trusted either: the
- * index trails a push. A file with a binary extension is left out: the walk
- * reads one only under `-a`, and then whatever the answer says.
+ * Code search answers only where it can vouch for the whole scope: an
+ * account with a credential (code search refuses an anonymous one, so it is
+ * not asked at all), more than `SCOPE_WARN` files (fewer are cheaper to
+ * read), a tree the API did not truncate, the default branch (the only one
+ * code search indexes), a word the search grammar reads as plain terms
+ * (`searchSafe`), and an answer that is the whole set (`narrowPaths`, which
+ * adds back every file the search never indexes). An empty answer is not
+ * trusted either: the index trails a push. A file with a binary extension is
+ * left out: the walk reads one only under `-a`, and then whatever the answer
+ * says.
  */
 export async function filesContaining(
   accessor: GitHubAccessor,
@@ -145,6 +147,7 @@ export async function filesContaining(
   under: readonly PathSpec[],
 ): Promise<PathSpec[] | null> {
   if (
+    accessor.account.anonymous ||
     !searchSafe(text) ||
     (await scopeFiles(accessor, under)) <= SCOPE_WARN ||
     accessor.truncated ||

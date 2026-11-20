@@ -67,14 +67,29 @@ export const GitHubAppAuth = z.preprocess(
 
 export type GitHubAppAuth = z.infer<typeof GitHubAppAuth>
 
-/** Refuse a GitHub config that names both credentials or neither. */
-function requireOne(config: { token?: unknown; app?: unknown }, ctx: z.RefinementCtx): void {
-  const hasToken = config.token !== undefined
-  if (hasToken === (config.app !== undefined)) {
-    ctx.addIssue({
-      code: 'custom',
-      message: `GitHub auth takes exactly one of token or app; got ${hasToken ? 'both' : 'neither'}`,
-    })
+/**
+ * Refuse a GitHub config that names both credentials, and one that names
+ * neither where a credential is `required`: a `gh` install needs a login,
+ * while a mount of a public repository reads it with no credential.
+ */
+function checkAuth(
+  required: boolean,
+): (config: { token?: unknown; app?: unknown }, ctx: z.RefinementCtx) => void {
+  const quantity = required ? 'exactly' : 'at most'
+  return (config, ctx) => {
+    const hasToken = config.token !== undefined
+    const hasApp = config.app !== undefined
+    if (hasToken && hasApp) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `GitHub auth takes ${quantity} one of token or app; got both`,
+      })
+    } else if (required && !hasToken && !hasApp) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `GitHub auth takes ${quantity} one of token or app; got neither`,
+      })
+    }
   }
 }
 
@@ -84,10 +99,10 @@ export const GitHubConfig = z
     token: secretStr()
       .optional()
       .describe(
-        'GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set.',
+        'GitHub token: a personal access token, an OAuth token or an App installation token. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.',
       ),
     app: GitHubAppAuth.optional().describe(
-      'A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set.',
+      'A GitHub App installation mirage mints and refreshes tokens for. At most one of `token` and `app` is set; with neither, the mount reads a public repository anonymously.',
     ),
     owner: z.string().describe('Repository owner, a user or an organization.'),
     repo: z.string().describe('Repository name.'),
@@ -102,7 +117,7 @@ export const GitHubConfig = z
       default: 'https://api.github.com',
     }),
   })
-  .superRefine(requireOne)
+  .superRefine(checkAuth(false))
 
 export type GitHubConfig = ConfigOf<typeof GitHubConfig>
 
@@ -115,7 +130,7 @@ export const GhConfig = z
     repo: z.string().optional(),
     branch: z.string().optional(),
   })
-  .superRefine(requireOne)
+  .superRefine(checkAuth(true))
 
 // Derived, not declared twice. The schema is the one doing real work --
 // it validates an install's config and carries the `secretStr` marker

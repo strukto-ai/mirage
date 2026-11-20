@@ -19,7 +19,7 @@ from contextlib import aclosing
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, NotRequired, TypedDict, cast
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from pydantic import SecretStr
@@ -54,18 +54,26 @@ class _NoBody(Enum):
     TOKEN = 0
 
 
-def github_headers(token: SecretStr | str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {reveal_secret(token)}",
+def github_headers(token: SecretStr | str | None) -> dict[str, str]:
+    """The headers an API call carries, an Authorization only with a token.
+
+    Args:
+        token (SecretStr | str | None): the token, None for an anonymous
+            call.
+    """
+    headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": API_VERSION,
     }
+    if token is not None:
+        headers["Authorization"] = f"Bearer {reveal_secret(token)}"
+    return headers
 
 
-async def github_token(account: GitHubAccount) -> str:
+async def github_token(account: GitHubAccount) -> str | None:
     """The token the account's calls ride: its fixed one, or its App
     installation's current one, minted when there is none or it is about
-    to expire.
+    to expire; None for an anonymous account.
 
     Args:
         account (GitHubAccount): the credential, API base and pool.
@@ -74,7 +82,7 @@ async def github_token(account: GitHubAccount) -> str:
     if config.token is not None:
         return config.token.get_secret_value()
     if account.app_tokens is None:
-        raise ValueError("GitHub auth takes exactly one of token or app")
+        return None
     return await account.app_tokens.token(lambda: _mint(account))
 
 
@@ -424,6 +432,39 @@ async def fetch_blob(
 ) -> bytes:
     data = await github_get(account, blob_path(owner, repo, sha))
     return base64.b64decode(data["content"])
+
+
+def raw_url(base: str, owner: str, repo: str, commit: str, path: str) -> str:
+    """The download URL of ``path`` at ``commit``, each segment of the path
+    percent-encoded as JavaScript's ``encodeURIComponent`` encodes it.
+
+    Args:
+        base (str): the raw host, such as ``RAW_BASE``.
+        owner (str): the repository's owner.
+        repo (str): the repository.
+        commit (str): the commit sha the file is read at.
+        path (str): the file, repo-relative.
+    """
+    encoded = quote(path, safe="/!*'()")
+    return f"{base}/{owner}/{repo}/{commit}/{encoded}"
+
+
+async def stream_raw(
+    account: GitHubAccount, url: str
+) -> AsyncGenerator[bytes, None]:
+    """A file's bytes from its download URL as they arrive, asked with no
+    credential and no API header, as a page asks it.
+
+    Args:
+        account (GitHubAccount): the account whose pool the download
+            rides.
+        url (str): the download URL, from :func:`raw_url`.
+    """
+    async with aclosing(
+        api_stream(url, error_of=_error_of, session=account.pool)
+    ) as source:
+        async for chunk in source:
+            yield chunk
 
 
 async def stream_blob(
