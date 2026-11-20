@@ -47,6 +47,17 @@ async def test_a_failed_call_raises_the_sdk_error(tools):
 
 
 @pytest.mark.asyncio
+async def test_input_outside_the_schema_never_reaches_the_tool(tools):
+    await tools["write"](path="/notes.txt", content="a\nb\nc\n")
+    with pytest.raises(antigravity.ToolExecutionError) as refused:
+        await tools["read"](path="/notes.txt", offset=-1, limit=4)
+    assert refused.value.tool_name == "read"
+    assert "Input validation error" in str(refused.value)
+    with pytest.raises(antigravity.ToolExecutionError):
+        await tools["shell"]()
+
+
+@pytest.mark.asyncio
 async def test_the_sdk_tool_runner_calls_them(workspace):
     runner = ToolRunner(mirage_tools(workspace))
     ok, failed = await runner.process_tool_calls(

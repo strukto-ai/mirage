@@ -14,6 +14,8 @@
 
 from typing import Any
 
+import jsonschema
+
 try:
     from google.antigravity import ToolExecutionError
     from google.antigravity.tools.tool_runner import ToolWithSchema
@@ -52,6 +54,9 @@ def _tool(
     """One Mirage tool as the Antigravity SDK takes a tool: a callable
     with its name, description and JSON schema.
 
+    The SDK hands the model's arguments on unchecked, so the input is
+    checked against the schema here, as the MCP server checks it.
+
     Args:
         ops (MirageToolOperations): the session's tool operations.
         name (str): the tool's name, as the agent calls it.
@@ -60,6 +65,14 @@ def _tool(
     """
 
     async def run(**args: Any) -> str:
+        try:
+            jsonschema.validate(args, schema)
+        except jsonschema.ValidationError as exc:
+            raise ToolExecutionError(
+                f"Input validation error: Invalid arguments for tool "
+                f"{name}: {exc.message}",
+                tool_name=name,
+            ) from exc
         result = await ops.call(name, args)
         if result.is_error:
             raise ToolExecutionError(result.text, tool_name=name)

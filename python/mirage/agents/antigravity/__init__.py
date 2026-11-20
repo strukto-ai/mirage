@@ -12,9 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.agents.antigravity.options import build_config
-from mirage.agents.antigravity.tools import mirage_tools
-from mirage.agents.prompt import MIRAGE_SYSTEM_PROMPT, build_system_prompt
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.agents.antigravity.options import build_config
+    from mirage.agents.antigravity.tools import mirage_tools
+    from mirage.agents.prompt import MIRAGE_SYSTEM_PROMPT, build_system_prompt
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.agents.antigravity.options": ("build_config",),
+    "mirage.agents.antigravity.tools": ("mirage_tools",),
+    "mirage.agents.prompt": ("MIRAGE_SYSTEM_PROMPT", "build_system_prompt"),
+}
 
 __all__ = [
     "build_config",
@@ -22,3 +33,5 @@ __all__ = [
     "MIRAGE_SYSTEM_PROMPT",
     "build_system_prompt",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)
