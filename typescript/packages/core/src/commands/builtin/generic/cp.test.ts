@@ -380,6 +380,33 @@ describe('cpGeneric primitive transfer errors', () => {
     expect(files.get('/d/u/y')).toEqual(new Uint8Array([2]))
   })
 
+  // POSIX cp step 3(c) continues after a destination open fails. Apply the
+  // same per-file rule when -n cannot read the destination's metadata.
+  it.each([
+    { failure: eacces('/dst/a'), message: 'Permission denied' },
+    { failure: new Error('malformed metadata'), message: 'malformed metadata' },
+  ])(
+    'recursive no-clobber copy reports an unreadable destination and copies a later sibling ($message)',
+    async ({ failure, message }) => {
+      const files = new Map([
+        ['/src/a', new Uint8Array([1])],
+        ['/src/b', new Uint8Array([2])],
+        ['/dst/a', new Uint8Array([3])],
+      ])
+      const [, io] = await runPrimitive(
+        files,
+        new Set(['/src', '/dst']),
+        ['/src', '/dst'],
+        { statFails: new Map([['/dst/a', failure]]) },
+        cpFlags({ recursive: true, noClobber: true, noTargetDir: true }),
+      )
+      expect(io.exitCode).toBe(1)
+      expect(files.get('/dst/a')).toEqual(new Uint8Array([3]))
+      expect(files.get('/dst/b')).toEqual(new Uint8Array([2]))
+      expect(await io.stderrStr()).toBe(`cp: cannot stat '/dst/a': ${message}\n`)
+    },
+  )
+
   it('read failure reports cannot open and continues remaining sources', async () => {
     const files = new Map([
       ['/src/a.txt', new Uint8Array([1])],
@@ -818,23 +845,33 @@ describe('backup version scan failures', () => {
   })
 })
 
-// The per-operand probes answer "is this path there?". A stat that fails for
-// any other reason is not an answer, and must not be read as one: returning
-// "missing" would let -n overwrite the very target it exists to protect.
-// Python's twins narrow to (FileNotFoundError, ValueError) in all three.
-// Exercised directly, because whichever probe runs first would otherwise
-// mask the others.
-describe('cp probes propagate non-missing stat failures', () => {
+describe('cp path probes', () => {
+  const policy = { cmdName: 'cp', noClobber: true, update: null, backup: null, suffix: '~' }
   const boom: StatFn = () => Promise.reject(new Error('401 Unauthorized'))
   const missing: StatFn = (p) => Promise.reject(enoent(key(p)))
 
-  it('overwriteGate rethrows instead of reporting "safe to overwrite"', async () => {
-    const policy = { cmdName: 'cp', noClobber: true, update: null, backup: null, suffix: '~' }
-    await expect(overwriteGate(policy, boom, spec('/a.txt'), spec('/dst.txt'), [])).rejects.toThrow(
-      '401 Unauthorized',
+  it('overwriteGate reports the backend error and refuses the overwrite', async () => {
+    const errors: string[] = []
+    expect(await overwriteGate(policy, boom, spec('/a.txt'), spec('/dst.txt'), errors)).toBe(false)
+    expect(errors).toEqual(["cp: cannot stat '/dst.txt': 401 Unauthorized"])
+  })
+
+  it('overwriteGate allows writing to a missing destination', async () => {
+    const errors: string[] = []
+    expect(await overwriteGate(policy, missing, spec('/a.txt'), spec('/dst.txt'), errors)).toBe(
+      true,
     )
-    // A genuinely missing target still means "nothing to clobber".
-    expect(await overwriteGate(policy, missing, spec('/a.txt'), spec('/dst.txt'), [])).toBe(true)
+    expect(errors).toEqual([])
+  })
+
+  it('overwriteGate propagates an abort', async () => {
+    const abort = new DOMException('execute aborted', 'AbortError')
+    const stat: StatFn = () => Promise.reject(abort)
+    const errors: string[] = []
+    await expect(overwriteGate(policy, stat, spec('/src'), spec('/dst'), errors)).rejects.toBe(
+      abort,
+    )
+    expect(errors).toEqual([])
   })
 
   it('entryKind rethrows instead of reporting the path as absent', async () => {

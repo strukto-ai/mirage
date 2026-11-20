@@ -1476,10 +1476,23 @@ async def overwrite_gate(
         # No gating flag: skip the target probe entirely so API-backed
         # mounts pay no extra stat per entry.
         return True
+
+    def after_stat_error(path: PathSpec, exc: Exception) -> bool:
+        if is_aborting(exc):
+            raise exc
+        if isinstance(
+            exc, (FileNotFoundError, NotADirectoryError, NoMountError)
+        ):
+            return True
+        errors.append(
+            f"{policy.cmd_name}: cannot stat '{path.raw_path}': {strerror_of(exc)}"
+        )
+        return False
+
     try:
         target_info = await stat(target)
-    except (FileNotFoundError, NotADirectoryError, NoMountError):
-        return True
+    except Exception as exc:
+        return after_stat_error(target, exc)
     if policy.no_clobber or policy.update == "none":
         return False
     if policy.update == "none-fail":
@@ -1488,21 +1501,13 @@ async def overwrite_gate(
     if policy.update == "older":
         try:
             src_info = await stat(src)
-        except (FileNotFoundError, NotADirectoryError, NoMountError):
-            return True
+        except Exception as exc:
+            return after_stat_error(src, exc)
         if copies is not None and policy.backup is None:
             try:
                 target_info = await dest_stat(stat, copies, target)
-            except (FileNotFoundError, NotADirectoryError, NoMountError):
-                return True
-            except FS_ERRORS as exc:
-                # GNU names a link whose target its stat may not reach
-                # and goes on with the next entry (coreutils 9.7).
-                errors.append(
-                    f"{policy.cmd_name}: cannot stat '{target.raw_path}': "
-                    f"{fs_strerror(exc)}"
-                )
-                return False
+            except Exception as exc:
+                return after_stat_error(target, exc)
         src_ts = iso_timestamp(src_info.modified)
         target_ts = iso_timestamp(target_info.modified)
         if (
@@ -2676,6 +2681,7 @@ async def copy_entries(
             if len(errors) > error_count:
                 copied_all = False
             continue
+        error_count = len(errors)
         if policy is not None and not await overwrite_gate(
             policy,
             stat,
@@ -2684,6 +2690,8 @@ async def copy_entries(
             errors,
             copies if isinstance(strategy, PrimitiveCopy) else None,
         ):
+            if len(errors) > error_count:
+                copied_all = False
             continue
         if (
             entry is not src
