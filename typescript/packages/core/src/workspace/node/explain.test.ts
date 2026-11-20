@@ -1099,9 +1099,13 @@ describe('prejudge', () => {
     expect(box.lines).toEqual([line])
   })
 
-  it.each([null, '/data/file', '/data/d/file'])(
-    'judges both guest pipeline destinations regardless of workspace options: %s',
-    async (sealed) => {
+  it.each(
+    [': | cd /data; cat ./file', ': | { : | cd /data; }; cat ./file'].flatMap((line) =>
+      [null, '/data/file', '/data/d/file'].map((sealed) => ({ line, sealed })),
+    ),
+  )(
+    'judges both guest pipeline destinations for $line with $sealed restricted',
+    async ({ line, sealed }) => {
       const box = new LineBox()
       const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
       open.push(w)
@@ -1117,7 +1121,6 @@ describe('prejudge', () => {
       })
       const session = w.getSession('s')
       session.cwd = '/data/d'
-      const line = ': | cd /data; cat ./file'
       for (const [lastpipe, monitor] of [
         [false, false],
         [true, false],

@@ -978,7 +978,7 @@ function* walkNode(
       } else if (
         pipeline.optionsMayChange &&
         !stageForks(last, session, pipeline, true) &&
-        (after[0] !== session || after[1] !== lost)
+        (pipeline.wholeLine || after[0] !== session || after[1] !== lost)
       ) {
         // The final stage may change the caller's cwd. The workspace has a
         // live command gate. For a whole line, judge every cwd we can place.
