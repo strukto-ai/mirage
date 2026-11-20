@@ -255,6 +255,44 @@
         "stdout": "",
         "stderr": "cat: Permission denied\n"
       }
+    },
+    {
+      "id": "ask_function_err_and_return_traps_share_one_approval",
+      "seq": 1346041,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "spanner",
+      "session_profiles": {
+        "spanner": {
+          "commands": {
+            "cat": [
+              {
+                "decision": "deny",
+                "reason": "span sealed",
+                "paths": [
+                  "/scratch/span/sealed/*"
+                ]
+              },
+              {
+                "decision": "ask",
+                "reason": "span review",
+                "paths": [
+                  "/scratch/span/*",
+                  "/scratch/deep/a/b/c/*"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "answer": "allow_once",
+      "command": "set -E; trap 'cat /scratch/deep/a/b/c/x' ERR; f() { trap 'cat /scratch/deep/a/b/c/x' RETURN; false; echo body; }; f; f; trap - ERR RETURN; set +E",
+      "expect": {
+        "exit": 0,
+        "stdout": "d\nbody\nd\nd\nbody\nd\n",
+        "stderr": ""
+      }
     }
   ]
 }
