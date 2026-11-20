@@ -1026,9 +1026,9 @@ async def _fork_subshell(
 ) -> RedirectResult:
     """Run a subshell, its own shell, as bash forks one.
 
-    Each statement of the body is a line of its own. The lines it
-    evaluates (``eval``, ``source``, ``$( )``, its EXIT action) see the
-    subshell's job list, as bash's do.
+    The statements of the body run on the line's handle, as part of
+    the line. The lines it evaluates (``eval``, ``source``, ``$( )``, its
+    EXIT action) see the subshell's job list, as bash's do.
 
     Args:
         deps (ExecuteNodeDeps): what the subshell node runs against.
@@ -1044,9 +1044,7 @@ async def _fork_subshell(
     # forked process.
     sub_table = deps.job_table.child()
     sub_deps = with_opts(deps, {"job_table": sub_table})
-    sub_recurse = partial(
-        execute_node, replace(sub_deps, sink=None, line_handle=None)
-    )
+    sub_recurse = partial(execute_node, replace(sub_deps, sink=None))
     child = child_context(context)
     as_program = is_program_invocation(session)
     results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []

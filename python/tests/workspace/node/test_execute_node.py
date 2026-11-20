@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 from mirage.commands.config import Context
 from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import RouteDecision
@@ -26,6 +28,7 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.parse import parse
 from mirage.types import MountMode, PathSpec
+from mirage.utils.ids import SeededIdSource
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.deps import ExecuteNodeDeps
@@ -435,6 +438,43 @@ def test_subshell_eval_wait_waits_on_the_subshells_jobs():
 def test_subshell_eval_sees_no_job_started_outside():
     out = _run(_shell_stdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )"))
     assert out == "done\n"
+
+
+def test_subshell_evaluates_a_line_on_the_typed_lines_handle():
+    reg, _ = _mock_registry()
+    execute_fn = AsyncMock(return_value=IOResult())
+    handle = LineHandle(LineId("line_typed"), "test", "( eval echo hi )")
+    context = EvaluationContext(_session())
+    context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
+    deps = ExecuteNodeDeps(
+        _mock_dispatch(),
+        reg,
+        Namespace(reg),
+        JobTable(),
+        execute_fn,
+        line_handle=handle,
+    )
+    _run(_execute_node(deps, parse("( eval echo hi )"), context))
+    assert execute_fn.call_args.kwargs["line_handle"] is handle
+
+
+async def _draw_after(line: str) -> str:
+    """Run a line in a seeded workspace and return the next id it draws.
+
+    Args:
+        line (str): the shell line.
+    """
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, ids=SeededIdSource(5))
+    try:
+        await ws.shell(line)
+        return ws.registry.ids.uuid7()
+    finally:
+        await ws.close()
+
+
+def test_subshell_statements_draw_no_line_id():
+    after_subshell = _run(_draw_after("( true; true; true )"))
+    assert after_subshell == _run(_draw_after("true"))
 
 
 # ── function definition ────────────────────────

@@ -27,7 +27,12 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import type { ExecuteNodeDeps } from '../executor/deps.ts'
 import { executeNode } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
+import { LineId } from '../../execution/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
 
 function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
@@ -455,6 +460,19 @@ async function shellStdout(line: string): Promise<string> {
   }
 }
 
+async function drawAfter(line: string): Promise<string> {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    { mode: MountMode.EXEC, ids: new SeededIdSource(5) },
+  )
+  try {
+    await ws.shell(line)
+    return ws.registry.ids.uuid7()
+  } finally {
+    await ws.close()
+  }
+}
+
 describe('a subshell', () => {
   it("lists the subshell's jobs to a line it evaluates", async () => {
     expect(await shellStdout('( sleep 0.2 & eval jobs )')).toBe(
@@ -470,6 +488,25 @@ describe('a subshell', () => {
 
   it('shows a line it evaluates no job started outside', async () => {
     expect(await shellStdout("sleep 0.2 & ( eval 'jobs; wait'; echo done )")).toBe('done\n')
+  })
+
+  it("evaluates a line on the typed line's handle", async () => {
+    const handles: (LineHandle | undefined)[] = []
+    const executeFn: ExecuteFn = (_cmd, opts) => {
+      handles.push(opts.lineHandle)
+      return Promise.resolve(new IOResult())
+    }
+    const lineHandle = new LineHandle(new LineId('line_typed'), 't', '( eval echo hi )')
+    await executeNode(
+      { ...buildDeps(plainRegistry()), executeFn, lineHandle },
+      parse('( eval echo hi )'),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
+    )
+    expect(handles).toEqual([lineHandle])
+  })
+
+  it('draws no line id for its statements', async () => {
+    expect(await drawAfter('( true; true; true )')).toBe(await drawAfter('true'))
   })
 })
 
