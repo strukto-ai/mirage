@@ -687,7 +687,7 @@
     },
     {
       "id": "whole_line_spellings",
-      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f, PS4 or BASH_ENV set by an assignment or a builtin that stores into it, a BASH_FUNC_ function handed through env, and an interactive or login shell set what the shell runs later where the gate cannot read it; ENV is no hook outside an interactive shell.",
+      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f, PS4 or BASH_ENV set by an assignment or a builtin that stores into it, a BASH_FUNC_ function handed through env, and an interactive or login shell set what the shell runs later where the gate cannot read it; ENV is no hook outside an interactive shell; declare, typeset and local with leading -p, -f or -F only print.",
       "world": {
         "machines": {
           "echobox": {
@@ -836,6 +836,34 @@
           "expect": {
             "exit": 126,
             "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "declare -p PS4",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -p PS4\n"
+          }
+        },
+        {
+          "command": "declare -n -p PS4",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -n -p PS4\n"
+          }
+        },
+        {
+          "command": "declare -p PS4=after",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -p PS4=after\n"
+          }
+        },
+        {
+          "command": "declare PS4=after -p; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
           }
         }
       ]
