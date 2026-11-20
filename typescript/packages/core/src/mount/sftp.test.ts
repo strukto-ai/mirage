@@ -171,7 +171,9 @@ it.each(['', '/export'])('walks SFTP client paths from root %j', async (root) =>
   const events = new EventEmitter()
   const channel: SftpChannel = {
     on: (event, listener) =>
-      events.on(event, (...args: unknown[]) => Reflect.apply(listener, undefined, args)),
+      events.on(event, (...args: unknown[]) => {
+        Reflect.apply(listener, undefined, args)
+      }),
     attrs: (_id, attrs) => events.emit('reply', { size: attrs.size, mode: attrs.mode }),
     name: (_id, names) => events.emit('reply', names[0]?.filename),
     status: (_id, code, message) => events.emit('reply', { code, message }),
@@ -185,7 +187,7 @@ it.each(['', '/export'])('walks SFTP client paths from root %j', async (root) =>
       events.emit(operation, 1, ...paths)
     })
   const core = new MountCore(ws.vfs, { rootPrefix: root })
-  const server = new MirageSFTPServer(channel, async () => core)
+  const server = new MirageSFTPServer(channel, () => Promise.resolve(core))
   const served = server.attach()
   try {
     for (const directory of ['left', 'right', 'right/deep'])
