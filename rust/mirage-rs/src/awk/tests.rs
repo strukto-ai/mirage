@@ -249,6 +249,39 @@ fn exit_and_errors() {
         regex.err,
         "awk: syntax error in regular expression [ at source line 1\n"
     );
+    // mawk 1.3.4 names the line a string or expression opened on, and its
+    // first ten bytes as typed.
+    for (program, said) in [
+        (
+            "BEGIN{print \"abc}",
+            "line 1: runaway string constant \"abc} ...",
+        ),
+        (
+            "BEGIN{print \"12345678901}",
+            "line 1: runaway string constant \"1234567890 ...",
+        ),
+        (
+            "BEGIN{print \"ab\\\"c }",
+            "line 1: runaway string constant \"ab\\\"c } ...",
+        ),
+        (
+            "BEGIN{print \"abc\\",
+            "line 1: runaway string constant \"abc ...",
+        ),
+        ("BEGIN{print \"", "line 1: runaway string constant \" ..."),
+        (
+            "BEGIN{x = 1\nprint \"abc\n}",
+            "line 2: runaway string constant \"abc ...",
+        ),
+        ("/abc", "line 1: runaway regular expression /abc ..."),
+    ] {
+        let ran = run_with(program, &[], "", &[]);
+        assert_eq!(
+            (ran.err.as_str(), ran.status),
+            (format!("awk: {said}\n").as_str(), 2),
+            "{program}"
+        );
+    }
     let short = run_with("BEGIN{printf \"%s %s\\n\", \"only\"}", &[], "", &[]);
     assert_eq!(
         short.err,

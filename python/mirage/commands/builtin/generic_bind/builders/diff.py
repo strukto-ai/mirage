@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.diff import diff_generic, parse_flags
+from mirage.commands.builtin.generic.diff import (
+    diff_generic,
+    facts,
+    parse_flags,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -48,4 +52,4 @@ async def diff(
     )
 
 
-BUILDER = GenericCommand("diff", diff, read=True, streams=True)
+BUILDER = GenericCommand("diff", diff, read=True, streams=True, facts=facts)

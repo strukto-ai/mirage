@@ -49,7 +49,6 @@ import { resolveSource } from '../utils/stream.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { UsageError } from '../../errors.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
-import { SYNOPSES } from '../../spec/synopsis.ts'
 import { usageHint } from '../../spec/usage.ts'
 import { scanned } from '../../../rs/scan.ts'
 import { GREP_STDIN_LABEL } from '../utils/constants.ts'
@@ -58,7 +57,7 @@ import { linksOf, mountsOf, mountRoot, ownOutput } from '../utils/links.ts'
 const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
 // (grep 3.11; the same two lines follow `option requires an argument`).
-const GREP_NO_PATTERN = `Usage: ${SYNOPSES.grep ?? ''}\n${usageHint('grep')}`
+const GREP_NO_PATTERN = usageHint('grep')
 // The types -D skip passes over; stdin is read whatever it is.
 const DEVICE_TYPES: ReadonlySet<FileType> = new Set([
   FileType.CHAR_DEVICE,

@@ -31,11 +31,13 @@ from mirage.commands.spec.constants import (
     RG_FLAG_NAMES,
     USAGE_EXIT,
     USAGE_HINT_PREFIX,
+    USAGE_LINE,
     USAGE_PAGE,
     ZGREP_UNSUPPORTED_LONG,
     ZGREP_UNSUPPORTED_SHORT,
 )
 from mirage.commands.spec.standard import help_page
+from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.word_choice import WordChoices, WordRefusalKind
 from mirage.errors.fs import fs_strerror
@@ -223,6 +225,8 @@ def unknown_option_error(
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"zgrep: {dashed}: option not supported\n"
         return encode_text(line), usage_exit_code(cmd_name)
+    if builtin and cmd_name == "zgrep":
+        return unknown_option_error("grep", token)
     if builtin and cmd_name in COMPARE_PROGRAMS:
         return unknown_option_error(COMPARE_PROGRAMS[cmd_name], token)
     if builtin and cmd_name in BZIP2_FAMILY:
@@ -626,7 +630,8 @@ def usage_hint(cmd_name: str, builtin: bool = True) -> str:
     coreutils writes the hint bare; diffutils routes it through
     ``error()``, so ``cmp`` and ``diff`` carry the command prefix on the
     hint line too. A command in ``USAGE_PAGE`` prints its help page
-    from the usage line on in its place.
+    from the usage line on in its place, and one in ``USAGE_LINE`` its
+    synopsis line above it.
 
     Args:
         cmd_name (str): the command whose hint line is wanted.
@@ -638,6 +643,8 @@ def usage_hint(cmd_name: str, builtin: bool = True) -> str:
     prefix = (
         f"{cmd_name}: " if builtin and cmd_name in USAGE_HINT_PREFIX else ""
     )
+    if builtin and cmd_name in USAGE_LINE:
+        prefix = f"Usage: {SYNOPSES[cmd_name]}\n"
     return f"{prefix}Try '{cmd_name} --help' for more information."
 
 

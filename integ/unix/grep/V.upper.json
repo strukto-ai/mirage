@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "grep (Mirage)\ngrep (Mirage)\nrc=2\n",
-        "stderr": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\n"
+        "stderr": "grep: unrecognized option '--bogus'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
       },
       "flags": [
         "V"

@@ -54,7 +54,6 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -82,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
-GREP_NO_PATTERN = f"Usage: {SYNOPSES['grep']}\n" + usage_hint("grep")
+GREP_NO_PATTERN = usage_hint("grep")
 # The types -D skip passes over; stdin is read whatever it is.
 DEVICE_TYPES = frozenset(
     {

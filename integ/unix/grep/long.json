@@ -277,7 +277,7 @@
       "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --i FOO /data/gfl/a.txt 2>&1; echo rc=$?; grep --nu foo /data/gfl/a.txt 2>&1; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "grep: option '--i' is ambiguous; possibilities: '--include' '--ignore-case' '--initial-tab' '--invert-match'\nTry 'grep --help' for more information.\nrc=2\ngrep: option '--nu' is ambiguous; possibilities: '--null' '--null-data'\nTry 'grep --help' for more information.\nrc=2\n",
+        "stdout": "grep: option '--i' is ambiguous; possibilities: '--include' '--ignore-case' '--initial-tab' '--invert-match'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\nrc=2\ngrep: option '--nu' is ambiguous; possibilities: '--null' '--null-data'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\nrc=2\n",
         "stderr": ""
       },
       "flags": [

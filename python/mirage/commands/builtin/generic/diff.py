@@ -55,9 +55,12 @@ from mirage.rs.stream import open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
 from mirage.types import (
+    LINK_TARGET_KEY,
     FileStat,
     FileType,
+    Follow,
     JsonValue,
+    LineFacts,
     PathSpec,
     ReadStreamFn,
 )
@@ -89,6 +92,8 @@ class DiffFlags:
     identical: bool = False
     exclude: tuple[str, ...] = ()
     exclude_from: tuple[PathSpec, ...] = ()
+    # --no-dereference compares a link as itself: by the path it holds.
+    no_dereference: bool = False
 
 
 @dataclass(slots=True)
@@ -109,11 +114,24 @@ class _Walk:
     real: Callable[[str], str] | None = None
     # A regular file's size, None when unknown, for -q to answer unread.
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None
+    # The namespace's links, which --no-dereference reads as themselves.
+    links: LinkView | None = None
 
 
 Absent = tuple[bool, bool]
 
 PRESENT: Absent = (False, False)
+
+# How diff names each type but a regular file, which it calls a regular
+# file or a regular empty file by its size (diffutils 3.10).
+TYPE_NAMES = {
+    FileType.DIRECTORY: "directory",
+    FileType.SYMLINK: "symbolic link",
+    FileType.CHAR_DEVICE: "character special file",
+    FileType.BLOCK_DEVICE: "block special file",
+    FileType.FIFO: "fifo",
+    FileType.SOCKET: "socket",
+}
 
 # The characters GNU diff spells as a C escape in a header name. Any
 # other control character is three octal digits.
@@ -400,6 +418,76 @@ async def _entries(walk: _Walk, path: PathSpec, absent: bool) -> set[str]:
     }
 
 
+def _link_text(walk: _Walk, path: PathSpec) -> str | None:
+    """The path a link holds, where diff reads links as themselves
+    (``--no-dereference``); None for anything else.
+
+    Args:
+        walk (_Walk): the comparison's reads and its parsed line.
+        path (PathSpec): the entry.
+    """
+    if not walk.flags.no_dereference or walk.links is None:
+        return None
+    if is_stdin(path):
+        return None
+    row = walk.links.stat_at(path.virtual)
+    if row is None or row.type != FileType.SYMLINK:
+        return None
+    target = row.extra.get(LINK_TARGET_KEY)
+    return target if isinstance(target, str) else ""
+
+
+async def _kind_name(walk: _Walk, path: PathSpec, kind: FileType) -> str:
+    """How diff names an entry's type when two differ: an empty regular
+    file is a ``regular empty file`` (diffutils 3.10).
+
+    Args:
+        walk (_Walk): the comparison's reads.
+        path (PathSpec): the entry.
+        kind (FileType): its type.
+    """
+    named = TYPE_NAMES.get(kind)
+    if named is not None:
+        return named
+    size = (await walk.stat_fn(path)).size
+    return "regular empty file" if size == 0 else "regular file"
+
+
+async def _link_pair(
+    walk: _Walk,
+    path_a: PathSpec,
+    path_b: PathSpec,
+    texts: tuple[str | None, str | None],
+) -> bytes | None:
+    """What diff says of a pair one or both of which is a link it reads
+    as itself: nothing for two holding one path, ``Symbolic links ...
+    differ`` for two holding different ones, and the two types otherwise.
+
+    Args:
+        walk (_Walk): the comparison's reads.
+        path_a (PathSpec): the first entry.
+        path_b (PathSpec): the second entry.
+        texts (tuple[str | None, str | None]): the path each holds, None
+            for one that is no link.
+    """
+    if texts[0] is not None and texts[1] is not None:
+        if texts[0] == texts[1]:
+            return None
+        return (
+            f"Symbolic links {_name(path_a)} and {_name(path_b)} differ\n"
+        ).encode()
+    names = [
+        "symbolic link"
+        if text is not None
+        else await _kind_name(walk, path, (await walk.stat_fn(path)).type)
+        for path, text in zip((path_a, path_b), texts)
+    ]
+    return (
+        f"File {_name(path_a)} is a {names[0]} while file "
+        f"{_name(path_b)} is a {names[1]}\n"
+    ).encode()
+
+
 async def _entry_kind(walk: _Walk, path: PathSpec) -> FileType | None:
     """What an entry is, as diff's stat follows it; None, and the entry
     named in ``trouble``, for one it cannot stat or a link that leads
@@ -483,6 +571,16 @@ async def _diff_dirs(
             continue
         child_a = _child_spec(dir_a, name)
         child_b = _child_spec(dir_b, name)
+        texts = (
+            _link_text(walk, child_a) if in_a else None,
+            _link_text(walk, child_b) if in_b else None,
+        )
+        if in_a and in_b and texts != (None, None):
+            said = await _link_pair(walk, child_a, child_b, texts)
+            if said is not None:
+                parts.append(said)
+                differ = True
+            continue
         kind_a = await _entry_kind(walk, child_a) if in_a else None
         kind_b = await _entry_kind(walk, child_b) if in_b else None
         if (in_a and kind_a is None) or (in_b and kind_b is None):
@@ -529,29 +627,24 @@ async def _diff_dirs(
                 )
                 parts.append(header.encode())
             parts.extend(body)
-        elif a_dir:
-            differ = True
-            parts.append(
-                (
-                    f"File {_name(child_a)} is a directory while file "
-                    f"{_name(child_b)} is a regular file\n"
-                ).encode()
-            )
         else:
+            assert kind_a is not None and kind_b is not None
             differ = True
             parts.append(
                 (
-                    f"File {_name(child_a)} is a regular file while file "
-                    f"{_name(child_b)} is a directory\n"
+                    f"File {_name(child_a)} is a "
+                    f"{await _kind_name(walk, child_a, kind_a)} while file "
+                    f"{_name(child_b)} is a "
+                    f"{await _kind_name(walk, child_b, kind_b)}\n"
                 ).encode()
             )
     return differ
 
 
 async def _missing(
-    stat_fn: Callable[..., Awaitable[FileStat]], path: PathSpec, allowed: bool
+    stat_fn: Callable[..., Awaitable[FileStat]], path: PathSpec
 ) -> bool:
-    if not allowed or is_stdin(path):
+    if is_stdin(path):
         return False
     try:
         await stat_fn(path)
@@ -611,6 +704,7 @@ async def diff(
             # --dereference), the operands' own taken there at dispatch.
             stat_fn=partial(followed_stat, stat_fn, links),
             real=links.resolve if links is not None else None,
+            links=links,
             flags=flags,
             excluded=await _excluded_patterns(flags, stream),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
@@ -618,6 +712,13 @@ async def diff(
             zone=zone,
             size_of=size_of,
         )
+        texts = (_link_text(walk, paths[0]), _link_text(walk, paths[1]))
+        if texts != (None, None):
+            said = await _link_pair(walk, paths[0], paths[1], texts)
+            return (
+                None if said is None else _output([said]),
+                IOResult(exit_code=0 if said is None else 1),
+            )
         if any(dashes) and not all(dashes):
             other = paths[1] if dashes[0] else paths[0]
             if (await stat_fn(other)).type == FileType.DIRECTORY:
@@ -625,13 +726,14 @@ async def diff(
                     exit_code=2,
                     stderr=b"diff: cannot compare '-' to a directory\n",
                 )
-        # A missing operand -N reads as empty only beside one that is
-        # there: two missing ones are both reported.
-        absent = (
-            await _missing(stat_fn, paths[0], flags.new_first),
-            await _missing(stat_fn, paths[1], flags.new_file),
+        # Two missing operands are both reported, -N or not; one -N
+        # names reads as empty beside one that is there.
+        gone = (
+            await _missing(stat_fn, paths[0]),
+            await _missing(stat_fn, paths[1]),
         )
-        if all(absent):
+        absent = (gone[0] and flags.new_first, gone[1] and flags.new_file)
+        if all(gone):
             missing: list[bytes] = []
             for path in paths:
                 try:
@@ -852,7 +954,21 @@ def parse_flags(
         identical=fl.as_bool("report_identical_files"),
         exclude=tuple(fl.as_list("exclude")),
         exclude_from=tuple(fl.as_paths("exclude_from")),
+        no_dereference=fl.as_bool("no_dereference"),
     )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A diff line follows its operands' links, unless
+    ``--no-dereference`` compares each link as itself.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    if fl.as_bool("no_dereference"):
+        return LineFacts(follows=Follow.NONE)
+    return LineFacts()
 
 
 async def diff_generic(

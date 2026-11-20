@@ -112,6 +112,7 @@ def test_unknown_short_option_reports_char():
     msg, code = unknown_option_error("grep", "Y")
     assert msg == (
         b"grep: invalid option -- 'Y'\n"
+        b"Usage: grep [OPTION]... PATTERNS [FILE]...\n"
         b"Try 'grep --help' for more information.\n"
     )
     assert code == 2
@@ -221,6 +222,7 @@ def test_ambiguous_option_matches_gnu_shape():
     assert out == (
         b"grep: option '--c' is ambiguous; possibilities: "
         b"'--context' '--color' '--count'\n"
+        b"Usage: grep [OPTION]... PATTERNS [FILE]...\n"
         b"Try 'grep --help' for more information.\n"
     )
     assert code == 2
@@ -388,6 +390,7 @@ def test_boolean_long_with_a_value_names_the_option_without_it():
     msg, code = unexpected_value_error("grep", "--byte-offset=2")
     assert msg == (
         b"grep: option '--byte-offset' doesn't allow an argument\n"
+        b"Usage: grep [OPTION]... PATTERNS [FILE]...\n"
         b"Try 'grep --help' for more information.\n"
     )
     assert code == 2

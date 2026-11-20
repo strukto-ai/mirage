@@ -774,6 +774,11 @@ export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set([
 // spec.
 export const USAGE_PAGE: ReadonlySet<string> = new Set(['sed', 'bzip2', 'bunzip2'])
 
+// Commands that print their synopsis line above the `Try '--help'` line
+// after every usage error: grep 3.11, whose zgrep, egrep and rgrep hand
+// their option errors to it.
+export const USAGE_LINE: ReadonlySet<string> = new Set(['grep'])
+
 // The programs zcmp and zdiff run, whose refusal of an option they do not know
 // is theirs, not the wrapper's.
 export const COMPARE_PROGRAMS: Readonly<Record<string, string>> = Object.freeze({

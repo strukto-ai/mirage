@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { diffGeneric, parseFlags } from '../../generic/diff.ts'
+import { diffGeneric, facts, parseFlags } from '../../generic/diff.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { utf8Locale } from '../../../../shell/bytes.ts'
 import type { CommandFn } from '../../../config.ts'
@@ -40,4 +40,5 @@ export const BUILDER: GenericCommand = {
   streams: true,
   read: true,
   fn: diff,
+  facts,
 }
