@@ -58,6 +58,19 @@ async def test_input_outside_the_schema_never_reaches_the_tool(tools):
 
 
 @pytest.mark.asyncio
+async def test_a_tool_the_profile_takes_away_answers_as_the_sdk_error():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    write = {tool.__name__: tool for tool in mirage_tools(ws, session_id="ro")}
+    ws.create_session("ro", profile={"mounts": {"/": "read"}})
+    try:
+        with pytest.raises(antigravity.ToolExecutionError) as refused:
+            await write["write"](path="/x", content="y")
+    finally:
+        await ws.close()
+    assert "Tool write not found" in str(refused.value)
+
+
+@pytest.mark.asyncio
 async def test_the_sdk_tool_runner_calls_them(workspace):
     runner = ToolRunner(mirage_tools(workspace))
     ok, failed = await runner.process_tool_calls(

@@ -2595,12 +2595,15 @@ export class Workspace {
    * End a session's lines as a dropped terminal ends its foreground job:
    * each process the session runs gets SIGHUP (`HANGUP_SIGNAL`), so a
    * program on a machine stops as a hangup stops it, sparing what left its
-   * session, then the lines are cancelled as `cancel` cancels them.
-   * Returns how many lines were cancelled.
+   * session, then the lines are cancelled as `cancel` cancels them. A
+   * runner `setsid` made the leader of a session of its own (`leader`) left
+   * it, so it keeps running. Returns how many lines were cancelled.
    */
   async hangup(sessionId: string): Promise<number> {
     for (const runner of this.processTable.live()) {
-      if (runner.record.sessionId === sessionId) runner.terminate(HANGUP_SIGNAL)
+      if (runner.record.sessionId === sessionId && (runner.record.leader ?? null) === null) {
+        runner.terminate(HANGUP_SIGNAL)
+      }
     }
     return this.cancel(sessionId)
   }

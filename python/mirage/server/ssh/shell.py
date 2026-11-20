@@ -222,10 +222,10 @@ class ShellChannel:
         loop = asyncio.get_running_loop()
 
         async def send(data: bytes, stderr: bool) -> None:
-            if self._lost:
+            if self._lost or not await on_loop(
+                self._output.write(data, stderr), loop
+            ):
                 self._hang_up()
-                return
-            await on_loop(self._output.write(data, stderr), loop)
 
         async def run_line() -> int:
             try:
@@ -281,6 +281,8 @@ class ShellChannel:
             if self._tty:
                 await self._output.write(encode_text(self._prompt()))
             item = await self._input.readline()
+            if self._lost:
+                return status
             if item is Mark.LIMIT:
                 await self._output.write(
                     b"mirage: shell input line too long\n", stderr=True

@@ -48,7 +48,7 @@ export async function servePipe(
   try {
     const execution = await ws.shell(line, {
       sessionId,
-      stdin: channel as AsyncIterable<Uint8Array>,
+      stdin: channel.iterator({ destroyOnReturn: false }) as AsyncIterable<Uint8Array>,
       record: false,
       stream: true,
     })

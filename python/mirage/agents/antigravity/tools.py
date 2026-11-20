@@ -73,7 +73,12 @@ def _tool(
                 f"{name}: {exc.message}",
                 tool_name=name,
             ) from exc
-        result = await ops.call(name, args)
+        try:
+            result = await ops.call(name, args)
+        except KeyError as exc:
+            raise ToolExecutionError(
+                f"Tool {name} not found", tool_name=name
+            ) from exc
         if result.is_error:
             raise ToolExecutionError(result.text, tool_name=name)
         return result.text

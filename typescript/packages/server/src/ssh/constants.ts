@@ -55,15 +55,18 @@ export const FORWARD_RELAY_PY =
 
 // The line a forward runs, as its login's lines run, to reach {port} on that
 // machine's loopback: the first relay the machine has, socat, python3 or
-// bash, joins the forward's channel to it.
+// bash, joins the forward's channel to it. Bash ends when the port does, but
+// it cannot end its writes at end of input, so a service that answers only
+// after its request's end needs socat or python3.
 export const FORWARD_LINE =
   'if command -v socat >/dev/null 2>&1; ' +
   'then exec socat - TCP:127.0.0.1:{port}; fi; ' +
   'if command -v python3 >/dev/null 2>&1; ' +
   `then exec python3 -c '${FORWARD_RELAY_PY}' {port}; fi; ` +
   'if command -v bash >/dev/null 2>&1; ' +
-  "then exec bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1 || exit 1; " +
-  "cat <&3 & cat >&3; wait' forward {port}; fi; " +
+  "then exec bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1 4<&0 || exit 1; " +
+  "cat <&4 >&3 & cat <&3; s=$?; kill $! 2>/dev/null; exit $s' " +
+  'forward {port}; fi; ' +
   'echo "forward: no socat, python3 or bash" >&2; exit 127'
 
 // A client that answers no keepalive for this many intervals is gone, so

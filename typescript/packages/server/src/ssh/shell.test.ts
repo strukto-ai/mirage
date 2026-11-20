@@ -102,6 +102,17 @@ describe('command channels', () => {
     await untilSessionsClose(h)
   })
 
+  it('are hung up when a terminal drops with input left unread', async () => {
+    const h = await startHarness()
+    const client = await connect(h)
+    client.exec('sleep 30', { pty: true }, (err, stream) => {
+      if (err === undefined) stream.write('a'.repeat(3 * 1024 * 1024))
+    })
+    await new Promise((r) => setTimeout(r, 500))
+    ;(client as unknown as { _sock: { destroy(): void } })._sock.destroy()
+    await untilSessionsClose(h)
+  })
+
   it('run on after a drop without a terminal', async () => {
     const h = await startHarness()
     const client = await connect(h)

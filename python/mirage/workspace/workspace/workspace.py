@@ -3353,7 +3353,9 @@ class Workspace:
         job: each process the session runs gets SIGHUP
         (``HANGUP_SIGNAL``), so a program on a machine stops as a hangup
         stops it, sparing what left its session, then the lines are
-        cancelled as ``cancel`` cancels them.
+        cancelled as ``cancel`` cancels them. A runner ``setsid`` made
+        the leader of a session of its own (``leader``) left it, so it
+        keeps running.
 
         Args:
             session_id (str): the session.
@@ -3362,7 +3364,10 @@ class Workspace:
             int: how many lines were cancelled.
         """
         for process in self.process_table.live():
-            if process.record.session_id == session_id:
+            if (
+                process.record.session_id == session_id
+                and process.record.leader is None
+            ):
                 process.terminate(HANGUP_SIGNAL)
         return await self.cancel(session_id)
 

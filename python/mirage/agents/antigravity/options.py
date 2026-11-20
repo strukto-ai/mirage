@@ -42,7 +42,8 @@ async def build_config(
     agent's only file access layer. Subagents are off too, since a
     subagent would get the harness's own file and shell tools back. The
     prompt is added to the harness's own instructions, not put in their
-    place.
+    place. Stored sessions load first, so a stored session's profile
+    picks its tools.
 
     Args:
         workspace (Workspace): The workspace to serve.
@@ -52,6 +53,7 @@ async def build_config(
     Returns:
         LocalAgentConfig: Ready to pass to google.antigravity.Agent.
     """
+    await workspace.ensure_sessions_loaded()
     return LocalAgentConfig(
         tools=mirage_tools(workspace, session_id=session_id),
         capabilities=CapabilitiesConfig(

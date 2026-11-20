@@ -164,7 +164,9 @@ app.
     const app = express()
     const server = createServer(app)
     const sockets = new WebSocketServer({ noServer: true })
-    const allowed = (req) => req.headers.authorization === `Bearer ${process.env.APP_TOKEN}`
+    const token = process.env.APP_TOKEN
+    if (!token) throw new Error('set APP_TOKEN')
+    const allowed = (req) => req.headers.authorization === `Bearer ${token}`
     server.on('upgrade', (req, socket, head) => {
       const id = /^\/ssh\/([^/?]+)$/.exec(req.url ?? '')?.[1]
       if (id === undefined || !allowed(req) || registry.visible(id, null) === null) {
@@ -234,8 +236,9 @@ account's workspaces:
   - A dropped connection ends the line as sshd would. With a terminal it
     hangs the line up with `SIGHUP`. Without one (`ssh -T`, as editors
     connect), it sends nothing: the line runs on without input, and is hung
-    up the first time it writes. On a machine, a process that left the
-    line's session with `setsid`, or ignores `SIGHUP`, keeps running.
+    up the first time it writes. On a machine, a process that ignores
+    `SIGHUP` keeps running, and on Linux so does one that left the line's
+    session with `setsid`.
   - The server sends a keepalive every 15 seconds and closes a connection that
     misses three, so a half-open one hangs its line up as well.
   - A port forward reaches `127.0.0.1` or `localhost` only, where the

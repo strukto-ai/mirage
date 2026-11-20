@@ -360,7 +360,8 @@ export class ChannelInput {
  * Writes a line's output back to the client. On a terminal stderr folds
  * into stdout, as a pty points both descriptors at one device, and each
  * newline goes out as CRLF, as asyncssh's line editor does on the Python
- * side.
+ * side. Output after the channel has closed goes nowhere, and the write
+ * says so.
  */
 export class ChannelOutput {
   constructor(
@@ -368,10 +369,10 @@ export class ChannelOutput {
     private readonly tty: boolean,
   ) {}
 
-  async write(data: Uint8Array, stderr = false): Promise<void> {
-    if (data.byteLength === 0) return
+  async write(data: Uint8Array, stderr = false): Promise<boolean> {
+    if (data.byteLength === 0) return true
     const stream: Writable = stderr && !this.tty ? this.channel.stderr : this.channel
-    if (!stream.writable) return
+    if (!stream.writable) return false
     let out = data
     const lfs = this.tty ? data.reduce((n, b) => (b === LF ? n + 1 : n), 0) : 0
     if (lfs > 0) {
@@ -382,15 +383,23 @@ export class ChannelOutput {
         out[i++] = b
       }
     }
-    if (stream.write(out)) return
-    await new Promise<void>((resolve) => {
-      const done = (): void => {
-        stream.off('drain', done)
-        stream.off('close', done)
-        resolve()
+    if (stream.write(out)) return true
+    return new Promise<boolean>((resolve) => {
+      const done = (drained: boolean): void => {
+        stream.off('drain', onDrain)
+        stream.off('close', onClose)
+        this.channel.off('close', onClose)
+        resolve(drained)
       }
-      stream.once('drain', done)
-      stream.once('close', done)
+      const onDrain = (): void => {
+        done(true)
+      }
+      const onClose = (): void => {
+        done(false)
+      }
+      stream.once('drain', onDrain)
+      stream.once('close', onClose)
+      this.channel.once('close', onClose)
     })
   }
 }

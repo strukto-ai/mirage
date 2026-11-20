@@ -352,3 +352,28 @@ async def test_hangup_stops_a_sessions_line_with_sighup():
         assert {p.signal for p in running} == {1}
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_hangup_spares_a_job_setsid_moved_out_of_the_session():
+    ws = Workspace({})
+    try:
+        ws.create_session("s1")
+        await ws.shell("setsid sleep 60 & sleep 61 &", session_id="s1")
+        jobs = {}
+        for _ in range(500):
+            jobs = {
+                p.record.command: p
+                for p in ws.process_table.live()
+                if p.record.session_id == "s1"
+            }
+            if set(jobs) == {"sleep 60", "sleep 61"}:
+                break
+            await asyncio.sleep(0.01)
+        assert set(jobs) == {"sleep 60", "sleep 61"}
+        await ws.hangup("s1")
+        assert jobs["sleep 61"].signal == 1
+        assert jobs["sleep 60"].signal is None
+        assert jobs["sleep 60"] in ws.process_table.live()
+    finally:
+        await ws.close()

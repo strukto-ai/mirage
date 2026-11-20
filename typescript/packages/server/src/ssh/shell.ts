@@ -106,6 +106,11 @@ export class ShellChannel {
     this.running?.abort()
   }
 
+  /** Whether the connection dropped, read fresh across an await. */
+  private dropped(): boolean {
+    return this.lost
+  }
+
   /** Hang the channel's lines up (`Workspace.hangup`), once. */
   private hangUp(): void {
     if (this.hung || !this.live()) return
@@ -163,10 +168,8 @@ export class ShellChannel {
         stream: true,
       })
       try {
-        const result = await deliver(execution, (data, stderr) => {
-          if (!this.lost) return this.output.write(data, stderr)
-          this.hangUp()
-          return Promise.resolve()
+        const result = await deliver(execution, async (data, stderr) => {
+          if (this.lost || !(await this.output.write(data, stderr))) this.hangUp()
         })
         return result.exitCode
       } finally {
@@ -193,9 +196,10 @@ export class ShellChannel {
   /** Read and run lines until `exit` or end of input. */
   async repl(): Promise<number> {
     let status = 0
-    while (!this.lost) {
+    while (!this.dropped()) {
       if (this.tty) await this.output.write(encoder.encode(this.currentPrompt()))
       const item = await this.input.readline()
+      if (this.dropped()) return status
       if (item === Mark.LIMIT) {
         await this.output.write(encoder.encode('mirage: shell input line too long\n'), true)
         return 1

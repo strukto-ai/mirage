@@ -898,9 +898,9 @@ export async function serveCodex(
   if (opened === null) return
   const [entry, sessionId] = opened
   const output = new ChannelOutput(channel, false)
-  const codex = new CodexChannel(registry, entry, sessionId, (text) =>
-    output.write(encoder.encode(text + '\n')),
-  )
+  const codex = new CodexChannel(registry, entry, sessionId, async (text) => {
+    await output.write(encoder.encode(text + '\n'))
+  })
   const input = new ChannelInput(channel, false, CODEX_MAX_MESSAGE)
   input.start()
   let status = 0

@@ -302,6 +302,54 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
     }
   }, 15_000)
 
+  // Once the run's program has exited, a hangup still spares what setsid
+  // moved out of the session, and a stopped process is continued so the
+  // hangup ends it.
+  it('keeps to the session once the program is gone', async () => {
+    const tag = `${crypto.randomUUID().replaceAll('-', '')}:9`
+    const program = spawn(
+      '/bin/sh',
+      ['-c', 'setsid sleep 300 & echo $!; sleep 301 & echo $!; sleep 302 & echo $!'],
+      { env: { ...process.env, [PROCESS]: tag }, detached: true },
+    )
+    let text = ''
+    program.stdout.on('data', (d: Buffer) => {
+      text += d.toString()
+    })
+    await new Promise((resolve) => program.once('exit', resolve))
+    const [kept, hung, stopped] = text.split('\n').filter(Boolean).map(Number) as [
+      number,
+      number,
+      number,
+    ]
+    const ended = (pid: number): boolean => {
+      let stat: string
+      try {
+        stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8')
+      } catch {
+        return true
+      }
+      const state = stat
+        .slice(stat.lastIndexOf(')') + 1)
+        .trim()
+        .split(/\s+/)[0]
+      return state === 'Z' || state === 'X'
+    }
+    try {
+      process.kill(stopped, 'SIGSTOP')
+      const root = { pid: program.pid ?? 0, started: 0, exited: null }
+      const done = spawnSync('/bin/sh', ['-c', stopLine(tag, 1, root)], { timeout: 10_000 })
+      expect(done.status).toBe(0)
+      for (let i = 0; i < 50 && !(ended(hung) && ended(stopped)); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      expect(ended(hung) && ended(stopped)).toBe(true)
+      expect(ended(kept)).toBe(false)
+    } finally {
+      spawnSync('/bin/sh', ['-c', stopLine(tag)], { timeout: 10_000 })
+    }
+  }, 15_000)
+
   // A tag names one process: the stop line for w:9 leaves the run of w:90
   // running.
   it('matches its process tag whole', async () => {

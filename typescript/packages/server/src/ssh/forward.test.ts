@@ -100,6 +100,41 @@ describe('forwards', () => {
     }
   }, 30_000)
 
+  it('carry the answer to a request that ends with end of input', async () => {
+    const upper = createServer((socket) => {
+      let text = ''
+      socket.on('data', (d: Buffer) => {
+        text += d.toString()
+      })
+      socket.on('end', () => {
+        socket.end(text.toUpperCase())
+      })
+    })
+    await new Promise<void>((resolve) => upper.listen(0, '127.0.0.1', resolve))
+    const port = (upper.address() as AddressInfo).port
+    try {
+      const ws = new Workspace(
+        { '/': new RAMVFS() },
+        { mode: MountMode.EXEC, machines: { here: new Here('here', { captures: ['@line'] }) } },
+      )
+      const client = await connect(await startHarness(ws))
+      const stream = await openForward(client, port)
+      const got = new Promise<string>((resolve) => {
+        let text = ''
+        stream.on('data', (d: Buffer) => {
+          text += d.toString()
+        })
+        stream.on('close', () => {
+          resolve(text)
+        })
+      })
+      stream.end('ping\n')
+      expect(await got).toBe('PING\n')
+    } finally {
+      upper.close()
+    }
+  }, 30_000)
+
   it('to another host are refused', async () => {
     const client = await connect(await startHarness())
     await expect(

@@ -562,8 +562,9 @@ after 5 seconds if the machine stops answering. That needs `/bin/sh`, `tr`,
 `grep` and `/proc` on the machine.
 
 A dropped [SSH](/home/access/ssh) connection with a terminal sends `HUP`
-instead, and only to the processes still in the run's session, with no KILL
-after it: a process that left with `setsid`, or ignores `HUP`, keeps running.
+instead, then `CONT`, with no KILL after it: a process that ignores `HUP`
+keeps running. On Linux it reaches only the processes still in the run's
+session, so one that left with `setsid` keeps running too.
 Without a terminal the drop sends nothing until the run writes, as sshd's
 broken pipe would end it, and then sends the same `HUP`.
 

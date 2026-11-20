@@ -5,6 +5,7 @@ import type { Action, ExecuteResultContext } from '../policy/types.ts'
 import { JobConsole } from '../shell/console/job_console.ts'
 import { Channel } from '../shell/console/types.ts'
 import { LineHandle } from '../execution/line/handle.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
 import { LineId } from '../execution/types.ts'
 import { ShellExecution } from './shell_execution.ts'
 import { ExecuteResult } from './workspace/types.ts'
@@ -271,6 +272,32 @@ describe('ShellExecution', () => {
       await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
       await execution.close()
       expect(new Set(running.map((p) => p.signal))).toEqual(new Set([1]))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('hangup spares a job setsid moved out of the session', async () => {
+    const ws = new Workspace({})
+    try {
+      ws.createSession('s1')
+      await ws.shell('setsid sleep 60 & sleep 61 &', { sessionId: 's1' })
+      const jobs = (): Map<string, ProcessHandle> =>
+        new Map(
+          [...ws.processTable.live()]
+            .filter((p) => p.record.sessionId === 's1')
+            .map((p) => [p.record.command, p]),
+        )
+      let found = jobs()
+      for (let i = 0; i < 500 && !(found.has('sleep 60') && found.has('sleep 61')); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        found = jobs()
+      }
+      expect([...found.keys()].sort()).toEqual(['sleep 60', 'sleep 61'])
+      await ws.hangup('s1')
+      expect(found.get('sleep 61')?.signal).toBe(1)
+      expect(found.get('sleep 60')?.signal ?? null).toBeNull()
+      expect([...ws.processTable.live()]).toContain(found.get('sleep 60'))
     } finally {
       await ws.close()
     }

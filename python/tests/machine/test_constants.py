@@ -829,3 +829,52 @@ def test_the_hangup_spares_what_left_the_run_or_ignores_it():
         if program.poll() is None:
             program.kill()
         program.stdout.close()
+
+
+def _ended(pid: int) -> bool:
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return True
+    return stat.rsplit(")", 1)[1].split()[0] in ("Z", "X")
+
+
+# Once the run's program has exited, a hangup still spares what setsid
+# moved out of the session, and a stopped process is continued so the
+# hangup ends it.
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
+def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
+    tag = f"{uuid.uuid4().hex}:9"
+    program = subprocess.Popen(
+        [
+            "/bin/sh",
+            "-c",
+            "setsid sleep 300 & echo $!; sleep 301 & echo $!; "
+            "sleep 302 & echo $!",
+        ],
+        env={**os.environ, PROCESS: tag},
+        stdout=subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert program.stdout is not None
+    kept, hung, stopped = [int(program.stdout.readline()) for _ in range(3)]
+    program.wait(timeout=5)
+    try:
+        os.kill(stopped, 19)
+        done = subprocess.run(
+            ["/bin/sh", "-c", stop_line(tag, 1, MachinePid(program.pid, 0.0))],
+            check=False,
+            timeout=10,
+        )
+        assert done.returncode == 0
+        for _ in range(50):
+            if _ended(hung) and _ended(stopped):
+                break
+            time.sleep(0.1)
+        assert _ended(hung) and _ended(stopped)
+        assert not _ended(kept)
+    finally:
+        subprocess.run(
+            ["/bin/sh", "-c", stop_line(tag)], check=False, timeout=10
+        )
+        program.stdout.close()

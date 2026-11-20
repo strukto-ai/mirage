@@ -28,16 +28,25 @@ from mirage.server.ssh.server import serve_tunnel
 from tests.server.ssh.conftest import start_harness, stop_harness
 
 
-async def _echo_server() -> asyncio.Server:
-    async def echo(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        while data := await reader.read(1024):
-            writer.write(data)
-            await writer.drain()
-        writer.close()
+async def _echo(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    while data := await reader.read(1024):
+        writer.write(data)
+        await writer.drain()
+    writer.close()
 
-    return await asyncio.start_server(echo, "127.0.0.1", 0)
+
+async def _upper(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    writer.write((await reader.read()).upper())
+    await writer.drain()
+    writer.close()
+
+
+async def _echo_server() -> asyncio.Server:
+    return await asyncio.start_server(_echo, "127.0.0.1", 0)
 
 
 class _Here(MachineHandle):
@@ -79,6 +88,25 @@ async def test_a_forward_reaches_the_port_where_the_lines_run(tmp_path):
             reader, writer = await conn.open_connection("127.0.0.1", port)
             writer.write(b"ping\n")
             assert await asyncio.wait_for(reader.readline(), 30) == b"ping\n"
+            writer.close()
+    finally:
+        await stop_harness(harness)
+        server.close()
+
+
+@pytest.mark.asyncio
+async def test_a_forward_carries_the_answer_to_a_request_ended_by_eof(
+    tmp_path,
+):
+    server = await asyncio.start_server(_upper, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    harness = await start_harness(tmp_path, _line_machine_workspace())
+    try:
+        async with harness.connect() as conn:
+            reader, writer = await conn.open_connection("127.0.0.1", port)
+            writer.write(b"ping\n")
+            writer.write_eof()
+            assert await asyncio.wait_for(reader.read(), 30) == b"PING\n"
             writer.close()
     finally:
         await stop_harness(harness)
