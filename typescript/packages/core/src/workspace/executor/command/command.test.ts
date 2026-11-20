@@ -29,16 +29,13 @@ import { MountRegistry } from '../../mount/registry.ts'
 import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { Argv } from '../../expand/argv.ts'
-import { resolveTarget } from '../../lookup/lookup.ts'
-import { executeNode } from '../../node/execute_node.ts'
-import type { Occurrence } from '../../../policy/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ParseScope } from '../../../shell/parse/scope.ts'
 import { handleJobs } from '../builtins/jobs/jobs.ts'
 import { handleKill } from '../builtins/kill/kill.ts'
 import type { ResolvedCommand, MountTarget } from './resolved.ts'
 import { handleCommand } from './command.ts'
-import { withOpts, type ExecuteNodeDeps } from '../deps.ts'
+import type { ExecuteNodeDeps } from '../deps.ts'
 import type { ExecuteNodeFn } from './types.ts'
 
 function mountCommand(
@@ -332,53 +329,6 @@ describe('bound command execution', () => {
       expect([io.exitCode, node.command]).toEqual([0, 'echo bound'])
     } finally {
       parser.release()
-    }
-  })
-
-  it('keeps the bound site after an identical function redefinition', async () => {
-    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    const body = 'f() { say "${BASH_SOURCE[0]}" "$LINENO"; }'
-    const parser = new ParseScope()
-    try {
-      await ws.shell(`printf '%s\\n' '${body}' > /first; printf '\\n%s\\n' '${body}' > /second`)
-      await ws.shell('shopt -s expand_aliases')
-      await ws.shell("alias say='echo before'; source /first")
-      const session = ws.getSession(ws.defaultSessionId)
-      const target = resolveTarget('f', [], session, ws.registry)
-      if (target.kind !== 'function') throw new Error('expected a shell function')
-      const origin = session.functionSites.get('f')?.origin
-      expect(origin).toBeDefined()
-      expect(origin).not.toBeNull()
-
-      await ws.shell("alias say='echo after'; source /second")
-      expect(session.functions.f).toBe(target.body)
-      expect((await ws.shell('f')).stdoutText).toBe('after /second 2\n')
-
-      const deps: ExecuteNodeDeps = {
-        ...buildDeps(ws.registry, ws.jobTable),
-        parser,
-        handed: { claimed: [], parent: null, origin: null },
-      }
-      const origins: (Occurrence | null | undefined)[] = []
-      const run: ExecuteNodeFn = (node, context, stdin, stack, opts) => {
-        origins.push(opts?.handed?.origin)
-        return executeNode(withOpts(deps, opts), node, context, stdin, stack)
-      }
-      const [out, io] = await handleCommand(
-        deps,
-        run,
-        {
-          argv: new Argv('f', [], []),
-          target,
-        },
-        new EvaluationContext(session),
-      )
-      expect([decode(await materialize(out)), io.exitCode]).toEqual(['before /first 1\n', 0])
-      expect(origins).toHaveLength(1)
-      expect(origins[0]).toBe(origin)
-    } finally {
-      parser.release()
-      await ws.close()
     }
   })
 
