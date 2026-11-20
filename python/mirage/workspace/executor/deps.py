@@ -33,11 +33,12 @@ from mirage.workspace.mount.namespace import Namespace
 class ExecuteNodeDeps:
     """What the node walk runs against, one value per subtree.
 
-    A subtree's value is derived with ``dataclasses.replace``, never
-    changed in place. The entry point for nested lines is stored unbound
-    and bound on read to the subtree's own hand-off, event and line, so
-    the hand-off a subtree's gates read and the one its nested lines run
-    under are one fact.
+    A subtree's value is a new value built from its parent's
+    (``with_opts``, ``with_hand_off``, ``dataclasses.replace`` or the
+    constructor), never changed in place. The entry point for nested
+    lines is stored unbound and bound on read to the subtree's own
+    hand-off, event and line, so the hand-off a subtree's gates read and
+    the one its nested lines run under are one fact.
 
     Args:
         dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).

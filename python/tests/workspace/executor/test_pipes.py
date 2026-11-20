@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +29,8 @@ from mirage.workspace import Workspace
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.deps import ExecuteNodeDeps
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -45,15 +46,21 @@ async def no_line(*_args, **_kw):
     raise AssertionError("nothing to run")
 
 
+async def no_dispatch(*_args, **_kw):
+    raise AssertionError("dispatch should not have been called")
+
+
 def bare_deps() -> ExecuteNodeDeps:
-    """The value a caller with no dispatcher or ledger gives: a job
-    table of its own, and an entry point that runs nothing."""
+    """A real registry, namespace and job table over one RAM mount, with
+    a dispatcher and an entry point that fail the test if called."""
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMVFS(), MountMode.WRITE)
     return ExecuteNodeDeps(
-        None,
-        SimpleNamespace(decisions=None),
-        None,
-        JobTable(),
-        no_line,
+        dispatch=no_dispatch,
+        registry=registry,
+        namespace=Namespace(registry),
+        job_table=JobTable(),
+        entry=no_line,
     )
 
 

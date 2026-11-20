@@ -231,7 +231,6 @@ async def _recurse_reassociated(
         context,
         stdin,
         call_stack,
-        sink=deps.sink,
     )
 
 
@@ -291,7 +290,6 @@ async def _recurse_lifted(
         stdin,
         call_stack,
         processes,
-        deps.sink,
     )
 
 
@@ -338,7 +336,7 @@ async def _recurse_stage(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
         return await _run_redirected(
-            deps,
+            with_opts(deps, {"sink": None}),
             recurse,
             node,
             bound,
@@ -367,7 +365,6 @@ async def _run_pipeline(
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     processes: ProcessTable | None = None,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
 
@@ -377,7 +374,8 @@ async def _run_pipeline(
     the list's. A leading ``!`` negates the whole pipeline's status.
 
     Args:
-        deps (ExecuteNodeDeps): what the pipeline runs against.
+        deps (ExecuteNodeDeps): what the pipeline runs against; its
+            sink is where the output goes as it arrives.
         recurse (Callable): the plain execute_node recursion.
         stages (PipelineStages): the pipeline's stages.
         context (EvaluationContext): the evaluation's session and frame.
@@ -385,9 +383,7 @@ async def _run_pipeline(
         call_stack (CallStack | None): shell call stack.
         processes (ProcessTable | None): where the stages run as
             managed processes.
-        sink (JobConsole | None): where the output goes as it arrives.
     """
-    deps = with_opts(deps, {"sink": sink})
     execute_fn = deps.execute_fn
     session = context.session
     if stages.lead is not None:
@@ -476,7 +472,6 @@ async def _recurse_pipe_stderr(
         context,
         stdin,
         call_stack,
-        sink=deps.sink,
     )
 
 
@@ -525,8 +520,6 @@ async def _run_redirected(
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    *,
-    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a redirected statement: the command under its redirects.
 
@@ -537,7 +530,9 @@ async def _run_redirected(
     command they follow.
 
     Args:
-        deps (ExecuteNodeDeps): what the statement runs against.
+        deps (ExecuteNodeDeps): what the statement runs against; its
+            sink is where the redirect writes what it routes as it goes,
+            None to return it.
         recurse (Callable): the plain execute_node recursion.
         command (Any): the redirected command node, None for a bare
             redirect.
@@ -547,11 +542,9 @@ async def _run_redirected(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
-        sink (JobConsole | None): where the redirect writes what it
-            routes as it goes, None to return it.
     """
-    deps = with_opts(deps, {"sink": sink})
     dispatch = deps.dispatch
+    sink = deps.sink
     execute_fn = deps.execute_fn
     registry = deps.registry
     namespace = deps.namespace
@@ -567,7 +560,6 @@ async def _run_redirected(
             context,
             stdin,
             call_stack,
-            sink=sink,
         )
     if command is not None and command.type == NT.FUNCTION_DEFINITION:
         # The redirects belong to the function, applied at each call
@@ -603,7 +595,7 @@ async def _run_redirected(
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
-            deps,
+            with_opts(deps, {"sink": None}),
             recurse,
             get_pipeline_stages(command, redirects),
             context,
@@ -628,7 +620,6 @@ async def _run_redirected(
                 context,
                 stdin,
                 call_stack,
-                sink=sink,
             )
         return await _negated(
             stdout, io, exec_node, context, command if inner is None else inner
@@ -1401,15 +1392,14 @@ async def _execute_node_body(
         to: JobConsole | None,
     ) -> Awaitable[RedirectResult]:
         return _run_redirected(
-            deps,
+            with_opts(deps, {"sink": to}),
             recurse,
             command,
             redirects,
-            job_table.processes if job_table is not None else None,
+            job_table.processes,
             context,
             stdin,
             cs,
-            sink=to,
         )
 
     if kind == NodeKind.TIMED:
@@ -1434,7 +1424,7 @@ async def _execute_node_body(
                 deps,
                 recurse,
                 list(pending),
-                job_table.processes if job_table is not None else None,
+                job_table.processes,
                 statements[-1],
             )
         # A root run in a caller's frame is the caller's own line (eval,
@@ -1509,8 +1499,7 @@ async def _execute_node_body(
             context,
             stdin,
             cs,
-            job_table.processes if job_table is not None else None,
-            sink,
+            job_table.processes,
         )
         return ran if sink is None else await drained(sink, *ran)
 

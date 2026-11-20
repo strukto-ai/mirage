@@ -409,6 +409,16 @@ async def execute_command(
     function body, a nested shell) writes them as they finish, and
     ``expanded`` is filled with the words the command expanded to, so
     its caller knows what the head ran as.
+
+    Args:
+        deps (ExecuteNodeDeps): what the command runs against.
+        recurse (Callable): the plain execute_node recursion.
+        node (TSNodeLike): the command node.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
+        expanded (ExpandedWords | None): filled with the words the
+            command expanded to.
     """
     registry = deps.registry
     execute_fn = deps.execute_fn
@@ -727,15 +737,15 @@ async def _run_command_body(
     sink = deps.sink
     claimant = claimant_for(node, deps.handed)
     deps = ExecuteNodeDeps(
-        deps.dispatch,
-        registry,
-        namespace,
-        deps.job_table,
-        partial(deps.entry, node=node),
-        deps.cancel,
-        deps.handed,
-        deps.line_handle,
-        sink,
+        dispatch=deps.dispatch,
+        registry=registry,
+        namespace=namespace,
+        job_table=deps.job_table,
+        entry=partial(deps.entry, node=node),
+        cancel=deps.cancel,
+        handed=deps.handed,
+        line_handle=deps.line_handle,
+        sink=sink,
     )
     execute_fn = deps.execute_fn
 
@@ -825,6 +835,24 @@ async def _run_argv(
     redirect targets, judged with the line because their I/O runs on
     the shell's own fds outside the admitted command's gate window, and
     ``runner`` applies redirects after word expansion, gating each open.
+
+    Args:
+        deps (ExecuteNodeDeps): what the command runs against.
+        recurse (Callable): the plain execute_node recursion.
+        argv (Argv): the expanded command words.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
+        row (int): the row the shell began reading the command on.
+        redirects (tuple[PathSpec, ...]): the statement's expanded
+            redirect targets.
+        runner (RedirectRunner | None): applies the redirects after word
+            expansion, None when the command has none.
+        seed_prefix (Callable[[str], None] | None): seeds the prefix
+            assignments once the command's name is known.
+        claimant (Claimant | None): the command and its line.
+        assigned (frozenset[str]): the names the command's prefix
+            assignments set.
     """
     dispatch = deps.dispatch
     registry = deps.registry
@@ -1620,6 +1648,15 @@ async def _route_argv(
 
     The half of ``_run_argv`` past the gate, split out so the gate's
     verdict can be bound around it.
+
+    Args:
+        deps (ExecuteNodeDeps): what the command runs against.
+        recurse (Callable): the plain execute_node recursion.
+        argv (Argv): the admitted command words.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        call_stack (CallStack | None): shell call stack.
+        row (int): the row the shell began reading the command on.
     """
     dispatch = deps.dispatch
     registry = deps.registry

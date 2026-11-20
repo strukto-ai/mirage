@@ -944,13 +944,13 @@ async function runArgv(
     // line, so the command tier's policy guard can fire preVfs for the
     // backend I/O a handler performs.
     const run = (nested: ExecuteFn = executeFn) => {
-      let routed = deps
+      let routedDeps = deps
       if (nested !== executeFn || output !== sink) {
-        routed = { ...deps, executeFn: nested }
-        if (output === undefined) delete routed.sink
-        else routed.sink = output
+        routedDeps = { ...deps, executeFn: nested }
+        if (output === undefined) delete routedDeps.sink
+        else routedDeps.sink = output
       }
-      return routeArgv(routed, recurse, argv, context, given, callStack, row, admitted)
+      return routeArgv(routedDeps, recurse, argv, context, given, callStack, row, admitted)
     }
     // A preCommand route places this command, and what it runs, over the
     // line's placement for its run alone: the lines it runs (`eval`) keep
