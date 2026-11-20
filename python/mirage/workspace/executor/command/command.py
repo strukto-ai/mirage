@@ -1034,22 +1034,17 @@ async def handle_command(
     cmd_str = " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in parts
     )
-    follow = (
-        operand_follow(
-            namespace.session_links(session),
-            dispatch,
-            cmd_name,
-            parts,
-            session.cwd,
-        )
-        if namespace is not None
-        else None
+    follow = operand_follow(
+        namespace.session_links(session),
+        dispatch,
+        cmd_name,
+        parts,
+        session.cwd,
     )
 
     # Job builtins
     if (
         cmd_name in JOB_BUILTINS
-        and job_table is not None
         and lookup(cmd_name, session, registry, context.frame.routing)
         is not Consumer.FUNCTION
     ):
@@ -1065,7 +1060,6 @@ async def handle_command(
 
     if (
         cmd_name in MACHINE_HANDLERS
-        and job_table is not None
         and (
             cmd_name == "free"
             or runs_programs(
@@ -1109,26 +1103,17 @@ async def handle_command(
             call_stack,
         )
 
-    if dispatch is not None:
-        dispatch = made_by_command(dispatch)
+    dispatch = made_by_command(dispatch)
     files = Files(
         dispatch,
-        (
-            namespace.readers(lambda _session: session.visibility)
-            if namespace is not None
-            else None
-        ),
+        namespace.readers(lambda _session: session.visibility),
         follow=follow,
         ledger=False,
     )
 
     def cli_context() -> CLIContext:
         return CLIContext(
-            shell=(
-                nested_shell(execute_fn, session.session_id)
-                if execute_fn is not None
-                else None
-            ),
+            shell=nested_shell(execute_fn, session.session_id),
             command_limits=registry.command_limits,
             ids=registry.ids,
             vfs=files,
@@ -1292,11 +1277,7 @@ async def handle_command(
         )
 
     prepared: ParsedCommand | None = None
-    if (
-        not borrowed
-        and cmd_name in PROGRAM_FILE_COMMANDS
-        and dispatch is not None
-    ):
+    if not borrowed and cmd_name in PROGRAM_FILE_COMMANDS:
         candidate = parse_flags(
             parts[1:],
             registered_spec(cmd_name, SPECS[cmd_name]),

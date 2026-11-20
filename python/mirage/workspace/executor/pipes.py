@@ -600,8 +600,7 @@ async def handle_subshell(
     call_stack = (call_stack or CallStack()).fork(loops=False, paren=True)
     # The subshell's actions run as its own lines: their `wait` and
     # `jobs` see the subshell's jobs, not the caller's.
-    if execute_fn is not None and job_table is not None:
-        execute_fn = partial(execute_fn, job_table=job_table)
+    execute_fn = partial(execute_fn, job_table=job_table)
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="()", exit_code=0)
@@ -619,7 +618,7 @@ async def handle_subshell(
         # leak to the parent.
         is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
         armed = err_trap_armed(session)
-        if is_bg and job_table is not None:
+        if is_bg:
             try:
                 stdout, io, last_exec = await handle_background(
                     execute_node,

@@ -246,7 +246,7 @@ async def run_shell_function(
         ) = outer_parse
         session._alias_view = outer_view
         session._alias_expansion = outer_expansion
-        if nested is not None and decisions is not None:
+        if nested is not None:
             decisions.hand_up(session.session_id, nested)
         scope.release()
         reset_caller(marked)

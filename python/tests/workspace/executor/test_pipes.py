@@ -20,6 +20,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import current_caller
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.machine.constants import stop_signal
@@ -45,13 +46,13 @@ async def no_line(*_args, **_kw):
 
 
 def bare_deps() -> ExecuteNodeDeps:
-    """The value a caller with no dispatcher, job table or ledger gives:
-    every field None but the entry point, which runs nothing."""
+    """The value a caller with no dispatcher or ledger gives: a job
+    table of its own, and an entry point that runs nothing."""
     return ExecuteNodeDeps(
         None,
         SimpleNamespace(decisions=None),
         None,
-        None,
+        JobTable(),
         no_line,
     )
 
