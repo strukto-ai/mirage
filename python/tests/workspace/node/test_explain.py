@@ -1240,6 +1240,9 @@ ANOTHER_SPELLING = (
     "command typeset 'PS4=$(hostname)'; set -x; :",
     "builtin export 'PS4=$(hostname)'; set -x; :",
     "export -p 'PS4=$(hostname)'; set -x; :",
+    'n=-bash; exec -a "$n" bash -c :',
+    'n=-bash; env -a "$n" bash -c :',
+    'k=BASH_ENV; env "$k=/data/e" bash -c :',
 )
 
 STILL_RUNS = (

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -187,6 +188,7 @@ class InnerLine:
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-0", "--null", "-"})
 _ENV_VALUED = ("unset", "chdir", "argv0")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # Variables a whole line's shell expands or sources on its own.
 HOOK_VARS = frozenset({"PS4", "BASH_ENV", "BASH_CMDS", "BASH_ALIASES"})
 
@@ -239,7 +241,9 @@ def _exec_inner(args: Sequence[Word]) -> list[InnerLine]:
         if "l" in word:
             return [InnerLine()]
         if word.endswith("a"):
-            if i < len(args) and args[i].value.startswith("-"):
+            if i < len(args) and (
+                args[i].text is None or args[i].value.startswith("-")
+            ):
                 return [InnerLine()]
             i += 1
     rest = tuple(args[i:])
@@ -337,7 +341,9 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
             after = args[i + 1] if i + 1 < len(args) else None
             chdir = _value_of(args[i], after, "C", "chdir") or chdir
             argv0 = _value_of(args[i], after, "a", "argv0")
-            if argv0 is not None and argv0.value.startswith("-"):
+            if argv0 is not None and (
+                argv0.text is None or argv0.value.startswith("-")
+            ):
                 # A leading `-` in argv0 makes a shell a login shell.
                 return [InnerLine()]
             i += 2 if _takes_next(word) else 1
@@ -348,7 +354,11 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         and "=" in args[i].value
         and not args[i].value.startswith("=")
     ):
-        if is_hook(args[i].value.partition("=")[0]):
+        name = args[i].value.partition("=")[0]
+        # A name only the run expands may be a hook's.
+        if is_hook(name) or (
+            args[i].text is None and not _ENV_NAME.fullmatch(name)
+        ):
             return [InnerLine()]
         i += 1
     rest = tuple(args[i:])

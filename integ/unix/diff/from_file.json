@@ -266,6 +266,46 @@
       "flags": [
         "from-file"
       ]
+    },
+    {
+      "id": "diff_from_file_excludes_in_every_comparison",
+      "seq": 601152,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/ffdiff3/d /data/ffdiff3/e /data/ffdiff3/f && printf 1 > /data/ffdiff3/d/skip && printf 2 > /data/ffdiff3/e/skip && printf 3 > /data/ffdiff3/f/skip && printf k > /data/ffdiff3/d/k && printf k > /data/ffdiff3/e/k && printf k > /data/ffdiff3/f/k && cd /data/ffdiff3 && printf 'skip\\n' | diff -r -X - --from-file=d e f; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "X",
+        "from-file"
+      ]
     }
   ]
 }

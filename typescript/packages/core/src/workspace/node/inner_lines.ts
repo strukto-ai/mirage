@@ -153,6 +153,7 @@ export function innerReadable(inner: InnerLine): boolean {
 const FIND_EXEC: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 const ENV_FLAGS: ReadonlySet<string> = new Set(['-i', '--ignore-environment', '-0', '--null', '-'])
 const ENV_VALUED = ['unset', 'chdir', 'argv0'] as const
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 // Variables a whole line's shell expands or sources on its own.
 export const HOOK_VARS: ReadonlySet<string> = new Set([
   'PS4',
@@ -201,7 +202,7 @@ function execInner(args: readonly Word[]): InnerLine[] {
     if (word === '--') break
     if (word.includes('l')) return [UNREADABLE]
     if (word.endsWith('a')) {
-      if (valueAt(args, i).startsWith('-')) return [UNREADABLE]
+      if (args[i]?.text === null || valueAt(args, i).startsWith('-')) return [UNREADABLE]
       i += 1
     }
   }
@@ -282,7 +283,9 @@ function envInner(args: readonly Word[]): InnerLine[] {
         chdir = valueOf(current, args[i + 1] ?? null, 'C', 'chdir') ?? chdir
         const argv0 = valueOf(current, args[i + 1] ?? null, 'a', 'argv0')
         // A leading `-` in argv0 makes a shell a login shell.
-        if (argv0 !== null && wordValue(argv0).startsWith('-')) return [UNREADABLE]
+        if (argv0 !== null && (argv0.text === null || wordValue(argv0).startsWith('-'))) {
+          return [UNREADABLE]
+        }
       }
       i += takesNext(word) ? 2 : 1
       continue
@@ -292,7 +295,9 @@ function envInner(args: readonly Word[]): InnerLine[] {
   while (i < args.length) {
     const word = valueAt(args, i)
     if (!word.includes('=') || word.startsWith('=')) break
-    if (isHook(word.split('=', 1)[0] ?? '')) return [UNREADABLE]
+    const name = word.split('=', 1)[0] ?? ''
+    // A name only the run expands may be a hook's.
+    if (isHook(name) || (args[i]?.text === null && !ENV_NAME.test(name))) return [UNREADABLE]
     i += 1
   }
   const rest = args.slice(i)

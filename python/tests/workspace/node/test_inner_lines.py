@@ -188,6 +188,17 @@ def test_inner_words_keep_what_the_gate_could_not_read():
         assert inner_lines(name, [Word("$o", None), *_words("ls")]) == [
             InnerLine()
         ]
+    # A dynamic argv0 may start with `-`, and a dynamic name be a hook's.
+    named = Word('"$n"', None)
+    assert inner_lines("exec", [*_words("-a"), named, *_words("bash")]) == [
+        InnerLine()
+    ]
+    assert inner_lines("env", [*_words("-a"), named, *_words("bash")]) == [
+        InnerLine()
+    ]
+    assert inner_lines("env", [Word('"$k=/x"', None), *_words("bash")]) == [
+        InnerLine()
+    ]
     (inner,) = inner_lines("env", [Word('A="$x"', None), *_words("rm")])
     assert [w.value for w in inner.argv] == ["rm"]
     assert inner_lines("bash", [*_words("--version"), dynamic]) == []

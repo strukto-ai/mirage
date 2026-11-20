@@ -188,6 +188,15 @@ describe('innerLines', () => {
       const [held] = innerLines(name, [{ raw, text: null }, ...words('rm')])
       expect([name, held && innerReadable(held)]).toEqual([name, false])
     }
+    // A dynamic argv0 may start with `-`, and a dynamic name be a hook's.
+    const named: Word = { raw: '"$n"', text: null }
+    for (const line of [
+      innerLines('exec', [...words('-a'), named, ...words('bash')]),
+      innerLines('env', [...words('-a'), named, ...words('bash')]),
+      innerLines('env', [{ raw: '"$k=/x"', text: null }, ...words('bash')]),
+    ]) {
+      expect(line.map(innerReadable)).toEqual([false])
+    }
     const [assigned] = innerLines('env', [{ raw: 'A="$x"', text: null }, ...words('rm')])
     expect(assigned?.argv.map(wordValue)).toEqual(['rm'])
     expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
