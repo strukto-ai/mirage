@@ -234,16 +234,17 @@ export function resolveTarget(
   registry: MountRegistry,
   routing?: RouteDecision<Runtime>,
 ): CommandTarget {
+  const target = firstTarget(name, session, registry, routing)
   if (
     name === MACHINE_VIEW &&
+    target.kind !== Consumer.FUNCTION &&
     routing !== undefined &&
     !Object.hasOwn(routing.bindings, name) &&
     runsPrograms(routing.bindings) &&
     picksMachine(args)
   )
     return { kind: Consumer.SESSION }
-  for (const target of layers(name, session, registry, routing)) return target
-  return { kind: Consumer.UNKNOWN }
+  return target
 }
 
 /**
@@ -276,10 +277,11 @@ export function runsWrapper(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  consumer?: Consumer,
 ): boolean {
   const bindings = routing?.bindings ?? registry.runtimeBindings
   if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return false
-  const consumer = lookup(name, session, registry, routing)
+  consumer ??= lookup(name, session, registry, routing)
   if (consumer !== Consumer.UNKNOWN && consumer !== Consumer.EXTERNAL) return false
   return RUNNERS.has(name) || readWrapper(name, args)[0] !== null
 }
@@ -357,6 +359,16 @@ function* layers(
   }
 }
 
+function firstTarget(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+  routing?: RouteDecision<Runtime>,
+): CommandTarget {
+  for (const target of layers(name, session, registry, routing)) return target
+  return { kind: Consumer.UNKNOWN }
+}
+
 /**
  * Route a command name to the layer that consumes it.
  *
@@ -396,8 +408,7 @@ export function lookup(
   registry: MountRegistry,
   routing?: RouteDecision<Runtime>,
 ): Consumer {
-  for (const target of layers(name, session, registry, routing)) return target.kind
-  return Consumer.UNKNOWN
+  return firstTarget(name, session, registry, routing).kind
 }
 
 /**

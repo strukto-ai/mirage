@@ -162,7 +162,7 @@ async def expand_argv(
     consumer, routing = routed_consumer(
         name, typed, session, registry, context.frame.routing
     )
-    if runs_wrapper(name, typed, session, registry, routing):
+    if runs_wrapper(name, typed, session, registry, routing, consumer):
         consumer = Consumer.EXTERNAL
     refused = runtime_refused(name, session, registry, routing)
     if name not in session.functions and consumer is not Consumer.EXTERNAL:
