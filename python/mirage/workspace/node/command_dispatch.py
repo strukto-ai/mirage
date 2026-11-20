@@ -166,6 +166,7 @@ from mirage.workspace.lookup.constants import (
     PROGRAM_WRAPPERS,
 )
 from mirage.workspace.lookup.lookup import (
+    CliTarget,
     external_target,
     program_runtime,
     resolve_target,
@@ -181,11 +182,7 @@ from mirage.workspace.lookup.machine import (
     program_machine,
     several_machines,
 )
-from mirage.workspace.lookup.types import (
-    CliTarget,
-    ExternalTarget,
-    FunctionTarget,
-)
+from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
