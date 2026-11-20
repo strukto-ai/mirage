@@ -12,60 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from dataclasses import fields
+from dataclasses import fields, replace
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 from mirage.commands.builtin.utils.limit import guard_output
 from mirage.context import reset_caller, set_admission
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobTable
 from mirage.execution.line.handle import LineHandle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import (
     ExecuteResultContext,
-    HandOff,
     decision_of,
     post_execute_gate,
     render_deny,
 )
 from mirage.policy.types import RouteContext
-from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole, Terminal
+from mirage.shell.console import Terminal
 from mirage.shell.helpers import get_text, input_substitution_redirect
 from mirage.types import PathSpec, Producer
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand.redirects import expand_redirect
-from mirage.workspace.mount import MountRegistry
-from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import Refused, admit
-from mirage.workspace.node.execute_node import execute_node
+from mirage.workspace.node.execute_node import ExecuteNodeDeps, execute_node
 from mirage.workspace.node.occurrence import claimant_for
 from mirage.workspace.types import ExecutionNode
 
 
 async def run_command_tree(
-    dispatch: DispatchFn,
-    registry: MountRegistry,
-    namespace: Namespace,
-    job_table: JobTable,
-    execute_fn: Callable[..., Any],
+    deps: ExecuteNodeDeps,
     ast: Any,
     context: EvaluationContext,
     stdin: Any,
-    cancel: asyncio.Event | None,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
     command_substitution: bool = False,
     read: list[str] | None = None,
     call_stack: CallStack | None = None,
-    line_handle: LineHandle | None = None,
     route: RouteContext | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
@@ -80,17 +66,12 @@ async def run_command_tree(
     inside the barrier here.
 
     Args:
-        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
-        registry (MountRegistry): mount registry for path resolution.
-        namespace (Namespace): addressing authority for symlink ops.
-        job_table (JobTable): background job management.
-        execute_fn (Callable): recursive execute (for source/eval).
+        deps (ExecuteNodeDeps): what the tree runs against: the line's
+            hand-off, threaded to every command's gate, its abort event,
+            its sink and its handle (None makes one for the tree).
         ast (Any): parsed root node.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
-        cancel (asyncio.Event | None): event used to abort mid-flight.
-        handed (HandOff | None): the line's hand-off, threaded to every
-            command's gate.
         command_substitution (bool): capture a lone input redirect's data
             using the same expansion, dispatcher and output gates.
         read (list[str] | None): the words the shell expanding the
@@ -108,19 +89,20 @@ async def run_command_tree(
         execution node.
     """
     session = context.session
+    registry = deps.registry
+    namespace = deps.namespace
+    cancel = deps.cancel
+    handed = deps.handed
+    sink = deps.sink
     run = partial(
         execute_node,
-        dispatch,
-        registry,
-        namespace,
-        job_table,
-        execute_fn,
-        cancel=cancel,
-        handed=handed,
-        sink=sink,
-        line_handle=line_handle
-        or LineHandle(
-            new_line_id(registry.ids), session.session_id, get_text(ast)
+        deps
+        if deps.line_handle is not None
+        else replace(
+            deps,
+            line_handle=LineHandle(
+                new_line_id(registry.ids), session.session_id, get_text(ast)
+            ),
         ),
     )
     redirect = (
@@ -132,7 +114,7 @@ async def run_command_tree(
         expanded = await expand_redirect(
             redirect,
             context,
-            execute_fn,
+            deps.execute_fn,
             registry,
             links=namespace.session_links(session),
             words=read,
@@ -177,7 +159,7 @@ async def run_command_tree(
             try:
                 stdout, io, exec_node = await handle_redirect(
                     run,
-                    dispatch,
+                    deps.dispatch,
                     None,
                     [expanded],
                     context,

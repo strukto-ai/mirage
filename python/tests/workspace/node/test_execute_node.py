@@ -13,13 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import replace
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from mirage.commands.config import Context
 from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.policy import HandOff
 from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -30,18 +34,24 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.node.execute_node import (
+    ExecuteNodeDeps,
+    with_hand_off,
+    with_opts,
+)
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
 
-def execute_node(dispatch, registry, *args, **kwargs):
-    context = kwargs.get("context", args[3] if len(args) > 3 else None)
+def execute_node(dispatch, registry, job_table, execute_fn, *args, **kwargs):
+    context = kwargs.get("context", args[1] if len(args) > 1 else None)
     if context is not None and context.frame.routing is None:
         context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
-    return _execute_node(
-        dispatch, registry, Namespace(registry), *args, **kwargs
+    deps = ExecuteNodeDeps(
+        dispatch, registry, Namespace(registry), job_table, execute_fn
     )
+    return _execute_node(deps, *args, **kwargs)
 
 
 def _session(cwd="/", env=None):
@@ -3052,3 +3062,37 @@ def test_cd_tilde():
     dispatch.side_effect = FileNotFoundError("not found")
     _, io, _, session, _, _ = _exec("cd ~", session=session, dispatch=dispatch)
     assert session.cwd == "/"
+
+
+# ── ExecuteNodeDeps ─────────────────────────────────
+
+
+def _deps(**fields):
+    registry = MountRegistry()
+    return ExecuteNodeDeps(
+        _mock_dispatch(),
+        registry,
+        Namespace(registry),
+        JobTable(),
+        AsyncMock(return_value=IOResult()),
+        **fields,
+    )
+
+
+def test_with_opts_cancel_none_clears_the_event():
+    deps = _deps(cancel=asyncio.Event())
+    assert with_opts(deps, {"cancel": None}).cancel is None
+
+
+def test_with_opts_unknown_key_raises():
+    with pytest.raises(TypeError, match="jobs"):
+        with_opts(_deps(), {"jobs": JobTable()})
+
+
+def test_execute_fn_follows_the_hand_off():
+    deps = _deps(handed=HandOff())
+    handed = HandOff()
+    for derived in (replace(deps, handed=handed), with_hand_off(deps, handed)):
+        deps.entry.reset_mock()
+        _run(derived.execute_fn("true", session_id="test"))
+        assert deps.entry.call_args.kwargs["handed"] is handed
