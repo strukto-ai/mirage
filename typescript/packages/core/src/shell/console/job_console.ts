@@ -34,8 +34,26 @@ export class JobConsole {
   private boundProcess: string | null = null
   // Whether what this console takes on stderr goes where its stdout goes
   // (`2>&1`): a redirect level's, set when its descriptors are opened; a
-  // job's own console keeps them apart.
+  // job's own console keeps them apart. The session's `exec` stdout and
+  // stderr bindings as the level began running, which the join holds under
+  // (`joined`).
   joinsErrors = false
+  execStreams: readonly [string | null, string | null] = [null, null]
+
+  /**
+   * Whether a program writing here now writes its stderr where its stdout
+   * goes: the level joined the two, and no `exec` it ran since pointed either
+   * elsewhere (`{ exec 2>f; prog; } 2>&1`). A binding made before the level
+   * stays under it (`exec >log; prog 2>&1`). Mirrors Python's `joined`.
+   *
+   * @param execStdout the session's `exec` stdout binding.
+   * @param execStderr its `exec` stderr binding.
+   */
+  joined(execStdout: string | null, execStderr: string | null): boolean {
+    return (
+      this.joinsErrors && this.execStreams[0] === execStdout && this.execStreams[1] === execStderr
+    )
+  }
 
   /** The id of the process whose output this is, as text. */
   get process(): string | null {

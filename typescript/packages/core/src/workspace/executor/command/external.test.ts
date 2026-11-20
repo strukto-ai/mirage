@@ -906,6 +906,8 @@ describe('a joined program', () => {
     ['{ prog < /dev/null; } 2>&1', 'out\nerr\n', '', true],
     ['{ exec 2>/data/e; prog; } 2>&1; echo -; cat /data/e', 'out\n-\nerr\n', '', false],
     ['{ exec 2>&-; prog; } 2>&1', 'out\n', '', false],
+    ['exec >/data/l; prog 2>&1; exec >&2; cat /data/l', '', 'out\nerr\n', true],
+    ['{ exec 2>/data/e; { prog; } >&1; } 2>&1; echo -; cat /data/e', 'out\n-\nerr\n', '', false],
   ])('runs %j joined on its machine as its redirects say', async (line, said, errs, joined) => {
     const enc = new TextEncoder()
     const box = new ScriptedMachine('box', () => ({

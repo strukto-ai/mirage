@@ -308,8 +308,8 @@ def _folder_free(name: str) -> bool:
 def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
     """Every path a command names, absolute, with whether any of them
     depends on the folder it runs from: an operand typed relative, an
-    option's path the folder changes, or no path at all (``ls`` lists
-    the folder).
+    option's path the folder changes, or no path operand at all (``ls``
+    and ``grep -r -f /tmp/p x`` read the folder).
 
     Args:
         argv (Argv): the command.
@@ -320,7 +320,7 @@ def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
     children = _child_paths(argv.name, argv.args, cwd)
     paths = [unmark_globs(w.virtual) for w in operands]
     relative = (
-        not (paths or options or children)
+        not paths
         or any(not w.raw_path.startswith("/") for w in operands)
         or options != _option_paths(argv, "/")
     )
@@ -428,9 +428,9 @@ def stated_machine(
         if w.kind not in (WordKind.NAME, WordKind.REDIRECT)
     ]
     children = _child_paths(name, args, cwd)
-    relative = not (named or children) or any(
-        not p.raw_path.startswith("/") for p in named
-    )
+    relative = not any(
+        w.kind is WordKind.OPERAND for w in words if w.path
+    ) or any(not p.raw_path.startswith("/") for p in named)
     scopes = [
         *((unmark_globs(p.virtual), True) for p in named),
         *((c, True) for c in children),
