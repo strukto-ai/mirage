@@ -155,9 +155,11 @@ fn mount(
     mut config: fuser::Config,
 ) -> (std::io::Result<fuser::Session<fs::MirageFs>>, bool) {
     config.n_threads = Some(1);
-    let session = mount_macfuse(source, mountpoint)
-        .and_then(|fd| fuser::Session::from_fd(fs, fd, config.acl, config));
-    (session, true)
+    match mount_macfuse(source, mountpoint) {
+        Ok(Ok(fd)) => (fuser::Session::from_fd(fs, fd, config.acl, config), true),
+        Ok(Err(err)) => (Err(err), true),
+        Err(err) => (Err(err), false),
+    }
 }
 
 /// macFUSE's options for a mount: `fsname` names it as the
@@ -177,9 +179,13 @@ const MACFUSE_LIBRARY: &std::ffi::CStr = c"/usr/local/lib/libfuse.2.dylib";
 /// only now, so the binary runs and names its version on a Mac without
 /// macFUSE, and links nothing of it. libfuse's channel stays open until the
 /// process ends: macFUSE finishes the mount once the session answers the
-/// kernel's first request.
+/// kernel's first request. An error when nothing was mounted; an inner one
+/// when the mount stands without a device to serve it.
 #[cfg(target_os = "macos")]
-fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd::OwnedFd> {
+fn mount_macfuse(
+    source: &str,
+    mountpoint: &str,
+) -> std::io::Result<std::io::Result<std::os::fd::OwnedFd>> {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::io::{Error, ErrorKind};
     use std::os::fd::{FromRawFd, OwnedFd};
@@ -187,11 +193,12 @@ fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd:
     #[repr(C)]
     struct Args {
         argc: c_int,
-        argv: *const *const c_char,
+        argv: *mut *mut c_char,
         allocated: c_int,
     }
-    type Mount = unsafe extern "C" fn(*const c_char, *const Args) -> *mut c_void;
+    type Mount = unsafe extern "C" fn(*const c_char, *mut Args) -> *mut c_void;
     type ChannelFd = unsafe extern "C" fn(*mut c_void) -> c_int;
+    type FreeArgs = unsafe extern "C" fn(*mut Args);
 
     let library = unsafe { libc::dlopen(MACFUSE_LIBRARY.as_ptr(), libc::RTLD_NOW) };
     if library.is_null() {
@@ -211,6 +218,8 @@ fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd:
     let mount: Mount = unsafe { std::mem::transmute::<*mut c_void, Mount>(symbol(c"fuse_mount")?) };
     let channel_fd: ChannelFd =
         unsafe { std::mem::transmute::<*mut c_void, ChannelFd>(symbol(c"fuse_chan_fd")?) };
+    let free_args: FreeArgs =
+        unsafe { std::mem::transmute::<*mut c_void, FreeArgs>(symbol(c"fuse_opt_free_args")?) };
     let bad = |_| Error::from(ErrorKind::InvalidInput);
     let options = format!("fsname={},{MACFUSE_OPTIONS}", source.replace(',', "\\,"));
     let argv = [
@@ -218,22 +227,23 @@ fn mount_macfuse(source: &str, mountpoint: &str) -> std::io::Result<std::os::fd:
         CString::new("-o").map_err(bad)?,
         CString::new(options).map_err(bad)?,
     ];
-    let pointers: Vec<*const c_char> = argv.iter().map(|arg| arg.as_ptr()).collect();
-    let args = Args {
+    let mut pointers: Vec<*mut c_char> = argv.iter().map(|arg| arg.as_ptr().cast_mut()).collect();
+    let mut args = Args {
         argc: pointers.len() as c_int,
-        argv: pointers.as_ptr(),
+        argv: pointers.as_mut_ptr(),
         allocated: 0,
     };
     let target = CString::new(mountpoint).map_err(bad)?;
-    let channel = unsafe { mount(target.as_ptr(), &args) };
+    let channel = unsafe { mount(target.as_ptr(), &mut args) };
+    unsafe { free_args(&mut args) };
     if channel.is_null() {
         return Err(Error::other("macFUSE refused the mount"));
     }
     let fd = unsafe { channel_fd(channel) };
     if fd < 0 {
-        return Err(Error::other("macFUSE gave the mount no device"));
+        return Ok(Err(Error::other("macFUSE gave the mount no device")));
     }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    Ok(Ok(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
 /// Mount `/dev/fuse` at `mountpoint` as `fuse.mirage` when this process

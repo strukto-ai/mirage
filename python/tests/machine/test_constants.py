@@ -689,10 +689,24 @@ def test_a_macs_mount_table_names_each_prefix_by_its_real_path():
         "synchronous, nobrowse, mounted by u)\n"
         "map auto_home on /System/Volumes/Data/home (autofs, nobrowse)\n"
         f"{DARWIN_POINT_MARK}/data\t/home/u/.mirage/mnt/data\n"
-        f"{DARWIN_POINT_MARK}/notes\t/notes\n"
+        f"{DARWIN_POINT_MARK}/notes\t/notes\n",
+        {},
     )
     assert rows == {"/data": ("src-1:/data", "macfuse")}
     assert points == {"/data": "/home/u/.mirage/mnt/data", "/notes": "/notes"}
+
+
+def test_a_macs_mount_table_keeps_a_source_holding_on_whole():
+    rows, points = darwin_mount_table(
+        "src-1:/a on /b on /a on /b (macfuse, nodev, mounted by u)\n"
+        "src-1:/c on /c (macfuse, nodev, mounted by u)\n",
+        {"/a on /b": "/a on /b", "/c": "/c"},
+    )
+    assert rows == {
+        "/a on /b": ("src-1:/a on /b", "macfuse"),
+        "/c": ("src-1:/c", "macfuse"),
+    }
+    assert points == {"/a on /b": "/a on /b", "/c": "/c"}
 
 
 MAC = pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac's ps")
@@ -710,7 +724,7 @@ def test_a_macs_table_line_follows_a_link_to_its_real_path(tmp_path):
     real.mkdir()
     (tmp_path / "link").symlink_to(real)
     done = _sh(darwin_table_line([f"{tmp_path}/link/ws"]))
-    _, points = darwin_mount_table(done.stdout)
+    _, points = darwin_mount_table(done.stdout, {})
     assert points == {f"{tmp_path}/link/ws": f"{real.resolve()}/ws"}
 
 
@@ -758,3 +772,37 @@ def test_a_mac_knows_a_run_by_its_program_and_what_runs_under_it():
         for left in (wrapper, other, program):
             left.kill()
             left.wait(5)
+
+
+@MAC
+def test_a_mac_stop_kills_what_outlives_the_program(tmp_path):
+    untagged = {k: v for k, v in os.environ.items() if k != PROCESS}
+    pidfile = tmp_path / "child"
+    program = subprocess.Popen(
+        [
+            "/bin/sh",
+            "-c",
+            '/bin/sh -c \'trap "" TERM; echo $$ > "$1"; '
+            'while :; do /bin/sleep 0.05; done\' sh "$0" & wait',
+            str(pidfile),
+        ],
+        env=untagged,
+    )
+    child = 0
+    try:
+        for _ in range(50):
+            if pidfile.exists() and pidfile.read_text().strip():
+                break
+            time.sleep(0.1)
+        child = int(pidfile.read_text())
+        started = float(_sh(darwin_start(str(program.pid))).stdout)
+        root = MachinePid(program.pid, started)
+        assert _sh(stop_line("w1:9", 15, root)).returncode == 0
+        assert program.wait(5) != 0
+        time.sleep(0.2)
+        assert _sh(f"kill -0 {child}").returncode != 0
+    finally:
+        program.kill()
+        program.wait(5)
+        if child:
+            _sh(f"kill -KILL {child}")
