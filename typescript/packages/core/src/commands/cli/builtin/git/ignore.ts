@@ -17,6 +17,7 @@ import { readOptional } from './io.ts'
 
 import type { Files } from '../../../../workspace/files.ts'
 import type { RepoLocation } from './types.ts'
+import { rstripChars } from '../../../../utils/text.ts'
 
 export const GITIGNORE = '.gitignore'
 export const INFO_EXCLUDE = 'info/exclude'
@@ -115,10 +116,10 @@ function translate(pattern: string, anchored: boolean): string {
 export function parseRules(text: string): Rule[] {
   const rules: Rule[] = []
   for (const [index, raw] of text.split('\n').entries()) {
-    // Trailing whitespace is not part of a pattern unless it was escaped, and a
-    // blank or commented line is not a pattern at all.
+    // Trailing spaces are not part of a pattern unless escaped, and a blank or
+    // commented line is not a pattern at all.
     let line = raw.replace(/\r$/, '')
-    const kept = line.trimEnd().length
+    const kept = rstripChars(line, ' ').length
     line = line.slice(0, line[kept - 1] === '\\' ? kept + 1 : kept)
     if (line === '' || line.startsWith('#')) continue
     const spelled = line

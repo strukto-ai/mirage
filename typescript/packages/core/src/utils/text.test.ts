@@ -36,5 +36,7 @@ describe('rstripChars', () => {
     expect(rstripChars('v1.-.', '.-')).toBe('v1')
     expect(rstripChars('===', '=')).toBe('')
     expect(rstripChars('ab', 'c')).toBe('ab')
+    expect(rstripChars('x\u{1F200}', '\u{1F600}')).toBe('x\u{1F200}')
+    expect(rstripChars('a\u{1F600}\u{1F600}', '\u{1F600}')).toBe('a')
   })
 })

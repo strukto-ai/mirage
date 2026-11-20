@@ -20,6 +20,11 @@ export function rstripNewlines(s: string): string {
 
 export function rstripChars(s: string, chars: string): string {
   let end = s.length
-  while (end > 0 && chars.includes(s.charAt(end - 1))) end--
+  while (end > 0) {
+    const unit = s.charCodeAt(end - 1)
+    const start = end > 1 && unit >= 0xdc00 && unit < 0xe000 ? end - 2 : end - 1
+    if (!chars.includes(s.slice(start, end))) break
+    end = start
+  }
   return s.slice(0, end)
 }

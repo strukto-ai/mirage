@@ -2927,10 +2927,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n!igkeep\\nsub/\\n' > .gitignore; mkdir sub; echo a > sub/x; echo b > igfile; git check-ignore igfile igkeep sub sub/x sub/y other; echo \"[$?]\"; git check-ignore other; echo \"[$?]\"; git check-ignore -q igfile; echo \"[$?]\"; git check-ignore -q other; echo \"[$?]\"); rm -rf /repo/ci",
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n!igkeep\\nsub/\\n' > .gitignore; mkdir sub; echo a > sub/x; echo b > igfile; git check-ignore igfile igkeep sub sub/x sub/y other; echo \"[$?]\"; git check-ignore other; echo \"[$?]\"; git check-ignore -q igfile; echo \"[$?]\"; git check-ignore -q other; echo \"[$?]\"; printf 'tab\\\\\\t\\t\\nesc\\\\    \\ntrail   \\n' >> .gitignore; git check-ignore \"$(printf 'tab\\t\\t')\" \"$(printf 'tab\\t')\" 'esc ' 'esc  ' trail 'trail '; echo \"[$?]\"); rm -rf /repo/ci",
       "expect": {
         "exit": 0,
-        "stdout": "igfile\nsub\nsub/x\nsub/y\n[0]\n[1]\n[0]\n[1]\n",
+        "stdout": "igfile\nsub\nsub/x\nsub/y\n[0]\n[1]\n[0]\n[1]\n\"tab\\t\\t\"\nesc \ntrail\n[0]\n",
         "stderr": ""
       }
     },
