@@ -767,8 +767,6 @@ export interface ExecuteNodeDeps {
   namespace: Namespace
   jobTable: JobTable
   executeFn: ExecuteFn
-  workspaceId: string
-  registerCloser: (fn: () => Promise<void>) => void
   signal?: AbortSignal
   /**
    * The hand-off this subtree runs on, carried to every command's gate

@@ -153,11 +153,9 @@ export interface ExecuteEnv {
   records: OpRecord[]
   jobTable: JobTable
   lineTable: LineTable
-  workspaceId: string
   runtimes: Runtimes
   router: Router
   secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
-  registerCloser(fn: () => Promise<void>): void
   execute(cmd: string, options: ExecuteOptions): Promise<ExecuteResult>
 }
 
@@ -1137,13 +1135,9 @@ async function runPreparedLine(
             namespace: env.namespace,
             jobTable: options.jobTable ?? env.jobTable,
             executeFn,
-            workspaceId: env.workspaceId,
             lineHandle:
               options.lineHandle ??
               new LineHandle(newLineId(env.registry.ids), targetSession.sessionId, command),
-            registerCloser: (fn: () => Promise<void>) => {
-              env.registerCloser(fn)
-            },
             // Alias expansion rewrites the head word and reads the result as a
             // fresh line, whose parse the line's scope holds.
             parser,
