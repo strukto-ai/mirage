@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { materialize } from '../../../io/types.ts'
+import * as rs from '../../../rs/stream.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { formatWcLines, numberWidth, parseFlags, wcGeneric } from './wc.ts'
@@ -63,6 +64,23 @@ describe('formatWcLines', () => {
     expect(formatWcLines([{ values: [2], label: '/a/n\nq' }])).toEqual(["2 '/a/n'$'\\n''q'"])
     expect(formatWcLines([{ values: [2], label: '/a/b c' }])).toEqual(['2 /a/b c'])
   })
+})
+
+it('requests only lines, words and bytes by default', async () => {
+  const run = vi.spyOn(rs, 'runStream')
+  try {
+    const stdin = new TextEncoder().encode('one two\n')
+    const ctx: Context = { stdin, flags: { total: 'only' }, cwd: PathSpec.fromStrPath('/') }
+    const result = await wcGeneric([], [], ctx, vi.fn())
+    expect(new TextDecoder().decode(await materialize(result?.[0] ?? null))).toBe('1 2 8\n')
+    expect(run).toHaveBeenCalledWith(
+      'wc',
+      { lines: true, words: true, bytes: true, chars: false, max_line_length: false },
+      expect.anything(),
+    )
+  } finally {
+    run.mockRestore()
+  }
 })
 
 describe('numberWidth', () => {

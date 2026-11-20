@@ -1,3 +1,5 @@
+from unittest.mock import ANY, patch
+
 import pytest
 
 from mirage.commands.builtin.generic.wc import (
@@ -12,6 +14,7 @@ from mirage.commands.builtin.generic.wc import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.io.types import PathRecord, materialize
+from mirage.rs import run_stream
 from mirage.types import PathSpec
 
 
@@ -100,6 +103,29 @@ def test_format_wc_lines_combines_selected_counts_in_canonical_order():
 
 def _sync_read(_path):
     return b"x\n"
+
+
+@pytest.mark.asyncio
+async def test_default_wc_requests_only_lines_words_and_bytes():
+    with patch(
+        "mirage.commands.builtin.generic.wc.run_stream", wraps=run_stream
+    ) as scan:
+        output, _, _ = await format_multi(
+            [PathSpec.from_str_path("/a")], read=_sync_read
+        )
+
+    assert output == b"1 1 2 /a\n"
+    scan.assert_called_once_with(
+        "wc",
+        {
+            "lines": True,
+            "words": True,
+            "bytes": True,
+            "chars": False,
+            "max_line_length": False,
+        },
+        ANY,
+    )
 
 
 async def _async_byte_read(_path):

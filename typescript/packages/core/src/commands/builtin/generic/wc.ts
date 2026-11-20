@@ -99,6 +99,9 @@ async function wc(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcC
     chars: flags.chars,
     max_line_length: flags.maxLineLength,
   }
+  if (!Object.values(config).some(Boolean)) {
+    Object.assign(config, { lines: true, words: true, bytes: true })
+  }
   let report = ''
   for await (const part of runStream('wc', config, chunks(source, ctx.signal))) {
     report += decoder.decode(part)
