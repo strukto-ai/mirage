@@ -169,11 +169,10 @@ hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
    workflow checks the tag against the versions and builds again.
 
 1. Download the run's `mirage-ai-*`, `mirage-fuse-*` and `npm-tarballs`
-   artifacts, check them, and publish them by hand: the wheels to PyPI
-   first, then the npm tarballs, `core` before the packages that depend on
-   it. A pre-release
-   goes out under npm's `alpha`, `beta` or `rc` dist-tag, a release under
-   `latest`.
+   artifacts, check them, and publish them by hand: the wheels and the
+   `mirage-ai` sdist to PyPI first, then the npm tarballs, `core` before
+   the packages that depend on it. A pre-release goes out under npm's
+   `alpha`, `beta` or `rc` dist-tag, a release under `latest`.
 
 1. From a checkout of the tag, push the sandbox image to the GitHub
    container registry under the version and `latest`:

@@ -128,7 +128,8 @@ def main() -> int:
     shared = bundled(crate_sections("ast-grep/Cargo.toml"))
     append(WHEEL, WHEEL_LEAD, "python/Cargo.toml", shared)
     append(CORE, CORE_LEAD, "pdf-wasm/Cargo.toml", shared)
-    append(FUSE, FUSE_LEAD, "fuse/Cargo.toml", [])
+    musl = (ROOT / "licenses/third_party/musl.txt").read_text().strip()
+    append(FUSE, FUSE_LEAD, "fuse/Cargo.toml", [musl])
     written = ", ".join(str(p.relative_to(ROOT)) for p in (WHEEL, CORE, FUSE))
     print(f"wrote {written}")
     return 0

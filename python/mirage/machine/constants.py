@@ -144,11 +144,14 @@ SERVED_KINDS: dict[str, str] = {
     "fuse.mirage": "mirage-fuse",
 }
 
-# Finds mirage-fuse on the machine, Mirage's folder in its home first and
-# then its PATH, into ``$f``.
+# Finds the machine's mirage-fuse that speaks this host's fsproto, Mirage's
+# folder in its home first and then its PATH, into ``$f``, empty when
+# neither does.
 MIRAGE_FUSE_FIND = (
-    'f="${HOME:-/root}/.mirage/bin/mirage-fuse"; '
-    '[ -x "$f" ] || f=$(command -v mirage-fuse 2>/dev/null); '
+    'f=; for c in "${HOME:-/root}/.mirage/bin/mirage-fuse" '
+    '"$(command -v mirage-fuse 2>/dev/null)"; do '
+    'case "$("$c" --version 2>/dev/null)" in '
+    f'(*" fsproto {FSPROTO_VERSION}") f=$c; break;; esac; done; '
 )
 
 # This host's version as npm spells it, ``0.1.0-alpha.1`` for PyPI's
@@ -161,17 +164,16 @@ MIRAGE_FUSE_VERSION = re.sub(
 
 # Exits 0 once the machine's mirage-fuse speaks this host's fsproto: one
 # it lacks is installed into Mirage's folder in its home at this host's
-# version, with uv or else npm, whichever the machine has.
+# version, with uv or else npm, whichever the machine has, either one
+# replacing a stale one there.
 MIRAGE_FUSE_LINE = (
-    f'{MIRAGE_FUSE_FIND}case "$("$f" --version 2>/dev/null)" in '
-    f'(*" fsproto {FSPROTO_VERSION}") exit 0;; esac; '
+    f'{MIRAGE_FUSE_FIND}[ -n "$f" ] && exit 0; '
     'd="${HOME:-/root}/.mirage"; { { command -v uv && '
     'UV_TOOL_BIN_DIR="$d/bin" uv tool install --force '
     f"mirage-fuse=={MIRAGE_FUSE_VERSION}; }} || {{ command -v npm && "
-    'npm install -g --prefix "$d" '
+    'npm install -g --force --prefix "$d" '
     f"@struktoai/mirage-fuse@{MIRAGE_FUSE_VERSION}; }}; }} >/dev/null 2>&1; "
-    f'{MIRAGE_FUSE_FIND}case "$("$f" --version 2>/dev/null)" in '
-    f'(*" fsproto {FSPROTO_VERSION}") exit 0;; esac; exit 1'
+    f'{MIRAGE_FUSE_FIND}[ -n "$f" ]'
 )
 MIRAGE_FUSE_HINT = (
     "mount_type mirage needs a Linux machine with mirage-fuse speaking "

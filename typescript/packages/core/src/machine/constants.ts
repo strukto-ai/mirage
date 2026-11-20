@@ -125,11 +125,14 @@ export const SERVED_KINDS: ReadonlyMap<string, string> = new Map([
   ['fuse.mirage', 'mirage-fuse'],
 ])
 
-// Finds mirage-fuse on the machine, Mirage's folder in its home first and
-// then its PATH, into `$f`.
+// Finds the machine's mirage-fuse that speaks this host's fsproto, Mirage's
+// folder in its home first and then its PATH, into `$f`, empty when
+// neither does.
 export const MIRAGE_FUSE_FIND =
-  'f="${HOME:-/root}/.mirage/bin/mirage-fuse"; ' +
-  '[ -x "$f" ] || f=$(command -v mirage-fuse 2>/dev/null); '
+  'f=; for c in "${HOME:-/root}/.mirage/bin/mirage-fuse" ' +
+  '"$(command -v mirage-fuse 2>/dev/null)"; do ' +
+  'case "$("$c" --version 2>/dev/null)" in ' +
+  `(*" fsproto ${String(FSPROTO_VERSION)}") f=$c; break;; esac; done; `
 
 // This host's version as npm spells it, `0.1.0-alpha.1`; uv reads that
 // spelling too.
@@ -137,17 +140,16 @@ export const MIRAGE_FUSE_VERSION = VERSION
 
 // Exits 0 once the machine's mirage-fuse speaks this host's fsproto: one
 // it lacks is installed into Mirage's folder in its home at this host's
-// version, with uv or else npm, whichever the machine has.
+// version, with uv or else npm, whichever the machine has, either one
+// replacing a stale one there.
 export const MIRAGE_FUSE_LINE =
-  `${MIRAGE_FUSE_FIND}case "$("$f" --version 2>/dev/null)" in ` +
-  `(*" fsproto ${String(FSPROTO_VERSION)}") exit 0;; esac; ` +
+  `${MIRAGE_FUSE_FIND}[ -n "$f" ] && exit 0; ` +
   'd="${HOME:-/root}/.mirage"; { { command -v uv && ' +
   'UV_TOOL_BIN_DIR="$d/bin" uv tool install --force ' +
   `mirage-fuse==${MIRAGE_FUSE_VERSION}; } || { command -v npm && ` +
-  'npm install -g --prefix "$d" ' +
+  'npm install -g --force --prefix "$d" ' +
   `@struktoai/mirage-fuse@${MIRAGE_FUSE_VERSION}; }; } >/dev/null 2>&1; ` +
-  `${MIRAGE_FUSE_FIND}case "$("$f" --version 2>/dev/null)" in ` +
-  `(*" fsproto ${String(FSPROTO_VERSION)}") exit 0;; esac; exit 1`
+  `${MIRAGE_FUSE_FIND}[ -n "$f" ]`
 export const MIRAGE_FUSE_HINT = `mount_type mirage needs a Linux machine with mirage-fuse speaking fsproto ${String(FSPROTO_VERSION)}, and it could not be installed: that takes uv or npm there; put it in the image (uv tool install mirage-fuse==${MIRAGE_FUSE_VERSION} or npm install -g @struktoai/mirage-fuse@${MIRAGE_FUSE_VERSION}), or use mount_type ssh`
 
 /**

@@ -30,6 +30,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ENCODE_OUTPUT,
+  MIRAGE_FUSE_FIND,
   MIRAGE_FUSE_LINE,
   MIRAGE_FUSE_VERSION,
   MOUNT_GUARD,
@@ -527,7 +528,8 @@ describe('SSHFS_LINE', () => {
 
 // Stand-ins for the installers MIRAGE_FUSE_LINE calls, on a PATH of their own:
 // each logs its call and, unless told to fail, puts a mirage-fuse speaking
-// this host's fsproto where it was asked to.
+// this host's fsproto where it was asked to. npm, as npm does, refuses to
+// replace a file there without --force.
 const FUSE = `#!/bin/sh\necho "mirage-fuse 0 fsproto ${String(FSPROTO_VERSION)}"\n`
 const FAKE_INSTALLERS: Record<string, string> = {
   uv:
@@ -536,9 +538,13 @@ const FAKE_INSTALLERS: Record<string, string> = {
     `printf '%s' '${FUSE}' > "$UV_TOOL_BIN_DIR/mirage-fuse"\n` +
     '/bin/chmod +x "$UV_TOOL_BIN_DIR/mirage-fuse"\n',
   npm:
-    '#!/bin/sh\necho "npm $*" >> "$LOG"\n/bin/mkdir -p "$4/bin"\n' +
-    `printf '%s' '${FUSE}' > "$4/bin/mirage-fuse"\n` +
-    '/bin/chmod +x "$4/bin/mirage-fuse"\n',
+    '#!/bin/sh\necho "npm $*" >> "$LOG"\nf=; p=\n' +
+    'while [ $# -gt 0 ]; do case $1 in --force) f=1;; ' +
+    '--prefix) p=$2;; esac; shift; done\n' +
+    '[ -e "$p/bin/mirage-fuse" ] && [ -z "$f" ] && exit 1\n' +
+    '/bin/mkdir -p "$p/bin"\n' +
+    `printf '%s' '${FUSE}' > "$p/bin/mirage-fuse"\n` +
+    '/bin/chmod +x "$p/bin/mirage-fuse"\n',
 }
 
 describe('MIRAGE_FUSE_LINE', () => {
@@ -597,7 +603,7 @@ describe('MIRAGE_FUSE_LINE', () => {
       0,
       [
         `uv tool install --force mirage-fuse==${MIRAGE_FUSE_VERSION} in ${home}/.mirage/bin`,
-        `npm install -g --prefix ${home}/.mirage @struktoai/mirage-fuse@${MIRAGE_FUSE_VERSION}`,
+        `npm install -g --force --prefix ${home}/.mirage @struktoai/mirage-fuse@${MIRAGE_FUSE_VERSION}`,
       ],
     ])
   })
@@ -610,6 +616,23 @@ describe('MIRAGE_FUSE_LINE', () => {
     const [code, calls] = line(dir, ['npm'])
     expect([code, calls.length]).toEqual([0, 1])
     expect(readFileSync(stale, 'utf8')).not.toContain('fsproto 0')
+  })
+  it('takes the PATH one past a stale home one', () => {
+    const dir = machine()
+    const home = join(dir, 'home')
+    const stale = join(home, '.mirage', 'bin', 'mirage-fuse')
+    mkdirSync(join(home, '.mirage', 'bin'), { recursive: true })
+    writeFileSync(stale, '#!/bin/sh\necho "mirage-fuse 0 fsproto 0"\n')
+    chmodSync(stale, 0o755)
+    const fuse = join(dir, 'bin', 'mirage-fuse')
+    writeFileSync(fuse, FUSE)
+    chmodSync(fuse, 0o755)
+    expect(line(dir, [])).toEqual([0, []])
+    const found = spawnSync('/bin/sh', ['-c', `${MIRAGE_FUSE_FIND}printf %s "$f"`], {
+      env: { PATH: join(dir, 'bin'), HOME: home },
+      encoding: 'utf8',
+    })
+    expect(found.stdout).toBe(fuse)
   })
   it('fails without uv or npm', () => {
     expect(line(machine(), [])).toEqual([1, []])
