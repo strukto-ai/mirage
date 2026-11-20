@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from functools import partial
 
 from mirage.context import (
@@ -35,7 +36,7 @@ from mirage.workspace.executor.builtins.alias.alias import body_aliases
 from mirage.workspace.executor.builtins.shared import is_count_word
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import execute_body, returning
-from mirage.workspace.executor.deps import ExecuteNodeDeps
+from mirage.workspace.executor.deps import ExecuteNodeDeps, with_hand_off
 from mirage.workspace.executor.traps import (
     lift_function_traps,
     restore_function_traps,
@@ -86,8 +87,10 @@ async def run_shell_function(
     ending in ``&``; its ``handed`` holds the approval claims a job
     inherits and its registry's ``decisions`` the ledger that holds
     them; its ``sink`` is where each statement writes as it finishes
-    (None returns the body's output); its ``execute_fn`` runs a trap
-    action as a line of the shell.
+    (None returns the body's output). The body runs on one value of its
+    own, on the function's hand-off, so its commands, its jobs and its
+    ERR and RETURN actions are all judged under that hand-off; an action
+    stands at its own text, not at the command that called the function.
 
     Args:
         deps (ExecuteNodeDeps): what the call runs against.
@@ -100,11 +103,9 @@ async def run_shell_function(
         call_stack (CallStack | None): the caller's stack, or a fresh
             one for a top-level call.
     """
-    job_table = deps.job_table
     handed = deps.handed
     decisions = deps.registry.decisions
     sink = deps.sink
-    execute_fn = deps.execute_fn
     session = context.session
     cs = (
         call_stack
@@ -201,22 +202,20 @@ async def run_shell_function(
         if handed is not None and origin is not None
         else None
     )
-    body_handed = nested if nested is not None else handed
+    outer = deps if nested is None else with_hand_off(deps, nested)
+    body_deps = replace(outer, entry=partial(outer.entry, node=None))
+    execute_fn = body_deps.execute_fn
     if nested is not None:
         execute_node = partial(execute_node, handed=nested)
     try:
         try:
             stdout, merged_io, last_exec = await execute_body(
+                body_deps,
                 execute_node,
                 func_body,
                 context,
                 stdin,
                 cs,
-                job_table,
-                body_handed,
-                decisions,
-                execute_fn,
-                sink,
             )
         except ReturnSignal as sig:
             stdout = sig.stdout

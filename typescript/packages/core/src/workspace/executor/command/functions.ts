@@ -33,7 +33,8 @@ import type { SessionState } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
 import { isCountWord } from '../builtins/shared.ts'
-import type { ExecuteNodeDeps } from '../deps.ts'
+import type { ExecuteFn } from '../../expand/types.ts'
+import { withHandOff, type ExecuteNodeDeps } from '../deps.ts'
 import { executeBody, returning } from '../control.ts'
 import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteNodeFn } from './types.ts'
@@ -63,7 +64,7 @@ export async function runShellFunction(
   const parser = deps.parser
   if (parser === undefined) throw new Error('function invocation requires a parse scope')
   const session = context.session
-  const { sink, executeFn } = deps
+  const { sink } = deps
   const handed = deps.handed ?? null
   const decisions = deps.registry.decisions
   const cs = callStack ?? new CallStack(session.shellNesting)
@@ -149,6 +150,11 @@ export async function runShellFunction(
   const nested: HandOff | null =
     handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
 
+  const outer = nested === null ? deps : withHandOff(deps, nested)
+  const reach = outer.executeFn
+  const executeFn: ExecuteFn = (cmd, opts) => reach(cmd, { ...opts, node: undefined })
+  const bodyDeps: ExecuteNodeDeps = { ...outer, executeFn }
+
   const run: ExecuteNodeFn =
     sink === undefined && nested === null
       ? executeNode
@@ -167,18 +173,7 @@ export async function runShellFunction(
       let io: IOResult
       let lastExec: ExecutionNode
       try {
-        ;[stdout, io, lastExec] = await executeBody(
-          run,
-          body,
-          context,
-          bodyStdin,
-          cs,
-          deps.jobTable,
-          nested ?? handed,
-          decisions,
-          executeFn,
-          sink ?? null,
-        )
+        ;[stdout, io, lastExec] = await executeBody(bodyDeps, run, body, context, bodyStdin, cs)
       } catch (err) {
         if (!(err instanceof ReturnSignal)) throw err
         stdout = err.stdout

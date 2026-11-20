@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -32,7 +33,9 @@ from mirage.types import Limit, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor import background
+from mirage.workspace.session import SessionState
 from mirage.workspace.store import RAMWorkspaceStateStore
 from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
@@ -1202,3 +1205,24 @@ async def test_a_capture_waits_for_a_job_still_writing_into_it(job):
         assert await res.materialize_stdout() == b"[held]\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_statement_ending_in_ampersand_without_a_job_table_fails_loud():
+    async def execute(*_args, **_kw):
+        raise AssertionError("a job is not run inline")
+
+    statement = SimpleNamespace(
+        text=b"x", next_sibling=SimpleNamespace(type="&")
+    )
+    sess = SessionState(session_id="test")
+    with pytest.raises(RuntimeError, match="job table"):
+        await background.run_statement(
+            execute,
+            statement,
+            EvaluationContext(sess),
+            None,
+            (None, False),
+            None,
+            None,
+        )

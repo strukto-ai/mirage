@@ -19,24 +19,38 @@ import { ExitSignal } from '../../shell/errors.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { type BodyRun, carried, executeBody, handleIf, handleWhile, takeStdout } from './control.ts'
+import { JobTable } from '../../execution/job/index.ts'
+import { MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Namespace } from '../mount/namespace/namespace.ts'
+import { MountRegistry } from '../mount/registry.ts'
+import { type BodyRun, carried, executeBody, handleWhile, takeStdout } from './control.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
+import type { ExecuteNodeDeps } from './deps.ts'
 
 function node(text: string, nextSibling: TSNodeLike | null = null): TSNodeLike {
   return { type: 'command', text, children: [], namedChildren: [], isNamed: true, nextSibling }
 }
 
-/** A body statement whose terminator is `&`. */
-function bg(text: string): TSNodeLike {
-  return node(text, { type: '&', text: '&', children: [], namedChildren: [], isNamed: false })
-}
-
 const noLine = (): Promise<IOResult> => Promise.reject(new Error('nothing to run'))
+
+function bareDeps(): ExecuteNodeDeps {
+  const registry = new MountRegistry({ '/ram': new RAMVFS() }, MountMode.WRITE)
+  return {
+    dispatch: () => {
+      throw new Error('dispatch should not have been called')
+    },
+    registry,
+    namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
+    jobTable: new JobTable(),
+    executeFn: noLine,
+  }
+}
 
 function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
   const context = new EvaluationContext(session)
-  return (nodes, bound) =>
-    executeBody(execute, nodes, context, null, null, null, null, null, null, null, bound)
+  const deps = bareDeps()
+  return (nodes, bound) => executeBody(deps, execute, nodes, context, null, null, bound)
 }
 
 describe('handleWhile', () => {
@@ -82,18 +96,6 @@ describe('handleWhile', () => {
     )
     expect(turns).toBe(10002)
     expect((await materialize(io.stderr)).byteLength).toBe(0)
-  })
-})
-
-describe('& inside a body', () => {
-  it('fails loud without a job table', async () => {
-    const execute: ExecuteNodeFn = () =>
-      Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('x')]]]
-    const s = new SessionState({ sessionId: 'test' })
-    await expect(
-      handleIf(runner(execute, s), branches, null, new EvaluationContext(s), noLine, null),
-    ).rejects.toThrow(/job table/)
   })
 })
 

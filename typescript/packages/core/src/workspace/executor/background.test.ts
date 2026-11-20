@@ -17,11 +17,14 @@ import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspac
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { WorkspaceHeldError } from '../../execution/errors.ts'
 import { JobTable } from '../../execution/job/index.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { EvaluationContext } from '../evaluation.ts'
+import { SessionState } from '../session/session.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { logger } from './background.ts'
+import { logger, runStatement } from './background.ts'
 
 function buildWs(): Workspace {
   return new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
@@ -737,5 +740,30 @@ describe('a job keeps the descriptors it started with', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('a statement ending in &', () => {
+  it('fails loud without a job table', () => {
+    const statement: TSNodeLike = {
+      type: 'command',
+      text: 'x',
+      children: [],
+      namedChildren: [],
+      isNamed: true,
+      nextSibling: { type: '&', text: '&', children: [], namedChildren: [], isNamed: false },
+    }
+    const s = new SessionState({ sessionId: 'test' })
+    expect(() =>
+      runStatement(
+        () => Promise.reject(new Error('a job is not run inline')),
+        statement,
+        new EvaluationContext(s),
+        null,
+        [null, false],
+        null,
+        null,
+      ),
+    ).toThrow(/job table/)
   })
 })

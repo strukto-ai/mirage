@@ -1526,15 +1526,11 @@ async def _execute_node_body(
 
     run_body = partial(
         execute_body,
+        deps,
         stream,
         context=context,
         stdin=stdin,
         call_stack=cs,
-        job_table=job_table,
-        handed=handed,
-        decisions=registry.decisions,
-        execute_fn=execute_fn,
-        sink=sink,
     )
 
     if kind == NodeKind.COMPOUND:

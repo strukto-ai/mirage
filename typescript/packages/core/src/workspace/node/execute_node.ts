@@ -1331,20 +1331,7 @@ async function executeNodeBody(
   }
 
   const run: BodyRun = (nodes, bound, leading) =>
-    executeBody(
-      stream,
-      nodes,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      deps.handed ?? null,
-      registry.decisions,
-      executeFn,
-      sink ?? null,
-      bound,
-      leading,
-    )
+    executeBody(called, stream, nodes, context, stdin, callStack, bound, leading)
 
   if (kind === NodeKind.COMPOUND) return run(node.namedChildren)
 
