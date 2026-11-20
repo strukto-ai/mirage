@@ -594,14 +594,16 @@ export class ProcessTable {
   /**
    * Revoke the session's views and cancel its runners. A closed session's
    * ID can be reused and a replaced profile grants a new view, so neither
-   * may keep an entry point, or a runner admitted under the old grants.
+   * may keep an entry point, or a runner admitted under the old grants. A
+   * runner already stopping keeps the signal that stops it, so what a
+   * hangup stops ends as a hangup ends it, not killed as its session closes.
    */
   revokeSession(sessionId: string): void {
     this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1)
     for (const process of this.live()) {
       if (process.record.sessionId !== sessionId) continue
       process.revoked = true
-      process.terminate()
+      if (process.record.state !== 'stopping') process.terminate()
     }
   }
 

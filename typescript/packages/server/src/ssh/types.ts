@@ -25,3 +25,26 @@ export interface SSHEndpoint {
   readonly config: SSHConfig
   listener: SSHListener | null
 }
+
+export interface Endpoint {
+  address: string
+  port: number
+}
+
+/** What the server knows about one channel's login. */
+export interface ChannelRequest {
+  username: string
+  /** The login key's `mirage-profile` values; empty when it has none. */
+  profile: readonly string[]
+  /** The login key's `mirage-account` values; empty when it has none. */
+  account: readonly string[]
+  command: string | null
+  term: string | null
+  /** The client's `TRACEPARENT` and `TRACESTATE`, as it set them. */
+  env: Readonly<Record<string, string>>
+  peer: Endpoint | null
+  local: Endpoint | null
+}
+
+/** Who a login is: the workspace it names and its key's options. */
+export type Login = Pick<ChannelRequest, 'username' | 'profile' | 'account'>

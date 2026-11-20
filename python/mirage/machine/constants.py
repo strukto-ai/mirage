@@ -17,6 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from mirage.execution.job.constants import HANGUP_SIGNAL
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
 from mirage.machine.types import MountType
@@ -660,6 +661,11 @@ def stop_line(
     that fails before it found any, or on the last look, exits 1, so KILL
     never reaches a pid the last ``ps`` did not check.
 
+    A hangup (``HANGUP_SIGNAL``) is what a dropped terminal sends: on
+    Linux it reaches only the processes still in ``root``'s session, so
+    one that left it with ``setsid`` keeps running, and no KILL follows,
+    so one that ignores it (``nohup``) keeps running too.
+
     Args:
         process (str): the id of the Mirage process the run is, as
             ``PROCESS`` carries it.
@@ -670,12 +676,24 @@ def stop_line(
     """
     mark = single_quote(f"{PROCESS}={process}")
     mine = {root.pid: (process, root.started)} if root is not None else {}
+    hangup = signum == HANGUP_SIGNAL
+    own = f"sid {root.pid} && s=$q; " if hangup and root is not None else ""
+    end = (
+        "exit 0"
+        if hangup
+        else "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; "
+        'done; [ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
+    )
     return (
-        f"m={mark}; f=; if [ -d /proc/self ]; then PATH={TOOLS_PATH}; "
+        f"m={mark}; f=; s=; if [ -d /proc/self ]; then PATH={TOOLS_PATH}; "
         "command -v tr >/dev/null || exit 127; "
         "command -v grep >/dev/null || exit 127; "
+        'sid() { q=; read -r t 2>/dev/null < "/proc/$1/stat" || return 1; '
+        't=${t##*")"}; set -- $t; q=$4; }; '
+        f"{own}"
         "left() { l=; for p in /proc/[0-9]*; do "
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
+        '&& { [ -z "$s" ] || { sid "${p#/proc/}" && [ "$q" = "$s" ]; }; } '
         '&& l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
         f"else PATH={DARWIN_PATH}; k=; l=; {darwin_roots(mine)}"
@@ -685,8 +703,7 @@ def stop_line(
         f"'{darwin_runs(True, 'ids')}'); r=; l=; "
         'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; '
         f"left || exit {NOT_RUNNING_STATUS}; kill -{signum} $l 2>/dev/null; "
-        "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
-        '[ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
+        f"{end}"
     )
 
 

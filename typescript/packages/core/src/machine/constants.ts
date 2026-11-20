@@ -16,6 +16,7 @@ import { singleQuote } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { decodeBase64 } from '../utils/base64.ts'
 import { boundSystemClock, systemNow } from '../utils/clock.ts'
+import { HANGUP_SIGNAL } from '../execution/job/constants.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachinePid } from '../execution/types.ts'
 import type { MountType } from './types.ts'
@@ -625,6 +626,11 @@ export const PIPE_SIGNAL = 13
  * before it found any, or on the last look, exits 1, so KILL never reaches
  * a pid the last `ps` did not check.
  *
+ * A hangup (`HANGUP_SIGNAL`) is what a dropped terminal sends: on Linux it
+ * reaches only the processes still in `root`'s session, so one that left
+ * it with `setsid` keeps running, and no KILL follows, so one that ignores
+ * it (`nohup`) keeps running too.
+ *
  * @param process the id of the Mirage process the run is, as `PROCESS`
  *   carries it.
  * @param signum the first signal, TERM (15) unless a `kill` named another.
@@ -636,12 +642,22 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
   const mine = new Map<number, readonly [string, number]>(
     root !== null ? [[root.pid, [process, root.started]]] : [],
   )
+  const hangup = signum === HANGUP_SIGNAL
+  const own = hangup && root !== null ? `sid ${String(root.pid)} && s=$q; ` : ''
+  const end = hangup
+    ? 'exit 0'
+    : 'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; ' +
+      'done; [ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
   return (
-    `m=${mark}; f=; if [ -d /proc/self ]; then PATH=${TOOLS_PATH}; ` +
+    `m=${mark}; f=; s=; if [ -d /proc/self ]; then PATH=${TOOLS_PATH}; ` +
     'command -v tr >/dev/null || exit 127; ' +
     'command -v grep >/dev/null || exit 127; ' +
+    'sid() { q=; read -r t 2>/dev/null < "/proc/$1/stat" || return 1; ' +
+    't=${t##*")"}; set -- $t; q=$4; }; ' +
+    own +
     'left() { l=; for p in /proc/[0-9]*; do ' +
     'tr \'\\000\' \'\\n\' < "$p/environ" 2>/dev/null | grep -qxF "$m" ' +
+    '&& { [ -z "$s" ] || { sid "${p#/proc/}" && [ "$q" = "$s" ]; }; } ' +
     '&& l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
     `else PATH=${DARWIN_PATH}; k=; l=; ${darwinRoots(mine)}` +
@@ -650,8 +666,7 @@ export function stopLine(process: string, signum = 15, root: MachinePid | null =
     `'${darwinRuns(true, 'ids')}'); r=; l=; ` +
     'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; ' +
     `left || exit ${String(NOT_RUNNING_STATUS)}; kill -${String(signum)} $l 2>/dev/null; ` +
-    'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
-    '[ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
+    end
   )
 }
 

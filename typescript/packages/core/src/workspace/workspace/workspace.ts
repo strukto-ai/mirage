@@ -117,7 +117,7 @@ import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { HANGUP_EXIT_CODE } from '../../execution/job/constants.ts'
+import { HANGUP_EXIT_CODE, HANGUP_SIGNAL } from '../../execution/job/constants.ts'
 import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { literalTree } from '../../shell/literal.ts'
@@ -2589,6 +2589,20 @@ export class Workspace {
     for (const [stop] of hit) stop.abort()
     await Promise.all(hit.filter(([stop]) => stop !== own).map(([, line]) => line.ended))
     return cancelled
+  }
+
+  /**
+   * End a session's lines as a dropped terminal ends its foreground job:
+   * each process the session runs gets SIGHUP (`HANGUP_SIGNAL`), so a
+   * program on a machine stops as a hangup stops it, sparing what left its
+   * session, then the lines are cancelled as `cancel` cancels them.
+   * Returns how many lines were cancelled.
+   */
+  async hangup(sessionId: string): Promise<number> {
+    for (const runner of this.processTable.live()) {
+      if (runner.record.sessionId === sessionId) runner.terminate(HANGUP_SIGNAL)
+    }
+    return this.cancel(sessionId)
   }
 
   /**

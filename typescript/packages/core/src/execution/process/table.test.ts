@@ -160,6 +160,43 @@ it('does not claim exit before finally completes', async () => {
   expect(process.terminate()).toBe(false)
 })
 
+it('keeps the signal of a stopping runner when its session is revoked', async () => {
+  const processes = new ProcessTable()
+  const entered = gate(),
+    release = gate()
+  const abort = new AbortController()
+  const process = processes.start({
+    sessionId: 'a',
+    command: 'work',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () => {
+      entered.release()
+      try {
+        await new Promise<never>((_, reject) => {
+          abort.signal.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      } finally {
+        await release.promise
+      }
+      return 0
+    },
+  })
+  await entered.promise
+  expect(process.terminate(1)).toBe(true)
+  processes.revokeSession('a')
+  release.release()
+  expect(await process.join()).toMatchObject({ exit: 129, signal: 1 })
+})
+
 it('scopes immutable views and revokes them when a session ID is reused', async () => {
   const processes = new ProcessTable(),
     release = gate()

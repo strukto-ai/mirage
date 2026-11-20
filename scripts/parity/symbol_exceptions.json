@@ -1,5 +1,5 @@
 {
- "baseline": 707,
+ "baseline": 705,
  "modules": {
   "commands/cli/builtin/ast_grep/engine": {
    "typescript_only": {
@@ -656,8 +656,9 @@
   "server/ssh/constants": {
    "python_only": {
     "CODEX_SOCKET_MODULE": "Python loads the codex module by path, since it imports asyncssh, so a server without the ssh extra starts; TypeScript's codex module only types ssh2 and is imported directly.",
-    "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair in chunks; TypeScript pipes a ws stream, which chunks for itself.",
-    "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path."
+    "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair, and a pipe its channel, in chunks; TypeScript pipes a ws stream and reads an ssh2 channel as an async iterable, which chunk for themselves.",
+    "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path.",
+    "ROUTE_ACCOUNT": "asyncssh admits a tunneled login through a server object, which leaves the route's account on the connection for key_account to read; ssh2's admitTunnel callback returns it as the login's account values."
    }
   },
   "server/ssh/relay": {
@@ -665,15 +666,19 @@
     "pump": "websockets reads a connection as an async iterator, so Python carries each direction through one function; ws hands TypeScript each message to an event handler."
    }
   },
+  "server/ssh/pipe": {
+   "python_only": {
+    "PipeInput": "A Python line reads its stdin through LoopStdin, which wants a reader with read(); an ssh2 channel is already the async iterable a TypeScript line reads."
+   }
+  },
   "server/ssh/server": {
+   "python_only": {
+    "LoginSSHServer": "asyncssh asks a server object whether to open a forward (connection_requested); ssh2 emits a tcpip event, which serveConnection answers.",
+    "TunnelSSHServer": "asyncssh admits a login through a server object, which leaves the route's account on the connection (ROUTE_ACCOUNT); ssh2's twin is the admitTunnel callback."
+   },
    "typescript_only": {
     "Admit": "ssh2 takes a login decision as a callback, typed here; asyncssh asks a server object (MirageSSHServer, TunnelSSHServer).",
     "admitTunnel": "ssh2 admits a tunneled login through a callback; asyncssh's twin is the TunnelSSHServer class in session."
-   }
-  },
-  "server/ssh/session": {
-   "python_only": {
-    "TunnelSSHServer": "asyncssh admits a login through a server object, and key_account reads the tunnel's account off it; ssh2's twin is the admitTunnel callback in server."
    }
   },
   "server/ssh/types": {
@@ -681,6 +686,11 @@
     "SSHTunnel": "Python types the connection its lazily loaded tunnel returns; TypeScript's serveTunnel resolves when the connection ends.",
     "ServeCodexSocket": "Python types serve_codex_socket for the route that loads it by path; TypeScript imports it directly.",
     "ServeTunnel": "Python types serve_tunnel for the route that loads it by path; TypeScript imports it and keeps its own signature."
+   },
+   "typescript_only": {
+    "ChannelRequest": "ssh2 hands each request's details to an event handler, which collects them in these shapes; asyncssh's process and connection objects carry them.",
+    "Endpoint": "ssh2 hands each request's details to an event handler, which collects them in these shapes; asyncssh's process and connection objects carry them.",
+    "Login": "ssh2 hands each request's details to an event handler, which collects them in these shapes; asyncssh's process and connection objects carry them."
    }
   },
   "cli/login": {

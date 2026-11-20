@@ -379,6 +379,7 @@ class ChannelOutput:
     descriptors at one device; asyncssh's line editor then turns each
     newline into CRLF and redraws the input line around the output,
     and on a pty it does not edit, each newline goes out as CRLF here.
+    Output after the channel has closed goes nowhere.
 
     Args:
         process (asyncssh.SSHServerProcess[str]): the channel's process.
@@ -400,8 +401,11 @@ class ChannelOutput:
         )
         if self._crlf:
             data = data.replace(b"\n", b"\r\n")
-        stream.write(decode_text(data))
-        await stream.drain()
+        try:
+            stream.write(decode_text(data))
+            await stream.drain()
+        except BrokenPipeError as exc:
+            logger.debug("ssh: output after the channel closed: %r", exc)
 
 
 async def deliver(execution: ShellExecution, send: Send) -> IOResult:

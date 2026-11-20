@@ -763,7 +763,9 @@ class ProcessTable:
 
         A closed session's ID can be reused and a replaced profile grants
         a new view, so neither may keep an entry point, or a runner admitted
-        under the old grants.
+        under the old grants. A runner already stopping keeps the signal
+        that stops it, so what a hangup stops ends as a hangup ends it, not
+        killed as its session closes.
 
         Args:
             session_id (str): session being closed or re-profiled.
@@ -775,7 +777,8 @@ class ProcessTable:
         for process in self.live():
             if process.record.session_id == session_id:
                 process.revoked = True
-                process.terminate()
+                if process.record.state != ProcessState.STOPPING:
+                    process.terminate()
 
     def current(self, record: Process) -> bool:
         """Whether the record the table keeps under ``record``'s pid,

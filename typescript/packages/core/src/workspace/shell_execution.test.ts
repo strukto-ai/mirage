@@ -256,6 +256,26 @@ describe('ShellExecution', () => {
     }
   })
 
+  it('hangup stops a session line with SIGHUP', async () => {
+    const ws = new Workspace({})
+    try {
+      ws.createSession('s1')
+      const execution = await ws.shell('sleep 60; echo never', { sessionId: 's1', stream: true })
+      let running = [...ws.processTable.live()].filter((p) => p.record.sessionId === 's1')
+      for (let i = 0; i < 500 && running.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        running = [...ws.processTable.live()].filter((p) => p.record.sessionId === 's1')
+      }
+      expect(running.length).toBeGreaterThan(0)
+      expect(await ws.hangup('s1')).toBe(1)
+      await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
+      await execution.close()
+      expect(new Set(running.map((p) => p.signal))).toEqual(new Set([1]))
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('cancel reaches a held output drain', async () => {
     const ws = new Workspace({})
     ws.policies.add(new ApproveOutput())

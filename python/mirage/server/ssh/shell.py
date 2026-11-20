@@ -12,25 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 import asyncio
 import concurrent.futures
-import errno
 import logging
-import secrets
-import shlex
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import asyncssh
-from asyncssh.connection import SSHConnection
 from opentelemetry import context
 
 from mirage import Workspace
 from mirage.concurrency.limiter import on_loop
 from mirage.server.env import trace_headers
-from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
+from mirage.server.ssh.login import open_login, refuse, still_served
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
@@ -53,10 +49,6 @@ def prompt(cwd: str) -> str:
     return f"mirage:{cwd}$ "
 
 
-def new_session_id() -> str:
-    return f"ssh_{secrets.token_hex(6)}"
-
-
 def ends_shell(line: str) -> bool:
     """Whether a typed line asks the interactive shell to leave.
 
@@ -69,190 +61,6 @@ def ends_shell(line: str) -> bool:
     """
     words = line.split()
     return bool(words) and words[0] == "exit" and len(words) <= 2
-
-
-def login_env(process: asyncssh.SSHServerProcess[str]) -> dict[str, str]:
-    """The environment sshd hands a login: who, from where, on what.
-
-    The user is the workspace id, since that is the name the client
-    logged in as. ``HOME`` is the session's own, its user's home.
-
-    Args:
-        process (asyncssh.SSHServerProcess[str]): the channel's process.
-
-    Returns:
-        dict[str, str]: variable name to value.
-    """
-    user = process.get_extra_info("username")
-    env = {"USER": user, "LOGNAME": user}
-    peer = process.get_extra_info("peername")
-    local = process.get_extra_info("sockname")
-    if peer and local:
-        env["SSH_CLIENT"] = f"{peer[0]} {peer[1]} {local[1]}"
-        env["SSH_CONNECTION"] = f"{peer[0]} {peer[1]} {local[0]} {local[1]}"
-    if process.term_type:
-        env["TERM"] = process.term_type
-    return env
-
-
-def _key_option(conn: SSHConnection, option: str, what: str) -> str | None:
-    """The one value the login's authorized key gives ``option``.
-
-    Args:
-        conn (SSHConnection): the authenticated login's connection.
-        option (str): the authorized_keys option to read.
-        what (str): what the value names, for the refusal.
-
-    Raises:
-        TypeError: ``conn`` is not the server side of a connection.
-        ValueError: the option is bare, empty or given more than once.
-    """
-    if not isinstance(conn, asyncssh.SSHServerConnection):
-        raise TypeError("a key's option is read off a server connection")
-    values = conn.get_key_option(option)
-    if values is None:
-        return None
-    names = values if isinstance(values, list) else [values]
-    name = names[0] if len(names) == 1 else None
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"{option} must name exactly one {what}")
-    return name
-
-
-def key_profile(conn: SSHConnection) -> str | None:
-    """The profile the login's authorized key is bound to, if any.
-
-    The key's line in authorized_keys names it with
-    ``mirage-profile="<name>"``; a key without the option runs under the
-    workspace's default profile.
-
-    Args:
-        conn (SSHConnection): the authenticated login's connection.
-    """
-    return _key_option(conn, PROFILE_OPTION, "profile")
-
-
-class TunnelSSHServer(asyncssh.SSHServer):
-    """Admits a login the HTTPS route already authenticated.
-
-    The route checked the caller's token and that its account may use
-    the workspace its URL names, so the login needs no key. It may only
-    name that workspace: another username is asked for a method this
-    server offers none of, and is refused.
-
-    Args:
-        workspace_id (str): the workspace the route admitted.
-        account (str | None): the caller's account; None when the
-            server's auth mode names none.
-    """
-
-    def __init__(self, workspace_id: str, account: str | None) -> None:
-        self.workspace_id = workspace_id
-        self.account = account
-
-    def begin_auth(self, username: str) -> bool:
-        return username != self.workspace_id
-
-    def password_auth_supported(self) -> bool:
-        return False
-
-
-def key_account(conn: SSHConnection) -> str | None:
-    """The account the login belongs to, if any.
-
-    A login the HTTPS route carried runs as the account its token
-    named. Otherwise the key's line in authorized_keys names it with
-    ``mirage-account="<name>"``; the account may open only the
-    workspaces it owns. A key without the option has no account.
-
-    Args:
-        conn (SSHConnection): the authenticated login's connection.
-    """
-    if isinstance(conn, asyncssh.SSHServerConnection):
-        owner = conn.get_owner()
-        if isinstance(owner, TunnelSSHServer):
-            return owner.account
-    return _key_option(conn, ACCOUNT_OPTION, "account")
-
-
-def login_entry(
-    registry: WorkspaceRegistry, conn: SSHConnection, workspace_id: str
-) -> WorkspaceEntry | None:
-    """The workspace a login may open, else None.
-
-    One rule for every channel kind: the key's account must be allowed
-    the workspace its username names. A key whose account option is
-    malformed opens nothing.
-
-    Args:
-        registry (WorkspaceRegistry): the daemon's workspaces.
-        conn (SSHConnection): the authenticated login's connection.
-        workspace_id (str): the workspace the username names.
-    """
-    try:
-        account = key_account(conn)
-    except ValueError as exc:
-        logger.warning("ssh: refusing %s: %s", workspace_id, exc)
-        return None
-    return registry.visible(workspace_id, account)
-
-
-async def open_session(
-    ws: Workspace,
-    session_id: str,
-    env: Mapping[str, str] | None = None,
-    profile: str | None = None,
-    registry: WorkspaceRegistry | None = None,
-) -> None:
-    """Create the session a channel runs as.
-
-    The session runs under ``profile`` (the login key's), else the
-    workspace's default profile. The login environment is exported by
-    an unrecorded line, so a hidden name is refused as any ``export`` of
-    it would be, and a name the profile already set keeps its value.
-
-    Args:
-        ws (Workspace): the workspace, on its own loop.
-        session_id (str): the new session's id.
-        env (Mapping[str, str] | None): the login environment.
-        profile (str | None): the profile the login key is bound to;
-            None for the workspace default.
-        registry (WorkspaceRegistry | None): the server's workspaces,
-            whose shutdown and ``max_sessions`` refuse a new session.
-
-    Raises:
-        PolicyError: the workspace has no such profile.
-        OSError: EAGAIN while the server shuts down or the workspace is
-            at ``max_sessions``.
-    """
-    await ws.ensure_sessions_loaded()
-    if registry is not None and registry.draining:
-        refused("shutting_down")
-        raise OSError(errno.EAGAIN, "server is shutting down")
-    cap = registry.max_sessions if registry is not None else None
-    if cap is not None and len(ws.list_sessions()) >= cap:
-        refused("max_sessions")
-        raise OSError(errno.EAGAIN, f"workspace is at max_sessions ({cap})")
-    session = ws.create_session(session_id, profile=profile)
-    try:
-        missing = {
-            k: v for k, v in (env or {}).items() if k not in session.env
-        }
-        if not missing:
-            return
-        line = "export " + " ".join(
-            f"{k}={shlex.quote(v)}" for k, v in missing.items()
-        )
-        io = await ws.shell(line, session_id=session_id, record=False)
-        if io.exit_code != 0:
-            logger.debug(
-                "ssh: login env refused on %s: %s",
-                session_id,
-                await io.stderr_str(),
-            )
-    except BaseException:
-        await ws.close_session(session_id)
-        raise
 
 
 async def stamp_interrupt(ws: Workspace, session_id: str) -> None:
@@ -280,6 +88,11 @@ class ShellChannel:
     ``cd`` never leaks from one channel to another and two channels
     never wait on each other's lines.
 
+    A dropped connection ends the channel's lines as it ends a process
+    under sshd: on a terminal it hangs them up, and without one it
+    sends nothing, so the line runs on without input until it writes,
+    where sshd's pipe would break, and is hung up then.
+
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
         entry (WorkspaceEntry): the workspace this channel serves.
@@ -304,10 +117,10 @@ class ShellChannel:
         self._running: concurrent.futures.Future[int] | None = None
         self._line: asyncio.Task[int] | None = None
         self._lost = False
+        self._hung = False
 
     def _live(self) -> bool:
-        wid = self._entry.id
-        return wid in self._registry and self._registry.get(wid) is self._entry
+        return still_served(self._registry, self._entry)
 
     def _interrupt(self) -> None:
         line = self._line
@@ -335,7 +148,28 @@ class ShellChannel:
     async def _watch_close(self) -> None:
         await self._process.wait_closed()
         self._lost = True
-        self._interrupt()
+        if not self._live():
+            self._interrupt()
+        elif self._tty:
+            self._hang_up()
+
+    def _hang_up(self) -> None:
+        """Hang the channel's lines up (``Workspace.hangup``), once."""
+        if self._hung or not self._live():
+            return
+        self._hung = True
+        runner = self._entry.runner
+        asyncio.run_coroutine_threadsafe(
+            runner.ws.hangup(self._session_id), runner.loop
+        ).add_done_callback(self._hung_up)
+
+    def _hung_up(self, future: concurrent.futures.Future[int]) -> None:
+        if not future.cancelled() and future.exception() is not None:
+            logger.debug(
+                "ssh: hangup of %s failed: %r",
+                self._session_id,
+                future.exception(),
+            )
 
     def _prompt(self) -> str:
         if not self._live():
@@ -366,7 +200,8 @@ class ShellChannel:
     async def run(self, line: str) -> int:
         """Run one line on the workspace's loop, streaming its output.
 
-        Ctrl-C and a dropped connection cancel the line where it is.
+        Ctrl-C cancels the line where it is, and a dropped connection
+        hangs it up (``Workspace.hangup``).
         Each write waits for the channel to drain, so a fast producer
         is paced by the client instead of buffered without bound. The
         status is read once the output has ended, because a streaming
@@ -387,6 +222,9 @@ class ShellChannel:
         loop = asyncio.get_running_loop()
 
         async def send(data: bytes, stderr: bool) -> None:
+            if self._lost:
+                self._hang_up()
+                return
             await on_loop(self._output.write(data, stderr), loop)
 
         async def run_line() -> int:
@@ -471,67 +309,6 @@ class ShellChannel:
         return status
 
 
-def _refuse(process: asyncssh.SSHServerProcess[str], message: str) -> None:
-    """Tell the client why its channel cannot run, and exit it 1.
-
-    Args:
-        process (asyncssh.SSHServerProcess[str]): the channel's process.
-        message (str): the reason, after ``mirage: ``.
-    """
-    process.stderr.write(f"mirage: {message}\n")
-    process.exit(1)
-
-
-async def open_login(
-    registry: WorkspaceRegistry,
-    process: asyncssh.SSHServerProcess[str],
-    door: str,
-) -> tuple[WorkspaceEntry, str] | None:
-    """The login's workspace and a fresh session opened in it.
-
-    The session runs under the login key's profile, else the workspace's
-    default, with the environment an ``ssh`` login gets. A login whose
-    workspace is out of reach, or whose session cannot open, is told why
-    and its channel exits 1.
-
-    Args:
-        registry (WorkspaceRegistry): the daemon's workspaces.
-        process (asyncssh.SSHServerProcess[str]): the channel's process.
-        door (str): the channel's kind, for the log.
-
-    Returns:
-        tuple[WorkspaceEntry, str] | None: the workspace and the session
-        id, or None once the channel has exited.
-    """
-    workspace_id = process.get_extra_info("username")
-    entry = login_entry(
-        registry, process.channel.get_connection(), workspace_id
-    )
-    if entry is None:
-        _refuse(process, f"no such workspace: {workspace_id}")
-        return None
-    session_id = new_session_id()
-    runner = entry.runner
-    try:
-        profile = key_profile(process.channel.get_connection())
-        await runner.call(
-            open_session(
-                runner.ws,
-                session_id,
-                login_env(process),
-                profile,
-                registry,
-            )
-        )
-    except Exception as exc:
-        logger.warning(
-            "%s: cannot open a session on %s: %r", door, workspace_id, exc
-        )
-        _refuse(process, f"cannot open a session: {exc}")
-        return None
-    return entry, session_id
-
-
 async def handle_channel(
     registry: WorkspaceRegistry, process: asyncssh.SSHServerProcess[str]
 ) -> None:
@@ -545,7 +322,7 @@ async def handle_channel(
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
     if process.subsystem is not None:
-        _refuse(process, f"unsupported subsystem: {process.subsystem}")
+        refuse(process, f"unsupported subsystem: {process.subsystem}")
         return
     opened = await open_login(registry, process, "ssh")
     if opened is None:
@@ -558,4 +335,7 @@ async def handle_channel(
         ).serve()
     finally:
         context.detach(token)
-    process.exit(status)
+    try:
+        process.exit(status)
+    except OSError as exc:
+        logger.debug("ssh: channel closed before its status: %r", exc)

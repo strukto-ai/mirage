@@ -1,6 +1,6 @@
 ---
 title: Google Antigravity
-description: Connect Antigravity to a Mirage workspace through MCP or a FUSE mount.
+description: Connect Antigravity to a Mirage workspace through MCP, a FUSE mount or SSH.
 icon: /images/google-logo.svg
 ---
 
@@ -66,4 +66,8 @@ mirage workspace create workspace.yaml --id demo-fuse
 cd /tmp/mirage-demo && agy
 ```
 
-In the Antigravity app, open `/tmp/mirage-demo` as the project folder. For an SSH Host project, mount the workspace on that Linux host and open the mountpoint there.
+In the Antigravity app, open `/tmp/mirage-demo` as the project folder.
+
+## SSH
+
+An SSH Host project opens the workspace itself, with Antigravity's server on a [machine](/home/setup/machine/overview): see [Editors over SSH](/home/agents/remote-ssh).

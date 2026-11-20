@@ -121,7 +121,8 @@
                   "home/agents/antigravity",
                   "home/agents/claude-code",
                   "home/agents/codex",
-                  "home/agents/grok-build"
+                  "home/agents/grok-build",
+                  "home/agents/remote-ssh"
                 ]
               },
               {

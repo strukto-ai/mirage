@@ -1,0 +1,85 @@
+---
+title: Editors over SSH
+description: Open a Mirage workspace in Cursor, VS Code or Antigravity through their SSH remote feature.
+icon: laptop-code
+---
+
+Cursor, VS Code and Antigravity open a remote project by installing their own
+server on the host over SSH and reaching it through port forwards. Pointed at
+Mirage, that server runs on a [machine](/home/setup/machine/overview) the
+workspace sends its lines to, and works on the workspace's mounts there.
+
+## Set up
+
+<Steps>
+  <Step title="Turn on SSH">
+    Set up the [SSH server](/home/access/ssh#set-up): a port, and a public key in
+    `~/.mirage/ssh/authorized_keys`.
+  </Step>
+  <Step title="Start a machine">
+    ```bash
+    docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
+      --name dev-box python:3.12-slim sleep infinity
+    docker exec dev-box sh -c 'apt-get update && apt-get install -y sshfs curl'
+    ```
+    The editor needs 64-bit Linux with glibc, and `curl` or `wget` to fetch its
+    server. `python3`, `socat` or `bash` carries its port forwards.
+  </Step>
+  <Step title="Create the workspace">
+    ```yaml workspace.yaml
+    mounts:
+      /project:
+        vfs: ram
+        mode: write
+    machines:
+      box:
+        provider: docker
+        container: dev-box
+        mount_type: ssh
+        captures: ["@line"]
+    command_limits:
+      "@line": {timeout_seconds: 0}
+    ```
+    ```bash
+    mirage workspace create workspace.yaml --id demo
+    ```
+    `@line` runs every SSH line whole on the machine. `timeout_seconds: 0`
+    lifts the 10 minute line limit, since the editor's setup line stays open
+    as long as its window does.
+  </Step>
+</Steps>
+
+## Connect
+
+Add the workspace as an SSH host:
+
+```text ~/.ssh/config
+Host mirage-demo
+  HostName 127.0.0.1
+  Port 2222
+  User demo
+```
+
+On a hosted server, use the [Over HTTPS](/home/access/ssh#over-https) entry
+instead and connect to `demo@mirage`.
+
+| Editor | Open the workspace |
+| --- | --- |
+| Cursor | **Remote-SSH: Connect to Host...** from the Command Palette, pick `mirage-demo`, then open `/project`. |
+| VS Code | Install the Remote - SSH extension, then the same as Cursor. |
+| Antigravity | **New Project**, then **SSH Host...**, pick `mirage-demo`, then open `/project`. |
+
+The editor's terminal, tasks and extensions run on the machine, and the files
+under `/project` are the workspace's.
+
+## How it behaves
+
+- A dropped connection leaves the editor's server running, as sshd does, so
+  the editor reconnects to the same server.
+- Each port forward runs as a line of its own session, so the login's
+  [profile](/home/configuration/session) and policies judge it as any line.
+- The editor's server runs its own commands on the machine. Mirage's command
+  rules see the lines that come over SSH, and every file call into a mount
+  still goes through the workspace.
+- A reconnect leaves the old setup line running until the editor's server
+  exits, and each counts against the server's `max_sessions`.

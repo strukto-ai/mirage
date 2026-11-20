@@ -46,9 +46,13 @@ PUBLISH_SECONDS = 1.0
 # that dies is seen as gone at most this long after its last renewal.
 LEASE_SECONDS = 30.0
 
+# The signal a terminal's hangup sends, which a dropped SSH connection
+# sends its line too.
+HANGUP_SIGNAL = 1
+
 # The status a job lost with its owner answers: SIGHUP's, as bash's job
 # answers when its terminal goes.
-HANGUP_EXIT_CODE = 129
+HANGUP_EXIT_CODE = 128 + HANGUP_SIGNAL
 
 # How long a shared console's output is kept after its last write, or
 # after its owner last renewed it while the job ran, so the streams of

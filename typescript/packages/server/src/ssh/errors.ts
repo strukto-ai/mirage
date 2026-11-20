@@ -20,6 +20,17 @@ export class SSHConfigError extends Error {
   }
 }
 
+/**
+ * A login that cannot run a channel: its workspace is out of reach, or its
+ * session cannot open. The message is what the client is told.
+ */
+export class LoginRefusedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LoginRefusedError'
+  }
+}
+
 /** A codex-exec request answered with a JSON-RPC error. */
 export class CodexRPCError extends Error {
   readonly code: number

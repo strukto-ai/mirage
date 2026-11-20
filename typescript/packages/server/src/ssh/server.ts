@@ -33,20 +33,17 @@ import {
   CODEX_SUBSYSTEM,
   KEEPALIVE_COUNT_MAX,
   KEEPALIVE_INTERVAL_SECONDS,
+  LOOPBACK_HOSTS,
   PROFILE_OPTION,
 } from './constants.ts'
 import { ENV_TRACE_CONTEXT } from '../env.ts'
 import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
-import {
-  handleChannel,
-  refuse,
-  type ChannelRequest,
-  type Endpoint,
-  type ShellChannel,
-} from './session.ts'
+import { serveForward } from './forward.ts'
+import { refuse } from './login.ts'
 import { serveSFTP } from './sftp.ts'
-import type { SSHListener } from './types.ts'
+import { handleChannel, type ShellChannel } from './shell.ts'
+import type { ChannelRequest, Endpoint, SSHListener } from './types.ts'
 
 /**
  * ssh2 is CommonJS, and Node's ESM loader names only the exports it can
@@ -229,6 +226,15 @@ function serveConnection(
       })
   })
   client.on('ready', () => {
+    // A forward to the loopback of the machine the login's lines run on
+    // runs as a line of its own (`serveForward`); any other host is refused.
+    client.on('tcpip', (accept, reject, info) => {
+      if (!LOOPBACK_HOSTS.has(info.destIP)) {
+        reject()
+        return
+      }
+      void serveForward(registry, { username, profile, account }, info.destPort, accept())
+    })
     client.on('session', (accept) => {
       const session = accept()
       let term: string | null = null

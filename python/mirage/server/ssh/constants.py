@@ -32,6 +32,40 @@ CODEX_SOCKET_MODULE = "mirage.server.ssh.codex:serve_codex_socket"
 # How many bytes the HTTPS route relays at a time.
 TUNNEL_CHUNK = 64 * 1024
 
+# The hosts a forward may name: the loopback of the machine its login's
+# lines run on, the one place a forward reaches.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
+# What a forward to any other host is refused with.
+FORWARD_REFUSED = "only 127.0.0.1 and localhost are forwarded"
+
+# The relay FORWARD_LINE runs where the machine has python3: its stdin to
+# the port and the port to its stdout, ending its writes at end of input.
+FORWARD_RELAY_PY = (
+    "import os,socket,sys,threading\n"
+    's=socket.create_connection(("127.0.0.1",int(sys.argv[1])))\n'
+    "def up():\n"
+    " while b:=os.read(0,65536):s.sendall(b)\n"
+    " s.shutdown(socket.SHUT_WR)\n"
+    "threading.Thread(target=up,daemon=True).start()\n"
+    "o=sys.stdout.buffer\n"
+    "while b:=s.recv(65536):o.write(b);o.flush()\n"
+)
+
+# The line a forward runs, as its login's lines run, to reach {port} on
+# that machine's loopback: the first relay the machine has, socat,
+# python3 or bash, joins the forward's channel to it.
+FORWARD_LINE = (
+    "if command -v socat >/dev/null 2>&1; "
+    "then exec socat - TCP:127.0.0.1:{port}; fi; "
+    "if command -v python3 >/dev/null 2>&1; "
+    f"then exec python3 -c '{FORWARD_RELAY_PY}' {{port}}; fi; "
+    "if command -v bash >/dev/null 2>&1; "
+    "then exec bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1 || exit 1; "
+    "cat <&3 & cat >&3; wait' forward {port}; fi; "
+    'echo "forward: no socat, python3 or bash" >&2; exit 127'
+)
+
 # The authorized_keys option that binds a key to one of the workspace's
 # profiles (`mirage-profile="guarded" ssh-ed25519 AAAA...`). The server
 # reads it, never the client, so a key cannot pick a looser profile.
@@ -41,6 +75,11 @@ PROFILE_OPTION = "mirage-profile"
 # (`mirage-account="alice" ssh-ed25519 AAAA...`). The account opens only
 # the workspaces it owns; in jwt mode a key without one opens nothing.
 ACCOUNT_OPTION = "mirage-account"
+
+# The connection's extra info a login the HTTPS route admitted carries its
+# account under: the route checked the caller's token, so the login runs as
+# the account it named, with no key and so no ACCOUNT_OPTION.
+ROUTE_ACCOUNT = "mirage_route_account"
 
 # A client that answers no keepalive for this many intervals is gone,
 # so its connection closes and the line it was running is cancelled
