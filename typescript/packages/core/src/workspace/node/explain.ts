@@ -2627,7 +2627,15 @@ function written(
     if (node === undefined) break
     const name = sets(node, names)
     if (name !== null) return [node, name]
-    stack.push(...[...node.children].reverse())
+    // A declaration read its assignments' names; only their values are left
+    // to walk.
+    const kids =
+      node.type === NodeType.DECLARATION_COMMAND
+        ? node.children.flatMap((kid) =>
+            kid.type === NodeType.VARIABLE_ASSIGNMENT ? [...kid.children] : [kid],
+          )
+        : [...node.children]
+    stack.push(...kids.reverse())
   }
   return null
 }
@@ -2637,12 +2645,15 @@ function written(
  * none when `declare`, `typeset` or `local` only prints (`-p`, `-f`, `-F`).
  */
 function declared(head: string, words: readonly Word[], names: ReadonlySet<string>): string | null {
+  if (NAMEREFS.has(head)) {
+    for (const word of words) {
+      if (word.text === null || !word.text.startsWith('-') || word.text === '--') break
+      if (/[pfF]/.test(word.text)) return null
+    }
+  }
   for (const word of words) {
     if (word.text === null) return head
-    if (NAMEREFS.has(head) && word.text.startsWith('-')) {
-      if (/[pfF]/.test(word.text)) return null
-      if (word.text.includes('n')) return head
-    }
+    if (NAMEREFS.has(head) && word.text.startsWith('-') && word.text.includes('n')) return head
     const name = word.text.split('=', 1)[0]?.split('[', 1)[0] ?? ''
     if (names.has(name)) return name
   }
@@ -2673,16 +2684,16 @@ function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
   }
   if (node.type === NodeType.DECLARATION_COMMAND) {
     const head = kids[0] === undefined ? '' : getText(kids[0])
-    // An assignment names its variable and is read as one; any other word is
+    // An assignment is read by its name, the value aside; any other word is
     // a flag or a NAME[=VALUE] the builtin parses at run time.
-    const words = kids
-      .slice(1)
-      .filter((k) => k.type !== NodeType.VARIABLE_ASSIGNMENT)
-      .map((k) =>
-        k.type === NodeType.VARIABLE_NAME
-          ? { raw: getText(k), text: getText(k) }
-          : readWord(k, null),
-      )
+    const words = kids.slice(1).map((k): Word => {
+      if (k.type === NodeType.VARIABLE_ASSIGNMENT) {
+        const name = `${k.children[0] === undefined ? '' : getText(k.children[0])}=`
+        return { raw: name, text: name }
+      }
+      if (k.type === NodeType.VARIABLE_NAME) return { raw: getText(k), text: getText(k) }
+      return readWord(k, null)
+    })
     return declared(head, words, names)
   }
   if (node.type !== NodeType.COMMAND) return null

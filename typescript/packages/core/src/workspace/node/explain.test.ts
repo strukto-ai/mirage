@@ -285,6 +285,8 @@ const ANOTHER_SPELLING = [
   'n=-bash; exec -a "$n" bash -c :',
   'n=-bash; env -a "$n" bash -c :',
   'k=BASH_ENV; env "$k=/data/e" bash -c :',
+  "declare PS4='$(hostname)' -p; set -x; :",
+  'declare -p x=$(read PS4 <<< x); set -x; :',
 ] as const
 
 const STILL_RUNS = [
@@ -314,6 +316,8 @@ const STILL_RUNS_UNDER_RULES = [
   'g() { local x="$1"; }; g a',
   'declare -p PS4',
   'typeset -F PS4',
+  'declare -n -p PS4',
+  'declare -p PS4=after',
 ] as const
 
 /** Every command an explained tree holds, nested scopes included. */

@@ -2239,7 +2239,20 @@ def _written(ast: Any, names: frozenset[str]) -> tuple[Any, str] | None:
         name = _sets(node, names)
         if name is not None:
             return node, name
-        stack.extend(reversed(node.children))
+        kids = node.children
+        if node.type == NodeType.DECLARATION_COMMAND:
+            # The declaration read its assignments' names; only their
+            # values are left to walk.
+            kids = [
+                part
+                for kid in kids
+                for part in (
+                    kid.children
+                    if kid.type == NodeType.VARIABLE_ASSIGNMENT
+                    else [kid]
+                )
+            ]
+        stack.extend(reversed(kids))
     return None
 
 
@@ -2271,16 +2284,20 @@ def _sets(node: Any, names: frozenset[str]) -> str | None:
         return None
     if node.type == NodeType.DECLARATION_COMMAND:
         head = get_text(kids[0]) if kids else ""
-        # An assignment names its variable and is read as one; any other
+        # An assignment is read by its name, the value aside; any other
         # word is a flag or a NAME[=VALUE] the builtin parses at run time.
         words = [
             (
-                Word(get_text(k), get_text(k))
+                Word(
+                    get_text(k.children[0]) + "=",
+                    get_text(k.children[0]) + "=",
+                )
+                if k.type == NodeType.VARIABLE_ASSIGNMENT
+                else Word(get_text(k), get_text(k))
                 if k.type == NodeType.VARIABLE_NAME
                 else read_word(k, None)
             )
             for k in kids[1:]
-            if k.type != NodeType.VARIABLE_ASSIGNMENT
         ]
         return _declared(head, words, names)
     if node.type != NodeType.COMMAND:
@@ -2328,14 +2345,17 @@ def _declared(
             NAME[=VALUE] operands the builtin parses at run time.
         names (frozenset[str]): the variables asked about.
     """
+    if head in _NAMEREFS:
+        for word in words:
+            if word.text is None or word.text[:1] != "-" or word.text == "--":
+                break
+            if any(flag in word.text for flag in "pfF"):
+                return None
     for word in words:
         if word.text is None:
             return head
-        if head in _NAMEREFS and word.text[:1] == "-":
-            if any(flag in word.text for flag in "pfF"):
-                return None
-            if "n" in word.text:
-                return head
+        if head in _NAMEREFS and word.text[:1] == "-" and "n" in word.text:
+            return head
         name = word.text.split("=", 1)[0].split("[", 1)[0]
         if name in names:
             return name
