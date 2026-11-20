@@ -42,7 +42,7 @@ async def token_header(accessor: GitHubAccount) -> dict[str, str]:
     Args:
         accessor (GitHubAccount): the install's account.
     """
-    secret = f"x-access-token:{await github_token(accessor)}"
+    secret = f"x-access-token:{await github_token(accessor) or ''}"
     return {
         "Authorization": f"Basic {base64.b64encode(secret.encode()).decode()}"
     }

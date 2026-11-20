@@ -20,9 +20,17 @@ from mirage.core.github.tree_entry import TreeEntry
 from mirage.vfs.secrets import reveal_secret
 
 
-def test_github_config_requires_token():
+def test_github_config_needs_no_token_for_a_public_repository():
+    cfg = GitHubConfig()
+    assert (cfg.token, cfg.app) == (None, None)
+
+
+def test_github_config_refuses_both_a_token_and_an_app():
     with pytest.raises(ValidationError):
-        GitHubConfig()
+        GitHubConfig(
+            token="ghp_abc123",
+            app={"app_id": 7, "private_key": "k", "installation_id": 42},
+        )
 
 
 def test_github_config_with_token():

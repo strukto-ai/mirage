@@ -111,10 +111,8 @@ async def test_put_keeps_a_sealed_field_left_out_and_null_removes_it(
     r = await client.put(
         "/v1/vfs/github", json={"fields": {"owner": "o", "token": None}}
     )
-    assert r.status_code == 400
-    assert r.json()["error"]["message"] == (
-        "github takes exactly one of token or app; got neither"
-    )
+    assert r.status_code == 200, r.text
+    assert (await client.get("/v1/vfs/github")).json()["sealed"] == []
     await client.post(
         "/v1/clis",
         json={
@@ -142,12 +140,8 @@ async def test_fields_are_checked_against_the_type(client):
     cases = [
         ({"type": "nope", "fields": {}}, "type must be a vfs: "),
         (
-            {"type": "github", "fields": {"owner": "o"}},
-            "github takes exactly one of token or app; got neither",
-        ),
-        (
             {"type": "github", "fields": {"token": "t", **APP}},
-            "github takes exactly one of token or app; got both",
+            "github takes at most one of token or app; got both",
         ),
         (
             {"type": "github", "fields": {"app.app_id": "7"}},
@@ -178,6 +172,16 @@ async def test_fields_are_checked_against_the_type(client):
     r = await client.post("/v1/vfs", json={**GITHUB, "name": "sec_x"})
     assert r.status_code == 400
     assert "not look like an id" in r.json()["error"]["message"]
+    r = await client.post(
+        "/v1/clis", json={"name": "g", "type": "gh", "fields": {}}
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["message"] == (
+        "gh takes exactly one of token or app; got neither"
+    )
+    public = {"type": "github", "fields": {"owner": "o", "repo": "r"}}
+    r = await client.post("/v1/vfs", json={"name": "public", **public})
+    assert r.status_code == 201, r.text
 
 
 @pytest.mark.asyncio

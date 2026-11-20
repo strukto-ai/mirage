@@ -180,10 +180,11 @@ async def files_containing(
     """The files under ``under`` that may hold the whole word ``text``.
 
     Code search answers only where it can vouch for the whole scope:
-    more than ``SCOPE_WARN`` files (fewer are cheaper to read), a tree
-    the API did not truncate, the default branch (the only one code
-    search indexes), a word the search grammar reads as plain terms
-    (``search_safe``), and an answer that is the whole set
+    an account with a credential (code search refuses an anonymous one,
+    so it is not asked at all), more than ``SCOPE_WARN`` files (fewer are
+    cheaper to read), a tree the API did not truncate, the default branch
+    (the only one code search indexes), a word the search grammar reads
+    as plain terms (``search_safe``), and an answer that is the whole set
     (``narrow_paths``, which adds back every file the search never
     indexes). An empty answer is not trusted either: the index trails
     a push. A file with a binary extension is left out: the walk reads
@@ -195,7 +196,8 @@ async def files_containing(
         under (list[PathSpec]): the directories walked.
     """
     if (
-        not search_safe(text)
+        accessor.account.anonymous
+        or not search_safe(text)
         or await _scope_files(accessor, under) <= SCOPE_WARN
         or accessor.truncated
         or await ensure_ref(accessor) != await ensure_default_branch(accessor)

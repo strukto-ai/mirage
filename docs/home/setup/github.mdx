@@ -17,8 +17,10 @@ root.
 
 ## Setup
 
-Create a fine-grained personal access token with read-only **Contents** on
-the repository, then export it:
+A public repository needs no setup: leave out `token` and the mount reads it
+anonymously, as in [Public repositories](#public-repositories). For a private
+repository, create a fine-grained personal access token with read-only
+**Contents** on the repository, then export it:
 
 <AccordionGroup>
   <Accordion title="Create the token">
@@ -33,8 +35,7 @@ the repository, then export it:
 
     A classic token (Tokens (classic)) also works: select the `repo` scope for
     private repositories. That broad scope includes write access, so prefer a
-    fine-grained token for tighter permissions. A public repository still
-    needs a token; one with no scopes reads it.
+    fine-grained token for tighter permissions.
   </Accordion>
 </AccordionGroup>
 
@@ -119,6 +120,32 @@ export GITHUB_TOKEN=github_pat_...
 - A GitHub App installation can replace the token; the SDK guides show the
   `app` block.
 
+## Public repositories
+
+With neither `token` nor `app`, the mount reads a public repository with no
+credentials, which is how a browser page mounts one with nothing typed:
+
+```yaml workspace.yaml
+mounts:
+  /github:
+    vfs: github
+    mode: read
+    config:
+      owner: strukto-ai
+      repo: mirage
+```
+
+- File reads come from `raw.githubusercontent.com` at the commit the tree
+  listing named, so a read never sees a newer revision than the listing and
+  does not count against the REST API's rate limit.
+- `grep -rw` and `rg -w` read every file instead of asking GitHub code search,
+  which takes no anonymous requests.
+- The tree listing, and the default branch lookup when `ref` is unset, still
+  cost REST requests, and GitHub allows 60 an hour per IP address without
+  credentials. A token raises that to 5,000.
+- On GitHub Enterprise (`base_url` set), anonymous reads go through the REST
+  API, one request per file.
+
 ## Sample runs
 
 ```bash
@@ -157,7 +184,8 @@ $ rg -w "def build_vfs" /github/python
 ```
 
 The mount is read-only. Act on the repository with the
-[`gh`](/home/setup/cli/gh) CLI, which takes the same token.
+[`gh`](/home/setup/cli/gh) CLI, which takes the same token and, unlike the
+mount, always needs one.
 
 ## SDK guides
 

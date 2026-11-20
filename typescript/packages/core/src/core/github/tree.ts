@@ -96,16 +96,18 @@ export function treeListing(
 }
 
 /**
- * Replace the accessor's tree with one response.
+ * Replace the accessor's tree, and the commit it names, with one response.
  */
 export function reseatTree(
   accessor: GitHubAccessor,
   tree: Record<string, TreeEntry>,
   truncated: boolean,
+  head: string | null,
 ): void {
   accessor.truncated = truncated
   accessor.tree = tree
   accessor.treeLoaded = true
+  accessor.head = head
 }
 
 /** Search consults the last listing directly, including a complete empty tree. */
@@ -145,7 +147,7 @@ export async function refreshTree(accessor: GitHubAccessor): Promise<{
   )
   // A drop while GitHub answered may be for the very write this tree
   // predates, so it is handed back but not kept.
-  if (generation === accessor.generation) reseatTree(accessor, tree, truncated)
+  if (generation === accessor.generation) reseatTree(accessor, tree, truncated, sha)
   return truncated ? null : { tree, version: sha }
 }
 

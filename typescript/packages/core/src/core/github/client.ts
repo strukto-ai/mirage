@@ -18,6 +18,7 @@ import { throttling } from '@octokit/plugin-throttling'
 import { RequestError } from '@octokit/request-error'
 import type { ApiResponse } from '../api/client.ts'
 import {
+  apiStream,
   bodyChunks,
   loweredHeaders,
   MAX_BODY_BYTES,
@@ -63,10 +64,17 @@ export interface GitHubTransport {
   /** GET a path's raw media type as its bytes arrive. */
   stream?(path: string): AsyncIterable<Uint8Array>
   /**
-   * The token calls ride: the configured one, or an App installation's
-   * current one, minted when there is none or it is about to expire.
+   * GET a download URL outside the API as its bytes arrive, with no
+   * credential and no API header. A transport without it cannot read a file
+   * through an anonymous account on github.com.
    */
-  token?(): Promise<string>
+  raw?(url: string): AsyncIterable<Uint8Array>
+  /**
+   * The token calls ride: the configured one, or an App installation's
+   * current one, minted when there is none or it is about to expire; null
+   * for an anonymous account.
+   */
+  token?(): Promise<string | null>
 }
 
 const Kit = Octokit.plugin(retry, throttling)
@@ -118,17 +126,21 @@ export class HttpGitHubTransport implements GitHubTransport {
   readonly baseUrl: string
   private readonly kit: InstanceType<typeof Kit>
   private readonly fetcher: typeof fetch
+  private readonly timeout: number | undefined
   private readonly fixedToken: string | undefined
   private readonly appTokens: AppTokens | undefined
   private readonly mint: (() => Promise<MintedToken>) | undefined
+  private readonly anonymous: boolean
 
   constructor(opts: { token?: string; app?: GitHubAppAuth; baseUrl?: string; timeout?: number }) {
-    if ((opts.token === undefined) === (opts.app === undefined)) {
-      throw new Error('GitHub auth takes exactly one of token or app')
+    if (opts.token !== undefined && opts.app !== undefined) {
+      throw new Error('GitHub auth takes at most one of token or app; got both')
     }
     this.baseUrl = opts.baseUrl ?? API_BASE
+    this.timeout = opts.timeout
     this.fetcher = stallTimeout(opts.timeout)
     this.fixedToken = opts.token
+    this.anonymous = opts.token === undefined && opts.app === undefined
     if (opts.app !== undefined) {
       this.appTokens = new AppTokens(opts.app)
       // Minting rides a client of its own: one through this kit would pass
@@ -150,27 +162,29 @@ export class HttpGitHubTransport implements GitHubTransport {
         // and a fake certainly does not, so paying it there would add a
         // second per write for nothing.
         enabled: this.baseUrl === API_BASE,
+        // Anonymous, a spent limit lifts within the hour, so waiting for it
+        // would hang the line; it fails at once, as Python's does.
         onRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
-          count < GITHUB_RETRIES,
+          !this.anonymous && count < GITHUB_RETRIES,
         onSecondaryRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
-          count < GITHUB_RETRIES,
+          !this.anonymous && count < GITHUB_RETRIES,
       },
     })
     // The credential rides every request that names none of its own. gh adds
     // its token only to a request without an Authorization, so `gh api -H
     // 'Authorization: ...'` runs as the account the line chose; octokit's
     // own token hook overwrote it. An App's token is minted here, on the
-    // first request that needs one.
+    // first request that needs one. An anonymous transport sends none.
     this.kit.hook.before('request', async (options) => {
-      options.headers.authorization ??= `token ${await this.token()}`
+      if (options.headers.authorization !== undefined) return
+      const token = await this.token()
+      if (token !== null) options.headers.authorization = `token ${token}`
     })
   }
 
-  async token(): Promise<string> {
+  async token(): Promise<string | null> {
     if (this.fixedToken !== undefined) return this.fixedToken
-    if (this.appTokens === undefined || this.mint === undefined) {
-      throw new Error('GitHub auth takes exactly one of token or app')
-    }
+    if (this.appTokens === undefined || this.mint === undefined) return null
     return this.appTokens.token(this.mint)
   }
 
@@ -222,6 +236,23 @@ export class HttpGitHubTransport implements GitHubTransport {
     const r = await this.send('GET', path, undefined, undefined, { accept: RAW_MEDIA_TYPE })
     const body = r.data as ReadableStream<Uint8Array> | null
     if (body !== null) yield* bodyChunks(body)
+  }
+
+  // A bare GET, outside Octokit: its API version header would make a page's
+  // request one the browser preflights, and the download host answers only
+  // a simple request from any origin.
+  async *raw(url: string): AsyncGenerator<Uint8Array, void> {
+    yield* apiStream(url, {
+      errorOf: (response, body) =>
+        new GitHubApiError(
+          apiMessage(body, response.statusText),
+          response.status,
+          body,
+          response.url || url,
+          loweredHeaders(response.headers),
+        ),
+      ...(this.timeout === undefined ? {} : { timeout: this.timeout }),
+    })
   }
 
   private async send(
@@ -448,4 +479,41 @@ export async function* streamBlob(
 
 function blobPath(owner: string, repo: string, sha: string): string {
   return `/repos/${owner}/${repo}/git/blobs/${sha}`
+}
+
+/**
+ * The download URL of `path` at `commit`, each segment of the path
+ * percent-encoded. Mirrors Python's `raw_url`.
+ *
+ * Args:
+ *   base (string): the raw host, such as `RAW_BASE`.
+ *   owner (string): the repository's owner.
+ *   repo (string): the repository.
+ *   commit (string): the commit sha the file is read at.
+ *   path (string): the file, repo-relative.
+ */
+export function rawUrl(
+  base: string,
+  owner: string,
+  repo: string,
+  commit: string,
+  path: string,
+): string {
+  return `${base}/${owner}/${repo}/${commit}/${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
+ * A file's bytes from its download URL as they arrive, asked with no
+ * credential and no API header, as a page asks it. Mirrors Python's
+ * `stream_raw`.
+ *
+ * Throws:
+ *   Error: the transport cannot download outside the API.
+ */
+export async function* streamRaw(
+  transport: GitHubTransport,
+  url: string,
+): AsyncGenerator<Uint8Array, void> {
+  if (transport.raw === undefined) throw new Error(`this GitHub transport cannot download ${url}`)
+  yield* transport.raw(url)
 }

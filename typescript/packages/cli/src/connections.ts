@@ -261,11 +261,19 @@ async function typeFields(client: DaemonClient, kind: Kind, type: string): Promi
 /**
  * The credentials an entry takes exactly one of, by `kind/type`: a field, or
  * a block by its group. No one of them is required, so the field spec alone
- * would prompt for none. GitHub authenticates with a token or as an App.
+ * would prompt for none. gh authenticates with a token or as an App.
  */
 const ONE_CREDENTIAL: Readonly<Record<string, readonly string[]>> = {
-  'vfs/github': ['token', 'app'],
   'cli/gh': ['token', 'app'],
+}
+
+/**
+ * The credentials an entry takes at most one of: asked at a terminal, where
+ * an empty answer is none, and never required. A github mount with neither
+ * reads a public repository.
+ */
+const AT_MOST_ONE_CREDENTIAL: Readonly<Record<string, readonly string[]>> = {
+  'vfs/github': ['token', 'app'],
 }
 
 // A PEM key spans lines, which a prompt cannot take, so its prompt also
@@ -294,6 +302,7 @@ async function fill(
   name: string,
   spec: Spec,
   credentials: readonly string[] = [],
+  optional = false,
 ): Promise<void> {
   const stdin = new StdinLines()
   for (const [key, path] of draft.secrets)
@@ -305,18 +314,25 @@ async function fill(
   )
   const unchosen = credentials.length > 0 && !credentials.some((c) => credentialGiven(c, given))
   const missing = missingRequired(spec, given)
-  if (!unchosen && missing.length === 0) return
+  const ask = unchosen && (!optional || process.stdin.isTTY === true)
+  if (!ask && missing.length === 0) return
   if (!process.stdin.isTTY) {
-    const named = unchosen ? [credentials.join(' or '), ...missing] : missing
+    const named = ask ? [credentials.join(' or '), ...missing] : missing
     fail(`missing required fields: ${named.join(', ')}`, 2)
   }
-  if (unchosen) {
-    let choice = ''
-    while (!credentials.includes(choice)) {
-      choice = (await prompt(`Authenticate ${name} with ${credentials.join(' or ')}`, false)).trim()
-    }
+  if (ask) {
+    const choices = optional ? [...credentials, ''] : credentials
+    const none = optional ? ' (empty for none)' : ''
+    let choice: string
+    do {
+      choice = (
+        await prompt(`Authenticate ${name} with ${credentials.join(' or ')}${none}`, false)
+      ).trim()
+    } while (!choices.includes(choice))
     const block = spec.filter((f) => f.group === choice && f.required === true)
-    missing.unshift(...(block.length > 0 ? block.map((f) => f.name) : [choice]))
+    if (choice !== '') {
+      missing.unshift(...(block.length > 0 ? block.map((f) => f.name) : [choice]))
+    }
   }
   for (const key of missing) {
     const field = spec.find((f) => f.name === key)
@@ -479,7 +495,9 @@ function registerKindCommands(program: Command, kind: Kind): void {
     await c.ensureRunning({ allowSpawn: true })
     const spec = await typeFields(c, kind, type)
     refuseArgvSecrets(draft, spec)
-    await fill(draft, entry, spec, ONE_CREDENTIAL[`${kind.name}/${type}`])
+    const key = `${kind.name}/${type}`
+    const optional = AT_MOST_ONE_CREDENTIAL[key]
+    await fill(draft, entry, spec, ONE_CREDENTIAL[key] ?? optional, optional !== undefined)
     const r = await c.request('POST', kind.route, {
       body: JSON.stringify({ name: entry, type, fields: draft.fields }),
     })

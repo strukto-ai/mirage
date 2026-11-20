@@ -126,11 +126,16 @@ function checkRules(
     if (parsed?.protocol !== 'https:') throw invalid("url must be the MCP server's https URL")
   }
   // GitHub authenticates with a token or as an App, never both: no one
-  // field is required, so the rule is the pair's.
+  // field is required, so the rule is the pair's. A mount may name neither
+  // to read a public repository; gh needs a login.
   if ((kind === 'vfs' && type === 'github') || (kind === 'cli' && type === 'gh')) {
     const token = given.has('token')
-    if (token === [...given].some((name) => name.startsWith('app.'))) {
-      throw invalid(`${type} takes exactly one of token or app; got ${token ? 'both' : 'neither'}`)
+    const app = [...given].some((name) => name.startsWith('app.'))
+    const required = kind === 'cli'
+    const quantity = required ? 'exactly' : 'at most'
+    if (token && app) throw invalid(`${type} takes ${quantity} one of token or app; got both`)
+    if (required && !token && !app) {
+      throw invalid(`${type} takes ${quantity} one of token or app; got neither`)
     }
   }
 }

@@ -25,12 +25,17 @@ from mirage.core.github.client import (
     GitHubApiError,
     GitHubConnectionError,
     fetch_blob,
+    github_get,
     github_headers,
     github_request,
     github_request_response,
     graphql_url,
+    raw_url,
+    stream_raw,
 )
 from mirage.core.github.config import GhConfig, GitHubConfig
+from mirage.core.github.constants import RAW_BASE
+from mirage.vfs.github import GitHubVFS
 
 
 def test_github_headers_contains_auth():
@@ -38,6 +43,12 @@ def test_github_headers_contains_auth():
     assert headers["Authorization"] == "Bearer ghp_test123"
     assert headers["Accept"] == "application/vnd.github+json"
     assert "X-GitHub-Api-Version" in headers
+
+
+def test_github_headers_without_a_token_carry_no_authorization():
+    headers = github_headers(None)
+    assert "Authorization" not in headers
+    assert headers["Accept"] == "application/vnd.github+json"
 
 
 @pytest.mark.asyncio
@@ -83,6 +94,8 @@ async def _echo(request: web.Request) -> web.Response:
             "body": await request.text(),
             "content_type": request.headers.get("Content-Type"),
             "accept": request.headers.get("Accept"),
+            "authorization": request.headers.get("Authorization"),
+            "api_version": request.headers.get("X-GitHub-Api-Version"),
         }
     )
     if isinstance(REPLY["body"], bytes):
@@ -122,6 +135,55 @@ def _account(base_url: str) -> GitHubAccount:
 async def account(base_url):
     async with _account(base_url) as account:
         yield account
+
+
+# A mount of a public repository names neither credential, and its calls
+# carry no Authorization at all rather than an empty one.
+@pytest.mark.asyncio
+async def test_an_anonymous_mount_sends_no_authorization(base_url):
+    config = GitHubConfig(owner="o", repo="r", base_url=base_url)
+    async with GitHubVFS(config).accessor.account as anonymous:
+        await github_get(anonymous, "/repos/o/r")
+        await github_request(anonymous, "GET", "/repos/o/r")
+    async with _account(base_url) as account:
+        await github_get(account, "/repos/o/r")
+    assert [seen["authorization"] for seen in SEEN] == [
+        None,
+        None,
+        "Bearer t",
+    ]
+
+
+def test_raw_url_names_the_commit_and_encodes_each_segment():
+    assert (
+        raw_url(RAW_BASE, "o", "r", "c0ffee", "docs/a b#?%.md")
+        == "https://raw.githubusercontent.com/o/r/c0ffee/docs/a%20b%23%3F%25.md"
+    )
+
+
+# A download asks with no credential and no API header, whatever the
+# account holds, as a page asks it.
+@pytest.mark.asyncio
+async def test_stream_raw_sends_a_bare_get(account, base_url):
+    REPLY.update(
+        {"status": 200, "body": b"bytes", "content_type": "text/plain"}
+    )
+    url = f"{base_url}/o/r/c0ffee/a.txt"
+    assert b"".join([c async for c in stream_raw(account, url)]) == b"bytes"
+    assert (SEEN[0]["path"], SEEN[0]["authorization"]) == (
+        "/o/r/c0ffee/a.txt",
+        None,
+    )
+    assert SEEN[0]["api_version"] is None
+
+
+@pytest.mark.asyncio
+async def test_stream_raw_raises_on_a_missing_file(account, base_url):
+    REPLY.update({"status": 404, "body": "404: Not Found"})
+    with pytest.raises(GitHubApiError) as excinfo:
+        async for _ in stream_raw(account, f"{base_url}/o/r/c0ffee/gone"):
+            pass
+    assert excinfo.value.status == 404
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,12 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.core.github.client import fetch_blob, stream_blob
+from mirage.core.github.client import (
+    fetch_blob,
+    raw_url,
+    stream_blob,
+    stream_raw,
+)
 from mirage.core.github.constants import BLOB_TEXT
 from mirage.core.github.repo import graphql_data
 from mirage.errors.fs import eisdir, enoent
@@ -40,7 +45,8 @@ async def read(
     exactly the bytes returned however old the listing is. That is also
     the documented limit of ``read: fresh`` here: a file read for the
     first time comes from the listing, and the next read's probe corrects
-    it.
+    it. An anonymous account on github.com downloads the file instead
+    (``_raw_source``), at a commit whose tree names that same sha.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -56,9 +62,14 @@ async def read(
     """
     sha = _blob_sha(path_spec, entry)
     timer = start_op()
-    data = await fetch_blob(
-        accessor.account, accessor.owner, accessor.repo, sha
-    )
+    url = _raw_source(accessor, path_spec, sha)
+    if url is None:
+        data = await fetch_blob(
+            accessor.account, accessor.owner, accessor.repo, sha
+        )
+    else:
+        async with aclosing(stream_raw(accessor.account, url)) as source:
+            data = b"".join([chunk async for chunk in source])
     record(
         "read",
         path_spec.virtual,
@@ -84,7 +95,9 @@ async def read_many(
     which proves the bytes are the ones a read returns. A binary,
     truncated or non-UTF-8 blob, a file past ``limit`` bytes, and a path
     with no file row are left out for their own read. Each file kept is
-    recorded as ``read`` records it.
+    recorded as ``read`` records it. An anonymous account asks nothing and
+    leaves every file to its own read, since GraphQL refuses a call with no
+    credential.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -93,6 +106,8 @@ async def read_many(
         entries (list[FileStat | None]): what is at each path, as its
             folder's listing names it.
     """
+    if accessor.account.anonymous:
+        return {}
     asked: dict[str, tuple[str, str]] = {}
     for path, entry in zip(paths, entries, strict=True):
         if (
@@ -151,9 +166,11 @@ async def read_stream(
     """Stream a file's blob as it downloads, recorded by its sha.
 
     The blob comes as GitHub's raw media type, the bytes themselves rather
-    than base64 inside JSON. The sha is the row's, as :func:`read` takes
-    it, and recorded up front: the blob endpoint is content-addressed, so
-    it names the bytes however far the stream is read.
+    than base64 inside JSON; an anonymous account on github.com downloads
+    the file instead, as :func:`read` does. The sha is the row's, as
+    :func:`read` takes it, and recorded up front: the blob endpoint is
+    content-addressed, and a download names a commit whose tree holds that
+    blob, so it names the bytes however far the stream is read.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -168,8 +185,11 @@ async def read_stream(
     rec = record_stream(
         "read", path_spec.virtual, VFSName.GITHUB, fingerprint=sha
     )
+    url = _raw_source(accessor, path_spec, sha)
     async with aclosing(
         stream_blob(accessor.account, accessor.owner, accessor.repo, sha)
+        if url is None
+        else stream_raw(accessor.account, url)
     ) as source:
         async for chunk in source:
             if rec is not None:
@@ -177,6 +197,32 @@ async def read_stream(
             yield chunk
     if rec is not None:
         rec.complete = True
+
+
+def _raw_source(
+    accessor: GitHubAccessor, path_spec: PathSpec, sha: str
+) -> str | None:
+    """The URL that downloads the blob ``sha`` at ``path_spec``, or None
+    when it is asked by sha.
+
+    An anonymous account on github.com downloads files, since each blob
+    request spends one of the 60 an hour the REST API allows it. The
+    download names the commit the accessor's tree was listed at, and only
+    when that tree holds this very blob at the path, so the bytes are the
+    ones ``sha`` names; a row from an older listing, or a tree that names
+    no commit, is asked by sha.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        path_spec (PathSpec): the file.
+        sha (str): the blob sha the file's row names.
+    """
+    base = accessor.account.raw_base
+    rel = path_spec.mount_path.strip("/")
+    row = accessor.tree.get(rel)
+    if base is None or accessor.head is None or row is None or row.sha != sha:
+        return None
+    return raw_url(base, accessor.owner, accessor.repo, accessor.head, rel)
 
 
 def _blob_sha(path_spec: PathSpec, entry: FileStat | None) -> str:

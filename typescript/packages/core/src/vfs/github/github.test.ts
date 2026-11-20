@@ -289,6 +289,22 @@ describe('grep and rg over code search', () => {
     expect(await read(hub)).toHaveLength(5)
   })
 
+  // Twin of test_an_anonymous_mount_scans_instead_of_searching: code search
+  // refuses a call with no credential, so the walk reads every file, each
+  // downloaded.
+  it('scans every file of an anonymous mount without searching', async () => {
+    const hub = new FakeGitHub(REPO)
+    vi.stubGlobal('fetch', hub.fetch)
+    const line = 'grep -rw import /gh'
+    const got = await run(await GitHubVFS.create({ owner: 'o', repo: 'r' }), line)
+    expect(got).toEqual(await run(ram(), line))
+    expect([hub.count('search'), hub.count('blob'), hub.count('graphql')]).toEqual([0, 0, 0])
+    const downloaded = hub.log
+      .filter(([route]) => route === 'raw')
+      .map(([, raw]) => raw.slice(raw.indexOf('/') + 1))
+    expect(new Set(downloaded)).toEqual(new Set(Object.keys(REPO)))
+  })
+
   it('does not search a scope cheaper to read', async () => {
     scope.warn = 100
     const line = 'grep -rw import /gh'

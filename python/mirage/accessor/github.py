@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.github.app import AppTokens
 from mirage.core.github.config import GhConfig
-from mirage.core.github.constants import API_BASE
+from mirage.core.github.constants import API_BASE, RAW_BASE
 from mirage.core.github.tree_entry import TreeEntry
 
 
@@ -30,7 +30,9 @@ class GitHubAccount(SessionAccessor):
 
     Args:
         config (GhConfig): the token or App and the API base; a gh
-            install's also names its default repository and branch.
+            install's also names its default repository and branch, and a
+            github mount's may name neither credential, to read a public
+            repository anonymously.
     """
 
     def __init__(self, config: GhConfig) -> None:
@@ -46,6 +48,22 @@ class GitHubAccount(SessionAccessor):
     def api_base(self) -> str:
         """The REST base its calls go to: github.com's when none is set."""
         return (self.config.base_url or API_BASE).rstrip("/")
+
+    @property
+    def anonymous(self) -> bool:
+        """Whether it holds neither a token nor an App, so its calls carry
+        no Authorization."""
+        return self.config.token is None and self.config.app is None
+
+    @property
+    def raw_base(self) -> str | None:
+        """Where a file's bytes are downloaded instead of asked by blob:
+        raw.githubusercontent.com for an anonymous account on github.com,
+        whose blob requests would each spend the REST limit; None for an
+        account with a credential, or on a GitHub Enterprise host."""
+        if self.anonymous and self.api_base == API_BASE:
+            return RAW_BASE
+        return None
 
     def _peer(self, peer: Accessor) -> "GitHubAccount | None":
         """The account behind a peer (a gh install's, or a github
@@ -105,6 +123,8 @@ class GitHubAccessor(Accessor):
         tree (dict[str, TreeEntry] | None): the recursive tree, None
             until fetched.
         truncated (bool): whether GitHub truncated that tree.
+        head (str | None): the commit that tree was listed at, None until
+            a listing names one.
     """
 
     def __init__(
@@ -116,6 +136,7 @@ class GitHubAccessor(Accessor):
         default_branch: str | None = None,
         tree: dict[str, TreeEntry] | None = None,
         truncated: bool = False,
+        head: str | None = None,
     ) -> None:
         self.account = account
         self.owner = owner
@@ -147,6 +168,7 @@ class GitHubAccessor(Accessor):
         # once an index was wired.
         self.tree_loaded: bool = tree is not None
         self.truncated = truncated
+        self.head = head
         # Bumped by forget, so a tree GitHub answered before the drop is
         # handed back to its caller but not reseated.
         self.generation = 0
@@ -162,3 +184,4 @@ class GitHubAccessor(Accessor):
         self.tree = {}
         self.tree_loaded = False
         self.truncated = False
+        self.head = None

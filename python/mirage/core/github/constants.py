@@ -15,6 +15,11 @@
 import re
 
 API_BASE = "https://api.github.com"
+# Where github.com serves a file's bytes at a commit with no credential. Its
+# downloads do not count against the REST API's hourly limit, which allows
+# an anonymous caller 60 requests, and it answers any origin, so a page can
+# read it.
+RAW_BASE = "https://raw.githubusercontent.com"
 API_VERSION = "2022-11-28"
 RAW_MEDIA_TYPE = "application/vnd.github.raw+json"
 SCOPE_WARN = 100

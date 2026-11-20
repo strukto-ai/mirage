@@ -264,11 +264,15 @@ def type_fields(
 
 # The credentials an entry takes exactly one of, by `kind/type`: a field,
 # or a block by its group. No one of them is required, so the field spec
-# alone would prompt for none. GitHub authenticates with a token or as an
-# App.
+# alone would prompt for none. gh authenticates with a token or as an App.
 ONE_CREDENTIAL: dict[str, tuple[str, ...]] = {
-    "vfs/github": ("token", "app"),
     "cli/gh": ("token", "app"),
+}
+# The credentials an entry takes at most one of: asked at a terminal, where
+# an empty answer is none, and never required. A github mount with neither
+# reads a public repository.
+AT_MOST_ONE_CREDENTIAL: dict[str, tuple[str, ...]] = {
+    "vfs/github": ("token", "app"),
 }
 # A PEM key spans lines, which a prompt cannot take, so its prompt also
 # reads `@PATH`.
@@ -309,18 +313,21 @@ def fill(
     name: str,
     spec: list[dict[str, Any]],
     credentials: tuple[str, ...] = (),
+    optional: bool = False,
 ) -> None:
     """Read the sealed values, then the required fields still missing:
     prompted for in a terminal, else refused, all named at once. An entry
     that takes one of several credentials and names none is asked which
-    one first.
+    one first; an optional one is asked only in a terminal, where an empty
+    answer is none.
 
     Args:
         draft (Draft): the entry.
         name (str): its name, for the prompts.
         spec (list[dict[str, Any]]): the type's fields.
-        credentials (tuple[str, ...]): the credentials it takes exactly
-            one of, if any.
+        credentials (tuple[str, ...]): the credentials it takes one of,
+            if any.
+        optional (bool): whether it may take none of them.
     """
     for key, path in draft.secrets:
         draft.fields[key] = read_secret(key, path, name)
@@ -329,17 +336,22 @@ def fill(
         credential_given(c, given) for c in credentials
     )
     missing = missing_required(spec, given)
-    if not unchosen and not missing:
+    ask = unchosen and (not optional or sys.stdin.isatty())
+    if not ask and not missing:
         return
     if not sys.stdin.isatty():
-        named = [" or ".join(credentials), *missing] if unchosen else missing
+        named = [" or ".join(credentials), *missing] if ask else missing
         fail(f"missing required fields: {', '.join(named)}", exit_code=2)
-    if unchosen:
-        choice = ""
-        while choice not in credentials:
+    if ask:
+        choices = (*credentials, "") if optional else credentials
+        none = " (empty for none)" if optional else ""
+        choice: str | None = None
+        while choice not in choices:
             choice = str(
                 typer.prompt(
-                    f"Authenticate {name} with {' or '.join(credentials)}"
+                    f"Authenticate {name} with {' or '.join(credentials)}{none}",
+                    default="" if optional else None,
+                    show_default=False,
                 )
             ).strip()
         block = [
@@ -347,7 +359,8 @@ def fill(
             for f in spec
             if f.get("group") == choice and f.get("required")
         ]
-        missing = [*(block or [choice]), *missing]
+        if choice:
+            missing = [*(block or [choice]), *missing]
     for key in missing:
         field = next((f for f in spec if f["name"] == key), None)
         hint = " (@PATH reads it from a file)" if key in FILE_PROMPTS else ""
@@ -498,11 +511,14 @@ def kind_app(kind: Kind) -> typer.Typer:
             client.ensure_running()
             spec = type_fields(client, kind, draft.type)
             refuse_argv_secrets(draft, spec)
+            key = f"{kind.name}/{draft.type}"
+            optional = AT_MOST_ONE_CREDENTIAL.get(key)
             fill(
                 draft,
                 draft.name,
                 spec,
-                ONE_CREDENTIAL.get(f"{kind.name}/{draft.type}", ()),
+                ONE_CREDENTIAL.get(key) or optional or (),
+                optional=optional is not None,
             )
             r = client.request(
                 "POST",

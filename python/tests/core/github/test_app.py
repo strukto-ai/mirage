@@ -243,17 +243,22 @@ async def test_app_tokens_mint_again_within_the_margin():
     assert await tokens.token(mint) == "t2"
 
 
+def test_a_mount_takes_at_most_one_credential():
+    with pytest.raises(
+        ValidationError, match="at most one of token or app; got both"
+    ):
+        GitHubConfig(owner="o", repo="r", token="t", app=_app())
+    anonymous = GitHubConfig(owner="o", repo="r")
+    assert (anonymous.token, anonymous.app) == (None, None)
+
+
 @pytest.mark.parametrize(
     ("got", "auth"),
     [("both", {"token": "t", "app": _app()}), ("neither", {})],
 )
-def test_config_refuses_both_or_neither(got, auth):
+def test_gh_takes_exactly_one_credential(got, auth):
     with pytest.raises(
-        ValidationError, match=f"one of token or app; got {got}"
-    ):
-        GitHubConfig(owner="o", repo="r", **auth)
-    with pytest.raises(
-        ValidationError, match=f"one of token or app; got {got}"
+        ValidationError, match=f"exactly one of token or app; got {got}"
     ):
         GhConfig(**auth)
 
