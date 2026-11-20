@@ -51,7 +51,9 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-KI-Agenten arbeiten in einem Terminal. Mirage ist **ein virtuelles Terminal**, das die Terminal-Schnittstelle, den Datenspeicher und die Rechenmaschinen voneinander trennt. Mirage leitet jeden Befehl an die Maschine weiter, die zu ihm passt, über heterogene Maschinen wie Container, microVMs, Cloud-Sandboxes und SSH-Hosts hinweg. Dateien, CLIs und Maschinen werden ihm getrennt hinzugefügt. Das hält es flexibel und die Infrastrukturkosten niedrig und lässt Agenten so effizient und sicher wie möglich arbeiten.
+LLMs werden in Terminal-Umgebungen nachtrainiert, deshalb kennen KI-Agenten die Terminal-Schnittstelle am besten. Doch ein Terminal ist heute an eine einzige Maschine und den Kernel ihres Betriebssystems gebunden, mit seinen Dateien und seinen Berechnungen auf derselben Maschine.
+
+Mirage ist **ein virtuelles Terminal für KI-Agenten**, das die Terminal-Schnittstelle vom Datenspeicher und von den Rechenmaschinen trennt. Es virtualisiert die Shell, das Dateisystem, die CLIs und die Maschinen. Jedes virtuelle Terminal startet mit nur wenigen KB Speicher, sodass KI-Agenten überall ein Terminal nutzen können, in einer Anwendung, einer mobilen App, einem Browser-Tab, einem FastAPI- oder Express-Server und sogar auf einem Edge-Gerät wie einem Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -60,9 +62,10 @@ KI-Agenten arbeiten in einem Terminal. Mirage ist **ein virtuelles Terminal**, d
   </picture>
 </p>
 
-- **Kontrollierbar.** Lege fest, was jeder Agent erreicht, welche Dateien er sieht, welche Zugangsdaten seine virtuellen Dateisysteme und CLIs verwenden, ohne sie ihm zu zeigen, und welche Maschine jedes seiner Programme ausführt.
-- **Skriptbar.** Das gesamte Terminal wird in Code oder einer Konfigurationsdatei definiert, von seinen virtuellen Dateisystemen, CLIs und Maschinen bis zu seinen Regeln, etwa welche Befehle eine Freigabe brauchen und wie viel Ausgabe ein Agent zurückbekommt.
-- **Verwaltet.** Mirage verwaltet die Infrastruktur des virtuellen Terminals, zusammengesetzt aus den gewählten Backends. Das virtuelle Dateisystem liegt auf S3, Drive, einer Datenbank oder im RAM, Jobs und History im RAM, in Redis oder auf der Festplatte, und ganze Workspaces lassen sich als Snapshots speichern. Jeder Befehl, den ein Agent ausführt, wird aufgezeichnet und kann als Trace an ein OpenTelemetry-Backend gesendet werden.
+- **Kontrollierbar.** Jeder Agent bekommt nur die Dateien, Befehle, Zugangsdaten und Maschinen, die sein Profil erlaubt.
+- **Skriptbar.** Das gesamte Terminal wird in Code oder einer einzigen Konfigurationsdatei definiert, von seinen Dateisystemen, CLIs und Maschinen bis zu seinen Regeln.
+- **Verwaltet.** Der Zustand liegt auf bereits vorhandener Infrastruktur wie RAM, Festplatte, Redis oder S3, und jeder Befehl wird aufgezeichnet und kann als OpenTelemetry-Trace exportiert werden.
+- **Leichtgewichtig.** Jeder Workspace belegt nur wenige KB Speicher, und Mirage ist von der Shell bis zu jedem Dienstaufruf asynchron, sodass ein Prozess viele Agenten gleichzeitig bedient. Es lässt sich fast überall einsetzen, auf einem Python- oder TypeScript-Server, in einem Browser-Tab, einem Cloudflare Worker oder auf einem Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -138,7 +141,7 @@ slack: Permission denied
 - **Eine skriptfähige Policy-Engine.** Ein Policy-Skript kann jede gefährliche Aktion verhindern, bevor sie ausgeführt wird, und derselbe Stapel prüft jede VFS-Operation und jeden Session-Schreibzugriff, sodass weder eine Datei noch eine Umgebungsvariable nach außen dringt.
 - **Benachrichtigungen, die mit dem VFS und den Agenten verdrahtet sind.** Externe Änderungen werden zu einem Ereignisstrom auf dem Mount, sodass eine neue Slack-Antwort als Änderung der Chat-Datei im virtuellen Dateisystem erscheint und der Agent darauf reagiert, statt den Baum erneut zu durchsuchen.
 
-## Virtuelles Dateisystem
+## Einheitliches virtuelles Dateisystem
 
 [Mirage](https://www.strukto.ai/mirage) „mountet“ alles als ein einheitliches virtuelles Dateisystem für KI-Agenten. Jeder Dienst liegt nebeneinander unter einer einzigen Wurzel und folgt derselben POSIX-Semantik.
 
@@ -153,7 +156,7 @@ slack: Permission denied
 
 Agenten erreichen es über die Python- und TypeScript-SDKs, die CLI `mirage` oder einen echten Mountpoint über FUSE und FSKit und bearbeiten es dann mit den Unix-Werkzeugen, die sie schon kennen, etwa `ls`, `grep`, `find` und `jq`.
 
-## Virtuelle Kommandozeilenwerkzeuge
+## Virtuelle CLIs
 
 Diese Kommandozeilenwerkzeuge sind virtualisiert: [Mirage](https://www.strukto.ai/mirage) beantwortet `git`, `slack` oder `ntn` selbst, sodass ein Agent den Dienst bedient, ohne dass das Programm auf der Maschine installiert ist. Jedes ahmt das echte Werkzeug nach, ein Agent, der die CLI kennt, braucht also nichts Neues. Weil sie virtuell sind, lässt sich dasselbe Werkzeug mehrfach unter verschiedenen Namen installieren, jedes mit eigenen Zugangsdaten, sodass jeder Agent genau die Konten erhält, die ihm zugewiesen sind.
 
@@ -163,7 +166,7 @@ Diese Kommandozeilenwerkzeuge sind virtualisiert: [Mirage](https://www.strukto.a
 | **Kommunikation**    | <a href="https://docs.mirage.strukto.ai/home/setup/cli/slack"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/discord"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/himalaya"><img src="../assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **Arbeit und Daten** | <a href="https://docs.mirage.strukto.ai/home/setup/cli/linear"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/ntn"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/trello"><img src="https://cdn.simpleicons.org/trello" width="20" height="20" alt="trello" title="trello" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/airtable"><img src="https://cdn.simpleicons.org/airtable" width="20" height="20" alt="airtable" title="airtable" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/gws"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://docs.mirage.strukto.ai/home/setup/cli/hf"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/office"><img src="https://api.iconify.design/lucide/file-spreadsheet.svg?color=%23888888" width="20" height="20" alt="office" title="office" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/pdftotext"><img src="https://api.iconify.design/lucide/file-text.svg?color=%23888888" width="20" height="20" alt="pdftotext" title="pdftotext" /></a> <a href="https://docs.mirage.strukto.ai/home/setup/cli/pdfinfo"><img src="https://api.iconify.design/lucide/file-search.svg?color=%23888888" width="20" height="20" alt="pdfinfo" title="pdfinfo" /></a> |
 
-## Virtuelle Maschine
+## Virtuelle Maschinen
 
 Maschinen werden auf dieselbe Weise virtualisiert, und nicht nur für Programmiersprachen. Jeder Befehl auf der Zeile kann an eine konfigurierte Maschine gehen: Python läuft etwa im Prozess mit [Monty](https://pydantic.dev/articles/pydantic-monty), während ein anderer Befehl, sagen wir `kubectl`, per SSH auf einer entfernten Maschine läuft. Welche Maschine eine Zeile bedient, kann ein [geskripteter Maschinen-Router](https://docs.mirage.strukto.ai/home/policy/route-machine) entscheiden.
 

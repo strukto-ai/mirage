@@ -51,7 +51,9 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-AI Agent làm việc trong terminal. Mirage là **một terminal ảo** tách riêng giao diện terminal, nơi lưu trữ dữ liệu và các máy tính toán. Mirage định tuyến mỗi lệnh tới máy phù hợp với nó, trên các máy không đồng nhất như container, microVM, sandbox đám mây và máy chủ SSH. File, CLI và máy được thêm vào riêng rẽ, nhờ đó Mirage linh hoạt, chi phí hạ tầng thấp, và agent làm việc theo cách hiệu quả và an toàn nhất.
+Các LLM được hậu huấn luyện (post-train) trong môi trường terminal, nên giao diện mà AI agent quen thuộc nhất là terminal. Nhưng terminal ngày nay gắn với một máy duy nhất và nhân hệ điều hành của nó, với file và việc tính toán đều nằm trên chính máy đó.
+
+Mirage là **một terminal ảo cho AI agent**, tách giao diện terminal khỏi nơi lưu trữ dữ liệu và các máy tính toán. Nó ảo hóa shell, hệ thống file, các CLI và các máy. Mỗi terminal ảo khởi động chỉ với vài KB bộ nhớ, nên AI agent có thể dùng terminal ở mọi nơi, bên trong một ứng dụng, một ứng dụng di động, một tab trình duyệt, một server FastAPI hoặc Express, và cả một thiết bị biên như Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -60,9 +62,10 @@ AI Agent làm việc trong terminal. Mirage là **một terminal ảo** tách ri
   </picture>
 </p>
 
-- **Kiểm soát được.** Quyết định mỗi agent tiếp cận những gì, thấy những file nào, hệ thống file ảo và CLI của nó dùng thông tin xác thực nào mà không để lộ ra, và máy nào chạy từng chương trình của nó.
-- **Viết script được.** Toàn bộ terminal được định nghĩa bằng code hoặc một file cấu hình, từ hệ thống file ảo, CLI và máy cho tới các quy tắc, như lệnh nào cần phê duyệt và agent nhận lại bao nhiêu đầu ra.
-- **Được quản lý.** Mirage quản lý hạ tầng của terminal ảo, ghép từ các backend được chọn. Hệ thống file ảo nằm trên S3, Drive, một cơ sở dữ liệu hoặc RAM, job và lịch sử trên RAM, Redis hoặc ổ đĩa, và toàn bộ workspace có thể được lưu thành snapshot. Mọi lệnh agent chạy đều được ghi lại và có thể gửi tới một backend OpenTelemetry dưới dạng trace.
+- **Kiểm soát được.** Mỗi agent chỉ nhận được những file, lệnh, thông tin xác thực và máy mà profile của nó cho phép.
+- **Viết script được.** Toàn bộ terminal được định nghĩa bằng code hoặc một file cấu hình duy nhất, từ hệ thống file, CLI và máy cho tới các quy tắc.
+- **Được quản lý.** Trạng thái nằm trên hạ tầng sẵn có, như RAM, ổ đĩa, Redis hoặc S3, và mọi lệnh đều được ghi lại và có thể xuất ra dưới dạng trace OpenTelemetry.
+- **Nhẹ.** Mỗi workspace chỉ chiếm vài KB bộ nhớ và Mirage bất đồng bộ từ shell tới từng lời gọi dịch vụ, nên một tiến trình phục vụ được nhiều agent cùng lúc. Nó có thể được triển khai gần như ở mọi nơi, trên một server Python hoặc TypeScript, một tab trình duyệt, một Cloudflare Worker hoặc một Raspberry Pi.
 
 <p align="center">
   <picture>
@@ -138,7 +141,7 @@ slack: Permission denied
 - **Công cụ chính sách viết được bằng script.** Một script chính sách có thể chặn mọi hành động nguy hiểm trước khi nó chạy, và cùng ngăn xếp đó kiểm soát mọi thao tác VFS và mọi lần ghi session, nên không tệp nào và không biến môi trường nào bị rò rỉ.
 - **Thông báo nối vào VFS và agent.** Thay đổi bên ngoài trở thành luồng sự kiện trên mount, nên một trả lời Slack mới hiện ra như một thay đổi của tệp hội thoại trong hệ thống tệp ảo, và agent phản ứng theo đó thay vì quét lại toàn bộ cây.
 
-## Hệ thống tệp ảo
+## Hệ thống tệp ảo hợp nhất
 
 [Mirage](https://www.strukto.ai/mirage) "mount" mọi thứ thành một hệ thống tệp ảo thống nhất cho AI agent. Mỗi dịch vụ nằm cạnh nhau dưới một gốc duy nhất và tuân theo cùng ngữ nghĩa POSIX.
 
@@ -153,7 +156,7 @@ slack: Permission denied
 
 Agent tiếp cận nó qua SDK Python và TypeScript, CLI `mirage`, hoặc một mountpoint thật qua FUSE và FSKit, rồi làm việc bằng các công cụ unix đã quen như `ls`, `grep`, `find` và `jq`.
 
-## Công cụ dòng lệnh ảo
+## CLI ảo
 
 Các công cụ dòng lệnh này được ảo hóa: [Mirage](https://www.strukto.ai/mirage) tự đáp ứng `git`, `slack` hay `ntn`, nên agent điều khiển dịch vụ mà máy không cần cài chương trình đó. Mỗi công cụ mô phỏng công cụ thật, nên agent đã biết CLI không cần học gì mới. Vì là ảo, cùng một công cụ có thể được cài nhiều lần dưới các tên khác nhau, mỗi bản có thông tin xác thực riêng, nên mỗi agent nhận đúng những tài khoản được giao.
 

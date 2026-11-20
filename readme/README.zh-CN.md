@@ -51,7 +51,9 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-AI Agent 在终端中工作。Mirage 是一个**虚拟终端**，它把终端接口、数据存储和计算机器彼此分开。Mirage 把每条命令路由到适合它的机器上，覆盖容器、microVM、云沙箱和 SSH 主机等异构机器。文件、CLI 和机器分别加入，因此它保持灵活、基础设施成本低，并让 Agent 以最高效、最安全的方式工作。
+LLM 在终端环境中完成后训练，因此 AI Agent 最熟悉终端接口。但如今的终端绑定在单台机器和它的操作系统内核上，文件和计算都在同一台机器上。
+
+Mirage 是一个**面向 AI Agent 的虚拟终端**，它把终端接口与数据存储和计算机器分开。它虚拟化了 shell、文件系统、CLI 和机器。每个虚拟终端启动时只占用几 KB 内存，因此 AI Agent 可以在任何地方使用终端环境，包括应用内、移动应用、浏览器标签页、FastAPI 或 Express 服务器，甚至 Raspberry Pi 这样的边缘设备。
 
 <p align="center">
   <picture>
@@ -60,9 +62,10 @@ AI Agent 在终端中工作。Mirage 是一个**虚拟终端**，它把终端接
   </picture>
 </p>
 
-- **可控。** 决定每个 Agent 能触达什么，包括它能看到哪些文件、它的虚拟文件系统和 CLI 在不向它展示的情况下使用哪些凭据，以及由哪台机器运行它的每个程序。
-- **可脚本化。** 整个终端用代码或配置文件定义，从虚拟文件系统、CLI 和机器，到各项规则，例如哪些命令需要审批、Agent 能拿回多少输出。
-- **托管式。** Mirage 管理虚拟终端的基础设施，由所选的后端组合而成。虚拟文件系统放在 S3、Drive、数据库或 RAM 上，作业和历史记录放在 RAM、Redis 或磁盘上，整个工作区可以保存为快照。Agent 运行的每条命令都会被记录，并可以作为 trace 发送到 OpenTelemetry 后端。
+- **可控。** 每个 Agent 只能拿到它的 profile 允许的文件、命令、凭据和机器。
+- **可脚本化。** 整个终端用代码或一个配置文件定义，从文件系统、CLI 和机器到各项规则。
+- **托管式。** 状态存放在已有的基础设施上，例如 RAM、磁盘、Redis 或 S3，每条命令都会被记录，并可以导出为 OpenTelemetry trace。
+- **轻量。** 每个工作区只占用几 KB 内存，Mirage 从 shell 到每次服务调用都是异步的，因此一个进程可以同时服务许多 Agent。它几乎可以部署在任何地方，包括 Python 或 TypeScript 服务器、浏览器标签页、Cloudflare Worker 或 Raspberry Pi。
 
 <p align="center">
   <picture>
@@ -138,7 +141,7 @@ slack: Permission denied
 - **可脚本化的策略引擎。** 策略脚本可以在任何危险操作执行前将其阻止，同一套策略栈还会拦截每一次 VFS 操作和会话写入，因此文件和环境变量都不会泄露。
 - **接入 VFS 与 Agent 的通知。** 外部变更会成为挂载上的事件流，因此一条新的 Slack 回复会表现为虚拟文件系统中聊天文件的变化，Agent 直接据此响应，而不必重新扫描整棵树。
 
-## 虚拟文件系统
+## 统一虚拟文件系统
 
 [Mirage](https://www.strukto.ai/mirage) 把一切“挂载”为一个面向 AI Agent 的统一虚拟文件系统。每个服务并排位于同一个根目录下，并遵循相同的 POSIX 语义。
 
@@ -153,7 +156,7 @@ slack: Permission denied
 
 Agent 可以通过 Python 和 TypeScript SDK、`mirage` CLI，或基于 FUSE 和 FSKit 的真实挂载点访问它，再用已经熟悉的 unix 工具操作，如 `ls`、`grep`、`find` 和 `jq`。
 
-## 虚拟命令行工具
+## 虚拟 CLI
 
 这些命令行工具是虚拟化的：[Mirage](https://www.strukto.ai/mirage) 自己应答 `git`、`slack` 或 `ntn`，因此 Agent 无需在机器上安装对应程序即可驱动服务。每个工具都模仿真实工具，熟悉该 CLI 的 Agent 无需学习新东西。由于它们是虚拟的，同一个工具可以用不同名称安装多次，各自使用独立的凭据，因此每个 Agent 拿到的恰好是分配给它的账号。
 

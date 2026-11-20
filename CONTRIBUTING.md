@@ -1,8 +1,8 @@
 # Contributing to Mirage
 
-Thank you for your interest in contributing to Mirage. Mirage is a unified
-virtual filesystem for AI agents, with Python and TypeScript implementations in
-one repository.
+Thank you for your interest in contributing to Mirage. Mirage is a virtual
+terminal for AI agents, with Python and TypeScript implementations in one
+repository.
 
 ## Contribution Guidelines
 
