@@ -22,8 +22,9 @@ import type {
 import { VFSName } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { vfsCall } from '@struktoai/mirage-core/vfs/call'
 import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
+import { Effect, type ConfigState, type Handed } from '@struktoai/mirage-core/vfs/types'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { append as sshAppend } from '../../core/ssh/append.ts'
 import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
@@ -40,7 +41,7 @@ import { rmR as sshRmR } from '../../core/ssh/rm.ts'
 import { rmdir as sshRmdir } from '../../core/ssh/rmdir.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
-import { stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
+import { realpath as sshRealpath, stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
 import { follow as sshFollow, readStream as sshStream } from '../../core/ssh/stream.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { unlink as sshUnlink } from '../../core/ssh/unlink.ts'
@@ -96,6 +97,11 @@ export class SSHVFS extends BaseVFS {
 
   override stat(path: PathSpec): Promise<FileStat> {
     return sshStat(this.accessor, path)
+  }
+
+  @vfsCall({ effect: Effect.METADATA })
+  realpath(path: PathSpec): Promise<string> {
+    return sshRealpath(this.accessor, path)
   }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {

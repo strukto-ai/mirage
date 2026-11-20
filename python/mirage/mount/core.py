@@ -51,6 +51,7 @@ from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
+from mirage.utils.path import ends_at_dot
 from mirage.utils.stat_view import (
     atime_ns,
     content_size,
@@ -328,7 +329,9 @@ class MountCore:
             return self._root
         return self._root + path
 
-    async def client_path(self, path: str) -> str:
+    async def client_path(
+        self, path: str, *, reject_final_dot: bool = False
+    ) -> str:
         """Walk dots against the client's root before mapping into the workspace.
 
         The dispatcher checks and follows each directory consumed by a dot.
@@ -336,7 +339,11 @@ class MountCore:
 
         Args:
             path (str): absolute or root-relative client spelling.
+            reject_final_dot (bool): refuse a final dot or parent as an
+                operand that names a directory entry to remove or rename.
         """
+        if reject_final_dot and ends_at_dot(path):
+            raise einval(path)
         parts: list[str] = []
         for part in path.split("/"):
             if not part:
@@ -347,7 +354,7 @@ class MountCore:
                 prefix = "/" + "/".join(parts)
                 if not is_dir(await self.stat(prefix)):
                     raise enotdir(path)
-                prefix = self._client_identity(prefix)
+                prefix = await self._client_identity(prefix)
                 if part == "..":
                     prefix = posixpath.dirname(prefix)
                 parts = prefix[1:].split("/") if prefix != "/" else []
@@ -365,15 +372,43 @@ class MountCore:
         name = await self.client_path(path)
         if await self._row_or_none(name) is None:
             return name.rstrip("/") or "/"
-        return self._client_identity(name)
+        return await self._client_identity(name)
 
-    def _client_identity(self, path: str) -> str:
-        resolved = self.identity(path)
-        if resolved == self._root:
-            return "/"
-        if not resolved.startswith(self._root + "/"):
-            raise enoent(path)
-        return resolved[len(self._root) :]
+    async def _client_identity(self, path: str) -> str:
+        async def identify() -> str:
+            resolved = self.identity(path)
+            if resolved != self._root and not resolved.startswith(
+                self._root + "/"
+            ):
+                raise enoent(path)
+            reader = reader_of(self._files)
+            owner = reader.owner(resolved)
+            if owner is not None and "realpath" in owner.calls:
+                key, _ = await self._files.dispatch(
+                    "realpath", PathSpec.from_str_path(resolved)
+                )
+                if not isinstance(key, str) or key.startswith("/"):
+                    raise einval(path)
+                landing = (owner.prefix.rstrip("/") + "/" + key).rstrip(
+                    "/"
+                ) or "/"
+                if landing != resolved:
+                    target_owner = reader.owner(landing)
+                    if (
+                        (
+                            landing != self._root
+                            and not landing.startswith(self._root + "/")
+                        )
+                        or target_owner is None
+                        or target_owner.prefix != owner.prefix
+                        or reader.follow(landing) != landing
+                    ):
+                        raise enoent(path)
+                    await self._files.stat(landing)
+                    resolved = landing
+            return resolved[len(self._root) :] or "/"
+
+        return await self._op(identify())
 
     def attrs(self, s: FileStat, size: int | None = None) -> MountAttrs:
         """The POSIX attrs for one stat row, the way a guest's stat reads

@@ -12,18 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
+import { eacces, enoent, exdev } from '@struktoai/mirage-core/errors/fs'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { parseTree, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { modeType, S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
 import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, isPermissionDenied } from './utils.ts'
+import { isNoSuchFile, isPermissionDenied, sftpCall } from './utils.ts'
 
 const FIND_TYPES: Readonly<Record<string, number>> = { d: S_IFDIR, f: S_IFREG }
 
@@ -86,6 +87,30 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
   const cleaned = rstripSlash(virtual)
   const name = cleaned.length === 0 ? '/' : (cleaned.split('/').pop() ?? '/')
   return attrsToFileStat(name, attrs)
+}
+
+/** Resolve remote links to a key under the configured root. */
+export async function realpath(accessor: SSHAccessor, path: PathSpec): Promise<string> {
+  const sftp = await accessor.sftp()
+  try {
+    const root = posixNormpath(
+      await sftpCall<string>((done) => {
+        sftp.realpath(accessor.config.root ?? '/', done)
+      }),
+    )
+    const remote = posixNormpath(
+      await sftpCall<string>((done) => {
+        sftp.realpath(joinRoot(root, rawPathOf(path)), done)
+      }),
+    )
+    const prefix = rstripSlash(root) + '/'
+    if (!root.startsWith('/') || (remote !== root && !remote.startsWith(prefix))) throw exdev(path)
+    return remote === root ? '' : remote.slice(prefix.length)
+  } catch (err) {
+    if (isNoSuchFile(err)) throw enoent(path)
+    if (isPermissionDenied(err)) throw eacces(path)
+    throw err
+  }
 }
 
 /**

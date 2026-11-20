@@ -20,10 +20,11 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.core.posix.stat import parse_tree, tree_command
 from mirage.core.posix.utils import join_root
 from mirage.core.ssh.constants import SFTP_KINDS
-from mirage.errors.fs import eacces, enoent
+from mirage.errors.fs import eacces, enoent, exdev
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_path
+from mirage.utils.path import posix_normpath
 from mirage.utils.stat_view import mode_type
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,31 @@ async def stat(
     return attrs_to_file_stat(
         path.rstrip("/").rsplit("/", 1)[-1] or "/", attrs
     )
+
+
+async def realpath(accessor: SSHAccessor, path: PathSpec) -> str:
+    """Resolve remote links to a key under the configured root.
+
+    Args:
+        accessor (SSHAccessor): the mount's connection.
+        path (PathSpec): the path to resolve on the remote server.
+    """
+    sftp = await accessor.sftp()
+    try:
+        root = posix_normpath(await sftp.realpath(accessor.config.root))
+        remote = posix_normpath(
+            await sftp.realpath(join_root(root, path.mount_path))
+        )
+    except asyncssh.SFTPPermissionDenied as exc:
+        raise eacces(path) from exc
+    except asyncssh.SFTPNoSuchFile as exc:
+        raise enoent(path) from exc
+    prefix = root.rstrip("/") + "/"
+    if not root.startswith("/") or (
+        remote != root and not remote.startswith(prefix)
+    ):
+        raise exdev(path)
+    return "" if remote == root else remote[len(prefix) :]
 
 
 async def tree(

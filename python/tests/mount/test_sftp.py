@@ -119,6 +119,17 @@ async def test_sftp_walks_the_client_path_from_its_root(root):
                 await sftp.stat(path)
             assert error.value.errno == code
 
+        with pytest.raises(OSError) as error:
+            await sftp.rmdir(b"/left/jump/.")
+        assert error.value.errno == errno.EINVAL
+        with pytest.raises(OSError) as error:
+            await sftp.rename(b"/left/jump/.", b"/moved")
+        assert error.value.errno == errno.EINVAL
+        with pytest.raises(OSError) as error:
+            await sftp.posix_rename(b"/left/", b"/left/jump/../")
+        assert error.value.errno == errno.EINVAL
+        assert stat.S_ISDIR((await sftp.stat(b"/right/deep")).permissions)
+
         await sftp.remove(b"/left/jump/../marker")
         assert await ws.vfs.read(f"{root}/left/marker") == b"left"
         with pytest.raises(FileNotFoundError):

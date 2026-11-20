@@ -257,7 +257,11 @@ export class MirageSFTPServer {
       )
     })
     s.on('RMDIR', (id: number, path: string) => {
-      this.serve(id, () => this.simple(id, async (core) => core.rmdir(await core.clientPath(path))))
+      this.serve(id, () =>
+        this.simple(id, async (core) =>
+          core.rmdir(await core.clientPath(path, { rejectFinalDot: true })),
+        ),
+      )
     })
     s.on('RENAME', (id: number, oldPath: string, newPath: string) => {
       this.serve(id, () => this.rename(id, oldPath, newPath))
@@ -284,7 +288,10 @@ export class MirageSFTPServer {
       }
       this.serve(id, () =>
         this.simple(id, async (core) =>
-          core.rename(await core.clientPath(from), await core.clientPath(to)),
+          core.rename(
+            await core.clientPath(from, { rejectFinalDot: true }),
+            await core.clientPath(to, { rejectFinalDot: true }),
+          ),
         ),
       )
     })
@@ -468,8 +475,8 @@ export class MirageSFTPServer {
   // SFTP v3's rename refuses to replace an existing target.
   private async rename(id: number, oldPath: string, newPath: string): Promise<void> {
     const core = await this.mount()
-    const from = await core.clientPath(oldPath)
-    const to = await core.clientPath(newPath)
+    const from = await core.clientPath(oldPath, { rejectFinalDot: true })
+    const to = await core.clientPath(newPath, { rejectFinalDot: true })
     if (await exists(core, to)) throw eexist(to)
     await core.rename(from, to)
     this.sftp.status(id, STATUS.OK)

@@ -34,7 +34,7 @@ import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
 import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
-import { parent, posixNormpath } from '../utils/path.ts'
+import { endsAtDot, parent, posixNormpath } from '../utils/path.ts'
 import { sliceWindow } from '../utils/ranges.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
@@ -182,7 +182,8 @@ export class MountCore {
    * each directory consumed by a dot. The operation still gets the final name
    * and its trailing slash.
    */
-  async clientPath(path: string): Promise<string> {
+  async clientPath(path: string, { rejectFinalDot = false } = {}): Promise<string> {
+    if (rejectFinalDot && endsAtDot(path)) throw einval(path)
     let parts: string[] = []
     for (const part of path.split('/')) {
       if (part === '') continue
@@ -191,7 +192,7 @@ export class MountCore {
       } else if (parts.length > 0) {
         let prefix = '/' + parts.join('/')
         if (!isDir(await this.stat(prefix))) throw enotdir(path)
-        prefix = this.clientIdentity(prefix)
+        prefix = await this.clientIdentity(prefix)
         if (part === '..') prefix = parent(prefix)
         parts = prefix === '/' ? [] : prefix.slice(1).split('/')
       }
@@ -208,11 +209,30 @@ export class MountCore {
     return this.clientIdentity(name)
   }
 
-  private clientIdentity(path: string): string {
-    const resolved = this.identity(path)
-    if (resolved === this.root) return '/'
-    if (!resolved.startsWith(this.root + '/')) throw enoent(path)
-    return resolved.slice(this.root.length)
+  private clientIdentity(path: string): Promise<string> {
+    return this.op(async () => {
+      let resolved = this.identity(path)
+      if (resolved !== this.root && !resolved.startsWith(this.root + '/')) throw enoent(path)
+      const reader = readerOf(this.files)
+      const owner = reader.owner(resolved)
+      if (owner?.calls?.has('realpath') === true) {
+        const [key] = await this.files.dispatch('realpath', PathSpec.fromStrPath(resolved))
+        if (typeof key !== 'string' || key.startsWith('/')) throw einval(path)
+        const landing = rstripSlash(rstripSlash(owner.prefix) + '/' + key) || '/'
+        if (landing !== resolved) {
+          if (
+            (landing !== this.root && !landing.startsWith(this.root + '/')) ||
+            reader.owner(landing)?.prefix !== owner.prefix ||
+            reader.follow(landing) !== landing
+          ) {
+            throw enoent(path)
+          }
+          await this.files.stat(landing)
+          resolved = landing
+        }
+      }
+      return resolved.slice(this.root.length) || '/'
+    })
   }
 
   /**
