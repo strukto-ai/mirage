@@ -133,6 +133,54 @@ async function run(
   return cpGeneric(paths.map(spec), stat, { copy, find }, flags, undefined, opts.readdir)
 }
 
+async function symbolicCopyWithStatFailure(
+  failure: Error,
+  links: Map<string, string>,
+): Promise<IOResult> {
+  const files = new Map(['/src/a-good', '/src/z-bad'].map((p) => [p, new Uint8Array()]))
+  const dirs = new Set(['/src'])
+  const { stat, strategy } = makePrimitive(files, dirs, {
+    statFails: new Map([['/src/z-bad', failure]]),
+  })
+  const dispatch: DispatchFn = (op, path, _args, kwargs = {}) => {
+    if (op === 'mkdir') dirs.add(path.virtual)
+    else if (op === 'symlink') links.set(path.virtual, String(kwargs.target))
+    else throw new Error(`unexpected op: ${op}`)
+    return Promise.resolve([null, new IOResult()])
+  }
+  const [, io] = await cpGeneric(
+    [spec('/src'), spec('/out')],
+    stat,
+    strategy,
+    cpFlags({ recursive: true, link: 'symbolic' }),
+    undefined,
+    strategy.readdir,
+    undefined,
+    undefined,
+    undefined,
+    dispatch,
+  )
+  return io
+}
+
+it.each([
+  [eacces('/src/z-bad'), 'Permission denied'],
+  [new RangeError('malformed metadata'), 'malformed metadata'],
+])('cp -Rs links later siblings after a child stat fails with %s', async (failure, message) => {
+  const links = new Map<string, string>()
+  const io = await symbolicCopyWithStatFailure(failure, links)
+  expect(io.exitCode).toBe(1)
+  expect(await io.stderrStr()).toBe(`cp: cannot stat '/src/z-bad': ${message}\n`)
+  expect(links).toEqual(new Map([['/out/a-good', '/src/a-good']]))
+})
+
+it('cp -Rs stops linking on abort', async () => {
+  const links = new Map<string, string>()
+  const abort = new DOMException('execute aborted', 'AbortError')
+  await expect(symbolicCopyWithStatFailure(abort, links)).rejects.toBe(abort)
+  expect(links.size).toBe(0)
+})
+
 describe('cpGeneric guards', () => {
   it('deep under a plain file still reports Not a directory', async () => {
     const files = new Map([

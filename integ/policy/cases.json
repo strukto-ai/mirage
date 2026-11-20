@@ -314,6 +314,16 @@
    ]
   },
   {
+   "id": "recursive_symbolic_copy_skips_the_child_whose_stat_is_denied",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "exec", "command": "mkdir /data/src && touch /data/src/a-good /data/src/z-bad", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "register_policy", "id": "copy-stat", "pre_vfs": {"/data/src/z-bad": {"deny": "sealed entry"}}},
+    {"op": "exec", "command": "cp -Rs /data/src /data/out", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot stat '/data/src/z-bad': Permission denied\n", "decision": "sealed entry"}}},
+    {"op": "exec", "command": "test ! -L /data/out/z-bad && readlink /data/out/a-good", "expect": {"value": {"exit_code": 0, "stdout": "/data/src/a-good\n", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "pre_execute_and_post_execute_answer_for_the_whole_line",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
