@@ -223,6 +223,23 @@ describe('wrapLine', () => {
   })
 })
 
+function stat(pid: number): string[] {
+  let text: string
+  try {
+    text = readFileSync(`/proc/${String(pid)}/stat`, 'utf8')
+  } catch {
+    return ['X']
+  }
+  return text
+    .slice(text.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/)
+}
+
+function ended(pid: number): boolean {
+  return ['Z', 'X'].includes(stat(pid)[0] ?? 'X')
+}
+
 // A run's program may ignore TERM, and the config may set a PATH that
 // holds no grep: the stop line still ends every process of the run.
 describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
@@ -331,19 +348,6 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
     const exited = new Promise((resolve) => program.once('exit', resolve))
     const [pids] = await Promise.all([labelled, exited])
     const pid = (label: string): number => pids.get(label) ?? 0
-    const stat = (of: number): string[] => {
-      let text: string
-      try {
-        text = readFileSync(`/proc/${String(of)}/stat`, 'utf8')
-      } catch {
-        return ['X']
-      }
-      return text
-        .slice(text.lastIndexOf(')') + 1)
-        .trim()
-        .split(/\s+/)
-    }
-    const ended = (of: number): boolean => ['Z', 'X'].includes(stat(of)[0] ?? 'X')
     const leader = Number(stat(pid('z'))[3])
     for (let i = 0; i < 50 && stat(leader)[0] !== 'Z'; i++) {
       await new Promise((resolve) => setTimeout(resolve, 100))
