@@ -87,10 +87,16 @@ describe('runCommandTree under a cancelled line', () => {
   }
 
   it('stops the substitution in a backtick read', async () => {
-    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual(['f', 'started'])
+    expect(await filesAfterCancel(`echo \`< $(${slow})\`; touch /data/after`)).toEqual([
+      'f',
+      'started',
+    ])
   })
 
   it('stops the substitution in a $( ) read', async () => {
-    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual(['f', 'started'])
+    expect(await filesAfterCancel(`echo $(< $(${slow})); touch /data/after`)).toEqual([
+      'f',
+      'started',
+    ])
   })
 })
