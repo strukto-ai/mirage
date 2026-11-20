@@ -25,12 +25,11 @@ from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS
+from mirage.runtime.constants import WORKSPACE_PROVIDERS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import (
     ExecutionKind,
     OutputFn,
-    RouteDecision,
     RunResult,
     RuntimeIdentity,
 )
@@ -80,7 +79,7 @@ async def run_external(
     stdin: ByteSource | None,
     session: SessionState,
     registry: MountRegistry,
-    routing: RouteDecision[RuntimeIdentity],
+    entry: RuntimeIdentity | None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage.
@@ -92,9 +91,6 @@ async def run_external(
     lands beside its stdout and stays when the program is stopped;
     without one it lands on the result, kept as it arrives all the same.
     """
-    bindings = routing.bindings
-    entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
-    command = shlex.join(argv.tokens)
     if entry is None:
         denied = admission_denial(argv.name)
         err = await denied.materialize_stderr()
@@ -102,7 +98,9 @@ async def run_external(
             None,
             denied,
             ExecutionNode(
-                command=command, exit_code=CANNOT_EXECUTE_STATUS, stderr=err
+                command=shlex.join(argv.tokens),
+                exit_code=CANNOT_EXECUTE_STATUS,
+                stderr=err,
             ),
         )
     runtime = Runtime.require(entry)

@@ -22,9 +22,8 @@ import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import type { ProcessTraits } from '../../../execution/process/types.ts'
 import type { MachineName } from '../../../execution/types.ts'
-import { EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS } from '../../../runtime/constants.ts'
+import { WORKSPACE_PROVIDERS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
-import type { RouteDecision } from '../../../runtime/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Argv } from '../../expand/argv.ts'
@@ -75,14 +74,11 @@ export async function runExternal(
   stdin: ByteSource | null,
   session: SessionState,
   registry: MountRegistry,
-  routing: RouteDecision<Runtime>,
+  runtime: Runtime | null,
   signal?: AbortSignal,
   sink?: JobConsole,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
-  const bindings = routing.bindings
-  const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
-  const runtime = bindings[key]
-  if (runtime == null) {
+  if (runtime === null) {
     const denied = admissionDenial(argv.name)
     const stderr = await denied.materializeStderr()
     return [

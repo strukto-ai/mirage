@@ -35,6 +35,8 @@ import { shellJoin } from '../../../shell/join.ts'
 import { Limit, MountMode, type PathSpec } from '../../../types.ts'
 import { abortable, sleep } from '../../../utils/abort.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { runExternal } from './external.ts'
+import { Argv } from '../../expand/argv.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, lookup, lookupAll, SHELL_NAMES } from '../../lookup/index.ts'
 import { CAPTURABLE_BUILTINS } from '../../lookup/constants.ts'
@@ -127,6 +129,28 @@ function workspace(probe: Runtime, others: Runtime[] = []): Workspace {
 }
 
 describe('external program capture', () => {
+  it('executes the supplied runtime and preserves its argv', async () => {
+    const configured = new ProcessProbe()
+    const selected = new ProcessProbe()
+    const ws = workspace(configured)
+    try {
+      const argv = new Argv('native', ['a b', ''], ['a b', ''])
+      const [out, io, node] = await runExternal(
+        argv,
+        null,
+        new SessionState({ sessionId: 'test' }),
+        ws.registry,
+        selected,
+      )
+      await materialize(out)
+      expect([io.exitCode, node.exitCode]).toEqual([0, 0])
+      expect(selected.requests.map((r) => r.argv)).toEqual([['native', 'a b', '']])
+      expect(configured.requests).toHaveLength(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('preserves Mirage pipes and VFS redirects', async () => {
     const probe = new ProcessProbe()
     const ws = workspace(probe)

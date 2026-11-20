@@ -108,7 +108,14 @@ import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
-import { lookup, programRuntime, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
+import {
+  externalTarget,
+  lookup,
+  programRuntime,
+  resolveTarget,
+  routedConsumer,
+  runsWrapper,
+} from '../lookup/lookup.ts'
 import {
   binProgram,
   linkMachine,
@@ -1407,15 +1414,7 @@ async function routeArgv(
             stdin,
           )
     if (held !== null && placed !== undefined)
-      return runExternal(
-        argv,
-        stdin,
-        session,
-        registry,
-        { ...placed, bindings: { ...placed.bindings, [name]: held } },
-        signal,
-        sink,
-      )
+      return runExternal(argv, stdin, session, registry, held, signal, sink)
     const onTheRuntime =
       placed !== undefined &&
       name.startsWith('/') &&
@@ -1432,7 +1431,15 @@ async function routeArgv(
               placed,
             )
             if (program === null) {
-              return runExternal(argv, stdin, session, registry, placed, signal, sink)
+              return runExternal(
+                argv,
+                stdin,
+                session,
+                registry,
+                externalTarget(name, placed.bindings).runtime,
+                signal,
+                sink,
+              )
             }
             return setProgramInvocation(
               session,
@@ -1442,7 +1449,7 @@ async function routeArgv(
                   stdin,
                   session,
                   registry,
-                  placed,
+                  externalTarget(program, placed.bindings).runtime,
                   signal,
                   sink,
                 ),
@@ -1492,16 +1499,11 @@ async function routeArgv(
     )
   }
 
-  const [consumer, routing] = routedConsumer(
-    name,
-    argv.args,
-    session,
-    registry,
-    context.frame.routing,
-  )
-  if (consumer === Consumer.EXTERNAL) {
-    if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    return runExternal(argv, stdin, session, registry, routing, signal, sink)
+  const routing = context.frame.routing
+  const target = resolveTarget(name, argv.args, session, registry, routing)
+  const consumer = target.kind
+  if (target.kind === Consumer.EXTERNAL) {
+    return runExternal(argv, stdin, session, registry, target.runtime, signal, sink)
   }
   // A mount command whose every path is one machine's own runs there whole,
   // with the machine's own output. A glob's matches are checked too, since
@@ -1520,16 +1522,7 @@ async function routeArgv(
       stdin,
       context.frame.routing,
     )
-    if (machine !== null)
-      return runExternal(
-        words,
-        stdin,
-        session,
-        registry,
-        { ...routing, bindings: { ...routing.bindings, [name]: machine } },
-        signal,
-        sink,
-      )
+    if (machine !== null) return runExternal(words, stdin, session, registry, machine, signal, sink)
   }
 
   // A function of a builtin's or a namespace program's name runs in its
@@ -1613,15 +1606,7 @@ async function routeArgv(
       namespace.sessionLinks(session),
     )
     if (machine === null) return null
-    return runExternal(
-      argv,
-      null,
-      session,
-      registry,
-      { ...routing, bindings: { ...routing.bindings, [name]: machine } },
-      signal,
-      sink,
-    )
+    return runExternal(argv, null, session, registry, machine, signal, sink)
   }
 
   const program = shadowed
