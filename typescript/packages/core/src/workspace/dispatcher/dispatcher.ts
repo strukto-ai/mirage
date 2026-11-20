@@ -1132,6 +1132,9 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
+    if (name === 'rmdir' && owner !== null && owner.prefix === normDir(call.path.virtual)) {
+      throw ebusy(call.path)
+    }
     // A pruned walk cannot stop at an omitted entry to check its access,
     // consult a cached or pinned body, or cross into another filesystem.
     if (
