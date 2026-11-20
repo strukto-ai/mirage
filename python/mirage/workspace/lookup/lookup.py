@@ -219,15 +219,17 @@ def resolve_target(
     routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> CommandTarget:
     """Select the winning registration under the current placement."""
+    target = _first_target(name, session, registry, routing)
     if (
         name == MACHINE_VIEW
+        and not isinstance(target, FunctionTarget)
         and routing is not None
         and name not in routing.bindings
         and runs_programs(routing.bindings)
         and picks_machine(args)
     ):
         return Consumer.SESSION
-    return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
+    return target
 
 
 def runs_on_machine(
@@ -329,6 +331,7 @@ def runs_wrapper(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
+    consumer: Consumer | None = None,
 ) -> bool:
     """Whether Mirage runs a wrapper itself (``handle_wrapper``): one no
     layer of the workspace holds (a function, a CLI, a mount's command)
@@ -341,16 +344,16 @@ def runs_wrapper(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (CLIs, mount commands).
         routing (RouteDecision | None): the line's placement.
+        consumer (Consumer | None): the winner if already selected here.
     """
     bindings: Mapping[str, RuntimeIdentity | None] = (
         routing.bindings if routing is not None else registry.runtime_bindings
     )
     if name not in PROGRAM_WRAPPERS or name in bindings:
         return False
-    if lookup(name, session, registry, routing) not in (
-        Consumer.UNKNOWN,
-        Consumer.EXTERNAL,
-    ):
+    if consumer is None:
+        consumer = lookup(name, session, registry, routing)
+    if consumer not in (Consumer.UNKNOWN, Consumer.EXTERNAL):
         return False
     return name in RUNNERS or read_wrapper(name, args)[0] is not None
 
@@ -428,6 +431,15 @@ def _layers(
         yield ExternalTarget(fallback)
 
 
+def _first_target(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> CommandTarget:
+    return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
+
+
 def lookup(
     name: str,
     session: SessionState,
@@ -471,9 +483,7 @@ def lookup(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
-    return target_consumer(
-        next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
-    )
+    return target_consumer(_first_target(name, session, registry, routing))
 
 
 def lookup_all(
