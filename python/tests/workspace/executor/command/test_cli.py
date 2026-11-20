@@ -49,6 +49,7 @@ from mirage.workspace.executor.command.cli import (
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.node import command_dispatch
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
@@ -1423,6 +1424,79 @@ class ClosingAccessor(NOOPAccessor):
 
     async def close(self) -> None:
         self.closed = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_preparation", [False, True])
+async def test_selected_cli_retirement(monkeypatch, fail_preparation):
+    ws = Workspace({"/": RAMVFS()})
+    selected = asyncio.Event()
+    retiring = asyncio.Event()
+    events = []
+
+    async def output(accessor):
+        events.append(("output", accessor))
+        yield b"done\n"
+
+    async def leaf(accessor, paths, texts, ctx):
+        events.append(("leaf", accessor))
+        return output(accessor), IOResult()
+
+    cli = CLI(
+        CommandSpec(name="demo"),
+        handlers={"": CLIHandler(fn=leaf)},
+        accessor=ClosingAccessor,
+    )
+    install = ws.register_cli("demo", cli)
+    try:
+        await ws.shell("type -a demo; command -v demo")
+        await asyncio.wait_for(install.activity.wait(), 1)
+        resolve = command_dispatch.resolve_target
+        handle = command_dispatch.handle_command
+        wait = install.activity.wait
+
+        def selecting(*args):
+            target = resolve(*args)
+            if args[0] == "demo":
+                selected.set()
+            return target
+
+        async def waiting():
+            ws.register_cli("demo", cli)
+            retiring.set()
+            await wait()
+            events.append(("idle", install.accessor))
+
+        async def preparing(*args):
+            await retiring.wait()
+            events.append(("prepare", args[2].target.install.accessor))
+            if fail_preparation:
+                raise RuntimeError("preparation failed")
+            return await handle(*args)
+
+        monkeypatch.setattr(command_dispatch, "resolve_target", selecting)
+        monkeypatch.setattr(command_dispatch, "handle_command", preparing)
+        monkeypatch.setattr(install.activity, "wait", waiting)
+        running = asyncio.create_task(ws.shell("demo"))
+        await asyncio.wait_for(selected.wait(), 1)
+        removal = asyncio.create_task(ws.unregister_cli("demo"))
+        result = await asyncio.wait_for(running, 2)
+        if fail_preparation:
+            assert result.exit_code == 1
+            assert b"preparation failed" in result.stderr
+        else:
+            assert (result.exit_code, result.stdout) == (0, b"done\n")
+        await asyncio.wait_for(removal, 1)
+        expected = (
+            ["prepare", "idle"]
+            if fail_preparation
+            else ["prepare", "leaf", "output", "idle"]
+        )
+        assert events == [(event, install.accessor) for event in expected]
+        assert install.accessor.closed
+        assert not ws.registry.clis.get("demo").accessor.closed
+    finally:
+        await ws.close()
 
 
 async def _done_output():

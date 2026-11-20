@@ -21,6 +21,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from contextlib import ExitStack
 from functools import partial
 from itertools import accumulate
 from typing import Any, TypeVar, assert_never
@@ -1059,8 +1060,10 @@ async def _run_argv(
             routed_deps = with_opts(deps, {"sink": output})
             if entry is not deps.entry:
                 routed_deps = dataclasses.replace(routed_deps, entry=entry)
-            with command_records(own=True) as mine:
-                command = await bind_command(argv, routed_deps, context, given)
+            with command_records(own=True) as mine, ExitStack() as lifetime:
+                command = await bind_command(
+                    argv, routed_deps, context, given, lifetime
+                )
                 result = await run_resolved(
                     routed_deps,
                     recurse,
@@ -1656,6 +1659,7 @@ async def bind_command(
     deps: ExecuteNodeDeps,
     context: EvaluationContext,
     stdin: ByteSource | None,
+    lifetime: ExitStack,
 ) -> ResolvedCommand[ExecutionTarget]:
     """Select this invocation's worker inside its admitted placement.
 
@@ -1664,6 +1668,7 @@ async def bind_command(
         deps (ExecuteNodeDeps): the registrations and file operations.
         context (EvaluationContext): the session and final placement.
         stdin (ByteSource | None): input for operand-dependent routing.
+        lifetime (ExitStack): holds the selected CLI until dispatch returns.
     """
     session = context.session
     registry = deps.registry
@@ -1705,9 +1710,13 @@ async def bind_command(
     if isinstance(target, FunctionTarget):
         return ResolvedCommand(argv, target)
 
-    held, matched = await _held_machine(argv, deps, context, stdin, consumer)
-    if held is not None:
-        return ResolvedCommand(matched, ExternalTarget(held))
+    # A CLI is selected and retained without yielding to its uninstaller.
+    if not isinstance(target, CliTarget):
+        held, matched = await _held_machine(
+            argv, deps, context, stdin, consumer
+        )
+        if held is not None:
+            return ResolvedCommand(matched, ExternalTarget(held))
 
     if argv.args[:1] == ("--help",) and not is_program_invocation(session):
         answered = flag_help(name)
@@ -1725,6 +1734,7 @@ async def bind_command(
     if handler is not None:
         return ResolvedCommand(argv, WorkerTarget(handler))
     if isinstance(target, CliTarget):
+        lifetime.callback(target.install.activity.acquire())
         return ResolvedCommand(argv, target)
     if target is Consumer.UNKNOWN:
         # A machine-only builtin known at install time still tries its mount
