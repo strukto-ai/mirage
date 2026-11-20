@@ -25,7 +25,7 @@ import { Files } from '../../../workspace/files.ts'
 import { UsageError } from '../../errors.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream } from '../../../io/stream.ts'
-import { enoent } from '../../../errors/fs.ts'
+import { enoent, enotdir } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
@@ -158,6 +158,27 @@ describe('diffGeneric with stdin', () => {
       null,
       2,
       'diff: gone: No such file or directory\n',
+    ])
+  })
+
+  it('names each operand that fails its stat', async () => {
+    const unread = (p: PathSpec): AsyncIterable<Uint8Array> => {
+      throw new Error(`read ${p.virtual}`)
+    }
+    const statBad = (p: PathSpec): Promise<FileStat> =>
+      Promise.reject(p.virtual === '/d/gone' ? enoent(p.virtual) : enotdir(p.virtual))
+    const ctx = { flags: { new_file: true } } as unknown as Context
+    const [out, io] = await diffRun(
+      [operand('gone', '/d/gone'), operand('f/child', '/d/f/child')],
+      ctx,
+      unread,
+      readdir,
+      statBad,
+    )
+    expect([out, io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([
+      null,
+      2,
+      'diff: gone: No such file or directory\ndiff: f/child: Not a directory\n',
     ])
   })
 

@@ -160,6 +160,33 @@ async def test_a_missing_operand_is_named_before_either_is_read():
 
 
 @pytest.mark.asyncio
+async def test_each_operand_that_fails_its_stat_is_named():
+    async def unread(path: PathSpec) -> bytes:
+        raise AssertionError(f"read {path.virtual}")
+
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/gone":
+            raise FileNotFoundError(
+                2, "No such file or directory", path.virtual
+            )
+        raise NotADirectoryError(20, "Not a directory", path.virtual)
+
+    out, io = await diff(
+        [_operand("gone", "/d/gone"), _operand("f/child", "/d/f/child")],
+        stream=unread,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(new_file=True, new_first=True),
+    )
+    assert (out, io.exit_code, io.stderr) == (
+        None,
+        2,
+        b"diff: gone: No such file or directory\n"
+        b"diff: f/child: Not a directory\n",
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_read_failing_mid_stream_is_trouble_and_closes_its_input():
     closed: list[str] = []
 
