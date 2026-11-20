@@ -331,20 +331,25 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
     const exited = new Promise((resolve) => program.once('exit', resolve))
     const [pids] = await Promise.all([labelled, exited])
     const pid = (label: string): number => pids.get(label) ?? 0
-    const ended = (pid: number): boolean => {
-      let stat: string
+    const stat = (of: number): string[] => {
+      let text: string
       try {
-        stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8')
+        text = readFileSync(`/proc/${String(of)}/stat`, 'utf8')
       } catch {
-        return true
+        return ['X']
       }
-      const state = stat
-        .slice(stat.lastIndexOf(')') + 1)
+      return text
+        .slice(text.lastIndexOf(')') + 1)
         .trim()
-        .split(/\s+/)[0]
-      return state === 'Z' || state === 'X'
+        .split(/\s+/)
+    }
+    const ended = (of: number): boolean => ['Z', 'X'].includes(stat(of)[0] ?? 'X')
+    const leader = Number(stat(pid('z'))[3])
+    for (let i = 0; i < 50 && stat(leader)[0] !== 'Z'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
     try {
+      expect(stat(leader)[0]).toBe('Z')
       process.kill(pid('s'), 'SIGSTOP')
       const root = { pid: program.pid ?? 0, started: 0, exited: null }
       const done = spawnSync('/bin/sh', ['-c', stopLine(tag, 1, root)], { timeout: 10_000 })

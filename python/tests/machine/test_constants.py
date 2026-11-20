@@ -831,12 +831,16 @@ def test_the_hangup_spares_what_left_the_run_or_ignores_it():
         program.stdout.close()
 
 
-def _ended(pid: int) -> bool:
+def _stat(pid: int) -> list[str]:
     try:
         stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
     except OSError:
-        return True
-    return stat.rsplit(")", 1)[1].split()[0] in ("Z", "X")
+        return ["X"]
+    return stat.rsplit(")", 1)[1].split()
+
+
+def _ended(pid: int) -> bool:
+    return _stat(pid)[0] in ("Z", "X")
 
 
 # Once the run's program has exited, a hangup still spares what setsid
@@ -865,7 +869,13 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
         label, pid = program.stdout.readline().split()
         pids[label.decode()] = int(pid)
     program.wait(timeout=5)
+    leader = int(_stat(pids["z"])[3])
+    for _ in range(50):
+        if _stat(leader)[0] == "Z":
+            break
+        time.sleep(0.1)
     try:
+        assert _stat(leader)[0] == "Z"
         os.kill(pids["s"], 19)
         done = subprocess.run(
             ["/bin/sh", "-c", stop_line(tag, 1, MachinePid(program.pid, 0.0))],
