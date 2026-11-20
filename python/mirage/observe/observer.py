@@ -47,6 +47,7 @@ from mirage.observe.log_entry import (
     STDOUT_TRUNCATE,
     LogEntry,
 )
+from mirage.observe.metrics import call_made, line_ended
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.utils.clock import Clock, SystemClock
@@ -419,6 +420,7 @@ class Observer:
             cwd (str | None): Session cwd at log time.
             parent (str | None): The line that made the call.
         """
+        call_made(rec)
         await self._log(LogEntry.from_op_record(rec, session, cwd, parent))
         if parent is None:
             _call_span(self._workspace_id, self._machine, rec, session)
@@ -505,6 +507,7 @@ class Observer:
             else round((self._clock.monotonic() - started[1]) * 1000)
         )
         if started is not None and took is not None:
+            line_ended(io.exit_code, took)
             _end_line(
                 started[2],
                 (started[0], started[0] + took),

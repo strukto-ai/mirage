@@ -16,6 +16,31 @@ NAME_LIMIT = 200
 
 TRACER_NAME = "mirage.observe"
 
+METER_NAME = "mirage.observe"
+
+# Bucket bounds, in seconds, of the duration histograms: OpenTelemetry's
+# advice for a request's duration, 5 ms to 10 s, then up to 5 minutes for
+# the long lines an agent runs.
+DURATION_BUCKETS = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    2.5,
+    5.0,
+    7.5,
+    10.0,
+    30.0,
+    60.0,
+    300.0,
+)
+
 # Set to ``false`` or ``0`` to keep what calls touched out of spans: no
 # output on ``shell``, no ``vfs.<call>`` spans. Named after OpenTelemetry's
 # ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``.
