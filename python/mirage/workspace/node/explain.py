@@ -1284,7 +1284,7 @@ def _walk_node(
             if not forked:
                 ended = after
             elif not _stage_forks(last, session, pipeline, possible=True) and (
-                after[0] is not session or after[1] != lost
+                pipeline.guest or after[0] is not session or after[1] != lost
             ):
                 if pipeline.guest:
                     # The guest may keep its cwd or the last stage's. The

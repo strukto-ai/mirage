@@ -2350,7 +2350,14 @@ async def test_a_background_pipeline_passes_lastpipe_to_its_child_stages():
 @pytest.mark.parametrize(
     "sealed", [None, "/data/secret", "/data/public/secret"]
 )
-async def test_whole_line_lastpipe_checks_both_guest_cwds(sealed):
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cd /data | cd /data/public; cat ./secret",
+        ": | { : | cd /data/public; }; cat ./secret",
+    ],
+)
+async def test_whole_line_lastpipe_checks_both_guest_cwds(sealed, line):
     box = _LineBox()
     cat = (
         "allow"
@@ -2370,7 +2377,6 @@ async def test_whole_line_lastpipe_checks_both_guest_cwds(sealed):
         ws.create_session("s", profile="r")
         session = ws.get_session("s")
         session.cwd = "/data"
-        line = "cd /data | cd /data/public; cat ./secret"
         for lastpipe, monitor in [(False, False), (True, False), (True, True)]:
             session.shopts["lastpipe"] = lastpipe
             session.shell_options["monitor"] = monitor
