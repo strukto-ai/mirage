@@ -434,19 +434,20 @@ function lineFlags(argv: string[]): DiffFlags | IOResult {
 
 // Pinned against GNU diffutils 3.10: one comparison per operand, in order,
 // with no separator, and the worst status of them.
+async function* oneEmptyChunk(): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield new Uint8Array()
+}
+
 describe('--from-file and --to-file', () => {
   it('closes the comparisons before one that fails', async () => {
     let closed = 0
     let calls = 0
-    async function* oneChunk(): AsyncGenerator<Uint8Array> {
-      await Promise.resolve()
-      yield new Uint8Array()
-    }
     const computer: DiffComputer = {
       compare: () => {
         calls += 1
         if (calls > 1) return Promise.reject(new PipeClosed())
-        const kept = new OutputStream(oneChunk(), () => {
+        const kept = new OutputStream(oneEmptyChunk(), () => {
           closed += 1
           return Promise.resolve()
         })
@@ -462,7 +463,7 @@ describe('--from-file and --to-file', () => {
           cwd: PathSpec.fromStrPath('/'),
           diff: computer,
         },
-        () => oneChunk(),
+        () => oneEmptyChunk(),
         readdir,
         (p: PathSpec) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE })),
       ),

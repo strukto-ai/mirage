@@ -571,6 +571,10 @@ async def _one_empty_chunk():
     yield b""
 
 
+async def _file_stat(path: PathSpec) -> FileStat:
+    return FileStat(name=path.virtual, type=FileType.FILE)
+
+
 @pytest.mark.asyncio
 async def test_a_from_file_comparison_that_fails_closes_the_ones_before():
     closed: list[bool] = []
@@ -586,15 +590,12 @@ async def test_a_from_file_comparison_that_fails_closes_the_ones_before():
         kept = OutputStream(_one_empty_chunk(), close)
         return PairResult("different", (kept,), 1, ())
 
-    async def stat(path: PathSpec) -> FileStat:
-        return FileStat(name=path.virtual, type=FileType.FILE)
-
     with pytest.raises(ValueError):
         await diff(
             [_operand("y", "/d/y"), _operand("z", "/d/z")],
             stream=_readdir,
             readdir_fn=_readdir,
-            stat_fn=stat,
+            stat_fn=_file_stat,
             flags=DiffFlags(from_file=_operand("x", "/d/x")),
             computer=SimpleNamespace(compare=compare),
         )
