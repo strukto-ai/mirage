@@ -12,16 +12,130 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS, Argument, CommandSpec
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
+from mirage.policy.types import HandOff
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.cli.types import CLIInstall
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.command.command import handle_command
+from mirage.workspace.executor.command.resolved import ResolvedCommand
+from mirage.workspace.executor.deps import ExecuteNodeDeps
+from mirage.workspace.expand.argv import Argv
+from mirage.workspace.lookup.lookup import resolve_target
+from mirage.workspace.lookup.types import CliTarget, Consumer, FunctionTarget
+from mirage.workspace.node.execute_node import execute_node
+from mirage.workspace.session import SessionState
+
+
+async def _handle_bound(command, session):
+    ws = Workspace({"/": RAMVFS()})
+    try:
+        deps = ExecuteNodeDeps(
+            ws.dispatch, ws.registry, ws.namespace, ws.job_table, ws.shell
+        )
+        stdout, io, node = await handle_command(
+            deps,
+            partial(execute_node, deps),
+            command,
+            EvaluationContext(session),
+        )
+        return await materialize(stdout), io.exit_code, node
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_argv_has_an_empty_successful_record():
+    command = ResolvedCommand(Argv("", (), ()), Consumer.UNKNOWN)
+    out, status, node = await _handle_bound(command, SessionState("test"))
+    assert (out, status, node.command, node.exit_code) == (b"", 0, "", 0)
+
+
+@pytest.mark.asyncio
+async def test_function_executes_its_bound_body():
+    session = SessionState("test")
+    session.functions["f"] = "f() { echo later; }"
+    command = ResolvedCommand(
+        Argv("f", ("arg",), ("arg",)),
+        FunctionTarget('f() { echo bound "$1"; }', None),
+    )
+    out, status, node = await _handle_bound(command, session)
+    assert (out, status, node.exit_code) == (b"bound arg\n", 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_bound_function_keeps_its_site_after_identical_redefinition():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    body = 'f() { say "${BASH_SOURCE[0]}" "$LINENO"; }'
+    try:
+        await ws.shell(
+            f"printf '%s\\n' '{body}' > /first; printf '\\n%s\\n' '{body}' > /second"
+        )
+        await ws.shell("shopt -s expand_aliases")
+        await ws.shell("alias say='echo before'; source /first")
+        session = ws.get_session(ws.default_session_id)
+        target = resolve_target("f", (), session, ws.registry)
+        assert isinstance(target, FunctionTarget)
+        origin = session._function_sites["f"].origin
+        assert origin is not None
+
+        await ws.shell("alias say='echo after'; source /second")
+        assert session.functions["f"] == target.body
+        assert (await ws.shell("f")).stdout == b"after /second 2\n"
+
+        deps = ExecuteNodeDeps(
+            ws.dispatch,
+            ws.registry,
+            ws.namespace,
+            ws.job_table,
+            ws.shell,
+            handed=HandOff(),
+        )
+        origins = []
+
+        async def run(*args, **opts):
+            origins.append(opts["handed"].origin)
+            return await execute_node(deps, *args, **opts)
+
+        out, io, _ = await handle_command(
+            deps,
+            run,
+            ResolvedCommand(Argv("f", (), ()), target),
+            EvaluationContext(session),
+        )
+        assert (await materialize(out), io.exit_code) == (
+            b"before /first 1\n",
+            0,
+        )
+        assert len(origins) == 1 and origins[0] is origin
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cli_executes_its_bound_installation():
+    async def run(accessor, paths, texts, ctx):
+        return b"selected", IOResult()
+
+    cli = CLI(
+        spec=CommandSpec(name="tool", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(run)},
+    )
+    command = ResolvedCommand(
+        Argv("tool", ("run",), ("run",)), CliTarget(CLIInstall("tool", cli))
+    )
+    out, status, node = await _handle_bound(command, SessionState("test"))
+    assert (out, status, node.exit_code) == (b"selected", 0, 0)
 
 
 @pytest.mark.asyncio

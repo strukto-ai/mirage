@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias
 if TYPE_CHECKING:
     from mirage.runtime.types import RuntimeIdentity
     from mirage.workspace.cli.types import CLIInstall
+    from mirage.workspace.session.functions import FunctionSite
 
 
 class Consumer(Enum):
@@ -52,6 +53,7 @@ class ExternalTarget:
 @dataclass(frozen=True, slots=True)
 class FunctionTarget:
     body: str
+    site: FunctionSite | None
     kind: ClassVar[Consumer] = Consumer.FUNCTION
 
 

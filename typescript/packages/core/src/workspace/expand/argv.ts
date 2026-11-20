@@ -135,7 +135,9 @@ export async function expandArgv(
   // refuses a shell builtin's name.
   const typed = expanded.slice(consumed).map(unmarkGlobs)
   const [routed, routing] = routedConsumer(name, typed, session, registry, context.frame.routing)
-  const consumer = runsWrapper(name, typed, session, registry, routing, routed) ? Consumer.EXTERNAL : routed
+  const consumer = runsWrapper(name, typed, session, registry, routing, routed)
+    ? Consumer.EXTERNAL
+    : routed
   const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)

@@ -52,7 +52,6 @@ import { encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
-import type { JobTable } from '../../../execution/job/index.ts'
 import { Follow, PathSpec } from '../../../types.ts'
 import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -62,10 +61,13 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import type { ExecuteNodeDeps } from '../deps.ts'
+import type { CommandWorker, HandlerTarget, ResolvedCommand } from './resolved.ts'
 import { Files } from '../../files.ts'
-import { EXEC_WRAPPERS, MACHINE_VIEW } from '../../lookup/constants.ts'
-import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
+import type { Argv } from '../../expand/argv.ts'
+import type { Runtime } from '../../../runtime/base.ts'
 import { picksMachine, runsPrograms } from '../../lookup/lookup.ts'
+import { MACHINE_VIEW } from '../../lookup/constants.ts'
+import { Consumer, lineFacts, lookup } from '../../lookup/index.ts'
 import { MountCommandAmbiguous } from '../../mount/errors.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -123,48 +125,42 @@ import {
 } from './run.ts'
 import { type ExecuteNodeFn, type ParsedCommand } from './types.ts'
 
-// One handler per JOB_BUILTINS member but ps, which also takes the workspace
-// user; lookup already narrowed the name.
-const JOB_HANDLERS: Record<
-  string,
-  (
-    jobTable: JobTable,
-    textParts: string[],
-    session: SessionState | null,
-    view: SessionView | null,
-    signal?: AbortSignal,
-    sink?: JobConsole,
-  ) => RedirectResult | Promise<RedirectResult>
-> = {
-  wait: handleWait,
-  kill: handleKill,
-  jobs: handleJobs,
-  disown: handleDisown,
-  pgrep: handlePgrep,
-  pkill: handlePkill,
-  pidof: handlePidof,
-  killall: handleKillall,
-}
+const JOB_HANDLERS = new Map<string, CommandWorker>([
+  ['ps', handlePs],
+  ['wait', handleWait],
+  ['kill', handleKill],
+  ['jobs', handleJobs],
+  ['disown', handleDisown],
+  ['pgrep', handlePgrep],
+  ['pkill', handlePkill],
+  ['pidof', handlePidof],
+  ['killall', handleKillall],
+])
 
-// The builtins that report on the machines programs run on; `nproc` answers
-// for them only once there are any.
-const MACHINE_HANDLERS: Record<
-  string,
-  (
-    jobTable: JobTable,
-    textParts: string[],
-    session: SessionState | null,
-    view: SessionView | null,
-    signal?: AbortSignal,
-    sink?: JobConsole,
-  ) => RedirectResult | Promise<RedirectResult>
-> = {
-  free: handleFree,
-  uptime: handleUptime,
-  top: handleTop,
-  nproc: handleNproc,
-  hostname: handleHostname,
-  lscpu: handleLscpu,
+const MACHINE_HANDLERS = new Map<string, CommandWorker>([
+  ['free', handleFree],
+  ['uptime', handleUptime],
+  ['top', handleTop],
+  ['nproc', handleNproc],
+  ['hostname', handleHostname],
+  ['lscpu', handleLscpu],
+])
+
+export function commandWorker(
+  argv: Argv,
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
+): CommandWorker | undefined {
+  const name = argv.name
+  const machine = MACHINE_HANDLERS.get(name)
+  if (
+    machine !== undefined &&
+    (name === 'free' || runsPrograms(bindings)) &&
+    !(name === 'nproc' && argv.operands.some((p) => p === '--help' || p === '--version')) &&
+    ((name !== 'hostname' && name !== MACHINE_VIEW) ||
+      picksMachine(argv.operands.map((p) => (typeof p === 'string' ? p : p.virtual))))
+  )
+    return machine
+  return JOB_HANDLERS.get(name)
 }
 
 /**
@@ -825,7 +821,7 @@ function spanning(
 export async function handleCommand(
   deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
-  parts: readonly (string | PathSpec)[],
+  command: ResolvedCommand<HandlerTarget>,
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
@@ -833,81 +829,51 @@ export async function handleCommand(
 ): Promise<RedirectResult> {
   const session = context.session
   const { registry, jobTable, namespace, executeFn, signal, sink } = deps
-  let dispatch: CallerDispatchFn = deps.dispatch
+  const { argv, target } = command
+  let parts = argv.words
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
 
-  const head = parts[0]
-  if (head === undefined) {
-    return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
-  }
   const view = sessionView(session, context.frame.diagnostics)
-  let cmdName = typeof head === 'string' ? head : head.virtual
+  const head = argv.name
+  let cmdName = head
   const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
-
-  const machineHandler = MACHINE_HANDLERS[cmdName]
-  if (
-    machineHandler !== undefined &&
-    (cmdName === 'free' ||
-      runsPrograms(context.frame.routing?.bindings ?? registry.runtimeBindings)) &&
-    !(cmdName === 'nproc' && parts.some((p) => p === '--help' || p === '--version')) &&
-    ((cmdName !== 'hostname' && cmdName !== MACHINE_VIEW) ||
-      picksMachine(parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual)))) &&
-    lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
-  ) {
-    return machineHandler(
+  if (target.kind === 'unknown') {
+    const shown = session.vars.shell.shown(cmdName)
+    return failed(
+      cmdStr,
+      NOT_FOUND_STATUS,
+      encodeText(`${shellVoice()}${shown}: command not found\n`),
+    )
+  }
+  if (target.kind === 'worker') {
+    const words = parts.map((p) =>
+      typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,
+    )
+    return target.handler(
       jobTable,
-      parts.map((p) => (typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual)),
+      words,
       session,
       view,
       mergeSignals(signal, context.frame.abortSignal),
+      sink,
     )
   }
-  if (
-    JOB_BUILTINS.has(cmdName) &&
-    lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
-  ) {
-    const textParts = parts.map((p) =>
-      typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,
-    )
-    if (cmdName === 'ps') {
-      return handlePs(jobTable, textParts, session, view)
-    }
-    const handler = JOB_HANDLERS[cmdName]
-    if (handler !== undefined) {
-      return handler(
-        jobTable,
-        textParts,
-        session,
-        view,
-        mergeSignals(signal, context.frame.abortSignal),
-        // `fg` is the one job builtin that writes before it blocks.
-        sink,
-      )
-    }
-  }
-
-  // Shell functions, where one is what the name runs (a program run execs
-  // the program instead).
-  const funcBody = session.functions[cmdName]
-  if (
-    funcBody !== undefined &&
-    lookup(cmdName, session, registry, context.frame.routing ?? undefined) === Consumer.FUNCTION
-  ) {
+  if (target.kind === 'function') {
     return runShellFunction(
       deps,
       executeNode,
       cmdName,
-      funcBody,
-      parts.slice(1),
+      target,
+      argv.operands,
       context,
       stdin,
       callStack,
     )
   }
 
-  dispatch = madeByCommand(dispatch, admission)
+  const dispatch = madeByCommand(deps.dispatch, admission)
   // The command's own files keep no ledger: the dispatcher accounts for the line.
   const commandFiles = (follow: FollowOperands | null): Files =>
     new Files(
@@ -937,8 +903,8 @@ export async function handleCommand(
   // A CLI that works on files rather than an API (`git`) reaches them
   // through `ctx.vfs`, the session's files made by the command; the
   // rest never look.
-  const cliInstall = registry.clis.get(cmdName)
-  if (cliInstall !== null) {
+  if (target.kind === 'cli') {
+    const cliInstall = target.install
     // A leaf that waits on its service keeps running; the caller's abort
     // releases the invocation, as it does for `wait`.
     return abortable(
@@ -960,10 +926,8 @@ export async function handleCommand(
 
   // A wrapper execs the program it names, past every function and CLI; the
   // session's command trees judge the name it typed.
-  const typed = cmdName
-  const wrapped = runsAs(cmdName, registry) !== cmdName ? EXEC_WRAPPERS.get(cmdName) : undefined
-  if (wrapped !== undefined) {
-    const [runs, option] = wrapped
+  if (target.wrapper !== null) {
+    const [runs, option] = target.wrapper
     cmdName = runs
     parts = [runs, option, ...parts.slice(1)]
   }
@@ -986,16 +950,6 @@ export async function handleCommand(
     namespace,
     executeFn,
     ...(sink !== undefined ? { sink } : {}),
-  }
-
-  // Unknown name: nobody registers it; fail like bash before any
-  // backend work. The admission policies (fired upstream at the
-  // dispatch chokepoint) stay ahead of this so
-  // protective refusals keep their specific messages.
-  if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
-    const shown = session.vars.shell.shown(typed)
-    const errBytes = encodeText(`${shellVoice()}${shown}: command not found\n`)
-    return failed(cmdStr, NOT_FOUND_STATUS, errBytes)
   }
 
   const runTree = async (

@@ -138,7 +138,7 @@ export function describe(
   }
   const body = session === undefined ? undefined : sessionEntry(session.functions, name)
   if (kind === NameKind.FUNCTION && session !== undefined && body !== undefined)
-    return `${name} is a function\n${storedFunctionText(name, body, parser, bodyAliasValues(session, name))}`
+    return `${name} is a function\n${storedFunctionText(name, body, parser, bodyAliasValues(session, session.functionSite(name, body)))}`
   if (kind === NameKind.FILE) return `${name} is ${programFile(name)}`
   return `${name} is ${DESCRIPTIONS[kind] ?? ''}`
 }

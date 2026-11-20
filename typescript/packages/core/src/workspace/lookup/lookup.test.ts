@@ -19,7 +19,7 @@ import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { setProgramInvocation } from '../../context/session_context.ts'
 import { parseCommand } from '../../commands/spec/index.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { runs } from '../../policy/match/allow.ts'
 import type { ShellNode } from '../../policy/types.ts'
@@ -191,14 +191,17 @@ describe('lookup', () => {
     expect(target.kind === Consumer.CLI && target.install).toBe(ws.registry.clis.get('prog'))
   })
 
-  it('function shadows an installed CLI', () => {
+  it.each([false, true])('function shadows an installed CLI (stale site: %s)', (stale) => {
     const { session, ws } = fixture()
     ws.registerCli('prog', cliTree())
     session.functions.prog = 'prog() { :; }'
+    if (stale)
+      session.functionSites.set('prog', { source: 'prog() { false; }', mark: [1, 0], origin: null })
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
     expect(resolveTarget('prog', [], session, ws.registry)).toEqual({
       kind: Consumer.FUNCTION,
       body: 'prog() { :; }',
+      site: null,
     })
   })
 
@@ -1339,6 +1342,30 @@ describe('lscpu, the view of the machines', () => {
     const sandbox = new Sandbox()
     const routing = { bindings: { [EXTERNAL_COMMANDS]: sandbox }, fallback: sandbox } as never
     expect(routedConsumer('lscpu', args, session, ws.registry, routing)[0]).toBe(expected)
+  })
+
+  it('runs the installed CLI for a glob that spells a machine option', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: [new Box('a', 'gcc')] },
+    )
+    try {
+      ws.registerCli(
+        'lscpu',
+        new CLI({
+          spec: new CommandSpec({ name: 'lscpu', arguments: [new Argument('--machine')] }),
+          handlers: {
+            '': new CLIHandler({
+              fn: () => [new TextEncoder().encode('installed CLI'), new IOResult()],
+            }),
+          },
+        }),
+      )
+      const result = await ws.shell('cd /data && touch ./--machine=a && lscpu *')
+      expect([result.exitCode, result.stdoutText]).toEqual([0, 'installed CLI'])
+    } finally {
+      await ws.close()
+    }
   })
 
   it('stays the program when a runtime captures it by name', () => {

@@ -23,7 +23,7 @@ from collections.abc import (
 )
 from functools import partial
 from itertools import accumulate
-from typing import Any, TypeVar
+from typing import Any, TypeVar, assert_never
 
 from mirage.commands.builtin.utils.limit import (
     guard_io,
@@ -130,11 +130,21 @@ from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.command.command import (
+    command_worker,
     fill_tree_env,
     made_by_command,
 )
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.executor.command.handler import argument_list_too_long
+from mirage.workspace.executor.command.resolved import (
+    NAMESPACE_PROGRAMS,
+    ExecutionTarget,
+    MountTarget,
+    NamespaceProgram,
+    PathTarget,
+    ResolvedCommand,
+    WorkerTarget,
+)
 from mirage.workspace.executor.deps import ExecuteNodeDeps, with_opts
 from mirage.workspace.expand import expand_assignment
 from mirage.workspace.expand.argv import Argv, expand_argv
@@ -149,15 +159,17 @@ from mirage.workspace.lookup import (
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import (
+    EXEC_WRAPPERS,
     MACHINE_ANSWERED,
+    MACHINE_ONLY_BUILTINS,
     PROGRAM_WRAPPERS,
 )
 from mirage.workspace.lookup.lookup import (
     external_target,
-    lookup,
     program_runtime,
     resolve_target,
-    routed_consumer,
+    runs_as,
+    runs_programs,
     runs_wrapper,
     target_consumer,
 )
@@ -168,7 +180,11 @@ from mirage.workspace.lookup.machine import (
     program_machine,
     several_machines,
 )
-from mirage.workspace.lookup.types import ExternalTarget
+from mirage.workspace.lookup.types import (
+    CliTarget,
+    ExternalTarget,
+    FunctionTarget,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -858,7 +874,6 @@ async def _run_argv(
         assigned (frozenset[str]): the names the command's prefix
             assignments set.
     """
-    dispatch = deps.dispatch
     registry = deps.registry
     namespace = deps.namespace
     cancel = deps.cancel
@@ -1045,10 +1060,11 @@ async def _run_argv(
             if entry is not deps.entry:
                 routed_deps = dataclasses.replace(routed_deps, entry=entry)
             with command_records(own=True) as mine:
-                result = await _route_argv(
+                command = await bind_command(argv, routed_deps, context, given)
+                result = await run_resolved(
                     routed_deps,
                     recurse,
-                    argv,
+                    command,
                     context,
                     given,
                     call_stack,
@@ -1158,16 +1174,7 @@ async def _run_argv(
         denied = await guard((), stdin)
         if denied is not None:
             return denied
-        held, _ = await _held_machine(
-            name,
-            argv,
-            session,
-            registry,
-            namespace,
-            dispatch,
-            stdin,
-            context.frame.routing,
-        )
+        held, _ = await _held_machine(argv, deps, context, stdin)
         machine = machine if held is None else held.machine
     staged = (
         bind_caller(current_caller().changed({"machine": machine}))
@@ -1240,45 +1247,50 @@ def _stage_machine(
 
 
 async def _held_machine(
-    name: str,
     argv: Argv,
-    session: SessionState,
-    registry: MountRegistry,
-    namespace: Namespace,
-    dispatch: DispatchFn,
+    deps: ExecuteNodeDeps,
+    context: EvaluationContext,
     stdin: ByteSource | None,
-    placed: RouteDecision[RuntimeIdentity] | None,
+    consumer: Consumer | None = None,
 ) -> tuple[RemoteRuntime | None, Argv]:
-    """The machine a command runs on whole because its files are that
-    machine's own, with the words it runs with there: a program named by
-    a path the machine holds, or a mount command (or a namespace program
-    the machine answers) whose every path, each glob match included, is
-    the machine's. None, with ``argv``, for a command Mirage keeps.
+    """The machine holding the program path or every operand, including
+    each glob match. Return its matched argv when it can run there whole.
 
     Args:
-        name (str): the command's name.
         argv (Argv): the command.
-        session (SessionState): the session.
-        registry (MountRegistry): the mount registry.
-        namespace (Namespace): the namespace, for the session's links.
-        dispatch (DispatchFn): stats a program named by a path.
-        stdin (ByteSource | None): what is piped into it.
-        placed (RouteDecision | None): the line's placement.
+        deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
+        context (EvaluationContext): the session and current placement.
+        stdin (ByteSource | None): input to the program.
+        consumer (Consumer | None): the selected layer. Redirect staging
+            precedes final binding and asks under its own placement.
     """
+    name = argv.name
+    placed = context.frame.routing
+    session = context.session
+    registry = deps.registry
+    namespace = deps.namespace
     if placed is None:
         return None, argv
-    links = namespace.session_links(session)
     if "/" in name:
         held = await program_machine(
-            name, session, registry, links, dispatch, stdin
+            name,
+            session,
+            registry,
+            namespace.session_links(session),
+            deps.dispatch,
+            stdin,
         )
         return held, argv
-    consumer, _ = routed_consumer(name, argv.args, session, registry, placed)
+    if consumer is None:
+        consumer = target_consumer(
+            resolve_target(name, argv.args, session, registry, placed)
+        )
     if not (
         consumer is Consumer.MOUNT
         or (consumer is Consumer.NAMESPACE and name in MACHINE_ANSWERED)
     ):
         return None, argv
+    links = namespace.session_links(session)
     machine = await operand_machine(argv, session, registry, links, stdin)
     if machine is None:
         return None, argv
@@ -1314,7 +1326,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
 
 async def _run_namespace_program(
-    name: str,
+    program: NamespaceProgram,
     namespace: Namespace,
     made: DispatchFn,
     registry: MountRegistry,
@@ -1325,11 +1337,11 @@ async def _run_namespace_program(
         Callable[[list[LinkPlan], LnFlags], Awaitable[RedirectResult | None]]
         | None
     ) = None,
-) -> RedirectResult | None:
-    """Run a program that lives above the mounts, None for any other.
+) -> RedirectResult:
+    """Run the selected program above the mounts.
 
     Args:
-        name (str): the command.
+        program (NamespaceProgram): the selected operation.
         namespace (Namespace): the link table.
         made (DispatchFn): the dispatcher the program's ops go through.
         registry (MountRegistry): the mounts.
@@ -1341,39 +1353,39 @@ async def _run_namespace_program(
     """
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
-    if name == "ln":
+    if program is NamespaceProgram.LN:
         return await handle_ln(
             namespace, made, session, operands, links_elsewhere
         )
 
-    if name == "readlink":
+    if program is NamespaceProgram.READLINK:
         return await handle_readlink(namespace, made, session, operands)
 
     # ── extended attributes (the namespace's node table and the backend's
     #    own facts; they read -h themselves) ──
-    if name == "getfattr":
+    if program is NamespaceProgram.GETFATTR:
         return await handle_getfattr(namespace, made, session, operands)
-    if name == "setfattr":
+    if program is NamespaceProgram.SETFATTR:
         return await handle_setfattr(made, session, operands, stdin)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──
-    if name == "chmod":
+    if program is NamespaceProgram.CHMOD:
         return await handle_chmod(namespace, made, session, operands)
-    if name == "chown":
+    if program is NamespaceProgram.CHOWN:
         return await handle_chown(namespace, made, session, operands)
-    if name == "chgrp":
+    if program is NamespaceProgram.CHGRP:
         return await handle_chgrp(namespace, made, session, operands)
-    if name == "touch":
+    if program is NamespaceProgram.TOUCH:
         return await handle_touch(namespace, made, session, operands)
 
     # ── capacity (registry-routed: enumerates mounts, reports per-mount
     #    capacity; never fabricates numbers) ──
-    if name == "df":
+    if program is NamespaceProgram.DF:
         return await handle_df(registry, session, made, operands)
-    if name == "mount":
+    if program is NamespaceProgram.MOUNT:
         return await handle_mount(registry, session, operands)
-    return None
+    assert_never(program)
 
 
 async def _strip_links(
@@ -1639,118 +1651,38 @@ async def _wrapped_verdict(
     return routes
 
 
-async def _route_argv(
-    deps: ExecuteNodeDeps,
-    recurse: Callable[..., Awaitable[RedirectResult]],
+async def bind_command(
     argv: Argv,
+    deps: ExecuteNodeDeps,
     context: EvaluationContext,
     stdin: ByteSource | None,
-    call_stack: CallStack | None,
-    row: int,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Route one admitted command to its builtin or mount handler.
-
-    The half of ``_run_argv`` past the gate, split out so the gate's
-    verdict can be bound around it.
+) -> ResolvedCommand[ExecutionTarget]:
+    """Select this invocation's worker inside its admitted placement.
 
     Args:
-        deps (ExecuteNodeDeps): what the command runs against.
-        recurse (Callable): the plain execute_node recursion.
-        argv (Argv): the admitted command words.
-        context (EvaluationContext): the evaluation's session and frame.
-        stdin (ByteSource | None): input stream.
-        call_stack (CallStack | None): shell call stack.
-        row (int): the row the shell began reading the command on.
+        argv (Argv): the admitted words.
+        deps (ExecuteNodeDeps): the registrations and file operations.
+        context (EvaluationContext): the session and final placement.
+        stdin (ByteSource | None): input for operand-dependent routing.
     """
-    dispatch = deps.dispatch
-    registry = deps.registry
-    namespace = deps.namespace
-    execute_fn = deps.execute_fn
-    sink = deps.sink
     session = context.session
+    registry = deps.registry
+    placed = context.frame.routing
     name = argv.name
-    args = list(argv.args)
-    operands = list(argv.operands)
 
-    # ── path execution ─────────────────────────
-    # bash hands a slash-carrying head word to the loader, never to
-    # command lookup: no builtin, function, or CLI can claim it. After
-    # the admission gate so a policy sees the line like any other.
-    if name and "/" in name:
-        placed = context.frame.routing
-        # A program file one machine holds at its own path runs there.
-        held = (
-            None
-            if placed is None
-            else await program_machine(
-                name,
-                session,
-                registry,
-                namespace.session_links(session),
-                dispatch,
-                stdin,
-            )
-        )
+    if "/" in name:
+        held, _ = await _held_machine(argv, deps, context, stdin)
         if held is not None:
-            assert placed is not None
-            return await run_external(
-                argv,
-                stdin,
-                session,
-                registry,
-                held,
-                sink,
-            )
-
-        async def on_the_runtime() -> RedirectResult:
-            assert placed is not None
-            unread = _unreadable(name, session)
-            if unread is not None:
-                return _refused(" ".join([name, *argv.args]), unread)
-            program = bin_program(
-                name,
-                session,
-                registry,
-                namespace.session_links(session),
-                placed,
-            )
-            if program is None:
-                return await run_external(
-                    argv,
-                    stdin,
-                    session,
-                    registry,
-                    external_target(name, placed.bindings).runtime,
-                    sink,
-                )
-            marked = set_program_invocation(session, f"{shell_voice()}{name}")
-            try:
-                return await run_external(
-                    dataclasses.replace(argv, name=program, prefix=()),
-                    stdin,
-                    session,
-                    registry,
-                    external_target(program, placed.bindings).runtime,
-                    sink,
-                )
-            finally:
-                reset_caller(marked)
-
-        external = (
-            placed is not None
-            and name.startswith("/")
-            and lookup(name, session, registry, placed) is Consumer.EXTERNAL
-            and not runtime_refused(name, session, registry, placed)
-        )
-        return await handle_exec_path(
-            deps,
-            name,
-            [word_text(a) for a in args],
-            context,
-            stdin,
-            call_stack,
-            on_the_runtime if external else None,
-        )
+            return ResolvedCommand(argv, ExternalTarget(held))
+        absent = None
+        if placed is not None and name.startswith("/"):
+            target = resolve_target(name, argv.args, session, registry, placed)
+            if (
+                isinstance(target, ExternalTarget)
+                and target.runtime is not None
+            ):
+                absent = target
+        return ResolvedCommand(argv, PathTarget(absent))
 
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
@@ -1760,7 +1692,76 @@ async def _route_argv(
     if name in UNSUPPORTED_BUILTINS:
         helped = flag_help(name) if argv.args[:1] == ("--help",) else None
         if helped is not None:
-            return helped
+            return ResolvedCommand(argv, helped)
+        return ResolvedCommand(argv, "unsupported")
+
+    target = resolve_target(name, argv.args, session, registry, placed)
+    consumer = target_consumer(target)
+    if runs_wrapper(name, argv.args, session, registry, placed, consumer):
+        return ResolvedCommand(argv, "wrapper")
+    if isinstance(target, ExternalTarget):
+        assert placed is not None
+        return ResolvedCommand(argv, target)
+    if isinstance(target, FunctionTarget):
+        return ResolvedCommand(argv, target)
+
+    held, matched = await _held_machine(argv, deps, context, stdin, consumer)
+    if held is not None:
+        return ResolvedCommand(matched, ExternalTarget(held))
+
+    if argv.args[:1] == ("--help",) and not is_program_invocation(session):
+        answered = flag_help(name)
+        if answered is not None:
+            return ResolvedCommand(argv, answered)
+    builtin = BUILTINS.get(name)
+    if builtin is not None:
+        return ResolvedCommand(argv, builtin)
+    program = NAMESPACE_PROGRAMS.get(name)
+    if program is not None:
+        return ResolvedCommand(argv, program)
+
+    bindings = registry.runtime_bindings if placed is None else placed.bindings
+    handler = command_worker(argv, bindings)
+    if handler is not None:
+        return ResolvedCommand(argv, WorkerTarget(handler))
+    if isinstance(target, CliTarget):
+        return ResolvedCommand(argv, target)
+    if target is Consumer.UNKNOWN:
+        # A machine-only builtin known at install time still tries its mount
+        # implementation when a workspace route removes the last machine.
+        if name not in MACHINE_ONLY_BUILTINS or not runs_programs(
+            registry.runtime_bindings
+        ):
+            return ResolvedCommand(argv, Consumer.UNKNOWN)
+    wrapper = EXEC_WRAPPERS[name] if runs_as(name, registry) != name else None
+    return ResolvedCommand(argv, MountTarget(wrapper))
+
+
+async def run_resolved(
+    deps: ExecuteNodeDeps,
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    command: ResolvedCommand[ExecutionTarget],
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    row: int,
+) -> RedirectResult:
+    """Run the bound action, following operands only at their execution stage."""
+    argv = command.argv
+    target = command.target
+    dispatch = deps.dispatch
+    registry = deps.registry
+    namespace = deps.namespace
+    execute_fn = deps.execute_fn
+    sink = deps.sink
+    session = context.session
+    name = argv.name
+    operands = list(argv.operands)
+    routing = context.frame.routing
+
+    if isinstance(target, tuple):
+        return target
+    if target == "unsupported":
         code = 1 if name in ("bg", "fg") else 2
         why = "no job control" if name in ("bg", "fg") else "not supported"
         err = encode_text(f"{shell_voice()}{name}: {why}\n")
@@ -1769,8 +1770,53 @@ async def _route_argv(
             IOResult(exit_code=code, stderr=err),
             ExecutionNode(command=name, exit_code=code, stderr=err),
         )
+    if isinstance(target, ExternalTarget):
+        return await run_external(
+            argv, stdin, session, registry, target.runtime, sink
+        )
+    if isinstance(target, PathTarget):
+        absent = target.fallback
 
-    if runs_wrapper(name, argv.args, session, registry, context.frame.routing):
+        async def on_the_runtime() -> RedirectResult:
+            assert absent is not None and routing is not None
+            unread = _unreadable(name, session)
+            if unread is not None:
+                return _refused(" ".join([name, *argv.args]), unread)
+            program = bin_program(
+                name,
+                session,
+                registry,
+                namespace.session_links(session),
+                routing,
+            )
+            if program is None:
+                return await run_external(
+                    argv, stdin, session, registry, absent.runtime, sink
+                )
+            marked = set_program_invocation(session, f"{shell_voice()}{name}")
+            try:
+                return await run_external(
+                    dataclasses.replace(argv, name=program, prefix=()),
+                    stdin,
+                    session,
+                    registry,
+                    external_target(program, routing.bindings).runtime,
+                    sink,
+                )
+            finally:
+                reset_caller(marked)
+
+        return await handle_exec_path(
+            deps,
+            name,
+            list(argv.args),
+            context,
+            stdin,
+            call_stack,
+            on_the_runtime if absent is not None else None,
+        )
+
+    if target == "wrapper":
         return handle_wrapper(
             execute_fn,
             name,
@@ -1778,72 +1824,13 @@ async def _route_argv(
             session,
             registry,
             stdin,
-            context.frame.routing,
+            routing,
             sink,
         )
 
-    routing = context.frame.routing
-    target = resolve_target(name, argv.args, session, registry, routing)
-    if isinstance(target, ExternalTarget):
-        return await run_external(
-            argv, stdin, session, registry, target.runtime, sink
-        )
-    consumer = target_consumer(target)
-    # A mount command whose every path is one machine's own runs there
-    # whole, with the machine's own output, as does a namespace program
-    # asking after the machine's own links. A glob's matches are checked
-    # too, since one may be a link only Mirage holds.
-    if routing is not None and (
-        consumer is Consumer.MOUNT
-        or (consumer is Consumer.NAMESPACE and name in MACHINE_ANSWERED)
-    ):
-        machine, matched = await _held_machine(
-            name,
-            argv,
-            session,
-            registry,
-            namespace,
-            dispatch,
-            stdin,
-            context.frame.routing,
-        )
-        if machine is not None:
-            return await run_external(
-                matched,
-                stdin,
-                session,
-                registry,
-                machine,
-                sink,
-            )
-
-    # A function of a builtin's or a namespace program's name runs in
-    # its place (`timeout() { ...; }`), as bash finds a function first;
-    # the arms below are the builtin's and the program's.
-    shadowed = consumer is Consumer.FUNCTION
-
-    # ── `--help` as a builtin's first word ─────
-    # bash answers it with the builtin's help and status 2 before the
-    # builtin reads its options, the job builtins included. A program
-    # run (`find -exec printf --help`) is the program's own, not this.
-    if (
-        argv.args[:1] == ("--help",)
-        and not shadowed
-        and not is_program_invocation(session)
-    ):
-        answered = flag_help(name)
-        if answered is not None:
-            return answered
-
-    # ── shell builtins ──────────────────────────
-    # One lookup: every executor-run builtin word maps to a handler that
-    # takes the whole invocation, so the arms live beside their workers
-    # (builtins/<word>/) rather than here. Job builtins and the
-    # interpreters are not in the table; they route below.
-    builtin = None if shadowed else BUILTINS.get(name)
-    if builtin is not None:
+    if callable(target):
         try:
-            return await builtin(
+            return await target(
                 BuiltinCall(
                     argv=argv,
                     context=context,
@@ -1883,49 +1870,47 @@ async def _route_argv(
     # The programs below run here rather than on a mount, and every op
     # one issues is the program's, as a mount command's is: a rule scoped
     # to it reaches what ``chmod -R`` walks into, not only its operands.
-    made = made_by_command(dispatch)
+    if isinstance(target, NamespaceProgram):
+        made = made_by_command(dispatch)
 
-    async def ln_on_machine(
-        plans: list[LinkPlan], flags: LnFlags
-    ) -> RedirectResult | None:
-        # Links landing in one machine's own folder are made there, so
-        # its programs follow them.
-        if routing is None:
-            return None
-        machine = await link_machine(
-            [
-                (
-                    plan.link_abs,
-                    resolve_path(
-                        word_text(plan.source),
-                        parent(plan.link_abs)
-                        if flags.symbolic
-                        else session.cwd,
-                    ),
-                )
-                for plan in plans
-            ],
-            flags.symbolic,
-            session,
-            registry,
-            namespace.session_links(session),
-        )
-        if machine is None:
-            return None
-        return await run_external(
-            argv,
-            None,
-            session,
-            registry,
-            machine,
-            sink,
-        )
+        async def ln_on_machine(
+            plans: list[LinkPlan], flags: LnFlags
+        ) -> RedirectResult | None:
+            # Links landing in one machine's own folder are made there, so
+            # its programs follow them.
+            if routing is None:
+                return None
+            machine = await link_machine(
+                [
+                    (
+                        plan.link_abs,
+                        resolve_path(
+                            word_text(plan.source),
+                            parent(plan.link_abs)
+                            if flags.symbolic
+                            else session.cwd,
+                        ),
+                    )
+                    for plan in plans
+                ],
+                flags.symbolic,
+                session,
+                registry,
+                namespace.session_links(session),
+            )
+            if machine is None:
+                return None
+            return await run_external(
+                argv,
+                None,
+                session,
+                registry,
+                machine,
+                sink,
+            )
 
-    program = (
-        None
-        if shadowed
-        else await _run_namespace_program(
-            name,
+        return await _run_namespace_program(
+            target,
             namespace,
             made,
             registry,
@@ -1934,9 +1919,6 @@ async def _route_argv(
             stdin,
             ln_on_machine,
         )
-    )
-    if program is not None:
-        return program
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
@@ -1962,7 +1944,7 @@ async def _route_argv(
     stdout, io, exec_node = await handle_command(
         deps,
         recurse,
-        argv.words,
+        ResolvedCommand(argv, target),
         context,
         stdin,
         call_stack,

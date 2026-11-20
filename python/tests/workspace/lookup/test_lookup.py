@@ -17,7 +17,7 @@ import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import reset_caller, set_program_invocation
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
@@ -55,6 +55,7 @@ from mirage.workspace.lookup.types import (
     FunctionTarget,
 )
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.functions import FunctionSite
 from tests.fixtures.command_trees import trees
 
 
@@ -204,13 +205,18 @@ def test_installed_cli_routes_cli():
     assert target.install is ws.registry.clis.get("prog")
 
 
-def test_function_shadows_installed_cli():
+@pytest.mark.parametrize("stale", [False, True])
+def test_function_shadows_installed_cli(stale):
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
     session.functions["prog"] = "prog() { :; }"
+    if stale:
+        session._function_sites["prog"] = FunctionSite(
+            "prog() { false; }", (1, 0), None
+        )
     assert lookup("prog", session, ws._registry) is Consumer.FUNCTION
     assert resolve_target("prog", (), session, ws.registry) == FunctionTarget(
-        "prog() { :; }"
+        "prog() { :; }", None
     )
 
 
@@ -860,6 +866,32 @@ def test_lscpu_is_the_machine_view_until_it_asks_the_program(args, expected):
     )
     consumer, _ = routed_consumer("lscpu", args, session, ws.registry, routing)
     assert consumer is expected
+
+
+@pytest.mark.asyncio
+async def test_lscpu_cli_receives_a_glob_that_spells_a_machine_option():
+    marker = b"installed CLI"
+
+    async def report(accessor, paths, texts, ctx):
+        return marker, IOResult()
+
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines=[_Box("a", "gcc")]
+    )
+    try:
+        ws.register_cli(
+            "lscpu",
+            CLI(
+                spec=CommandSpec(
+                    name="lscpu", arguments=(Argument("--machine"),)
+                ),
+                handlers={"": CLIHandler(fn=report)},
+            ),
+        )
+        result = await ws.shell("cd /data && touch ./--machine=a && lscpu *")
+        assert (result.exit_code, result.stdout) == (0, marker)
+    finally:
+        await ws.close()
 
 
 def test_lscpu_captured_by_name_stays_the_program():

@@ -14,6 +14,7 @@
 
 import type { Runtime } from '../../runtime/base.ts'
 import type { CLIInstall } from '../cli/types.ts'
+import type { FunctionSite } from '../session/functions.ts'
 
 /**
  * The layer that consumes a command: a command belongs to the layer
@@ -45,6 +46,7 @@ export interface ExternalTarget {
 export interface FunctionTarget {
   readonly kind: typeof Consumer.FUNCTION
   readonly body: string
+  readonly site: FunctionSite | null
 }
 
 export interface CliTarget {

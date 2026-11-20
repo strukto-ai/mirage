@@ -28,6 +28,7 @@ import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { argsBytes, checkEnv, framesBytes } from '../../session/budget.ts'
+import type { FunctionTarget } from '../../lookup/types.ts'
 import { calledLines } from '../../session/functions.ts'
 import type { SessionState } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -55,7 +56,7 @@ export async function runShellFunction(
   deps: ExecuteNodeDeps,
   executeNode: ExecuteNodeFn,
   cmdName: string,
-  source: string,
+  target: FunctionTarget,
   restParts: readonly (string | PathSpec)[],
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -84,11 +85,12 @@ export async function runShellFunction(
   const textArgs = restParts.map(wordText)
   checkEnv(session, 0, argsBytes(textArgs), framesBytes(cs))
   // The body's statements read the caller's stdin in turn.
+  const { site } = target
   const scope = parser.fork()
   let body
   try {
-    const aliases = bodyAliases(session, cmdName)
-    body = parseFunction(source, (line) => scope.parse(line, aliases))
+    const aliases = bodyAliases(session, site)
+    body = parseFunction(target.body, (line) => scope.parse(line, aliases))
   } catch (error) {
     scope.release()
     throw error
@@ -128,16 +130,14 @@ export async function runShellFunction(
   const outerView = session.aliasView
   const outerExpansion = session.aliasExpansion
   session.aliasExpansion = null
-  let site = session.functionSites.get(cmdName)
-  if (site !== undefined && site.source !== source) site = undefined
-  if (site === undefined) {
+  if (site === null) {
     session.parseSeq += 1
     ;[session.parseCurrent, session.parseRow] = [session.parseSeq, 0]
   } else {
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
   session.lineRow = site?.row ?? 0
-  session.lineRows = site === undefined ? null : calledLines(site.lines, body)
+  session.lineRows = calledLines(site?.lines, body)
   const parseName = site?.name ?? 'environment'
   session.parseName = parseName
   const outerSources = session.sourceFiles

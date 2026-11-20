@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
+from mirage.workspace.session.functions import FunctionSite
 
 
 async def handle_alias(
@@ -281,32 +282,31 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     return frozenset(session.aliases) - blocked
 
 
-def body_aliases(session: SessionState, name: str) -> frozenset[str]:
+def body_aliases(
+    session: SessionState, site: FunctionSite | None
+) -> frozenset[str]:
     """The alias names a stored function's body is read with
     (``body_alias_values``).
 
     Args:
         session (SessionState): shell session state.
-        name (str): the function's name.
+        site (FunctionSite | None): the selected definition site.
     """
-    return frozenset(body_alias_values(session, name))
+    return frozenset(body_alias_values(session, site))
 
 
-def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
-    """The aliases a stored function's body is read with, by name: the
+def body_alias_values(
+    session: SessionState, site: FunctionSite | None
+) -> dict[str, str]:
+    """The aliases a stored function's body is read with: the
     ones its definition saw, or the session's own for a definition that
     kept none (one restored from a stored session).
 
     Args:
         session (SessionState): shell session state.
-        name (str): the function's name.
+        site (FunctionSite | None): the selected definition site.
     """
-    site = session._function_sites.get(name)
-    if (
-        site is not None
-        and site.source == session.functions.get(name)
-        and site.aliases is not None
-    ):
+    if site is not None and site.aliases is not None:
         return dict(site.aliases)
     if not aliases_on(session):
         return {}

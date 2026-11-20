@@ -20,7 +20,7 @@ import { SessionProfile } from '../../../policy/profile.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { JobTable } from '../../../execution/job/index.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec, wordText } from '../../../types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { EvaluationContext } from '../../evaluation.ts'
@@ -28,9 +28,28 @@ import { Namespace } from '../../mount/namespace/namespace.ts'
 import { MountRegistry } from '../../mount/registry.ts'
 import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+import { Argv } from '../../expand/argv.ts'
+import { resolveTarget } from '../../lookup/lookup.ts'
+import { executeNode } from '../../node/execute_node.ts'
+import type { Occurrence } from '../../../policy/types.ts'
+import { ExecutionNode } from '../../types.ts'
+import { ParseScope } from '../../../shell/parse/scope.ts'
+import { handleJobs } from '../builtins/jobs/jobs.ts'
+import { handleKill } from '../builtins/kill/kill.ts'
+import type { ResolvedCommand, MountTarget } from './resolved.ts'
 import { handleCommand } from './command.ts'
-import type { ExecuteNodeDeps } from '../deps.ts'
+import { withOpts, type ExecuteNodeDeps } from '../deps.ts'
 import type { ExecuteNodeFn } from './types.ts'
+
+function mountCommand(
+  name: string,
+  ...operands: (string | PathSpec)[]
+): ResolvedCommand<MountTarget> {
+  return {
+    argv: new Argv(name, operands.map(wordText), operands),
+    target: { kind: 'mount', wrapper: null },
+  }
+}
 
 function treeFallbackRegistry(): MountRegistry {
   const registry = new MountRegistry(
@@ -152,7 +171,7 @@ describe('handleCommand — mount tree fallback', () => {
       const [stdout, io] = await handleCommand(
         buildDeps(registry),
         NEVER_EXECUTE,
-        ['remote', 'send'],
+        mountCommand('remote', 'send'),
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
       expect(io.exitCode).toBe(0)
@@ -175,7 +194,7 @@ describe('handleCommand — mount tree fallback', () => {
       const [stdout, io] = await handleCommand(
         buildDeps(registry),
         NEVER_EXECUTE,
-        ['remote', 'put'],
+        mountCommand('remote', 'put'),
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
       expect(io.exitCode).toBe(0)
@@ -192,7 +211,7 @@ describe('handleCommand — mount tree fallback', () => {
     const [stdout, io] = await handleCommand(
       buildDeps(registry),
       NEVER_EXECUTE,
-      ['remote', verb],
+      mountCommand('remote', verb),
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
     expect(io.exitCode).toBe(0)
@@ -206,7 +225,7 @@ describe('handleCommand — mount tree fallback', () => {
       const [stdout, io] = await handleCommand(
         buildDeps(registry),
         NEVER_EXECUTE,
-        ['remote', ...argv],
+        mountCommand('remote', ...argv),
         routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
       )
       expect(decode(io.stderr as Uint8Array)).not.toContain('ambiguous')
@@ -222,7 +241,7 @@ describe('handleCommand — mount tree fallback', () => {
     const [, refused] = await handleCommand(
       buildDeps(registry),
       NEVER_EXECUTE,
-      ['remote', 'put'],
+      mountCommand('remote', 'put'),
       routed(new EvaluationContext(session)),
     )
     expect(refused.exitCode).toBe(1)
@@ -234,7 +253,7 @@ describe('handleCommand — mount tree fallback', () => {
     const [stdout, io] = await handleCommand(
       buildDeps(registry),
       NEVER_EXECUTE,
-      ['remote', 'put'],
+      mountCommand('remote', 'put'),
       routed(new EvaluationContext(session)),
     )
     expect(io.exitCode).toBe(0)
@@ -283,13 +302,113 @@ function decode(b: Uint8Array | null): string {
   return new TextDecoder().decode(b)
 }
 
+describe('bound command execution', () => {
+  it('keeps an empty argv successful', async () => {
+    const registry = treeFallbackRegistry()
+    const [out, io, node] = await handleCommand(
+      buildDeps(registry),
+      NEVER_EXECUTE,
+      { argv: new Argv('', [], []), target: { kind: 'unknown' } },
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    )
+    expect([out, io.exitCode, node.command, node.exitCode]).toEqual([null, 0, '', 0])
+  })
+
+  it('executes the selected function body after the definition changes', async () => {
+    const registry = treeFallbackRegistry()
+    const session = new SessionState({ sessionId: 'test' })
+    const argv = new Argv('f', [], [])
+    const body = 'f() { echo bound; }'
+    session.functions.f = 'f() { echo later; }'
+    const parser = new ParseScope()
+    try {
+      const [, io, node] = await handleCommand(
+        { ...buildDeps(registry), parser },
+        (statement) =>
+          Promise.resolve([null, new IOResult(), new ExecutionNode({ command: statement.text })]),
+        { argv, target: { kind: 'function', body, site: null } },
+        new EvaluationContext(session),
+      )
+      expect([io.exitCode, node.command]).toEqual([0, 'echo bound'])
+    } finally {
+      parser.release()
+    }
+  })
+
+  it('keeps the bound site after an identical function redefinition', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const body = 'f() { say "${BASH_SOURCE[0]}" "$LINENO"; }'
+    const parser = new ParseScope()
+    try {
+      await ws.shell(`printf '%s\\n' '${body}' > /first; printf '\\n%s\\n' '${body}' > /second`)
+      await ws.shell('shopt -s expand_aliases')
+      await ws.shell("alias say='echo before'; source /first")
+      const session = ws.getSession(ws.defaultSessionId)
+      const target = resolveTarget('f', [], session, ws.registry)
+      if (target.kind !== 'function') throw new Error('expected a shell function')
+      const origin = session.functionSites.get('f')?.origin
+      expect(origin).toBeDefined()
+      expect(origin).not.toBeNull()
+
+      await ws.shell("alias say='echo after'; source /second")
+      expect(session.functions.f).toBe(target.body)
+      expect((await ws.shell('f')).stdoutText).toBe('after /second 2\n')
+
+      const deps: ExecuteNodeDeps = {
+        ...buildDeps(ws.registry, ws.jobTable),
+        parser,
+        handed: { claimed: [], parent: null, origin: null },
+      }
+      const origins: (Occurrence | null | undefined)[] = []
+      const run: ExecuteNodeFn = (node, context, stdin, stack, opts) => {
+        origins.push(opts?.handed?.origin)
+        return executeNode(withOpts(deps, opts), node, context, stdin, stack)
+      }
+      const [out, io] = await handleCommand(
+        deps,
+        run,
+        {
+          argv: new Argv('f', [], []),
+          target,
+        },
+        new EvaluationContext(session),
+      )
+      expect([decode(await materialize(out)), io.exitCode]).toEqual(['before /first 1\n', 0])
+      expect(origins).toHaveLength(1)
+      expect(origins[0]).toBe(origin)
+    } finally {
+      parser.release()
+      await ws.close()
+    }
+  })
+
+  it('runs the supplied CLI installation', async () => {
+    const registry = treeFallbackRegistry()
+    const other = treeFallbackRegistry()
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'tool', subcommands: [new CommandSpec({ name: 'run' })] }),
+      handlers: {
+        run: new CLIHandler({ fn: () => [new TextEncoder().encode('selected'), new IOResult()] }),
+      },
+    })
+    const install = other.clis.install('tool', cli)
+    const [out, io] = await handleCommand(
+      buildDeps(registry),
+      NEVER_EXECUTE,
+      { argv: new Argv('tool', ['run'], ['run']), target: { kind: 'cli', install } },
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    )
+    expect([io.exitCode, decode(await materialize(out))]).toEqual([0, 'selected'])
+  })
+})
+
 describe('handleCommand — command not found', () => {
   it('returns exit 127 when no mount has the command', async () => {
     const reg = new MountRegistry({ '/ram': new StubVFS('ram') }, MountMode.WRITE)
     const [, io, exec] = await handleCommand(
       buildDeps(reg),
       NEVER_EXECUTE,
-      ['nope'],
+      { argv: new Argv('nope', [], []), target: { kind: 'unknown' } },
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(127)
@@ -319,7 +438,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     const [stdout, io, exec] = await handleCommand(
       buildDeps(reg),
       NEVER_EXECUTE,
-      ['cat', PathSpec.fromStrPath('/ram/x')],
+      mountCommand('cat', PathSpec.fromStrPath('/ram/x')),
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
     expect(io.exitCode).toBe(0)
@@ -353,7 +472,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     await handleCommand(
       buildDeps(reg),
       NEVER_EXECUTE,
-      ['head', '-n', '5', PathSpec.fromStrPath('/ram/x')],
+      mountCommand('head', '-n', '5', PathSpec.fromStrPath('/ram/x')),
       routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
     expect(seenFlags.n).toBe('5')
@@ -380,7 +499,7 @@ describe('handleCommand — cross-mount', () => {
     const [, io, exec] = await handleCommand(
       buildDeps(reg),
       NEVER_EXECUTE,
-      ['mycmd', PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')],
+      mountCommand('mycmd', PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')),
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(1)
@@ -396,7 +515,7 @@ describe('handleCommand — job builtins', () => {
     const [, io] = await handleCommand(
       buildDeps(reg, jt),
       NEVER_EXECUTE,
-      ['jobs'],
+      { argv: new Argv('jobs', [], []), target: { kind: 'worker', handler: handleJobs } },
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(0)
@@ -408,7 +527,7 @@ describe('handleCommand — job builtins', () => {
     const [, io] = await handleCommand(
       buildDeps(reg, jt),
       NEVER_EXECUTE,
-      ['kill', '999'],
+      { argv: new Argv('kill', ['999'], ['999']), target: { kind: 'worker', handler: handleKill } },
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(1)
