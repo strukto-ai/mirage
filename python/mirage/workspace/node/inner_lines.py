@@ -500,7 +500,8 @@ def _starts_rc(words: Sequence[str]) -> bool:
         if skip:
             skip = False
             continue
-        if word in ("-", "--") or not word.startswith("-"):
+        # bash reads `+` words as options too, and `+l` still logs in.
+        if word in ("-", "--") or word[:1] not in ("-", "+"):
             return False
         if word.startswith("--"):
             if word == "--login":

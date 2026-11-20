@@ -392,7 +392,8 @@ function startsRc(words: readonly string[]): boolean {
       skip = false
       continue
     }
-    if (word === '-' || word === '--' || !word.startsWith('-')) return false
+    // bash reads `+` words as options too, and `+l` still logs in.
+    if (word === '-' || word === '--' || !['-', '+'].includes(word[0] ?? '')) return false
     if (word.startsWith('--')) {
       if (word === '--login') return true
       skip = BASH_LONG_OPTIONS.get(word.slice(2)) === true
