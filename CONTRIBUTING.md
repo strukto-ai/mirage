@@ -146,13 +146,16 @@ Useful PR title prefixes:
 
 ## Releasing
 
-A release publishes `mirage-ai` to PyPI and the `@struktoai/mirage-*`
-packages to npm, all at one version. `.github/workflows/release.yml`
-builds and checks them; publishing is by hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
-(`mirage._rs`), `@struktoai/mirage-core` its WebAssembly build.
+A release publishes `mirage-ai` and `mirage-fuse` to PyPI and the
+`@struktoai/mirage-*` packages to npm, all at one version.
+`.github/workflows/release.yml` builds and checks them; publishing is by
+hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
+(`mirage._rs`), `@struktoai/mirage-core` its WebAssembly build, and
+`rust/fuse` publishes the Linux `mirage-fuse` executables to both registries.
 
-1. Set the new version in `python/pyproject.toml`, `rust/Cargo.toml` and
-   each published `typescript/packages/*/package.json`, then refresh the
+1. Set the new version in `python/pyproject.toml`, `rust/Cargo.toml`,
+   `rust/fuse/package.json` and each published
+   `typescript/packages/*/package.json`, then refresh the
    locks (`uv lock` in `python/`, `cargo update --workspace` in `rust/`).
    `python3 scripts/check_release_versions.py` says whether they agree.
 
@@ -165,11 +168,11 @@ builds and checks them; publishing is by hand. Both carry the Rust in `rust/`: e
 1. Push a tag named for the version (`v0.0.8`) on that commit. The
    workflow checks the tag against the versions and builds again.
 
-1. Download the run's `mirage-ai-*` and `npm-tarballs` artifacts, check
-   them, and publish them by hand: `mirage-ai` to PyPI first, then the npm
-   tarballs, `core` before the packages that depend on it. A pre-release
-   goes out under npm's `alpha`, `beta` or `rc` dist-tag, a release under
-   `latest`.
+1. Download the run's `mirage-ai-*`, `mirage-fuse-*` and `npm-tarballs`
+   artifacts, check them, and publish them by hand: the wheels and the
+   `mirage-ai` sdist to PyPI first, then the npm tarballs, `core` before
+   the packages that depend on it. A pre-release goes out under npm's
+   `alpha`, `beta` or `rc` dist-tag, a release under `latest`.
 
 1. From a checkout of the tag, push the sandbox image to the GitHub
    container registry under the version and `latest`:

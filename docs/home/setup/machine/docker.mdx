@@ -104,7 +104,8 @@ prints `HELLO`. Remove both with `mirage workspace delete box-demo` and
 ## Connecting the workspace
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the image needs only `sshfs`. With
-`mirage`, it needs `mirage-fuse` on its `PATH` and `fuse3`. With `own`,
+`mirage`, it needs `fuse3` and `uv` or `npm` to install
+[`mirage-fuse`](/home/setup/machine/overview#mirage). With `own`,
 copy `sandbox.yaml` in and start Mirage in the container:
 
 ```bash

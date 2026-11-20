@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mirage-fuse"
+dynamic = ["version"]
+description = "The FUSE client a machine mounts a Mirage workspace's prefixes with, served by Mirage over fsproto"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
+authors = [
+    { name = "Zecheng Zhang", email = "zecheng@strukto.ai" },
+]
+keywords = ["ai-agents", "filesystem", "fuse"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Topic :: System :: Filesystems",
+]
+
+[project.urls]
+Homepage = "https://github.com/strukto-ai/mirage"
+Repository = "https://github.com/strukto-ai/mirage"
+Issues = "https://github.com/strukto-ai/mirage/issues"
+
+[tool.maturin]
+bindings = "bin"

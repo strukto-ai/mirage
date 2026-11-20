@@ -68,3 +68,54 @@ jobs:
         with:
           name: npm-tarballs
           path: ${{ runner.temp }}/npm/*.tgz
+
+  # mirage-fuse runs on the machine, so it builds for Linux alone: one static
+  # musl executable per architecture, which runs on glibc and musl alike, so
+  # each wheel carries both platform tags.
+  fuse:
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: rust/fuse
+          target: ${{ matrix.target }}
+          args: --release --locked --zig --compatibility manylinux2014 musllinux_1_2 --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirage-fuse-wheel-${{ matrix.target }}
+          path: rust/fuse/dist/*.whl
+
+  # The npm package carries both executables, and its bin script picks the
+  # one for `uname -m`. npm pack keeps their mode; pnpm pack would not.
+  fuse-npm:
+    needs: fuse
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: mirage-fuse-wheel-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/wheels
+      - name: Pack
+        run: |
+          for arch in x86_64 aarch64; do
+            unzip -p "$RUNNER_TEMP"/wheels/*_"$arch".whl '*.data/scripts/mirage-fuse' > "rust/fuse/bin/mirage-fuse-$arch"
+            chmod +x "rust/fuse/bin/mirage-fuse-$arch"
+          done
+          mkdir "$RUNNER_TEMP/npm"
+          (cd rust/fuse && npm pack --pack-destination "$RUNNER_TEMP/npm")
+      - name: Each artifact carries the license
+        run: python3 scripts/check_release_artifacts.py "$RUNNER_TEMP"/wheels/*.whl "$RUNNER_TEMP"/npm/*.tgz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirage-fuse-npm
+          path: ${{ runner.temp }}/npm/*.tgz

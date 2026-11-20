@@ -22,6 +22,7 @@ from mirage.machine.types import MountType
 from mirage.mount.constants import FSPROTO_VERSION, KERNEL_CACHE_SECONDS
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
+from mirage.version import __version__
 
 
 def not_running_hint(
@@ -143,22 +144,43 @@ SERVED_KINDS: dict[str, str] = {
     "fuse.mirage": "mirage-fuse",
 }
 
-# Finds mirage-fuse on the machine, its PATH first and then Mirage's folder
-# in its home, into ``$f``.
+# Finds the machine's mirage-fuse that speaks this host's fsproto, Mirage's
+# folder in its home first and then its PATH, into ``$f``, empty when
+# neither does.
 MIRAGE_FUSE_FIND = (
-    "f=$(command -v mirage-fuse 2>/dev/null) || "
-    'f="${HOME:-/root}/.mirage/bin/mirage-fuse"; '
+    'f=; for c in "${HOME:-/root}/.mirage/bin/mirage-fuse" '
+    '"$(command -v mirage-fuse 2>/dev/null)"; do '
+    'case "$("$c" --version 2>/dev/null)" in '
+    f'(*" fsproto {FSPROTO_VERSION}") f=$c; break;; esac; done; '
 )
 
-# Exits 0 when the machine's mirage-fuse speaks this host's fsproto.
+# This host's version as npm spells it, ``0.1.0-alpha.1`` for PyPI's
+# ``0.1.0a1``; uv reads that spelling too.
+MIRAGE_FUSE_VERSION = re.sub(
+    r"(a|b|rc)(\d+)$",
+    lambda m: f"-{ {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}[m[1]] }.{m[2]}",
+    __version__,
+)
+
+# Exits 0 once the machine's mirage-fuse speaks this host's fsproto: one
+# it lacks is installed into Mirage's folder in its home at this host's
+# version, with uv or else npm, whichever the machine has, either one
+# replacing a stale one there.
 MIRAGE_FUSE_LINE = (
-    MIRAGE_FUSE_FIND + 'case "$("$f" --version 2>/dev/null)" in '
-    f'(*" fsproto {FSPROTO_VERSION}") exit 0;; esac; exit 1'
+    f'{MIRAGE_FUSE_FIND}[ -n "$f" ] && exit 0; '
+    'd="${HOME:-/root}/.mirage"; { { command -v uv && '
+    'UV_TOOL_BIN_DIR="$d/bin" uv tool install --force '
+    f"mirage-fuse=={MIRAGE_FUSE_VERSION}; }} || {{ command -v npm && "
+    'npm install -g --force --prefix "$d" '
+    f"@struktoai/mirage-fuse@{MIRAGE_FUSE_VERSION}; }}; }} >/dev/null 2>&1; "
+    f'{MIRAGE_FUSE_FIND}[ -n "$f" ]'
 )
 MIRAGE_FUSE_HINT = (
     "mount_type mirage needs a Linux machine with mirage-fuse speaking "
-    f"fsproto {FSPROTO_VERSION} on its PATH or in ~/.mirage/bin: put it in "
-    "the image, or use mount_type ssh"
+    f"fsproto {FSPROTO_VERSION}, and it could not be installed: that takes "
+    "uv or npm there; put it in the image (uv tool install "
+    f"mirage-fuse=={MIRAGE_FUSE_VERSION} or npm install -g "
+    f"@struktoai/mirage-fuse@{MIRAGE_FUSE_VERSION}), or use mount_type ssh"
 )
 
 # Every argv a machine runs goes under this POSIX sh prelude, with the

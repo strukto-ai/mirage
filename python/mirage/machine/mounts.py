@@ -216,7 +216,7 @@ def unmount_line(prefix: str) -> str:
 
 def mirage_fuse_line(source: str, prefix: str, log: str) -> str:
     """The pipe command that mounts ``source`` at ``prefix`` with
-    mirage-fuse, found on the machine's PATH or in Mirage's folder there
+    mirage-fuse, found in Mirage's folder on the machine or on its PATH
     (``MIRAGE_FUSE_FIND``), its errors in ``log``. Its stdin and stdout
     are the fsproto stream.
 

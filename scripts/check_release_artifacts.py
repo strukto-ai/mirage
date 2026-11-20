@@ -31,7 +31,7 @@ def package_dirs() -> list[pathlib.Path]:
     """Every directory a package is published from. npm and the Python
     builds ship only what the package's own directory holds, so each one
     keeps a copy of the root LICENSE."""
-    dirs = [ROOT / "python"]
+    dirs = [ROOT / "python", ROOT / "rust/fuse"]
     for manifest in sorted(
         (ROOT / "typescript/packages").glob("*/package.json")
     ):

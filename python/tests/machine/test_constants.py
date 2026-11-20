@@ -13,14 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import pathlib
 import stat
 import subprocess
+import tomllib
 import uuid
 
 import pytest
 
 from mirage.machine.constants import (
     ENCODE_OUTPUT,
+    MIRAGE_FUSE_FIND,
+    MIRAGE_FUSE_LINE,
+    MIRAGE_FUSE_VERSION,
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
@@ -39,6 +44,7 @@ from mirage.machine.constants import (
     stop_line,
     wrap_line,
 )
+from mirage.mount.constants import FSPROTO_VERSION
 
 PRELUDE = '/bin/sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
 
@@ -546,3 +552,121 @@ def test_sshfs_line_installs_as_root_without_sudo(tmp_path):
 def test_sshfs_line_fails_when_it_cannot_install(tmp_path, tools, env):
     code, calls = _sshfs_line(tmp_path, tools, **env)
     assert (code, calls) == (1, [])
+
+
+# Stand-ins for the installers MIRAGE_FUSE_LINE calls, on a PATH of their
+# own: each logs its call and, unless told to fail, puts a mirage-fuse
+# speaking this host's fsproto where it was asked to. npm, as npm does,
+# refuses to replace a file there without --force.
+_FUSE = f'#!/bin/sh\necho "mirage-fuse 0 fsproto {FSPROTO_VERSION}"\n'
+_FAKE_INSTALLERS = {
+    "uv": (
+        '#!/bin/sh\necho "uv $* in $UV_TOOL_BIN_DIR" >> "$LOG"\n'
+        '[ -z "$UV_FAILS" ] || exit 1\n/bin/mkdir -p "$UV_TOOL_BIN_DIR"\n'
+        f"printf '%s' '{_FUSE}' > \"$UV_TOOL_BIN_DIR/mirage-fuse\"\n"
+        '/bin/chmod +x "$UV_TOOL_BIN_DIR/mirage-fuse"\n'
+    ),
+    "npm": (
+        '#!/bin/sh\necho "npm $*" >> "$LOG"\nf=; p=\n'
+        "while [ $# -gt 0 ]; do case $1 in --force) f=1;; "
+        "--prefix) p=$2;; esac; shift; done\n"
+        '[ -e "$p/bin/mirage-fuse" ] && [ -z "$f" ] && exit 1\n'
+        '/bin/mkdir -p "$p/bin"\n'
+        f"printf '%s' '{_FUSE}' > \"$p/bin/mirage-fuse\"\n"
+        '/bin/chmod +x "$p/bin/mirage-fuse"\n'
+    ),
+}
+
+
+def _mirage_fuse_line(tmp_path, tools, **env):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in tools:
+        path = bin_dir / name
+        path.write_text(_FAKE_INSTALLERS[name])
+        path.chmod(0o755)
+    log = tmp_path / "log"
+    log.touch()
+    done = subprocess.run(
+        ["/bin/sh", "-c", MIRAGE_FUSE_LINE],
+        env={
+            "PATH": str(bin_dir),
+            "HOME": str(tmp_path / "home"),
+            "LOG": str(log),
+            **env,
+        },
+        check=False,
+    )
+    return done.returncode, log.read_text().splitlines()
+
+
+def test_mirage_fuse_version_is_the_npm_spelling_of_this_release():
+    cargo = pathlib.Path(__file__).parents[3] / "rust/Cargo.toml"
+    version = tomllib.loads(cargo.read_text())["workspace"]["package"]
+    assert MIRAGE_FUSE_VERSION == version["version"]
+
+
+def test_mirage_fuse_line_leaves_a_machine_that_has_it_alone(tmp_path):
+    (tmp_path / "bin").mkdir()
+    fuse = tmp_path / "bin/mirage-fuse"
+    fuse.write_text(_FUSE)
+    fuse.chmod(0o755)
+    assert _mirage_fuse_line(tmp_path, ["uv", "npm"]) == (0, [])
+
+
+def test_mirage_fuse_line_installs_with_uv_into_mirages_folder(tmp_path):
+    code, calls = _mirage_fuse_line(tmp_path, ["uv", "npm"])
+    folder = tmp_path / "home/.mirage/bin"
+    assert code == 0
+    assert calls == [
+        f"uv tool install --force mirage-fuse=={MIRAGE_FUSE_VERSION} "
+        f"in {folder}"
+    ]
+    assert (folder / "mirage-fuse").is_file()
+
+
+def test_mirage_fuse_line_falls_back_to_npm(tmp_path):
+    code, calls = _mirage_fuse_line(tmp_path, ["uv", "npm"], UV_FAILS="1")
+    home = tmp_path / "home"
+    assert code == 0
+    assert calls == [
+        f"uv tool install --force mirage-fuse=={MIRAGE_FUSE_VERSION} "
+        f"in {home}/.mirage/bin",
+        f"npm install -g --force --prefix {home}/.mirage "
+        f"@struktoai/mirage-fuse@{MIRAGE_FUSE_VERSION}",
+    ]
+
+
+def test_mirage_fuse_line_replaces_one_speaking_another_fsproto(tmp_path):
+    (tmp_path / "home/.mirage/bin").mkdir(parents=True)
+    stale = tmp_path / "home/.mirage/bin/mirage-fuse"
+    stale.write_text('#!/bin/sh\necho "mirage-fuse 0 fsproto 0"\n')
+    stale.chmod(0o755)
+    code, calls = _mirage_fuse_line(tmp_path, ["npm"])
+    assert code == 0
+    assert len(calls) == 1
+    assert "fsproto 0" not in stale.read_text()
+
+
+def test_mirage_fuse_line_takes_the_path_one_past_a_stale_home_one(tmp_path):
+    (tmp_path / "home/.mirage/bin").mkdir(parents=True)
+    stale = tmp_path / "home/.mirage/bin/mirage-fuse"
+    stale.write_text('#!/bin/sh\necho "mirage-fuse 0 fsproto 0"\n')
+    stale.chmod(0o755)
+    (tmp_path / "bin").mkdir()
+    fuse = tmp_path / "bin/mirage-fuse"
+    fuse.write_text(_FUSE)
+    fuse.chmod(0o755)
+    assert _mirage_fuse_line(tmp_path, []) == (0, [])
+    found = subprocess.run(
+        ["/bin/sh", "-c", MIRAGE_FUSE_FIND + 'printf %s "$f"'],
+        env={"PATH": str(tmp_path / "bin"), "HOME": str(tmp_path / "home")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert found.stdout == str(fuse)
+
+
+def test_mirage_fuse_line_fails_without_uv_or_npm(tmp_path):
+    assert _mirage_fuse_line(tmp_path, []) == (1, [])
