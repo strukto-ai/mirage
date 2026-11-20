@@ -857,7 +857,7 @@ def test_the_hangup_keeps_to_the_session_once_the_program_is_gone():
         start_new_session=True,
     )
     assert program.stdout is not None
-    kept, hung, stopped = [int(program.stdout.readline()) for _ in range(3)]
+    kept, hung, stopped = (int(program.stdout.readline()) for _ in range(3))
     program.wait(timeout=5)
     try:
         os.kill(stopped, 19)
