@@ -21,8 +21,10 @@ import pytest
 from mirage.commands.builtin.generic.cp import (
     CpFlags,
     TransferLinks,
+    TransferPolicy,
     cp_generic,
     dest_kind,
+    overwrite_gate,
     parse_flags,
     source_kind,
     target_dir_error,
@@ -373,6 +375,57 @@ async def test_primitive_refused_destination_probe_skips_only_its_tree():
     )
     assert "/d/t/sub/x" not in files
     assert files["/d/u/y"] == b"Y"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure,message",
+    [
+        (eacces("/dst/a"), "Permission denied"),
+        (ValueError("malformed metadata"), "malformed metadata"),
+    ],
+)
+async def test_recursive_no_clobber_reports_stat_error_and_copies_later_sibling(
+    failure: Exception, message: str
+):
+    # POSIX cp step 3(c) continues after a destination open fails. Apply the
+    # same per-file rule when -n cannot read the destination's metadata.
+    files = {
+        "/src/a": b"replacement",
+        "/src/b": b"new",
+        "/dst/a": b"original",
+    }
+    _, io = await _run_primitive(
+        files,
+        {"/src", "/dst"},
+        ["/src", "/dst"],
+        flags=CpFlags(recursive=True, no_clobber=True, no_target_dir=True),
+        stat_fails={"/dst/a": failure},
+    )
+    assert io.exit_code == 1
+    assert files["/dst/a"] == b"original"
+    assert files.get("/dst/b") == b"new"
+    assert io.stderr == f"cp: cannot stat '/dst/a': {message}\n".encode()
+
+
+@pytest.mark.asyncio
+async def test_destination_overwrite_probe_propagates_abort():
+    abort = MirageAbortError()
+
+    async def stat(_path: PathSpec) -> FileStat:
+        raise abort
+
+    errors: list[str] = []
+    with pytest.raises(MirageAbortError) as raised:
+        await overwrite_gate(
+            TransferPolicy(cmd_name="cp", no_clobber=True),
+            stat,
+            _spec("/src"),
+            _spec("/dst"),
+            errors,
+        )
+    assert raised.value is abort
+    assert errors == []
 
 
 _OLD = "2020-01-01T00:00:00+00:00"

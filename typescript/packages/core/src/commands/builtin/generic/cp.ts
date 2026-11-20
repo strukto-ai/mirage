@@ -1367,14 +1367,19 @@ export async function overwriteGate(
   // pay no extra stat per entry.
   const ask = policy.ask ?? null
   if (!policy.noClobber && !updateGates(policy.update) && ask === null) return true
+
+  const afterStatError = (path: PathSpec, err: unknown): boolean => {
+    if (isAborting(err)) throw err
+    if (isMissingPath(err) || isEnotdir(err)) return true
+    errors.push(`${policy.cmdName}: cannot stat '${path.rawPath}': ${strerrorOf(err)}`)
+    return false
+  }
+
   let targetInfo: FileStat
   try {
     targetInfo = await stat(target)
   } catch (err) {
-    // A probe failure here is not permission to clobber: returning true on an
-    // auth error or timeout would silently defeat -n / --update=none.
-    if (!isMissingPath(err) && !isEnotdir(err)) throw err
-    return true
+    return afterStatError(target, err)
   }
   if (policy.noClobber || policy.update === 'none') return false
   if (policy.update === 'none-fail') {
@@ -1386,21 +1391,13 @@ export async function overwriteGate(
     try {
       srcInfo = await stat(src)
     } catch (err) {
-      if (!isMissingPath(err) && !isEnotdir(err)) throw err
-      return true
+      return afterStatError(src, err)
     }
     if (copies !== undefined && policy.backup === null) {
       try {
         targetInfo = await destStat(stat, copies)(target)
       } catch (err) {
-        if (isMissingPath(err) || isEnotdir(err)) return true
-        if (!isFsError(err)) throw err
-        // GNU names a link whose target its stat may not reach and goes on
-        // with the next entry (coreutils 9.7).
-        errors.push(
-          `${policy.cmdName}: cannot stat '${target.rawPath}': ${fsStrerror(err) ?? String(err)}`,
-        )
-        return false
+        return afterStatError(target, err)
       }
     }
     const srcTs = modifiedTs(srcInfo.modified)
@@ -1916,6 +1913,7 @@ export async function copyEntries(
       if (errors.length > errorCount) copiedAll = false
       continue
     }
+    const errorCount = errors.length
     if (
       opts.policy !== undefined &&
       !(await overwriteGate(
@@ -1926,8 +1924,10 @@ export async function copyEntries(
         errors,
         'unlink' in strategy ? undefined : opts.copies,
       ))
-    )
+    ) {
+      if (errors.length > errorCount) copiedAll = false
       continue
+    }
     if (
       entry !== src.virtual &&
       !made.has(parent(entryDstSpec.virtual)) &&
