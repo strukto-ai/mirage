@@ -395,3 +395,31 @@ describe('rg -L', () => {
     ])
   })
 })
+
+describe('rg walks under the ignore files of each directory', () => {
+  it('reads .gitignore inside a repository, .ignore and .rgignore anywhere', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const lines = [
+      'mkdir -p /w/a/env /w/a/b && cd /w && touch a/env/e.py a/b/x.py a/g.py a/i.py a/r.py a/k.log && ' +
+        "printf 'env/\\n*.log\\n' > a/.gitignore && printf 'i.py\\n' > a/.ignore && " +
+        "printf 'r.py\\n' > a/.rgignore && rg --files a | sort | tr '\\n' ' '",
+      "cd /w && mkdir .git && rg --files a | sort | tr '\\n' ' '",
+      "cd /w && rg --files --no-ignore-vcs a | sort | tr '\\n' ' '",
+      "cd /w && rg --files -u a | sort | tr '\\n' ' '",
+      "cd /w/a && rg --files | sort | tr '\\n' ' '",
+    ]
+    const out: string[] = []
+    try {
+      for (const line of lines) out.push(new TextDecoder().decode((await ws.shell(line)).stdout))
+    } finally {
+      await ws.close()
+    }
+    expect(out).toEqual([
+      'a/b/x.py a/env/e.py a/g.py a/k.log ',
+      'a/b/x.py a/g.py ',
+      'a/b/x.py a/env/e.py a/g.py a/k.log ',
+      'a/b/x.py a/env/e.py a/g.py a/i.py a/k.log a/r.py ',
+      'b/x.py g.py ',
+    ])
+  })
+})

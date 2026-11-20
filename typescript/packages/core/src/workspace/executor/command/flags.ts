@@ -17,6 +17,10 @@ import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import {
   ambiguousOptionError,
+  clapBuiltin,
+  clapInvalidValue,
+  clapMissingValue,
+  clapUnknownOption,
   invalidArgumentError,
   invalidFloatError,
   invalidIntError,
@@ -269,7 +273,16 @@ export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array
   // "unexpected_value" share invalidOptions: a boolean long handed a value
   // is not an unrecognized option, and getopt_long words it differently
   // (`grep --byte-offset=2`).
+  const clap = clapBuiltin(cmdName, builtin)
   for (const kind of parsed.optionErrorKinds) {
+    if (clap && kind === 'invalid')
+      return clapUnknownOption(cmdName, parsed.invalidOptions[0] ?? '')
+    if (clap && kind === 'needs_value')
+      return clapMissingValue(cmdName, parsed.needsValueOptions[0] ?? '')
+    if (clap && kind === 'value') {
+      const badValue = parsed.invalidValueOptions[0]
+      if (badValue !== undefined) return clapInvalidValue(cmdName, badValue[0], badValue[1])
+    }
     if (kind === 'ambiguous') {
       const ambiguous = parsed.ambiguousOptions[0]
       if (ambiguous !== undefined) return ambiguousOptionError(cmdName, ...ambiguous, builtin)

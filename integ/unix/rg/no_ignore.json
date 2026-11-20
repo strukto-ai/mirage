@@ -52,6 +52,43 @@
         "ignore_file_case_insensitive",
         "no_ignore_file_case_insensitive"
       ]
+    },
+    {
+      "id": "rg_walk_reads_each_directorys_ignore_files",
+      "seq": 110000209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgig/a/env /data/rgig/a/b && printf 'hit\\n' > /data/rgig/a/env/e.py && printf 'hit\\n' > /data/rgig/a/b/x.py && printf 'hit\\n' > /data/rgig/a/g.py && printf 'hit\\n' > /data/rgig/a/i.py && printf 'hit\\n' > /data/rgig/a/r.py && printf 'hit\\n' > /data/rgig/a/k.log && printf 'env/\\n*.log\\n' > /data/rgig/a/.gitignore && printf 'i.py\\n' > /data/rgig/a/.ignore && printf 'r.py\\n' > /data/rgig/a/.rgignore && rg -l --sort path hit /data/rgig; mkdir -p /data/rgig/.git && printf x > /data/rgig/.git/HEAD && rg -l --sort path hit /data/rgig; rg -l --sort path --no-ignore-vcs hit /data/rgig; rg -l --sort path -uu hit /data/rgig; (cd /data/rgig/a/env && rg -l hit); (cd /data/rgig/a/b && rg -l --sort path hit .. | head -3)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgig/a/b/x.py\n/data/rgig/a/env/e.py\n/data/rgig/a/g.py\n/data/rgig/a/k.log\n/data/rgig/a/b/x.py\n/data/rgig/a/g.py\n/data/rgig/a/b/x.py\n/data/rgig/a/env/e.py\n/data/rgig/a/g.py\n/data/rgig/a/k.log\n/data/rgig/a/b/x.py\n/data/rgig/a/env/e.py\n/data/rgig/a/g.py\n/data/rgig/a/i.py\n/data/rgig/a/k.log\n/data/rgig/a/r.py\ne.py\n../b/x.py\n../g.py\n",
+        "stderr": ""
+      },
+      "flags": [
+        "files_with_matches",
+        "sort",
+        "no_ignore_vcs",
+        "unrestricted"
+      ]
     }
   ]
 }

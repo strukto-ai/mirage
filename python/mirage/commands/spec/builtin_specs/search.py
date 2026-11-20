@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.constants import PATHS_OPERAND
-from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
 SPECS: dict[str, CommandSpec] = {
     "grep": CommandSpec(
@@ -278,6 +278,60 @@ SPECS: dict[str, CommandSpec] = {
                 provided_by=("-e", "-f", "--files", "--type-list"),
             ),
             PATHS_OPERAND,
+        ),
+    ),
+    # fd 10.2.0: clap takes a long flag only as spelled, -s and -i
+    # override each other, and -x/-X take the rest of the line up to a
+    # lone `;`. Mirage writes no colors, so --color is accepted and plain.
+    "fd": CommandSpec(
+        allow_abbrev=False,
+        usage_style=UsageStyle.CLAP,
+        arguments=(
+            Argument("-H", "--hidden", action="store_true"),
+            Argument("-I", "--no-ignore", action="store_true"),
+            Argument("--no-ignore-vcs", action="store_true"),
+            Argument("--no-ignore-parent", action="store_true"),
+            Argument("--no-require-git", action="store_true"),
+            Argument("-u", "--unrestricted", action="count"),
+            Argument("-s", "--case-sensitive", action="store_true"),
+            Argument("-i", "--ignore-case", action="store_true"),
+            Argument("-g", "--glob", action="store_true"),
+            Argument("--regex", action="store_true"),
+            Argument("-F", "--fixed-strings", action="store_true"),
+            Argument("-a", "--absolute-path", action="store_true"),
+            Argument("-L", "--follow", action="store_true"),
+            Argument("-p", "--full-path", action="store_true"),
+            Argument("-0", "--print0", action="store_true"),
+            Argument("-d", "--max-depth", metavar="depth"),
+            Argument("--min-depth", metavar="depth"),
+            Argument("--exact-depth", metavar="depth"),
+            Argument("-E", "--exclude", action="append", metavar="pattern"),
+            Argument("-t", "--type", action="append", metavar="filetype"),
+            Argument("-e", "--extension", action="append", metavar="ext"),
+            Argument("-x", "--exec", nargs="REMAINDER", metavar="cmd"),
+            Argument("-X", "--exec-batch", nargs="REMAINDER", metavar="cmd"),
+            Argument(
+                "--ignore-file", type="path", action="append", metavar="path"
+            ),
+            Argument(
+                "-c",
+                "--color",
+                choices=("auto", "always", "never"),
+                metavar="when",
+            ),
+            Argument("-j", "--threads", metavar="num"),
+            Argument("--max-results", metavar="count"),
+            Argument("-1", action="store_true"),
+            Argument("-q", "--quiet", action="store_true"),
+            Argument(
+                "--strip-cwd-prefix",
+                nargs="?",
+                attached_only=True,
+                choices=("auto", "always", "never"),
+                metavar="when",
+            ),
+            Argument("text", nargs="?", metavar="pattern"),
+            Argument("paths", type="path", nargs="*", metavar="path"),
         ),
     ),
     "sed": CommandSpec(

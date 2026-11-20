@@ -26,6 +26,10 @@ from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
+    clap_builtin,
+    clap_invalid_value,
+    clap_missing_value,
+    clap_unknown_option,
     invalid_argument_error,
     invalid_float_error,
     invalid_int_error,
@@ -313,7 +317,15 @@ def option_error(
     # and "unexpected_value" share invalid_options: a boolean long handed
     # a value is not an unrecognized option, and getopt_long words it
     # differently (`grep --byte-offset=2`).
+    clap = clap_builtin(cmd_name, builtin)
     for kind in parsed.option_error_kinds:
+        if clap and kind == "invalid":
+            return clap_unknown_option(cmd_name, parsed.invalid_options[0])
+        if clap and kind == "needs_value":
+            return clap_missing_value(cmd_name, parsed.needs_value_options[0])
+        if clap and kind == "value":
+            option, value, _ = parsed.invalid_value_options[0]
+            return clap_invalid_value(cmd_name, option, value)
         if kind == "ambiguous":
             token, candidates = parsed.ambiguous_options[0]
             return ambiguous_option_error(cmd_name, token, candidates, builtin)

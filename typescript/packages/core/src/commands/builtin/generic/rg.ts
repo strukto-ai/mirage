@@ -36,12 +36,20 @@ import { scanned } from '../../../rs/scan.ts'
 import { resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
-import { IgnoreRules, Overrides, Verdict, walkCandidate } from '../rg_glob.ts'
+import {
+  type IgnoreSources,
+  IgnoreRules,
+  Overrides,
+  Verdict,
+  ignoreLines,
+  walkCandidate,
+} from '../rg_glob.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import {
   osErrorText,
   type Haystack,
+  type IgnoreReader,
   WalkFilter,
   onOtherMount,
   openErrorLine,
@@ -64,6 +72,8 @@ import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { gnuBasename } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
@@ -222,6 +232,25 @@ export function parseFlags(fl: FlagView): RgFlags {
     else if (name === 'no_hidden') hidden = !fl.asBool(name) && hidden
     else if (unrestricted >= 2) hidden = true
   }
+  // -u is --no-ignore; each --no-ignore-* drops its own kind and --no-ignore
+  // drops every file, never --ignore-file's (14.1.1).
+  let noIgnore = false
+  for (const name of fl.typedOrder('no_ignore', 'ignore', 'unrestricted')) {
+    if (name === 'no_ignore') noIgnore = fl.asBool(name) || noIgnore
+    else if (name === 'ignore') noIgnore = !fl.asBool(name) && noIgnore
+    else if (unrestricted >= 1) noIgnore = true
+  }
+  const reads = (off: string, on: string): boolean => !noIgnore && last(fl, off, on) !== off
+  const vcs = reads('no_ignore_vcs', 'ignore_vcs')
+  const ignoreSources: IgnoreSources = {
+    vcs,
+    exclude: vcs && reads('no_ignore_exclude', 'ignore_exclude'),
+    dot: reads('no_ignore_dot', 'ignore_dot'),
+    custom: '.rgignore',
+    parents: reads('no_ignore_parent', 'ignore_parent'),
+    requireGit: last(fl, 'no_require_git', 'require_git') !== 'no_require_git',
+    bom: false,
+  }
   const separator = values.context_separator
   const pathSeparator = values.path_separator
   const selections: TypeSelection[] = []
@@ -295,6 +324,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     typeChanges: changes,
     typeSelections: selections,
     hidden,
+    ignoreSources,
     maxDepth: values.max_depth,
     maxFilesize: values.max_filesize,
     follow: last(fl, 'follow', 'no_follow') === 'follow',
@@ -342,14 +372,47 @@ export async function ignoreRules(
     try {
       if (dispatch === undefined) throw enoent(path.rawPath)
       const [data] = await dispatch('read', path)
-      for (const item of decodeText(await materialize(data as ByteSource)).split(/\r?\n/))
-        lines.push(item)
+      lines.push(...ignoreLines(await materialize(data as ByteSource), false))
     } catch (err) {
       if (!isFsError(err)) throw err
       notes.push(`rg: ${path.rawPath}: ${osErrorText(err)}`)
     }
   }
   return new IgnoreRules(lines)
+}
+
+// How a walk reads the ignore files it meets, through the dispatcher so a
+// file on any mount is read. Mirrors Python's _DispatchReader.
+class DispatchReader implements IgnoreReader {
+  constructor(private readonly dispatch: DispatchFn) {}
+
+  async read(path: string): Promise<Uint8Array | null> {
+    try {
+      const [data] = await this.dispatch('read', toPathspec(path))
+      return await materialize(data as ByteSource)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return null
+    }
+  }
+
+  async names(dir: string): Promise<ReadonlySet<string> | null> {
+    try {
+      const [entries] = await this.dispatch('readdir', toPathspec(dir))
+      return new Set((entries as string[]).map((entry) => gnuBasename(rstripSlash(entry) || entry)))
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return null
+    }
+  }
+}
+
+/**
+ * How a walk reads the ignore files it meets, null without a dispatcher.
+ * Mirrors Python's ignore_reader.
+ */
+export function ignoreReader(dispatch: DispatchFn | undefined): IgnoreReader | null {
+  return dispatch === undefined ? null : new DispatchReader(dispatch)
 }
 
 // Whether -g, --iglob, -t or -T filter the files a walk searches.
@@ -491,6 +554,7 @@ export async function rgGeneric(
       boundary,
       linkResolver(ctx),
       stopped,
+      ignoreReader(dispatchOf(ctx)),
     )
     if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
       const listed: Haystack[] = []
@@ -750,12 +814,41 @@ export async function* haystacks(
   boundary: MountView | null,
   resolver: LinkResolver | null,
   stopped: ReadonlySet<string>,
+  reader: IgnoreReader | null = null,
 ): AsyncGenerator<Haystack> {
   // ripgrep holds one path that is not a directory to one thread, as it
   // does -j1 and a sort; every other line runs its parallel walker.
   const parallel = runsParallel(f)
   const several = parallel && paths.length > 1
+  // Every operand is looked up before any is searched, so one that is not
+  // there is reported even when the output's reader stops early (14.1.1).
+  const found: [PathSpec, FileStat | null, boolean][] = []
   for (const p of paths) {
+    if (isStdin(p)) {
+      found.push([p, null, false])
+      continue
+    }
+    if (p.walkError !== null) {
+      warnings.push(walkErrorLine(p.rawPath, walkRefusal(p), several))
+      continue
+    }
+    try {
+      const s = await st(p.virtual)
+      found.push([p, s, s.type === FileType.DIRECTORY])
+    } catch (err) {
+      if (!isWalkError(err)) throw err
+      try {
+        // A directory that exists only because mounts sit under it answers
+        // readdir but not stat.
+        await rd(p.virtual)
+        found.push([p, null, true])
+      } catch (inner) {
+        if (!isWalkError(inner)) throw inner
+        warnings.push(walkErrorLine(p.rawPath, err, several))
+      }
+    }
+  }
+  for (const [p, s, isDir] of found) {
     if (isStdin(p)) {
       yield {
         virtual: p.virtual,
@@ -766,28 +859,6 @@ export async function* haystacks(
       }
       continue
     }
-    if (p.walkError !== null) {
-      warnings.push(walkErrorLine(p.rawPath, walkRefusal(p), several))
-      continue
-    }
-    let isDir = false
-    let s: FileStat | null = null
-    try {
-      s = await st(p.virtual)
-      isDir = s.type === FileType.DIRECTORY
-    } catch (err) {
-      if (!isWalkError(err)) throw err
-      try {
-        // A directory that exists only because mounts sit under it answers
-        // readdir but not stat.
-        await rd(p.virtual)
-        isDir = true
-      } catch (inner) {
-        if (!isWalkError(inner)) throw inner
-        warnings.push(walkErrorLine(p.rawPath, err, several))
-        continue
-      }
-    }
     if (!isDir) {
       yield { virtual: p.virtual, shown: p.rawPath, stat: s, spec: p, resolver: null }
       continue
@@ -797,7 +868,7 @@ export async function* haystacks(
       const home = boundary.rootOf(p.virtual)
       crosses = (path) => onOtherMount((q) => boundary.rootOf(q), home, path)
     }
-    for await (const found of walkHaystacks(
+    for await (const hit of walkHaystacks(
       rd,
       st,
       p.virtual,
@@ -810,8 +881,9 @@ export async function* haystacks(
       resolver,
       f.follow,
       parallel,
+      reader === null ? null : { sources: f.ignoreSources, reader },
     )) {
-      yield found
+      yield hit
       if (stopped.has(p.virtual)) break
     }
   }

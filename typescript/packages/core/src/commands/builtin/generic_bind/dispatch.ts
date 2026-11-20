@@ -22,7 +22,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import { currentCaller, bindCaller, type Caller } from '../../../context/session_context.ts'
 import type { FollowOperands } from '../../../view/types.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -76,6 +76,7 @@ export async function runDispatch(
   ids?: IdSource,
   find?: FindExpr,
   env?: Record<string, string>,
+  shell?: ShellFn,
 ): Promise<[ByteSource | null, IOResult]> {
   return bindCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
@@ -91,6 +92,7 @@ export async function runDispatch(
       ...(find === undefined ? {} : { find }),
       ...(signal === undefined ? {} : { signal }),
       ...(env === undefined ? {} : { env }),
+      ...(shell === undefined ? {} : { shell }),
     })
     if (result === null) return [null, new IOResult()]
     if (builder.streams === true) return result

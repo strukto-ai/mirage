@@ -15,6 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   ambiguousOptionError,
+  clapBuiltin,
+  clapInvalidValue,
+  clapMissingValue,
+  clapUnknownOption,
+  jaro,
   extraOperandError,
   missingOperandError,
   invalidFloatError,
@@ -590,5 +595,51 @@ describe('rgUnknownFlag', () => {
   it("keeps ripgrep's order", () => {
     expect(similarRgFlags('colo')).toEqual(['color', 'colors'])
     expect(similarRgFlags('pcr')).toEqual([])
+  })
+})
+
+describe('clap refusals for a builtin', () => {
+  it.each([
+    ['foo', 'follow', 0.833],
+    ['hid', 'hidden', 0.833],
+    ['zzz', 'hidden', 0],
+  ])('jaro(%s, %s) ranks clap suggestions', (a, b, score) => {
+    expect(Math.round(jaro(a, b) * 1000) / 1000).toBe(score)
+  })
+
+  it.each([
+    [
+      '--hid',
+      "tip: a similar argument exists: '--hidden'",
+      'Usage: fd --hidden [pattern] [path]...',
+    ],
+    [
+      '--zzz',
+      "tip: to pass '--zzz' as a value, use '-- --zzz'",
+      'Usage: fd [OPTIONS] [pattern] [path]...',
+    ],
+    ['Z', "tip: to pass '-Z' as a value, use '-- -Z'", 'Usage: fd [OPTIONS] [pattern] [path]...'],
+  ])('fd refuses %s in clap words', (token, tip, usage) => {
+    const [stderr, code] = clapUnknownOption('fd', token)
+    const name = token.startsWith('-') ? token : `-${token}`
+    expect(new TextDecoder().decode(stderr)).toBe(
+      `error: unexpected argument '${name}' found\n\n  ${tip}\n\n${usage}\n\nFor more information, try '--help'.\n`,
+    )
+    expect(code).toBe(2)
+  })
+
+  it('refuses a missing or unlisted value', () => {
+    const [missing, code] = clapMissingValue('fd', '--max-depth')
+    expect(new TextDecoder().decode(missing)).toBe(
+      "error: a value is required for '--max-depth <depth>' but none was supplied\n\nFor more information, try '--help'.\n",
+    )
+    expect(code).toBe(2)
+    const [invalid] = clapInvalidValue('fd', '-c', 'bogus')
+    expect(new TextDecoder().decode(invalid)).toBe(
+      "error: invalid value 'bogus' for '--color <when>'\n  [possible values: auto, always, never]\n\nFor more information, try '--help'.\n",
+    )
+    expect(clapBuiltin('fd', true)).toBe(true)
+    expect(clapBuiltin('fd', false)).toBe(false)
+    expect(clapBuiltin('rg', true)).toBe(false)
   })
 })

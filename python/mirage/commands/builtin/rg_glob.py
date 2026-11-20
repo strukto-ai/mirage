@@ -361,6 +361,144 @@ class IgnoreRules:
         return Verdict.NONE
 
 
+@dataclass(frozen=True)
+class IgnoreSources:
+    """Which ignore files a walk reads, as the ignore crate's builder sets
+    them.
+
+    Args:
+        vcs (bool): the ``.gitignore`` files, only inside a git repository
+            unless ``require_git`` is off.
+        exclude (bool): the repository's ``.git/info/exclude``.
+        dot (bool): the ``.ignore`` files and the tool's own file.
+        custom (str | None): the tool's own file (``.rgignore``,
+            ``.fdignore``).
+        parents (bool): the files in the directories above the walk's root.
+        require_git (bool): read git's files only inside a repository.
+        bom (bool): drop a byte order mark opening a file, as the ignore
+            crate has since ripgrep 14.1.1 shipped (ast-grep 0.51.3 does).
+    """
+
+    vcs: bool
+    exclude: bool
+    dot: bool
+    custom: str | None
+    parents: bool
+    require_git: bool
+    bom: bool
+
+
+def ignore_lines(data: bytes, bom: bool) -> list[str]:
+    """An ignore file's lines as the ignore crate reads them: split at
+    LF, a CR before it dropped, the file ending at its first line that is
+    not UTF-8. Mirrors TypeScript's ignoreLines.
+
+    Args:
+        data (bytes): the file's bytes.
+        bom (bool): drop a byte order mark opening the first line.
+    """
+    if not data:
+        return []
+    ended = data.endswith(b"\n")
+    chunks = data.split(b"\n")
+    if ended:
+        chunks.pop()
+    lines: list[str] = []
+    for i, chunk in enumerate(chunks):
+        if (ended or i < len(chunks) - 1) and chunk.endswith(b"\r"):
+            chunk = chunk[:-1]
+        try:
+            line = chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            break
+        lines.append(line.lstrip("\ufeff") if not lines and bom else line)
+    return lines
+
+
+@dataclass(frozen=True)
+class DirRules:
+    """One walked directory's ignore files, each None when absent or off.
+
+    Args:
+        dir (str): the directory's virtual path.
+        has_git (bool): whether a ``.git`` stands in it.
+        custom (IgnoreRules | None): the tool's own file.
+        dot (IgnoreRules | None): ``.ignore``.
+        git (IgnoreRules | None): ``.gitignore``.
+        exclude (IgnoreRules | None): ``.git/info/exclude``.
+    """
+
+    dir: str
+    has_git: bool
+    custom: IgnoreRules | None
+    dot: IgnoreRules | None
+    git: IgnoreRules | None
+    exclude: IgnoreRules | None
+
+
+class IgnoreStack:
+    """The ignore files governing one directory of a walk, nearest
+    directory first.
+
+    The ignore crate's precedence: the tool's own file outranks
+    ``.ignore``, which outranks ``.gitignore``, which outranks the
+    repository's exclude file; within each kind the nearest directory with
+    a matching line decides. ``.gitignore`` and exclude lines count only up
+    to the repository's root, and only inside a repository unless
+    ``require_git`` is off.
+
+    Args:
+        sources (IgnoreSources): which files the walk reads.
+        layers (tuple[DirRules, ...]): the directories' files, nearest first.
+    """
+
+    def __init__(
+        self, sources: IgnoreSources, layers: tuple[DirRules, ...] = ()
+    ) -> None:
+        self.sources = sources
+        self.layers = layers
+
+    def within(self, rules: DirRules) -> "IgnoreStack":
+        """The stack with ``rules`` as the nearest directory's files.
+
+        Args:
+            rules (DirRules): the directory's files.
+        """
+        return IgnoreStack(self.sources, (rules, *self.layers))
+
+    def verdict(self, path: str, is_dir: bool) -> Verdict:
+        """What the ignore files say about a walked entry.
+
+        Args:
+            path (str): the entry's virtual path.
+            is_dir (bool): whether it is a directory.
+        """
+        any_git = not self.sources.require_git or any(
+            layer.has_git for layer in self.layers
+        )
+        custom = dot = git = exclude = Verdict.NONE
+        saw_git = False
+        for layer in self.layers:
+            base = "/" if layer.dir == "/" else layer.dir + "/"
+            if not path.startswith(base):
+                continue
+            rel = path[len(base) :]
+            if custom is Verdict.NONE and layer.custom is not None:
+                custom = layer.custom.verdict(rel, is_dir)
+            if dot is Verdict.NONE and layer.dot is not None:
+                dot = layer.dot.verdict(rel, is_dir)
+            if any_git and not saw_git:
+                if git is Verdict.NONE and layer.git is not None:
+                    git = layer.git.verdict(rel, is_dir)
+                if exclude is Verdict.NONE and layer.exclude is not None:
+                    exclude = layer.exclude.verdict(rel, is_dir)
+            saw_git = saw_git or layer.has_git
+        for said in (custom, dot, git, exclude):
+            if said is not Verdict.NONE:
+                return said
+        return Verdict.NONE
+
+
 def walk_candidate(shown: str, cwd: str) -> str:
     """The path ripgrep matches a walked entry's globs against.
 

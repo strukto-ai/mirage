@@ -14,7 +14,18 @@
 
 import { describe, expect, it } from 'vitest'
 import { UsageError } from '../errors.ts'
-import { Overrides, Verdict, compileGlob, overrideGlob, walkCandidate } from './rg_glob.ts'
+import {
+  type DirRules,
+  type IgnoreSources,
+  IgnoreRules,
+  IgnoreStack,
+  Overrides,
+  Verdict,
+  compileGlob,
+  ignoreLines,
+  overrideGlob,
+  walkCandidate,
+} from './rg_glob.ts'
 
 describe('compileGlob', () => {
   // globset with literal separators, which ripgrep builds -g with.
@@ -174,5 +185,73 @@ describe('walkCandidate', () => {
     ['/elsewhere/a.py', '/data', '/elsewhere/a.py'],
   ])('matches %s from %s as %s', (shown, cwd, candidate) => {
     expect(walkCandidate(shown, cwd)).toBe(candidate)
+  })
+})
+
+describe('ignoreLines', () => {
+  const bytes = (...parts: number[]): Uint8Array => Uint8Array.from(parts)
+  const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
+  it.each([
+    [enc('a\r\nb\n'), false, ['a', 'b']],
+    [enc('a\nb\r'), false, ['a', 'b\r']],
+    [Uint8Array.from([...enc('one\n'), 0xff, ...enc('\ntwo\n')]), false, ['one']],
+    [bytes(0xef, 0xbb, 0xbf, 0x61, 0x0a), true, ['a']],
+    [bytes(0xef, 0xbb, 0xbf, 0x61, 0x0a), false, ['\ufeffa']],
+    [new Uint8Array(), true, []],
+  ])('reads %j as the ignore crate reads it', (data, bom, lines) => {
+    expect(ignoreLines(data, bom)).toEqual(lines)
+  })
+})
+
+describe('IgnoreStack', () => {
+  const sources = (changes: Partial<IgnoreSources> = {}): IgnoreSources => ({
+    vcs: true,
+    exclude: true,
+    dot: true,
+    custom: '.rgignore',
+    parents: true,
+    requireGit: true,
+    bom: false,
+    ...changes,
+  })
+  const rules = (
+    dir: string,
+    hasGit = false,
+    files: Partial<Record<'custom' | 'dot' | 'git' | 'exclude', string[]>> = {},
+  ): DirRules => {
+    const of = (name: 'custom' | 'dot' | 'git' | 'exclude'): IgnoreRules | null => {
+      const lines = files[name]
+      return lines === undefined ? null : new IgnoreRules(lines)
+    }
+    return {
+      dir,
+      hasGit,
+      custom: of('custom'),
+      dot: of('dot'),
+      git: of('git'),
+      exclude: of('exclude'),
+    }
+  }
+
+  it('ranks by kind before depth', () => {
+    const stack = new IgnoreStack(sources())
+      .within(rules('/r', true, { dot: ['!keep.ts'] }))
+      .within(rules('/r/sub', false, { git: ['keep.ts', 'drop.ts'] }))
+    expect(stack.verdict('/r/sub/keep.ts', false)).toBe(Verdict.WHITELIST)
+    expect(stack.verdict('/r/sub/drop.ts', false)).toBe(Verdict.IGNORE)
+    expect(stack.verdict('/r/sub/plain.ts', false)).toBe(Verdict.NONE)
+  })
+
+  it('reads git files only inside a repository', () => {
+    const outside = new IgnoreStack(sources()).within(rules('/r', false, { git: ['*.log'] }))
+    expect(outside.verdict('/r/a.log', false)).toBe(Verdict.NONE)
+    const unrequired = new IgnoreStack(sources({ requireGit: false })).within(
+      rules('/r', false, { git: ['*.log'] }),
+    )
+    expect(unrequired.verdict('/r/a.log', false)).toBe(Verdict.IGNORE)
+    const above = new IgnoreStack(sources())
+      .within(rules('/', false, { git: ['*.log'] }))
+      .within(rules('/r', true))
+    expect(above.verdict('/r/a.log', false)).toBe(Verdict.NONE)
   })
 })

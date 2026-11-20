@@ -14,6 +14,7 @@
 
 import { decodeText } from '../../shell/bytes.ts'
 import type { TypeChange, TypeSelection } from './rg_filetypes.ts'
+import type { IgnoreSources } from './rg_glob.ts'
 const REPETITION = /\{[0-9]*(,[0-9]*)?\}/y
 
 /**
@@ -76,6 +77,8 @@ export interface RgFlags {
   typeChanges: readonly TypeChange[]
   typeSelections: readonly TypeSelection[]
   hidden: boolean
+  // The ignore files the walk reads, after --no-ignore and its kin.
+  ignoreSources: IgnoreSources
   maxDepth: number | null
   maxFilesize: number | null
   follow: boolean

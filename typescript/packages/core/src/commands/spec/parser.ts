@@ -738,6 +738,20 @@ export function parseCommand(
     return detached + 1
   }
 
+  // The words an option takes: its fixed nargs, or for a REMAINDER option
+  // every word up to a lone `;` or the end.
+  const arityOf = (spelling: string, attachedValue: boolean): number | undefined => {
+    const dest = cs.destOf(spelling)
+    if (!cs.restDests.has(dest)) return cs.nargsByDest.get(dest)
+    let end = i + 1
+    while (end < scanArgv.length && scanArgv[end] !== ';') end++
+    return end - i - 1 + (attachedValue ? 1 : 0)
+  }
+
+  // Step over the `;` that ended a REMAINDER option's words.
+  const pastRest = (spelling: string, at: number): number =>
+    cs.restDests.has(cs.destOf(spelling)) && scanArgv[at] === ';' ? at + 1 : at
+
   // Keep a value typed onto its option word, with the option as typed and
   // the directory a PATH value resolves against: the operand base for the
   // base option itself (`-C a -Cb` is `a/b`), else the cwd, as a detached
@@ -847,8 +861,13 @@ export function parseCommand(
       }
       const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
       const dest = cs.destOf(spelling)
-      const width = cs.nargsByDest.get(dest)
-      if (cs.longBoolSpellings.has(etok)) {
+      const width = arityOf(spelling, eqPos !== -1)
+      if (cs.restDests.has(dest) && width !== undefined) {
+        i = pastRest(
+          spelling,
+          i + recordValues(spelling, width, eqPos === -1 ? null : tok.slice(eqPos + 1)),
+        )
+      } else if (cs.longBoolSpellings.has(etok)) {
         const next = scanArgv[i + 1]
         if (
           cs.detachedOptionalSpellings.has(etok) &&
@@ -961,8 +980,7 @@ export function parseCommand(
       if (matchedOptional) continue
       let matchedValue = false
       for (const vf of cs.valueSpellings) {
-        const dest = cs.destOf(vf)
-        const width = cs.nargsByDest.get(dest)
+        const width = arityOf(vf, tok.length > vf.length)
         if (width !== undefined && tok.startsWith(vf) && (tok === vf || !whole)) {
           const attachedValue =
             tok.length > vf.length ? attached(tok.slice(vf.length), equalsValues) : null
@@ -972,7 +990,7 @@ export function parseCommand(
             optionErrorKinds.push('needs_value')
             i += 1
           } else {
-            i += recordValues(vf, width, attachedValue)
+            i = pastRest(vf, i + recordValues(vf, width, attachedValue))
           }
           matchedValue = true
           break
@@ -1046,8 +1064,7 @@ export function parseCommand(
 
       const mixed = matchMixedCluster(tok, cs)
       if (mixed !== null) {
-        const dest = cs.destOf(mixed.valueFlag)
-        const arity = cs.nargsByDest.get(dest)
+        const arity = arityOf(mixed.valueFlag, mixed.attached !== null)
         if (arity !== undefined) {
           const remaining = arity - (mixed.attached === null ? 0 : 1)
           if (i + remaining >= scanArgv.length) {
@@ -1056,10 +1073,14 @@ export function parseCommand(
             i += 1
           } else {
             for (const name of mixed.bools) setBoolFlag(flags, cs, name)
-            i += recordValues(
+            i = pastRest(
               mixed.valueFlag,
-              arity,
-              mixed.attached === null ? null : attached(mixed.attached, equalsValues),
+              i +
+                recordValues(
+                  mixed.valueFlag,
+                  arity,
+                  mixed.attached === null ? null : attached(mixed.attached, equalsValues),
+                ),
             )
           }
           continue

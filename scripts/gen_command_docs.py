@@ -132,6 +132,7 @@ SECTIONS = (
             (("find",), "Select paths and run actions"),
             (("grep",), "Search lines"),
             (("rg",), "Search recursively with path filters"),
+            (("fd",), "Find entries by name under ignore rules"),
             (("search",), "Search through a backend's search capability"),
             (("diff",), "Compare text files or directory trees"),
             (("cmp",), "Compare bytes"),

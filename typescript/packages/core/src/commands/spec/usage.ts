@@ -37,10 +37,12 @@ import {
   ZGREP_UNSUPPORTED_LONG,
   ZGREP_UNSUPPORTED_SHORT,
 } from './constants.ts'
-import { specOf } from './builtins.ts'
+import { BUILTIN_SPECS, specOf } from './builtins.ts'
+import { argumentDest, compileSpec } from './compile.ts'
+import { clapUnexpectedArgument, operandSlot, optionMetavar } from './help.ts'
 import { helpPage } from './standard.ts'
 import { SYNOPSES } from './synopsis.ts'
-import { CommandName } from './types.ts'
+import { type Argument, CommandName, UsageStyle } from './types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { rstripNewlines } from '../../utils/text.ts'
 
@@ -578,4 +580,112 @@ export function missingOperandError(
   const line =
     after === null ? `${cmdName}: missing operand` : `${cmdName}: missing operand after '${after}'`
   return new UsageError(`${line}\n${usageHint(cmdName)}`, usageExitCode(cmdName))
+}
+
+const CLAP_FOOTER = "\n\nFor more information, try '--help'.\n"
+
+/** Whether a builtin answers its option errors in clap's words. Mirrors Python's clap_builtin. */
+export function clapBuiltin(cmdName: string, builtin: boolean): boolean {
+  return builtin && BUILTIN_SPECS[cmdName]?.usageStyle === UsageStyle.CLAP
+}
+
+/**
+ * The Jaro similarity of two words, which clap's suggestion of a similar
+ * flag ranks by. Mirrors Python's jaro.
+ */
+export function jaro(a: string, b: string): number {
+  if (a === '' && b === '') return 1
+  if (a === '' || b === '') return 0
+  const reach = Math.max(Math.floor(Math.max(a.length, b.length) / 2) - 1, 0)
+  const taken: boolean[] = Array.from({ length: b.length }, () => false)
+  const matched: string[] = []
+  for (let i = 0; i < a.length; i++) {
+    for (let j = Math.max(0, i - reach); j < Math.min(b.length, i + reach + 1); j++) {
+      if (!taken[j] && b[j] === a[i]) {
+        taken[j] = true
+        matched.push(a[i] ?? '')
+        break
+      }
+    }
+  }
+  if (matched.length === 0) return 0
+  const other: string[] = []
+  for (let j = 0; j < b.length; j++) if (taken[j]) other.push(b[j] ?? '')
+  const swaps = matched.filter((ch, k) => ch !== other[k]).length / 2
+  const m = matched.length
+  return (m / a.length + m / b.length + (m - swaps) / m) / 3
+}
+
+function clapShown(opt: Argument): string {
+  const dest = argumentDest(opt)
+  if (opt.action === 'store_true' || opt.action === 'count') return dest
+  return `${dest} <${optionMetavar(opt)}>`
+}
+
+function clapUsage(cmdName: string, used: string): string {
+  const compiled = compileSpec(specOf(cmdName))
+  const slots = compiled.positional.map((operand) => operandSlot(operand))
+  if (compiled.rest !== null) slots.push(operandSlot(compiled.rest, true))
+  return ['Usage:', cmdName, used, ...slots].join(' ')
+}
+
+/**
+ * clap's refusal of an option a builtin does not declare: a similar long
+ * flag suggested and put in the usage line, else the tip to pass the word as
+ * an operand after `--`. Mirrors Python's clap_unknown_option.
+ */
+export function clapUnknownOption(cmdName: string, token: string): [Uint8Array, number] {
+  const word = token.startsWith('-') ? token : `-${token}`
+  const name = word.split('=', 1)[0] ?? word
+  const compiled = compileSpec(specOf(cmdName))
+  let used = '[OPTIONS]'
+  let tip = `tip: to pass '${name}' as a value, use '-- ${name}'`
+  if (name.startsWith('--')) {
+    let best: [number, string, Argument] | null = null
+    for (const opt of compiled.options) {
+      for (const spelling of opt.names) {
+        if (!spelling.startsWith('--')) continue
+        const score = jaro(name.slice(2), spelling.slice(2))
+        if (score > 0.7 && (best === null || score > best[0])) best = [score, spelling, opt]
+      }
+    }
+    if (best !== null) {
+      tip = `tip: a similar argument exists: '${best[1]}'`
+      used = clapShown(best[2])
+    }
+  }
+  const text = `${clapUnexpectedArgument(name)}\n\n  ${tip}\n\n${clapUsage(cmdName, used)}${CLAP_FOOTER}`
+  return [encodeText(text), usageExitCode(cmdName)]
+}
+
+function clapOption(cmdName: string, option: string): Argument | undefined {
+  const compiled = compileSpec(specOf(cmdName))
+  const word = option.startsWith('-') ? option : `-${option}`
+  const dest = compiled.destOf(word)
+  return compiled.options.find((opt) => argumentDest(opt) === dest)
+}
+
+/** clap's refusal of an option typed without its value. Mirrors Python's clap_missing_value. */
+export function clapMissingValue(cmdName: string, option: string): [Uint8Array, number] {
+  const opt = clapOption(cmdName, option)
+  const shown = opt === undefined ? option : clapShown(opt)
+  const allowed =
+    opt !== undefined && opt.choices.length > 0
+      ? `\n  [possible values: ${opt.choices.join(', ')}]`
+      : ''
+  const text = `error: a value is required for '${shown}' but none was supplied${allowed}${CLAP_FOOTER}`
+  return [encodeText(text), usageExitCode(cmdName)]
+}
+
+/** clap's refusal of a value outside an option's choices. Mirrors Python's clap_invalid_value. */
+export function clapInvalidValue(
+  cmdName: string,
+  option: string,
+  value: string,
+): [Uint8Array, number] {
+  const opt = clapOption(cmdName, option)
+  const shown = opt === undefined ? option : clapShown(opt)
+  const allowed = opt === undefined ? '' : opt.choices.join(', ')
+  const text = `error: invalid value '${value}' for '${shown}'\n  [possible values: ${allowed}]${CLAP_FOOTER}`
+  return [encodeText(text), usageExitCode(cmdName)]
 }

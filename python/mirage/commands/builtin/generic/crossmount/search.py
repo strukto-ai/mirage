@@ -42,6 +42,7 @@ from mirage.commands.builtin.generic.rg import (
     filters_files,
     haystacks,
     headed,
+    ignore_reader,
     ignore_rules,
     json_summary,
     label_flags,
@@ -278,6 +279,7 @@ async def run_search(
                 mounts if rg.one_file_system else None,
                 resolver,
                 stopped,
+                ignore_reader(dispatch),
             )
             if rg.sort not in (None, "none") and not (
                 rg.sort == "path" and not rg.sort_reverse

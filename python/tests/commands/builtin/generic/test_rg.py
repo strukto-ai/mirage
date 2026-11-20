@@ -542,3 +542,32 @@ async def test_rg_dash_q_keeps_status_0_past_a_dangling_link():
     assert await _walked(
         "ln -s nowhere s/dang && rg -L -q --sort path o s"
     ) == ("", DANG.format("s/dang"), 0)
+
+
+@pytest.mark.asyncio
+async def test_rg_walks_under_the_ignore_files_of_each_directory():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    lines = [
+        "mkdir -p /w/a/env /w/a/b && cd /w && touch a/env/e.py a/b/x.py"
+        " a/g.py a/i.py a/r.py a/k.log && printf 'env/\\n*.log\\n' >"
+        " a/.gitignore && printf 'i.py\\n' > a/.ignore && printf 'r.py\\n' >"
+        " a/.rgignore && rg --files a | sort | tr '\\n' ' '",
+        "cd /w && mkdir .git && rg --files a | sort | tr '\\n' ' '",
+        "cd /w && rg --files --no-ignore-vcs a | sort | tr '\\n' ' '",
+        "cd /w && rg --files -u a | sort | tr '\\n' ' '",
+        "cd /w/a && rg --files | sort | tr '\\n' ' '",
+    ]
+    out = []
+    try:
+        for line in lines:
+            io = await ws.shell(line)
+            out.append((io.stdout or b"").decode())
+    finally:
+        await ws.close()
+    assert out == [
+        "a/b/x.py a/env/e.py a/g.py a/k.log ",
+        "a/b/x.py a/g.py ",
+        "a/b/x.py a/env/e.py a/g.py a/k.log ",
+        "a/b/x.py a/env/e.py a/g.py a/i.py a/k.log a/r.py ",
+        "b/x.py g.py ",
+    ]

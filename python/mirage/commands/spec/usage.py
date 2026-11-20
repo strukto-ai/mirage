@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.builtin_specs import SPECS
+from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.constants import (
     BZIP2_FAMILY,
     COMPARE_PROGRAMS,
@@ -36,9 +37,14 @@ from mirage.commands.spec.constants import (
     ZGREP_UNSUPPORTED_LONG,
     ZGREP_UNSUPPORTED_SHORT,
 )
+from mirage.commands.spec.help import (
+    clap_unexpected_argument,
+    operand_slot,
+    option_metavar,
+)
 from mirage.commands.spec.standard import help_page
 from mirage.commands.spec.synopsis import SYNOPSES
-from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.types import Argument, CommandName, UsageStyle
 from mirage.commands.spec.word_choice import WordChoices, WordRefusalKind
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import DotWalkLoop, FileTooLargeError
@@ -709,3 +715,144 @@ def missing_operand_error(
     return UsageError(
         f"{line}\n{usage_hint(cmd_name)}", usage_exit_code(cmd_name)
     )
+
+
+CLAP_FOOTER = "\n\nFor more information, try '--help'.\n"
+
+
+def clap_builtin(cmd_name: str, builtin: bool) -> bool:
+    """Whether a builtin answers its option errors in clap's words.
+
+    Args:
+        cmd_name (str): the command name.
+        builtin (bool): the line was parsed against the builtin's grammar.
+    """
+    spec = SPECS.get(cmd_name)
+    return builtin and spec is not None and spec.usage_style is UsageStyle.CLAP
+
+
+def jaro(a: str, b: str) -> float:
+    """The Jaro similarity of two words, which clap's suggestion of a
+    similar flag ranks by.
+
+    Args:
+        a (str): one word.
+        b (str): the other.
+    """
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    reach = max(max(len(a), len(b)) // 2 - 1, 0)
+    taken = [False] * len(b)
+    matched: list[str] = []
+    for i, ch in enumerate(a):
+        for j in range(max(0, i - reach), min(len(b), i + reach + 1)):
+            if not taken[j] and b[j] == ch:
+                taken[j] = True
+                matched.append(ch)
+                break
+    if not matched:
+        return 0.0
+    other = [b[j] for j in range(len(b)) if taken[j]]
+    swaps = sum(x != y for x, y in zip(matched, other, strict=True)) / 2
+    m = len(matched)
+    return (m / len(a) + m / len(b) + (m - swaps) / m) / 3
+
+
+def _clap_shown(opt: Argument) -> str:
+    dest = argument_dest(opt)
+    if opt.action in ("store_true", "count"):
+        return dest
+    return f"{dest} <{option_metavar(opt)}>"
+
+
+def _clap_usage(cmd_name: str, used: str) -> str:
+    compiled = compile_spec(SPECS[cmd_name])
+    slots = [operand_slot(operand) for operand in compiled.positional]
+    if compiled.rest is not None:
+        slots.append(operand_slot(compiled.rest, ellipsis=True))
+    return " ".join(["Usage:", cmd_name, used, *slots])
+
+
+def clap_unknown_option(cmd_name: str, token: str) -> tuple[bytes, int]:
+    """clap's refusal of an option a builtin does not declare: a similar
+    long flag suggested and put in the usage line, else the tip to pass
+    the word as an operand after ``--``.
+
+    Args:
+        cmd_name (str): the command name.
+        token (str): the offending token or short letter.
+    """
+    word = token if token.startswith("-") else f"-{token}"
+    name = word.split("=", 1)[0]
+    compiled = compile_spec(SPECS[cmd_name])
+    used = "[OPTIONS]"
+    tip = f"tip: to pass '{name}' as a value, use '-- {name}'"
+    if name.startswith("--"):
+        scored = [
+            (jaro(name[2:], spelling[2:]), spelling, opt)
+            for opt in compiled.options
+            for spelling in opt.names
+            if spelling.startswith("--")
+        ]
+        close = [entry for entry in scored if entry[0] > 0.7]
+        if close:
+            _, spelling, opt = max(close, key=lambda entry: entry[0])
+            tip = f"tip: a similar argument exists: '{spelling}'"
+            used = _clap_shown(opt)
+    text = (
+        f"{clap_unexpected_argument(name)}\n\n  {tip}\n\n"
+        f"{_clap_usage(cmd_name, used)}{CLAP_FOOTER}"
+    )
+    return encode_text(text), usage_exit_code(cmd_name)
+
+
+def _clap_option(cmd_name: str, option: str) -> Argument | None:
+    compiled = compile_spec(SPECS[cmd_name])
+    word = option if option.startswith("-") else f"-{option}"
+    dest = compiled.dest.get(word, word)
+    return next(
+        (opt for opt in compiled.options if argument_dest(opt) == dest), None
+    )
+
+
+def clap_missing_value(cmd_name: str, option: str) -> tuple[bytes, int]:
+    """clap's refusal of an option typed without its value.
+
+    Args:
+        cmd_name (str): the command name.
+        option (str): the option as the parser reports it.
+    """
+    opt = _clap_option(cmd_name, option)
+    shown = option if opt is None else _clap_shown(opt)
+    allowed = (
+        f"\n  [possible values: {', '.join(opt.choices)}]"
+        if opt is not None and opt.choices
+        else ""
+    )
+    text = (
+        f"error: a value is required for '{shown}' but none was supplied"
+        f"{allowed}{CLAP_FOOTER}"
+    )
+    return encode_text(text), usage_exit_code(cmd_name)
+
+
+def clap_invalid_value(
+    cmd_name: str, option: str, value: str
+) -> tuple[bytes, int]:
+    """clap's refusal of a value outside an option's choices.
+
+    Args:
+        cmd_name (str): the command name.
+        option (str): the option as the parser reports it.
+        value (str): the value typed.
+    """
+    opt = _clap_option(cmd_name, option)
+    shown = option if opt is None else _clap_shown(opt)
+    allowed = "" if opt is None else ", ".join(opt.choices)
+    text = (
+        f"error: invalid value '{value}' for '{shown}'\n"
+        f"  [possible values: {allowed}]{CLAP_FOOTER}"
+    )
+    return encode_text(text), usage_exit_code(cmd_name)

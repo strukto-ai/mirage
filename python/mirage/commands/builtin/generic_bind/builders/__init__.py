@@ -29,6 +29,7 @@ from mirage.commands.builtin.generic_bind.builders import diff
 from mirage.commands.builtin.generic_bind.builders import dirname
 from mirage.commands.builtin.generic_bind.builders import du
 from mirage.commands.builtin.generic_bind.builders import expand
+from mirage.commands.builtin.generic_bind.builders import fd
 from mirage.commands.builtin.generic_bind.builders import file
 from mirage.commands.builtin.generic_bind.builders import find
 from mirage.commands.builtin.generic_bind.builders import fmt
@@ -98,6 +99,7 @@ BUILDERS = (
     dirname.BUILDER,
     du.BUILDER,
     expand.BUILDER,
+    fd.BUILDER,
     file.BUILDER,
     find.BUILDER,
     fmt.BUILDER,

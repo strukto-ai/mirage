@@ -99,10 +99,14 @@ def argument_shapes(
                 argument.nargs is not None or argument.type != "str"
             ):
                 raise ValueError("zero-token actions cannot declare nargs")
-            if argument.nargs in ("*", "+", "REMAINDER"):
+            if argument.nargs in ("*", "+"):
                 raise ValueError(
                     "variadic nargs belongs to positional arguments"
                 )
+            if argument.nargs == "REMAINDER" and (
+                argument.action != "store" or argument.type != "str"
+            ):
+                raise ValueError("a REMAINDER option stores its words as text")
             if isinstance(argument.nargs, int) and argument.action == "append":
                 raise ValueError(
                     "multi-value options use action='extend' or 'store'"
@@ -224,6 +228,10 @@ class CompiledSpec:
         remainder (bool): the rest operand gathers every word from the
             first operand on, options included (``Argument.nargs``,
             argparse's ``nargs=REMAINDER``).
+        rest_dests (frozenset[str]): canonical spellings of options that
+            take every word after them up to a lone ``;``, as find's
+            ``-exec`` does, or the end of the line, as argparse's
+            ``nargs=REMAINDER`` option does.
         base_dest (str | None): canonical spelling of the option that
             re-bases the path operands after it (``CommandSpec.
             operand_base``, tar's -C).
@@ -254,6 +262,7 @@ class CompiledSpec:
     rest_kind: ValueType | None = None
     base_dest: str | None = None
     nargs_by_dest: dict[str, int] = field(default_factory=dict)
+    rest_dests: frozenset[str] = frozenset()
     value_types_by_dest: dict[str, tuple[ValueType, ...]] = field(
         default_factory=dict
     )
@@ -582,6 +591,9 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         positional=positional,
         rest=rest,
         nargs_by_dest=nargs_by_dest,
+        rest_dests=frozenset(
+            argument_dest(opt) for opt in options if opt.nargs == "REMAINDER"
+        ),
         value_types_by_dest={
             argument_dest(opt): opt.value_types
             for opt in options

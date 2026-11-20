@@ -28,6 +28,7 @@ def test_parser_uses_the_room_available_for_each_file() -> None:
         "path": "input.ts",
         "pattern": "return $X",
         "view": "auto",
+        "pub_members": False,
         "directory": False,
         "files_only": True,
         "update": False,

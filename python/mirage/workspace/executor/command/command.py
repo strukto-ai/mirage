@@ -661,6 +661,9 @@ async def _run_cross_mount(
             diff=registry.diff,
             ids=registry.ids,
             follow=follow,
+            shell=None
+            if execute_fn is None
+            else nested_shell(execute_fn, session.session_id),
         )
     except voice.passes:
         raise

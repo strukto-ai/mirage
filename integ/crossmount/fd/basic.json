@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "xm_fd_walks_each_mount",
+      "seq": 110000212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/xm_fd /data2/xm_fd && printf x > /data/xm_fd/a.txt && printf x > /data2/xm_fd/b.txt && printf x > /data2/xm_fd/c.md && fd -e txt . /data/xm_fd /data2/xm_fd && fd -e md . /data/xm_fd /data2/xm_fd -X echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xm_fd/a.txt\n/data2/xm_fd/b.txt\n/data2/xm_fd/c.md\n",
+        "stderr": ""
+      },
+      "flags": [
+        "extension",
+        "exec_batch"
+      ]
+    }
+  ]
+}
