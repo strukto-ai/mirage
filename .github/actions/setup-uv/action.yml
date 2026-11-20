@@ -48,9 +48,9 @@ runs:
     # minutes in some forty-five jobs a run, and cargo rebuilt it every time:
     # it judges a crate by its files' mtimes, which a checkout sets to now.
     # So maturin builds into a directory of its own, cached under the exact
-    # tree git holds for rust/, the profile and the platform. The key has no
-    # fallback: a job that restored another tree's build and never compiled
-    # would save it under this tree's key.
+    # tree git holds for rust/, the compiler, the profile and the platform.
+    # The key has no fallback: a job that restored another tree's build and
+    # never compiled would save it under this tree's key.
     - name: Choose the Cargo profile and build directory for mirage._rs
       id: build
       shell: bash
@@ -60,7 +60,7 @@ runs:
         dir="${RUNNER_TEMP//\\//}/mirage-rs"
         echo "MATURIN_PEP517_ARGS=--profile $PROFILE --target-dir $dir" >> "$GITHUB_ENV"
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
-        echo "key=mirage-rs-${{ runner.os }}-${{ runner.arch }}-$PROFILE-$(git rev-parse HEAD:rust)" >> "$GITHUB_OUTPUT"
+        echo "key=mirage-rs-${{ runner.os }}-${{ runner.arch }}-$PROFILE-$(rustc -V | cut -d' ' -f2)-$(git rev-parse HEAD:rust)" >> "$GITHUB_OUTPUT"
 
     - name: Cache the build of mirage._rs
       id: cache
@@ -70,11 +70,18 @@ runs:
         key: ${{ steps.build.outputs.key }}
 
     # The restored build was compiled from exactly these sources, so it is
-    # dated after the checkout and cargo finds every crate fresh.
+    # dated after the checkout and cargo finds every crate fresh. Now, not a
+    # future date: a crate cargo rebuilds later in the job must come out
+    # newer than the crates it links, or cargo rebuilds it again on every
+    # build, as it did for pyo3 and mirage._rs under a 2099 date. One stamp
+    # for every file, since a dependency dated even a moment after its
+    # dependent is stale too.
     - name: Date the restored build after the checkout
       if: steps.cache.outputs.cache-hit == 'true'
       shell: bash
-      run: find "${{ steps.build.outputs.dir }}" -exec touch -t 209901010000 {} +
+      run: |
+        stamp=$(date +%Y%m%d%H%M.%S)
+        find "${{ steps.build.outputs.dir }}" -exec touch -t "$stamp" {} +
 
     - uses: astral-sh/setup-uv@v7
       with:
