@@ -826,7 +826,21 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
 
 
 @pytest.mark.asyncio
-async def test_a_session_made_again_under_its_id_is_refused():
+async def test_sessions_with_one_view_share_the_machine():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    first = await ws.session("first", profile="agent")
+    second = await ws.session("second", profile="agent")
+    assert (await first.shell("python3 job.py")).exit_code == 0
+    pipes = list(sandbox.pipes)
+    result = await second.shell("python3 job.py")
+    assert (result.exit_code, await result.stderr_str()) == (0, "")
+    assert sandbox.pipes == pipes
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_session_made_again_under_its_view_shares_the_machine():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -834,12 +848,24 @@ async def test_a_session_made_again_under_its_id_is_refused():
     await ws.close_session("agent")
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
+    assert (result.exit_code, await result.stderr_str()) == (0, "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_session_made_again_under_another_view_is_refused():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.close_session("agent")
+    agent = await ws.session("agent")
+    result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
         "fake: this machine shows an earlier session agent's view of the "
         "workspace; give session agent a machine of its own\n"
     )
-    assert len(sandbox.pipes) == 2
     await ws.close()
 
 

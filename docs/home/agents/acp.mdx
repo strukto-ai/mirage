@@ -1,0 +1,136 @@
+---
+title: ACP
+sidebarTitle: Overview
+description: Run an ACP agent on a Mirage workspace from Zed, a JetBrains IDE, t3code or another ACP client, with no machine.
+icon: arrows-left-right
+---
+
+The [Agent Client Protocol](https://agentclientprotocol.com) is how an app
+such as Zed, a JetBrains IDE or t3code drives a coding agent: the app starts the
+agent and the two talk JSON-RPC over the agent's stdin and stdout.
+`mirage acp` goes in place of the agent's command and starts the agent itself:
+
+```text
+ACP client ──▶ mirage acp ──▶ agent
+                   │
+                   └──▶ workspace
+```
+
+Every message passes through, with three changes:
+
+- `initialize` offers the agent the client's file methods, and each file
+  read or write the agent asks for is answered from the workspace.
+- Each session gets the workspace's [MCP tools](/home/access/mcp#tools), as a
+  `mirage mcp` server.
+- Claude's ACP adapter has its built-in tools turned off, so it works through
+  the workspace's tools alone.
+
+The agent runs where the client starts it and nothing is uploaded, so no
+[machine](/home/setup/machine/overview) is needed. A workspace on a hosted
+server works the same way, reached with the CLI's
+[login](/home/access/cli#log-in).
+
+## Clients
+
+| Client | Where the command goes |
+| --- | --- |
+| <img noZoom src="/images/zed-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Zed | `agent_servers` in `~/.config/zed/settings.json`, with `"type": "custom"` |
+| <img noZoom src="/images/jetbrains-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />JetBrains IDEs | `agent_servers` in `~/.jetbrains/acp.json` |
+| <img noZoom src="/images/t3code-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />t3code | A local ACP command: see [t3code](/home/agents/t3code) |
+
+## Agents
+
+| Agent | Its ACP command, after `--` |
+| --- | --- |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude | `claude-agent-acp`, from npm `@zed-industries/claude-agent-acp` |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Codex | `codex-acp`, from npm `@zed-industries/codex-acp` |
+| <img noZoom src="/images/gemini-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Gemini CLI | `gemini --acp` |
+| <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Grok Build | `grok agent stdio` |
+| <img noZoom src="/images/opencode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenCode | `opencode acp` |
+
+An agent that reads and writes files through the client works on the
+workspace's files. One that also runs tools of its own keeps them on the
+computer beside the workspace's tools; turn them off in the agent's own
+settings to keep it to the workspace.
+
+## Set up
+
+<Steps>
+  <Step title="Install the CLI">
+    <CodeGroup>
+    ```bash uv
+    uv tool install mirage-ai
+    ```
+    ```bash npm
+    npm install -g @struktoai/mirage-cli
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Create the workspace">
+    ```yaml workspace.yaml
+    mounts:
+      /:
+        vfs: ram
+        mode: write
+    ```
+    ```bash
+    mirage workspace create workspace.yaml --id demo
+    ```
+  </Step>
+  <Step title="Add the agent to the client">
+    <CodeGroup>
+    ```json Zed
+    {
+      "agent_servers": {
+        "Claude on Mirage": {
+          "type": "custom",
+          "command": "mirage",
+          "args": ["acp", "-w", "demo", "--", "claude-agent-acp"],
+          "env": {}
+        }
+      }
+    }
+    ```
+    ```json JetBrains
+    {
+      "agent_servers": {
+        "Claude on Mirage": {
+          "command": "mirage",
+          "args": ["acp", "-w", "demo", "--", "claude-agent-acp"]
+        }
+      }
+    }
+    ```
+    </CodeGroup>
+    Give the full path of `mirage` when the client does not start it from a
+    shell that has it on its `PATH`.
+  </Step>
+</Steps>
+
+## Options
+
+```bash
+mirage acp [-w ID | -c CONFIG] [-s SESSION] [--root PATH] -- AGENT...
+```
+
+| Option | Default | Means |
+| --- | --- | --- |
+| `-w`, `--workspace` | | The workspace to use. |
+| `-c`, `--config` | `.mirage/workspace.yaml` | A config to create the workspace from, as `mirage mcp` takes one. |
+| `-s`, `--session` | the workspace's default | The session the agent's files and tools act as, under its [profile](/home/configuration/session). |
+| `--root` | `/` | The workspace path the client's project folder stands for. |
+
+An agent asks for a file by its absolute path on the client. A path inside
+the session's folder lands under `--root`; any other absolute path is read
+as a workspace path. Put `--` before the agent's command so its options stay
+its own. The exit status is the agent's, and 127 when there is no such
+command.
+
+## How it behaves
+
+- A request the agent makes of the client, other than a file read or write,
+  reaches the client unchanged, as does everything the client sends.
+- An MCP server of the client's named `mirage` is replaced by the
+  workspace's; the others stay.
+- A config with no `workspace_id` makes a workspace that lives as long as
+  `mirage acp` does, as with `mirage mcp`.

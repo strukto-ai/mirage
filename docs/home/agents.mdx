@@ -21,21 +21,34 @@ Every connection goes to one Mirage server, so they all see the same workspaces 
 
 ### Coding agents
 
-Run the agent as it is, on a workspace the `mirage` CLI creates.
+Run the agent as it is, on a workspace the `mirage` CLI creates. Each way in
+is one of five:
 
-| Agent | Shell | MCP | SSH | FUSE |
-| --- | :-: | :-: | :-: | :-: |
-| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Antigravity](/home/agents/antigravity) | | ✓ | ✓ | ✓ |
-| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ |
-| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | | ✓ | ✓ | ✓ |
-| <Icon icon="laptop-code" size={14} /> [Cursor](/home/agents/remote-ssh) | | | ✓ | |
-| <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Grok Build](/home/agents/grok-build) | | ✓ | | ✓ |
-| <Icon icon="laptop-code" size={14} /> [VS Code](/home/agents/remote-ssh) | | | ✓ | |
+| Way in | Agents | How they reach the workspace | Machine |
+| --- | --- | --- | :-: |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | Claude Code | Its shell is `mirage-bash`, or MCP, or FUSE | |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | Codex | Its SSH exec-server, or MCP, or FUSE | |
+| <img noZoom src="/images/t3code-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[t3code](/home/agents/t3code) | Every agent t3code runs | A local ACP command, or MCP | |
+| <Icon icon="server" size={14} /> [Editors over SSH](/home/agents/remote-ssh) | Cursor, VS Code, Antigravity | The editor's server on a machine | ✓ |
+| <Icon icon="arrows-left-right" size={14} /> [ACP](/home/agents/acp) | Claude, Codex, Gemini CLI, Grok Build, OpenCode, from Zed or a JetBrains IDE | `mirage acp` between the client and the agent | |
+
+Each agent's connections:
+
+| Agent | Shell | MCP | SSH | FUSE | ACP |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Antigravity](/home/agents/antigravity) | | ✓ | ✓ | ✓ | |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ | ✓ |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/cursor-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Cursor](/home/agents/remote-ssh) | | | ✓ | | |
+| <img noZoom src="/images/gemini-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gemini CLI](/home/agents/acp) | | | | | ✓ |
+| <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Grok Build](/home/agents/grok-build) | | ✓ | | ✓ | ✓ |
+| <img noZoom src="/images/vscode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[VS Code](/home/agents/remote-ssh) | | | ✓ | | |
 
 - **Shell**: the agent's own shell is [`mirage-bash`](/home/access/cli#mirage-bash), so every command it runs goes to the workspace.
 - **MCP**: the agent gets Mirage's seven tools beside its own, from its plugin or `mirage mcp`.
-- **SSH**: the agent's own tools run in the workspace. Cursor, VS Code and Antigravity run their server on a [machine](/home/setup/machine/overview): see [Editors over SSH](/home/agents/remote-ssh).
+- **SSH**: the agent's own tools run in the workspace. Codex needs nothing more; Cursor, VS Code and Antigravity run their server on a [machine](/home/setup/machine/overview): see [Editors over SSH](/home/agents/remote-ssh).
 - **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
+- **ACP**: an ACP client runs the agent through [`mirage acp`](/home/agents/acp), which answers its file reads and writes from the workspace and hands it Mirage's tools.
 
 Codex can also run in the workspace from a remote harness, through [exec-server forward](/home/agents/codex#exec-server-forward).
 

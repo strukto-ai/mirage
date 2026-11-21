@@ -1,6 +1,6 @@
 ---
 title: Grok Build
-description: Connect Grok Build to a Mirage workspace through MCP or a FUSE mount.
+description: Connect Grok Build to a Mirage workspace through MCP, a FUSE mount or ACP.
 icon: /images/grok-logo.svg
 ---
 
@@ -48,4 +48,13 @@ mounts:
 ```bash
 mirage workspace create .mirage/workspace.yaml --id demo
 cd /tmp/mirage-demo && grok
+```
+
+## ACP
+
+From an [ACP client](/home/agents/acp) such as Zed or t3code, run Grok Build
+through `mirage acp`, with no machine:
+
+```bash
+mirage acp -w demo -- grok agent stdio
 ```

@@ -1734,6 +1734,18 @@
    "typescript_only": {
     "nodeKey": "Python compares the normalized subtrees two mounts' grammars give with dataclass equality; a TypeScript tree of Maps has no structural equality, so it compares their JSON with each Map as its entries."
    }
+  },
+  "cli/acp": {
+   "typescript_only": {
+    "registerAcpCommand": "Typer registers one function per verb, so the acp verb is a module-level `acp_cmd`; the TypeScript CLI builds the same verb on a commander program inside registerAcpCommand."
+   }
+  },
+  "server/acp/relay": {
+   "typescript_only": {
+    "Agent": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
+    "JsonRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
+    "isRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process."
+   }
   }
  }
 }

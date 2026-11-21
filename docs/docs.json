@@ -118,11 +118,25 @@
                 "group": "Coding Agents",
                 "icon": "laptop-code",
                 "pages": [
-                  "home/agents/antigravity",
                   "home/agents/claude-code",
                   "home/agents/codex",
-                  "home/agents/grok-build",
-                  "home/agents/remote-ssh"
+                  "home/agents/t3code",
+                  {
+                    "group": "Editors over SSH",
+                    "icon": "server",
+                    "pages": [
+                      "home/agents/remote-ssh",
+                      "home/agents/antigravity"
+                    ]
+                  },
+                  {
+                    "group": "ACP",
+                    "icon": "arrows-left-right",
+                    "pages": [
+                      "home/agents/acp",
+                      "home/agents/grok-build"
+                    ]
+                  }
                 ]
               },
               {

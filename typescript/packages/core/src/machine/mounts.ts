@@ -58,6 +58,7 @@ import {
   SSHFS_SOURCE_PREFIX,
   SYNTHETIC_CONF,
   UNMOUNT_WAIT_SECONDS,
+  VIEW_KEYS,
   machineDirLine,
   mountField,
 } from './constants.ts'
@@ -100,6 +101,17 @@ export function registerPipeServer(
 
 const DECODER = new TextDecoder()
 const ENCODER = new TextEncoder()
+/**
+ * What a served machine shows `session`: its record's `VIEW_KEYS`. Each SSH
+ * login, port forward and reconnect is a session of its own, so a machine
+ * compares views, not sessions: one whose view matches the served session's
+ * runs there too.
+ */
+function viewOf(session: SessionState): string {
+  const record = session.toDict(false)
+  return JSON.stringify(VIEW_KEYS.map((key) => record[key] ?? null))
+}
+
 const OCTAL_ESCAPE = /\\([0-7]{3})/g
 
 function octalChar(_match: string, digits: string): string {
@@ -649,7 +661,7 @@ export class MachineMounts {
       if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id, this.machine)
       const served = this.session
       const session = getSession(current.sessionId)
-      if (served !== null && served !== session) {
+      if (served !== null && served !== session && viewOf(served) !== viewOf(session)) {
         const earlier = served.sessionId === current.sessionId ? 'an earlier ' : ''
         return refuse(
           `${this.provider}: this machine shows ${earlier}session ${served.sessionId}'s view ` +

@@ -16,6 +16,7 @@ import os
 
 import typer
 
+from mirage.cli import acp as acp_module
 from mirage.cli import api as api_module
 from mirage.cli import config as config_module
 from mirage.cli import connections as connections_module
@@ -76,6 +77,13 @@ daemon_module.app.add_typer(config_module.app, name="config")
 app.add_typer(daemon_module.app, name="daemon")
 app.add_typer(login_module.context_app, name="context")
 app.command("mcp")(mcp_module.mcp_cmd)
+app.command(
+    "acp",
+    context_settings={
+        "allow_interspersed_args": False,
+        "ignore_unknown_options": True,
+    },
+)(acp_module.acp_cmd)
 app.command("rpc")(rpc_module.rpc_cmd)
 app.command("ssh-proxy")(ssh_module.ssh_proxy_cmd)
 app.command("codex-exec")(ssh_module.codex_exec_cmd)

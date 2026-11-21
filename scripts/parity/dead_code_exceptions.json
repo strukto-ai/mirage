@@ -155,6 +155,12 @@
       "async_auth_flow"
     ]
   },
+  "python/mirage/server/acp/relay.py": {
+    "reason": "httpx.Auth's hook, which the client calls per request.",
+    "names": [
+      "async_auth_flow"
+    ]
+  },
   "python/mirage/server/rpc/relay.py": {
     "reason": "httpx.Auth's hook, which the client calls per request.",
     "names": [

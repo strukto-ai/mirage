@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
+import { registerAcpCommand } from './acp.ts'
 import { registerApiCommand } from './api.ts'
 import { DaemonUnreachable } from './client.ts'
 import { ContextError, LoginError } from './credentials.ts'
@@ -81,6 +82,7 @@ export function buildProgram(): Command {
   registerConnectionCommands(program)
   registerApiCommand(program)
   registerMcpCommand(program)
+  registerAcpCommand(program)
   registerRpcCommand(program)
   registerSshProxyCommand(program)
   registerCodexExecCommand(program)

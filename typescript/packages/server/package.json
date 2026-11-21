@@ -110,6 +110,10 @@
       "types": "./dist/rpc/index.d.ts",
       "import": "./dist/rpc/index.js"
     },
+    "./acp": {
+      "types": "./dist/acp/index.d.ts",
+      "import": "./dist/acp/index.js"
+    },
     "./api": {
       "types": "./dist/api.d.ts",
       "import": "./dist/api.js"

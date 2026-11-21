@@ -1,0 +1,41 @@
+---
+title: t3code
+description: Run t3code's ACP agents on a Mirage workspace, or give its built-in providers Mirage's MCP tools.
+icon: /images/t3code-logo.svg
+---
+
+[t3code](https://t3.codes) runs coding agents for its projects and threads.
+It reaches Mirage two ways, neither of which needs a
+[machine](/home/setup/machine/overview):
+
+| Way | Agents | Files and tools |
+| --- | --- | --- |
+| [Local ACP command](#local-acp-command) | Any ACP agent: Claude, Codex, Gemini CLI, Grok Build, OpenCode | The workspace's MCP tools, and each file read or write the agent asks t3code for |
+| [MCP](#mcp) | A built-in provider whose own config takes MCP servers | The workspace's MCP tools beside the agent's own |
+
+## Local ACP command
+
+Create the workspace, as on the [ACP](/home/agents/acp#set-up) page, then in
+t3code:
+
+1. Open **Settings → Providers** and select **Add provider**.
+2. Select **Show more**, then **Local ACP command**.
+3. Enter `mirage` as the executable, with one argument per row: `acp`, `-w`,
+   `demo`, `--`, then the agent's command, such as `claude-agent-acp`.
+
+t3code runs the command on the environment that hosts its server, so
+`mirage` and the agent must be installed there. [ACP](/home/agents/acp)
+lists each agent's command and what `mirage acp` changes.
+
+## MCP
+
+t3code's built-in providers load MCP servers from their own config on the
+environment. Add the workspace there, as for Claude Code:
+
+```bash
+claude mcp add mirage -- mirage mcp -w demo
+```
+
+The provider keeps its own tools as well, so it also works on the
+environment's files. Through a local ACP command, Claude's own tools are
+turned off and it works on the workspace alone.
