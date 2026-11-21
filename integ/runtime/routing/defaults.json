@@ -9,15 +9,15 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr": "python3: command not found\n"
+            "stderr": "bash: line 1: python3: command not found\n"
           }
         },
         {
-          "command": "node -e \"console.log(1)\"",
+          "command": "true\nnode -e \"console.log(1)\"",
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr": "node: command not found\n"
+            "stderr": "bash: line 2: node: command not found\n"
           }
         },
         {

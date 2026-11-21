@@ -370,9 +370,9 @@ def test_a_wrapper_is_a_program_where_what_it_runs_is():
 
 
 # An interpreter is a program only where a language runtime runs it; a
-# workspace without one answers `python3: command not found`, as a system
-# that never installed it does, so neither `which` nor `ls /usr/bin`
-# finds it.
+# workspace without one answers `bash: line 1: python3: command not
+# found`, as a system that never installed it does, so neither `which`
+# nor `ls /usr/bin` finds it.
 def test_program_has_no_file_for_an_interpreter_no_language_runtime_runs():
     session = SessionState(session_id="t")
     ws = Workspace({"/": RAMVFS()}, machines=[])

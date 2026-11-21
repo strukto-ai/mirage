@@ -195,7 +195,7 @@ def captured_headers(httpx_mock):
 async def test_curl_sends_default_user_agent(multi_mount_ws, captured_headers):
     io = await multi_mount_ws.shell("curl -s https://x.test/file")
     assert io.exit_code == 0
-    assert captured_headers["headers"]["User-Agent"].startswith("Mozilla/5.0")
+    assert captured_headers["headers"]["User-Agent"] == "curl/8.14.1"
 
 
 @pytest.mark.asyncio

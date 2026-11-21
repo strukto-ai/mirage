@@ -665,3 +665,20 @@ it('has a notice waited out on both sides of a move', async () => {
     await ws.close()
   }
 })
+
+// A cap past what the Wasm modules' 32-bit address space can count still
+// bounds the line rather than refusing it: the shell and jq take it as the
+// largest cap there is.
+it.each(['4GB', '8GB'])('runs a line under a max_memory of %s', async (maxMemory) => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { maxMemory, maxEnv: maxMemory })
+  try {
+    const r = await ws.shell('x=$(echo hi); echo "$x"; echo \'{"a":1}\' | jq -c .')
+    expect([r.exitCode, stdoutStr(r), new TextDecoder().decode(r.stderr)]).toEqual([
+      0,
+      'hi\n{"a":1}\n',
+      '',
+    ])
+  } finally {
+    await ws.close()
+  }
+})

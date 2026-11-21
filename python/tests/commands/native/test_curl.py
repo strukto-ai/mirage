@@ -196,7 +196,11 @@ def test_header_and_method_reach_the_request(monkeypatch):
     calls = _stub(monkeypatch)
     _run("http://x.test/echo", request="PUT", header="X-Mirage-Test: yes")
     assert calls[0]["method"] == "PUT"
-    assert calls[0]["headers"] == {"X-Mirage-Test": "yes"}
+    assert calls[0]["headers"] == {
+        "User-Agent": "curl/8.14.1",
+        "Accept": "*/*",
+        "X-Mirage-Test": "yes",
+    }
 
 
 def test_data_implies_post(monkeypatch):
@@ -317,9 +321,29 @@ def test_long_spellings_reach_the_request(monkeypatch):
     )
     assert calls[0]["method"] == "PUT"
     assert calls[0]["headers"] == {
-        "X-Mirage-Test": "yes",
         "User-Agent": "agent/1",
+        "Accept": "*/*",
+        "X-Mirage-Test": "yes",
     }
+
+
+def test_curls_own_user_agent_and_accept_unless_the_line_names_them(
+    monkeypatch,
+):
+    # curl 8.14.1 names itself and takes anything unless the line names
+    # either; an empty -A, or a -H with no value, sends neither.
+    calls = _stub(monkeypatch)
+    _run("http://x.test/p")
+    assert calls[0]["headers"] == {
+        "User-Agent": "curl/8.14.1",
+        "Accept": "*/*",
+    }
+    calls = _stub(monkeypatch)
+    _run("http://x.test/p", user_agent="")
+    assert calls[0]["headers"] == {"Accept": "*/*"}
+    calls = _stub(monkeypatch)
+    _run("http://x.test/p", header=["User-Agent:", "Accept:"])
+    assert calls[0]["headers"] == {}
 
 
 def test_max_time_reaches_the_request_in_seconds(monkeypatch):
@@ -410,7 +434,7 @@ def test_verbose_dumps_request_and_response_headers_on_stderr(monkeypatch):
     assert io.stderr.decode() == (
         "> GET /f?q=1 HTTP/1.1\r\n"
         "> Host: x.test\r\n"
-        "> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n"
+        "> User-Agent: curl/8.14.1\r\n"
         "> Accept: */*\r\n"
         "> \r\n"
         + "".join(f"< {line}\r\n" for line in RESPONSE_DUMP.split("\r\n")[:-1])
@@ -466,7 +490,9 @@ def test_data_sends_the_form_content_type_unless_a_header_names_one(
     calls = _stub(monkeypatch)
     _run("http://x.test/f", data="a=1")
     assert calls[0]["headers"] == {
-        "Content-Type": "application/x-www-form-urlencoded"
+        "User-Agent": "curl/8.14.1",
+        "Accept": "*/*",
+        "Content-Type": "application/x-www-form-urlencoded",
     }
     calls = _stub(monkeypatch)
     _body, io = _run(
@@ -476,11 +502,15 @@ def test_data_sends_the_form_content_type_unless_a_header_names_one(
         verbose=True,
         silent=True,
     )
-    assert calls[0]["headers"] == {"Content-Type": "application/json"}
+    assert calls[0]["headers"] == {
+        "User-Agent": "curl/8.14.1",
+        "Accept": "*/*",
+        "Content-Type": "application/json",
+    }
     assert io.stderr.decode().split("< ")[0] == (
         "> POST /f HTTP/1.1\r\n"
         "> Host: x.test\r\n"
-        "> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n"
+        "> User-Agent: curl/8.14.1\r\n"
         "> Accept: */*\r\n"
         "> Content-Type: application/json\r\n"
         "> Content-Length: 2\r\n"
@@ -805,13 +835,13 @@ def test_v_shows_the_jar_cookie_line_after_accept_per_hop(httpx_mock):
     ]
     assert requests == [
         "> GET /jar/x HTTP/1.1",
-        "> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)",
+        "> User-Agent: curl/8.14.1",
         "> Accept: */*",
         "> Cookie: y=2",
         "> X-A: 1",
         "> ",
         "> GET /jar/next HTTP/1.1",
-        "> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)",
+        "> User-Agent: curl/8.14.1",
         "> Accept: */*",
         "> Cookie: h=1; y=2",
         "> X-A: 1",

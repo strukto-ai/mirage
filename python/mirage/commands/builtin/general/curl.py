@@ -24,7 +24,6 @@ from mirage.commands.builtin.general.curl_write_out import render_write_out
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
 from mirage.commands.builtin.utils.cookie import CookieJar, same_origin
 from mirage.commands.builtin.utils.http import (
-    DEFAULT_USER_AGENT,
     HttpResponse,
     http_form_request,
     http_request,
@@ -58,6 +57,10 @@ EXIT_HTTP_ERROR = 22
 EXIT_WRITE = 23
 EXIT_READ = 26
 EXIT_TIMEOUT = 28
+
+# What curl names itself on every request a line does not name it on, the
+# version of the pinned image's curl.
+USER_AGENT = "curl/8.14.1"
 
 CRLF = "\r\n"
 HELP_HINT = "curl: try 'curl --help' or 'curl --manual' for more information"
@@ -592,9 +595,8 @@ async def curl(
         template = raw.decode(errors="replace")
     body, json = await request_body(fl, ctx)
     # A custom header of a name curl would add itself takes its place,
-    # so curl's own goes only where the line names none. The trace lists
-    # them in curl's order; the wire leaves User-Agent and Accept to the
-    # client's defaults unless the line set them.
+    # so curl's own goes only where the line names none, and an empty -A
+    # sends none. The wire and the trace list them in curl's order.
     auth: list[tuple[str, str]] = []
     prompt = b""
     user = fl.as_str("user")
@@ -603,26 +605,19 @@ async def curl(
         token, prompt = basic_auth(user, stdin)
         auth.append(("Authorization", token))
     agent = (
-        [("User-Agent", user_agent)]
-        if user_agent and "user-agent" not in named
-        else []
+        []
+        if "user-agent" in named or user_agent == ""
+        else [("User-Agent", user_agent or USER_AGENT)]
     )
+    accept = [] if "accept" in named or json else [("Accept", "*/*")]
     typed = [
         (name, JSON_TYPE)
         for name in ("Content-Type", "Accept")
         if json and name.lower() not in named
     ]
-    headers = [*auth, *agent, *sent, *typed]
+    headers = [*auth, *agent, *accept, *sent, *typed]
     # The jar's Cookie line goes between the two, as each hop sent it.
-    trace_head = [
-        *auth,
-        *(
-            []
-            if "user-agent" in named
-            else [("User-Agent", user_agent or DEFAULT_USER_AGENT)]
-        ),
-        *([] if "accept" in named or json else [("Accept", "*/*")]),
-    ]
+    trace_head = [*auth, *agent, *accept]
     trace_tail = [*sent, *typed]
     started = time.monotonic()
     # The body bytes read so far, and the failure that cut the transfer

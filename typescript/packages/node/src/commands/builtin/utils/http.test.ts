@@ -14,6 +14,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer as createPlainServer } from 'node:http'
 import { createServer, type Server } from 'node:https'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -75,6 +76,50 @@ describe.skipIf(!hasOpenssl)('curl -k against a self-signed server', () => {
     try {
       const r = await ws.shell(line.replace('URL', url))
       expect([r.exitCode, new TextDecoder().decode(r.stdout)]).toEqual([exitCode, stdout])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+// curl and wget send only the headers they name: none of the Accept,
+// Accept-Encoding, Accept-Language, Sec-Fetch-Mode and User-Agent fetch adds
+// on its own reaches the server (curl 8.14.1, wget 1.25.0). Connection is the
+// transport's own.
+describe('the headers curl and wget send', () => {
+  const plain = createPlainServer((req, res) => {
+    const seen = Object.entries(req.headers)
+      .filter(([name]) => name !== 'host' && name !== 'connection')
+      .map(([name, value]) => `${name}=${String(value)}`)
+      .sort()
+    res.writeHead(200, { 'content-type': 'text/plain' })
+    res.end(seen.map((line) => `${line}\n`).join(''))
+  })
+  let url = ''
+
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => plain.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${String((plain.address() as AddressInfo).port)}/`
+  })
+
+  afterAll(async () => {
+    await new Promise((resolve) => plain.close(resolve))
+  })
+
+  it.each([
+    ['curl -s URL', 'accept=*/*\nuser-agent=curl/8.14.1\n'],
+    ["curl -s -A '' URL", 'accept=*/*\n'],
+    ["curl -s -H 'User-Agent:' -H 'Accept:' URL", ''],
+    [
+      "curl -s -H 'Accept-Language: en' URL",
+      'accept-language=en\naccept=*/*\nuser-agent=curl/8.14.1\n',
+    ],
+    ['wget -qO- URL', 'accept-encoding=identity\naccept=*/*\nuser-agent=Wget/1.25.0\n'],
+  ])('%s', async (line, stdout) => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    try {
+      const r = await ws.shell(line.replace('URL', url))
+      expect([r.exitCode, new TextDecoder().decode(r.stdout)]).toEqual([0, stdout])
     } finally {
       await ws.close()
     }

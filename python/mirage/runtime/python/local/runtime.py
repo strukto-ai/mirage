@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
+from mirage.context.session_context import missing_program
 from mirage.errors.fs import fs_strerror
 from mirage.execution.types import MachineName
 from mirage.io.types import ByteSource
@@ -46,20 +47,19 @@ from mirage.types import PathSpec
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-def _unrunnable(name: str, path: str) -> tuple[str, int] | None:
+def _unrunnable(path: str) -> tuple[str, int] | None:
     """Why a program named by a path cannot run, in the shell's words and
     exit code; None when it can.
 
     Args:
-        name (str): the program as typed.
-        path (str): that path joined to the cwd.
+        path (str): the program as typed, joined to the cwd.
     """
     if not os.path.exists(path):
-        return f"{name}: No such file or directory\n", NOT_FOUND_STATUS
+        return "No such file or directory", NOT_FOUND_STATUS
     if os.path.isdir(path):
-        return f"{name}: Is a directory\n", CANNOT_EXECUTE_STATUS
+        return "Is a directory", CANNOT_EXECUTE_STATUS
     if not os.access(path, os.X_OK):
-        return f"{name}: Permission denied\n", CANNOT_EXECUTE_STATUS
+        return "Permission denied", CANNOT_EXECUTE_STATUS
     return None
 
 
@@ -179,6 +179,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
     ) -> RunResult:
         name = texts[0]
         cwd = ctx.cwd.virtual
+        # What the shell, or a program that execs this one, leads its
+        # report of a program that cannot run with.
+        lead, missing, voice = missing_program(name)
         refusal = await cwd_refusal(name, cwd, errors)
         if refusal is not None:
             return refusal
@@ -188,16 +191,17 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             # `..` past a symlink as written.
             program = os.path.join(cwd, name)
             # Off the loop too: the path may be in a folder it serves.
-            unrunnable = await asyncio.to_thread(_unrunnable, name, program)
+            unrunnable = await asyncio.to_thread(_unrunnable, program)
             if unrunnable is not None:
-                return await _not_run(errors, *unrunnable)
+                why, status = unrunnable
+                return await _not_run(errors, f"{lead}: {why}\n", status)
         else:
             # Off the loop, which a PATH entry on a mount this process
             # serves needs.
             found = await asyncio.to_thread(shutil.which, name)
             if found is None:
                 return await _not_run(
-                    errors, f"{name}: command not found\n", NOT_FOUND_STATUS
+                    errors, f"{lead}: {missing}\n", NOT_FOUND_STATUS
                 )
             # Absolute: a relative PATH entry names a file here, and the
             # program starts in the session's cwd.
@@ -222,10 +226,11 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             reason = fs_strerror(exc) or errno.errorcode.get(
                 exc.errno or 0, str(exc)
             )
+            # The shell says what failed; a program that execs this one
+            # says only why.
+            said = f"cannot execute: {reason}" if voice else reason
             return await _not_run(
-                errors,
-                f"{name}: cannot execute: {reason}\n",
-                CANNOT_EXECUTE_STATUS,
+                errors, f"{lead}: {said}\n", CANNOT_EXECUTE_STATUS
             )
 
     async def _spawn(

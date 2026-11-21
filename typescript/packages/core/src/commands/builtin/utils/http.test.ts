@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { materialize } from '../../../io/types.ts'
-import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
+import { httpFormRequest, httpRequest, isHttpError, registerHostFetch } from './http.ts'
 import { CookieJar } from './cookie.ts'
 import { setCurrentEvaluation } from '../../../context/session_context.ts'
 import { EvaluationContext } from '../../../workspace/evaluation.ts'
@@ -282,27 +282,37 @@ describe('redirect history', () => {
   })
 })
 
-// curl -k: a request that does not verify goes through the fetch the host
-// registered; one that does, or a host that registered none, uses fetch.
-describe('insecure fetch', () => {
+// The host's fetch: every request goes through the fetch the host
+// registered, told whether to verify (curl -k), with only the headers the
+// caller named; a host that registered none uses fetch.
+describe('host fetch', () => {
   afterEach(() => {
-    registerInsecureFetch(null)
+    registerHostFetch(null)
     vi.unstubAllGlobals()
   })
 
-  it('sends verify: false through the registered fetch', async () => {
-    const fetchMock = makeFetchMock('verified')
-    const insecure = makeFetchMock('unverified')
+  it('sends every request through the registered fetch with its verify', async () => {
+    const fetchMock = makeFetchMock('global')
+    const host = makeFetchMock('host')
+    const asked: [string, boolean, Record<string, string>][] = []
     vi.stubGlobal('fetch', fetchMock)
-    registerInsecureFetch(insecure)
+    registerHostFetch((url, init, verify) => {
+      asked.push([url, verify, { ...(init.headers as Record<string, string>) }])
+      return host(url, init)
+    })
     const skipped = await httpRequest('https://example.com/x', { verify: false })
-    const checked = await httpRequest('https://example.com/x')
+    const checked = await httpRequest('https://example.com/y', { headers: { Accept: '*/*' } })
     const form = await httpFormRequest('https://example.com/f', { verify: false })
-    expect(new TextDecoder().decode(await materialize(skipped.body))).toBe('unverified')
-    expect(new TextDecoder().decode(await materialize(checked.body))).toBe('verified')
-    expect(new TextDecoder().decode(await materialize(form.body))).toBe('unverified')
-    expect(urlsCalled(insecure)).toEqual(['https://example.com/x', 'https://example.com/f'])
-    expect(urlsCalled(fetchMock)).toEqual(['https://example.com/x'])
+    expect(new TextDecoder().decode(await materialize(skipped.body))).toBe('host')
+    expect(new TextDecoder().decode(await materialize(checked.body))).toBe('host')
+    expect(new TextDecoder().decode(await materialize(form.body))).toBe('host')
+    expect(asked.map(([url, verify]) => [url, verify])).toEqual([
+      ['https://example.com/x', false],
+      ['https://example.com/y', true],
+      ['https://example.com/f', false],
+    ])
+    expect(asked.slice(0, 2).map(([, , headers]) => headers)).toEqual([{}, { Accept: '*/*' }])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('falls back to fetch when no host registered one', async () => {

@@ -93,6 +93,18 @@ function request(method: string) {
   }
 }
 
+// Reports every header a request carries, sorted, but the ones the transport
+// owns (Host, Connection) and the harness's own `x-mirage-` ones, so a case can
+// assert that curl and wget send their own set and nothing a client library
+// adds on its own.
+function headers(ctx: Ctx<C>): Reply {
+  const lines = Object.keys(ctx.headers)
+    .filter((name) => name !== 'host' && name !== 'connection' && !name.startsWith('x-mirage-'))
+    .sort()
+    .map((name) => `${name}=${headerOf(ctx, name)}\n`)
+  return text(200, lines.join(''))
+}
+
 // Reports the request's content type alone, so a case can assert what -d
 // puts on the wire, and that -H replaces it rather than doubling it.
 function contentType(ctx: Ctx<C>): Reply {
@@ -137,6 +149,7 @@ export function httpRoutes(): KitRoute<C>[] {
     route<C>('POST', '/echo', echo('POST')),
     route<C>('DELETE', '/echo', echo('DELETE')),
     route<C>('POST', '/type', contentType),
+    route<C>('GET', '/headers', headers),
     route<C>('GET', '/request', request('GET')),
     route<C>('POST', '/request', request('POST')),
     route<C>('POST', '/form', form),

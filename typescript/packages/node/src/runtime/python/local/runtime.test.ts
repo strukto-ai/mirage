@@ -430,7 +430,7 @@ describe('LocalRuntime', () => {
 
   it.each([
     [['cksum'], '/', 0, '2352138605 2\n', ''],
-    [['no-such-program-xyz'], '/', 127, '', 'no-such-program-xyz: command not found\n'],
+    [['no-such-program-xyz'], '/', 127, '', 'bash: no-such-program-xyz: command not found\n'],
     [
       ['cksum'],
       '/no/such/dir',
@@ -471,9 +471,9 @@ describe('LocalRuntime', () => {
   })
 
   it.each([
-    ['./missing', 127, './missing: No such file or directory\n'],
-    ['./plain', 126, './plain: Permission denied\n'],
-    ['./sub', 126, './sub: Is a directory\n'],
+    ['./missing', 127, 'bash: ./missing: No such file or directory\n'],
+    ['./plain', 126, 'bash: ./plain: Permission denied\n'],
+    ['./sub', 126, 'bash: ./sub: Is a directory\n'],
   ])('answers %s as the shell would', async (name, exitCode, stderr) => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
     await writeFile(join(dir, 'plain'), '#!/bin/sh\necho hi\n')
@@ -520,7 +520,7 @@ describe('LocalRuntime', () => {
         const result = await runProcess(rt, ['mirage-broken'], dir)
         expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
           126,
-          'mirage-broken: cannot execute: No such file or directory\n',
+          'bash: mirage-broken: cannot execute: No such file or directory\n',
         ])
       } finally {
         unserve(names)
@@ -544,7 +544,7 @@ describe('LocalRuntime', () => {
         const result = await runProcess(rt, ['./mirage-fifo'], dir)
         expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
           126,
-          './mirage-fifo: cannot execute: Permission denied\n',
+          'bash: ./mirage-fifo: cannot execute: Permission denied\n',
         ])
       } finally {
         unserve(names)

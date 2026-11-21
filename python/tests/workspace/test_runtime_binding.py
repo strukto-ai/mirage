@@ -61,7 +61,7 @@ async def test_default_world_runs_no_interpreter(ws, command, flag):
     assert await materialize(io.stdout) == b""
     assert (
         await materialize(io.stderr)
-        == f"{command}: command not found\n".encode()
+        == f"bash: line 1: {command}: command not found\n".encode()
     )
 
 

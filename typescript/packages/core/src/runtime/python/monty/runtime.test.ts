@@ -685,7 +685,9 @@ describe('Workspace with the monty runtime', () => {
         const io = await ws.shell(`${name} --version`)
         expect(io.exitCode).toBe(127)
         expect(new TextDecoder().decode(io.stdout)).toBe('')
-        expect(new TextDecoder().decode(io.stderr)).toBe(`${name}: command not found\n`)
+        expect(new TextDecoder().decode(io.stderr)).toBe(
+          `bash: line 1: ${name}: command not found\n`,
+        )
       }
     } finally {
       await ws.close()

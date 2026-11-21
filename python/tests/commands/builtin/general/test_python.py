@@ -252,7 +252,7 @@ async def test_version_without_a_runtime_uses_the_invoked_name(name):
         assert await materialize(io.stdout) == b""
         assert (
             await materialize(io.stderr)
-            == f"{name}: command not found\n".encode()
+            == f"bash: line 1: {name}: command not found\n".encode()
         )
     finally:
         await ws.close()
@@ -275,7 +275,10 @@ async def test_an_unbound_interpreter_answers_127_before_its_script(line):
         io = await ws.shell(line)
         name = line.split()[0]
         assert io.exit_code == 127
-        assert await io.stderr_str() == f"{name}: command not found\n"
+        assert (
+            await io.stderr_str()
+            == f"bash: line 1: {name}: command not found\n"
+        )
     finally:
         await ws.close()
 
