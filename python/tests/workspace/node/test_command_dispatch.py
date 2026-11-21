@@ -547,6 +547,11 @@ class NoPython(Policy):
         return Deny("no python") if ctx.command == "python3" else None
 
 
+class NoWriter(Policy):
+    def pre_command(self, ctx):
+        return Deny("writes") if ctx.write else None
+
+
 SPELLED = [
     "nice /usr/bin/python3 -c 1",
     "nohup /usr/bin/python3 -c 1",
@@ -738,6 +743,17 @@ async def test_a_path_s_name_reaches_the_tree_its_program_removes():
         r = await ws.shell("/opt/rm -rf /d")
         assert (r.exit_code != 0, r.stdout) == (True, b"")
         assert (await ws.shell("/opt/rm -rf /e")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_writes_as_its_program_does():
+    # A coded policy sees the name pass's context as `rm` alone gives it.
+    ws = _spelled(policies=[NoWriter()])
+    try:
+        assert (await ws.shell("/opt/rm /z")).exit_code == 126
+        assert (await ws.shell("/opt/echo z")).stdout == b"b\n"
     finally:
         await ws.close()
 

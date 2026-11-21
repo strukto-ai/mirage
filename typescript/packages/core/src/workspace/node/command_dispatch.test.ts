@@ -565,6 +565,12 @@ class NoPython implements Policy {
   }
 }
 
+class NoWriter implements Policy {
+  preCommand(ctx: CommandContext): Deny | null {
+    return ctx.write ? { kind: 'deny', reason: 'writes' } : null
+  }
+}
+
 const SPELLED = [
   'nice /usr/bin/python3 -c 1',
   'nohup /usr/bin/python3 -c 1',
@@ -743,6 +749,17 @@ describe('a wrapper over a path-spelled program', () => {
 
   // `ls` with no operand lists the cwd, so the name pass judges that folder as
   // `ls` alone would.
+  it('judges a path program as a writer when its name writes', async () => {
+    // A coded policy sees the name pass's context as `rm` alone gives it.
+    const ws = spelledWs({ policies: [new NoWriter()] })
+    try {
+      expect((await ws.shell('/opt/rm /z')).exitCode).toBe(126)
+      expect(text((await ws.shell('/opt/echo z')).stdout)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('reaches the tree a path program removes by its name', async () => {
     // `rm -r` reaches every file under its operand, so the name pass judges
     // what lies below it as `rm` alone would.
