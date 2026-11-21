@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 
 from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Blob, Commit, ObjectID
 
 from mirage.commands.cli.builtin.git.dates import plural
 from mirage.commands.cli.builtin.git.format import short
+from mirage.commands.cli.builtin.git.opcodes import line_opcodes
 from mirage.utils.width import text_width
 
 ROOT_COMMIT = "(root-commit) "
@@ -91,14 +91,9 @@ def _count_lines(old_data: bytes, new_data: bytes) -> tuple[int, int]:
         old_data (bytes): the old side's bytes.
         new_data (bytes): the new side's bytes.
     """
-    matcher = SequenceMatcher(
-        a=old_data.splitlines(keepends=True),
-        b=new_data.splitlines(keepends=True),
-        autojunk=False,
-    )
     insertions = 0
     deletions = 0
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in line_opcodes([old_data], [new_data]):
         if tag == "equal":
             continue
         deletions += i2 - i1

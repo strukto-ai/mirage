@@ -232,7 +232,7 @@ async def report_rows(
             report's paths are relative to.
     """
     rows, state, no_commits = await collect(
-        vfs, repo, location, UNTRACKED_NORMAL
+        vfs, repo, location, UNTRACKED_NORMAL, embedded={}
     )
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     detached = (
@@ -356,6 +356,7 @@ async def status(
         location,
         parsed.untracked,
         parsed.ignored,
+        embedded={},
     )
     if patterns:
         rows = await _selected_rows(

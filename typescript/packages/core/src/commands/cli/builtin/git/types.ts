@@ -189,6 +189,12 @@ export interface StatusEntry {
   readonly treeStatus: string
   /** The path renamed from, set only for `R`. */
   readonly original: string | null
+  /**
+   * What changed in the repository a gitlink records, as the long format
+   * names it after the path (`new commits, untracked content`); absent for
+   * any other path.
+   */
+  readonly embedded?: string
 }
 
 /** What one walk of the working tree found. */
@@ -203,6 +209,12 @@ export interface WorkTree {
   /** Paths to report as untracked, already collapsed to `dir/` where git would. */
   readonly untracked: string[]
   readonly ignored: string[]
+  /**
+   * The directories holding a repository of their own (a `.git` inside),
+   * which the walk never enters: git records one as a gitlink, never its
+   * files.
+   */
+  readonly repos: string[]
 }
 
 /** One `.mailmap` line: the identity it matches and what it maps to. */

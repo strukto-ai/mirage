@@ -462,6 +462,20 @@ export async function packedObject(packs: Packs, oid: string): Promise<Packed | 
   return found === null ? null : readAt(packs, found.file, found.offset)
 }
 
+/**
+ * An object's entry as its pack stores it, header and compressed data, which a
+ * pack built from this one carries as it is, as git's pack-objects reuses one.
+ * Null for a delta, which the receiver would have to rebuild (costing it what
+ * the reuse saves), or an object no pack holds.
+ */
+export async function storedEntry(packs: Packs, oid: string): Promise<Uint8Array | null> {
+  const found = await locate(packs, oid)
+  if (found === null) return null
+  const end = await entryEnd(packs, found.file, found.offset)
+  const raw = await readBlocks(found.file.blocks, found.offset, end - found.offset)
+  return entryHead(raw, found.offset).base === null ? raw : null
+}
+
 /** Whether a pack holds an object, reading only its index. */
 export async function holdsPacked(packs: Packs, oid: string): Promise<boolean> {
   return (await locate(packs, oid)) !== null

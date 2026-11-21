@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 
 from dulwich.repo import BaseRepo
 
+from mirage.commands.cli.builtin.git.opcodes import line_opcodes
 from mirage.commands.cli.builtin.git.patch import blob_data, byte_lines
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.rs.regex import PosixRegex
@@ -110,8 +110,7 @@ def _greps(
     ):
         return False
     before, after = byte_lines(old), byte_lines(new)
-    matcher = SequenceMatcher(a=before, b=after, autojunk=False)
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in line_opcodes(before, after):
         if tag == "equal":
             continue
         for line in (*before[i1:i2], *after[j1:j2]):

@@ -23,18 +23,22 @@ import { readIndex } from './index_file.ts'
 import { entryBytes } from './io.ts'
 import { visibleEntries } from './pathspec.ts'
 
-import { readBlobBytes, type Repo } from './repo.ts'
+import { embeddedHead, embeddedLocation } from './embedded.ts'
+import { openRepo, readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { shownEntries } from './seen.ts'
 import { similarityScore } from './similarity.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { ConflictedEntry, IndexEntry, IndexState, StatusEntry, WorkTree } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { scan, UNTRACKED_NO } from './worktree.ts'
+import { scan, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 const UNCHANGED = ' '
+// What git diff adds to the commit of a gitlink whose repository has changes
+// of its own.
+const DIRTY = '-dirty'
 export const MODIFIED = 'M'
 export const ADDED = 'A'
 export const DELETED = 'D'
@@ -354,24 +358,68 @@ async function differs(
   return oid.oid !== entry.oid
 }
 
-/** Compare the index with the working tree: what is not staged yet. */
+/** What changed in the repository a gitlink records, and the commit it has out. */
+export interface EmbeddedChange {
+  /** The long format's words for it: `new commits, modified content`. */
+  readonly note: string
+  /** The embedded repository's HEAD, null on an unborn branch. */
+  readonly head: string | null
+}
+
+/**
+ * What changed in the repository a gitlink records, as git's long format
+ * names it: commits past the recorded one, then modified and untracked
+ * content. Null when nothing did, or no repository is there.
+ */
+async function embeddedChange(
+  outer: Repo,
+  vfs: Files,
+  path: string,
+  recorded: string,
+): Promise<EmbeddedChange | null> {
+  const location = await embeddedLocation(vfs, outer.location.worktree.join(path))
+  if (location === null) return null
+  const head = await embeddedHead(vfs, location)
+  const [rows] = await collect(await openRepo(vfs, location, null), vfs, UNTRACKED_NORMAL)
+  const notes = [
+    ...(head === recorded ? [] : ['new commits']),
+    ...(rows.some((row) => row.indexStatus !== UNTRACKED && row.indexStatus !== IGNORED)
+      ? ['modified content']
+      : []),
+    ...(rows.some((row) => row.indexStatus === UNTRACKED) ? ['untracked content'] : []),
+  ]
+  return notes.length === 0 ? null : { note: notes.join(', '), head }
+}
+
+/**
+ * Compare the index with the working tree: what is not staged yet.
+ *
+ * A 160000 entry records another repository's HEAD, and what stands at the
+ * name is a directory. With `embedded`, a gitlink whose repository is there
+ * reads modified when that repository moved past the recorded commit or has
+ * changes of its own, as git's status says, and what changed is kept there;
+ * without it, or with no repository there (a submodule never checked out), a
+ * gitlink reads unchanged, which keeps a branch switch from being refused over
+ * a file that was never missing.
+ */
 export async function workChanges(
   repo: Repo,
   vfs: Files,
   worktree: PathSpec,
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
+  embedded: Map<string, EmbeddedChange> | null = null,
 ): Promise<Map<string, string>> {
   const changes = new Map<string, string>()
   for (const [path, entry] of entries) {
-    // A 160000 entry records another repository's HEAD, and what stands at the
-    // name is a directory, so the walk never finds a file there and every
-    // submodule read as deleted. git compares the submodule's own HEAD, which
-    // is unreadable from here, and says nothing at all when there is none;
-    // saying nothing is both the closest this can get and what keeps a branch
-    // switch away from a submodule from being refused over a file that was
-    // never missing.
-    if (entry.mode === Number.parseInt(GITLINK_MODE, 8)) continue
+    if (entry.mode === Number.parseInt(GITLINK_MODE, 8)) {
+      if (embedded === null || !found.repos.includes(path)) continue
+      const change = await embeddedChange(repo, vfs, path, entry.oid)
+      if (change === null) continue
+      changes.set(path, MODIFIED)
+      embedded.set(path, change)
+      continue
+    }
     const info = found.files.get(path)
     if (info === undefined) changes.set(path, DELETED)
     // A symlink and a file holding its target text hash alike.
@@ -416,12 +464,30 @@ export async function workEntries(
 ): Promise<Map<string, TreeEntry>> {
   const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO, false, roots)
-  const changes = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
+  const embedded = new Map<string, EmbeddedChange>()
+  const changes = await workChanges(
+    repo,
+    vfs,
+    repo.location.worktree,
+    state.entries,
+    found,
+    embedded,
+  )
   const entries = stagedEntries(state)
   for (const path of state.conflicts.keys()) {
     if (found.files.has(path)) changes.set(path, MODIFIED)
   }
   for (const [path, code] of changes) {
+    // A gitlink reads as the commit its repository has out, marked dirty
+    // when that repository has changes of its own, as git diff shows it.
+    const moved = embedded.get(path)
+    if (moved !== undefined) {
+      if (moved.head !== null) {
+        const dirty = moved.note.includes('content') ? DIRTY : ''
+        entries.set(path, { oid: `${moved.head}${dirty}`, mode: GITLINK_MODE })
+      }
+      continue
+    }
     const info = found.files.get(path)
     if (code === DELETED || info === undefined) {
       entries.delete(path)
@@ -507,6 +573,8 @@ export interface StatusRow {
   readonly end: readonly [string, string] | null
   /** Whether the two letters are a conflict code. */
   readonly unmerged: boolean
+  /** What changed in the repository a gitlink records, as `EmbeddedChange.note`. */
+  readonly embedded?: string
 }
 
 /**
@@ -542,7 +610,13 @@ export async function assembled(
     threshold === null
       ? new Map([...staged].map(([path, letter]) => [path, [letter, null, 0] as StagedRow]))
       : await pairRenames(repo, staged, oids, kinds, threshold)
-  const rows = merge(paired, unstaged, conflicts, untracked)
+  const notes = new Map(
+    shown.flatMap((row) => (row.embedded === undefined ? [] : [[row.name, row.embedded] as const])),
+  )
+  const rows = merge(paired, unstaged, conflicts, untracked).map((row) => {
+    const note = notes.get(row.path)
+    return note === undefined ? row : { ...row, embedded: note }
+  })
   for (const path of ignored.sort(compareCodePoints))
     rows.push({ path, indexStatus: IGNORED, treeStatus: IGNORED, original: null })
   return rows
@@ -555,6 +629,7 @@ export async function collect(
   mode: string,
   showIgnored = false,
   roots: readonly string[] | null = null,
+  embedded: Map<string, EmbeddedChange> | null = null,
 ): Promise<[StatusRow[], IndexState, boolean]> {
   const state = await readIndex(repo, vfs)
   const head = await headEntries(repo)
@@ -568,7 +643,14 @@ export async function collect(
     ...visibleEntries(repo.location, state.conflicts).keys(),
   ])
   const found = await scan(vfs, repo.location, tracked, mode, showIgnored, roots)
-  const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
+  const unstaged = await workChanges(
+    repo,
+    vfs,
+    repo.location.worktree,
+    state.entries,
+    found,
+    embedded,
+  )
   const at = (name: string): PathSpec => repo.location.worktree.join(rstripSlash(name))
   const row = (
     name: string,
@@ -583,14 +665,14 @@ export async function collect(
   for (const name of [...new Set([...staged.keys(), ...unstaged.keys()])].sort(compareCodePoints)) {
     const oid = oids.get(name)
     const kind = kinds.get(name)
-    rows.push(
-      row(
-        name,
-        staged.get(name) ?? UNCHANGED,
-        unstaged.get(name) ?? UNCHANGED,
-        oid !== undefined && kind !== undefined ? [kind, oid] : null,
-      ),
+    const made = row(
+      name,
+      staged.get(name) ?? UNCHANGED,
+      unstaged.get(name) ?? UNCHANGED,
+      oid !== undefined && kind !== undefined ? [kind, oid] : null,
     )
+    const note = embedded?.get(name)?.note
+    rows.push(note === undefined ? made : { ...made, embedded: note })
   }
   for (const name of found.untracked) rows.push(row(name, UNTRACKED, UNTRACKED))
   for (const name of found.ignored) rows.push(row(name, IGNORED, IGNORED))

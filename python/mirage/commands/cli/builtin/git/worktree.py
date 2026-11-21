@@ -24,6 +24,7 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
+from mirage.commands.cli.builtin.git.embedded import embedded_location
 from mirage.commands.cli.builtin.git.errors import WorkTreeLimitError
 from mirage.commands.cli.builtin.git.ignore import (
     GITIGNORE,
@@ -33,6 +34,7 @@ from mirage.commands.cli.builtin.git.ignore import (
 from mirage.commands.cli.builtin.git.io import (
     read_names,
     read_optional,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
@@ -276,6 +278,19 @@ class Scanner:
         )
         return ignores if local is None else ignores.push(relative, local)
 
+    async def _embedded(self, relative: str) -> bool:
+        """Whether a directory holds a repository of its own, which git
+        neither enters nor lists file by file, whatever the untracked
+        mode: a ``.git`` inside it that git could open.
+
+        Args:
+            relative (str): repository-relative path of the directory.
+        """
+        path = self._absolute(relative)
+        if await stat_of(self._vfs, path.join(GIT_DIR)) is None:
+            return False
+        return await embedded_location(self._vfs, path) is not None
+
     async def _visit_directory(
         self, relative: str, ignored: bool, ignores: IgnoreStack
     ) -> None:
@@ -344,9 +359,19 @@ class Scanner:
             if info is None:
                 continue
             if info.type is FileType.DIRECTORY:
-                await self._visit_directory(
-                    child, ignored or rules.is_ignored(child, True), rules
-                )
+                skipped = ignored or rules.is_ignored(child, True)
+                if child not in self._directories and await self._embedded(
+                    child
+                ):
+                    self.found.repos.append(child)
+                    if child in self._tracked or self._mode == UNTRACKED_NO:
+                        continue
+                    if not skipped:
+                        self.found.untracked.append(f"{child}/")
+                    elif self._show_ignored:
+                        self.found.ignored.append(f"{child}/")
+                    continue
+                await self._visit_directory(child, skipped, rules)
                 continue
             self._count(child)
             self.found.files[child] = info

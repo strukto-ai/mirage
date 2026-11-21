@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getOpcodes, groupOpcodes } from '../../../builtin/diff_format.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { FUNCNAME_START, GIT_SPACE, GITLINK_MODE } from './constants.ts'
+import { groupOpcodes, lineOpcodes, type Opcode } from './opcodes.ts'
 import { quotePath } from './render.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
 import { readable } from './seen.ts'
@@ -87,10 +87,15 @@ export async function filePatch(
       `rename to ${quotePath(path, false, fully)}`,
     )
   if (before && before.oid === after?.oid) return text(head)
-  head.push(
-    `index ${shortOid(before, width)}..${shortOid(after, width)}` +
-      (before && before.mode === after?.mode ? ` ${after.mode}` : ''),
-  )
+  // A gitlink whose repository only has changes of its own records the same
+  // commit, and git names no ids for it.
+  const commitOnly = (entry: TreeEntry | null): string | undefined =>
+    entry?.oid.replace(/-dirty$/, '')
+  if (!(before?.mode === GITLINK_MODE && commitOnly(before) === commitOnly(after)))
+    head.push(
+      `index ${shortOid(before, width)}..${shortOid(after, width)}` +
+        (before && before.mode === after?.mode ? ` ${after.mode}` : ''),
+    )
   const old = await blobData(repo, before),
     fresh = await blobData(repo, after)
   const from = before ? source : DEV_NULL,
@@ -127,7 +132,7 @@ function hunks(
   const out: string[] = []
   let context = ''
   let searched = -1
-  const codes = getOpcodes(old, fresh)
+  const codes = lineOpcodes(old, fresh)
   const groups = groupOpcodes(codes, count)
   for (const group of functionContext ? functionGroups(old, codes, groups) : groups) {
     const first = group[0],
@@ -140,7 +145,7 @@ function hunks(
         const bytes = encodeText(line).subarray(0, FUNCNAME_BYTES)
         let end = bytes.length
         while (end > 0 && GIT_SPACE.has(bytes[end - 1] ?? 0)) end--
-        context = decodeText(bytes.subarray(0, end))
+        context = decodeText(wholeChars(bytes.subarray(0, end)))
         break
       }
     }
@@ -163,6 +168,24 @@ function hunks(
   return out.join('')
 }
 
+/**
+ * `data` without the UTF-8 sequence its end cuts short, as git trims a hunk
+ * header's function name once it has cut it to 80 bytes and dropped the
+ * trailing blanks (git 2.47.3), a lone lead byte included. Mirrors Python's
+ * `whole_chars`.
+ */
+export function wholeChars(data: Uint8Array): Uint8Array {
+  for (let back = 1; back <= Math.min(4, data.length); back++) {
+    const byte = data[data.length - back] ?? 0
+    if (byte < 0x80) return data
+    if (byte >= 0xc0) {
+      const need = byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4
+      return back >= need ? data : data.subarray(0, data.length - back)
+    }
+  }
+  return data
+}
+
 function span(start: number, stop: number): string {
   if (stop - start === 1) return String(start + 1)
   return `${String(stop > start ? start + 1 : start)},${String(stop - start)}`
@@ -171,8 +194,6 @@ function span(start: number, stop: number): string {
 function hunkLine(marker: string, line: string): string {
   return line.endsWith('\n') ? marker + line : `${marker}${line}\n\\ No newline at end of file\n`
 }
-
-type Opcode = ReturnType<typeof getOpcodes>[number]
 
 /** Widen to Git's default function boundaries (Git 2.47.3 Debian / 2.50.1). */
 function functionGroups(

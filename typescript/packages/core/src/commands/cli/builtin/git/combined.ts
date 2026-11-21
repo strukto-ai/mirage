@@ -1,5 +1,5 @@
-import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { FUNCNAME_START, GIT_SPACE } from './constants.ts'
+import { lineOpcodes } from './opcodes.ts'
 
 // Measured against git 2.47.3 and 2.50.1. Both print a -U0 hunk that reaches
 // past the last line with every count one short, so dropping a final line
@@ -108,7 +108,7 @@ function compareSides(parents: string[][], result: string[]): Layout {
   const gaps: Removal[][] = Array.from({ length: result.length + 1 }, () => [])
   parents.forEach((lines, index) => {
     const bit = 2 ** index
-    for (const [tag, lo, hi, start, stop] of getOpcodes(lines, result)) {
+    for (const [tag, lo, hi, start, stop] of lineOpcodes(lines, result)) {
       if (tag === 'equal') continue
       for (let row = start; row < stop; row++) newcomers[row] = (newcomers[row] ?? 0) | bit
       if (hi > lo) gaps[start] = coalesce(gaps[start] ?? [], lines.slice(lo, hi), bit)

@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 
 from mirage.commands.cli.builtin.git.constants import FUNCNAME_START, GIT_SPACE
+from mirage.commands.cli.builtin.git.opcodes import line_opcodes
 
 # Measured against git 2.47.3 and 2.50.1. Both print a -U0 hunk that
 # reaches past the last line with every count one short, so dropping a
@@ -140,8 +140,10 @@ def _compare_sides(parents: list[list[str]], result: list[str]) -> Layout:
     gaps: list[list[Removal]] = [[] for _ in range(len(result) + 1)]
     for index, lines in enumerate(parents):
         bit = 1 << index
-        matcher = SequenceMatcher(a=lines, b=result, autojunk=False)
-        for tag, lo, hi, start, stop in matcher.get_opcodes():
+        for tag, lo, hi, start, stop in line_opcodes(
+            [line.encode() for line in lines],
+            [line.encode() for line in result],
+        ):
             if tag == "equal":
                 continue
             for row in range(start, stop):

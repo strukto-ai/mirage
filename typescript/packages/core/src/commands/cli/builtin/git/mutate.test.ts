@@ -306,6 +306,60 @@ describe('git add', () => {
     },
   )
 
+  /**
+   * A repository of its own at `sub` with one commit, or with HEAD on a
+   * branch that has none yet when told so.
+   */
+  function embedded(repo: string, checkedOut = true): void {
+    const sub = join(repo, 'sub')
+    mkdirSync(sub)
+    execFileSync('git', ['-C', sub, 'init', '-q'])
+    writeFileSync(join(sub, 'in.txt'), 'inner\n')
+    const who = ['-C', sub, '-c', 'user.name=a', '-c', 'user.email=a@b']
+    execFileSync('git', [...who, 'add', '.'])
+    execFileSync('git', [...who, 'commit', '-qm', 'inner'])
+    if (!checkedOut) execFileSync('git', ['-C', sub, 'checkout', '-q', '--orphan', 'unborn'])
+  }
+
+  // git 2.47.3: the repository's HEAD commit at mode 160000, never its files,
+  // and the warning with its advice on stderr.
+  it('stages an embedded repository as a gitlink', async () => {
+    const h = await harness((repo) => {
+      embedded(repo)
+    })
+    const head = git(join(h.repo, 'sub'), ['rev-parse', 'HEAD']).trim()
+    const [code, , err] = await h.run('add -A')
+    expect(code).toBe(0)
+    expect(err).toMatch(
+      /^warning: adding embedded git repository: sub\nhint: You've added another git repository inside your current repository\.\n/,
+    )
+    const index = git(await h.drain(), ['ls-files', '-s'])
+    expect(index).toContain(`160000 ${head} 0\tsub\n`)
+    expect(index).not.toContain('sub/in.txt')
+    expect(await h.run('add sub/in.txt')).toEqual([
+      128,
+      '',
+      "fatal: Pathspec 'sub/in.txt' is in submodule 'sub'\n",
+    ])
+    await write(h, 'sub/in.txt', 'more\n')
+    const [, out] = await h.run('status')
+    expect(out).toContain('\tnew file:   sub\n')
+    expect(out).toContain('\tmodified:   sub (modified content)\n')
+  })
+
+  it('refuses an embedded repository without a commit', async () => {
+    const h = await harness((repo) => {
+      embedded(repo, false)
+      writeFileSync(join(repo, 'fresh.txt'), 'x\n')
+    })
+    expect(await h.run('add -A')).toEqual([
+      128,
+      '',
+      "error: 'sub/' does not have a commit checked out\nfatal: adding files failed\n",
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toContain('?? fresh.txt')
+  })
+
   it('says what it did not do with no pathspec', async () => {
     const h = await harness()
     const [code, , err] = await h.run('add')

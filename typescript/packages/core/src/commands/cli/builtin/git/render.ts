@@ -40,6 +40,7 @@ const WORK_LABELS: Record<string, string> = {
   T: 'typechange:',
 }
 
+const EMBEDDED_HINT = '  (commit or discard the untracked or modified content in submodules)'
 const CONFLICT_LABELS: Record<string, string> = {
   DD: 'both deleted:',
   AU: 'added by us:',
@@ -270,7 +271,10 @@ function workEntries(rows: readonly StatusEntry[], fully: boolean): string[] {
     if (row.treeStatus === UNCHANGED || row.treeStatus === UNTRACKED || row.treeStatus === '!')
       continue
     const label = WORK_LABELS[row.treeStatus] ?? 'modified:'
-    lines.push(labelled(label, quotePath(row.path, false, fully), LABEL_WIDTH))
+    const path = quotePath(row.path, false, fully)
+    lines.push(
+      labelled(label, row.embedded === undefined ? path : `${path} (${row.embedded})`, LABEL_WIDTH),
+    )
   }
   return lines
 }
@@ -357,9 +361,12 @@ export function longFormat(
   // describe entries this section actually prints: an unmerged path can also
   // carry a D and is reported elsewhere.
   const deleted = work.some((line) => line.startsWith(`\t${WORK_LABELS.D ?? ''}`))
+  // git adds a line when a gitlink's repository has changes of its own,
+  // which no `git add` here records.
+  const content = rows.some((row) => row.embedded?.includes('content') === true)
   for (const item of section(
     WORK_HEADER,
-    [deleted ? WORK_HINT_DELETED : WORK_HINT, DISCARD_HINT],
+    [deleted ? WORK_HINT_DELETED : WORK_HINT, DISCARD_HINT, ...(content ? [EMBEDDED_HINT] : [])],
     work,
   ))
     lines.push(item)

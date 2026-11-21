@@ -639,6 +639,25 @@ export class PathspecError extends GitError {
 }
 
 /**
+ * An embedded repository with no commit to record, which `add` refuses,
+ * staging nothing at all (git 2.47.3).
+ */
+export class UnbornEmbeddedError extends GitError {
+  override readonly prefix = null
+
+  constructor(path: string) {
+    super(`error: '${path}/' does not have a commit checked out\nfatal: adding files failed`)
+  }
+}
+
+/** A pathspec inside a repository the index records as a gitlink (git 2.47.3). */
+export class SubmodulePathspecError extends GitError {
+  constructor(pathspec: string, submodule: string) {
+    super(`Pathspec '${pathspec}' is in submodule '${submodule}'`)
+  }
+}
+
+/**
  * An empty pathspec operand, which git refuses rather than reading as
  * everything (pinned against git 2.54).
  */

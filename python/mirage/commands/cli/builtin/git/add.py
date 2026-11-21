@@ -21,14 +21,21 @@ from dulwich.objects import ObjectID
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import (
     EXECUTABLE,
+    GITLINK,
     OWNER_EXECUTE,
     REGULAR,
     SYMLINK,
+)
+from mirage.commands.cli.builtin.git.embedded import (
+    embedded_head,
+    embedded_location,
 )
 from mirage.commands.cli.builtin.git.errors import (
     IgnoredPathsError,
     NothingSpecifiedError,
     PathspecError,
+    SubmodulePathspecError,
+    UnbornEmbeddedError,
     UnindexableFileError,
     UnknownPathspecError,
 )
@@ -44,8 +51,10 @@ from mirage.commands.cli.builtin.git.pathspec import (
     matched,
     pattern_roots,
     repo_relative,
+    under,
     visible_entries,
 )
+from mirage.commands.cli.builtin.git.repo import config_values
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
@@ -54,6 +63,7 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
+    git_bool,
     require_vfs,
     start_point,
 )
@@ -204,6 +214,7 @@ async def _resolve(
     operands: Sequence[str],
     found: WorkTree,
     tracked: set[str],
+    linked: set[str],
     ignores: IgnoreStack,
     force: bool,
 ) -> tuple[set[str], set[str]]:
@@ -222,6 +233,7 @@ async def _resolve(
         operands (Sequence[str]): the pathspecs as typed.
         found (WorkTree): what the walk of the working tree found.
         tracked (set[str]): repository-relative paths the index holds.
+        linked (set[str]): the tracked paths that are gitlinks.
         ignores (IgnoreStack): the repository's ignore rules.
         force (bool): whether ``-f`` was given.
     """
@@ -231,7 +243,23 @@ async def _resolve(
     ignored: list[str] = []
     for operand in operands:
         target = repo_relative(location, start, operand)
-        gone = matched(tracked, target) - present
+        # A path inside an embedded repository is that repository's to
+        # stage: git refuses it under a gitlink the index holds and
+        # passes over it otherwise (git 2.47.3).
+        holder = next((r for r in found.repos if under(target, r)), None)
+        if holder is not None:
+            if holder in tracked:
+                raise SubmodulePathspecError(operand, holder)
+            continue
+        repos = matched(set(found.repos), target)
+        for repo in repos:
+            if force or repo in tracked or not ignores.is_ignored(repo, True):
+                stage.add(repo)
+            elif repo == target:
+                ignored.append(target)
+        gone = matched(tracked, target) - present - linked
+        if target in repos:
+            continue
         if target in present:
             if force or target in tracked or not ignores.is_ignored(target):
                 stage.add(target)
@@ -239,7 +267,7 @@ async def _resolve(
                 ignored.append(target)
             continue
         hits = matched(present, target)
-        if hits or gone:
+        if hits or gone or repos:
             stage |= hits if force else keep_addable(hits, tracked, ignores)
             remove |= gone
             continue
@@ -280,6 +308,36 @@ async def stage_changes(
     added: list[str] = []
     for path in sorted(stage):
         before = state.entries.get(path.encode())
+        if path in found.repos:
+            # git records an embedded repository as a gitlink to the
+            # commit it has out, and adds nothing when it has none.
+            location_ = await embedded_location(
+                vfs, location.worktree.join(path)
+            )
+            head = (
+                None
+                if location_ is None
+                else await embedded_head(vfs, location_)
+            )
+            if head is None:
+                raise UnbornEmbeddedError(path)
+            sha = ObjectID(head.encode())
+            if before is None:
+                added.append(path)
+            elif (before.sha, before.mode) != (sha, GITLINK):
+                changed.append((path, "add"))
+            state.entries[path.encode()] = IndexEntry(
+                ctime=0,
+                mtime=0,
+                dev=0,
+                ino=0,
+                mode=GITLINK,
+                uid=0,
+                gid=0,
+                size=0,
+                sha=sha,
+            )
+            continue
         try:
             data = await entry_bytes(
                 vfs, location.worktree.join(path), found.files[path]
@@ -323,9 +381,20 @@ async def stage_tracked(
     """
     tracked = decoded(visible_entries(location, state.entries))
     found = await scan(vfs, location, tracked, UNTRACKED_NO)
-    present = set(found.files)
+    present = set(found.files) | set(found.repos)
+    linked = {
+        path
+        for path in tracked
+        if (entry := state.entries.get(path.encode())) is not None
+        and entry.mode == GITLINK
+    }
     await stage_changes(
-        vfs, location, state, found, tracked & present, tracked - present
+        vfs,
+        location,
+        state,
+        found,
+        tracked & present,
+        tracked - present - linked,
     )
 
 
@@ -374,27 +443,43 @@ async def add(
         ),
     )
     ignores = await load_ignores(vfs, location.commondir, location.worktree)
+    present = set(found.files) | set(found.repos)
+    # A gitlink whose repository is not there (a submodule never checked
+    # out) stays as the index has it.
+    linked = {
+        path
+        for path in tracked
+        if (entry := state.entries.get(path.encode())) is not None
+        and entry.mode == GITLINK
+    }
     if parsed.update:
         scope = (
             _update_scope(
                 location,
                 start,
                 tracked,
-                set(found.files),
+                present,
                 texts,
             )
             if texts
             else tracked
         )
-        stage = scope & set(found.files)
-        remove = scope - set(found.files)
+        stage = scope & present
+        remove = scope - present - linked
     elif parsed.every and not texts:
         stage = (
-            set(found.files)
+            set(present)
             if parsed.force
             else keep_addable(set(found.files), tracked, ignores)
         )
-        remove = tracked - set(found.files)
+        stage |= {
+            path
+            for path in found.repos
+            if parsed.force
+            or path in tracked
+            or not ignores.is_ignored(path, True)
+        }
+        remove = tracked - present - linked
     else:
         stage, remove = await _resolve(
             vfs,
@@ -403,11 +488,72 @@ async def add(
             texts,
             found,
             tracked,
+            linked,
             ignores,
             parsed.force,
         )
+    held = set(state.entries)
     lines = await stage_changes(vfs, location, state, found, stage, remove)
     await write_index(vfs, location.gitdir, state)
-    if not parsed.verbose or not lines:
-        return None, IOResult()
-    return "".join(f"{line}\n" for line in lines).encode(), IOResult()
+    embedded = [
+        path
+        for path in sorted(stage)
+        if path in found.repos and path.encode() not in held
+    ]
+    warned = await _embedded_warnings(vfs, location, embedded)
+    out = "".join(f"{line}\n" for line in lines) if parsed.verbose else ""
+    return (out.encode() if out else None), IOResult(
+        stderr=warned.encode() if warned else None
+    )
+
+
+async def _embedded_warnings(
+    vfs: Files, location: RepoLocation, paths: list[str]
+) -> str:
+    """git's warning for each embedded repository ``add`` records anew,
+    with the advice after the first unless ``advice.addEmbeddedRepo``
+    turns it off, and the line saying how to turn it off unless that is
+    already set (git 2.47.3). Mirrors TS ``embeddedWarnings``.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        paths (list[str]): the embedded repositories added, in order.
+    """
+    if not paths:
+        return ""
+    values = await config_values(vfs, location, b"advice", b"addEmbeddedRepo")
+    advise = git_bool(values, "advice.addembeddedrepo", True)
+    out = []
+    for i, path in enumerate(paths):
+        out.append(f"warning: adding embedded git repository: {path}\n")
+        if i > 0 or not advise:
+            continue
+        hint = [
+            "You've added another git repository inside your current "
+            "repository.",
+            "Clones of the outer repository will not contain the contents of",
+            "the embedded repository and will not know how to obtain it.",
+            "If you meant to add a submodule, use:",
+            "",
+            f"\tgit submodule add <url> {path}",
+            "",
+            "If you added this path by mistake, you can remove it from the",
+            "index with:",
+            "",
+            f"\tgit rm --cached {path}",
+            "",
+            'See "git help submodule" for more information.',
+            *(
+                []
+                if values
+                else [
+                    'Disable this message with "git config '
+                    'advice.addEmbeddedRepo false"'
+                ]
+            ),
+        ]
+        out.extend(
+            "hint:\n" if not line else f"hint: {line}\n" for line in hint
+        )
+    return "".join(out)

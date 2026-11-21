@@ -21,7 +21,8 @@ import { GIT_DIR } from './constants.ts'
 import { WorkTreeLimitError } from './errors.ts'
 import { under } from './pathspec.ts'
 import { GITIGNORE, type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readNames, readOptional } from './io.ts'
+import { embeddedLocation } from './embedded.ts'
+import { readNames, readOptional, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import type { RepoLocation, WorkTree } from './types.ts'
@@ -59,11 +60,7 @@ function trackedDirectories(tracked: ReadonlySet<string>): Set<string> {
 
 /** One walk of the working tree, carrying what the walk needs. */
 class Scanner {
-  readonly found: { files: Map<string, FileStat>; untracked: string[]; ignored: string[] } = {
-    files: new Map(),
-    untracked: [],
-    ignored: [],
-  }
+  readonly found: WorkTree = { files: new Map(), untracked: [], ignored: [], repos: [] }
   private readonly directories: Set<string>
   private readonly mounts: MountView | undefined
   private readonly counted = new Map<string, number>()
@@ -211,6 +208,17 @@ class Scanner {
     return false
   }
 
+  /**
+   * Whether a directory holds a repository of its own, which git neither
+   * enters nor lists file by file, whatever the untracked mode: a `.git`
+   * inside it.
+   */
+  private async embedded(relative: string): Promise<boolean> {
+    const dir = this.absolute(relative)
+    if ((await statOf(this.vfs, dir.join(GIT_DIR))) === null) return false
+    return (await embeddedLocation(this.vfs, dir)) !== null
+  }
+
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
@@ -285,7 +293,15 @@ class Scanner {
       const info = await this.entryStat(child)
       if (info === null) continue
       if (info.type === FileType.DIRECTORY) {
-        await this.visitDirectory(child, ignored || rules.isIgnored(child, true), rules)
+        const skipped = ignored || rules.isIgnored(child, true)
+        if (!this.directories.has(child) && (await this.embedded(child))) {
+          this.found.repos.push(child)
+          if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
+          if (!skipped) this.found.untracked.push(`${child}/`)
+          else if (this.showIgnored) this.found.ignored.push(`${child}/`)
+          continue
+        }
+        await this.visitDirectory(child, skipped, rules)
         continue
       }
       this.count(child)

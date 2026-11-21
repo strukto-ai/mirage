@@ -147,7 +147,14 @@ export async function reportRows(
   head: HeadRef,
   start: string,
 ): Promise<Rows<StatusRow>> {
-  const [rows, state, noCommits] = await collect(repo, vfs, UNTRACKED_NORMAL)
+  const [rows, state, noCommits] = await collect(
+    repo,
+    vfs,
+    UNTRACKED_NORMAL,
+    false,
+    null,
+    new Map(),
+  )
   const fully = await configBool(repo, 'core.quotepath', true)
   const detached = head.branch !== null ? '' : await detachedLine(repo, head)
   const upstream = await branchUpstream(repo, head, noCommits)
@@ -225,7 +232,14 @@ export async function status(
   const showStash = await chosen(repo, fl, 'show_stash', 'no_show_stash', 'showStash', false)
   const aheadBehind = await chosen(repo, fl, 'ahead_behind', 'no_ahead_behind', 'aheadBehind', true)
   const threshold = await renameThreshold(repo, fl)
-  const [collected, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
+  const [collected, state, noCommits] = await collect(
+    repo,
+    vfs,
+    parsed.untracked,
+    parsed.ignored,
+    null,
+    new Map(),
+  )
   const rows = patterns.length
     ? await selectedRows(repo, vfs, collected, parsed.ignored, patterns)
     : collected

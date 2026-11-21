@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Errors } from 'isomorphic-git'
-import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { plural } from './dates.ts'
 import { short } from './format.ts'
+import { lineOpcodes } from './opcodes.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
 import type { TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -38,8 +38,6 @@ const UNMERGED_COUNT = 'Unmerged'
 // " | ", the space after the count, and the last column, left free.
 const FRAME = 6
 const SLASH = 0x2f
-
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 /** One changed path as the diffstat table renders it. */
 export interface FileStat {
@@ -78,13 +76,9 @@ async function blobData(repo: Repo, oid: string | null): Promise<Uint8Array> {
 
 /** Line insertions and deletions between two text blobs. */
 function countLines(oldData: Uint8Array, newData: Uint8Array): [number, number] {
-  const split = (data: Uint8Array): string[] => {
-    const text = DEC.decode(data)
-    return text === '' ? [] : text.split(/(?<=\n)/)
-  }
   let insertions = 0
   let deletions = 0
-  for (const [tag, i1, i2, j1, j2] of getOpcodes(split(oldData), split(newData))) {
+  for (const [tag, i1, i2, j1, j2] of lineOpcodes([decodeText(oldData)], [decodeText(newData)])) {
     if (tag === 'equal') continue
     deletions += i2 - i1
     insertions += j2 - j1
