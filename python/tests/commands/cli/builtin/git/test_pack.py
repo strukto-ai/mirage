@@ -125,3 +125,16 @@ async def test_a_corrupt_pack_is_refused_as_git_does_leaving_nothing(
 async def test_an_empty_pack_stores_nothing(files):
     await store_pack(files, GITDIR, _chunked(b"", 1), SystemIdSource())
     assert not await files.exists(GITDIR.join("objects/pack"))
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_store_leaves_nothing_behind(packed, files):
+    _, _, pack, _ = packed
+
+    async def cut() -> AsyncGenerator[bytes, None]:
+        yield pack[:4096]
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await store_pack(files, GITDIR, cut(), SystemIdSource())
+    assert await files.readdir(GITDIR.join("objects/pack")) == []

@@ -39,6 +39,8 @@ import type { Files } from '../../../../workspace/files.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const LOOSE = /\/objects\/([0-9a-f]{2})\/([0-9a-f]{38})$/
+/** What a packed object that cannot be read is served as: nothing inflates from it. */
+const UNREADABLE = new Uint8Array([0x78, 0x00])
 
 export const KINDS = ['commit', 'tree', 'blob', 'tag']
 export const OFS_DELTA = 6
@@ -196,29 +198,32 @@ export function wrapped(type: string, content: Uint8Array): Uint8Array {
  */
 export function applyDelta(delta: Uint8Array, base: Uint8Array): Uint8Array {
   let at = 0
+  const next = (): number => {
+    const byte = delta[at++]
+    if (byte === undefined) throw new GitError('delta ends inside an instruction')
+    return byte
+  }
   const size = (): number => {
     let value = 0
     let shift = 0
     let byte: number
     do {
-      byte = delta[at++] ?? 0
+      byte = next()
       value += (byte & 0x7f) * 2 ** shift
       shift += 7
-    } while (byte & 0x80 && at < delta.byteLength)
+    } while (byte & 0x80)
     return value
   }
   if (size() !== base.byteLength) throw new GitError('delta base size mismatch')
   const out = new Uint8Array(size())
   let wrote = 0
   while (at < delta.byteLength) {
-    const op = delta[at++] ?? 0
+    const op = next()
     if (op & 0x80) {
       let offset = 0
       let length = 0
-      for (let bit = 0; bit < 4; bit++)
-        if (op & (1 << bit)) offset += (delta[at++] ?? 0) * 2 ** (8 * bit)
-      for (let bit = 0; bit < 3; bit++)
-        if (op & (0x10 << bit)) length += (delta[at++] ?? 0) * 2 ** (8 * bit)
+      for (let bit = 0; bit < 4; bit++) if (op & (1 << bit)) offset += next() * 2 ** (8 * bit)
+      for (let bit = 0; bit < 3; bit++) if (op & (0x10 << bit)) length += next() * 2 ** (8 * bit)
       if (length === 0) length = 0x10000
       if (offset + length > base.byteLength || wrote + length > out.byteLength)
         throw new GitError('delta copies past its base')
@@ -252,7 +257,12 @@ function entryHead(
       byte = raw[at++] ?? 0
       back = (back + 1) * 128 + (byte & 0x7f)
     }
-    return { kind, at, base: offset - back }
+    const base = offset - back
+    if (base <= 0 || base >= offset)
+      throw new GitError(
+        `pack has bad object at offset ${String(offset)}: delta base offset is out of bound`,
+      )
+    return { kind, at, base }
   }
   if (kind === REF_DELTA)
     return { kind, at: at + SHA_BYTES, base: toHex(raw.subarray(at, at + SHA_BYTES)) }
@@ -618,10 +628,18 @@ export function gitFs(
       bytes = await source.read(target)
     } catch (err) {
       const loose = packs === null || !isMissingPath(err) ? null : LOOSE.exec(target.virtual)
-      const packed =
-        loose === null || packs === null
-          ? null
-          : await packedObject(packs, `${loose[1] ?? ''}${loose[2] ?? ''}`)
+      if (loose === null || packs === null) throw err
+      let packed: Packed | null
+      try {
+        packed = await packedObject(packs, `${loose[1] ?? ''}${loose[2] ?? ''}`)
+      } catch (failure) {
+        // isomorphic-git drops a readFile error and then looks in the packs it
+        // cannot see, so an unreadable packed object would come out as a
+        // missing one. Bytes that do not inflate fail it as a corrupt loose
+        // object does.
+        console.debug('packed object unreadable:', failure)
+        return encoding === undefined ? UNREADABLE : ''
+      }
       if (packed === null) throw err
       bytes = storedZlib(wrapped(packed.type, packed.content))
     }

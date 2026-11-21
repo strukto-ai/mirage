@@ -156,6 +156,8 @@ async def delta_ids(
                 continue
             child = waiting.pop(0)
             rebuilt = b"".join(apply_delta(base, await content(child)))
+            if not waiting:
+                stack.pop()
             oid = (
                 hashlib.sha1(b"%s %d\0" % (kind, len(rebuilt)) + rebuilt)
                 .hexdigest()
@@ -194,10 +196,10 @@ async def store_pack(
     the index is written. Nothing holds the pack itself, so a clone
     costs one object's bytes at a time, not the repository's.
 
-    Named by the pack's own checksum, as git names one it receives, and
-    indexed after the pack is in place, so a reader that lists ``.idx``
-    files never finds one whose pack is not there yet. An empty pack
-    stores nothing.
+    Named by the pack's own checksum, as git names one it receives. The
+    index is written aside and renamed in after the pack, as git does,
+    so a reader that lists ``.idx`` files never finds one cut short or
+    one whose pack is not there yet. An empty pack stores nothing.
 
     Args:
         vfs (Files): the session's files.
@@ -216,6 +218,7 @@ async def store_pack(
     directory = commondir.join(PACK_DIR)
     await ensure_dir(vfs, directory)
     temporary = directory.join(f"tmp_pack_{token(ids)}")
+    staged = directory.join(f"tmp_idx_{token(ids)}")
     scan = open_stream("git_pack", {})
     scanned: list[Scanned] = []
     checksum = b""
@@ -263,8 +266,10 @@ async def store_pack(
             await remove_file(vfs, temporary)
             return
         index = pack_index(entries, bytes.fromhex(checksum.decode()))
+        await vfs.write(staged, index)
         await vfs.rename(temporary, directory.join(f"{stem}.pack"))
-        await vfs.write(directory.join(f"{stem}{IDX_SUFFIX}"), index)
-    except Exception:
+        await vfs.rename(staged, directory.join(f"{stem}{IDX_SUFFIX}"))
+    except BaseException:
         await remove_file(vfs, temporary)
+        await remove_file(vfs, staged)
         raise

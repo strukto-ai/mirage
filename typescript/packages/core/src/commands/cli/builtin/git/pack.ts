@@ -139,6 +139,7 @@ async function deltaIds(
         continue
       }
       const rebuilt = applyDelta(await content(child), base)
+      if (!waiting.length) stack.pop()
       const oid = await sha1Hex(wrapped(kind, rebuilt))
       ids.set(child.offset, oid)
       stack.push([rebuilt, children(child.offset, oid)])
@@ -161,10 +162,10 @@ function token(ids: IdSource): string {
  * the index is written. Nothing holds the pack itself, so a clone costs one
  * object's bytes at a time, not the repository's.
  *
- * Named by the pack's own checksum, as git names one it receives, and
- * indexed after the pack is in place, so a reader that lists `.idx` files
- * never finds one whose pack is not there yet. An empty pack stores
- * nothing.
+ * Named by the pack's own checksum, as git names one it receives. The index
+ * is written aside and renamed in after the pack, as git does, so a reader
+ * that lists `.idx` files never finds one cut short or one whose pack is not
+ * there yet. An empty pack stores nothing.
  *
  * @param vfs the session's files
  * @param commondir the shared git directory, which owns the object database
@@ -184,6 +185,7 @@ export async function storePack(
   const dir = commondir.join(PACK_DIR)
   await ensureDir(vfs, dir)
   const temporary = dir.join(`tmp_pack_${token(ids)}`)
+  const staged = dir.join(`tmp_idx_${token(ids)}`)
   const scan = openStreamSync('git_pack', {})
   const scanned: Scanned[] = []
   let checksum = ''
@@ -241,11 +243,12 @@ export async function storePack(
       await removeFile(vfs, temporary)
       return
     }
-    const index = await packIndex(entries, fromHex(checksum))
+    await vfs.write(staged, await packIndex(entries, fromHex(checksum)))
     await vfs.rename(temporary, dir.join(`${stem}.pack`))
-    await vfs.write(dir.join(`${stem}${IDX_SUFFIX}`), index)
+    await vfs.rename(staged, dir.join(`${stem}${IDX_SUFFIX}`))
   } catch (err) {
     await removeFile(vfs, temporary)
+    await removeFile(vfs, staged)
     throw err
   }
 }

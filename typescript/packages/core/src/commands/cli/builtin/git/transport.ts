@@ -21,6 +21,7 @@ import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { chunks } from '../../../../io/cooperative.ts'
+import { closeQuietly } from '../../../../io/stream.ts'
 import { Digest } from '../../../../utils/hash.ts'
 import { fromHex } from '../../../../utils/hex.ts'
 import type { Context } from '../../../config.ts'
@@ -423,23 +424,29 @@ export class HttpTransport implements Transport {
         ...(body === undefined ? {} : { body }),
         timeoutMs: null,
         followRedirects: true,
+        stream: true,
       })
     } catch (err) {
       if (err instanceof HttpConnectError)
         throw new GitError(`unable to access '${this.url}/': ${err.message}`)
       throw err
     }
-    if (resp.status === 401 || resp.status === 403) {
-      if (this.configured || Object.keys(this.credentials).length)
-        throw new GitError(`Authentication failed for '${this.url}/'`)
-      const host = new URL(this.url).origin
-      throw new GitError(`could not read Username for '${host}': terminal prompts disabled`)
+    try {
+      if (resp.status === 401 || resp.status === 403) {
+        if (this.configured || Object.keys(this.credentials).length)
+          throw new GitError(`Authentication failed for '${this.url}/'`)
+        const host = new URL(this.url).origin
+        throw new GitError(`could not read Username for '${host}': terminal prompts disabled`)
+      }
+      if (resp.status === 404) throw new GitError(`repository '${this.url}/' not found`)
+      if (resp.status >= 400)
+        throw new GitError(
+          `unable to access '${this.url}/': The requested URL returned error: ${String(resp.status)}`,
+        )
+    } catch (err) {
+      await closeQuietly(resp.body)
+      throw err
     }
-    if (resp.status === 404) throw new GitError(`repository '${this.url}/' not found`)
-    if (resp.status >= 400)
-      throw new GitError(
-        `unable to access '${this.url}/': The requested URL returned error: ${String(resp.status)}`,
-      )
     if (method === 'GET') {
       const moved = resp.url.split('/info/refs')[0] ?? this.url
       if (new URL(moved).origin !== new URL(this.url).origin) this.credentials = {}

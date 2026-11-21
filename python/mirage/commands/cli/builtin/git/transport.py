@@ -45,6 +45,7 @@ from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.util import require_vfs
 from mirage.commands.config import Context
 from mirage.io.cooperative import chunks
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, materialize
 from mirage.types import PathSpec
 
@@ -466,24 +467,31 @@ class HttpTransport:
                 body,
                 None,
                 follow_redirects=True,
+                stream=True,
             )
         except HttpConnectError as exc:
             raise GitError(f"unable to access '{self._url}/': {exc}") from exc
-        if resp.status in (401, 403):
-            if self._configured or self._credentials:
-                raise GitError(f"Authentication failed for '{self._url}/'")
-            host = urlunsplit(urlsplit(self._url)._replace(path="", query=""))
-            raise GitError(
-                f"could not read Username for '{host}': "
-                "terminal prompts disabled"
-            )
-        if resp.status == 404:
-            raise GitError(f"repository '{self._url}/' not found")
-        if resp.is_error:
-            raise GitError(
-                f"unable to access '{self._url}/': The requested "
-                f"URL returned error: {resp.status}"
-            )
+        try:
+            if resp.status in (401, 403):
+                if self._configured or self._credentials:
+                    raise GitError(f"Authentication failed for '{self._url}/'")
+                host = urlunsplit(
+                    urlsplit(self._url)._replace(path="", query="")
+                )
+                raise GitError(
+                    f"could not read Username for '{host}': "
+                    "terminal prompts disabled"
+                )
+            if resp.status == 404:
+                raise GitError(f"repository '{self._url}/' not found")
+            if resp.is_error:
+                raise GitError(
+                    f"unable to access '{self._url}/': The requested "
+                    f"URL returned error: {resp.status}"
+                )
+        except GitError:
+            await close_quietly(resp.body)
+            raise
         if method == "GET":
             moved = resp.url.split("/info/refs", 1)[0]
             before, after = urlsplit(self._url), urlsplit(moved)

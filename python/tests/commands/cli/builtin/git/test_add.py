@@ -248,11 +248,16 @@ async def test_force_stages_what_an_ignored_directory_holds(
     (repo_path / ".gitignore").write_text("build/\n*.log\n", encoding="utf-8")
     (repo_path / "build").mkdir()
     (repo_path / "build" / "out.o").write_text("x\n", encoding="utf-8")
+    (repo_path / "build" / "lib" / ".git").mkdir(parents=True)
+    (repo_path / "build" / "lib" / ".git" / "HEAD").write_text(
+        "ref: refs/heads/main\n", encoding="utf-8"
+    )
     (repo_path / "noisy.log").write_text("x\n", encoding="utf-8")
     assert (await run(git_rw, line))[0] == 0
     index = staged(repo_path)
     assert b"build/out.o" in index
     assert b"noisy.log" in index
+    assert not [path for path in index if b".git/" in path]
 
 
 @pytest.mark.asyncio
