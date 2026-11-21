@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import random
+from typing import Any
+
+import pytest
+
 from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import (
     io_reach,
@@ -37,9 +42,9 @@ def _refusal(
 
 
 def _reach(
-    rules: AdmissionRules | None, ctx: CommandContext, virtual: str
+    rules: AdmissionRules | None, ctx: CommandContext, virtual: str, granted=()
 ) -> bool:
-    return io_reach(rules, naming_rules(rules, ctx), virtual)
+    return io_reach(rules, naming_rules(rules, ctx), virtual, granted)
 
 
 def test_a_mount_tree_reaches_a_line_by_its_cwd_or_its_paths():
@@ -168,3 +173,145 @@ def test_skipped_at_dispatch_names_every_tree():
     rules = trees({"rm": "deny"}, mounts={"/a": {"cp": "deny"}})
     assert skipped_at_dispatch(rules) == ("commands", "mounts./a.commands")
     assert skipped_at_dispatch(None) == ()
+
+
+def test_io_reach_skips_an_ask_the_line_holds_a_grant_for():
+    rules = trees({"rm": {"decision": "ask", "paths": ["/data/*"]}})
+    rm = line("rm", "-rf", "/data")
+    nod = decide(rm, rules).asks
+    assert _reach(rules, rm, "/data")
+    assert not _reach(rules, rm, "/data", nod)
+    assert not _reach(rules, rm, "/data/sub", nod)
+    kept = trees(
+        {
+            "rm": [
+                {"decision": "ask", "paths": ["/data/*"]},
+                {"decision": "deny", "paths": ["*.pem"]},
+            ]
+        }
+    )
+    nod = decide(rm, kept).asks
+    assert nod
+    assert _reach(kept, rm, "/data", nod)
+    assert _reach(kept, rm, "/data/sub", nod)
+
+
+_PATTERNS = (
+    "/dir/*",
+    "/dir/**",
+    "/dir",
+    "/dir/",
+    "/dir/secret/*",
+    "/dir/secret",
+    "/dir/a/*",
+    "/dir/a",
+    "/dir2/*",
+    "/*",
+    "/",
+    "*.pem",
+    "secret",
+    "/dir/*/x.pem",
+    "/dir/a/x.pem",
+    "/dir/s*",
+    "*",
+    "/dir/a/b/*",
+    "/other/*",
+    "k.*",
+)
+_UNIVERSE = (
+    "/",
+    "/dir",
+    "/dir/a",
+    "/dir/a/x.pem",
+    "/dir/a/b",
+    "/dir/a/b/c.txt",
+    "/dir/secret",
+    "/dir/secret/k.pem",
+    "/dir/secret/deep",
+    "/dir/secret/deep/k.txt",
+    "/dir/s1",
+    "/dir/s1/f",
+    "/dir2",
+    "/dir2/y.pem",
+    "/dir2/secret",
+    "/dir2/secret/z",
+    "/other",
+    "/other/z.txt",
+    "/secret",
+    "/x.pem",
+)
+_DECISIONS = ("allow", "deny", "ask")
+
+
+def _random_leaf(rnd: random.Random) -> Any:
+    decision = rnd.choice(_DECISIONS)
+    if rnd.random() < 0.25:
+        return decision
+    return {
+        "decision": decision,
+        "paths": rnd.sample(_PATTERNS, rnd.choice([1, 1, 2])),
+    }
+
+
+def _random_entry(rnd: random.Random) -> Any:
+    if rnd.random() < 0.55:
+        return _random_leaf(rnd)
+    leaves = [_random_leaf(rnd) for _ in range(rnd.choice([2, 2, 3]))]
+    return [x for x in leaves if isinstance(x, dict)] or _random_leaf(rnd)
+
+
+def _random_block(rnd: random.Random) -> dict[str, Any]:
+    block: dict[str, Any] = {}
+    if rnd.random() < 0.6:
+        block["*"] = (
+            _random_entry(rnd)
+            if rnd.random() < 0.5
+            else rnd.choice(_DECISIONS)
+        )
+    if rnd.random() < 0.9:
+        block["grep"] = _random_entry(rnd)
+    return block
+
+
+def _at_or_under(virtual: str, root: str) -> bool:
+    return (
+        virtual == root
+        or root == "/"
+        or virtual.startswith(root.rstrip("/") + "/")
+    )
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_io_reach_covers_every_entry_io_refusal_refuses_below_it(seed):
+    rnd = random.Random(seed)
+    checks = 0
+    violations = []
+    for _ in range(300):
+        commands = _random_block(rnd)
+        mounts = {}
+        if rnd.random() < 0.3:
+            mounts[rnd.choice(["/dir", "/dir2", "/dir/secret"])] = (
+                _random_block(rnd)
+            )
+        if not commands and not mounts:
+            continue
+        operand = rnd.choice(_UNIVERSE)
+        rules = trees(commands or None, mounts or None)
+        ctx = line("grep", "-r", "x", operand)
+        verdict = decide(ctx, rules)
+        if verdict.outcome is Outcome.DENY:
+            continue
+        granted = verdict.asks if verdict.outcome is Outcome.ASK else ()
+        named = naming_rules(rules, ctx)
+        refused = {
+            p for p in _UNIVERSE if io_refusal(rules, named, p, granted)
+        }
+        for root in (u for u in _UNIVERSE if _at_or_under(u, operand)):
+            checks += 1
+            if io_reach(rules, named, root, granted):
+                continue
+            hit = [p for p in refused if _at_or_under(p, root)]
+            if hit:
+                violations.append((commands, mounts, operand, root, hit))
+    assert checks > 0
+    assert violations == []

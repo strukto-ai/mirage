@@ -594,9 +594,9 @@ class Workspace:
             self._session_mgr, on_ask
         )
 
-        self._kept_view: tuple[SessionState, Policies, SessionView] | None = (
-            None
-        )
+        self._kept_view: (
+            tuple[SessionState, Policies, SessionView, Files] | None
+        ) = None
         self._registry.policies.views = self._policy_views
         self._meta = WorkspaceMeta(
             self._workspace_id,
@@ -879,15 +879,17 @@ class Workspace:
             kept is None
             or kept[0] is not session
             or kept[1] is not self.policies
+            or kept[3].session_id != session.session_id
         ):
             kept = self._kept_view = (
                 session,
                 self.policies,
                 session_view(session, read_only=True),
+                self.vfs._for_session(session.session_id),
             )
         return (
             kept[2],
-            self.vfs._for_session(session.session_id),
+            kept[3],
             policy_caller(session, self.policies.account),
         )
 

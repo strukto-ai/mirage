@@ -98,6 +98,7 @@ from mirage.workspace.node.explain import (
     admit_line,
     line_held,
     line_judgments,
+    may_prejudge,
     prejudge_line,
     unrefused_nodes,
 )
@@ -1578,14 +1579,25 @@ async def run_prepared_line(
             # on, since a fetch that fails or a kill between it and the
             # run leaves a claimed grant just as unspent as a skipped gate
             # does.
-            refused = await prejudge_line(
-                ast,
-                effective_session,
-                ws.registry,
-                ws.namespace,
-                handed,
-                cancel,
-                await judged(),
+            refused = (
+                await prejudge_line(
+                    ast,
+                    effective_session,
+                    ws.registry,
+                    ws.namespace,
+                    handed,
+                    cancel,
+                    await judged(),
+                )
+                if judgments
+                or may_prejudge(
+                    ast,
+                    effective_session,
+                    ws.registry,
+                    ws.namespace,
+                    line_handed,
+                )
+                else None
             )
             if refused is not None:
                 # A question left waiting holds the line for its retry,

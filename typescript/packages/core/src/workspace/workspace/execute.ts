@@ -104,6 +104,7 @@ import {
   admitLine,
   lineHeld,
   lineJudgments,
+  mayPrejudge,
   prejudgeLine,
   unrefusedNodes,
   type Judged,
@@ -1165,6 +1166,7 @@ async function runPreparedLine(
               nested,
               handed,
               judged,
+              () => judgments !== null,
               deadline,
               topLevel,
               history,
@@ -1498,6 +1500,8 @@ async function runParsedLine(
   nested: NestedDecision,
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
+  // Whether placement already judged the line's commands.
+  judgedYet: () => boolean,
   // The top-level line's deadline: the controller its timer aborts, its
   // seconds, the line's signal with it folded in and when its budget began;
   // null for a nested line, or one whose deadline is lifted.
@@ -1607,16 +1611,20 @@ async function runParsedLine(
     // from the preflight on, since a fetch that fails or a kill between it
     // and the run leaves a claimed grant just as unspent as a skipped gate
     // does.
-    const prejudged = await prejudgeLine(
-      rootNode,
-      effectiveSession,
-      env.registry,
-      env.namespace,
-      handed,
-      reparse,
-      killed,
-      await judged(),
-    )
+    const prejudged =
+      judgedYet() ||
+      mayPrejudge(rootNode, effectiveSession, env.registry, env.namespace, handed, reparse)
+        ? await prejudgeLine(
+            rootNode,
+            effectiveSession,
+            env.registry,
+            env.namespace,
+            handed,
+            reparse,
+            killed,
+            await judged(),
+          )
+        : null
     if (prejudged !== null) {
       // A question left waiting holds the line for its retry, which has
       // to find the grants standing, so they are released rather than

@@ -23,10 +23,11 @@ class SessionScopedMixin(ABC):
     carry a rule for it (a profile's policy program speaks only for the
     sessions under that profile), and says so through ``wants_for``.
     ``Policies.wants`` is the static answer, true as soon as any policy
-    overrides the method, and every entry point keeps gating on it; a seam that
-    pays ahead for a method asks ``Policies.wants_for`` instead, which
+    overrides the method; the VFS op gate and every seam that pays ahead
+    for a method ask ``Policies.wants_for`` instead, on each call, which
     consults this mixin so one profile's entry point does not charge every
-    session.
+    session. The answer must be exact: a session it says no for is not
+    asked at that method at all.
     """
 
     @abstractmethod
