@@ -27,7 +27,14 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GH } from '../gh/index.ts'
 import { GitError } from './errors.ts'
 import { GIT } from './index.ts'
-import { displayUrl, extraHeaders, parseAdvertisement, pktLine, pktLines } from './transport.ts'
+import {
+  displayUrl,
+  extraHeaders,
+  parseAdvertisement,
+  pktLine,
+  pktLines,
+  pktStream,
+} from './transport.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -174,6 +181,33 @@ it('round-trips pkt-lines with flushes', () => {
 it("refuses a bad length as git's protocol error", () => {
   expect(() => [...pktLines(ENC.encode('zz00'))]).toThrow(GitError)
   expect(() => [...pktLines(ENC.encode('zz00'))]).toThrow('bad line length character: zz00')
+})
+
+async function* bytewise(data: Uint8Array): AsyncGenerator<Uint8Array> {
+  for (const byte of data) {
+    await Promise.resolve()
+    yield new Uint8Array([byte])
+  }
+}
+
+async function streamed(data: Uint8Array): Promise<(string | null)[]> {
+  const out: (string | null)[] = []
+  for await (const line of pktStream(bytewise(data)))
+    out.push(line === null ? null : DEC.decode(line))
+  return out
+}
+
+it('splits pkt-lines that arrive a byte at a time', async () => {
+  const stream = new Uint8Array([...pktLine('one\n'), ...ENC.encode('0000'), ...pktLine('two')])
+  expect(await streamed(stream)).toEqual(['one\n', null, 'two'])
+})
+
+it('refuses a stream cut inside a line as a hang-up', async () => {
+  const stream = pktLine('one\n').subarray(0, 6)
+  await expect(streamed(stream)).rejects.toThrow(
+    new GitError('the remote end hung up unexpectedly'),
+  )
+  await expect(streamed(ENC.encode('zz00'))).rejects.toThrow('bad line length character: zz00')
 })
 
 it('reads refs, peeled tags and the HEAD symref off an advertisement', () => {

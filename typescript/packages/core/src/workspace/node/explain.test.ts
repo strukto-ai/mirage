@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { Context } from '../../commands/config.ts'
 import { setExplaining, setDecisionSink } from '../../context/session_context.ts'
@@ -21,6 +21,7 @@ import type {
   AskHandler,
   CommandContext,
   CommandExplanation,
+  HandOff,
   Policy,
   Route,
   ShellNode,
@@ -41,7 +42,8 @@ import { parse } from '../../shell/parse/parse.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
-import { explainLine, JudgmentMode, type Judgment } from './explain.ts'
+import { Policies } from '../../policy/policies.ts'
+import { explainLine, JudgmentMode, lineJudgments, mayPrejudge, type Judgment } from './explain.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -2604,4 +2606,115 @@ it.each([
   const said = await w.explain(line, 's')
   const ran = await w.shell(line, { sessionId: 's' })
   expect([said.outcome, said.reason]).toEqual([Outcome.DENY, ran.decision?.reason])
+})
+
+const PREJUDGED: [string, boolean][] = [
+  ['rm /m/x', false],
+  ['echo a > /m/log', false],
+  ['rm /m/x 2>&1', false],
+  ['echo a; rm /m/x', true],
+  ['echo a && rm /m/x', true],
+  ['cat /m/x | rm /m/y', true],
+  ["eval 'rm /m/x'", true],
+  ["eval 'echo a > /m/log; rm /m/x'", true],
+  ["sh -c 'rm /m/x'", true],
+  ["sh -c 'echo a; rm /m/x'", true],
+  ['env rm /m/x', true],
+  ['command rm /m/x', true],
+  ['X=1 rm /m/x', false],
+  ['! rm /m/x', false],
+  ['if true; then rm /m/x; fi', true],
+  ['for i in 1 2; do rm /m/f$i; done', false],
+  ['( echo a; rm /m/x )', true],
+  ['{ echo a; rm /m/x; }', true],
+  ['( rm /m/x )', false],
+  ['{ rm /m/x; }', false],
+  ['echo $(echo a; rm /m/x)', true],
+  ['echo $(rm /m/x)', true],
+  ['xargs rm', true],
+  ['echo /m/x | xargs rm', true],
+  ['find /m -name x -exec rm {} \\;', true],
+  ['find /m -name x', false],
+  ['twice', false],
+  ['time rm /m/x', false],
+  ['$CMD /m/x', false],
+]
+
+const DENY_RM = { commands: { rm: { decision: 'deny', reason: 'no rm' } } }
+
+describe('the pass that holds a line', () => {
+  it('is skipped only where it would judge fewer than two commands', async () => {
+    const w = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await w.shell('twice() { echo a > /m/log; rm /m/x; }')
+      const session = w.getSession(w.defaultSessionId)
+      const handOff = (): HandOff => ({ claimed: [], parent: null, origin: null })
+      for (const [line, two] of PREJUDGED) {
+        const may = mayPrejudge(parse(line), session, w.registry, w.namespace, handOff(), (text) =>
+          parse(text),
+        )
+        const judgedLine = await lineJudgments(
+          parse(line),
+          session,
+          w.registry,
+          w.namespace,
+          handOff(),
+          (text) => parse(text),
+        )
+        const count = judgedLine.reduce((n, [, explained]) => n + explained.length, 0)
+        expect([line, may, count >= 2]).toEqual([line, two, two])
+      }
+    } finally {
+      await w.close()
+    }
+  })
+
+  it('leaves a one-command line to its gate alone', async () => {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/x', new TextEncoder().encode('x\n'))
+    const w = new Workspace(
+      { '/m': vfs },
+      { mode: MountMode.WRITE, profiles: { p: SessionProfile(DENY_RM) }, profile: 'p' },
+    )
+    const answers = vi.spyOn(Policies.prototype, 'answers')
+    try {
+      const held = await w.shell('echo a > /m/log && rm /m/x')
+      expect([held.exitCode, held.stderrText]).toEqual([126, 'rm: Permission denied\n'])
+      expect([...vfs.store.files.keys()]).toEqual(['/x'])
+      answers.mockClear()
+      const ran = await w.shell('rm /m/x')
+      expect([ran.exitCode, ran.stderrText]).toEqual([126, 'rm: Permission denied\n'])
+      expect(answers.mock.calls.filter(([method]) => method === 'preCommand')).toHaveLength(1)
+      expect([...vfs.store.files.keys()]).toEqual(['/x'])
+    } finally {
+      answers.mockRestore()
+      await w.close()
+    }
+  })
+
+  it('asks at each gate of a loop of one command', async () => {
+    const asked: string[] = []
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f1', new TextEncoder().encode('1\n'))
+    vfs.store.files.set('/f2', new TextEncoder().encode('2\n'))
+    const w = new Workspace(
+      { '/m': vfs },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          p: SessionProfile({ commands: { rm: { decision: 'ask', reason: 'confirm rm' } } }),
+        },
+        profile: 'p',
+        onAsk: answering(asked, Outcome.ALLOW),
+      },
+    )
+    try {
+      const ran = await w.shell('for i in 1 2; do rm /m/f$i; done')
+      expect(ran.exitCode).toBe(0)
+      expect(asked).toHaveLength(2)
+      expect([...vfs.store.files.keys()]).toEqual([])
+    } finally {
+      await w.close()
+    }
+  })
 })

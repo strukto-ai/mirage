@@ -245,3 +245,32 @@ it("takes a bare repository's HEAD as no checkout", async () => {
     `Would delete branch main (was ${tip}).\n`,
   ])
 })
+
+it.each([
+  ['repo.git', 'rev-parse --is-bare-repository --is-inside-work-tree --is-inside-git-dir'],
+  ['repo.git', 'log --format=%s'],
+  ['repo.git/refs', 'rev-parse --is-bare-repository'],
+  ['repo.git', 'status'],
+])('finds a bare repository from %s as git does: %s', async (dir, line) => {
+  const root = join(tmp, 'bare-found')
+  if (!statSync(root, { throwIfNoEntry: false })) {
+    const source = join(root, 'source')
+    mkdirSync(root, { recursive: true })
+    nativeIn(root, 'init', '-q', '-b', 'main', source)
+    nativeIn(source, 'commit', '-q', '--allow-empty', '-m', 'A')
+    nativeIn(root, 'clone', '-q', '--bare', source, join(root, 'repo.git'))
+    nativeIn(join(root, 'repo.git'), 'branch', 'trunk')
+    rmSync(source, { recursive: true, force: true })
+  }
+  const native = spawnSync('git', line.split(' '), {
+    cwd: join(root, dir),
+    env: AUTHOR_ENV,
+    encoding: 'utf8',
+  })
+  const result = await (await mountRepo(root)).shell(`git -C /repo/${dir} ${line}`)
+  expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+    native.status,
+    native.stdout,
+    native.stderr,
+  ])
+})

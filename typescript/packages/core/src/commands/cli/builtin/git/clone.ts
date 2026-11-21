@@ -39,6 +39,7 @@ import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
+import { SYSTEM_IDS } from '../../../../utils/ids.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
@@ -191,10 +192,10 @@ export async function clone(
   try {
     notes += await populate(ctx, transport, target, stored, local, typed)
   } catch (err) {
-    if (!(err instanceof GitError)) throw err
-    // A refused checkout leaves the clone behind, as git does.
-    const vfs = ctx.vfs
-    if (!(err instanceof CloneCheckoutError) && vfs !== undefined) {
+    // A refused checkout leaves the clone behind, as git does; any other
+    // failure takes back what the clone wrote, mirage's own refusals (its
+    // memory limit) included, as git cleans up on any failure.
+    if (!(err instanceof CloneCheckoutError)) {
       if (fresh) await removeTree(vfs, target)
       else
         for (const entry of await readNames(vfs, target)) {
@@ -202,6 +203,7 @@ export async function clone(
           if (child) await removeTree(vfs, target.join(child))
         }
     }
+    if (!(err instanceof GitError)) throw err
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
     return [
       null,
@@ -312,6 +314,7 @@ async function populate(
     adv,
     wants,
     one !== null,
+    ctx.ids ?? SYSTEM_IDS,
     depth,
   )
   for (const want of received)

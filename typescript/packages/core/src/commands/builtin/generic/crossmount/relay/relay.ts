@@ -30,6 +30,7 @@ import { DISPATCH_BUILDERS, RELAY_COMMANDS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import { ReadAhead } from '../../../generic_bind/files.ts'
 import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
+import type { ShellFn } from '../../../../../runtime/types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { SessionView } from '../../../../../view/types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
@@ -69,6 +70,9 @@ export async function runRelay(
   diff?: DiffComputer,
   ids?: IdSource,
   signal?: AbortSignal,
+  // Runs a nested line in the session, for a generic that runs commands
+  // of its own (fd -x).
+  shell?: ShellFn,
 ): Promise<CrossResult> {
   if (!RELAY_COMMANDS.has(cmdName))
     throw new Error(`Unsupported cross-mount relay command: ${cmdName}`)
@@ -117,6 +121,9 @@ export async function runRelay(
       undefined,
       diff,
       ids,
+      undefined,
+      undefined,
+      shell,
     )
   }
   throw new Error(`No cross-mount composition for ${cmdName}`)

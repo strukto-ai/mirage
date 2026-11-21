@@ -483,10 +483,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "printf '*.log\\n' > /repo/.gitignore && printf 'x\\n' > /repo/a.log && git -C /repo add a.log",
+      "command": "printf '*.log\\n' > /repo/.gitignore && printf 'x\\n' > /repo/a.log && git -C /repo add a.log; echo rc=$?; for f in . -A; do (git clone -q /repo /repo/fa && cd /repo/fa || exit 1; printf 'build/\\n*.log\\n' > .gitignore; mkdir build; printf 'x\\n' > build/out.o; printf 'x\\n' > a.log; git add -f $f; echo rc=$?; git ls-files build a.log; cd /repo; rm -rf fa); done",
       "expect": {
-        "exit": 1,
-        "stdout": "",
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\na.log\nbuild/out.o\nrc=0\na.log\nbuild/out.o\n",
         "stderr": "The following paths are ignored by one of your .gitignore files:\na.log\nhint: Use -f if you really want to add them.\nhint: Disable this message with \"git config set advice.addIgnoredFile false\"\n"
       }
     },

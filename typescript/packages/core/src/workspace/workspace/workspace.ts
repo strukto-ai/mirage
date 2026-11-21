@@ -117,7 +117,7 @@ import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { HANGUP_EXIT_CODE } from '../../execution/job/constants.ts'
+import { HANGUP_EXIT_CODE, HANGUP_SIGNAL } from '../../execution/job/constants.ts'
 import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { literalTree } from '../../shell/literal.ts'
@@ -366,7 +366,12 @@ export class Workspace {
   private readonly programMachine: string | null
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
-  private keptView: { session: SessionState; policies: Policies; view: SessionView } | null = null
+  private keptView: {
+    session: SessionState
+    policies: Policies
+    view: SessionView
+    vfs: Files
+  } | null = null
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private readonly policyFunctions: Readonly<Record<string, (...args: never[]) => unknown>>
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
@@ -845,18 +850,22 @@ export class Workspace {
       session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
     }
     if (session === null) return null
-    if (this.keptView?.session !== session || this.keptView.policies !== this.policies)
+    if (
+      this.keptView?.session !== session ||
+      this.keptView.policies !== this.policies ||
+      this.keptView.vfs.sessionId !== session.sessionId
+    )
       this.keptView = {
         session,
         policies: this.policies,
         view: Object.freeze(sessionView(session, undefined, true)),
+        // A method decides: its files say so on each op's own caller, so its
+        // reads run and its writes are refused wherever it runs.
+        vfs: withCaller(this.vfs.forSession(session.sessionId), {
+          explaining: DryRun.DECIDING,
+        }),
       }
-    const view = this.keptView.view
-    // A method decides: its files say so on each op's own caller, so its
-    // reads run and its writes are refused wherever it runs.
-    const vfs = withCaller(this.vfs.forSession(session.sessionId), {
-      explaining: DryRun.DECIDING,
-    })
+    const { view, vfs } = this.keptView
     return { session: view, vfs, caller: policyCaller(session, this.policies.account) }
   }
 
@@ -2589,6 +2598,23 @@ export class Workspace {
     for (const [stop] of hit) stop.abort()
     await Promise.all(hit.filter(([stop]) => stop !== own).map(([, line]) => line.ended))
     return cancelled
+  }
+
+  /**
+   * End a session's lines as a dropped terminal ends its foreground job:
+   * each process the session runs gets SIGHUP (`HANGUP_SIGNAL`), so a
+   * program on a machine stops as a hangup stops it, sparing what left its
+   * session, then the lines are cancelled as `cancel` cancels them. A
+   * runner `setsid` made the leader of a session of its own (`leader`) left
+   * it, so it keeps running. Returns how many lines were cancelled.
+   */
+  async hangup(sessionId: string): Promise<number> {
+    for (const runner of this.processTable.live()) {
+      if (runner.record.sessionId === sessionId && (runner.record.leader ?? null) === null) {
+        runner.terminate(HANGUP_SIGNAL)
+      }
+    }
+    return this.cancel(sessionId)
   }
 
   /**

@@ -12,7 +12,7 @@ use ast_grep_outline::{
     DEFAULT_OUTLINE_RULES,
     combined_extractor::CombinedExtractors,
     extractor::parse_outline_rules,
-    options::{OutlineExtractorOptions, OutlineFlagFilter},
+    options::{OutlineExtractorOptions, OutlineFlagFilter, OutlineMemberOptions},
 };
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
@@ -37,6 +37,8 @@ struct Request {
     filter: Option<String>,
     symbol: Option<String>,
     view: String,
+    items: Option<String>,
+    pub_members: bool,
     directory: bool,
     files_only: bool,
     update: bool,
@@ -52,17 +54,29 @@ fn outline(req: &Request, doc: &AstGrep<StrDoc<SupportLang>>) -> Result<String> 
         .collect::<Vec<_>>()
         .join("\n---\n");
     let rules = parse_outline_rules::<SupportLang>(&yaml)?;
+    let items = match req.items.as_deref() {
+        None | Some("auto") if req.directory => "exports",
+        None | Some("auto") => "structure",
+        Some(items) => items,
+    };
+    let (imports, exported) = match items {
+        "structure" => (OutlineFlagFilter::No, OutlineFlagFilter::Any),
+        "exports" => (OutlineFlagFilter::Any, OutlineFlagFilter::Yes),
+        "imports" => (OutlineFlagFilter::Yes, OutlineFlagFilter::Any),
+        "all" => (OutlineFlagFilter::Any, OutlineFlagFilter::Any),
+        other => return Err(format!("invalid outline items: {other}").into()),
+    };
     let options = OutlineExtractorOptions {
-        imports: if req.directory {
-            OutlineFlagFilter::Any
-        } else {
-            OutlineFlagFilter::No
-        },
-        exported: if req.directory {
-            OutlineFlagFilter::Yes
-        } else {
-            OutlineFlagFilter::Any
-        },
+        imports,
+        exported,
+        members: Some(OutlineMemberOptions {
+            public: if req.pub_members {
+                OutlineFlagFilter::Yes
+            } else {
+                OutlineFlagFilter::Any
+            },
+            ..Default::default()
+        }),
         item_regex: req.filter.as_deref().map(regex::Regex::new).transpose()?,
         symbol_types: req
             .symbol
@@ -258,9 +272,7 @@ struct Project {
     rule_dirs: Vec<String>,
     #[serde(default)]
     util_dirs: Vec<String>,
-    #[serde(default)]
     custom_languages: Option<Value>,
-    #[serde(default)]
     language_globs: Option<Value>,
 }
 

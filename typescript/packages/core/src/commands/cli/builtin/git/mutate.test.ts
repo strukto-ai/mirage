@@ -290,6 +290,22 @@ describe('git add', () => {
     expect(git(await h.drain(), ['status', '--porcelain'])).toContain('A  debug.log')
   })
 
+  it.each(['add -f .', 'add -A -f'])(
+    'stages what an ignored directory holds under %s',
+    async (line) => {
+      const h = await harness()
+      await write(h, '.gitignore', 'build/\n*.log\n')
+      await write(h, 'build/out.o', 'x\n')
+      await write(h, 'build/lib/.git/HEAD', 'ref: refs/heads/main\n')
+      await write(h, 'debug.log', 'x\n')
+      expect((await h.run(line))[0]).toBe(0)
+      const status = git(await h.drain(), ['status', '--porcelain'])
+      expect(status).toContain('A  build/out.o')
+      expect(status).toContain('A  debug.log')
+      expect(status).not.toContain('.git/HEAD')
+    },
+  )
+
   it('says what it did not do with no pathspec', async () => {
     const h = await harness()
     const [code, , err] = await h.run('add')

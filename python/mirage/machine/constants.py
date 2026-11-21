@@ -17,6 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from mirage.execution.job.constants import HANGUP_SIGNAL
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
 from mirage.machine.types import MountType
@@ -660,6 +661,17 @@ def stop_line(
     that fails before it found any, or on the last look, exits 1, so KILL
     never reaches a pid the last ``ps`` did not check.
 
+    A hangup (``HANGUP_SIGNAL``) is what a dropped terminal sends: on
+    Linux it reaches only the processes still in ``root``'s session, so
+    one that left it with ``setsid`` keeps running, and no KILL follows,
+    so one that ignores it (``nohup``) keeps running too. CONT follows
+    it, as the kernel's own hangup sends it, so a stopped process takes
+    the hangup instead of holding it. Once ``root`` has exited its
+    session can no longer be read, so the hangup reaches a process only
+    when its session's leader is ``root`` or a live process outside the
+    run: a session another process of the run leads, or whose leader has
+    exited (a zombie too), is what ``setsid`` leaves.
+
     Args:
         process (str): the id of the Mirage process the run is, as
             ``PROCESS`` carries it.
@@ -670,14 +682,37 @@ def stop_line(
     """
     mark = single_quote(f"{PROCESS}={process}")
     mine = {root.pid: (process, root.started)} if root is not None else {}
+    hangup = signum == HANGUP_SIGNAL
+    own = (
+        f"z={root.pid}; sid $z && s=$q || g=1; "
+        if hangup and root is not None
+        else ""
+    )
+    end = (
+        "kill -CONT $l 2>/dev/null; exit 0"
+        if hangup
+        else "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; "
+        'done; [ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
+    )
     return (
-        f"m={mark}; f=; if [ -d /proc/self ]; then PATH={TOOLS_PATH}; "
+        f"m={mark}; f=; s=; g=; if [ -d /proc/self ]; then "
+        f"PATH={TOOLS_PATH}; "
         "command -v tr >/dev/null || exit 127; "
         "command -v grep >/dev/null || exit 127; "
-        "left() { l=; for p in /proc/[0-9]*; do "
+        'sid() { q=; read -r t 2>/dev/null < "/proc/$1/stat" || return 1; '
+        't=${t##*")"}; set -- $t; q=$4; }; '
+        'up() { read -r t 2>/dev/null < "/proc/$1/stat" || return 1; '
+        't=${t##*")"}; set -- $t; [ "$1" != Z ] && [ "$1" != X ]; }; '
+        f"{own}"
+        "left() { a=; l=; for p in /proc/[0-9]*; do "
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
-        '&& l="$l ${p#/proc/}"; done; '
-        '[ -n "$l" ]; }; '
+        '&& a="$a ${p#/proc/}"; done; '
+        'for p in $a; do if [ -n "$s" ]; then '
+        '{ sid $p && [ "$q" = "$s" ]; } || continue; '
+        'elif [ -n "$g" ]; then sid $p || continue; '
+        'if [ "$q" != "$z" ]; then up $q || continue; '
+        'case " $a " in *" $q "*) continue ;; esac; fi; fi; '
+        'l="$l $p"; done; [ -n "$l" ]; }; '
         f"else PATH={DARWIN_PATH}; k=; l=; {darwin_roots(mine)}"
         f"left() {{ o=$({DARWIN_PS}) || "
         '{ [ -n "$l" ] || exit 1; f=1; return 0; }; f=; '
@@ -685,8 +720,7 @@ def stop_line(
         f"'{darwin_runs(True, 'ids')}'); r=; l=; "
         'for w in $k; do l="$l ${w%%@*}"; done; [ -n "$l" ]; }; fi; '
         f"left || exit {NOT_RUNNING_STATUS}; kill -{signum} $l 2>/dev/null; "
-        "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
-        '[ -z "$f" ] || exit 1; kill -KILL $l 2>/dev/null; true'
+        f"{end}"
     )
 
 

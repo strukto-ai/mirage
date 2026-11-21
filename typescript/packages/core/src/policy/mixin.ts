@@ -29,9 +29,11 @@ export const SESSION_SCOPED: unique symbol = Symbol.for('mirage.policy.sessionSc
  * that carry a rule for it (a profile's policy program speaks only for
  * the sessions under that profile), and says so through `wantsFor`.
  * `Policies.wants` is the static answer, true as soon as any policy
- * defines the method, and every entry point keeps gating on it; a seam that pays
- * ahead for a method asks `Policies.wantsFor` instead, which consults this
- * brand so one profile's entry point does not charge every session.
+ * defines the method; the VFS op gate and every seam that pays ahead for a
+ * method ask `Policies.wantsFor` instead, on each call, which consults this
+ * brand so one profile's entry point does not charge every session. The
+ * answer must be exact: a session it says no for is not asked at that
+ * method at all.
  */
 export interface SessionScopedMixin {
   readonly [SESSION_SCOPED]: true

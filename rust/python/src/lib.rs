@@ -235,7 +235,6 @@ fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<shell::ShellTree>()?;
     m.add_class::<shell::ShellNode>()?;
     m.add_class::<shell::ShellHeredoc>()?;
-    m.add_class::<shell::ShellNode>()?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
     Ok(())
 }

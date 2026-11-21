@@ -54,7 +54,8 @@ class FlagBag(dict[str, T], Generic[T]):
     as (OPERAND, word), for a program that runs its own option loop each
     refused option as (REFUSED, word), and each SPELLED_WORDS word as
     (SPELLED, word), so it also says which options were typed before an
-    operand or a refusal.
+    operand or a refusal. A REMAINDER option's words are one occurrence,
+    held as a list.
 
     Args:
         values (Mapping[str, T] | None): Values to copy, preserving their tape.
@@ -62,7 +63,7 @@ class FlagBag(dict[str, T], Generic[T]):
 
     def __init__(self, values: Mapping[str, T] | None = None) -> None:
         super().__init__(values or {})
-        self.occurrences: list[tuple[str, str | bool | int]] = (
+        self.occurrences: list[tuple[str, str | bool | int | list[str]]] = (
             list(values.occurrences) if isinstance(values, FlagBag) else []
         )
 

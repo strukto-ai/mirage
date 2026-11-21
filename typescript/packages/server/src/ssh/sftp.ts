@@ -19,7 +19,7 @@ import { MirageSFTPServer } from '@struktoai/mirage-core/mount/sftp'
 import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { SFTPWrapper } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
-import { keyProfile, loginEntry, newSessionId, openSession } from './session.ts'
+import { keyProfile, loginEntry, newSessionId, openSession, stillServed } from './login.ts'
 
 /**
  * Serve SFTP (and so modern scp) for one channel onto its workspace, as a
@@ -47,7 +47,7 @@ export function serveSFTP(
   }
   const onExit = async (): Promise<void> => {
     try {
-      if (entry !== null && registry.has(entry.id) && registry.get(entry.id) === entry) {
+      if (entry !== null && stillServed(registry, entry)) {
         await entry.runner.ws.closeSession(sessionId)
       }
     } finally {

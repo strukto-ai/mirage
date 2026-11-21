@@ -24,6 +24,7 @@ it('uses the room available for each file processed by the same command', async 
     path: 'input.ts',
     pattern: 'return $X',
     view: 'auto',
+    pub_members: false,
     directory: false,
     files_only: true,
     update: false,

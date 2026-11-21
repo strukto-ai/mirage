@@ -805,6 +805,7 @@ export const OPERAND_EXIT: Readonly<Record<string, number>> = Object.freeze({
 })
 
 export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
+  fd: 2,
   dir: 2,
   vdir: 2,
   tty: 2,

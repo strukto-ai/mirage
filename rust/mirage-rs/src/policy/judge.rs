@@ -318,11 +318,15 @@ impl AdmissionMatcher {
     /// Whether a decision the line's walk holds is scoped to a path at or
     /// under this one, so a walk below it has entries to judge. A mount
     /// tree's deny or ask with no paths is scoped to its mount, so a walk
-    /// above or inside the mount reaches it.
-    pub fn io_reach(&self, walked: &[Walked], path: &[u32]) -> bool {
+    /// above or inside the mount reaches it. An ask the line holds a grant
+    /// for refuses nothing (`io_refusal`), so it reaches nothing.
+    pub fn io_reach(&self, walked: &[Walked], path: &[u32], granted: &[usize]) -> bool {
         walked.iter().any(|w| {
             let mount = self.trees.get(w.tree).and_then(|s| s.mount.as_ref());
             Self::walked_ids(std::slice::from_ref(w)).any(|id| {
+                if self.rules[id].decision == Outcome::Ask && granted.contains(&id) {
+                    return false;
+                }
                 match self.scopes.get(id).and_then(Option::as_ref) {
                     Some(scope) => scope.hides_intersect(path),
                     None => {
@@ -681,8 +685,8 @@ mod tests {
         let line = facts("/", &["grep", "-r", "x", "/data/src"], &["/data/src"]);
         assert_eq!(m.decide(&line).outcome, Allow);
         let walked = m.naming(&line.tokens, None, true);
-        assert!(m.io_reach(&walked, &text("/data/src")));
-        assert!(!m.io_reach(&walked, &text("/data/out")));
+        assert!(m.io_reach(&walked, &text("/data/src"), &[]));
+        assert!(!m.io_reach(&walked, &text("/data/out"), &[]));
         assert_eq!(
             m.io_refusal(&walked, &text("/data/src/readme.md"), &[]),
             None
@@ -704,7 +708,7 @@ mod tests {
         assert!(m.naming(&[text("echo"), text("hi")], None, true).is_empty());
         let cp = m.naming(&[text("cp")], None, true);
         assert!(cp.is_empty());
-        assert!(!m.io_reach(&cp, &text("/data")));
+        assert!(!m.io_reach(&cp, &text("/data"), &[]));
         assert_eq!(m.io_refusal(&cp, &text("/data/x"), &[]), None);
         let git = m.naming(&[text("git"), text("status")], None, true);
         assert_eq!(git.iter().map(|w| w.tree).collect::<Vec<_>>(), [1]);
@@ -724,6 +728,40 @@ mod tests {
     }
 
     #[test]
+    fn a_granted_ask_reaches_nothing() {
+        let m = matcher(
+            json!({"rm": {"decision": "ask", "paths": ["/data/review/*"]}}),
+            &[],
+        );
+        let walked = m.naming(&[text("rm"), text("-rf"), text("/data")], None, true);
+        let ask = m.io_refusal(&walked, &text("/data/review/x"), &[]).unwrap();
+        assert!(m.io_reach(&walked, &text("/data"), &[]));
+        assert!(m.io_reach(&walked, &text("/data/review"), &[]));
+        assert!(!m.io_reach(&walked, &text("/data"), &[ask]));
+        assert!(!m.io_reach(&walked, &text("/data/review"), &[ask]));
+    }
+
+    #[test]
+    fn a_granted_ask_leaves_a_deny_below_it_reaching() {
+        let m = matcher(
+            json!({"rm": [
+                {"decision": "ask", "paths": ["/data/*"]},
+                {"decision": "deny", "paths": ["/data/keep/*"]},
+            ]}),
+            &[],
+        );
+        let walked = m.naming(&[text("rm"), text("-rf"), text("/data")], None, true);
+        let ask = m.io_refusal(&walked, &text("/data/x"), &[]).unwrap();
+        assert_eq!(m.rules()[ask].decision, Ask);
+        assert!(m.io_reach(&walked, &text("/data"), &[ask]));
+        assert!(m.io_reach(&walked, &text("/data/keep"), &[ask]));
+        let deny = m
+            .io_refusal(&walked, &text("/data/keep/y"), &[ask])
+            .unwrap();
+        assert_eq!(m.rules()[deny].decision, Deny);
+    }
+
+    #[test]
     fn a_mount_trees_leaf_with_no_paths_reaches_its_mount() {
         let m = matcher(
             json!({"grep": "ask"}),
@@ -737,15 +775,15 @@ mod tests {
             None,
             true,
         );
-        assert!(m.io_reach(&walked, &text("/repo")));
-        assert!(m.io_reach(&walked, &text("/repo/private/s.txt")));
-        assert!(!m.io_reach(&walked, &text("/repo/open")));
-        assert!(!m.io_reach(&walked, &text("/other")));
+        assert!(m.io_reach(&walked, &text("/repo"), &[]));
+        assert!(m.io_reach(&walked, &text("/repo/private/s.txt"), &[]));
+        assert!(!m.io_reach(&walked, &text("/repo/open"), &[]));
+        assert!(!m.io_reach(&walked, &text("/other"), &[]));
         let refused = m.io_refusal(&walked, &text("/repo/private/s.txt"), &[]);
         assert_eq!(m.rules()[refused.unwrap()].decision, Deny);
         assert_eq!(m.io_refusal(&walked, &text("/repo/pub.txt"), &[]), None);
         let grep = m.naming(&[text("grep"), text("-r"), text("x")], None, true);
-        assert!(!m.io_reach(&grep, &text("/repo")));
+        assert!(!m.io_reach(&grep, &text("/repo"), &[]));
     }
 
     #[test]

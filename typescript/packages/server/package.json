@@ -98,6 +98,10 @@
       "types": "./dist/ssh/relay.d.ts",
       "import": "./dist/ssh/relay.js"
     },
+    "./ssh/server": {
+      "types": "./dist/ssh/server.d.ts",
+      "import": "./dist/ssh/server.js"
+    },
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "import": "./dist/mcp/index.js"

@@ -17,6 +17,12 @@ class SSHConfigError(ValueError):
     """Raised when the daemon's SSH settings are unusable."""
 
 
+class LoginRefusedError(Exception):
+    """A login that cannot run a channel: its workspace is out of reach,
+    or its session cannot open. The message is what the client is told.
+    """
+
+
 class CodexRPCError(Exception):
     """A codex-exec request answered with a JSON-RPC error.
 

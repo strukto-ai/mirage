@@ -40,7 +40,7 @@ from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.rs.diff_types import DiffComputer
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.types import CheckFn, PathSpec
 from mirage.utils.ids import IdSource
@@ -66,6 +66,7 @@ async def handle_cross_mount(
     follow: FollowOperands | None = None,
     diff: DiffComputer | None = None,
     ids: IdSource | None = None,
+    shell: ShellFn | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -106,6 +107,8 @@ async def handle_cross_mount(
             operand and reduces the outputs.
         follow (FollowOperands | None): The line's operand resolution,
             which a walk through the dispatcher's globs take.
+        shell (ShellFn | None): runs a nested line in the session, for
+            the RELAY generic that runs commands of its own (fd -x).
     """
     native = run_single
     input_source = resolve_source(stdin)
@@ -179,6 +182,7 @@ async def handle_cross_mount(
                 check_unlink,
                 diff=diff,
                 ids=ids,
+                shell=shell,
             )
         if strategy is Strategy.STREAM:
             return await run_stream(

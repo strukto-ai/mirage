@@ -28,7 +28,7 @@ from dulwich.objects import (
     ShaFile,
     sha_to_hex,
 )
-from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
+from dulwich.pack import Pack, PackData, load_pack_index_file
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
@@ -443,19 +443,6 @@ async def load_object_store(vfs: Files, gitdir: PathSpec) -> VfsObjectStore:
     )
 
 
-def _index_pack(data: bytes) -> tuple[bytes, bytes]:
-    """A received pack's v2 index and its trailing checksum.
-
-    Args:
-        data (bytes): the whole packfile, deltas resolved inside it.
-    """
-    pack = PackData.from_file(BytesIO(data), SHA1, len(data))
-    checksum = pack.get_stored_checksum()
-    out = BytesIO()
-    write_pack_index(out, pack.sorted_entries(), checksum)
-    return out.getvalue(), checksum
-
-
 @asynccontextmanager
 async def _shallow_held(path: PathSpec) -> AsyncIterator[None]:
     """Hold one ``.git/shallow`` against other rewrites of it.
@@ -499,31 +486,6 @@ async def add_shallow(
             path,
             "".join(f"{oid}\n" for oid in sorted({*held, *oids})).encode(),
         )
-
-
-async def store_pack(vfs: Files, commondir: PathSpec, data: bytes) -> None:
-    """Keep a fetched pack whole, beside the index git reads it through.
-
-    Named by the pack's own checksum, as git names one it receives, and
-    written index last so a reader that lists ``.idx`` files never
-    finds one whose pack is not there yet.
-
-    Args:
-        vfs (Files): the session's files.
-        commondir (PathSpec): absolute virtual path of the shared git
-            directory, which owns the object database.
-        data (bytes): the packfile; empty stores nothing.
-    """
-    if not data:
-        return
-    index, checksum = await asyncio.to_thread(_index_pack, data)
-    stem = f"pack-{checksum.hex()}"
-    await write_once(
-        vfs, commondir.join(PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
-    )
-    await write_once(
-        vfs, commondir.join(PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
-    )
 
 
 def abbrev_for(repo: BaseRepo) -> int:

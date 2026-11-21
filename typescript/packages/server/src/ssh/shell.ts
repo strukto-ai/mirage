@@ -13,19 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { context } from '@opentelemetry/api'
-import { refused } from '../metrics.ts'
-import { traceHeaders } from '../env.ts'
-import { requestContext } from '../trace.ts'
-import { randomBytes } from 'node:crypto'
 import { recordStatus } from '@struktoai/mirage-core/workspace/executor/statement'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { ServerChannel } from 'ssh2'
-import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
-import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
-import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
 import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
-import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { rstripChars } from '@struktoai/mirage-core/utils/text'
+import type { ServerChannel } from 'ssh2'
+import { traceHeaders } from '../env.ts'
+import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import { requestContext } from '../trace.ts'
+import { openLogin, stillServed } from './login.ts'
+import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
+import type { ChannelRequest } from './types.ts'
 
 const FALLBACK_PROMPT = 'mirage$ '
 
@@ -34,10 +32,6 @@ const decoder = new TextDecoder()
 
 function prompt(cwd: string): string {
   return `mirage:${cwd}$ `
-}
-
-export function newSessionId(): string {
-  return `ssh_${randomBytes(6).toString('hex')}`
 }
 
 /**
@@ -52,135 +46,6 @@ export function endsShell(line: string): boolean {
     .split(/\s+/)
     .filter((w) => w !== '')
   return words[0] === 'exit' && words.length <= 2
-}
-
-export interface Endpoint {
-  address: string
-  port: number
-}
-
-/** What the server knows about one channel's login. */
-export interface ChannelRequest {
-  username: string
-  /** The login key's `mirage-profile` values; empty when it has none. */
-  profile: readonly string[]
-  /** The login key's `mirage-account` values; empty when it has none. */
-  account: readonly string[]
-  command: string | null
-  term: string | null
-  /** The client's `TRACEPARENT` and `TRACESTATE`, as it set them. */
-  env: Readonly<Record<string, string>>
-  peer: Endpoint | null
-  local: Endpoint | null
-}
-
-/**
- * The environment sshd hands a login: who, from where, on what. The user is
- * the workspace id, since that is the name the client logged in as. `HOME`
- * is the session's own, its user's home.
- */
-export function loginEnv(request: ChannelRequest): Record<string, string> {
-  const env: Record<string, string> = {
-    USER: request.username,
-    LOGNAME: request.username,
-  }
-  const { peer, local } = request
-  if (peer !== null && local !== null) {
-    env.SSH_CLIENT = `${peer.address} ${String(peer.port)} ${String(local.port)}`
-    env.SSH_CONNECTION = `${peer.address} ${String(peer.port)} ${local.address} ${String(local.port)}`
-  }
-  if (request.term !== null && request.term !== '') env.TERM = request.term
-  return env
-}
-
-/**
- * The profile the login's authorized key is bound to, if any. The key's
- * line names it with `mirage-profile="<name>"`; a key without the option
- * runs under the workspace's default profile. A bare, empty or repeated
- * option is refused.
- */
-function keyOption(values: readonly string[], option: string, what: string): string | null {
-  if (values.length === 0) return null
-  const [name] = values
-  if (values.length !== 1 || name === undefined || name === '') {
-    throw new Error(`${option} must name exactly one ${what}`)
-  }
-  return name
-}
-
-export function keyProfile(values: readonly string[]): string | null {
-  return keyOption(values, PROFILE_OPTION, 'profile')
-}
-
-/**
- * The account the login's key belongs to, if any: its line's
- * `mirage-account="<name>"`. The account may open only the workspaces it
- * owns; a key without the option has no account.
- */
-function keyAccount(values: readonly string[]): string | null {
-  return keyOption(values, ACCOUNT_OPTION, 'account')
-}
-
-/**
- * The workspace a login may open, else null. One rule for every channel
- * kind: the key's account must be allowed the workspace its username
- * names. A key whose account option is malformed opens nothing.
- */
-export function loginEntry(
-  registry: WorkspaceRegistry,
-  workspaceId: string,
-  account: readonly string[],
-): WorkspaceEntry | null {
-  let name: string | null
-  try {
-    name = keyAccount(account)
-  } catch (err) {
-    console.warn(
-      `ssh: refusing ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
-    )
-    return null
-  }
-  return registry.visible(workspaceId, name)
-}
-
-/**
- * Create the session a channel runs as, under `profile` (the login key's),
- * else the workspace's default profile; a profile the workspace does not
- * define is refused. The login environment is exported by an unrecorded
- * line, so a hidden or protected name is refused as any `export` of it
- * would be, and a name the profile already set keeps its value. A
- * server shutting down, or a workspace at the server's `maxSessions`,
- * refuses it with EAGAIN.
- */
-export async function openSession(
-  ws: Workspace,
-  sessionId: string,
-  env: Record<string, string> = {},
-  profile: string | null = null,
-  registry: WorkspaceRegistry | null = null,
-): Promise<void> {
-  await ws.ensureSessionsLoaded()
-  if (registry?.draining === true) {
-    refused('shutting_down')
-    throw Object.assign(new Error('server is shutting down'), { code: 'EAGAIN' })
-  }
-  const cap = registry?.maxSessions ?? null
-  if (cap !== null && ws.listSessions().length >= cap) {
-    refused('max_sessions')
-    throw Object.assign(new Error(`workspace is at max_sessions (${String(cap)})`), {
-      code: 'EAGAIN',
-    })
-  }
-  const session = ws.createSession(sessionId, profile === null ? {} : { profile })
-  try {
-    const missing = Object.entries(env).filter(([name]) => !(name in session.env))
-    if (missing.length === 0) return
-    const line = `export ${missing.map(([k, v]) => `${k}=${singleQuote(v)}`).join(' ')}`
-    await ws.shell(line, { sessionId, record: false })
-  } catch (err) {
-    await ws.closeSession(sessionId)
-    throw err
-  }
 }
 
 /**
@@ -202,6 +67,11 @@ function stampInterrupt(ws: Workspace, sessionId: string): void {
  * each channel is a fresh process under sshd, so a `cd` never leaks from
  * one channel to another and two channels never wait on each other's
  * lines.
+ *
+ * A dropped connection ends the channel's lines as it ends a process under
+ * sshd: on a terminal it hangs them up, and without one it sends nothing,
+ * so the line runs on without input until it writes, where sshd's pipe
+ * would break, and is hung up then.
  */
 export class ShellChannel {
   private readonly tty: boolean
@@ -209,6 +79,7 @@ export class ShellChannel {
   private readonly output: ChannelOutput
   private running: AbortController | null = null
   private lost = false
+  private hung = false
 
   constructor(
     private readonly registry: WorkspaceRegistry,
@@ -228,12 +99,25 @@ export class ShellChannel {
   }
 
   private live(): boolean {
-    const wid = this.entry.id
-    return this.registry.has(wid) && this.registry.get(wid) === this.entry
+    return stillServed(this.registry, this.entry)
   }
 
   private interrupt(): void {
     this.running?.abort()
+  }
+
+  /** Whether the connection dropped, read fresh across an await. */
+  private dropped(): boolean {
+    return this.lost
+  }
+
+  /** Hang the channel's lines up (`Workspace.hangup`), once. */
+  private hangUp(): void {
+    if (this.hung || !this.live()) return
+    this.hung = true
+    this.entry.runner.ws.hangup(this.sessionId).catch((err: unknown) => {
+      console.debug('ssh: hangup failed', err)
+    })
   }
 
   private currentPrompt(): string {
@@ -246,22 +130,27 @@ export class ShellChannel {
     this.input.start()
     const onClose = (): void => {
       this.lost = true
-      this.interrupt()
+      if (!this.live()) this.interrupt()
+      else if (this.tty) this.hangUp()
     }
     this.channel.once('close', onClose)
+    this.request.gone.addEventListener('abort', onClose, { once: true })
+    if (this.request.gone.aborted) onClose()
     try {
       if (this.request.command !== null) return await this.run(this.request.command)
       return await this.repl()
     } finally {
       this.channel.off('close', onClose)
+      this.request.gone.removeEventListener('abort', onClose)
       this.input.close()
       if (this.live()) await this.entry.runner.ws.closeSession(this.sessionId)
     }
   }
 
   /**
-   * Run one line and stream its output. Ctrl-C and a dropped connection
-   * abort the line where it is; the status is then 130.
+   * Run one line and stream its output. Ctrl-C aborts the line where it
+   * is, and a dropped connection hangs it up (`Workspace.hangup`); the
+   * status is then 130.
    */
   async run(line: string): Promise<number> {
     if (!this.live()) {
@@ -282,7 +171,9 @@ export class ShellChannel {
         stream: true,
       })
       try {
-        const result = await deliver(execution, (data, stderr) => this.output.write(data, stderr))
+        const result = await deliver(execution, async (data, stderr) => {
+          if (this.lost || !(await this.output.write(data, stderr))) this.hangUp()
+        })
         return result.exitCode
       } finally {
         await execution.close()
@@ -308,9 +199,10 @@ export class ShellChannel {
   /** Read and run lines until `exit` or end of input. */
   async repl(): Promise<number> {
     let status = 0
-    while (!this.lost) {
+    while (!this.dropped()) {
       if (this.tty) await this.output.write(encoder.encode(this.currentPrompt()))
       const item = await this.input.readline()
+      if (this.dropped()) return status
       if (item === Mark.LIMIT) {
         await this.output.write(encoder.encode('mirage: shell input line too long\n'), true)
         return 1
@@ -332,49 +224,6 @@ export class ShellChannel {
     }
     return status
   }
-}
-
-/** Tell the client why its channel cannot run, and exit it 1. */
-export function refuse(channel: ServerChannel, message: string): void {
-  channel.stderr.write(`mirage: ${message}\n`)
-  channel.exit(1)
-  channel.end()
-}
-
-/**
- * The login's workspace and a fresh session opened in it, under the login
- * key's profile, else the workspace's default, with the environment an
- * `ssh` login gets. A login whose workspace is out of reach, or whose
- * session cannot open, is told why and its channel exits 1: null.
- * Mirrors Python's `open_login`.
- */
-export async function openLogin(
-  registry: WorkspaceRegistry,
-  channel: ServerChannel,
-  request: ChannelRequest,
-  door: string,
-): Promise<[WorkspaceEntry, string] | null> {
-  const entry = loginEntry(registry, request.username, request.account)
-  if (entry === null) {
-    refuse(channel, `no such workspace: ${request.username}`)
-    return null
-  }
-  const sessionId = newSessionId()
-  try {
-    await openSession(
-      entry.runner.ws,
-      sessionId,
-      loginEnv(request),
-      keyProfile(request.profile),
-      registry,
-    )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.warn(`${door}: cannot open a session on ${request.username}: ${message}`)
-    refuse(channel, `cannot open a session: ${message}`)
-    return null
-  }
-  return [entry, sessionId]
 }
 
 /**

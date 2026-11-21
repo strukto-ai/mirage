@@ -58,6 +58,8 @@ import type {
   Route,
 } from './types.ts'
 import { CALLS } from '../workspace/dispatcher/constants.ts'
+import { Files } from '../workspace/files.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 
 function callOf(name: string): VfsCall {
@@ -2175,4 +2177,180 @@ it('a check among some policies leaves no order', async () => {
   } finally {
     close.mockRestore()
   }
+})
+
+function tree(): RAMVFS {
+  const vfs = new RAMVFS()
+  vfs.store.dirs.add('/tree')
+  for (let i = 0; i < 10; i++)
+    vfs.store.files.set(`/tree/f${String(i)}.txt`, new TextEncoder().encode('needle\n'))
+  return vfs
+}
+
+function withA(): RAMVFS {
+  const vfs = new RAMVFS()
+  vfs.store.files.set('/a', new TextEncoder().encode('a\n'))
+  vfs.store.files.set('/b', new TextEncoder().encode('b\n'))
+  return vfs
+}
+
+const NO_READ_OF_A = `
+def pre_vfs(ctx):
+    if not ctx['write'] and ctx['path'] == '/m/a':
+        return {'kind': 'deny', 'reason': 'guarded'}
+`
+
+describe('preVfsGate asks per session', () => {
+  it('preVfsGate fast path skips evaluate and caches Files per session', async () => {
+    const ws = new Workspace({ '/m': tree() }, { mode: MountMode.WRITE })
+    const evalSpy = vi.spyOn(Policies.prototype, 'preVfs')
+    const filesSpy = vi.spyOn(Files.prototype, 'forSession')
+    try {
+      const entries = await ws.vfs.readdir('/m/tree')
+      expect(entries).toHaveLength(10)
+      for (let i = 0; i < 10; i++) await ws.vfs.read(`/m/tree/f${String(i)}.txt`)
+      expect(evalSpy).not.toHaveBeenCalled()
+      expect(filesSpy).not.toHaveBeenCalled()
+      const res = await ws.shell('grep -r needle /m/tree')
+      expect(res.exitCode).toBe(0)
+      expect(evalSpy).not.toHaveBeenCalled()
+      expect(filesSpy.mock.calls.length).toBeLessThanOrEqual(1)
+      filesSpy.mockClear()
+      const res2 = await ws.shell('grep -r needle /m/tree')
+      expect(res2.exitCode).toBe(0)
+      expect(evalSpy).not.toHaveBeenCalled()
+      expect(filesSpy).not.toHaveBeenCalled()
+    } finally {
+      evalSpy.mockRestore()
+      filesSpy.mockRestore()
+      await ws.close()
+    }
+    const passes: Policy = { preVfs: () => null }
+    const ws2 = new Workspace({ '/m': tree() }, { mode: MountMode.WRITE, policies: [passes] })
+    const evalSpy2 = vi.spyOn(Policies.prototype, 'preVfs')
+    const filesSpy2 = vi.spyOn(Files.prototype, 'forSession')
+    try {
+      const res = await ws2.shell('grep -r needle /m/tree')
+      expect(res.exitCode).toBe(0)
+      expect(evalSpy2).toHaveBeenCalled()
+      expect(filesSpy2.mock.calls.length).toBeLessThanOrEqual(1)
+    } finally {
+      evalSpy2.mockRestore()
+      filesSpy2.mockRestore()
+      await ws2.close()
+    }
+  })
+
+  it('refuses a write on a read-only mount when no policy wants preVfs', async () => {
+    const policies = new Policies()
+    expect(await policies.wantsFor('preVfs', '')).toBe(false)
+    await expect(
+      preVfsGate(policies, callOf('write'), path('/data/x'), true, '/data/', '', undefined, {
+        mode: MountMode.READ,
+      }),
+    ).rejects.toMatchObject({ code: 'EROFS' })
+    await preVfsGate(policies, callOf('write'), path('/data/x'), true, '/data/')
+    const vfs = withA()
+    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.READ })
+    try {
+      expect(await ws.policies.wantsFor('preVfs', '')).toBe(false)
+      const echoed = await ws.shell('echo x > /m/new')
+      expect(echoed.exitCode).toBe(1)
+      expect(echoed.stderrText).toContain('Read-only file system')
+      const removed = await ws.shell('rm /m/a')
+      expect(removed.exitCode).toBe(1)
+      expect(removed.stderrText).toContain('Read-only file system')
+      expect([...vfs.store.files.keys()].sort()).toEqual(['/a', '/b'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('judges a policy added after the first op', async () => {
+    const policies = new Policies()
+    await preVfsGate(policies, callOf('read'), path('/data/x'), false, '')
+    policies.add(new DenyReadOps())
+    await expect(preVfsGate(policies, callOf('read'), path('/data/x'), false, '')).rejects.toThrow(
+      PolicyDenied,
+    )
+    const ws = new Workspace({ '/m': withA() }, { mode: MountMode.WRITE })
+    try {
+      expect((await ws.shell('cat /m/a')).exitCode).toBe(0)
+      ws.policies.add({
+        preVfs: (ctx: VfsContext): Action | null =>
+          ctx.path.virtual === '/m/a' && !ctx.write
+            ? { kind: 'deny', reason: 'policy says no' }
+            : null,
+      })
+      const ran = await ws.shell('cat /m/a')
+      expect([ran.exitCode, ran.stderrText]).toEqual([1, 'cat: /m/a: Permission denied\n'])
+      expect((await ws.shell('cat /m/b')).stdoutText).toBe('b\n')
+      await expect(ws.vfs.read('/m/a')).rejects.toThrow(PolicyDenied)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('judges a session whose program came after the first op', async () => {
+    const ws = new Workspace(
+      { '/m': withA() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          guard: {
+            policy: {
+              preVfs: [{ script: new ScriptSource(NO_READ_OF_A, 'python'), runtime: 'monty' }],
+            },
+          },
+        } as never,
+      },
+    )
+    try {
+      expect((await ws.shell('cat /m/a')).exitCode).toBe(0)
+      expect(new TextDecoder().decode(await ws.vfs.read('/m/a'))).toBe('a\n')
+      ws.createSession('s', { profile: 'guard' })
+      expect(await ws.policies.wantsFor('preVfs', 's')).toBe(true)
+      expect(await ws.policies.wantsFor('preVfs', '')).toBe(false)
+      const ran = await ws.shell('cat /m/a', { sessionId: 's' })
+      expect([ran.exitCode, ran.stderrText]).toEqual([1, 'cat: /m/a: Permission denied\n'])
+      await expect(ws.vfs.read('/m/a', {}, 's')).rejects.toThrow(PolicyDenied)
+      expect((await ws.shell('cat /m/a')).stdoutText).toBe('a\n')
+      expect(new TextDecoder().decode(await ws.vfs.read('/m/a'))).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+  }, 120000)
+
+  it("refuses a deciding policy's write where no policy wants preVfs", async () => {
+    const vfs = withA()
+    const errors: (string | undefined)[] = []
+    const writer: Policy = {
+      async preCommand(ctx: CommandContext): Promise<null> {
+        if (ctx.command === 'cat' && ctx.vfs !== undefined) {
+          await ctx.vfs.write('/m/stamp', 'x').catch((err: unknown) => {
+            errors.push((err as { code?: string }).code)
+          })
+        }
+        return null
+      },
+    }
+    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, policies: [writer] })
+    try {
+      expect(await ws.policies.wantsFor('preVfs', '')).toBe(false)
+      for (let i = 0; i < 2; i++) {
+        const ran = await ws.shell('cat /m/a')
+        expect([ran.exitCode, ran.stdoutText]).toEqual([0, 'a\n'])
+      }
+      expect(errors).toEqual(['EROFS', 'EROFS'])
+      expect([...vfs.store.files.keys()].sort()).toEqual(['/a', '/b'])
+      ws.createSession('s')
+      const read = await new Session(ws, 's').explain.vfs.read('/m/a')
+      expect([read.outcome, read.error, read.answers]).toEqual([Outcome.ALLOW, '', []])
+      const wrote = await new Session(ws, 's').explain.vfs.write('/m/new', 'x')
+      expect([wrote.outcome, wrote.error]).toEqual([Outcome.ALLOW, ''])
+      expect([...vfs.store.files.keys()].sort()).toEqual(['/a', '/b'])
+    } finally {
+      await ws.close()
+    }
+  })
 })

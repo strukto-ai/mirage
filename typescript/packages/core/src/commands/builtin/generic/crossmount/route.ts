@@ -25,6 +25,7 @@ import { runFanout } from './fanout/index.ts'
 import type { AggregateFn } from '../../../config.ts'
 import { runOperands, mergeOperandIos } from './utils.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
+import type { ShellFn } from '../../../../runtime/types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
 import { runSearch } from './search.ts'
@@ -72,6 +73,9 @@ export async function handleCrossMount(
   diff?: DiffComputer,
   ids?: IdSource,
   signal?: AbortSignal,
+  // Runs a nested line in the session, for the RELAY generic that runs
+  // commands of its own (fd -x).
+  shell?: ShellFn,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -139,6 +143,7 @@ export async function handleCrossMount(
         diff,
         ids,
         signal,
+        shell,
       )
     }
     if (strategy === Strategy.STREAM) {

@@ -32,6 +32,7 @@ import {
   shows,
   commitOutput,
   commitShown,
+  changedEntries,
   commitSides,
   compare,
   entries,
@@ -268,10 +269,12 @@ async function twoTrees(
   flags: DiffFlags,
   recursive: boolean,
 ): Promise<Side[]> {
+  const [left, right] = [await treeId(repo, first), await treeId(repo, second)]
+  if (recursive) return [await changedEntries(repo, left, right, flags.pathspecs)]
   return [
     [
-      await entries(repo, await treeId(repo, first), recursive, flags.pathspecs),
-      await entries(repo, await treeId(repo, second), recursive, flags.pathspecs),
+      await entries(repo, left, recursive, flags.pathspecs),
+      await entries(repo, right, recursive, flags.pathspecs),
     ],
   ]
 }

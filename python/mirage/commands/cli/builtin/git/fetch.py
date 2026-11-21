@@ -32,8 +32,8 @@ from mirage.commands.cli.builtin.git.io import write_file
 from mirage.commands.cli.builtin.git.objects import (
     abbrev_for,
     add_shallow,
-    store_pack,
 )
+from mirage.commands.cli.builtin.git.pack import store_pack
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
     ZERO,
@@ -73,6 +73,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.clock import system_now
+from mirage.utils.ids import IdSource
 from mirage.workspace.files import Files
 
 FETCH_HEAD = "FETCH_HEAD"
@@ -216,6 +217,7 @@ async def _receive(
     location: RepoLocation,
     transport: LocalTransport | HttpTransport,
     wants: list[str],
+    ids: IdSource,
     depth: int | None = None,
     held: list[str] | None = None,
 ) -> BaseRepo:
@@ -231,6 +233,7 @@ async def _receive(
         location (RepoLocation): the receiving repository.
         transport (LocalTransport | HttpTransport): the remote.
         wants (list[str]): object ids asked for.
+        ids (IdSource): where the temporary pack's name is drawn from.
         depth (int | None): how many commits deep to fetch, None for
             the whole history.
         held (list[str] | None): commits already here that no ref
@@ -258,7 +261,7 @@ async def _receive(
         depth,
         tuple(sorted(oid.decode() for oid in repo.get_shallow())),
     )
-    await store_pack(vfs, location.commondir, fetched.pack)
+    await store_pack(vfs, location.commondir, fetched.pack, ids)
     await add_shallow(vfs, location.commondir, fetched.shallow)
     return await open_repo(vfs, location)
 
@@ -325,6 +328,7 @@ async def fetch_objects(
     adv: Advertisement,
     wanted: list[Wanted],
     follow: bool,
+    ids: IdSource,
     depth: int | None = None,
 ) -> tuple[BaseRepo, list[Wanted]]:
     """Bring in every wanted object, then the tags that follow them.
@@ -339,11 +343,12 @@ async def fetch_objects(
         adv (Advertisement): what the remote published.
         wanted (list[Wanted]): the refs to take.
         follow (bool): whether tags are auto-followed.
+        ids (IdSource): where temporary pack names are drawn from.
         depth (int | None): how many commits deep the refs are taken,
             None for their whole history.
     """
     repo = await _receive(
-        vfs, location, transport, [want.oid for want in wanted], depth
+        vfs, location, transport, [want.oid for want in wanted], ids, depth
     )
     if not follow:
         return repo, wanted
@@ -356,6 +361,7 @@ async def fetch_objects(
             location,
             transport,
             [tag.oid for tag in tags],
+            ids,
             depth,
             [want.oid for want in wanted],
         )
@@ -733,7 +739,7 @@ async def fetch(
     tag_opt = multivar(cfg, (b"remote", name.encode()), b"tagopt")
     follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
     repo, taken = await fetch_objects(
-        vfs, location, transport, adv, wanted, follow
+        vfs, location, transport, adv, wanted, follow, ctx.ids
     )
     pruned = []
     if fl.as_bool("prune") and not typed:

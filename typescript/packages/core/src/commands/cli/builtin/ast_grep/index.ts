@@ -14,6 +14,7 @@
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { currentCaller } from '../../../../context/session_context.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 import { MemoryExhausted } from '../../../../io/errors.ts'
 import { checkMemory, memoryRoom } from '../../../../io/memory.ts'
 import { readPrefix } from '../../../../io/cooperative.ts'
@@ -21,7 +22,14 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { IgnoreRules, Overrides, Verdict, walkCandidate } from '../../../builtin/rg_glob.ts'
+import {
+  type IgnoreSources,
+  type IgnoreStack,
+  Overrides,
+  Verdict,
+  walkCandidate,
+} from '../../../builtin/rg_glob.ts'
+import { type IgnoreReader, dirRules, rootStack } from '../../../builtin/rg_scan.ts'
 import { dispatchOf, mountView } from '../../../builtin/utils/links.ts'
 import { WalkBudget, beforeFullWalk } from '../../../builtin/utils/tree.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -49,12 +57,82 @@ const EXTENSIONS = new Map([
   ['mjs', 'JavaScript'],
   ['cjs', 'JavaScript'],
   ['py', 'Python'],
+  ['py3', 'Python'],
   ['pyi', 'Python'],
+  ['bzl', 'Python'],
+  ['bazel', 'Python'],
   ['ts', 'TypeScript'],
   ['mts', 'TypeScript'],
   ['cts', 'TypeScript'],
   ['tsx', 'Tsx'],
 ])
+const UNBUNDLED_EXTENSIONS = new Set([
+  'bash',
+  'bats',
+  'cgi',
+  'command',
+  'env',
+  'fcgi',
+  'ksh',
+  'sh',
+  'tmux',
+  'tool',
+  'zsh',
+  'c',
+  'h',
+  'cc',
+  'hpp',
+  'cpp',
+  'c++',
+  'hh',
+  'cxx',
+  'cu',
+  'ino',
+  'cs',
+  'css',
+  'scss',
+  'dart',
+  'ex',
+  'exs',
+  'go',
+  'hs',
+  'hcl',
+  'nomad',
+  'tf',
+  'tfvars',
+  'workflow',
+  'html',
+  'htm',
+  'xhtml',
+  'java',
+  'json',
+  'kt',
+  'ktm',
+  'kts',
+  'lua',
+  'markdown',
+  'md',
+  'nix',
+  'php',
+  'rb',
+  'rbw',
+  'gemspec',
+  'rs',
+  'scala',
+  'sc',
+  'sbt',
+  'sol',
+  'swift',
+  'yaml',
+  'yml',
+  'zig',
+])
+
+function extensionOf(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1) : ''
+}
 const GLOBS = new Argument('--globs', {
   action: 'append',
   help: 'Include or exclude matching paths',
@@ -69,10 +147,68 @@ const STDIN = new Argument('--stdin', {
   action: 'store_true',
   help: 'Read source from standard input',
 })
+const NO_IGNORE = new Argument('--no-ignore', {
+  action: 'append',
+  metavar: 'FILE_TYPE',
+  choices: ['hidden', 'dot', 'exclude', 'global', 'parent', 'vcs'],
+  help: 'Ignore files or hidden entries not to respect',
+})
 const UPDATE = new Argument(['-U', '--update-all'], {
   action: 'store_true',
   help: 'Apply rewrites',
 })
+
+/**
+ * Which ignore files a walk reads and whether it walks hidden entries:
+ * ast-grep's defaults with every `--no-ignore` value applied. `global`
+ * names git's own config, which no workspace has.
+ */
+interface Walk {
+  readonly sources: IgnoreSources
+  readonly hidden: boolean
+  readonly reader: IgnoreReader
+}
+
+function walkOf(off: ReadonlySet<string>, vfs: Files, maxMemory: number): Walk {
+  const vcs = !off.has('vcs')
+  return {
+    sources: {
+      vcs,
+      exclude: vcs && !off.has('exclude'),
+      dot: !off.has('dot'),
+      custom: null,
+      parents: !off.has('parent'),
+      requireGit: true,
+      bom: true,
+    },
+    hidden: off.has('hidden'),
+    reader: {
+      // ast-grep's walker goes on past an ignore file it cannot read.
+      read: async (path) => {
+        const file = PathSpec.fromStrPath(path)
+        try {
+          return (await vfs.isFile(file)) ? await read(vfs, file, maxMemory) : null
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          console.debug(`ast-grep: cannot read ${path}: ${String(error)}`)
+          return null
+        }
+      },
+      names: async (dir) => {
+        try {
+          const [entries] = await vfs.dispatch('readdir', PathSpec.fromStrPath(dir), [], {})
+          return new Set(
+            (entries as string[]).map((entry) => rstripSlash(entry).split('/').pop() ?? ''),
+          )
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          console.debug(`ast-grep: cannot list ${dir}: ${String(error)}`)
+          return null
+        }
+      },
+    },
+  }
+}
 
 async function* files(
   vfs: Files,
@@ -81,62 +217,27 @@ async function* files(
   budget: WalkBudget,
   cwd: PathSpec,
   globs: Overrides,
-  maxMemory: number,
+  walk: Walk,
 ): AsyncGenerator<[PathSpec, string]> {
   if ((await vfs.stat(root)).type === FileType.FILE) {
     yield [root, shown]
     return
   }
-  type Layers = readonly (readonly [string, IgnoreRules])[]
-  async function ignores(
-    folder: PathSpec,
-    prior: Layers,
-    repo: boolean,
-  ): Promise<[Layers, boolean]> {
-    const paths: string[] = []
-    if (await vfs.exists(folder.join('.git'))) {
-      repo = true
-      paths.push('.git/info/exclude')
-    }
-    if (repo) paths.push('.gitignore')
-    paths.push('.ignore')
-    let layers = prior
-    for (const name of paths) {
-      const file = folder.join(name)
-      if (await vfs.isFile(file)) {
-        const text = new TextDecoder().decode(await read(vfs, file, maxMemory))
-        layers = [...layers, [folder.virtual, new IgnoreRules(text.split(/\r?\n/))]]
-      }
-    }
-    return [layers, repo]
-  }
-  const ancestors: PathSpec[] = []
-  for (let folder = root; folder.virtual !== '/';) {
-    folder = folder.parent
-    ancestors.push(folder)
-  }
-  let inherited: Layers = []
-  let repository = false
-  for (const folder of ancestors.reverse())
-    [inherited, repository] = await ignores(folder, inherited, repository)
-  const pending: [PathSpec, string, Layers, boolean][] = [[root, shown, inherited, repository]]
+  const pending: [PathSpec, string, IgnoreStack][] = [
+    [root, shown, await rootStack(root.virtual, walk.sources, walk.reader)],
+  ]
   while (pending.length) {
     const entry = pending.pop()
     if (!entry) break
-    const [path, display, layers, repo] = entry
+    const [path, display, stack] = entry
     const stat = await vfs.stat(path, undefined, { nofollow: path !== root })
     const isDir = stat.type === FileType.DIRECTORY
     if (path !== root) {
       let verdict = globs.verdict(walkCandidate(display, cwd.virtual), isDir)
-      for (let i = layers.length - 1; i >= 0 && verdict === Verdict.NONE; i--) {
-        const layer = layers[i]
-        if (!layer) continue
-        const [prefix, rules] = layer
-        verdict = rules.verdict(path.virtual.slice(prefix.replace(/\/$/, '').length + 1), isDir)
-      }
+      if (verdict === Verdict.NONE) verdict = stack.verdict(path.virtual, isDir)
       if (
         verdict === Verdict.IGNORE ||
-        (verdict === Verdict.NONE && path.virtual.split('/').pop()?.startsWith('.'))
+        (verdict === Verdict.NONE && !walk.hidden && path.virtual.split('/').pop()?.startsWith('.'))
       )
         continue
     }
@@ -145,18 +246,20 @@ async function* files(
       const limit = budget.listingLimit(path.virtual)
       const [children] = await vfs.dispatch('readdir', path, [], limit === null ? {} : { limit })
       const selected: [PathSpec, string][] = []
+      const names = new Set<string>()
       for (const child of children as string[]) {
         if (!budget.spend(path.virtual)) break
         const name = rstripSlash(child).split('/').pop() ?? ''
+        names.add(name)
         selected.push([
           PathSpec.fromStrPath(child),
           display ? display.replace(/\/$/, '') + '/' + name : name,
         ])
       }
       if (!budget.stopped.length) {
-        const [childLayers, childRepo] = await ignores(path, layers, repo)
-        for (const [child, shown] of selected.reverse())
-          pending.push([child, shown, childLayers, childRepo])
+        const own = await dirRules(path.virtual, names, walk.sources, walk.reader)
+        const below = own === null ? stack : stack.within(own)
+        for (const [child, shown] of selected.reverse()) pending.push([child, shown, below])
       }
     }
     const stopped = budget.stopped[0]
@@ -220,7 +323,7 @@ async function loadRules(
       new WalkBudget(root, mounts),
       cwd,
       new Overrides([], [], false),
-      maxMemory,
+      walkOf(new Set(['parent']), vfs, maxMemory),
     )) {
       if (!/\.ya?ml$/.test(path.virtual)) continue
       const data = await read(vfs, path, maxMemory)
@@ -294,6 +397,7 @@ async function execute(
       throw new UsageError('ast-grep: --files-with-matches conflicts with --rewrite')
   }
   const globs = new Overrides(fl.asList('globs'), [], false)
+  const walk = walkOf(new Set(fl.asList('no_ignore')), vfs, maxMemory)
   const roots = paths.length ? paths : [ctx.cwd]
   let directory = false
   if (!stdin)
@@ -301,7 +405,8 @@ async function execute(
       if ((await vfs.stat(root)).type === FileType.DIRECTORY) {
         directory = true
         await beforeFullWalk(dispatchOf(ctx), root, 'ast-grep')
-      }
+      } else if (!language && UNBUNDLED_EXTENSIONS.has(extensionOf(root.virtual)))
+        throw new UsageError(`ast-grep: unsupported language: ${extensionOf(root.virtual)}`)
   const options = {
     verb,
     pattern,
@@ -315,6 +420,8 @@ async function execute(
     filter: verb === 'outline' ? (fl.asStr('match') ?? null) : null,
     symbol: verb === 'outline' ? (fl.asStr('type') ?? null) : null,
     view: verb === 'outline' ? fl.asStr('view', 'auto') : 'auto',
+    items: verb === 'outline' ? (fl.asStr('items') ?? null) : null,
+    pub_members: verb === 'outline' && fl.asBool('pub_members'),
   }
   const chunks: Uint8Array[] = []
   let size = 0,
@@ -364,11 +471,19 @@ async function execute(
         new WalkBudget(root, mounts),
         ctx.cwd,
         globs,
-        maxMemory,
+        walk,
       )) {
-        const lang = EXTENSIONS.get(/\.([^./]+)$/.exec(path.virtual)?.[1] ?? '')
-        if (lang && (!language || lang === language))
-          await visit(await read(vfs, path, maxMemory), path, display, lang)
+        const lang =
+          path === root && language ? language : EXTENSIONS.get(extensionOf(path.virtual))
+        if (!lang || (language && lang !== language)) continue
+        const data = await read(vfs, path, maxMemory)
+        if (data.length)
+          await visit(
+            data,
+            path,
+            verb === 'outline' ? display : display.replace(/^(\.\/)+/, ''),
+            lang,
+          )
       }
     }
   if (verb === 'outline' && !size) append(new TextEncoder().encode('nothing found\n'))
@@ -409,6 +524,7 @@ export const AST_GREP = new CLI({
           new Argument('--files-with-matches', { action: 'store_true' }),
           LANG,
           STDIN,
+          NO_IGNORE,
           GLOBS,
           PATHS,
         ],
@@ -430,6 +546,7 @@ export const AST_GREP = new CLI({
           }),
           LANG,
           STDIN,
+          NO_IGNORE,
           GLOBS,
           PATHS,
         ],
@@ -440,12 +557,21 @@ export const AST_GREP = new CLI({
         arguments: [
           new Argument('--match', { help: 'Filter top-level items by regex' }),
           new Argument('--type', { help: 'Comma-separated symbol types' }),
+          new Argument('--items', {
+            choices: ['auto', 'structure', 'exports', 'imports', 'all'],
+            help: 'Top-level items to include',
+          }),
+          new Argument('--pub-members', {
+            action: 'store_true',
+            help: 'Show only public members',
+          }),
           new Argument('--view', {
             choices: ['auto', 'names', 'signatures', 'digest', 'expanded'],
             help: 'Outline presentation',
           }),
           LANG,
           STDIN,
+          NO_IGNORE,
           GLOBS,
           PATHS,
         ],

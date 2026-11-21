@@ -35,8 +35,17 @@ function refusal(
   return ioRefusal(rules, namingRules(rules, ctx), virtual, granted)
 }
 
-function reach(rules: AdmissionRules | null, ctx: CommandContext, virtual: string): boolean {
-  return ioReach(rules, namingRules(rules, ctx), virtual)
+function reach(
+  rules: AdmissionRules | null,
+  ctx: CommandContext,
+  virtual: string,
+  granted: readonly CommandRule[] = [],
+): boolean {
+  return ioReach(rules, namingRules(rules, ctx), virtual, granted)
+}
+
+function atOrUnder(virtual: string, root: string): boolean {
+  return virtual === root || root === '/' || virtual.startsWith(`${root.replace(/\/+$/, '')}/`)
 }
 
 describe('command trees over paths', () => {
@@ -135,6 +144,88 @@ describe('command trees over paths', () => {
     expect(refusal(rules, git, '/repo/private/s.txt')).toBe('private')
     expect(refusal(rules, git, '/repo/pub.txt')).toBeNull()
     expect(reach(rules, line(['grep', '-r', 'x', '/repo']), '/repo')).toBe(false)
+  })
+
+  it('ioReach skips an ask the line holds a grant for', () => {
+    const rules = trees({ rm: { decision: 'ask', paths: ['/data/*'] } })
+    const rm = line(['rm', '-rf', '/data'])
+    const nod = decide(rm, rules).asks
+    expect(reach(rules, rm, '/data')).toBe(true)
+    expect(reach(rules, rm, '/data', nod)).toBe(false)
+    expect(reach(rules, rm, '/data/sub', nod)).toBe(false)
+    const kept = trees({
+      rm: [
+        { decision: 'ask', paths: ['/data/*'] },
+        { decision: 'deny', paths: ['*.pem'] },
+      ],
+    })
+    const held = decide(rm, kept).asks
+    expect(held.length).toBeGreaterThan(0)
+    expect(reach(kept, rm, '/data', held)).toBe(true)
+    expect(reach(kept, rm, '/data/sub', held)).toBe(true)
+  })
+
+  it('ioReach covers every entry ioRefusal refuses below it', () => {
+    const universe = [
+      '/',
+      '/dir',
+      '/dir/a',
+      '/dir/a/x.pem',
+      '/dir/secret',
+      '/dir/secret/k.pem',
+      '/dir/secret/deep/k.txt',
+      '/dir2',
+      '/dir2/y.pem',
+      '/other/z.txt',
+    ]
+    const table: [
+      Record<string, unknown> | null,
+      Record<string, Record<string, unknown>>,
+      string,
+    ][] = [
+      [{ grep: { decision: 'ask', paths: ['/dir/*'] } }, {}, '/dir'],
+      [{ grep: { decision: 'ask', paths: ['*.pem'] } }, {}, '/dir'],
+      [
+        {
+          grep: [
+            { decision: 'ask', paths: ['/dir/*'] },
+            { decision: 'deny', paths: ['/dir/secret/*'] },
+          ],
+        },
+        {},
+        '/dir/a',
+      ],
+      [{ '*': 'deny', grep: { decision: 'ask', paths: ['/dir/**'] } }, {}, '/dir/a'],
+      [
+        {
+          grep: [
+            { decision: 'ask', paths: ['/dir/*'] },
+            { decision: 'deny', paths: ['*.pem'] },
+          ],
+        },
+        {},
+        '/dir',
+      ],
+      [{ grep: 'ask' }, { '/dir/secret': { grep: { decision: 'deny', paths: ['k.*'] } } }, '/dir'],
+      [{ grep: { decision: 'ask', paths: ['secret'] } }, { '/dir': { grep: 'ask' } }, '/'],
+      [{ '*': { decision: 'deny', paths: ['/dir2/*'] }, grep: 'allow' }, {}, '/dir'],
+    ]
+    let checks = 0
+    for (const [commands, mounts, operand] of table) {
+      const rules = trees(commands, mounts)
+      const ctx = line(['grep', '-r', 'x', operand])
+      const ruling = decide(ctx, rules)
+      expect(ruling.outcome).not.toBe(Outcome.DENY)
+      const granted = ruling.outcome === Outcome.ASK ? ruling.asks : []
+      const named = namingRules(rules, ctx)
+      const refused = universe.filter((p) => ioRefusal(rules, named, p, granted) !== null)
+      for (const root of universe.filter((u) => atOrUnder(u, operand))) {
+        checks += 1
+        if (ioReach(rules, named, root, granted)) continue
+        expect(refused.filter((p) => atOrUnder(p, root))).toEqual([])
+      }
+    }
+    expect(checks).toBeGreaterThan(0)
   })
 
   it('skippedAtDispatch names every tree', () => {

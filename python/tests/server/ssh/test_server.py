@@ -64,7 +64,7 @@ async def test_passwords_are_never_offered(ssh):
             pass
     assert (
         MirageSSHServer(
-            ssh.config.authorized_keys_file
+            ssh.registry, ssh.config.authorized_keys_file
         ).password_auth_supported()
         is False
     )

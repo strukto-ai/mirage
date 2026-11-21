@@ -49,7 +49,8 @@ import {
   CODEX_TERMINATED,
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
-import { newSessionId, openLogin, openSession, type ChannelRequest } from './session.ts'
+import { newSessionId, openLogin, openSession } from './login.ts'
+import type { ChannelRequest } from './types.ts'
 import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
 import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
@@ -897,9 +898,9 @@ export async function serveCodex(
   if (opened === null) return
   const [entry, sessionId] = opened
   const output = new ChannelOutput(channel, false)
-  const codex = new CodexChannel(registry, entry, sessionId, (text) =>
-    output.write(encoder.encode(text + '\n')),
-  )
+  const codex = new CodexChannel(registry, entry, sessionId, async (text) => {
+    await output.write(encoder.encode(text + '\n'))
+  })
   const input = new ChannelInput(channel, false, CODEX_MAX_MESSAGE)
   input.start()
   let status = 0

@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from mirage.commands.builtin.rg_filetypes import TypeChange, TypeSelection
+from mirage.commands.builtin.rg_glob import IgnoreSources
 
 _REPETITION = re.compile(r"\{[0-9]*(,[0-9]*)?\}")
 
@@ -35,7 +36,9 @@ class RgFlags:
     which also searches the files a walk would skip as binary. encoding is
     -E: auto, none, or the WHATWG name of the encoding a label named.
     regex_size_limit and dfa_size_limit are ripgrep's compile limits in
-    bytes, None for its own.
+    bytes, None for its own. ignore_sources is which ignore files the walk
+    reads, after --no-ignore and its kin. no_ignore_messages silences what
+    the ignore files say about themselves.
     """
 
     ignore_case: bool
@@ -80,6 +83,7 @@ class RgFlags:
     type_changes: tuple[TypeChange, ...]
     type_selections: tuple[TypeSelection, ...]
     hidden: bool
+    ignore_sources: IgnoreSources
     max_depth: int | None
     max_filesize: int | None
     follow: bool
@@ -89,6 +93,7 @@ class RgFlags:
     sort_reverse: bool
     no_messages: bool
     null_data: bool = False
+    no_ignore_messages: bool = False
     crlf: bool = False
     multiline: bool = False
     multiline_dotall: bool = False

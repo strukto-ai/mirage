@@ -57,16 +57,16 @@ export function toPathspec(path: string | PathSpec): PathSpec {
  * of the mount the readdir is bound to.
  */
 export function mountParentReaddir(
-  readdir: (p: string) => Promise<string[]>,
+  readdir: (p: string, limit?: number) => Promise<string[]>,
   mounts: MountView | null | undefined,
   home: string,
-): (p: string) => Promise<string[]> {
+): (p: string, limit?: number) => Promise<string[]> {
   if (mounts === undefined || mounts === null) return readdir
-  return async (p: string) => {
+  return async (p: string, limit?: number) => {
     const below = mounts.descendants(home === '' ? '/' : home)
     if (below.some((root) => p === root || p.startsWith(rstripSlash(root) + '/'))) return []
     try {
-      return await readdir(p)
+      return await (limit === undefined ? readdir(p) : readdir(p, limit))
     } catch (e) {
       if (!isMissError(e)) throw e
       if (mounts.visibleDescendants(p).length === 0) throw e

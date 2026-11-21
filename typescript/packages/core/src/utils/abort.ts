@@ -39,13 +39,29 @@ export function hasAborted(signal?: AbortSignal): boolean {
   return signal?.aborted === true
 }
 
+// One fold per pair of signals. A line folds the same two (its evaluation's and
+// its own) on every read and write it makes (`callerSignal`), and Node keeps
+// each signal AbortSignal.any made from a live source until that source goes,
+// so folding afresh each time held millions of them over one clone.
+const MERGED = new WeakMap<AbortSignal, WeakMap<AbortSignal, AbortSignal>>()
+
 /** Fold two optional abort signals into one; either aborting aborts. */
 export function mergeSignals(
   a: AbortSignal | null | undefined,
   b: AbortSignal | null | undefined,
 ): AbortSignal | undefined {
-  if (a != null && b != null && a !== b) return AbortSignal.any([a, b])
-  return a ?? b ?? undefined
+  if (a == null || b == null || a === b) return a ?? b ?? undefined
+  let folds = MERGED.get(a)
+  if (folds === undefined) {
+    folds = new WeakMap()
+    MERGED.set(a, folds)
+  }
+  let merged = folds.get(b)
+  if (merged === undefined) {
+    merged = AbortSignal.any([a, b])
+    folds.set(b, merged)
+  }
+  return merged
 }
 
 // `setTimeout` holds a 32-bit signed delay, so anything longer is not merely

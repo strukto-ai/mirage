@@ -77,7 +77,10 @@ function classSource(shown: string, text: string, i: number, fold = false): [str
     }
     first = false
     if (i + 2 < text.length && text[i + 1] === '-' && text[i + 2] !== ']') {
-      members.push(classPart(ch, text[i + 2] ?? '', fold))
+      const end = text[i + 2] ?? ''
+      if ((ch.codePointAt(0) ?? 0) > (end.codePointAt(0) ?? 0))
+        throw globError(shown, `invalid range; '${ch}' > '${end}'`)
+      members.push(classPart(ch, end, fold))
       i += 3
       continue
     }
@@ -249,13 +252,20 @@ export function overrideGlob(line: string, caseInsensitive: boolean): OverrideGl
  * keeping it whatever the type and hidden filters would say. Once any plain
  * glob exists, a file no glob matches is dropped, while a directory no glob
  * matches is still walked. `iglobs` come after every `-g`, whatever order
- * the line gave them.
+ * the line gave them. `root` is where an anchored glob starts, cut off each
+ * path as the ignore crate cuts a matcher's root: fd roots `-E` at its first
+ * search path; empty for ripgrep, whose paths already start at the cwd.
  */
 export class Overrides {
   private readonly globs: readonly OverrideGlob[]
   private readonly keeps: boolean
 
-  constructor(globs: readonly string[], iglobs: readonly string[], caseInsensitive: boolean) {
+  constructor(
+    globs: readonly string[],
+    iglobs: readonly string[],
+    caseInsensitive: boolean,
+    private readonly root = '',
+  ) {
     const parsed = [
       ...globs.map((g) => overrideGlob(g, caseInsensitive)),
       ...iglobs.map((g) => overrideGlob(g, true)),
@@ -267,28 +277,53 @@ export class Overrides {
   // What the globs say about one walked path (`walkCandidate`'s form).
   verdict(path: string, isDir: boolean): Verdict {
     if (this.globs.length === 0) return Verdict.NONE
+    const candidate = stripped(path, this.root)
     for (let i = this.globs.length - 1; i >= 0; i--) {
       const glob = this.globs[i]
       if (glob === undefined || (glob.dirOnly && !isDir)) continue
-      if (glob.matcher.test(path)) return glob.keep ? Verdict.WHITELIST : Verdict.IGNORE
+      if (glob.matcher.test(candidate)) return glob.keep ? Verdict.WHITELIST : Verdict.IGNORE
     }
     if (this.keeps && !isDir) return Verdict.IGNORE
     return Verdict.NONE
   }
 }
 
+// `path` with `root` cut off its front as the ignore crate's `strip` cuts
+// it: byte for byte, never off a bare file name, and not at all for an
+// empty or `.` root. Mirrors Python's _stripped.
+function stripped(path: string, root: string): string {
+  if (root === '' || root === '.' || !path.includes('/') || !path.startsWith(root)) return path
+  const rest = path.slice(root.length)
+  return rest.startsWith('/') ? rest.slice(1) : rest
+}
+
 /**
  * --ignore-file's rules: gitignore lines rooted at the working directory, the
  * last one that matches a walked path deciding it, a plain one ignoring it and
- * a `!` one keeping it. Mirrors Python's IgnoreRules.
+ * a `!` one keeping it. A line whose glob does not compile is left out and
+ * kept in `errors`, as the ignore crate keeps the rest of the file. Mirrors
+ * Python's IgnoreRules.
  */
 export class IgnoreRules {
   private readonly globs: readonly OverrideGlob[]
+  readonly errors: readonly string[]
 
   constructor(lines: readonly string[] = []) {
-    this.globs = lines
-      .map((line) => overrideGlob(line, false))
-      .filter((g): g is OverrideGlob => g !== null)
+    const globs: OverrideGlob[] = []
+    const errors: string[] = []
+    lines.forEach((line, index) => {
+      let glob: OverrideGlob | null
+      try {
+        glob = overrideGlob(line, false)
+      } catch (error) {
+        if (!(error instanceof UsageError)) throw error
+        errors.push(`line ${String(index + 1)}: ${error.message.replace(/^rg: /, '')}`)
+        return
+      }
+      if (glob !== null) globs.push(glob)
+    })
+    this.globs = globs
+    this.errors = errors
   }
 
   /** Whether the files held no rule. */
@@ -303,6 +338,105 @@ export class IgnoreRules {
       if (glob === undefined || (glob.dirOnly && !isDir)) continue
       if (glob.matcher.test(path)) return glob.keep ? Verdict.IGNORE : Verdict.WHITELIST
     }
+    return Verdict.NONE
+  }
+}
+
+/**
+ * Which ignore files a walk reads, as the ignore crate's builder sets them:
+ * `vcs` the `.gitignore` files and `exclude` the repository's
+ * `.git/info/exclude`, both only inside a git repository unless `requireGit`
+ * is off; `dot` the `.ignore` files and `custom` the tool's own file
+ * (`.rgignore`, `.fdignore`); `parents` the files in the directories above
+ * the walk's root. `bom` drops a byte order mark opening a file, as the
+ * ignore crate has since ripgrep 14.1.1 shipped (ast-grep 0.51.3 does).
+ */
+export interface IgnoreSources {
+  readonly vcs: boolean
+  readonly exclude: boolean
+  readonly dot: boolean
+  readonly custom: string | null
+  readonly parents: boolean
+  readonly requireGit: boolean
+  readonly bom: boolean
+}
+
+/**
+ * An ignore file's lines as the ignore crate reads them: split at LF, a CR
+ * before it dropped, the file ending at its first line that is not UTF-8.
+ * `bom` drops a byte order mark opening the first line. Mirrors Python's
+ * ignore_lines.
+ */
+export function ignoreLines(data: Uint8Array, bom: boolean): string[] {
+  const strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+  const lines: string[] = []
+  for (let start = 0; start < data.length;) {
+    const newline = data.indexOf(10, start)
+    let end = newline === -1 ? data.length : newline
+    if (newline !== -1 && end > start && data[end - 1] === 13) end--
+    let line: string
+    try {
+      line = strict.decode(data.subarray(start, end))
+    } catch (error) {
+      if (error instanceof TypeError) break
+      throw error
+    }
+    lines.push(lines.length === 0 && bom ? line.replace(/^\uFEFF+/, '') : line)
+    start = newline === -1 ? data.length : newline + 1
+  }
+  return lines
+}
+
+/** One walked directory's ignore files, each null when absent or off. */
+export interface DirRules {
+  readonly dir: string
+  readonly hasGit: boolean
+  readonly custom: IgnoreRules | null
+  readonly dot: IgnoreRules | null
+  readonly git: IgnoreRules | null
+  readonly exclude: IgnoreRules | null
+}
+
+/**
+ * The ignore files governing one directory of a walk, nearest directory
+ * first. The ignore crate's precedence: the tool's own file outranks
+ * `.ignore`, which outranks `.gitignore`, which outranks the repository's
+ * exclude file; within each kind the nearest directory with a matching line
+ * decides. `.gitignore` and exclude lines count only up to the repository's
+ * root, and only inside a repository unless `requireGit` is off.
+ */
+export class IgnoreStack {
+  constructor(
+    readonly sources: IgnoreSources,
+    readonly layers: readonly DirRules[] = [],
+  ) {}
+
+  /** The stack with `rules` as the nearest directory's files. */
+  within(rules: DirRules): IgnoreStack {
+    return new IgnoreStack(this.sources, [rules, ...this.layers])
+  }
+
+  /** What the ignore files say about a walked entry's virtual path. */
+  verdict(path: string, isDir: boolean): Verdict {
+    const anyGit = !this.sources.requireGit || this.layers.some((layer) => layer.hasGit)
+    let custom = Verdict.NONE
+    let dot = Verdict.NONE
+    let git = Verdict.NONE
+    let exclude = Verdict.NONE
+    let sawGit = false
+    for (const layer of this.layers) {
+      const base = layer.dir === '/' ? '/' : `${layer.dir}/`
+      if (!path.startsWith(base)) continue
+      const rel = path.slice(base.length)
+      if (custom === Verdict.NONE && layer.custom) custom = layer.custom.verdict(rel, isDir)
+      if (dot === Verdict.NONE && layer.dot) dot = layer.dot.verdict(rel, isDir)
+      if (anyGit && !sawGit) {
+        if (git === Verdict.NONE && layer.git) git = layer.git.verdict(rel, isDir)
+        if (exclude === Verdict.NONE && layer.exclude) exclude = layer.exclude.verdict(rel, isDir)
+      }
+      sawGit ||= layer.hasGit
+    }
+    for (const said of [custom, dot, git, exclude]) if (said !== Verdict.NONE) return said
     return Verdict.NONE
   }
 }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec, Argument } from '../types.ts'
+import { CommandSpec, Argument, UsageStyle } from '../types.ts'
 import { PATHS_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
@@ -384,6 +384,53 @@ export const SPECS: Record<string, CommandSpec> = {
       PATHS_OPERAND,
     ],
     allowAbbrev: false,
+  }),
+  // fd 10.2.0: clap takes a long flag only as spelled, the later of -s and
+  // -i, -g and --regex, -1 and --max-results wins, and each -x/-X takes the
+  // rest of the line up to a lone `;`; fd's generic refuses the pairs clap
+  // does. Mirage writes no colors, so --color is accepted and plain.
+  fd: new CommandSpec({
+    arguments: [
+      new Argument(['-H', '--hidden'], { action: 'store_true' }),
+      new Argument(['-I', '--no-ignore'], { action: 'store_true' }),
+      new Argument('--no-ignore-vcs', { action: 'store_true' }),
+      new Argument('--no-ignore-parent', { action: 'store_true' }),
+      new Argument('--no-require-git', { action: 'store_true' }),
+      new Argument(['-u', '--unrestricted'], { action: 'count' }),
+      new Argument(['-s', '--case-sensitive'], { action: 'store_true' }),
+      new Argument(['-i', '--ignore-case'], { action: 'store_true' }),
+      new Argument(['-g', '--glob'], { action: 'store_true' }),
+      new Argument('--regex', { action: 'store_true' }),
+      new Argument(['-F', '--fixed-strings'], { action: 'store_true' }),
+      new Argument(['-a', '--absolute-path'], { action: 'store_true' }),
+      new Argument(['-L', '--follow'], { action: 'store_true' }),
+      new Argument(['-p', '--full-path'], { action: 'store_true' }),
+      new Argument(['-0', '--print0'], { action: 'store_true' }),
+      new Argument(['-d', '--max-depth'], { metavar: 'depth' }),
+      new Argument('--min-depth', { metavar: 'depth' }),
+      new Argument('--exact-depth', { metavar: 'depth' }),
+      new Argument(['-E', '--exclude'], { action: 'append', metavar: 'pattern' }),
+      new Argument(['-t', '--type'], { action: 'append', metavar: 'filetype' }),
+      new Argument(['-e', '--extension'], { action: 'append', metavar: 'ext' }),
+      new Argument(['-x', '--exec'], { nargs: 'REMAINDER', metavar: 'cmd' }),
+      new Argument(['-X', '--exec-batch'], { nargs: 'REMAINDER', metavar: 'cmd' }),
+      new Argument('--ignore-file', { type: 'path', action: 'append', metavar: 'path' }),
+      new Argument(['-c', '--color'], { choices: ['auto', 'always', 'never'], metavar: 'when' }),
+      new Argument(['-j', '--threads'], { metavar: 'num' }),
+      new Argument('--max-results', { metavar: 'count' }),
+      new Argument('-1', { action: 'store_true' }),
+      new Argument(['-q', '--quiet'], { action: 'store_true' }),
+      new Argument('--strip-cwd-prefix', {
+        nargs: '?',
+        attachedOnly: true,
+        choices: ['auto', 'always', 'never'],
+        metavar: 'when',
+      }),
+      new Argument('text', { nargs: '?', metavar: 'pattern' }),
+      new Argument('paths', { type: 'path', nargs: '*', metavar: 'path' }),
+    ],
+    allowAbbrev: false,
+    usageStyle: UsageStyle.CLAP,
   }),
   // The long options stand in sed 4.9's table order, which is the order an
   // ambiguous prefix lists them in (`--s`: --silent, --sandbox, --separate).

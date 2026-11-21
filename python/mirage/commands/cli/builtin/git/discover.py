@@ -206,6 +206,19 @@ async def discover(
             # directory is there.
             await _enter(vfs, start)
             first = False
+        # A directory that is itself a bare repository, as ``git init
+        # --bare`` and ``git clone --bare`` leave one, is taken after the
+        # ``.git`` git looks for first. One whose core.bare is unset or
+        # false is a checkout's ``.git``, found from the checkout above.
+        head = await stat_of(vfs, current.join("HEAD"))
+        if head is not None and head.type is FileType.FILE:
+            common = await _validated(vfs, current)
+            if common is not None:
+                found = await _location(
+                    vfs, current, common, current, worktree, root
+                )
+                if await is_bare(vfs, found):
+                    return found
         if current.virtual == root.virtual or current.virtual == "/":
             raise NotARepositoryError()
         current = current.parent

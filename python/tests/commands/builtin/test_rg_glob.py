@@ -15,9 +15,14 @@
 import pytest
 
 from mirage.commands.builtin.rg_glob import (
+    DirRules,
+    IgnoreRules,
+    IgnoreSources,
+    IgnoreStack,
     Overrides,
     Verdict,
     compile_glob,
+    ignore_lines,
     override_glob,
     walk_candidate,
 )
@@ -207,3 +212,96 @@ def test_walk_candidate_matches_from_the_working_directory(
     shown, cwd, candidate
 ):
     assert walk_candidate(shown, cwd) == candidate
+
+
+@pytest.mark.parametrize(
+    "data, bom, lines",
+    [
+        (b"a\r\nb\n", False, ["a", "b"]),
+        (b"a\nb\r", False, ["a", "b\r"]),
+        (b"one\n\xff\ntwo\n", False, ["one"]),
+        (b"\xef\xbb\xbfa\n", True, ["a"]),
+        (b"\xef\xbb\xbfa\n", False, ["\ufeffa"]),
+        (b"", True, []),
+    ],
+)
+def test_ignore_lines_read_as_the_ignore_crate_reads_them(data, bom, lines):
+    assert ignore_lines(data, bom) == lines
+
+
+def _sources(**changes: bool) -> IgnoreSources:
+    base = dict(
+        vcs=True,
+        exclude=True,
+        dot=True,
+        custom=".rgignore",
+        parents=True,
+        require_git=True,
+        bom=False,
+    )
+    base.update(changes)
+    return IgnoreSources(**base)
+
+
+def _rules(dir_: str, has_git: bool = False, **files: list[str]) -> DirRules:
+    def of(name: str) -> IgnoreRules | None:
+        return IgnoreRules(files[name]) if name in files else None
+
+    return DirRules(
+        dir_, has_git, of("custom"), of("dot"), of("git"), of("exclude")
+    )
+
+
+def test_ignore_stack_ranks_by_kind_before_depth():
+    stack = (
+        IgnoreStack(_sources())
+        .within(_rules("/r", True, dot=["!keep.ts"]))
+        .within(_rules("/r/sub", git=["keep.ts", "drop.ts"]))
+    )
+    assert stack.verdict("/r/sub/keep.ts", False) is Verdict.WHITELIST
+    assert stack.verdict("/r/sub/drop.ts", False) is Verdict.IGNORE
+    assert stack.verdict("/r/sub/plain.ts", False) is Verdict.NONE
+
+
+def test_ignore_stack_reads_git_files_only_inside_a_repository():
+    outside = IgnoreStack(_sources()).within(_rules("/r", git=["*.log"]))
+    assert outside.verdict("/r/a.log", False) is Verdict.NONE
+    unrequired = IgnoreStack(_sources(require_git=False)).within(
+        _rules("/r", git=["*.log"])
+    )
+    assert unrequired.verdict("/r/a.log", False) is Verdict.IGNORE
+    above = (
+        IgnoreStack(_sources())
+        .within(_rules("/", git=["*.log"]))
+        .within(_rules("/r", True))
+    )
+    assert above.verdict("/r/a.log", False) is Verdict.NONE
+
+
+def test_ignore_rules_keep_the_lines_around_one_that_does_not_compile():
+    rules = IgnoreRules(["[", "*.log", "# note", "{", "[z-a]", "[a-c]x"])
+    assert rules.verdict("a.log", False) is Verdict.IGNORE
+    assert rules.verdict("bx", False) is Verdict.IGNORE
+    assert rules.errors == (
+        "line 1: error parsing glob '[': unclosed character class; "
+        "missing ']'",
+        "line 4: error parsing glob '{': unclosed alternate group; "
+        "missing '}' (maybe escape '{' with '[{]'?)",
+        "line 5: error parsing glob '[z-a]': invalid range; 'z' > 'a'",
+    )
+
+
+@pytest.mark.parametrize(
+    "root, path, verdict",
+    [
+        ("data", "data/cache", Verdict.IGNORE),
+        ("src", "data/cache", Verdict.NONE),
+        ("", "cache", Verdict.IGNORE),
+        (".", "data/cache", Verdict.NONE),
+        ("data", "cache", Verdict.IGNORE),
+    ],
+)
+def test_overrides_anchor_a_glob_at_their_root(root, path, verdict):
+    assert (
+        Overrides(["!/cache"], [], False, root).verdict(path, True) is verdict
+    )

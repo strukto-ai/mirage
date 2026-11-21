@@ -189,7 +189,7 @@ export class Admitted implements EntryGate {
   // running command: a rule in force at any path its scope could cover.
   // The dispatcher checks coded file policies separately.
   scopes(virtual: string): boolean {
-    return this.rules !== null && ioReach(this.rules, this.named(), virtual)
+    return this.rules !== null && ioReach(this.rules, this.named(), virtual, this.granted)
   }
 
   // The command's walk through the trees (`namingRules`), asked on the

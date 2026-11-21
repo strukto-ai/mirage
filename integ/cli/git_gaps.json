@@ -2353,10 +2353,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "(cd /repo/.git; git rev-parse --is-inside-git-dir --is-inside-work-tree --is-bare-repository --show-cdup --show-prefix --absolute-git-dir --git-common-dir --git-dir --git-path HEAD; cd refs; git rev-parse --git-dir --git-common-dir --git-path HEAD --show-cdup)",
+      "command": "(cd /repo/.git; git rev-parse --is-inside-git-dir --is-inside-work-tree --is-bare-repository --show-cdup --show-prefix --absolute-git-dir --git-common-dir --git-dir --git-path HEAD; cd refs; git rev-parse --git-dir --git-common-dir --git-path HEAD --show-cdup); git init -q --bare /repo/bare.git && git -C /repo/bare.git rev-parse --is-bare-repository --is-inside-git-dir --is-inside-work-tree --git-dir && git -C /repo/bare.git/refs rev-parse --is-bare-repository --git-dir --show-prefix; echo rc=$?; rm -rf /repo/bare.git",
       "expect": {
         "exit": 0,
-        "stdout": "true\nfalse\nfalse\n\n/repo/.git\n.\n.\nHEAD\n/repo/.git\n/repo/.git\n/repo/.git/HEAD\n",
+        "stdout": "true\nfalse\nfalse\n\n/repo/.git\n.\n.\nHEAD\n/repo/.git\n/repo/.git\n/repo/.git/HEAD\ntrue\ntrue\nfalse\n.\ntrue\n/repo/bare.git\n\nrc=0\n",
         "stderr": ""
       }
     },

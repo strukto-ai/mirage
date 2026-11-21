@@ -33,6 +33,8 @@ from mirage.policy import (
     CommandContext,
     CommandExplanation,
     Deny,
+    HandOff,
+    Policies,
     Policy,
     Route,
     ShellNode,
@@ -52,7 +54,13 @@ from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.node.explain import Judgment, JudgmentMode, explain_line
+from mirage.workspace.node.explain import (
+    Judgment,
+    JudgmentMode,
+    explain_line,
+    line_judgments,
+    may_prejudge,
+)
 from mirage.workspace.session.state import seed_var, set_attr
 
 
@@ -3177,5 +3185,124 @@ async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
             Outcome.DENY,
             ran.decision.reason,
         )
+    finally:
+        await ws.close()
+
+
+PREJUDGED = [
+    ("rm /m/x", False),
+    ("echo a > /m/log", False),
+    ("rm /m/x 2>&1", False),
+    ("echo a; rm /m/x", True),
+    ("echo a && rm /m/x", True),
+    ("cat /m/x | rm /m/y", True),
+    ("eval 'rm /m/x'", True),
+    ("eval 'echo a > /m/log; rm /m/x'", True),
+    ("sh -c 'rm /m/x'", True),
+    ("sh -c 'echo a; rm /m/x'", True),
+    ("env rm /m/x", True),
+    ("command rm /m/x", True),
+    ("X=1 rm /m/x", False),
+    ("! rm /m/x", False),
+    ("if true; then rm /m/x; fi", True),
+    ("for i in 1 2; do rm /m/f$i; done", False),
+    ("( echo a; rm /m/x )", True),
+    ("{ echo a; rm /m/x; }", True),
+    ("( rm /m/x )", False),
+    ("{ rm /m/x; }", False),
+    ("echo $(echo a; rm /m/x)", True),
+    ("echo $(rm /m/x)", True),
+    ("xargs rm", True),
+    ("echo /m/x | xargs rm", True),
+    ("find /m -name x -exec rm {} \\;", True),
+    ("find /m -name x", False),
+    ("twice", False),
+    ("time rm /m/x", False),
+    ("$CMD /m/x", False),
+]
+
+
+@pytest.mark.asyncio
+async def test_may_prejudge_is_false_only_where_the_pass_judges_under_two():
+    ws = Workspace({"/m": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("twice() { echo a > /m/log; rm /m/x; }")
+        session = ws.get_session(ws.default_session_id)
+        for line, two in PREJUDGED:
+            ast = parse(line)
+            may = may_prejudge(
+                ast, session, ws._registry, ws._namespace, HandOff()
+            )
+            judged = await line_judgments(
+                ast, session, ws._registry, ws._namespace, HandOff()
+            )
+            count = sum(len(explained) for _, explained in judged)
+            assert (may, count >= 2) == (two, two), line
+    finally:
+        await ws.close()
+
+
+DENY_RM = {"commands": {"rm": {"decision": "deny", "reason": "no rm"}}}
+
+
+@pytest.mark.asyncio
+async def test_a_one_command_line_is_refused_by_its_gate_alone(monkeypatch):
+    evaluated: list[str] = []
+    evaluate = Policies._evaluate
+
+    async def counted(self, method, *args, **kwargs):
+        evaluated.append(method)
+        return await evaluate(self, method, *args, **kwargs)
+
+    monkeypatch.setattr(Policies, "_evaluate", counted)
+    vfs = RAMVFS()
+    vfs._store.files["/x"] = b"x\n"
+    ws = Workspace(
+        {"/m": vfs},
+        mode=MountMode.WRITE,
+        profiles={"p": DENY_RM},
+        profile="p",
+    )
+    try:
+        held = await ws.shell("echo a > /m/log && rm /m/x")
+        assert (held.exit_code, held.stderr) == (
+            126,
+            b"rm: Permission denied\n",
+        )
+        assert sorted(vfs._store.files) == ["/x"]
+        evaluated.clear()
+        ran = await ws.shell("rm /m/x")
+        assert (ran.exit_code, ran.stderr) == (
+            126,
+            b"rm: Permission denied\n",
+        )
+        assert evaluated.count("pre_command") == 1
+        assert sorted(vfs._store.files) == ["/x"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_loop_of_one_command_asks_at_each_gate():
+    asked: list[str] = []
+    vfs = RAMVFS()
+    vfs._store.files["/f1"] = b"1\n"
+    vfs._store.files["/f2"] = b"2\n"
+    ws = Workspace(
+        {"/m": vfs},
+        mode=MountMode.WRITE,
+        profiles={
+            "p": {
+                "commands": {"rm": {"decision": "ask", "reason": "confirm rm"}}
+            }
+        },
+        profile="p",
+        on_ask=_answering(asked, Outcome.ALLOW),
+    )
+    try:
+        ran = await ws.shell("for i in 1 2; do rm /m/f$i; done")
+        assert ran.exit_code == 0
+        assert len(asked) == 2
+        assert sorted(vfs._store.files) == []
     finally:
         await ws.close()

@@ -361,11 +361,13 @@ async def add(
     state = await read_index(vfs, location.gitdir)
     tracked = decoded(visible_entries(location, state.entries))
     start = start_point(fl).virtual
+    # ``-f`` walks ignored directories too, as git enters them for it.
     found = await scan(
         vfs,
         location,
         tracked,
         UNTRACKED_ALL,
+        parsed.force,
         roots=pattern_roots(
             (repo_relative(location, start, text) for text in texts),
             literal=True,
@@ -387,7 +389,11 @@ async def add(
         stage = scope & set(found.files)
         remove = scope - set(found.files)
     elif parsed.every and not texts:
-        stage = keep_addable(set(found.files), tracked, ignores)
+        stage = (
+            set(found.files)
+            if parsed.force
+            else keep_addable(set(found.files), tracked, ignores)
+        )
         remove = tracked - set(found.files)
     else:
         stage, remove = await _resolve(

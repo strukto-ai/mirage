@@ -38,7 +38,7 @@ from mirage.commands.builtin.generic_bind.files import ReadAhead
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.rs.diff_types import DiffComputer
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.types import CheckFn, PathSpec
 from mirage.utils.ids import IdSource
 from mirage.view.types import SessionView
@@ -61,6 +61,7 @@ async def run_relay(
     check_unlink: CheckFn | None = None,
     diff: DiffComputer | None = None,
     ids: IdSource | None = None,
+    shell: ShellFn | None = None,
 ) -> CrossResult:
     """Run a command whose work must see every operand at once.
 
@@ -98,6 +99,8 @@ async def run_relay(
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
         check_unlink (CheckFn | None): Refuses a move's source whose
             mount cannot condition the delete (mv).
+        shell (ShellFn | None): runs a nested line in the session, for a
+            generic that runs commands of its own (fd -x).
     """
     if cmd_name not in RELAY_COMMANDS:
         raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")
@@ -197,5 +200,6 @@ async def run_relay(
             argv,
             diff=diff,
             ids=ids,
+            shell=shell,
         )
     raise ValueError(f"No cross-mount composition for {cmd_name}")

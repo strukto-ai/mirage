@@ -207,7 +207,7 @@ class Admitted:
             virtual (str): absolute virtual path of a walk's start point.
         """
         return self.rules is not None and io_reach(
-            self.rules, self.named(), virtual
+            self.rules, self.named(), virtual, self.granted
         )
 
     def check(self, virtual: str) -> None:

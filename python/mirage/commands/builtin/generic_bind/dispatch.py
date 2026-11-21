@@ -35,7 +35,7 @@ from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.diff_types import DiffComputer
 from mirage.rs.find import FindExpr
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.types import FileType, PathSpec
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.view.types import FollowOperands
@@ -89,6 +89,7 @@ async def run_dispatch(
     ids: IdSource | None = None,
     find: FindExpr | None = None,
     env: dict[str, str] | None = None,
+    shell: ShellFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the same builder once across every operand's owning mount.
 
@@ -122,6 +123,7 @@ async def run_dispatch(
         find (FindExpr | None): find's parsed expression, which its
             builder reads in place of ``texts``.
         env (dict[str, str] | None): the command's environment.
+        shell (ShellFn | None): runs a nested line in the session.
     """
     ctx = Context(
         flags=virtual_flags(flag_kwargs),
@@ -133,6 +135,7 @@ async def run_dispatch(
         ids=ids if ids is not None else SystemIdSource(),
         find=find,
         env=env,
+        shell=shell,
     )
     # No mount is bound to the run, a line that spans mounts walking
     # through the dispatcher, even inside a command a mount runs (a

@@ -1,0 +1,83 @@
+---
+title: Antigravity SDK in Python
+sidebarTitle: Antigravity SDK
+description: Run Google's Antigravity SDK against a Mirage workspace, with Mirage's tools in place of the harness's own.
+icon: /images/google-logo.svg
+---
+
+The [Antigravity SDK](https://github.com/Google-Antigravity/antigravity-sdk-python) runs Gemini agents on Google's local harness. Mirage hands it a `Workspace` as tools, so every file and shell call the agent makes runs in the workspace, not on the host. To run the Antigravity app itself on a workspace, see [Antigravity](/home/agents/antigravity).
+
+## Install
+
+```bash
+uv add mirage-ai google-antigravity
+```
+
+The SDK needs protobuf 7, so it cannot share an environment with `mirage-ai[mem0]`.
+
+## Usage
+
+`build_config` returns a `LocalAgentConfig` that registers Mirage's tools, turns off the harness's own tools and subagents and adds a system prompt describing the mounts. Set `GEMINI_API_KEY`, then:
+
+```python
+import asyncio
+
+from google.antigravity import Agent
+
+from mirage import MountMode, RAMVFS, Workspace
+from mirage.agents.antigravity import build_config
+
+
+async def main() -> None:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        config = await build_config(ws)
+        async with Agent(config) as agent:
+            response = await agent.chat(
+                "Write 'hi from mirage' to /hello.txt, then cat it."
+            )
+            print(await response.text())
+    finally:
+        await ws.close()
+
+
+asyncio.run(main())
+```
+
+`build_config(ws, session_id="agent")` runs the tools as that session, under its profile. Create the session first with [`ws.session`](/python/access/in-app#workspace-methods). `system_prompt=` replaces Mirage's prompt, which the harness adds to its own instructions.
+
+## Tools
+
+The agent gets the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, only the ones the session's profile leaves it. A failed call comes back to the model as a tool error.
+
+Of the harness's own tools only `finish` stays, so the agent can still return structured output. Subagents are off, since a subagent would get the harness's file and shell tools back.
+
+## Other tools
+
+`mirage_tools` is the tools alone, to put next to other tools in a `LocalAgentConfig`:
+
+```python
+from google.antigravity import BuiltinTools, CapabilitiesConfig, LocalAgentConfig
+
+from mirage.agents.antigravity import build_system_prompt, mirage_tools
+
+config = LocalAgentConfig(
+    tools=[*mirage_tools(ws), lookup_ticket],
+    capabilities=CapabilitiesConfig(
+        enabled_tools=[BuiltinTools.FINISH, BuiltinTools.SEARCH_WEB],
+        enable_subagents=False,
+    ),
+    system_instructions=await build_system_prompt(workspace=ws),
+)
+```
+
+## Exports
+
+{/* generated: exports antigravity start */}
+| Symbol | Purpose |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>build_config</code> | Build a LocalAgentConfig backed by a Mirage Workspace. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage_tools</code> | Mirage's agent tools for an Antigravity agent, the ones the session's profile leaves it. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>build_system_prompt</code> | Build a system prompt with optional mount info and extra instructions. |
+{/* generated: exports antigravity end */}

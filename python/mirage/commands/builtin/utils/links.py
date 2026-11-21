@@ -168,15 +168,20 @@ class LinkResolver:
         stat, _ = await self.dispatch("stat", PathSpec.from_str_path(virtual))
         return stat
 
-    async def readdir(self, virtual: str) -> list[str]:
+    async def readdir(
+        self, virtual: str, limit: int | None = None
+    ) -> list[str]:
         """A directory's entries through the dispatcher, links among them.
 
         Args:
             virtual (str): the directory's virtual path, on any mount.
+            limit (int | None): how many entries the backend may stop at.
         """
-        entries, _ = await self.dispatch(
-            "readdir", PathSpec.from_str_path(virtual)
-        )
+        path = PathSpec.from_str_path(virtual)
+        if limit is None:
+            entries, _ = await self.dispatch("readdir", path)
+        else:
+            entries, _ = await self.dispatch("readdir", path, limit=limit)
         return list(entries)
 
     async def lstat(self, path: PathSpec) -> FileStat:

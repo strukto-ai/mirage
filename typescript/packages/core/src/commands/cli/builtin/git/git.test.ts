@@ -391,32 +391,41 @@ it.each([
   'log --all --format=%H',
   'show --stat --format=%s HEAD~1',
   'diff HEAD~2 HEAD~1',
-])('reads each pack and index once per invocation: %s', async (command) => {
-  const reads = new Map<string, number>()
-  const original = gitFsModule.gitFs
-  const spy = vi.spyOn(gitFsModule, 'gitFs').mockImplementation((vfs, location) =>
-    original(
-      new Files(async (op, path, args, kwargs) => {
-        if (op === 'read' && (path.virtual.endsWith('.pack') || path.virtual.endsWith('.idx'))) {
-          reads.set(path.virtual, (reads.get(path.virtual) ?? 0) + 1)
-        }
-        return vfs.dispatch(op, path, args, kwargs)
-      }),
-      location,
-    ),
-  )
-  try {
-    for (let invocation = 0; invocation < 2; invocation++) {
-      reads.clear()
-      expect(await run(command)).toEqual([0, realGit(command.split(' ')), ''])
-      expect([...reads.keys()].filter((path) => path.endsWith('.pack'))).toHaveLength(1)
-      expect([...reads.keys()].filter((path) => path.endsWith('.idx'))).toHaveLength(1)
-      expect([...reads.values()]).toEqual([1, 1])
+])(
+  'reads packs and indexes in ranges, each index header once per invocation: %s',
+  async (command) => {
+    const reads: { path: string; ranged: boolean; offset: unknown }[] = []
+    const original = gitFsModule.gitFs
+    const spy = vi.spyOn(gitFsModule, 'gitFs').mockImplementation((vfs, location) =>
+      original(
+        new Files(async (op, path, args, kwargs) => {
+          if (op === 'read' && (path.virtual.endsWith('.pack') || path.virtual.endsWith('.idx'))) {
+            reads.push({
+              path: path.virtual,
+              ranged: kwargs?.size !== undefined,
+              offset: kwargs?.offset,
+            })
+          }
+          return vfs.dispatch(op, path, args, kwargs)
+        }),
+        location,
+      ),
+    )
+    try {
+      for (let invocation = 0; invocation < 2; invocation++) {
+        reads.length = 0
+        expect(await run(command)).toEqual([0, realGit(command.split(' ')), ''])
+        expect(reads.length).toBeGreaterThan(0)
+        expect(reads.filter((read) => !read.ranged)).toEqual([])
+        expect(
+          reads.filter((read) => read.path.endsWith('.idx') && read.offset === 0),
+        ).toHaveLength(1)
+      }
+    } finally {
+      spy.mockRestore()
     }
-  } finally {
-    spy.mockRestore()
-  }
-})
+  },
+)
 
 describe('git log', () => {
   it('matches the real binary byte for byte', async () => {

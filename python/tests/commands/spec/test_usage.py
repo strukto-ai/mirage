@@ -4,10 +4,17 @@ from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.standard import help_page
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
+    clap_builtin,
+    clap_conflict,
+    clap_invalid_value,
+    clap_missing_value,
+    clap_shown,
+    clap_unknown_option,
     extra_operand_error,
     invalid_argument_error,
     invalid_float_error,
     invalid_int_error,
+    jaro,
     missing_operand_error,
     missing_required_error,
     missing_value_error,
@@ -683,3 +690,92 @@ def test_missing_operand_error_matches_gnu(cmd, last, argv, message, code):
     # (coreutils 9.7, diffutils 3.10).
     err = missing_operand_error(cmd, last, argv)
     assert (str(err), err.exit_code) == (message, code)
+
+
+@pytest.mark.parametrize(
+    "a, b, score",
+    [
+        ("foo", "follow", 0.833),
+        ("hid", "hidden", 0.833),
+        ("zzz", "hidden", 0.0),
+    ],
+)
+def test_jaro_ranks_clap_suggestions(a, b, score):
+    assert round(jaro(a, b), 3) == score
+
+
+@pytest.mark.parametrize(
+    "token, tip, usage",
+    [
+        (
+            "--hid",
+            "tip: a similar argument exists: '--hidden'",
+            "Usage: fd --hidden [pattern] [path]...",
+        ),
+        (
+            "--zzz",
+            "tip: to pass '--zzz' as a value, use '-- --zzz'",
+            "Usage: fd [OPTIONS] [pattern] [path]...",
+        ),
+        (
+            "Z",
+            "tip: to pass '-Z' as a value, use '-- -Z'",
+            "Usage: fd [OPTIONS] [pattern] [path]...",
+        ),
+    ],
+)
+def test_fd_refuses_an_unknown_option_in_clap_words(token, tip, usage):
+    stderr, code = clap_unknown_option("fd", token)
+    name = token if token.startswith("-") else f"-{token}"
+    assert stderr.decode() == (
+        f"error: unexpected argument '{name}' found\n\n  {tip}\n\n{usage}"
+        "\n\nFor more information, try '--help'.\n"
+    )
+    assert code == 2
+
+
+def test_fd_refuses_a_missing_or_unlisted_value_in_clap_words():
+    stderr, code = clap_missing_value("fd", "--max-depth")
+    assert stderr.decode() == (
+        "error: a value is required for '--max-depth <depth>' but none was "
+        "supplied\n\nFor more information, try '--help'.\n"
+    )
+    assert code == 2
+    stderr, _ = clap_invalid_value("fd", "-c", "bogus")
+    assert stderr.decode() == (
+        "error: invalid value 'bogus' for '--color <when>'\n"
+        "  [possible values: auto, always, never]\n\n"
+        "For more information, try '--help'.\n"
+    )
+    assert clap_builtin("fd", True) and not clap_builtin("fd", False)
+    assert not clap_builtin("rg", True)
+
+
+@pytest.mark.parametrize(
+    "name, shown",
+    [
+        ("unrestricted", "--unrestricted..."),
+        ("exec", "--exec <cmd>..."),
+        ("strip_cwd_prefix", "--strip-cwd-prefix[=<when>]"),
+        ("args_1", "-1"),
+        ("max_results", "--max-results <count>"),
+        ("paths", "[path]..."),
+    ],
+)
+def test_clap_names_an_argument_as_its_display_does(name, shown):
+    assert clap_shown("fd", name) == shown
+
+
+def test_clap_refuses_arguments_that_cannot_be_used_together():
+    assert clap_conflict(
+        "fd", "--quiet", ["--max-results <count>"], ["quiet", "text", "paths"]
+    ) == (
+        "the argument '--quiet' cannot be used with '--max-results <count>'"
+        "\n\nUsage: fd --quiet <pattern> <path>..."
+    )
+    assert clap_conflict(
+        "fd", "-1", ["--exec <cmd>...", "--list-details"], ["args_1"]
+    ) == (
+        "the argument '-1' cannot be used with:\n  --exec <cmd>...\n"
+        "  --list-details\n\nUsage: fd -1 [pattern] [path]..."
+    )

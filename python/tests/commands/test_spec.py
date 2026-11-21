@@ -257,6 +257,7 @@ def test_all_commands_have_specs():
         "file",
         "nl",
         "grep",
+        "fd",
         "rg",
         "sort",
         "uniq",

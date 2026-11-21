@@ -1277,6 +1277,50 @@ function isVerdict(expl: Judgment): boolean {
 }
 
 /**
+ * Whether `lineJudgments` may judge two commands of `root`, the least
+ * `prejudgeLine` refuses a line on. It walks the line as that pass does and
+ * stops at the second command; for a line with one, that command is judged
+ * once more only for the lines it runs (`eval`, `sh -c`, `env`, `xargs`,
+ * `find -exec`), read as the pass reads them. False means the pass would
+ * judge fewer than two commands, so a one-command line skips it and its
+ * command is judged once, by the per-command gate. True only sends the line
+ * through the pass, which counts again.
+ */
+export function mayPrejudge(
+  root: TSNodeLike,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  handed: HandOff,
+  reparse: (line: string) => TSNodeLike,
+): boolean {
+  const frame = rootFrame(root, handed.origin)
+  let only: Walked | null = null
+  for (const item of walkedLine(root, session, reparse, frame)) {
+    if (item.words[0]?.text === null) continue
+    if (only !== null) return true
+    only = item
+  }
+  if (only === null) return false
+  const { words, session: stands, lost = false, open = false } = only
+  const head = words[0]
+  if (head === undefined) return false
+  const name = wordValue(head)
+  if (runsFunction(name, stands, registry)) return false
+  const inners =
+    lost && !name.startsWith('/')
+      ? innerLines(name, words.slice(1))
+      : programLines(
+          words,
+          stands,
+          registry,
+          namespace === null ? null : namespace.sessionLinks(stands),
+          open,
+        )
+  return inners.some((inner) => innerReadable(inner))
+}
+
+/**
  * Every command of a line judged read-only, each with its place on the
  * line: the pass placement waits on (`lineHeld`) and `prejudgeLine`
  * refuses from, made once for both. `handed` is the line's hand-off,
@@ -1394,6 +1438,9 @@ export async function prejudgeLine(
   // already made them, so the policies are asked once.
   made: [Walked, Judged[]][] | null = null,
 ): Promise<Refused | null> {
+  if (made === null && !mayPrejudge(root, session, registry, namespace, handed, reparse)) {
+    return null
+  }
   const judged = made ?? (await lineJudgments(root, session, registry, namespace, handed, reparse))
   if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
   for (const [, explained] of judged) {

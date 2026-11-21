@@ -6,7 +6,7 @@ import { PLAIN_TRAITS, type Process, type ProcessRunner, type ProcessTraits } fr
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineName, type MachineResources, ProcessId } from '../types.ts'
-import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
+import { SIGCONT, SIGHUP, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 import { SignalStop } from '../../utils/abort.ts'
@@ -260,12 +260,20 @@ export class ProcessTable {
   /**
    * Request cancellation of every live runner whose parent is `pid` or
    * an ancestor further up, so grandchildren are reached after an
-   * intermediate runner has exited.
+   * intermediate runner has exited. A hangup stays in `pid`'s session: a
+   * runner `setsid` gave a session of its own (`leader`), and what it
+   * started, never takes it, as a terminal's hangup never reaches another
+   * session.
    *
    * @param signal what the stop stands for, as the parent's.
    */
   terminateChildren(pid: number, signal = 9): void {
-    for (const child of this.under(pid)) child.terminate(signal)
+    const own =
+      this.runners.get(pid)?.handle.record.leader ?? this.history.get(pid)?.record.leader ?? null
+    for (const child of this.under(pid)) {
+      if (signal === SIGHUP && (child.record.leader ?? null) !== own) continue
+      child.terminate(signal)
+    }
   }
 
   /**
@@ -594,14 +602,16 @@ export class ProcessTable {
   /**
    * Revoke the session's views and cancel its runners. A closed session's
    * ID can be reused and a replaced profile grants a new view, so neither
-   * may keep an entry point, or a runner admitted under the old grants.
+   * may keep an entry point, or a runner admitted under the old grants. A
+   * runner already stopping keeps the signal that stops it, so what a
+   * hangup stops ends as a hangup ends it, not killed as its session closes.
    */
   revokeSession(sessionId: string): void {
     this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1)
     for (const process of this.live()) {
       if (process.record.sessionId !== sessionId) continue
       process.revoked = true
-      process.terminate()
+      if (process.record.state !== 'stopping') process.terminate()
     }
   }
 

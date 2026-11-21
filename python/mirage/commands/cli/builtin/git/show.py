@@ -32,6 +32,7 @@ from mirage.commands.cli.builtin.git.dates import (
 )
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    changed_entries,
     commit_deltas,
     commit_entry,
     commit_output,
@@ -461,10 +462,13 @@ def _two_trees(
     parsed: DiffFlags,
     recursive: bool,
 ) -> list[Side]:
+    left, right = tree_id(repo, first), tree_id(repo, second)
+    if recursive:
+        return [changed_entries(repo, left, right, parsed.pathspecs)]
     return [
         (
-            entries(repo, tree_id(repo, first), recursive, parsed.pathspecs),
-            entries(repo, tree_id(repo, second), recursive, parsed.pathspecs),
+            entries(repo, left, recursive, parsed.pathspecs),
+            entries(repo, right, recursive, parsed.pathspecs),
         )
     ]
 
