@@ -73,6 +73,7 @@ UNGATED_SUBPATHS = (
     "./routes",
     "./registry",
     "./auth/middleware",
+    "./ssh/server",
 )
 
 # One pattern for every static form, because the first version of this gate

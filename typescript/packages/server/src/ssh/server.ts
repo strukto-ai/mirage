@@ -33,20 +33,17 @@ import {
   CODEX_SUBSYSTEM,
   KEEPALIVE_COUNT_MAX,
   KEEPALIVE_INTERVAL_SECONDS,
+  LOOPBACK_HOSTS,
   PROFILE_OPTION,
 } from './constants.ts'
 import { ENV_TRACE_CONTEXT } from '../env.ts'
 import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
-import {
-  handleChannel,
-  refuse,
-  type ChannelRequest,
-  type Endpoint,
-  type ShellChannel,
-} from './session.ts'
+import { serveForward } from './forward.ts'
+import { refuse } from './login.ts'
 import { serveSFTP } from './sftp.ts'
-import type { SSHListener } from './types.ts'
+import { handleChannel, type ShellChannel } from './shell.ts'
+import type { ChannelRequest, Endpoint, SSHListener } from './types.ts'
 
 /**
  * ssh2 is CommonJS, and Node's ESM loader names only the exports it can
@@ -213,6 +210,14 @@ function serveConnection(
   let username = ''
   let profile: readonly string[] = []
   let account: readonly string[] = []
+  // ssh2 holds a channel's close until its input is read out, so a line
+  // that reads none (a forward whose port has stopped reading) learns of
+  // the drop from the connection's own close.
+  const closed = new AbortController()
+  const gone = closed.signal
+  client.once('close', () => {
+    closed.abort()
+  })
   client.on('authentication', (ctx) => {
     void admit(ctx)
       .then((match) => {
@@ -229,6 +234,15 @@ function serveConnection(
       })
   })
   client.on('ready', () => {
+    // A forward to the loopback of the machine the login's lines run on
+    // runs as a line of its own (`serveForward`); any other host is refused.
+    client.on('tcpip', (accept, reject, info) => {
+      if (!LOOPBACK_HOSTS.has(info.destIP)) {
+        reject()
+        return
+      }
+      void serveForward(registry, { username, profile, account }, info.destPort, accept(), gone)
+    })
     client.on('session', (accept) => {
       const session = accept()
       let term: string | null = null
@@ -244,6 +258,7 @@ function serveConnection(
           env,
           peer,
           local,
+          gone,
         }
         void handleChannel(registry, channel, request, (s) => {
           shell = s
@@ -301,6 +316,7 @@ function serveConnection(
           env,
           peer,
           local,
+          gone,
         }
         void serveCodex(registry, channel, request)
       })

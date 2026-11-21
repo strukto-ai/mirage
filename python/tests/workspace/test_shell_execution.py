@@ -324,3 +324,62 @@ async def test_pipeline_streams_its_last_stage():
             assert event.data == b"ready\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_hangup_stops_a_sessions_line_with_sighup():
+    ws = Workspace({})
+    try:
+        ws.create_session("s1")
+        execution = await ws.shell(
+            "sleep 60; echo never", session_id="s1", stream=True
+        )
+        running = []
+        for _ in range(500):
+            running = [
+                p
+                for p in ws.process_table.live()
+                if p.record.session_id == "s1"
+            ]
+            if running:
+                break
+            await asyncio.sleep(0.01)
+        assert running
+        assert await ws.hangup("s1") == 1
+        with pytest.raises(MirageAbortError):
+            await execution.wait()
+        await execution.aclose()
+        assert {p.signal for p in running} == {1}
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_hangup_spares_a_child_setsid_moved_out_of_the_session():
+    ws = Workspace({})
+    try:
+        ws.create_session("s1")
+        execution = await ws.shell(
+            "setsid sleep 60 & sleep 61", session_id="s1", stream=True
+        )
+        line = "setsid sleep 60 & sleep 61"
+        jobs = {}
+        for _ in range(500):
+            jobs = {
+                p.record.command: p
+                for p in ws.process_table.live()
+                if p.record.session_id == "s1"
+            }
+            if set(jobs) == {line, "sleep 60"}:
+                break
+            await asyncio.sleep(0.01)
+        assert set(jobs) == {line, "sleep 60"}
+        assert await ws.hangup("s1") == 1
+        with pytest.raises(MirageAbortError):
+            await execution.wait()
+        await execution.aclose()
+        assert jobs[line].signal == 1
+        assert jobs["sleep 60"].signal is None
+        assert jobs["sleep 60"] in ws.process_table.live()
+    finally:
+        await ws.close()

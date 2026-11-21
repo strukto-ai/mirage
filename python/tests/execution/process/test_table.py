@@ -155,6 +155,33 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
 
 
 @pytest.mark.asyncio
+async def test_revoking_a_session_keeps_a_stopping_runners_signal():
+    processes = ProcessTable()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def run():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await release.wait()
+        return 0
+
+    process = processes.start(
+        session_id="a",
+        command="work",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    await entered.wait()
+    assert process.terminate(1)
+    processes.revoke_session("a")
+    release.set()
+    result = await process.join()
+    assert (result.exit, result.signal) == (129, 1)
+
+
+@pytest.mark.asyncio
 async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
     processes = ProcessTable()
     release = asyncio.Event()

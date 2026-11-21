@@ -561,6 +561,13 @@ TERM, then KILL a second later, to every process of that run, and gives up
 after 5 seconds if the machine stops answering. That needs `/bin/sh`, `tr`,
 `grep` and `/proc` on the machine.
 
+A dropped [SSH](/home/access/ssh) connection with a terminal sends `HUP`
+instead, then `CONT`, with no KILL after it: a process that ignores `HUP`
+keeps running. On Linux it reaches only the processes still in the run's
+session, so one that left with `setsid` keeps running too.
+Without a terminal the drop sends nothing until the run writes, as sshd's
+broken pipe would end it, and then sends the same `HUP`.
+
 <Warning>
   In TypeScript, a Daytona command keeps running after a timeout, and a
   Daytona sandbox has no timeout of its own, so it keeps billing. Use the

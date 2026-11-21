@@ -92,6 +92,109 @@ and `sshfs -o direct_io demo@mirage:/ ~/mnt/demo` all work. The CLI sends its
 token, your [`mirage login`](/home/access/cli#log-in) on a hosted server, and the
 login runs under the workspace's default profile.
 
+### In an app
+
+A workspace a FastAPI or Express app holds takes SSH the same way: add it
+to a registry, under the name logins use, and start the SSH server next to the
+app.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    from contextlib import asynccontextmanager
+    from pathlib import Path
+
+    from fastapi import FastAPI
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.server.registry import WorkspaceRegistry
+    from mirage.server.ssh.config import SSHConfig
+    from mirage.server.ssh.server import start_ssh_server
+
+    registry = WorkspaceRegistry()
+    registry.add(Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE), "demo")
+    keys = Path.home() / ".mirage" / "ssh"
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        ssh = await start_ssh_server(
+            registry,
+            SSHConfig(
+                port=2222,
+                host="127.0.0.1",
+                host_key_file=keys / "host_ed25519_key",
+                authorized_keys_file=keys / "authorized_keys",
+            ),
+        )
+        yield
+        ssh.close()
+        await ssh.wait_closed()
+
+
+    app = FastAPI(lifespan=lifespan)
+    ```
+
+    To carry SSH over the app's own port as well, mount
+    [`build_app()`](/python/access/server) in it, which serves the route
+    `mirage ssh-proxy` reaches.
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import { createServer } from 'node:http'
+    import { homedir } from 'node:os'
+    import { join } from 'node:path'
+    import express from 'express'
+    import { WebSocketServer, createWebSocketStream } from 'ws'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { WorkspaceRegistry } from '@struktoai/mirage-server/registry'
+    import { serveTunnel, startSSHServer } from '@struktoai/mirage-server/ssh/server'
+
+    const registry = new WorkspaceRegistry()
+    registry.add(new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE }), 'demo')
+    const keys = join(homedir(), '.mirage', 'ssh')
+    const config = {
+      port: 2222,
+      host: '127.0.0.1',
+      hostKeyFile: join(keys, 'host_ed25519_key'),
+      authorizedKeysFile: join(keys, 'authorized_keys'),
+    }
+    await startSSHServer(registry, config)
+
+    const app = express()
+    const server = createServer(app)
+    const sockets = new WebSocketServer({ noServer: true })
+    const token = process.env.APP_TOKEN
+    if (!token) throw new Error('set APP_TOKEN')
+    const allowed = (req) => req.headers.authorization === `Bearer ${token}`
+    server.on('upgrade', (req, socket, head) => {
+      const id = /^\/ssh\/([^/?]+)$/.exec(req.url ?? '')?.[1]
+      if (id === undefined || !allowed(req) || registry.visible(id, null) === null) {
+        socket.destroy()
+        return
+      }
+      sockets.handleUpgrade(req, socket, head, (ws) => {
+        const peer = { address: req.socket.remoteAddress ?? '', port: req.socket.remotePort ?? 0 }
+        const local = { address: req.socket.localAddress ?? '', port: req.socket.localPort ?? 0 }
+        void serveTunnel(registry, config, createWebSocketStream(ws), id, null, peer, local)
+      })
+    })
+    server.listen(3000, '127.0.0.1')
+    ```
+
+    `serveTunnel` carries SSH over the app's own port and admits the login
+    without a key, so the upgrade checks the request's credentials first
+    (`allowed`). A ProxyCommand that relays its stdin and stdout over the
+    WebSocket with those credentials connects to it.
+  </Tab>
+</Tabs>
+
+## Editors
+
+Cursor, VS Code and Antigravity open a workspace over SSH by installing their
+own server on a [machine](/home/setup/machine/overview) the workspace sends its
+lines to. [Editors over SSH](/home/agents/remote-ssh) sets it up.
+
 ## Auth (optional)
 
 In `local` and `token` mode, an authorized key opens every workspace under the
@@ -129,9 +232,16 @@ account's workspaces:
   - The session's profile and the mount modes apply as in any shell: a
     read-only mount refuses `sftp put`.
   - Output streams as the line prints it.
-  - Ctrl-C cancels the running line and sets `$?` to 130. A dropped connection
-    cancels it too.
+  - Ctrl-C cancels the running line and sets `$?` to 130.
+  - A dropped connection ends the line as sshd would. With a terminal it
+    hangs the line up with `SIGHUP`. Without one (`ssh -T`, as editors
+    connect), it sends nothing: the line runs on without input, and is hung
+    up the first time it writes. On a machine, a process that ignores
+    `SIGHUP` keeps running, and on Linux so does one that left the line's
+    session with `setsid`.
   - The server sends a keepalive every 15 seconds and closes a connection that
-    misses three, so a half-open one cancels its line as well.
-  - Nothing is forwarded: no ports, no agent, no X11.
+    misses three, so a half-open one hangs its line up as well.
+  - A port forward reaches `127.0.0.1` or `localhost` only, where the
+    session's lines run ([Editors](#editors)). Agents and X11 are never
+    forwarded.
 </Accordion>

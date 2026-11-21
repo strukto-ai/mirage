@@ -223,6 +223,23 @@ describe('wrapLine', () => {
   })
 })
 
+function stat(pid: number): string[] {
+  let text: string
+  try {
+    text = readFileSync(`/proc/${String(pid)}/stat`, 'utf8')
+  } catch {
+    return ['X']
+  }
+  return text
+    .slice(text.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/)
+}
+
+function ended(pid: number): boolean {
+  return ['Z', 'X'].includes(stat(pid)[0] ?? 'X')
+}
+
 // A run's program may ignore TERM, and the config may set a PATH that
 // holds no grep: the stop line still ends every process of the run.
 describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
@@ -261,6 +278,95 @@ describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
     },
     15_000,
   )
+
+  // A hangup reaches only what is still in the run's session, and nothing is
+  // killed after it: a setsid daemon and a child that ignores HUP keep
+  // running, as a dropped terminal leaves them.
+  it('spares what left the run, or ignores a hangup', async () => {
+    const tag = `${crypto.randomUUID().replaceAll('-', '')}:9`
+    const program = spawn(
+      '/bin/sh',
+      [
+        '-c',
+        "setsid sleep 300 & echo $!; (trap '' HUP; exec sleep 301) & echo $!; " +
+          'while :; do sleep 1; done',
+      ],
+      { env: { ...process.env, [PROCESS]: tag }, detached: true },
+    )
+    const left = await new Promise<number[]>((resolve) => {
+      let text = ''
+      program.stdout.on('data', (d: Buffer) => {
+        text += d.toString()
+        const pids = text.split('\n').filter(Boolean).map(Number)
+        if (pids.length >= 2) resolve(pids.slice(0, 2))
+      })
+    })
+    const ended = new Promise<string | null>((resolve) => {
+      program.once('exit', (_code, signal) => {
+        resolve(signal)
+      })
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const root = { pid: program.pid ?? 0, started: 0, exited: null }
+      const done = spawnSync('/bin/sh', ['-c', stopLine(tag, 1, root)], { timeout: 10_000 })
+      expect(done.status).toBe(0)
+      expect(await ended).toBe('SIGHUP')
+      for (const pid of left) expect(() => process.kill(pid, 0)).not.toThrow()
+    } finally {
+      spawnSync('/bin/sh', ['-c', stopLine(tag)], { timeout: 10_000 })
+      program.kill('SIGKILL')
+    }
+  }, 15_000)
+
+  // Once the run's program has exited, a hangup still spares what setsid
+  // moved out of the session, even once that session's leader has exited
+  // too (a zombie or reaped), and a stopped process is continued so the
+  // hangup ends it.
+  it('keeps to the session once the program is gone', async () => {
+    const tag = `${crypto.randomUUID().replaceAll('-', '')}:9`
+    const program = spawn(
+      '/bin/sh',
+      [
+        '-c',
+        'setsid sleep 300 & echo k $!; sleep 301 & echo h $!; sleep 302 & echo s $!; ' +
+          "setsid sh -c 'sleep 303 & echo o $!'; " +
+          'sh -c \'setsid sh -c "sleep 304 & echo z \\$!" & exec sleep 305\' &',
+      ],
+      { env: { ...process.env, [PROCESS]: tag }, detached: true },
+    )
+    const labelled = new Promise<Map<string, number>>((resolve) => {
+      let text = ''
+      program.stdout.on('data', (d: Buffer) => {
+        text += d.toString()
+        const lines = text.split('\n').slice(0, -1).filter(Boolean)
+        if (lines.length >= 5) {
+          resolve(new Map(lines.map((l) => [l.split(' ')[0] ?? '', Number(l.split(' ')[1])])))
+        }
+      })
+    })
+    const exited = new Promise((resolve) => program.once('exit', resolve))
+    const [pids] = await Promise.all([labelled, exited])
+    const pid = (label: string): number => pids.get(label) ?? 0
+    const leader = Number(stat(pid('z'))[3])
+    for (let i = 0; i < 50 && stat(leader)[0] !== 'Z'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    try {
+      expect(stat(leader)[0]).toBe('Z')
+      process.kill(pid('s'), 'SIGSTOP')
+      const root = { pid: program.pid ?? 0, started: 0, exited: null }
+      const done = spawnSync('/bin/sh', ['-c', stopLine(tag, 1, root)], { timeout: 10_000 })
+      expect(done.status).toBe(0)
+      for (let i = 0; i < 50 && !(ended(pid('h')) && ended(pid('s'))); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      expect(ended(pid('h')) && ended(pid('s'))).toBe(true)
+      expect(['k', 'o', 'z'].filter((label) => ended(pid(label)))).toEqual([])
+    } finally {
+      spawnSync('/bin/sh', ['-c', stopLine(tag)], { timeout: 10_000 })
+    }
+  }, 15_000)
 
   // A tag names one process: the stop line for w:9 leaves the run of w:90
   // running.

@@ -1,0 +1,205 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import asyncio
+import os
+import socket
+
+import asyncssh
+import pytest
+
+from mirage import RAMVFS, MountMode, Workspace
+from mirage.machine.handle import MachineHandle
+from mirage.machine.program import run_program
+from mirage.server.registry import WorkspaceRegistry
+from mirage.server.ssh.config import SSHConfig
+from mirage.server.ssh.server import serve_tunnel
+from tests.server.ssh.conftest import start_harness, stop_harness
+
+
+async def _echo(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    while data := await reader.read(1024):
+        writer.write(data)
+        await writer.drain()
+    writer.close()
+
+
+async def _upper(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    writer.write((await reader.read()).upper())
+    await writer.drain()
+    writer.close()
+
+
+async def _echo_server() -> asyncio.Server:
+    return await asyncio.start_server(_echo, "127.0.0.1", 0)
+
+
+class _Here(MachineHandle):
+    """A machine whose exec runs each argv on this host, as a provider's
+    exec runs it on its own."""
+
+    provider = "box"
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        return await run_program(
+            argv[0],
+            None,
+            list(argv[1:]),
+            stdin,
+            env={**os.environ, **env},
+            output=output,
+            errors=errors,
+        )
+
+
+def _line_machine_workspace() -> Workspace:
+    return Workspace(
+        {"/": (RAMVFS(), MountMode.EXEC)},
+        mode=MountMode.EXEC,
+        machines={"here": _Here("here", {"captures": ["@line"]})},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_forward_reaches_the_port_where_the_lines_run(tmp_path):
+    server = await _echo_server()
+    port = server.sockets[0].getsockname()[1]
+    harness = await start_harness(tmp_path, _line_machine_workspace())
+    try:
+        async with harness.connect() as conn:
+            reader, writer = await conn.open_connection("127.0.0.1", port)
+            writer.write(b"ping\n")
+            assert await asyncio.wait_for(reader.readline(), 30) == b"ping\n"
+            writer.close()
+    finally:
+        await stop_harness(harness)
+        server.close()
+
+
+@pytest.mark.asyncio
+async def test_a_forward_carries_the_answer_to_a_request_ended_by_eof(
+    tmp_path,
+):
+    server = await asyncio.start_server(_upper, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    harness = await start_harness(tmp_path, _line_machine_workspace())
+    try:
+        async with harness.connect() as conn:
+            reader, writer = await conn.open_connection("127.0.0.1", port)
+            writer.write(b"ping\n")
+            writer.write_eof()
+            assert await asyncio.wait_for(reader.read(), 30) == b"PING\n"
+            writer.close()
+    finally:
+        await stop_harness(harness)
+        server.close()
+
+
+def _ssh_sessions(harness) -> list[str]:
+    return [
+        s.session_id
+        for s in harness.entry.runner.ws.list_sessions()
+        if s.session_id.startswith("ssh_")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_forward_ends_with_a_dropped_connection_while_the_port_stalls(
+    tmp_path,
+):
+    held: list[asyncio.StreamWriter] = []
+
+    async def stall(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        writer.transport.pause_reading()
+        held.append(writer)
+
+    server = await asyncio.start_server(stall, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    harness = await start_harness(tmp_path, _line_machine_workspace())
+    try:
+        async with harness.connect() as conn:
+            _, writer = await conn.open_connection("127.0.0.1", port)
+            for _ in range(500):
+                if _ssh_sessions(harness):
+                    break
+                await asyncio.sleep(0.01)
+            assert len(_ssh_sessions(harness)) == 1
+            writer.write(b"a" * (8 * 1024 * 1024))
+            await asyncio.sleep(1)
+            conn.abort()
+        for _ in range(1000):
+            if not _ssh_sessions(harness):
+                break
+            await asyncio.sleep(0.01)
+        assert _ssh_sessions(harness) == []
+    finally:
+        for stalled in held:
+            stalled.close()
+        await stop_harness(harness)
+        server.close()
+
+
+@pytest.mark.asyncio
+async def test_a_forward_to_another_host_is_refused(ssh):
+    async with ssh.connect() as conn:
+        with pytest.raises(asyncssh.ChannelOpenError) as refused:
+            await conn.open_connection("example.com", 80)
+    assert refused.value.code == asyncssh.OPEN_ADMINISTRATIVELY_PROHIBITED
+
+
+@pytest.mark.asyncio
+async def test_a_forward_over_the_https_tunnel_reaches_the_port(tmp_path):
+    server = await _echo_server()
+    port = server.sockets[0].getsockname()[1]
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    registry.add(_line_machine_workspace(), "demo")
+    config = SSHConfig(
+        port=None,
+        host="127.0.0.1",
+        host_key_file=tmp_path / "host_key",
+        authorized_keys_file=tmp_path / "authorized_keys",
+    )
+    listener = socket.create_server(("127.0.0.1", 0))
+    theirs = socket.create_connection(listener.getsockname())
+    ours, _ = listener.accept()
+    listener.close()
+    try:
+        tunnel, conn = await asyncio.gather(
+            serve_tunnel(registry, config, ours, "demo", None),
+            asyncssh.connect(
+                sock=theirs,
+                username="demo",
+                known_hosts=None,
+                client_keys=None,
+            ),
+        )
+        async with conn:
+            reader, writer = await conn.open_connection("127.0.0.1", port)
+            writer.write(b"ping\n")
+            assert await asyncio.wait_for(reader.readline(), 30) == b"ping\n"
+            writer.close()
+        tunnel.close()
+        await tunnel.wait_closed()
+    finally:
+        await registry.close_all()
+        server.close()

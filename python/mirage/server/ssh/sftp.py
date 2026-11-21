@@ -20,11 +20,12 @@ import asyncssh
 from mirage.mount.core import MountCore
 from mirage.mount.sftp import MirageSFTPServer
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.server.ssh.session import (
+from mirage.server.ssh.login import (
     key_profile,
     login_entry,
     new_session_id,
     open_session,
+    still_served,
 )
 
 
@@ -70,11 +71,7 @@ def serve_sftp(
 
     async def on_exit() -> None:
         try:
-            if (
-                entry is not None
-                and entry.id in registry
-                and (registry.get(entry.id) is entry)
-            ):
+            if entry is not None and still_served(registry, entry):
                 await entry.runner.call(
                     entry.runner.ws.close_session(session_id)
                 )

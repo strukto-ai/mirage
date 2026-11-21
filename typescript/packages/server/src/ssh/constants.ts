@@ -34,6 +34,41 @@ export const PROFILE_OPTION = 'mirage-profile'
 // the workspaces it owns; in jwt mode a key without one opens nothing.
 export const ACCOUNT_OPTION = 'mirage-account'
 
+// The hosts a forward may name: the loopback of the machine its login's
+// lines run on, the one place a forward reaches.
+export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost'])
+
+// What a forward to any other host is refused with.
+export const FORWARD_REFUSED = 'only 127.0.0.1 and localhost are forwarded'
+
+// The relay FORWARD_LINE runs where the machine has python3: its stdin to
+// the port and the port to its stdout, ending its writes at end of input.
+export const FORWARD_RELAY_PY =
+  'import os,socket,sys,threading\n' +
+  's=socket.create_connection(("127.0.0.1",int(sys.argv[1])))\n' +
+  'def up():\n' +
+  ' while b:=os.read(0,65536):s.sendall(b)\n' +
+  ' s.shutdown(socket.SHUT_WR)\n' +
+  'threading.Thread(target=up,daemon=True).start()\n' +
+  'o=sys.stdout.buffer\n' +
+  'while b:=s.recv(65536):o.write(b);o.flush()\n'
+
+// The line a forward runs, as its login's lines run, to reach {port} on that
+// machine's loopback: the first relay the machine has, socat, python3 or
+// bash, joins the forward's channel to it. Bash ends when the port does, but
+// it cannot end its writes at end of input, so a service that answers only
+// after its request's end needs socat or python3.
+export const FORWARD_LINE =
+  'if command -v socat >/dev/null 2>&1; ' +
+  'then exec socat - TCP:127.0.0.1:{port}; fi; ' +
+  'if command -v python3 >/dev/null 2>&1; ' +
+  `then exec python3 -c '${FORWARD_RELAY_PY}' {port}; fi; ` +
+  'if command -v bash >/dev/null 2>&1; ' +
+  "then exec bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1 4<&0 || exit 1; " +
+  "cat <&4 >&3 & cat <&3; s=$?; kill $! 2>/dev/null; exit $s' " +
+  'forward {port}; fi; ' +
+  'echo "forward: no socat, python3 or bash" >&2; exit 127'
+
 // A client that answers no keepalive for this many intervals is gone, so
 // its connection closes and the line it was running is cancelled rather
 // than left behind a half-open socket.

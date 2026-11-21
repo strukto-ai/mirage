@@ -162,16 +162,12 @@
     ]
   },
   "python/mirage/server/ssh/server.py": {
-    "reason": "asyncssh's SSHServer hooks, which the connection calls.",
+    "reason": "asyncssh's SSHServer hooks and their arguments, which the connection calls and passes.",
     "names": [
       "begin_auth",
-      "connection_made"
-    ]
-  },
-  "python/mirage/server/ssh/session.py": {
-    "reason": "asyncssh's SSHServer hooks, which the connection calls.",
-    "names": [
-      "begin_auth"
+      "connection_requested",
+      "orig_host",
+      "orig_port"
     ]
   },
   "python/mirage/server/workers/worker.py": {

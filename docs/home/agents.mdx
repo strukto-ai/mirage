@@ -25,13 +25,16 @@ Run the agent as it is, on a workspace the `mirage` CLI creates.
 
 | Agent | Shell | MCP | SSH | FUSE |
 | --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Antigravity](/home/agents/antigravity) | | ✓ | ✓ | ✓ |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | | ✓ | ✓ | ✓ |
+| <Icon icon="laptop-code" size={14} /> [Cursor](/home/agents/remote-ssh) | | | ✓ | |
 | <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Grok Build](/home/agents/grok-build) | | ✓ | | ✓ |
+| <Icon icon="laptop-code" size={14} /> [VS Code](/home/agents/remote-ssh) | | | ✓ | |
 
 - **Shell**: the agent's own shell is [`mirage-bash`](/home/access/cli#mirage-bash), so every command it runs goes to the workspace.
 - **MCP**: the agent gets Mirage's seven tools beside its own, from its plugin or `mirage mcp`.
-- **SSH**: the agent's own tools run in the workspace.
+- **SSH**: the agent's own tools run in the workspace. Cursor, VS Code and Antigravity run their server on a [machine](/home/setup/machine/overview): see [Editors over SSH](/home/agents/remote-ssh).
 - **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
 
 Codex can also run in the workspace from a remote harness, through [exec-server forward](/home/agents/codex#exec-server-forward).
@@ -50,6 +53,7 @@ Or load Mirage into the agent as a TypeScript plugin, which replaces its own fil
 | Framework | Python | TypeScript |
 | --- | --- | --- |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude Agent SDK | [Guide](/python/agents/claude-agent-sdk) | [Guide](/typescript/agents/claude-agent-sdk) |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Antigravity SDK | [Guide](/python/agents/antigravity) | |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenAI Agents SDK | [Guide](/python/agents/openai-agents) | [Guide](/typescript/agents/openai-agents) |
 | <img noZoom src="/images/langchain-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />LangChain Deep Agents | [Guide](/python/agents/langchain) | [Guide](/typescript/agents/langchain) |
 | <img noZoom src="/images/agno-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Agno | [Guide](/python/agents/agno) | |

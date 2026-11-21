@@ -50,7 +50,7 @@ from mirage.server.rpc.constants import (
 )
 from mirage.server.ssh import constants
 from mirage.server.ssh.errors import CodexRPCError
-from mirage.server.ssh.session import (
+from mirage.server.ssh.login import (
     new_session_id,
     open_login,
     open_session,

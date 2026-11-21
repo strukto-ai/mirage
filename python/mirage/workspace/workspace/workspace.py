@@ -67,7 +67,7 @@ from mirage.events.base import EventRuntime
 from mirage.execution.constants import LINE_STOP_SIGNAL
 from mirage.execution.context import new_line_id
 from mirage.execution.job import Job, JobState, JobTable
-from mirage.execution.job.constants import HANGUP_EXIT_CODE
+from mirage.execution.job.constants import HANGUP_EXIT_CODE, HANGUP_SIGNAL
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.table import LineTable
 from mirage.execution.line.types import Line, LineState
@@ -3347,6 +3347,29 @@ class Workspace:
             *(ended.wait() for stop, ended in hit if stop is not own)
         )
         return cancelled
+
+    async def hangup(self, session_id: str) -> int:
+        """End a session's lines as a dropped terminal ends its foreground
+        job: each process the session runs gets SIGHUP
+        (``HANGUP_SIGNAL``), so a program on a machine stops as a hangup
+        stops it, sparing what left its session, then the lines are
+        cancelled as ``cancel`` cancels them. A runner ``setsid`` made
+        the leader of a session of its own (``leader``) left it, so it
+        keeps running.
+
+        Args:
+            session_id (str): the session.
+
+        Returns:
+            int: how many lines were cancelled.
+        """
+        for process in self.process_table.live():
+            if (
+                process.record.session_id == session_id
+                and process.record.leader is None
+            ):
+                process.terminate(HANGUP_SIGNAL)
+        return await self.cancel(session_id)
 
     @asynccontextmanager
     async def _quiesced(

@@ -39,6 +39,7 @@ export default defineConfig({
     'src/ssh/constants.ts',
     'src/ssh/codex.ts',
     'src/ssh/relay.ts',
+    'src/ssh/server.ts',
     'src/mcp/index.ts',
     'src/rpc/index.ts',
   ],
