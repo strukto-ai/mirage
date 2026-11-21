@@ -55,14 +55,15 @@ impl Stream for Mime {
                 .collect();
             return json(out, &entries);
         }
-        let mut message = MessageParser::default().parse(&self.raw).ok_or_else(|| {
+        let parser = MessageParser::default().max_decoded_nesting(MAX_DEPTH);
+        let mut message = parser.parse(&self.raw).ok_or_else(|| {
             StreamError::new(if matches!(self.config.view, View::Template) {
                 "Failed to parse composed message"
             } else {
                 "Failed to parse RFC 5322 message"
             })
         })?;
-        if too_deep(&message) {
+        if parser.nested_too_deep() || too_deep(&message) {
             dismantle(message);
             return Err(StreamError::new(format!(
                 "Message nests more than {MAX_DEPTH} attached messages"
@@ -397,6 +398,7 @@ fn read_part(
 
 #[cfg(test)]
 mod tests {
+    use super::MAX_DEPTH;
     use crate::open;
 
     fn render(view: &str, raw: &[u8]) -> Result<Vec<u8>, String> {
@@ -426,6 +428,78 @@ mod tests {
         }
         raw.extend_from_slice(b"Subject: x\n\nbody\n");
         raw
+    }
+
+    fn base64(bytes: &[u8]) -> Vec<u8> {
+        let mut stream = open("base64", br#"{"mode":"encode","wrap":76}"#).expect("opens");
+        let mut out = Vec::new();
+        stream.feed(bytes, &mut out).expect("feeds");
+        stream.finish(&mut out).expect("finishes");
+        out
+    }
+
+    // Of these short ASCII lines, quoted-printable escapes only `=`.
+    fn encoded(encoding: &str, body: Vec<u8>) -> Vec<u8> {
+        let mut raw =
+            format!("Content-Type: message/rfc822\nContent-Transfer-Encoding: {encoding}\n\n")
+                .into_bytes();
+        if encoding == "base64" {
+            raw.extend(base64(&body));
+        } else {
+            for byte in body {
+                match byte {
+                    b'=' => raw.extend_from_slice(b"=3D"),
+                    _ => raw.push(byte),
+                }
+            }
+        }
+        raw
+    }
+
+    #[test]
+    fn the_parser_keeps_an_encoded_message_nested_past_the_limit_as_binary() {
+        let parser = mail_parser::MessageParser::default().max_decoded_nesting(MAX_DEPTH);
+        for (depth, too_deep) in [(MAX_DEPTH + 1, true), (MAX_DEPTH, false)] {
+            for encoding in ["base64", "quoted-printable"] {
+                let raw = encoded(encoding, nested(depth));
+                assert!(parser.parse(&raw).is_some(), "{encoding} {depth}");
+                assert_eq!(parser.nested_too_deep(), too_deep, "{encoding} {depth}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_encoded_message_nested_within_the_limit_renders_in_every_view() {
+        for encoding in ["base64", "quoted-printable"] {
+            for raw in [
+                encoded(encoding, nested(63)),
+                encoded(encoding, digests(63)),
+            ] {
+                for view in ["json", "read", "template", "attachments"] {
+                    assert!(render(view, &raw).is_ok(), "{encoding} {view} refused");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_encoded_message_nested_past_the_limit_is_refused_in_every_view() {
+        for encoding in ["base64", "quoted-printable"] {
+            for depth in [64, 65, 20_000, 100_000] {
+                for raw in [
+                    encoded(encoding, nested(depth)),
+                    encoded(encoding, digests(depth)),
+                ] {
+                    for view in ["json", "read", "template", "attachments"] {
+                        assert_eq!(
+                            render(view, &raw).err().as_deref(),
+                            Some("Message nests more than 64 attached messages"),
+                            "{encoding} {depth} {view}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

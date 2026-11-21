@@ -20,6 +20,9 @@ use std::{borrow::Cow, collections::HashMap, hash::Hash, net::IpAddr};
 pub struct MessageParser {
     pub(crate) header_map: HashMap<HeaderName<'static>, HdrParseFnc>,
     pub(crate) def_hdr_parse_fnc: HdrParseFnc,
+    // Mirage: see `MessageParser::max_decoded_nesting`.
+    pub(crate) max_decoded_nesting: usize,
+    pub(crate) nested_too_deep: std::cell::Cell<bool>,
 }
 
 pub(crate) type HdrParseFnc = for<'x> fn(&mut MessageStream<'x>) -> crate::HeaderValue<'x>;

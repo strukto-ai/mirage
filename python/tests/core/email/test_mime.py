@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -109,3 +112,44 @@ def test_a_message_nested_past_64_levels_is_refused():
             StreamRefusal, match="Message nests more than 64 attached messages"
         ):
             render_mime(nested(depth), "read")
+
+
+def encoded(encoding: str, depth: int) -> bytes:
+    body = nested(depth)
+    if encoding == "base64":
+        body = base64.encodebytes(body)
+    return (
+        b"Content-Type: message/rfc822\r\nContent-Transfer-Encoding: "
+        + encoding.encode()
+        + b"\r\n\r\n"
+        + body
+    )
+
+
+REFUSAL_PROBE = """
+import sys
+from mirage.core.email.mime import render_mime
+from mirage.rs.errors import StreamRefusal
+try:
+    render_mime(sys.stdin.buffer.read(), sys.argv[1])
+except StreamRefusal as error:
+    print(error)
+"""
+
+
+@pytest.mark.parametrize("encoding", ["base64", "quoted-printable"])
+def test_an_encoded_message_nested_within_64_levels_renders(encoding):
+    assert json.loads(render_mime(encoded(encoding, 63), "json"))["parts"]
+
+
+@pytest.mark.parametrize("encoding", ["base64", "quoted-printable"])
+@pytest.mark.parametrize("view", ["json", "read"])
+def test_an_encoded_message_nested_past_64_levels_is_refused(encoding, view):
+    result = subprocess.run(
+        [sys.executable, "-c", REFUSAL_PROBE, view],
+        input=encoded(encoding, 20_000),
+        capture_output=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode()[-500:]
+    assert result.stdout == b"Message nests more than 64 attached messages\n"

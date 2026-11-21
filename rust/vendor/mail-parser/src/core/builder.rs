@@ -18,7 +18,18 @@ impl MessageParser {
         Self {
             header_map: Default::default(),
             def_hdr_parse_fnc: |s| s.parse_raw(),
+            max_decoded_nesting: usize::MAX,
+            nested_too_deep: Default::default(),
         }
+    }
+
+    /// Mirage: keep as binary a base64 or quoted-printable `message/*` part
+    /// whose decoded message nests more than `depth` attached messages, and
+    /// report it through `nested_too_deep`. Making such a message owned
+    /// recurses and copies the rest of it once per level.
+    pub fn max_decoded_nesting(mut self, depth: usize) -> Self {
+        self.max_decoded_nesting = depth;
+        self
     }
 
     /// Parse all MIME headers:

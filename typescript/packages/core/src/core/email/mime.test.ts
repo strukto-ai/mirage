@@ -86,3 +86,25 @@ test('a message nested past 64 levels is refused, not a trap', () => {
     )
   }
 })
+
+function encoded(encoding: 'base64' | 'quoted-printable', depth: number): Uint8Array {
+  const body = decoder.decode(nested(depth))
+  return encoder.encode(
+    `Content-Type: message/rfc822\r\nContent-Transfer-Encoding: ${encoding}\r\n\r\n` +
+      (encoding === 'base64' ? btoa(body) : body),
+  )
+}
+
+test('an encoded message nested past 64 levels is refused, not a trap', () => {
+  for (const encoding of ['base64', 'quoted-printable'] as const) {
+    const result = JSON.parse(
+      decoder.decode(renderMime(encoded(encoding, 63), 'json')),
+    ) as Projection
+    expect(result.parts.length).toBeGreaterThan(0)
+    for (const view of ['json', 'read'] as const) {
+      expect(() => renderMime(encoded(encoding, 20_000), view)).toThrow(
+        'Message nests more than 64 attached messages',
+      )
+    }
+  }
+})

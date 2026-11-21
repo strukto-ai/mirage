@@ -109,7 +109,46 @@ impl MessageParser {
     /// if no headers are found None is returned.
     ///
     pub fn parse<'x>(&self, raw_message: &'x (impl AsRef<[u8]> + ?Sized)) -> Option<Message<'x>> {
+        self.nested_too_deep.set(false);
         self.parse_(raw_message.as_ref(), MAX_NESTED_ENCODED, false)
+    }
+
+    /// Mirage: whether the last `parse` kept an encoded message as binary
+    /// for nesting past `max_decoded_nesting`.
+    pub fn nested_too_deep(&self) -> bool {
+        self.nested_too_deep.get()
+    }
+
+    // Mirage: the nesting is walked and a message too deep taken apart one
+    // level at a time, as its own drop would recurse.
+    fn within_nesting<'x>(&self, message: Message<'x>) -> Option<Message<'x>> {
+        let mut stack = vec![(&message, 0)];
+        let mut deep = false;
+        while let Some((message, level)) = stack.pop() {
+            for part in &message.parts {
+                if let PartType::Message(nested) = &part.body {
+                    deep |= level == self.max_decoded_nesting;
+                    stack.push((nested, level + 1));
+                }
+            }
+            if deep {
+                break;
+            }
+        }
+        drop(stack);
+        if !deep {
+            return Some(message);
+        }
+        self.nested_too_deep.set(true);
+        let mut stack = vec![message];
+        while let Some(mut message) = stack.pop() {
+            for part in &mut message.parts {
+                if let PartType::Message(nested) = std::mem::take(&mut part.body) {
+                    stack.push(nested);
+                }
+            }
+        }
+        None
     }
 
     /// Parses a byte slice containing the RFC5322 raw message and returns a
@@ -354,7 +393,10 @@ impl MessageParser {
                 message.attachments.push(message.parts.len() as u32);
 
                 if depth != 0 {
-                    if let Some(nested_message) = self.parse_(bytes.as_ref(), depth - 1, false) {
+                    if let Some(nested_message) = self
+                        .parse_(bytes.as_ref(), depth - 1, false)
+                        .and_then(|nested| self.within_nesting(nested))
+                    {
                         PartType::Message(Message {
                             html_body: nested_message.html_body,
                             text_body: nested_message.text_body,

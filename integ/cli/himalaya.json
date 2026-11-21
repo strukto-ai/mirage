@@ -1576,6 +1576,18 @@
         "stderr": ""
       },
       "conformance_skip": "mirage refuses a message nested past 64 levels, as rendering and freeing one walk the nesting on the stack; himalaya renders it"
+    },
+    {
+      "id": "hm_read_refuses_an_encoded_message_nested_past_64_levels",
+      "seq": 9940142,
+      "targets": ["cli-himalaya"],
+      "command": "{ printf 'Content-Type: message/rfc822\\r\\nContent-Transfer-Encoding: base64\\r\\n\\r\\n'; { printf '%.0sContent-Type: message/rfc822\\r\\n\\r\\n' $(seq 20000); printf 'Subject: deep\\r\\n\\r\\nbody\\r\\n'; } | base64; } | himalaya message add -m Archive > /dev/null; id=$(himalaya --json envelope list -m Archive | jq -r '.envelopes[0].id'); himalaya message read -m Archive \"$id\"; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Error: Message nests more than 64 attached messages\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nrc=1\n",
+        "stderr": ""
+      },
+      "conformance_skip": "mirage refuses a base64 part whose message nests past 64 levels, as making it owned walks and copies the nesting once per level; himalaya renders it"
     }
   ]
 }
