@@ -592,7 +592,11 @@ class HttpTransport:
                     )
             return None
 
-        head = await payload()
+        try:
+            head = await payload()
+        except BaseException:
+            await lines.aclose()
+            raise
         if head is None:
             await lines.aclose()
             return Fetched(shallow=tuple(cut))

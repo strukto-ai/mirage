@@ -526,8 +526,17 @@ export class HttpTransport implements Transport {
       }
       return null
     }
-    const head = await payload()
-    if (head === null) return { pack: nothing(), shallow: cut }
+    let head: Uint8Array | null
+    try {
+      head = await payload()
+    } catch (err) {
+      await lines.return(undefined)
+      throw err
+    }
+    if (head === null) {
+      await lines.return(undefined)
+      return { pack: nothing(), shallow: cut }
+    }
     const opening: Uint8Array = head
     async function* pack(): AsyncGenerator<Uint8Array> {
       try {
