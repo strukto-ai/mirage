@@ -132,6 +132,7 @@ ROWS: dict[str, str] = {
     "dir": "dir -laR /t",
     "dirname": "dirname /t/dir/c.txt",
     "du": "du -a /t/dir",
+    "fd": "fd -e txt . /t",
     "file": "file /t/a.txt /t/data.json /t/dir",
     "find": "find /t -name '*.txt'",
     "fold": "fold -w 3 /t/a.txt",

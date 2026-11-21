@@ -75,8 +75,11 @@ function argumentShapes(spec: CommandSpec): {
     }
 
     if (optional) {
-      if (arg.nargs === '*' || arg.nargs === '+' || arg.nargs === 'REMAINDER') {
-        throw new Error('option nargs must be a fixed count or ?')
+      if (arg.nargs === '*' || arg.nargs === '+') {
+        throw new Error('option nargs must be a fixed count, ? or REMAINDER')
+      }
+      if (arg.nargs === 'REMAINDER' && (arg.action !== 'store' || arg.type !== 'str')) {
+        throw new Error('a REMAINDER option stores its words as text')
       }
       if (arg.attachedOnly && arg.nargs !== '?') throw new Error('attachedOnly requires nargs ?')
       if (arg.providedBy.length > 0 || arg.textWhen.length > 0) {
@@ -117,6 +120,10 @@ function argumentShapes(spec: CommandSpec): {
  */
 export interface CompiledSpec {
   readonly nargsByDest: ReadonlyMap<string, number>
+  // Options that take every word after them up to a lone `;`, as find's
+  // -exec does, or the end of the line, as argparse's nargs=REMAINDER
+  // option does.
+  readonly restDests: ReadonlySet<string>
   readonly valueTypesByDest: ReadonlyMap<string, readonly ValueType[]>
   readonly detachedOptionalSpellings: ReadonlySet<string>
   readonly options: readonly Argument[]
@@ -333,6 +340,9 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const compiled: CompiledSpec = {
     ...grammar,
     nargsByDest,
+    restDests: new Set(
+      grammar.options.filter((opt) => opt.nargs === 'REMAINDER').map((opt) => argumentDest(opt)),
+    ),
     valueTypesByDest,
     detachedOptionalSpellings,
     boolSpellings,

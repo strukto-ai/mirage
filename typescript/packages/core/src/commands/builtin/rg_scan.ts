@@ -20,7 +20,16 @@ import { posixErrno } from '../../errors/posix.ts'
 import { gnuBasename, respellOne } from '../../utils/path.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import type { FileTypes } from './rg_filetypes.ts'
-import { IgnoreRules, type Overrides, Verdict, walkCandidate } from './rg_glob.ts'
+import {
+  type DirRules,
+  type IgnoreSources,
+  IgnoreRules,
+  IgnoreStack,
+  ignoreLines,
+  type Overrides,
+  Verdict,
+  walkCandidate,
+} from './rg_glob.ts'
 import type { LinkResolver } from './utils/links.ts'
 import type { AsyncReaddirFn } from './utils/types.ts'
 import type { MountRoot } from '../../view/types.ts'
@@ -49,11 +58,13 @@ export class WalkFilter {
 
   // Whether a walked entry is kept (a directory: descended). `candidate`
   // is its path as the globs match it, `name` its file name.
-  admits(candidate: string, name: string, isDir: boolean): boolean {
+  // `files` is what the walked directory's ignore files said, which
+  // outranks --ignore-file's rules.
+  admits(candidate: string, name: string, isDir: boolean, files = Verdict.NONE): boolean {
     const verdict = this.overrides.verdict(candidate, isDir)
     if (verdict === Verdict.IGNORE) return false
     if (verdict === Verdict.WHITELIST) return true
-    const ruled = this.ignores.verdict(candidate, isDir)
+    const ruled = files !== Verdict.NONE ? files : this.ignores.verdict(candidate, isDir)
     if (ruled === Verdict.IGNORE) return false
     const typed = this.types.verdict(name, isDir)
     if (typed === Verdict.IGNORE) return false
@@ -66,8 +77,13 @@ export class WalkFilter {
   }
 
   // Whether a walked file is searched, its stat read when the walk has one.
-  admitsFile(candidate: string, name: string, stat: FileStat | null): boolean {
-    if (!this.admits(candidate, name, false)) return false
+  admitsFile(
+    candidate: string,
+    name: string,
+    stat: FileStat | null,
+    files = Verdict.NONE,
+  ): boolean {
+    if (!this.admits(candidate, name, false, files)) return false
     const size = stat?.size ?? null
     if (this.maxFilesize !== null && size !== null && size > this.maxFilesize) return false
     return this.binary || !BINARY_EXTENSIONS.has(getExtension(name) ?? '')
@@ -88,6 +104,9 @@ export interface Haystack {
   stat: FileStat | null
   spec: PathSpec | null
   resolver: LinkResolver | null
+  // How deep a walked entry lies below its operand, 1 for the operand's
+  // own children; absent for an operand.
+  depth?: number
 }
 
 /**
@@ -137,6 +156,112 @@ function byName(a: string, b: string): number {
   return x < y ? -1 : x > y ? 1 : 0
 }
 
+/** How a walk reads ignore files: a file's bytes (null when it is not there) and a directory's entry names (null when it cannot be listed). */
+export interface IgnoreReader {
+  read(path: string): Promise<Uint8Array | null>
+  names(dir: string): Promise<ReadonlySet<string> | null>
+}
+
+const GIT_DIR = '.git'
+
+function joined(dir: string, name: string): string {
+  return dir === '/' ? `/${name}` : `${dir}/${name}`
+}
+
+/**
+ * One directory's ignore files, or null when it has none and holds no
+ * repository. Only a file its listing (`names`) names is read. Mirrors
+ * Python's dir_rules.
+ */
+export async function dirRules(
+  dir: string,
+  names: ReadonlySet<string>,
+  sources: IgnoreSources,
+  reader: IgnoreReader,
+): Promise<DirRules | null> {
+  const load = async (on: boolean, name: string): Promise<IgnoreRules | null> => {
+    if (!on || !names.has(name.split('/')[0] ?? name)) return null
+    const data = await reader.read(joined(dir, name))
+    return data === null ? null : new IgnoreRules(ignoreLines(data, sources.bom))
+  }
+  const hasGit = names.has(GIT_DIR)
+  const rules: DirRules = {
+    dir,
+    hasGit,
+    custom: sources.custom === null ? null : await load(sources.dot, sources.custom),
+    dot: await load(sources.dot, '.ignore'),
+    git: await load(sources.vcs, '.gitignore'),
+    exclude: hasGit ? await load(sources.exclude, `${GIT_DIR}/info/exclude`) : null,
+  }
+  if (!hasGit && !rules.custom && !rules.dot && !rules.git) return null
+  return rules
+}
+
+/**
+ * The stack a walk of `root` starts from: the ignore files of every
+ * directory above it, nearest first, when the sources read parents. With
+ * parents off a repository above still counts, so a `.gitignore` below it
+ * applies, as the ignore crate keeps its parents' `.git` while it drops
+ * their rules. Each is listed once, so a file no listing names costs no
+ * read. Mirrors Python's root_stack.
+ */
+export async function rootStack(
+  root: string,
+  sources: IgnoreSources,
+  reader: IgnoreReader,
+): Promise<IgnoreStack> {
+  let stack = new IgnoreStack(sources)
+  const repos = sources.vcs && sources.requireGit
+  if (root === '/' || !(sources.parents || repos)) return stack
+  const above: string[] = []
+  for (let dir = root; dir !== '/';) {
+    dir = dir.slice(0, dir.lastIndexOf('/')) || '/'
+    above.push(dir)
+  }
+  for (const dir of above.reverse()) {
+    const names = await reader.names(dir)
+    if (names === null) continue
+    if (!sources.parents) {
+      if (names.has(GIT_DIR))
+        stack = stack.within({
+          dir,
+          hasGit: true,
+          custom: null,
+          dot: null,
+          git: null,
+          exclude: null,
+        })
+      continue
+    }
+    const rules = await dirRules(dir, names, sources, reader)
+    if (rules !== null) stack = stack.within(rules)
+  }
+  return stack
+}
+
+/**
+ * One directory's ignore-file lines that do not compile, as ripgrep prints
+ * them under one `rg:`: the tool's own file, then `.ignore`, `.gitignore`
+ * and the exclude file, each line as `<file>: line N: ...`, named from
+ * `shown`, the directory as the walker names it. Empty when every line
+ * compiled. Mirrors Python's ignore_errors.
+ */
+function ignoreErrors(rules: DirRules, shown: string, custom: string | null): string {
+  const files: [string | null, IgnoreRules | null][] = [
+    [custom, rules.custom],
+    ['.ignore', rules.dot],
+    ['.gitignore', rules.git],
+    [`${GIT_DIR}/info/exclude`, rules.exclude],
+  ]
+  const lines: string[] = []
+  for (const [name, kept] of files) {
+    if (name === null || kept === null) continue
+    const path = shown === '' ? name : shown.endsWith('/') ? shown + name : `${shown}/${name}`
+    for (const error of kept.errors) lines.push(`${path}: ${error}`)
+  }
+  return lines.join('\n')
+}
+
 /**
  * --one-file-system's test: whether a directory lies on another mount than
  * the operand's. A mount is mirage's filesystem boundary, which a directory
@@ -163,7 +288,12 @@ export function onOtherMount(rootOf: MountRoot, home: string, path: string): boo
  * (-L) says to walk through it: then it stands for what it leads to, a
  * directory descended and a file searched under the link's own name, and
  * one that dangles, loops or leads back to a directory above it is reported
- * in ripgrep's words and skipped. Mirrors Python's walk_haystacks.
+ * in ripgrep's words and skipped. `notes` collects ripgrep's word on a
+ * walked directory's ignore-file line that does not compile, which leaves the
+ * exit status alone (null logs it); a directory above the operand reports its
+ * own into `warnings`, an error. `linkReaddir` lists a directory the walk
+ * reached through a link (null lists it through `resolver`). Mirrors
+ * Python's walk_haystacks.
  */
 export async function* walkHaystacks(
   readdirFn: AsyncReaddirFn,
@@ -178,6 +308,10 @@ export async function* walkHaystacks(
   resolver: LinkResolver | null = null,
   follow = false,
   parallel = false,
+  ignore: { readonly sources: IgnoreSources; readonly reader: IgnoreReader } | null = null,
+  entries = false,
+  notes: string[] | null = null,
+  linkReaddir: AsyncReaddirFn | null = null,
 ): AsyncGenerator<Haystack> {
   const walker = new Walker(
     readdirFn,
@@ -191,8 +325,19 @@ export async function* walkHaystacks(
     follow,
     shownRoot === '',
     parallel,
+    ignore?.reader ?? null,
+    entries,
+    notes,
+    linkReaddir,
   )
-  yield* walker.below(root, root, shownRoot, 0, [[root, walker.named(shownRoot)]], false)
+  const stack = ignore === null ? null : await rootStack(root, ignore.sources, ignore.reader)
+  if (stack !== null) {
+    for (const layer of [...stack.layers].reverse()) {
+      const said = ignoreErrors(layer, layer.dir, stack.sources.custom)
+      if (said !== '' && !(warnings ?? []).includes(`rg: ${said}`)) walker.warn(`rg: ${said}`)
+    }
+  }
+  yield* walker.below(root, root, shownRoot, 0, [[root, walker.named(shownRoot)]], false, stack)
 }
 
 // What one operand's walk reads with and keeps, for every level. Mirrors
@@ -210,7 +355,58 @@ class Walker {
     readonly follow: boolean,
     readonly implicit: boolean,
     readonly parallel: boolean,
+    readonly reader: IgnoreReader | null = null,
+    // Yield every kept entry, as fd lists them, not regular files alone.
+    readonly entries = false,
+    // Collects a walked directory's ignore-file lines that do not compile.
+    readonly notes: string[] | null = null,
+    // Lists a directory reached through a link; null lists it through `resolver`.
+    readonly linkReaddir: AsyncReaddirFn | null = null,
   ) {}
+
+  // A link as an entry of its own, when the walk lists entries and its
+  // filters keep the link's name; `ruled` is the link's path as walked,
+  // which the ignore files match.
+  linkEntry(
+    link: string,
+    shown: string,
+    depth: number,
+    rules: IgnoreStack | null,
+    ruled: string,
+  ): Haystack | null {
+    if (!this.entries || this.resolver === null) return null
+    const files = rules?.verdict(ruled, false) ?? Verdict.NONE
+    if (!this.walk.admits(walkCandidate(shown, this.cwd), gnuBasename(link), false, files))
+      return null
+    return {
+      virtual: link,
+      shown,
+      stat: this.resolver.links.statAt(link),
+      spec: null,
+      resolver: null,
+      depth: depth + 1,
+    }
+  }
+
+  // `stack` with `here`'s own ignore files on top, read when its listing
+  // names them; `here` is the directory's path as walked, through any link,
+  // and `named` how the walker names it. A line that does not compile is
+  // noted.
+  async rules(
+    here: string,
+    entries: readonly string[],
+    stack: IgnoreStack | null,
+    named: string,
+  ): Promise<IgnoreStack | null> {
+    if (stack === null || this.reader === null) return stack
+    const names = new Set(entries.map((entry) => gnuBasename(entryName(entry) || entry)))
+    const own = await dirRules(here, names, stack.sources, this.reader)
+    if (own === null) return stack
+    const said = ignoreErrors(own, named, stack.sources.custom)
+    if (said !== '' && this.notes !== null) this.notes.push(`rg: ${said}`)
+    else if (said !== '') console.debug(`ignore file lines left out: ${said}`)
+    return stack.within(own)
+  }
 
   // A path as the walker names it in a warning. Matches print the implicit
   // cwd's paths bare, but the walker's own errors name the path it walked,
@@ -237,7 +433,9 @@ class Walker {
    * directory above it to the operand, nearest first: what a link leading
    * back into the walk is caught against. `linked` says the walk reached
    * `here` through a link, so it reads through the dispatcher rather than the
-   * operand's backend.
+   * operand's backend. `logical` is `base` as walked, through the links that
+   * led to it, which the ignore files match: the ignore crate matches the
+   * walked path, not where a link leads (null when `base` is).
    */
   async *below(
     here: string,
@@ -246,24 +444,41 @@ class Walker {
     depth: number,
     chain: readonly (readonly [real: string, named: string])[],
     linked: boolean,
+    stack: IgnoreStack | null = null,
+    logical: string | null = null,
   ): AsyncGenerator<Haystack> {
+    const walked = logical ?? base
     if (this.walk.maxDepth !== null && depth >= this.walk.maxDepth) return
     const resolver = linked ? this.resolver : null
     let entries: string[]
     try {
-      entries = resolver !== null ? await resolver.readdir(here) : await this.readdirFn(here)
+      entries =
+        resolver !== null
+          ? await (this.linkReaddir ?? ((path: string) => resolver.readdir(path)))(here)
+          : await this.readdirFn(here)
     } catch (err) {
       if (!isWalkError(err)) throw err
       this.warn(walkErrorLine(chain[0]?.[1] ?? here, err, this.parallel))
       return
     }
     if (this.sortByName) entries = [...entries].sort(byName)
+    const rules = await this.rules(
+      respellOne(here, base, walked),
+      entries,
+      stack,
+      chain[0]?.[1] ?? here,
+    )
     for (const entry of entries) {
       // box/dropbox readdir marks folders with a trailing slash.
       const child = entryName(entry) || entry
       const shown = respellOne(child, base, shownBase)
+      const ruled = respellOne(child, base, walked)
       if (this.isLink(child)) {
-        if (this.follow) yield* this.through(child, shown, depth, chain)
+        if (this.follow) yield* this.through(child, shown, depth, chain, rules, ruled)
+        else {
+          const link = this.linkEntry(child, shown, depth, rules, ruled)
+          if (link !== null) yield link
+        }
         continue
       }
       let s: FileStat
@@ -276,9 +491,13 @@ class Walker {
       }
       const name = gnuBasename(child)
       const candidate = walkCandidate(shown, this.cwd)
-      if (s.type === FileType.DIRECTORY) {
+      const isDir = s.type === FileType.DIRECTORY
+      const files = rules?.verdict(ruled, isDir) ?? Verdict.NONE
+      if (isDir) {
         if (this.boundary?.(child) === true) continue
-        if (this.walk.admits(candidate, name, true)) {
+        if (this.walk.admits(candidate, name, true, files)) {
+          if (this.entries)
+            yield { virtual: child, shown, stat: s, spec: null, resolver, depth: depth + 1 }
           yield* this.below(
             child,
             base,
@@ -286,10 +505,15 @@ class Walker {
             depth + 1,
             [[child, this.named(shown)], ...chain],
             linked,
+            rules,
+            logical,
           )
         }
-      } else if (s.type === FileType.FILE && this.walk.admitsFile(candidate, name, s)) {
-        yield { virtual: child, shown, stat: s, spec: null, resolver }
+      } else if (
+        (s.type === FileType.FILE || this.entries) &&
+        this.walk.admitsFile(candidate, name, s, files)
+      ) {
+        yield { virtual: child, shown, stat: s, spec: null, resolver, depth: depth + 1 }
       }
     }
   }
@@ -299,12 +523,15 @@ class Walker {
    * is followed first, so one that dangles or loops is reported whatever the
    * filters would have said of its name, then a directory it leads to is
    * checked against the chain above it, and only then do the filters decide.
+   * `ruled` is the link's path as walked, which the ignore files match.
    */
   async *through(
     link: string,
     shown: string,
     depth: number,
     chain: readonly (readonly [real: string, named: string])[],
+    rules: IgnoreStack | null,
+    ruled: string,
   ): AsyncGenerator<Haystack> {
     const resolver = this.resolver
     if (resolver === null) return
@@ -317,22 +544,40 @@ class Walker {
     } catch (err) {
       if (!isWalkError(err)) throw err
       this.warn(walkErrorLine(named, err, this.parallel))
+      const dangling = this.linkEntry(link, shown, depth, rules, ruled)
+      if (dangling !== null) yield dangling
       return
     }
     const name = gnuBasename(link)
     const candidate = walkCandidate(shown, this.cwd)
-    if (s.type === FileType.DIRECTORY) {
+    const isDir = s.type === FileType.DIRECTORY
+    const files = rules?.verdict(ruled, isDir) ?? Verdict.NONE
+    if (isDir) {
       const above = chain.find(([real]) => real === target)
       if (above !== undefined) {
         this.warn(loopErrorLine(named, above[1]))
         return
       }
       if (this.boundary?.(target) === true) return
-      if (this.walk.admits(candidate, name, true)) {
-        yield* this.below(target, target, shown, depth + 1, [[target, named], ...chain], true)
+      if (this.walk.admits(candidate, name, true, files)) {
+        if (this.entries)
+          yield { virtual: target, shown, stat: s, spec: null, resolver, depth: depth + 1 }
+        yield* this.below(
+          target,
+          target,
+          shown,
+          depth + 1,
+          [[target, named], ...chain],
+          true,
+          rules,
+          ruled,
+        )
       }
-    } else if (s.type === FileType.FILE && this.walk.admitsFile(candidate, name, s)) {
-      yield { virtual: target, shown, stat: s, spec: null, resolver }
+    } else if (
+      (s.type === FileType.FILE || this.entries) &&
+      this.walk.admitsFile(candidate, name, s, files)
+    ) {
+      yield { virtual: target, shown, stat: s, spec: null, resolver, depth: depth + 1 }
     }
   }
 }

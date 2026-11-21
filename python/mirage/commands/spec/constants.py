@@ -742,6 +742,7 @@ FLOAT_VALUE = re.compile(
 # here would be a cycle; StrEnum members hash as their values, so lookups
 # with CommandName still hit.
 USAGE_EXIT = {
+    "fd": 2,
     "grep": 2,
     "egrep": 2,
     "fgrep": 2,

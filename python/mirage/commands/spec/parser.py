@@ -46,6 +46,7 @@ from mirage.commands.spec.types import (
     Attached,
     CommandSpec,
     ParsedFlagValue,
+    UsageStyle,
     ValueType,
     WordKind,
 )
@@ -317,7 +318,9 @@ def _set_value_flag(
     and argparse's ``type=`` do, so ``numfmt --to=bogus --to=si`` is
     refused for ``bogus`` although the bag keeps only ``si``, and
     ``--from=bad1 --to=bad2`` names ``bad1``. Only what the environment
-    or a default fills in afterwards is checked after the scan.
+    or a default fills in afterwards is checked after the scan. The tape
+    keeps a REMAINDER option's words as one occurrence, so two ``fd -x``
+    commands on one line stay two.
 
     Args:
         flags (dict): parsed flag bag, updated in place.
@@ -333,7 +336,10 @@ def _set_value_flag(
         for part in ([value] if isinstance(value, str) else value)
     ]
     if isinstance(flags, FlagBag):
-        flags.occurrences.extend((name, part) for part in stored)
+        if name in cs.rest_dests:
+            flags.occurrences.append((name, list(stored)))
+        else:
+            flags.occurrences.extend((name, part) for part in stored)
     if name in cs.multiple_dests:
         previous = flags.get(name)
         if isinstance(previous, list):
@@ -764,11 +770,20 @@ def parse_command(
             flags.occurrences.append((constants.REFUSED, word))
         return own_loop
 
+    # clap's validator names the earliest typed of two conflicting
+    # arguments, an operand among them (fd 10.2.0's path and
+    # --strip-cwd-prefix), so a clap program's operands keep their place.
+    clap_order = (
+        not unknown_is_operand
+        and builtin
+        and spec.usage_style is UsageStyle.CLAP
+    )
+
     def record_operand(word: str) -> None:
         raw_args.append(word)
         raw_indices.append(scan_origins[i])
         raw_bases.append(base)
-        if in_order_operands or own_loop:
+        if in_order_operands or own_loop or clap_order:
             flags.occurrences.append((constants.OPERAND, word))
 
     def record_values(
@@ -792,6 +807,27 @@ def parse_command(
         if attached is not None:
             record_attached(spelling, attached, kinds[0])
         return detached + 1
+
+    def arity_of(spelling: str, attached: bool) -> int | None:
+        """The words an option takes: its fixed nargs, or for a
+        REMAINDER option every word up to a lone ``;`` or the end."""
+        name = cs.dest_of(spelling)
+        if name not in cs.rest_dests:
+            return cs.nargs_by_dest.get(name)
+        end = i + 1
+        while end < len(scan_argv) and scan_argv[end] != ";":
+            end += 1
+        return end - i - 1 + attached
+
+    def past_rest(spelling: str, at: int) -> int:
+        """Step over the ``;`` that ended a REMAINDER option's words."""
+        if (
+            cs.dest_of(spelling) in cs.rest_dests
+            and at < len(scan_argv)
+            and scan_argv[at] == ";"
+        ):
+            return at + 1
+        return at
 
     def record_attached(
         spelling: str, value: str, kind: ValueType | None = None
@@ -905,8 +941,16 @@ def parse_command(
                     i += 1
                     continue
             etok = spelling if eq == -1 else spelling + tok[eq:]
-            arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
-            if etok in cs.long_bool_spellings:
+            arity = arity_of(spelling, eq != -1)
+            if cs.dest_of(spelling) in cs.rest_dests and arity is not None:
+                i = past_rest(
+                    spelling,
+                    i
+                    + record_values(
+                        spelling, arity, tok[eq + 1 :] if eq != -1 else None
+                    ),
+                )
+            elif etok in cs.long_bool_spellings:
                 if (
                     etok in cs.detached_optional_spellings
                     and i + 1 < len(scan_argv)
@@ -1049,7 +1093,7 @@ def parse_command(
                 continue
             matched_value = False
             for vf in cs.value_spellings:
-                arity = cs.nargs_by_dest.get(cs.dest_of(vf))
+                arity = arity_of(vf, len(tok) > len(vf))
                 if (
                     arity is not None
                     and tok.startswith(vf)
@@ -1058,7 +1102,11 @@ def parse_command(
                     fixed_attached = tok[len(vf) :]
                     remaining = arity - bool(fixed_attached)
                     if i + remaining < len(scan_argv):
-                        i += record_values(vf, arity, fixed_attached or None)
+                        i = past_rest(
+                            vf,
+                            i
+                            + record_values(vf, arity, fixed_attached or None),
+                        )
                     else:
                         needs_value_options.append(vf[1:])
                         option_error_kinds.append("needs_value")
@@ -1160,13 +1208,15 @@ def parse_command(
             mixed = _match_mixed_cluster(tok, cs)
             if mixed is not None:
                 cluster_bools, vflag, attached = mixed
-                arity = cs.nargs_by_dest.get(cs.dest_of(vflag))
+                arity = arity_of(vflag, attached is not None)
                 if arity is not None:
                     remaining = arity - (attached is not None)
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
                     if i + remaining < len(scan_argv):
-                        i += record_values(vflag, arity, attached)
+                        i = past_rest(
+                            vflag, i + record_values(vflag, arity, attached)
+                        )
                     else:
                         needs_value_options.append(vflag[1:])
                         option_error_kinds.append("needs_value")

@@ -2306,3 +2306,42 @@ describe('wordPaths', () => {
     expect(virtuals(['-t', '-', 'a'], 'cp')).toEqual([null, '/d/-', '/d/a'])
   })
 })
+
+describe('a REMAINDER option', () => {
+  it('takes the words up to a lone semicolon', () => {
+    const p = parseCommand(
+      specOf('fd'),
+      ['-t', 'f', 'core', 'src', '-x', 'ast-grep', 'outline', '{}', '--items', 'all'],
+      '/',
+    )
+    expect(p.flags['--exec']).toEqual(['ast-grep', 'outline', '{}', '--items', 'all'])
+    expect(p.texts()).toEqual(['core'])
+    expect(p.paths()).toEqual(['/src'])
+    const ended = parseCommand(specOf('fd'), ['-x', 'echo', '{}', ';', 'pat', '-H'], '/')
+    expect(ended.flags['--exec']).toEqual(['echo', '{}'])
+    expect(ended.flags['--hidden']).toBe(true)
+    expect(ended.texts()).toEqual(['pat'])
+  })
+
+  it('sits in a short cluster and may take no words', () => {
+    const clustered = parseCommand(specOf('fd'), ['-Hx', 'echo'], '/')
+    expect(clustered.flags['--hidden']).toBe(true)
+    expect(clustered.flags['--exec']).toEqual(['echo'])
+    expect(parseCommand(specOf('fd'), ['-X'], '/').flags['--exec-batch']).toEqual([])
+  })
+
+  it('keeps each occurrence and a clap operand in its place', () => {
+    const parsed = parseCommand(
+      specOf('fd'),
+      ['-x', 'echo', 'a', ';', 'pat', '-x', 'echo', 'b', ';', 'src'],
+      '/',
+      'fd',
+    )
+    expect(flagOccurrences(parsed.flags)).toEqual([
+      ['--exec', ['echo', 'a']],
+      ['', 'pat'],
+      ['--exec', ['echo', 'b']],
+      ['', 'src'],
+    ])
+  })
+})

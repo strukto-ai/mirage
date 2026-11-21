@@ -71,6 +71,10 @@ def _class_source(shown: str, text: str, i: int) -> tuple[str, int]:
             return prefix + "".join(members) + "]", i + 1
         first = False
         if i + 2 < len(text) and text[i + 1] == "-" and text[i + 2] != "]":
+            if ch > text[i + 2]:
+                raise glob_error(
+                    shown, f"invalid range; '{ch}' > '{text[i + 2]}'"
+                )
             members.append(re.escape(ch) + "-" + re.escape(text[i + 2]))
             i += 3
             continue
@@ -296,6 +300,10 @@ class Overrides:
         iglobs (Sequence[str]): the ``--iglob`` values, which ripgrep adds
             after every ``-g`` whatever order the line gave them.
         case_insensitive (bool): --glob-case-insensitive.
+        root (str): where an anchored glob starts, cut off each path as
+            the ignore crate cuts a matcher's root: fd roots ``-E`` at its
+            first search path; empty for ripgrep, whose paths already
+            start at the cwd.
     """
 
     def __init__(
@@ -303,11 +311,13 @@ class Overrides:
         globs: Sequence[str],
         iglobs: Sequence[str],
         case_insensitive: bool,
+        root: str = "",
     ) -> None:
         parsed = [override_glob(g, case_insensitive) for g in globs]
         parsed += [override_glob(g, True) for g in iglobs]
         self._globs = tuple(g for g in parsed if g is not None)
         self._keeps = any(g.keep for g in self._globs)
+        self._root = root
 
     def verdict(self, path: str, is_dir: bool) -> Verdict:
         """What the globs say about one walked path.
@@ -318,6 +328,7 @@ class Overrides:
         """
         if not self._globs:
             return Verdict.NONE
+        path = _stripped(path, self._root)
         for glob in reversed(self._globs):
             if glob.dir_only and not is_dir:
                 continue
@@ -328,18 +339,47 @@ class Overrides:
         return Verdict.NONE
 
 
+def _stripped(path: str, root: str) -> str:
+    """``path`` with ``root`` cut off its front as the ignore crate's
+    ``strip`` cuts it: byte for byte, never off a bare file name, and not
+    at all for an empty or ``.`` root.
+
+    Args:
+        path (str): the path as matched.
+        root (str): the matcher's root.
+    """
+    if root in ("", ".") or "/" not in path or not path.startswith(root):
+        return path
+    rest = path[len(root) :]
+    return rest[1:] if rest.startswith("/") else rest
+
+
 class IgnoreRules:
     """--ignore-file's rules: gitignore lines rooted at the working
     directory, the last one that matches a walked path deciding it, a
-    plain one ignoring it and a ``!`` one keeping it.
+    plain one ignoring it and a ``!`` one keeping it. A line whose glob
+    does not compile is left out and kept in ``errors``, as the ignore
+    crate keeps the rest of the file.
 
     Args:
         lines (Sequence[str]): the rules, in the order the files gave them.
     """
 
     def __init__(self, lines: Sequence[str] = ()) -> None:
-        parsed = [override_glob(line, False) for line in lines]
-        self._globs = tuple(g for g in parsed if g is not None)
+        globs: list[OverrideGlob] = []
+        errors: list[str] = []
+        for number, line in enumerate(lines, 1):
+            try:
+                glob = override_glob(line, False)
+            except UsageError as exc:
+                errors.append(
+                    f"line {number}: {str(exc).removeprefix('rg: ')}"
+                )
+                continue
+            if glob is not None:
+                globs.append(glob)
+        self._globs = tuple(globs)
+        self.errors = tuple(errors)
 
     @property
     def empty(self) -> bool:
@@ -358,6 +398,144 @@ class IgnoreRules:
                 continue
             if glob.matcher.fullmatch(path):
                 return Verdict.IGNORE if glob.keep else Verdict.WHITELIST
+        return Verdict.NONE
+
+
+@dataclass(frozen=True)
+class IgnoreSources:
+    """Which ignore files a walk reads, as the ignore crate's builder sets
+    them.
+
+    Args:
+        vcs (bool): the ``.gitignore`` files, only inside a git repository
+            unless ``require_git`` is off.
+        exclude (bool): the repository's ``.git/info/exclude``.
+        dot (bool): the ``.ignore`` files and the tool's own file.
+        custom (str | None): the tool's own file (``.rgignore``,
+            ``.fdignore``).
+        parents (bool): the files in the directories above the walk's root.
+        require_git (bool): read git's files only inside a repository.
+        bom (bool): drop a byte order mark opening a file, as the ignore
+            crate has since ripgrep 14.1.1 shipped (ast-grep 0.51.3 does).
+    """
+
+    vcs: bool
+    exclude: bool
+    dot: bool
+    custom: str | None
+    parents: bool
+    require_git: bool
+    bom: bool
+
+
+def ignore_lines(data: bytes, bom: bool) -> list[str]:
+    """An ignore file's lines as the ignore crate reads them: split at
+    LF, a CR before it dropped, the file ending at its first line that is
+    not UTF-8. Mirrors TypeScript's ignoreLines.
+
+    Args:
+        data (bytes): the file's bytes.
+        bom (bool): drop a byte order mark opening the first line.
+    """
+    if not data:
+        return []
+    ended = data.endswith(b"\n")
+    chunks = data.split(b"\n")
+    if ended:
+        chunks.pop()
+    lines: list[str] = []
+    for i, chunk in enumerate(chunks):
+        if (ended or i < len(chunks) - 1) and chunk.endswith(b"\r"):
+            chunk = chunk[:-1]
+        try:
+            line = chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            break
+        lines.append(line.lstrip("\ufeff") if not lines and bom else line)
+    return lines
+
+
+@dataclass(frozen=True)
+class DirRules:
+    """One walked directory's ignore files, each None when absent or off.
+
+    Args:
+        dir (str): the directory's virtual path.
+        has_git (bool): whether a ``.git`` stands in it.
+        custom (IgnoreRules | None): the tool's own file.
+        dot (IgnoreRules | None): ``.ignore``.
+        git (IgnoreRules | None): ``.gitignore``.
+        exclude (IgnoreRules | None): ``.git/info/exclude``.
+    """
+
+    dir: str
+    has_git: bool
+    custom: IgnoreRules | None
+    dot: IgnoreRules | None
+    git: IgnoreRules | None
+    exclude: IgnoreRules | None
+
+
+class IgnoreStack:
+    """The ignore files governing one directory of a walk, nearest
+    directory first.
+
+    The ignore crate's precedence: the tool's own file outranks
+    ``.ignore``, which outranks ``.gitignore``, which outranks the
+    repository's exclude file; within each kind the nearest directory with
+    a matching line decides. ``.gitignore`` and exclude lines count only up
+    to the repository's root, and only inside a repository unless
+    ``require_git`` is off.
+
+    Args:
+        sources (IgnoreSources): which files the walk reads.
+        layers (tuple[DirRules, ...]): the directories' files, nearest first.
+    """
+
+    def __init__(
+        self, sources: IgnoreSources, layers: tuple[DirRules, ...] = ()
+    ) -> None:
+        self.sources = sources
+        self.layers = layers
+
+    def within(self, rules: DirRules) -> "IgnoreStack":
+        """The stack with ``rules`` as the nearest directory's files.
+
+        Args:
+            rules (DirRules): the directory's files.
+        """
+        return IgnoreStack(self.sources, (rules, *self.layers))
+
+    def verdict(self, path: str, is_dir: bool) -> Verdict:
+        """What the ignore files say about a walked entry.
+
+        Args:
+            path (str): the entry's virtual path.
+            is_dir (bool): whether it is a directory.
+        """
+        any_git = not self.sources.require_git or any(
+            layer.has_git for layer in self.layers
+        )
+        custom = dot = git = exclude = Verdict.NONE
+        saw_git = False
+        for layer in self.layers:
+            base = "/" if layer.dir == "/" else layer.dir + "/"
+            if not path.startswith(base):
+                continue
+            rel = path[len(base) :]
+            if custom is Verdict.NONE and layer.custom is not None:
+                custom = layer.custom.verdict(rel, is_dir)
+            if dot is Verdict.NONE and layer.dot is not None:
+                dot = layer.dot.verdict(rel, is_dir)
+            if any_git and not saw_git:
+                if git is Verdict.NONE and layer.git is not None:
+                    git = layer.git.verdict(rel, is_dir)
+                if exclude is Verdict.NONE and layer.exclude is not None:
+                    exclude = layer.exclude.verdict(rel, is_dir)
+            saw_git = saw_git or layer.has_git
+        for said in (custom, dot, git, exclude):
+            if said is not Verdict.NONE:
+                return said
         return Verdict.NONE
 
 

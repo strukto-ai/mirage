@@ -28,10 +28,10 @@ def to_pathspec(path: Any) -> PathSpec:
 
 
 def mount_parent_readdir(
-    readdir: Callable[[str | PathSpec], Awaitable[list[str]]],
+    readdir: Callable[..., Awaitable[list[str]]],
     mounts: MountView | None,
     home: str,
-) -> Callable[[str | PathSpec], Awaitable[list[str]]]:
+) -> Callable[..., Awaitable[list[str]]]:
     """Wrap a walker's readdir so a mount parent lists as empty, not absent.
 
     A directory that exists only because mounts sit under it (``/repos``
@@ -68,11 +68,15 @@ def mount_parent_readdir(
         mounts (MountView | None): the mount boundaries; without them
             there is nothing to check and the readdir passes through.
         home (str): the prefix of the mount the readdir is bound to.
+
+    A ``limit`` reaches the readdir when the walk passes one.
     """
     if mounts is None:
         return readdir
 
-    async def listing(path: str | PathSpec) -> list[str]:
+    async def listing(
+        path: str | PathSpec, limit: int | None = None
+    ) -> list[str]:
         virtual = path.virtual if isinstance(path, PathSpec) else path
         if any(
             virtual == root or virtual.startswith(root.rstrip("/") + "/")
@@ -80,7 +84,9 @@ def mount_parent_readdir(
         ):
             return []
         try:
-            return await readdir(path)
+            if limit is None:
+                return await readdir(path)
+            return await readdir(path, limit=limit)
         except MISS_ERRORS:
             if mounts.visible_descendants(virtual):
                 return []

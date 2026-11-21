@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "id": "fd_lists_entries_under_ignore_rules",
+      "seq": 110000210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/fdw/.git /data/fdw/src/sub /data/fdw/docs /data/fdw/.hid /data/fdw/node_modules && printf x > /data/fdw/.git/HEAD && printf x > /data/fdw/src/a.ts && printf x > /data/fdw/src/B.ts && printf x > /data/fdw/src/sub/c.py && printf x > /data/fdw/docs/README.md && printf x > /data/fdw/.hid/x.ts && printf x > /data/fdw/.env && printf x > /data/fdw/node_modules/i.js && printf x > /data/fdw/AGENTS.md && printf 'node_modules\\n' > /data/fdw/.gitignore && printf 'B.ts\\n' > /data/fdw/.fdignore && (cd /data/fdw && fd; echo --; fd -H -t f '^(AGENTS\\.md|\\.env)$'; echo --; fd -u i.js; echo --; fd -t d . src; echo --; fd -e py -x echo {/} {//}; echo --; fd -g '*.MD'; fd -g '*.md'; echo --; fd -s -i a; echo --; fd -d 1 -t f; echo --; fd -t f -E src -0 | tr '\\0' '\\n'; echo --; fd -g --regex 'a\\.ts$'; echo --; fd -t f -x echo first {} \\; -x echo second {} \\; c.py; echo --; fd -E /sub . src docs; echo --; fd -E /sub . docs src; echo --; fd --max-results 2 -t f . src docs)",
+      "expect": {
+        "exit": 0,
+        "stdout": "AGENTS.md\ndocs/\ndocs/README.md\nsrc/\nsrc/a.ts\nsrc/sub/\nsrc/sub/c.py\n--\n.env\nAGENTS.md\n--\nnode_modules/i.js\n--\nsrc/sub/\n--\nc.py ./src/sub\n--\nAGENTS.md\ndocs/README.md\n--\nAGENTS.md\ndocs/README.md\nsrc/a.ts\n--\nAGENTS.md\n--\n./AGENTS.md\n./docs/README.md\n--\nsrc/a.ts\n--\nfirst ./src/sub/c.py\nsecond ./src/sub/c.py\n--\ndocs/README.md\nsrc/a.ts\n--\ndocs/README.md\nsrc/a.ts\nsrc/sub/\nsrc/sub/c.py\n--\nsrc/a.ts\nsrc/sub/c.py\n",
+        "stderr": ""
+      },
+      "flags": [
+        "hidden",
+        "type",
+        "unrestricted",
+        "extension",
+        "exec",
+        "glob",
+        "case_sensitive",
+        "ignore_case",
+        "max_depth",
+        "exclude",
+        "print0",
+        "regex",
+        "max_results"
+      ]
+    },
+    {
+      "id": "fd_refuses_in_its_own_words",
+      "seq": 110000211,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "(cd /data/fdw && fd x nosuch; echo \"rc=$?\"; fd . nosuch docs; echo \"rc=$?\"; fd -t q; echo \"rc=$?\"; fd --hid; echo \"rc=$?\"; fd '['; echo \"rc=$?\"; fd -q -x echo {} a.ts; echo \"rc=$?\"; fd a src --strip-cwd-prefix; echo \"rc=$?\"; printf '[1\\n*.py\\n' > /data/fdw/bad && fd -t f --ignore-file /data/fdw/bad . src; echo \"rc=$?\"; rm /data/fdw/bad; fd -j 0 x; echo \"rc=$?\"; fd -X echo {} {/}; echo \"rc=$?\"; fd -E '[z-a]' x; echo \"rc=$?\"; fd -0 --strip-cwd-prefix c.py | tr '\\0' '\\n')",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndocs/README.md\nrc=0\nrc=2\nrc=2\nrc=1\nrc=2\nrc=2\nsrc/a.ts\nrc=0\nrc=2\nrc=2\nrc=1\nsrc/sub/c.py\n",
+        "stderr": "[fd error]: Search path 'nosuch' is not a directory.\n[fd error]: No valid search paths given.\n[fd error]: Search path 'nosuch' is not a directory.\nerror: invalid value 'q' for '--type <filetype>'\n  [possible values: file, directory, symlink, block-device, char-device, executable, empty, socket, pipe]\n\nFor more information, try '--help'.\nerror: unexpected argument '--hid' found\n\n  tip: a similar argument exists: '--hidden'\n\nUsage: fd --hidden [pattern] [path]...\n\nFor more information, try '--help'.\n[fd error]: regex parse error:\n    [\n    ^\nerror: unclosed character class\n\nNote: You can use the '--fixed-strings' option to search for a literal string instead of a regular expression. Alternatively, you can also use the '--glob' option to match on a glob pattern.\nerror: the argument '--quiet' cannot be used with:\n  --exec <cmd>...\n  --exec-batch <cmd>...\n  --list-details\n\nUsage: fd --quiet [pattern] [path]...\n\nFor more information, try '--help'.\nerror: the argument '[path]...' cannot be used with '--strip-cwd-prefix[=<when>]'\n\nUsage: fd <pattern> <path>...\n\nFor more information, try '--help'.\n[fd error]: Malformed pattern in custom ignore file. /data/fdw/bad: line 1: error parsing glob '[1': unclosed character class; missing ']'.\nerror: invalid value '0' for '--threads <num>': number would be zero for non-zero type\n\nFor more information, try '--help'.\nerror: Only one placeholder allowed for batch commands\n\nUsage: fd [OPTIONS] [pattern] [path]...\n\nFor more information, try '--help'.\n[fd error]: Malformed exclude pattern: error parsing glob '![z-a]': invalid range; 'z' > 'a'\n"
+      },
+      "flags": [
+        "type",
+        "quiet",
+        "strip_cwd_prefix",
+        "ignore_file",
+        "threads",
+        "exec_batch",
+        "exclude",
+        "print0"
+      ]
+    }
+  ]
+}

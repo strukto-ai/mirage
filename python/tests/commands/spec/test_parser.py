@@ -2191,3 +2191,59 @@ def test_word_paths_name_a_directory_for_a_dash_given_to_cp_t():
         "/d/-",
         "/d/a",
     ]
+
+
+def test_a_remainder_option_takes_the_words_up_to_a_lone_semicolon():
+    parsed = parse_command(
+        SPECS["fd"],
+        [
+            "-t",
+            "f",
+            "core",
+            "src",
+            "-x",
+            "ast-grep",
+            "outline",
+            "{}",
+            "--items",
+            "all",
+        ],
+        "/",
+    )
+    assert parsed.flags["--exec"] == [
+        "ast-grep",
+        "outline",
+        "{}",
+        "--items",
+        "all",
+    ]
+    assert parsed.texts() == ["core"]
+    assert parsed.paths() == ["/src"]
+    ended = parse_command(
+        SPECS["fd"], ["-x", "echo", "{}", ";", "pat", "-H"], "/"
+    )
+    assert ended.flags["--exec"] == ["echo", "{}"]
+    assert ended.flags["--hidden"] is True
+    assert ended.texts() == ["pat"]
+
+
+def test_a_remainder_option_in_a_short_cluster_and_with_no_words():
+    clustered = parse_command(SPECS["fd"], ["-Hx", "echo"], "/")
+    assert clustered.flags["--hidden"] is True
+    assert clustered.flags["--exec"] == ["echo"]
+    assert parse_command(SPECS["fd"], ["-X"], "/").flags["--exec-batch"] == []
+
+
+def test_each_remainder_occurrence_and_a_clap_operand_keep_their_place():
+    parsed = parse_command(
+        SPECS["fd"],
+        ["-x", "echo", "a", ";", "pat", "-x", "echo", "b", ";", "src"],
+        "/",
+        "fd",
+    )
+    assert parsed.flags.occurrences == [
+        ("--exec", ["echo", "a"]),
+        ("", "pat"),
+        ("--exec", ["echo", "b"]),
+        ("", "src"),
+    ]

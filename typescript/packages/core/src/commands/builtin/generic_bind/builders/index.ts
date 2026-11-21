@@ -29,6 +29,7 @@ import * as diff from './diff.ts'
 import * as dirname from './dirname.ts'
 import * as du from './du.ts'
 import * as expand from './expand.ts'
+import * as fd from './fd.ts'
 import * as file from './file.ts'
 import * as find from './find.ts'
 import * as fmt from './fmt.ts'
@@ -98,6 +99,7 @@ export const BUILDERS: readonly GenericCommand[] = [
   dirname.BUILDER,
   du.BUILDER,
   expand.BUILDER,
+  fd.BUILDER,
   file.BUILDER,
   find.BUILDER,
   fmt.BUILDER,

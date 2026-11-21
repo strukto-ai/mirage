@@ -505,6 +505,9 @@ async function runCrossMount(
       registry.diff,
       registry.ids,
       mergeSignals(signal, context.frame.abortSignal),
+      executeFn === undefined
+        ? undefined
+        : nestedShell(executeFn, session, mergeSignals(signal, context.frame.abortSignal)),
     )
   } catch (err) {
     if (voice.passes(err)) throw err

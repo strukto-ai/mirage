@@ -23,6 +23,7 @@ import {
   walkFilter,
   filtersFiles,
   haystacks,
+  ignoreReader,
   headed,
   ignoreRules,
   jsonSummary,
@@ -184,6 +185,7 @@ export async function runSearch(
         rg.oneFileSystem ? (mounts ?? null) : null,
         resolver,
         stopped,
+        ignoreReader(dispatch),
       )
       if (rg.sort !== null && rg.sort !== 'none' && !(rg.sort === 'path' && !rg.sortReverse)) {
         const listed = []
