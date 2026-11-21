@@ -138,7 +138,7 @@ async function startWorker(): Promise<Port | null> {
   if (bridge === null) return null
   // The worker starts from the bundle core embeds, as pyodide's does: a
   // bundler that moves this module leaves no file a relative URL finds.
-  const { default: source } = await import('../../generated/wasm_worker.ts')
+  const { default: source } = await import('#wasm-worker')
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
   const worker = new Worker(url, { type: 'module' })
   return portOf(

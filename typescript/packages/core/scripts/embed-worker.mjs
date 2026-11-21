@@ -8,13 +8,16 @@ import { build } from 'esbuild'
 // A worker never starts another from these bundles, so each leaves them out,
 // and it runs on the mirage-rs module the page compiled, so each leaves out
 // its bytes too.
+const SOURCE_TYPES = 'declare const source: string\n\nexport default source\n'
 const workers = {
   pyodide_worker: 'runtime/python/pyodide/worker/entry.ts',
   computation_worker: 'concurrency/worker_entry.ts',
   wasm_worker: 'runtime/wasm/worker.ts',
 }
 const output = new URL('../src/generated/', import.meta.url)
+const built = new URL('../dist/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })
+mkdirSync(built, { recursive: true })
 for (const [name, entry] of Object.entries(workers)) {
   const result = await build({
     entryPoints: [fileURLToPath(new URL(`../src/${entry}`, import.meta.url))],
@@ -35,7 +38,7 @@ for (const [name, entry] of Object.entries(workers)) {
       {
         name: 'without-embedded-workers',
         setup(context) {
-          context.onResolve({ filter: /generated\/\w+_worker/ }, (args) => ({
+          context.onResolve({ filter: /generated\/\w+_worker|^#\w+-worker$/ }, (args) => ({
             path: args.path,
             external: true,
           }))
@@ -60,8 +63,16 @@ for (const [name, entry] of Object.entries(workers)) {
       },
     ],
   })
+  // Imported as `#<name>` (package.json `imports`), written beside the
+  // Rust modules so code run from source finds it too.
+  writeFileSync(new URL(`${name}.d.ts`, output), SOURCE_TYPES)
   writeFileSync(
-    new URL(`${name}.ts`, output),
-    `export default ${JSON.stringify(result.outputFiles[0].text)} as string\n`,
+    new URL(`${name}.js`, built),
+    `export default ${JSON.stringify(result.outputFiles[0].text)}\n`,
   )
 }
+
+// What a runtime with no Worker (workerd) imports in a worker's place: each
+// import sits behind a check for Worker, so nothing there reads it, and the
+// Worker's bundle carries no worker it cannot start.
+writeFileSync(new URL('no_worker.js', built), "export default ''\n")

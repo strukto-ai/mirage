@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 [dependencies]
 ast-grep-config = "=0.51.3"
 ast-grep-core = { version = "=0.51.3", features = ["tree-sitter"] }
-ast-grep-language = { version = "=0.51.3", default-features = false, features = ["tree-sitter-javascript", "tree-sitter-python", "tree-sitter-typescript"] }
+ast-grep-language = { version = "=0.51.3", default-features = false, features = ["tree-sitter-javascript", "tree-sitter-python", "tree-sitter-rust", "tree-sitter-typescript"] }
 ast-grep-outline = "=0.51.3"
 codespan-reporting = { version = "=0.13.1", default-features = false, features = ["std"] }
 regex = "1"

@@ -55,6 +55,8 @@ LANGUAGES = {
     "jsx": "JavaScript",
     "py": "Python",
     "python": "Python",
+    "rs": "Rust",
+    "rust": "Rust",
     "ts": "TypeScript",
     "typescript": "TypeScript",
     "tsx": "Tsx",
@@ -69,6 +71,7 @@ EXTENSIONS = {
     ".pyi": "Python",
     ".bzl": "Python",
     ".bazel": "Python",
+    ".rs": "Rust",
     ".ts": "TypeScript",
     ".mts": "TypeScript",
     ".cts": "TypeScript",
@@ -126,7 +129,6 @@ UNBUNDLED_EXTENSIONS = frozenset(
         "rb",
         "rbw",
         "gemspec",
-        "rs",
         "scala",
         "sc",
         "sbt",
@@ -153,7 +155,9 @@ PATHS = Argument(
     type="path",
     help="Files or directories in the workspace",
 )
-LANG = Argument("-l", "--lang", help="JavaScript, Python, TypeScript or TSX")
+LANG = Argument(
+    "-l", "--lang", help="JavaScript, Python, Rust, TypeScript or TSX"
+)
 STDIN = Argument(
     "--stdin", action="store_true", help="Read source from standard input"
 )

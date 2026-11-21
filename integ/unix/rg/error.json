@@ -133,11 +133,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -j1 -l hello /data/a.txt /data/nosuch.txt",
+      "command": "rg -j1 -l hello /data/a.txt /data/nosuch.txt; rg -l hello /data/a.txt /data/nosuch.txt | head -n 1; echo \"rc=${PIPESTATUS[*]}\"; rg -l -- hello /data/a.txt --glob; echo rc=$?; rg --sort=path -l hello /data/nosuch.txt /data/a.txt; echo rc=$?",
       "expect": {
-        "exit": 2,
-        "stdout": "/data/a.txt\n",
-        "stderr": "rg: /data/nosuch.txt: IO error for operation on /data/nosuch.txt: No such file or directory (os error 2)\n"
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/a.txt\nrc=2 0\n/data/a.txt\nrc=2\n/data/a.txt\nrc=2\n",
+        "stderr": "rg: /data/nosuch.txt: IO error for operation on /data/nosuch.txt: No such file or directory (os error 2)\nrg: /data/nosuch.txt: No such file or directory (os error 2)\nrg: --glob: No such file or directory (os error 2)\nrg: /data/nosuch.txt: IO error for operation on /data/nosuch.txt: No such file or directory (os error 2)\n"
       }
     },
     {

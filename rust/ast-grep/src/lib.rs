@@ -255,6 +255,7 @@ fn scan_rules(yaml: &str) -> Result<RuleCollection<SupportLang>> {
         if !matches!(
             rule.language,
             SupportLang::Python
+                | SupportLang::Rust
                 | SupportLang::TypeScript
                 | SupportLang::Tsx
                 | SupportLang::JavaScript

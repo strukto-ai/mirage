@@ -47,6 +47,8 @@ const LANGUAGES = new Map([
   ['javascript', 'JavaScript'],
   ['py', 'Python'],
   ['python', 'Python'],
+  ['rs', 'Rust'],
+  ['rust', 'Rust'],
   ['ts', 'TypeScript'],
   ['typescript', 'TypeScript'],
   ['tsx', 'Tsx'],
@@ -61,6 +63,7 @@ const EXTENSIONS = new Map([
   ['pyi', 'Python'],
   ['bzl', 'Python'],
   ['bazel', 'Python'],
+  ['rs', 'Rust'],
   ['ts', 'TypeScript'],
   ['mts', 'TypeScript'],
   ['cts', 'TypeScript'],
@@ -117,7 +120,6 @@ const UNBUNDLED_EXTENSIONS = new Set([
   'rb',
   'rbw',
   'gemspec',
-  'rs',
   'scala',
   'sc',
   'sbt',
@@ -142,7 +144,9 @@ const PATHS = new Argument('paths', {
   type: 'path',
   help: 'Files or directories in the workspace',
 })
-const LANG = new Argument(['-l', '--lang'], { help: 'JavaScript, Python, TypeScript or TSX' })
+const LANG = new Argument(['-l', '--lang'], {
+  help: 'JavaScript, Python, Rust, TypeScript or TSX',
+})
 const STDIN = new Argument('--stdin', {
   action: 'store_true',
   help: 'Read source from standard input',
