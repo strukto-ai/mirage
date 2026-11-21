@@ -112,7 +112,8 @@ def view_of(session: SessionState) -> tuple[JsonValue, ...]:
 
     Each SSH login, port forward and reconnect is a session of its own, so
     a machine compares views, not sessions: one whose view matches the
-    served session's runs there too.
+    session it first served runs there too, and that session stays the one
+    compared against.
 
     Args:
         session (SessionState): the session a line runs as.
@@ -771,7 +772,11 @@ class MachineMounts:
                 await errors(f"{unmounted(self._provider, lost)}\n".encode())
                 return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
             unserved = self._unserved(ruled)
-            if self._mount_type != "own" and (not unserved or self._served):
+            if (
+                served is None
+                and self._mount_type != "own"
+                and (not unserved or self._served)
+            ):
                 self._session = session
         if unserved:
             return await refused_run(

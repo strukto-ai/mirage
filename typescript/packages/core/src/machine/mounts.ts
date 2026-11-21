@@ -104,8 +104,8 @@ const ENCODER = new TextEncoder()
 /**
  * What a served machine shows `session`: its record's `VIEW_KEYS`. Each SSH
  * login, port forward and reconnect is a session of its own, so a machine
- * compares views, not sessions: one whose view matches the served session's
- * runs there too. Keys compare in any order, as Python's dicts do.
+ * compares views, not sessions: one whose view matches the session it first
+ * served runs there too, and that session stays the one compared against. Keys compare in any order, as Python's dicts do.
  */
 function viewOf(session: SessionState): string {
   const record = session.toDict(false)
@@ -687,7 +687,7 @@ export class MachineMounts {
       const lost = this.lost()
       if (lost !== null) return refuse(`${unmounted(this.provider, lost)}\n`, CANNOT_EXECUTE_STATUS)
       const unserved = this.unserved(ruled)
-      if (this.mountType !== 'own' && (!unserved || this.served.size > 0)) {
+      if (served === null && this.mountType !== 'own' && (!unserved || this.served.size > 0)) {
         this.session = session
       }
       return unserved

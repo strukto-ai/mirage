@@ -900,6 +900,24 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
+  it('keeps the machine on the view of the session it first served', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const first = await ws.session('first', { profile: 'agent' })
+    const second = await ws.session('second', { profile: 'agent' })
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    expect((await second.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.setSessionProfile('second', null)
+    const moved = await second.shell('python3 job.py')
+    expect([moved.exitCode, DEC.decode(moved.stderr)]).toEqual([
+      1,
+      "fake: this machine shows session first's view of the workspace; " +
+        'give session second a machine of its own\n',
+    ])
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.close()
+  })
+
   it('lets sessions share whatever order their mounts were listed in', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox)

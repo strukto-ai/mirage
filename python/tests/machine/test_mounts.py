@@ -840,6 +840,25 @@ async def test_sessions_with_one_view_share_the_machine():
 
 
 @pytest.mark.asyncio
+async def test_the_machine_keeps_the_view_of_the_session_it_first_served():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    first = await ws.session("first", profile="agent")
+    second = await ws.session("second", profile="agent")
+    assert (await first.shell("python3 job.py")).exit_code == 0
+    assert (await second.shell("python3 job.py")).exit_code == 0
+    await ws.set_session_profile("second", None)
+    moved = await second.shell("python3 job.py")
+    assert (moved.exit_code, await moved.stderr_str()) == (
+        1,
+        "fake: this machine shows session first's view of the workspace; "
+        "give session second a machine of its own\n",
+    )
+    assert (await first.shell("python3 job.py")).exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_sessions_share_whatever_order_their_mounts_were_listed_in():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)

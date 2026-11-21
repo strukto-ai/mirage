@@ -545,6 +545,13 @@
   "write": {},
   "read": "codex\n"
  },
+ "acp": {
+  "files": {"readTextFile": true, "writeTextFile": true},
+  "mcp": ["mirage"],
+  "write": {},
+  "read": {"content": "acp\n"},
+  "status": 0
+ },
  "server": {
   "health_without_token": 200,
   "ready_without_token": [200, {"status": "ready"}],
