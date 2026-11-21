@@ -56,7 +56,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, reader_of
 
 UNCHANGED = " "
 # What git diff adds to the commit of a gitlink whose repository has
@@ -429,19 +429,38 @@ async def _embedded_change(
     if location is None:
         return None
     head = await embedded_head(vfs, location)
-    rows, _, _ = await collect(
-        vfs, await open_repo(vfs, location), location, UNTRACKED_NORMAL
+    # Only what the session sees counts, and a repository nested in this
+    # one reports its content as git's recursive status does.
+    every, _, _ = await collect(
+        vfs,
+        await open_repo(vfs, location),
+        location,
+        UNTRACKED_NORMAL,
+        embedded={},
     )
+    rows = [r for r in every if reader_of(vfs).visible(r.path)]
+
+    def untracked(row: StatusRow) -> bool:
+        return (
+            row.index_status == UNTRACKED
+            or row.embedded == "untracked content"
+        )
+
     notes = [
         *([] if head == recorded.decode() else ["new commits"]),
         *(
             ["modified content"]
-            if any(r.index_status not in (UNTRACKED, IGNORED) for r in rows)
+            if any(
+                r.index_status != IGNORED and not untracked(r) for r in rows
+            )
             else []
         ),
         *(
             ["untracked content"]
-            if any(r.index_status == UNTRACKED for r in rows)
+            if any(
+                untracked(r) or "untracked content" in (r.embedded or "")
+                for r in rows
+            )
             else []
         ),
     ]
@@ -749,6 +768,20 @@ async def collect(
     unstaged = await work_changes(
         vfs, location.worktree, state.entries, found, embedded
     )
+    # With untracked files not reported, git says nothing of a gitlink
+    # whose repository only has untracked content (git 2.47.3).
+    if embedded is not None and mode == UNTRACKED_NO:
+        for name, change in list(embedded.items()):
+            note = ", ".join(
+                part
+                for part in change.note.split(", ")
+                if part != "untracked content"
+            )
+            if note:
+                embedded[name] = replace(change, note=note)
+            else:
+                del embedded[name]
+                unstaged.pop(name, None)
     conflicts = conflict_codes(state.conflicts)
 
     # The verdicts name a path as text with its undecodable bytes

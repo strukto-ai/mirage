@@ -253,11 +253,11 @@ async def _resolve(
             continue
         repos = matched(set(found.repos), target)
         for repo in repos:
-            if force or repo in tracked or not ignores.is_ignored(repo, True):
+            if force or repo in tracked or f"{repo}/" in found.untracked:
                 stage.add(repo)
             elif repo == target:
                 ignored.append(target)
-        gone = matched(tracked, target) - present - linked
+        gone = matched(tracked, target) - present - linked - repos
         if target in repos:
             continue
         if target in present:
@@ -363,6 +363,31 @@ async def stage_changes(
     ]
 
 
+async def _standing_gitlinks(
+    vfs: Files, location: RepoLocation, state: IndexState, tracked: set[str]
+) -> set[str]:
+    """The gitlinks the index holds whose directory still stands: one with
+    no repository there (a submodule never checked out) stays as the index
+    has it, and one whose directory is gone is staged as deleted, as git
+    does. Mirrors TS ``standingGitlinks``.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        state (IndexState): the index.
+        tracked (set[str]): repository-relative paths the index holds.
+    """
+    standing = set()
+    for path in tracked:
+        entry = state.entries.get(path.encode())
+        if entry is None or entry.mode != GITLINK:
+            continue
+        info = await stat_of(vfs, location.worktree.join(path))
+        if info is not None and info.type is FileType.DIRECTORY:
+            standing.add(path)
+    return standing
+
+
 async def stage_tracked(
     vfs: Files,
     location: RepoLocation,
@@ -382,12 +407,7 @@ async def stage_tracked(
     tracked = decoded(visible_entries(location, state.entries))
     found = await scan(vfs, location, tracked, UNTRACKED_NO)
     present = set(found.files) | set(found.repos)
-    linked = {
-        path
-        for path in tracked
-        if (entry := state.entries.get(path.encode())) is not None
-        and entry.mode == GITLINK
-    }
+    linked = await _standing_gitlinks(vfs, location, state, tracked)
     await stage_changes(
         vfs,
         location,
@@ -444,14 +464,7 @@ async def add(
     )
     ignores = await load_ignores(vfs, location.commondir, location.worktree)
     present = set(found.files) | set(found.repos)
-    # A gitlink whose repository is not there (a submodule never checked
-    # out) stays as the index has it.
-    linked = {
-        path
-        for path in tracked
-        if (entry := state.entries.get(path.encode())) is not None
-        and entry.mode == GITLINK
-    }
+    linked = await _standing_gitlinks(vfs, location, state, tracked)
     if parsed.update:
         scope = (
             _update_scope(
@@ -475,9 +488,7 @@ async def add(
         stage |= {
             path
             for path in found.repos
-            if parsed.force
-            or path in tracked
-            or not ignores.is_ignored(path, True)
+            if parsed.force or path in tracked or f"{path}/" in found.untracked
         }
         remove = tracked - present - linked
     else:

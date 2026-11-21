@@ -69,5 +69,7 @@ async def embedded_head(vfs: Files, location: RepoLocation) -> str | None:
     if head.ref is None:
         return head.commit
     refs = await load_refs(vfs, location.gitdir, location.commondir)
-    sha = refs.as_dict().get(Ref(head.ref.encode()))
-    return None if sha is None else sha.decode()
+    try:
+        return refs[Ref(head.ref.encode())].decode()
+    except KeyError:
+        return None

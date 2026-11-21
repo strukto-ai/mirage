@@ -347,6 +347,26 @@ describe('git add', () => {
     expect(out).toContain('\tmodified:   sub (modified content)\n')
   })
 
+  // git 2.47.3: `m` for modified content and `?` for untracked content alone
+  // in short status, `M` in porcelain; a gitlink whose directory is gone is
+  // staged as deleted.
+  it('names what changed in a gitlink in short status', async () => {
+    const h = await harness((repo) => {
+      embedded(repo)
+    })
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('commit -qm sub'))[0]).toBe(0)
+    await write(h, 'sub/u.txt', 'u\n')
+    expect((await h.run('status -s'))[1]).toBe(' ? sub\n')
+    expect((await h.run('status --porcelain'))[1]).toBe(' M sub\n')
+    expect((await h.run('status -s -uno'))[1]).toBe('')
+    await write(h, 'sub/in.txt', 'more\n')
+    expect((await h.run('status -s'))[1]).toBe(' m sub\n')
+    expect((await h.ws.shell('rm -rf /repo/sub')).exitCode).toBe(0)
+    expect(await h.run('add -A')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['ls-files'])).not.toContain('sub')
+  })
+
   it('refuses an embedded repository without a commit', async () => {
     const h = await harness((repo) => {
       embedded(repo, false)

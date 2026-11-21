@@ -281,6 +281,26 @@ def tracking_lines(upstream: Upstream, ahead_behind: bool = True) -> list[str]:
     ]
 
 
+def gitlink_letters(rows: list[StatusEntry]) -> list[StatusEntry]:
+    """The entries as short status shows them: a gitlink whose repository
+    only has changes of its own reads ``m``, or ``?`` for untracked content
+    alone, where porcelain keeps ``M`` (git 2.47.3). Mirrors TS
+    ``gitlinkLetters``.
+
+    Args:
+        rows (list[StatusEntry]): the status entries.
+    """
+    out = []
+    for row in rows:
+        note = row.embedded
+        if note is None or "new commits" in note or row.tree_status != "M":
+            out.append(row)
+            continue
+        letter = "m" if "modified content" in note else "?"
+        out.append(replace(row, tree_status=letter))
+    return out
+
+
 def short_format(
     rows: list[StatusEntry],
     header: str | None,

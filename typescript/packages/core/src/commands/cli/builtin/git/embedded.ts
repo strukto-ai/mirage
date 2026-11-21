@@ -17,7 +17,7 @@ import type { Files } from '../../../../workspace/files.ts'
 import { discover } from './discover.ts'
 import { InvalidGitFileError, NotARepositoryError } from './errors.ts'
 import { statOf } from './io.ts'
-import { loadRefs, readHead } from './refs.ts'
+import { loadRefs, readHead, resolveSymbolic } from './refs.ts'
 import type { RepoLocation } from './types.ts'
 
 /**
@@ -54,5 +54,6 @@ export async function embeddedHead(vfs: Files, location: RepoLocation): Promise<
   const head = await readHead(vfs, location.gitdir)
   if (head.ref === null) return head.commit
   const refs = await loadRefs(vfs, location.gitdir, location.commondir)
-  return refs.get(head.ref) ?? null
+  const end = await resolveSymbolic(vfs, location.gitdir, refs, head.ref, true)
+  return end === null ? null : (refs.get(end.name) ?? null)
 }

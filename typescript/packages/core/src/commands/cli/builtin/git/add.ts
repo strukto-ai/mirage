@@ -169,11 +169,11 @@ async function resolve(
     }
     const repos = matched(found.repos, target)
     for (const repo of repos) {
-      if (force || tracked.has(repo) || !ignores.isIgnored(repo, true)) stage.add(repo)
+      if (force || tracked.has(repo) || found.untracked.includes(`${repo}/`)) stage.add(repo)
       else if (repo === target) ignored.push(target)
     }
     const gone = [...matched(tracked, target)].filter(
-      (path) => !present.has(path) && !linked.has(path),
+      (path) => !present.has(path) && !linked.has(path) && !repos.has(path),
     )
     if (repos.has(target)) continue
     if (present.has(target)) {
@@ -259,6 +259,26 @@ export async function stageChanges(
 }
 
 /**
+ * The gitlinks the index holds whose directory still stands: one with no
+ * repository there (a submodule never checked out) stays as the index has
+ * it, and one whose directory is gone is staged as deleted, as git does.
+ */
+async function standingGitlinks(
+  vfs: Files,
+  location: RepoLocation,
+  state: IndexState,
+  tracked: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const standing = new Set<string>()
+  for (const path of tracked) {
+    if (state.entries.get(path)?.mode !== GITLINK) continue
+    if ((await statOf(vfs, location.worktree.join(path)))?.type === FileType.DIRECTORY)
+      standing.add(path)
+  }
+  return standing
+}
+
+/**
  * Restage every path the index holds from the working tree.
  *
  * What `add -u` does with no pathspec and `commit -a` does first: a modified
@@ -274,10 +294,9 @@ export async function stageTracked(
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
   const present = new Set([...found.files.keys(), ...found.repos])
+  const linked = await standingGitlinks(vfs, repo.location, state, tracked)
   const kept = new Set([...tracked].filter((path) => present.has(path)))
-  const removed = new Set(
-    [...tracked].filter((path) => !present.has(path) && state.entries.get(path)?.mode !== GITLINK),
-  )
+  const removed = new Set([...tracked].filter((path) => !present.has(path) && !linked.has(path)))
   const [staged] = await stageChanges(repo, vfs, state.entries, found, kept, removed)
   for (const path of removed) state.entries.delete(path)
   for (const [path, entry] of staged) state.entries.set(path, { path, ...entry, stage: 0 })
@@ -319,9 +338,7 @@ export async function add(
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, parsed.force, roots)
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
   const present = new Set([...found.files.keys(), ...found.repos])
-  // A gitlink whose repository is not there (a submodule never checked
-  // out) stays as the index has it.
-  const linked = new Set([...tracked].filter((path) => state.entries.get(path)?.mode === GITLINK))
+  const linked = await standingGitlinks(vfs, repo.location, state, tracked)
   const missing = (path: string): boolean => !present.has(path) && !linked.has(path)
   let stage: Set<string>
   let remove: Set<string>
@@ -335,7 +352,7 @@ export async function add(
   } else if (parsed.every && texts.length === 0) {
     stage = parsed.force ? new Set(present) : keepAddable(found.files.keys(), tracked, ignores)
     for (const path of found.repos)
-      if (parsed.force || tracked.has(path) || !ignores.isIgnored(path, true)) stage.add(path)
+      if (parsed.force || tracked.has(path) || found.untracked.includes(`${path}/`)) stage.add(path)
     remove = new Set([...tracked].filter(missing))
   } else {
     ;[stage, remove] = await resolve(

@@ -30,7 +30,7 @@ import { shownEntries } from './seen.ts'
 import { similarityScore } from './similarity.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { ConflictedEntry, IndexEntry, IndexState, StatusEntry, WorkTree } from './types.ts'
-import type { Files } from '../../../../workspace/files.ts'
+import { readerOf, type Files } from '../../../../workspace/files.ts'
 import { scan, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -380,13 +380,27 @@ async function embeddedChange(
   const location = await embeddedLocation(vfs, outer.location.worktree.join(path))
   if (location === null) return null
   const head = await embeddedHead(vfs, location)
-  const [rows] = await collect(await openRepo(vfs, location, null), vfs, UNTRACKED_NORMAL)
+  // Only what the session sees counts, and a repository nested in this one
+  // reports its content as git's recursive status does.
+  const [all] = await collect(
+    await openRepo(vfs, location, null),
+    vfs,
+    UNTRACKED_NORMAL,
+    false,
+    null,
+    new Map(),
+  )
+  const rows = all.filter((row) => readerOf(vfs).visible(row.path))
+  const untracked = (row: StatusRow): boolean =>
+    row.indexStatus === UNTRACKED || row.embedded === 'untracked content'
   const notes = [
     ...(head === recorded ? [] : ['new commits']),
-    ...(rows.some((row) => row.indexStatus !== UNTRACKED && row.indexStatus !== IGNORED)
+    ...(rows.some((row) => row.indexStatus !== IGNORED && !untracked(row))
       ? ['modified content']
       : []),
-    ...(rows.some((row) => row.indexStatus === UNTRACKED) ? ['untracked content'] : []),
+    ...(rows.some((row) => untracked(row) || row.embedded?.includes('untracked content') === true)
+      ? ['untracked content']
+      : []),
   ]
   return notes.length === 0 ? null : { note: notes.join(', '), head }
 }
@@ -651,6 +665,20 @@ export async function collect(
     found,
     embedded,
   )
+  // With untracked files not reported, git says nothing of a gitlink whose
+  // repository only has untracked content (git 2.47.3).
+  if (mode === UNTRACKED_NO)
+    for (const [name, change] of embedded ?? []) {
+      const note = change.note
+        .split(', ')
+        .filter((part) => part !== 'untracked content')
+        .join(', ')
+      if (note !== '') embedded?.set(name, { ...change, note })
+      else {
+        embedded?.delete(name)
+        unstaged.delete(name)
+      }
+    }
   const at = (name: string): PathSpec => repo.location.worktree.join(rstripSlash(name))
   const row = (
     name: string,

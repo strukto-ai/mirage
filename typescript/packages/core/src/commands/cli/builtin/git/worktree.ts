@@ -294,7 +294,10 @@ class Scanner {
       if (info === null) continue
       if (info.type === FileType.DIRECTORY) {
         const skipped = ignored || rules.isIgnored(child, true)
-        if (!this.directories.has(child) && (await this.embedded(child))) {
+        // An ignored directory the walk passes over is not probed: nothing
+        // about it would be reported either way.
+        const needed = !skipped || this.showIgnored || this.tracked.has(child)
+        if (!this.directories.has(child) && needed && (await this.embedded(child))) {
           this.found.repos.push(child)
           if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
           if (!skipped) this.found.untracked.push(`${child}/`)

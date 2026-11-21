@@ -360,8 +360,15 @@ class Scanner:
                 continue
             if info.type is FileType.DIRECTORY:
                 skipped = ignored or rules.is_ignored(child, True)
-                if child not in self._directories and await self._embedded(
-                    child
+                # An ignored directory the walk passes over is not probed:
+                # nothing about it would be reported either way.
+                needed = (
+                    not skipped or self._show_ignored or child in self._tracked
+                )
+                if (
+                    child not in self._directories
+                    and needed
+                    and await self._embedded(child)
                 ):
                     self.found.repos.append(child)
                     if child in self._tracked or self._mode == UNTRACKED_NO:

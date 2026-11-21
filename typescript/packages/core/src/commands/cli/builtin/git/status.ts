@@ -32,7 +32,7 @@ import {
 } from './pathspec.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
-import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
+import { branchLine, gitlinkLetters, longFormat, relativeEntries, shortFormat } from './render.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { HeadRef } from './types.ts'
@@ -253,7 +253,7 @@ export async function status(
     let body =
       parsed.porcelain || parsed.short
         ? shortFormat(
-            entries,
+            parsed.porcelain ? entries : gitlinkLetters(entries),
             parsed.branch ? branchLine(head.branch, noCommits, upstream, aheadBehind) : null,
             fully,
             parsed.nul,

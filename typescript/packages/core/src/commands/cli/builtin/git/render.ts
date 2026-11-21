@@ -227,6 +227,19 @@ export function trackingLines(upstream: Upstream, aheadBehind = true): string[] 
 }
 
 /** The whole of `--short` / `--porcelain` output. */
+/**
+ * The entries as short status shows them: a gitlink whose repository only
+ * has changes of its own reads `m`, or `?` for untracked content alone,
+ * where porcelain keeps `M` (git 2.47.3).
+ */
+export function gitlinkLetters(rows: readonly StatusEntry[]): StatusEntry[] {
+  return rows.map((row) => {
+    const note = row.embedded
+    if (note === undefined || note.includes('new commits') || row.treeStatus !== 'M') return row
+    return { ...row, treeStatus: note.includes('modified content') ? 'm' : '?' }
+  })
+}
+
 export function shortFormat(
   rows: readonly StatusEntry[],
   header: string | null,

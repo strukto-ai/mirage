@@ -474,3 +474,25 @@ async def test_an_embedded_repository_without_a_commit_is_refused(
         b"fatal: adding files failed\n",
     )
     assert b"fresh.txt" not in staged(repo_path)
+
+
+@pytest.mark.asyncio
+async def test_short_status_names_what_changed_in_a_gitlink(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: ``m`` for modified content and ``?`` for untracked
+    # content alone in short status, ``M`` in porcelain; a gitlink whose
+    # directory is gone is staged as deleted.
+    _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    (repo_path / "sub" / "u.txt").write_text("u\n", encoding="utf-8")
+    assert (await run(git_rw, "status -s"))[1] == b" ? sub\n"
+    assert (await run(git_rw, "status --porcelain"))[1] == b" M sub\n"
+    assert (await run(git_rw, "status -s -uno"))[1] == b""
+    (repo_path / "sub" / "in.txt").write_text("more\n", encoding="utf-8")
+    assert (await run(git_rw, "status -s"))[1] == b" m sub\n"
+    assert (await git_rw.shell("rm -rf /repo/sub")).exit_code == 0
+    code, _out, err = await run(git_rw, "add -A")
+    assert (code, err) == (0, b"")
+    assert b"sub" not in staged(repo_path)
