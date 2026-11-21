@@ -130,22 +130,35 @@ export function namingRules(rules: AdmissionRules | null, ctx: CommandContext): 
   return new Encoded(JSON.stringify(walked))
 }
 
+function grantedIndices(rules: AdmissionRules, granted: readonly CommandRule[]): number[] {
+  return ruleTable(rules).flatMap((rule, i) =>
+    granted.some((nod) => sameRule(nod, rule)) ? [i] : [],
+  )
+}
+
 /**
  * Whether a leaf the running line walked could refuse an entry at or
  * under this path: its paths could cover something in the subtree. What
  * a native walk asks before it trusts the raw tree, per operand the way
- * a hide is: a leaf on `/repo/.env` leaves `find /s3` its native op.
- * `named` is the line's walk (`namingRules`).
+ * a hide is: a leaf on `/repo/.env` leaves `find /s3` its native op. An
+ * ask the line holds a grant for refuses no entry (`ioRefusal`), so it
+ * reaches none: `rm -rf /x` approved under an ask on `/x/*` keeps the
+ * backend's one-call removal. `named` is the line's walk (`namingRules`).
  */
 export function ioReach(
   rules: AdmissionRules | null,
   named: Encoded | null,
   virtual: string,
+  granted: readonly CommandRule[] = [],
 ): boolean {
   return (
     rules !== null &&
     named !== null &&
-    admissionMatcher(rules).ask('io_reach', { walked: named, path: units(virtual) }) === true
+    admissionMatcher(rules).ask('io_reach', {
+      walked: named,
+      path: units(virtual),
+      granted: grantedIndices(rules, granted),
+    }) === true
   )
 }
 
@@ -168,14 +181,13 @@ export function ioRefusal(
   granted: readonly CommandRule[],
 ): string | null {
   if (rules === null || named === null) return null
-  const table = ruleTable(rules)
   const id = admissionMatcher(rules).ask('io_refusal', {
     walked: named,
     path: units(virtual),
-    granted: table.flatMap((rule, i) => (granted.some((nod) => sameRule(nod, rule)) ? [i] : [])),
+    granted: grantedIndices(rules, granted),
   }) as number | null
   if (id === null) return null
-  const rule = table[id]
+  const rule = ruleTable(rules)[id]
   if (rule === undefined) throw new Error('Invalid policy rule reply')
   return reasonOf(rule, null)
 }

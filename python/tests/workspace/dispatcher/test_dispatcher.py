@@ -54,10 +54,13 @@ from mirage.mount.changes import SERVED_BY
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
+    Decision,
     Deny,
+    Outcome,
     Policies,
     Policy,
     PolicyDenied,
+    Scope,
     VfsContext,
     VfsResultContext,
 )
@@ -4110,15 +4113,21 @@ async def test_retained_stat_runs_current_policy_without_backend(
 
 
 class _CountedRemoval(RAMVFS):
-    """A RAM mount that counts its one-call tree removals."""
+    """A RAM mount that counts its one-call tree removals and the file
+    removals a walk makes instead."""
 
     def __init__(self) -> None:
         super().__init__()
         self.removals = 0
+        self.unlinks = 0
 
     async def rm_r(self, path: PathSpec) -> Any:
         self.removals += 1
         return await super().rm_r(path)
+
+    async def unlink(self, path: PathSpec) -> None:
+        self.unlinks += 1
+        await super().unlink(path)
 
 
 @pytest.mark.asyncio
@@ -4148,6 +4157,46 @@ async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
         await ws.shell("mkdir -p /d/t/a && echo hi > /d/t/a/f")
         await ws.shell("rm -r /d/t", session_id="agent")
     assert vfs.removals == removals
+
+
+@pytest.mark.asyncio
+async def test_an_approved_ask_keeps_the_one_call_tree_removal():
+    # The nod the gate took for the line answers for every entry below
+    # it, so no entry is left to judge and the backend removes the tree
+    # in one call; the nod is spent, so the next line asks again.
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.id)
+        return replace(record, outcome=Outcome.ALLOW, scope=Scope.ONCE)
+
+    vfs = _CountedRemoval()
+    with Workspace(
+        {"/d/": vfs}, mode=MountMode.WRITE, on_ask=allows_once
+    ) as ws:
+        ws.create_session(
+            "agent",
+            profile={
+                "commands": {
+                    "rm": {
+                        "decision": "ask",
+                        "reason": "confirm",
+                        "paths": ["/d/t/*"],
+                    }
+                }
+            },
+        )
+        for run in (1, 2):
+            await ws.shell(
+                "mkdir -p /d/t/a /d/t/b && echo 1 > /d/t/a/f"
+                " && echo 2 > /d/t/b/g"
+            )
+            io = await ws.shell("rm -rf /d/t", session_id="agent")
+            assert io.exit_code == 0
+            assert len(asked) == run
+            assert (vfs.removals, vfs.unlinks) == (run, 0)
+            listed = await ws.shell("ls /d")
+            assert await listed.materialize_stdout() == b""
 
 
 class _SeesCalls(Policy):
