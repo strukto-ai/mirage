@@ -673,6 +673,7 @@ async def gate(
             if named in CWD_DEFAULT_RAW
             else None
         )
+        own_facts = line_facts(named, [named, *classified[1:]], session.cwd)
         program_ctx = dataclasses.replace(
             ctx,
             command=named,
@@ -680,12 +681,26 @@ async def gate(
             tokens=own.tokens,
             program=own.program,
             read=own.read,
+            walks=own_facts.walks,
+            write=_writes(
+                named,
+                args,
+                classified[1:],
+                own,
+                own_facts,
+                session,
+                registry,
+                namespace,
+                own_implied,
+            ),
+            subtree=own_facts.subtree,
+            move_target=own_facts.move_target,
             paths=_seen(
                 session,
                 line_paths(
                     named,
                     own,
-                    follows,
+                    own_facts.follows is not Follow.NONE,
                     links,
                     session.cwd,
                     own_implied,

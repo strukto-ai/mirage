@@ -1245,6 +1245,9 @@ ANOTHER_SPELLING = (
     'k=BASH_ENV; env "$k=/data/e" bash -c :',
     "declare PS4='$(hostname)' -p; set -x; :",
     "declare -p x=$(read PS4 <<< x); set -x; :",
+    "p=r; read -$p PS4 <<< '$(hostname)'; set -x; :",
+    "bash -oe nounset -i -c :",
+    "empty=; trap --$empty hostname EXIT",
 )
 
 STILL_RUNS = (
@@ -1604,6 +1607,8 @@ MACHINE_PATHS = (
     "HOME[0]=/data; cat ~/secret.txt",
     "bash -c 'HOME=/data; cat ~/secret.txt'",
     "declare -n h; h=HOME; h=/data; cat ~/secret.txt",
+    "env -C /tmp HOME=/data bash -c 'cat ~/secret.txt'",
+    "env -v HOME=/data bash -c 'cat ~/secret.txt'",
 )
 MACHINE_WRITES = (
     "find /data/pub -fprint /data/secret.txt",

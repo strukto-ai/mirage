@@ -728,6 +728,21 @@ async def test_a_path_s_name_reads_the_folder_its_program_lists_by_default():
 
 
 @pytest.mark.asyncio
+async def test_a_path_s_name_reaches_the_tree_its_program_removes():
+    # `rm -r` reaches every file under its operand, so the name pass
+    # judges what lies below it as `rm` alone would.
+    deny = {"rm": {"decision": "deny", "reason": "r", "paths": ["/d/k/*"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir -p /d/k && echo x > /d/k/f")
+        r = await ws.shell("/opt/rm -rf /d")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+        assert (await ws.shell("/opt/rm -rf /e")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_route_of_a_path_s_name_does_not_move_the_path():
     # The path runs where its own words place it: a route of its file's
     # name places that name, not the path.

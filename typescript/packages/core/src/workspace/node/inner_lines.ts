@@ -239,6 +239,23 @@ function takesNext(word: string): boolean {
   return false
 }
 
+// The options an `env` option word sets, as short letters: a cluster's up to
+// its first of `u`, `C`, `a` (the rest is that one's value), or the letter a
+// long option or its prefix stands for (`-` for one only GNU's env takes).
+function envLetters(word: string): Set<string> {
+  if (word.startsWith('--')) {
+    const name = word.slice(2).split('=', 1)[0] ?? ''
+    const longs: [string, string][] = [
+      ['ignore-environment', 'i'],
+      ['unset', 'u'],
+      ['null', '0'],
+    ]
+    return new Set([longs.find(([long]) => long.startsWith(name))?.[1] ?? '-'])
+  }
+  const end = word.search(/[uCa]/)
+  return new Set(word.slice(1, end < 0 ? word.length : end + 1))
+}
+
 // The folder an `env` option word sends its command to: `-C`'s or
 // `--chdir`'s value, attached or the next word; null for any other option.
 function valueOf(word: Word, after: Word | null, letter: string, long: string): Word | null {
@@ -264,6 +281,8 @@ function valueOf(word: Word, after: Word | null, letter: string, long: string): 
 // of them, so it is unreadable.
 function envInner(args: readonly Word[]): InnerLine[] {
   let chdir: Word | null = null
+  let changed = false
+  let foreign = false
   let i = 0
   while (i < args.length) {
     const word = valueAt(args, i)
@@ -274,10 +293,14 @@ function envInner(args: readonly Word[]): InnerLine[] {
     }
     if (splits(word)) return [UNREADABLE]
     if (ENV_FLAGS.has(word)) {
+      changed ||= word !== '-0' && word !== '--null'
       i += 1
       continue
     }
     if (word.startsWith('-') && word.length > 1) {
+      const letters = envLetters(word)
+      changed ||= letters.has('i') || letters.has('u')
+      foreign ||= [...letters].some((f) => !'iu0'.includes(f))
       const current = args[i]
       if (current !== undefined) {
         chdir = valueOf(current, args[i + 1] ?? null, 'C', 'chdir') ?? chdir
@@ -298,8 +321,12 @@ function envInner(args: readonly Word[]): InnerLine[] {
     const name = word.split('=', 1)[0] ?? ''
     // A name only the run expands may be a hook's.
     if (isHook(name) || (args[i]?.text === null && !ENV_NAME.test(name))) return [UNREADABLE]
+    changed = true
     i += 1
   }
+  // The tree's env refuses an option the machine's takes, so the
+  // environment its command runs in is not one the gate can build.
+  if (changed && foreign) return [UNREADABLE]
   const rest = args.slice(i)
   return rest.length > 0 ? [{ line: null, argv: rest, open: false, chdir }] : []
 }
@@ -391,21 +418,22 @@ function argvInner(args: readonly Word[]): InnerLine[] {
  * `~/.profile`) the gate cannot read.
  */
 function startsRc(words: readonly string[]): boolean {
-  let skip = false
+  let skip = 0
   for (const word of words) {
-    if (skip) {
-      skip = false
+    if (skip > 0) {
+      // Each `o` or `O` in a group takes the next word.
+      skip -= 1
       continue
     }
     // bash reads `+` words as options too, and `+l` still logs in.
     if (word === '-' || word === '--' || !['-', '+'].includes(word[0] ?? '')) return false
     if (word.startsWith('--')) {
       if (word === '--login') return true
-      skip = BASH_LONG_OPTIONS.get(word.slice(2)) === true
+      skip = BASH_LONG_OPTIONS.get(word.slice(2)) === true ? 1 : 0
       continue
     }
     if (word.includes('i') || word.includes('l')) return true
-    skip = 'oO'.includes(word.at(-1) ?? '')
+    skip = (word.match(/[oO]/g) ?? []).length
   }
   return false
 }
@@ -431,6 +459,8 @@ function shellInner(args: readonly Word[]): InnerLine[] {
 // operand resets it, and an option only lists.
 function trapInner(args: readonly Word[]): InnerLine[] {
   const first = args.length > 0 ? valueAt(args, 0) : ''
+  // The run may expand it to `--`, leaving an action to run.
+  if (first.startsWith('-') && args[0]?.text === null) return [UNREADABLE]
   if (first.startsWith('-') && first !== '-' && first !== '--') return []
   const rest = first === '--' ? args.slice(1) : args
   const action = rest.length > 0 ? valueAt(rest, 0) : ''

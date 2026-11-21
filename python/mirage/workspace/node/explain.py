@@ -2398,6 +2398,9 @@ def _stored(head: str, args: Sequence[Word]) -> list[Word]:
     while i < len(args) and args[i].value[:1] == "-" and args[i].value != "-":
         word = args[i]
         i += 1
+        if word.text is None:
+            # The run may expand it to options that store into anything.
+            return [word]
         if word.value == "--":
             break
         for at, flag in enumerate(word.value[1:], 1):
@@ -2405,7 +2408,7 @@ def _stored(head: str, args: Sequence[Word]) -> list[Word]:
                 continue
             rest = word.value[at + 1 :]
             value = (
-                Word(rest, None if word.text is None else rest)
+                Word(rest, rest)
                 if rest
                 else (args[i] if i < len(args) else None)
             )

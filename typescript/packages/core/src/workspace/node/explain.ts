@@ -2764,13 +2764,15 @@ function stored(head: string, args: readonly Word[]): Word[] {
     const value = wordValue(word)
     if (!value.startsWith('-') || value === '-') break
     i += 1
+    // The run may expand it to options that store into anything.
+    if (word.text === null) return [word]
     if (value === '--') break
     for (let at = 1; at < value.length; at++) {
       if (!valued.includes(value[at] ?? '')) continue
       const rest = value.slice(at + 1)
       let given: Word | null = null
       if (rest !== '') {
-        given = { raw: rest, text: word.text === null ? null : rest }
+        given = { raw: rest, text: rest }
       } else {
         given = args[i] ?? null
         i += 1

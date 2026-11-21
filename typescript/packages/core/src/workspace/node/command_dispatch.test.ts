@@ -743,6 +743,26 @@ describe('a wrapper over a path-spelled program', () => {
 
   // `ls` with no operand lists the cwd, so the name pass judges that folder as
   // `ls` alone would.
+  it('reaches the tree a path program removes by its name', async () => {
+    // `rm -r` reaches every file under its operand, so the name pass judges
+    // what lies below it as `rm` alone would.
+    const ws = spelledWs({
+      profiles: {
+        default: SessionProfile({
+          commands: { rm: { decision: 'deny', reason: 'r', paths: ['/d/k/*'] } },
+        }),
+      },
+    })
+    try {
+      await ws.shell('mkdir -p /d/k && echo x > /d/k/f')
+      const r = await ws.shell('/opt/rm -rf /d')
+      expect([r.exitCode === 0, text(r.stdout)]).toEqual([false, ''])
+      expect(text((await ws.shell('/opt/rm -rf /e')).stdout)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('reads the folder a path program lists by default by its name', async () => {
     const ws = spelledWs({
       profiles: {

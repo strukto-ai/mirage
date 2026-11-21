@@ -290,6 +290,27 @@ def _takes_next(word: str) -> bool:
     return False
 
 
+def _env_letters(word: str) -> frozenset[str]:
+    """The options an ``env`` option word sets, as short letters: a
+    cluster's up to its first of ``u``, ``C``, ``a`` (the rest is that
+    one's value), or the letter a long option or its prefix stands for
+    (``-`` for one only GNU's env takes).
+
+    Args:
+        word (str): one option word.
+    """
+    if word.startswith("--"):
+        name = word[2:].split("=", 1)[0]
+        longs = {"ignore-environment": "i", "unset": "u", "null": "0"}
+        return frozenset(
+            next(
+                (f for long, f in longs.items() if long.startswith(name)), "-"
+            )
+        )
+    end = next((at for at, f in enumerate(word) if f in "uCa"), len(word) - 1)
+    return frozenset(word[1 : end + 1])
+
+
 def _value_of(
     word: Word, after: Word | None, letter: str, long: str
 ) -> Word | None:
@@ -324,6 +345,7 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     read the way the tree's ``env`` builtin reads it; an option only the
     run expands may be any of them, so it is unreadable."""
     chdir: Word | None = None
+    changed = foreign = False
     i = 0
     while i < len(args):
         word = args[i].value
@@ -335,9 +357,13 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         if _splits(word):
             return [InnerLine()]
         if word in _ENV_FLAGS:
+            changed = changed or word not in ("-0", "--null")
             i += 1
             continue
         if word.startswith("-") and len(word) > 1:
+            letters = _env_letters(word)
+            changed = changed or bool(letters & {"i", "u"})
+            foreign = foreign or bool(letters - {"i", "u", "0"})
             after = args[i + 1] if i + 1 < len(args) else None
             chdir = _value_of(args[i], after, "C", "chdir") or chdir
             argv0 = _value_of(args[i], after, "a", "argv0")
@@ -360,7 +386,12 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
             args[i].text is None and not _ENV_NAME.fullmatch(name)
         ):
             return [InnerLine()]
+        changed = True
         i += 1
+    if changed and foreign:
+        # The tree's env refuses an option the machine's takes, so the
+        # environment its command runs in is not one the gate can build.
+        return [InnerLine()]
     rest = tuple(args[i:])
     return [InnerLine(argv=rest, chdir=chdir)] if rest else []
 
@@ -458,6 +489,9 @@ def _trap_inner(args: Sequence[Word]) -> list[InnerLine]:
         args (Sequence[Word]): the words after ``trap``.
     """
     first = args[0].value if args else ""
+    if first.startswith("-") and args[0].text is None:
+        # The run may expand it to `--`, leaving an action to run.
+        return [InnerLine()]
     if first.startswith("-") and first not in ("-", "--"):
         return []
     rest = args[1:] if first == "--" else args
@@ -505,10 +539,11 @@ def _starts_rc(words: Sequence[str]) -> bool:
     Args:
         words (Sequence[str]): the words after ``sh`` or ``bash``.
     """
-    skip = False
+    skip = 0
     for word in words:
         if skip:
-            skip = False
+            # Each `o` or `O` in a group takes the next word.
+            skip -= 1
             continue
         # bash reads `+` words as options too, and `+l` still logs in.
         if word in ("-", "--") or word[:1] not in ("-", "+"):
@@ -520,7 +555,7 @@ def _starts_rc(words: Sequence[str]) -> bool:
             continue
         if "i" in word or "l" in word:
             return True
-        skip = word[-1] in "oO"
+        skip = word.count("o") + word.count("O")
     return False
 
 

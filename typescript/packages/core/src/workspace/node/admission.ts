@@ -586,6 +586,7 @@ export async function gate(
       named in CWD_DEFAULT_RAW
         ? defaultCwdOperand([named, ...classified], named, registry, session.cwd, stdin)
         : null
+    const ownFacts = lineFacts(named, [named, ...classified], session.cwd)
     const programCtx: CommandContext = {
       ...ctx,
       command: named,
@@ -593,9 +594,31 @@ export async function gate(
       tokens: [...own.tokens],
       program: [...own.program],
       read: own.read,
+      walks: ownFacts.walks,
+      write: writes(
+        named,
+        args,
+        classified,
+        own,
+        ownFacts,
+        session,
+        registry,
+        namespace,
+        ownImplied,
+      ),
+      subtree: ownFacts.subtree,
+      moveTarget: ownFacts.moveTarget,
       paths: seen(
         session,
-        linePaths(named, own, follows, links, session.cwd, ownImplied, redirects),
+        linePaths(
+          named,
+          own,
+          ownFacts.follows !== Follow.NONE,
+          links,
+          session.cwd,
+          ownImplied,
+          redirects,
+        ),
         unread,
       ),
       words: seenWords(session, contextWords(named, own, redirects), unread),
