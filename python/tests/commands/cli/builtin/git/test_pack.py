@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import importlib
 import os
 import subprocess
 from collections.abc import AsyncGenerator
@@ -128,7 +129,9 @@ async def test_an_empty_pack_stores_nothing(files):
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_store_leaves_nothing_behind(packed, files):
+async def test_a_cancelled_store_leaves_nothing_behind(
+    packed, files, monkeypatch
+):
     _, _, pack, _ = packed
 
     async def cut() -> AsyncGenerator[bytes, None]:
@@ -137,4 +140,16 @@ async def test_a_cancelled_store_leaves_nothing_behind(packed, files):
 
     with pytest.raises(asyncio.CancelledError):
         await store_pack(files, GITDIR, cut(), SystemIdSource())
+    assert await files.readdir(GITDIR.join("objects/pack")) == []
+
+    async def cancelled(*_args) -> dict[int, bytes]:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        importlib.import_module("mirage.commands.cli.builtin.git.pack"),
+        "delta_ids",
+        cancelled,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await store_pack(files, GITDIR, _chunked(pack, 997), SystemIdSource())
     assert await files.readdir(GITDIR.join("objects/pack")) == []
