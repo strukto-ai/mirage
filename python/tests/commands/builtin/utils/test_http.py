@@ -22,10 +22,8 @@ from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils import http as http_mod
 from mirage.commands.builtin.utils.cookie import CookieJar
 from mirage.commands.builtin.utils.http import (
-    DEFAULT_USER_AGENT,
     HttpResponse,
     _endpoint,
-    _with_default_ua,
     http_request,
 )
 from mirage.io.types import materialize
@@ -110,6 +108,7 @@ class _FakeClient:
         self.resp = resp
         self.exc = exc
         self.kwargs = kwargs
+        self.headers: dict[str, str] = {}
         self.calls: list[dict] = []
 
     def build_request(
@@ -156,9 +155,27 @@ class _FakeHttpx:
         return self.client
 
 
-def test_with_default_ua_adds_and_is_overridable():
-    assert _with_default_ua(None) == {"User-Agent": DEFAULT_USER_AGENT}
-    assert _with_default_ua({"User-Agent": "mine"}) == {"User-Agent": "mine"}
+@pytest.mark.asyncio
+async def test_a_request_carries_only_its_callers_headers(httpx_mock):
+    # curl and wget send only the headers they name, so none of httpx's
+    # own (Accept, Accept-Encoding, Connection, User-Agent) rides along.
+    httpx_mock.add_response(url="http://x.test/h", text="ok")
+    httpx_mock.add_response(url="http://x.test/h", text="ok")
+    await http_request(
+        "http://x.test/h",
+        headers={"User-Agent": "curl/8.14.1", "Accept": "*/*"},
+    )
+    await http_request("http://x.test/h")
+    named, bare = (
+        {name.lower(): value for name, value in request.headers.items()}
+        for request in httpx_mock.get_requests()
+    )
+    assert named == {
+        "host": "x.test",
+        "user-agent": "curl/8.14.1",
+        "accept": "*/*",
+    }
+    assert bare == {"host": "x.test"}
 
 
 @pytest.mark.parametrize(

@@ -208,7 +208,7 @@ def test_local_name():
             "/",
             127,
             b"",
-            b"no-such-program-xyz: command not found\n",
+            b"bash: no-such-program-xyz: command not found\n",
         ),
         (
             ("cksum",),
@@ -272,9 +272,9 @@ async def test_a_program_named_by_a_relative_path_runs_from_the_cwd(tmp_path):
 @pytest.mark.parametrize(
     "name, exit_code, stderr",
     [
-        ("./missing", 127, b"./missing: No such file or directory\n"),
-        ("./plain", 126, b"./plain: Permission denied\n"),
-        ("./sub", 126, b"./sub: Is a directory\n"),
+        ("./missing", 127, b"bash: ./missing: No such file or directory\n"),
+        ("./plain", 126, b"bash: ./plain: Permission denied\n"),
+        ("./sub", 126, b"bash: ./sub: Is a directory\n"),
     ],
 )
 async def test_a_program_path_that_cannot_run_answers_as_the_shell(
@@ -325,7 +325,7 @@ async def test_a_program_that_cannot_start_fails_as_the_shell_would(
         await runtime.close()
     assert (result.exit_code, result.stderr) == (
         126,
-        b"mirage-broken: cannot execute: No such file or directory\n",
+        b"bash: mirage-broken: cannot execute: No such file or directory\n",
     )
 
 
@@ -349,7 +349,7 @@ async def test_a_fifo_fails_to_start_instead_of_waiting_on_it(
         await runtime.close()
     assert (result.exit_code, result.stderr) == (
         126,
-        b"./mirage-fifo: cannot execute: Permission denied\n",
+        b"bash: ./mirage-fifo: cannot execute: Permission denied\n",
     )
 
 

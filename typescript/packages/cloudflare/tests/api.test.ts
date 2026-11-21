@@ -356,7 +356,7 @@ describe('the server API in workerd', () => {
     expect([plain.exit_code, plain.stdout, plain.stderr]).toEqual([
       127,
       '',
-      'node: command not found\npython3: command not found\n',
+      'bash: line 1: node: command not found\nbash: line 1: python3: command not found\n',
     ])
     const named = await call('POST', '/v1/workspaces', {
       id: 'js',

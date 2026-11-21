@@ -282,7 +282,7 @@
       "command": "curl -sv -u a:b --json '{}' {http}/request 2>&1 >/dev/null | grep -E '^> (Authorization|User-Agent|Accept|Content)'",
       "expect": {
         "exit": 0,
-        "stdout": "> Authorization: Basic YTpi\r\n> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n> Content-Type: application/json\r\n> Accept: application/json\r\n> Content-Length: 2\r\n",
+        "stdout": "> Authorization: Basic YTpi\r\n> User-Agent: curl/8.14.1\r\n> Content-Type: application/json\r\n> Accept: application/json\r\n> Content-Length: 2\r\n",
         "stderr": ""
       }
     }

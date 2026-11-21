@@ -108,6 +108,8 @@
    "typescript_only": {
     "INSECURE": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces.",
     "insecureAgent": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces.",
+    "ADDED": "Node's fetch adds Accept, Accept-Encoding, Accept-Language, Sec-Fetch-Mode and User-Agent to every request, so its dispatcher drops the ones a command did not name; Python's httpx client has its defaults cleared where it is built.",
+    "onlyNamed": "Node's fetch adds Accept, Accept-Encoding, Accept-Language, Sec-Fetch-Mode and User-Agent to every request, so its dispatcher drops the ones a command did not name; Python's httpx client has its defaults cleared where it is built.",
     "failure": "fetch rejects a deadline, a cancel and a refused connection alike, so one function tells them apart for the head and the body; httpx raises a distinct exception for each, caught at each await."
    }
   },

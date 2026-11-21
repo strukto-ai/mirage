@@ -20,7 +20,11 @@ from functools import partial
 from typing import Any
 
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller, with_caller
+from mirage.context.session_context import (
+    current_caller,
+    missing_program,
+    with_caller,
+)
 from mirage.io.cooperative import chunks
 from mirage.io.memory import check_memory
 from mirage.io.pipe import BytePipe
@@ -252,16 +256,20 @@ def _failed(label: str, message: str, exit_code: int) -> CommandOutput:
 def not_bound(label: str) -> CommandOutput:
     """The answer of an interpreter command no runtime runs.
 
-    GNU wording (bash prints ``bash: python3: command not found``; the
-    shell prefix is dropped workspace-wide), exit 127 whatever the
-    operands say. A bound entry without the interpreter entry point (not
-    a ``LanguageRuntime``) is refused the same way: there is nothing to
-    run code on. Mirrors TS ``notBound``.
+    What the shell says of a program it cannot find (``bash: line 1:
+    python3: command not found``, or the words of a program that execs
+    it, such as ``timeout``), exit 127 whatever the operands say. A bound
+    entry without the interpreter entry point (not a ``LanguageRuntime``)
+    is refused the same way: there is nothing to run code on. Mirrors TS
+    ``notBound``.
 
     Args:
         label (str): the command name used in the message.
     """
-    return _failed(label, "command not found", NOT_FOUND_STATUS)
+    lead, reason, _ = missing_program(label)
+    return None, IOResult(
+        exit_code=NOT_FOUND_STATUS, stderr=f"{lead}: {reason}\n".encode()
+    )
 
 
 async def runtime_version(

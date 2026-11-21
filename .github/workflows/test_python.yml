@@ -383,7 +383,7 @@ jobs:
               ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
               io = await ws.shell("python3 -c 'print(1)'")
               assert io.exit_code == 127, io.exit_code
-              assert io.stderr == b"python3: command not found\n", io.stderr
+              assert io.stderr == b"bash: line 1: python3: command not found\n", io.stderr
               ws2 = Workspace({"/data": RAMVFS()},
                               mode=MountMode.EXEC,
                               machines={"local": {"provider": "host"}})

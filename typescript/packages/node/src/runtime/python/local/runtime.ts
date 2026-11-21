@@ -19,6 +19,7 @@ import { access, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
+import { missingProgram } from '@struktoai/mirage-core/context/session_context'
 import { MachineName } from '@struktoai/mirage-core/execution/types'
 import { HOST } from '@struktoai/mirage-core/runtime/constants'
 import {
@@ -73,15 +74,15 @@ async function isExecutable(program: string): Promise<boolean> {
  * Why a program named by a path cannot run, in the shell's words and exit
  * code; null when it can.
  */
-async function unrunnable(name: string, path: string): Promise<readonly [string, number] | null> {
+async function unrunnable(path: string): Promise<readonly [string, number] | null> {
   const found = await stat(path).catch((err: unknown) => {
     const code = (err as NodeJS.ErrnoException).code
     if (code === undefined) throw err
     debuglog('mirage')('local: cannot stat %s: %s', path, code)
     return null
   })
-  if (found === null) return [`${name}: No such file or directory\n`, NOT_FOUND_STATUS]
-  if (found.isDirectory()) return [`${name}: Is a directory\n`, CANNOT_EXECUTE_STATUS]
+  if (found === null) return ['No such file or directory', NOT_FOUND_STATUS]
+  if (found.isDirectory()) return ['Is a directory', CANNOT_EXECUTE_STATUS]
   const runs = await access(path, constants.X_OK).then(
     () => true,
     (err: unknown) => {
@@ -91,7 +92,7 @@ async function unrunnable(name: string, path: string): Promise<readonly [string,
       return false
     },
   )
-  return runs ? null : [`${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS]
+  return runs ? null : ['Permission denied', CANNOT_EXECUTE_STATUS]
 }
 
 /** A program that never started: its message, said on `errors`, and exit code. */
@@ -209,6 +210,9 @@ export class LocalRuntime
     ctx.signal?.throwIfAborted()
     const name = argv[0] ?? ''
     const cwd = ctx.cwd.virtual
+    // What the shell, or a program that execs this one, leads its report
+    // of a program that cannot run with.
+    const [lead, missing, voice] = missingProgram(name)
     const refusal = await cwdRefusal(name, cwd, errors)
     if (refusal !== null) return refusal
     let program: string
@@ -217,12 +221,12 @@ export class LocalRuntime
       // Joined, not resolved, so the host follows a `..` past a symlink
       // as written.
       program = isAbsolute(name) ? name : `${rstripSlash(cwd)}/${name}`
-      const refused = await unrunnable(name, program)
-      if (refused !== null) return notRun(errors, ...refused)
+      const refused = await unrunnable(program)
+      if (refused !== null) return notRun(errors, `${lead}: ${refused[0]}\n`, refused[1])
     } else {
       program = await onHostPath(name)
       if (!(await isExecutable(program)))
-        return notRun(errors, `${name}: command not found\n`, NOT_FOUND_STATUS)
+        return notRun(errors, `${lead}: ${missing}\n`, NOT_FOUND_STATUS)
     }
     // A program that cannot start (its script's interpreter missing, say)
     // fails as the shell's would, so `tool || fallback` goes on.
@@ -238,11 +242,11 @@ export class LocalRuntime
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
-      return notRun(
-        errors,
-        `${name}: cannot execute: ${fsStrerror(err) ?? code}\n`,
-        CANNOT_EXECUTE_STATUS,
-      )
+      // The shell says what failed; a program that execs this one says
+      // only why.
+      const reason = fsStrerror(err) ?? code
+      const said = voice !== '' ? `cannot execute: ${reason}` : reason
+      return notRun(errors, `${lead}: ${said}\n`, CANNOT_EXECUTE_STATUS)
     })
   }
 

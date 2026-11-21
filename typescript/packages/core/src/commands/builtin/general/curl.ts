@@ -19,13 +19,7 @@ import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
-import {
-  DEFAULT_USER_AGENT,
-  type HttpResponse,
-  httpFormRequest,
-  httpRequest,
-  isHttpError,
-} from '../utils/http.ts'
+import { type HttpResponse, httpFormRequest, httpRequest, isHttpError } from '../utils/http.ts'
 import { HTTP_TIMEOUT_SECONDS } from '../utils/constants.ts'
 import { CookieJar, sameOrigin } from '../utils/cookie.ts'
 import { resolveTarget } from '../utils/paths.ts'
@@ -58,6 +52,10 @@ const EXIT_HTTP_ERROR = 22
 const EXIT_WRITE = 23
 const EXIT_READ = 26
 const EXIT_TIMEOUT = 28
+
+// What curl names itself on every request a line does not name it on, the
+// version of the pinned image's curl.
+const USER_AGENT = 'curl/8.14.1'
 
 const CRLF = '\r\n'
 const HELP_HINT = "curl: try 'curl --help' or 'curl --manual' for more information"
@@ -482,9 +480,8 @@ async function curl(
   }
   const [body, json] = await requestBody(fl, ctx)
   // A custom header of a name curl would add itself takes its place, so
-  // curl's own goes only where the line names none. The trace lists them in
-  // curl's order; the wire leaves User-Agent and Accept to the client's
-  // defaults unless the line set them.
+  // curl's own goes only where the line names none, and an empty -A sends
+  // none. The wire and the trace list them in curl's order.
   const auth: [string, string][] = []
   let prompt: Uint8Array = new Uint8Array()
   const user = fl.asStr('user') ?? null
@@ -495,21 +492,22 @@ async function curl(
     auth.push(['Authorization', token])
   }
   const agent: [string, string][] =
-    userAgent !== null && !named.has('user-agent') ? [['User-Agent', userAgent]] : []
+    named.has('user-agent') || userAgent === '' ? [] : [['User-Agent', userAgent ?? USER_AGENT]]
+  const accept: [string, string][] = named.has('accept') || json ? [] : [['Accept', '*/*']]
   const typed: [string, string][] = json
     ? ['Content-Type', 'Accept']
         .filter((name) => !named.has(name.toLowerCase()))
         .map((name): [string, string] => [name, JSON_TYPE])
     : []
-  const headers: Record<string, string> = Object.fromEntries([...auth, ...agent, ...sent, ...typed])
-  // The jar's Cookie line goes between the two, as each hop sent it.
-  const traceHead: [string, string][] = [
+  const headers: Record<string, string> = Object.fromEntries([
     ...auth,
-    ...(named.has('user-agent')
-      ? []
-      : [['User-Agent', userAgent ?? DEFAULT_USER_AGENT] as [string, string]]),
-    ...(named.has('accept') || json ? [] : [['Accept', '*/*'] as [string, string]]),
-  ]
+    ...agent,
+    ...accept,
+    ...sent,
+    ...typed,
+  ])
+  // The jar's Cookie line goes between the two, as each hop sent it.
+  const traceHead: [string, string][] = [...auth, ...agent, ...accept]
   const traceTail: [string, string][] = [...sent, ...typed]
   const started = performance.now()
   // The body bytes read so far, and the failure that cut the transfer short:

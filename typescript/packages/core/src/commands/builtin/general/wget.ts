@@ -37,6 +37,15 @@ const EXIT_GENERIC = 1
 const EXIT_NETWORK = 4
 const EXIT_SERVER_ERROR = 8
 
+// The headers wget sends on every request, the version of the pinned image's
+// wget. Its `Connection: Keep-Alive` is fetch's own to send: undici sends it
+// on every request and a browser refuses it from a page.
+const HEADERS: Readonly<Record<string, string>> = {
+  'User-Agent': 'Wget/1.25.0',
+  Accept: '*/*',
+  'Accept-Encoding': 'identity',
+}
+
 const USAGE =
   "wget: missing URL\nUsage: wget [OPTION]... [URL]...\n\nTry `wget --help' for more options."
 
@@ -72,6 +81,7 @@ async function wget(
   let resp
   try {
     resp = await httpGet(url, {
+      headers: { ...HEADERS },
       ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
       timeoutMs:
         timeout === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : timeout === 0 ? null : timeout * 1000,

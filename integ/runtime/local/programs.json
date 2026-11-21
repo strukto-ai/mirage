@@ -59,7 +59,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr": "no-such-program-xyz: command not found\n"
+            "stderr": "bash: line 1: no-such-program-xyz: command not found\n"
           }
         },
         {

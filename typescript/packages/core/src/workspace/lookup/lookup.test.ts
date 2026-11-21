@@ -755,8 +755,9 @@ describe('program', () => {
   })
 
   // An interpreter is a program only where a language runtime runs it; a
-  // workspace without one answers `python3: command not found`, as a system
-  // that never installed it does, so neither `which` nor `ls /usr/bin` finds it.
+  // workspace without one answers `bash: line 1: python3: command not found`,
+  // as a system that never installed it does, so neither `which` nor
+  // `ls /usr/bin` finds it.
   it('has no file for an interpreter no language runtime runs', () => {
     const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE, machines: [] })
     const session = new SessionState({ sessionId: 't' })

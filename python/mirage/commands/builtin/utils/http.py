@@ -37,7 +37,6 @@ from mirage.commands.builtin.utils.cookie import (
 from mirage.io.stream import prime_stream
 from mirage.io.types import ByteSource
 
-DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; mirage/1.0)"
 DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -62,14 +61,6 @@ class HttpResponse:
     @property
     def is_error(self) -> bool:
         return self.status >= 400
-
-
-def _with_default_ua(headers: dict[str, str] | None) -> dict[str, str]:
-    # Header names are case-insensitive, so a `user-agent` the caller set
-    # replaces the default rather than riding beside it.
-    if headers and any(k.lower() == "user-agent" for k in headers):
-        return dict(headers)
-    return {"User-Agent": DEFAULT_USER_AGENT, **(headers or {})}
 
 
 def _endpoint(url: str) -> tuple[str, int]:
@@ -174,13 +165,17 @@ async def http_request(
         verify=verify,
         event_hooks=event_hooks,
     )
+    # httpx adds Accept, Accept-Encoding, Connection and its own
+    # User-Agent to every request. curl and wget send only what they name,
+    # so a request carries its caller's headers alone.
+    client.headers.clear()
     handed = False
     history: list[HttpResponse] = []
     try:
         request = client.build_request(
             method,
             url,
-            headers=_with_default_ua(headers),
+            headers=dict(headers or {}),
             content=data,
             data=form_data,
         )

@@ -105,6 +105,19 @@ describe('wget', () => {
     }
   })
 
+  // GNU Wget 1.25.0 names itself, takes anything and asks for the bytes as
+  // stored, on every request; Connection is fetch's own.
+  it("sends wget's own headers", async () => {
+    mockFetch('file-body')
+    await runWget(['https://x.test/f'], { args_O: '/tmp/d', q: true })
+    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]
+    expect(init?.headers).toEqual({
+      'User-Agent': 'Wget/1.25.0',
+      Accept: '*/*',
+      'Accept-Encoding': 'identity',
+    })
+  })
+
   it('-q suppresses stdout', async () => {
     const r = await runWget(['https://x.test/a.txt'], { q: true })
     expect(r.out).toBe('')

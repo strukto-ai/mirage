@@ -1101,3 +1101,29 @@ async def test_a_notice_is_waited_out_on_both_sides_of_a_move():
         assert clock.monotonic() == 2.0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_memory", ["4GB", "8GB"])
+async def test_a_line_runs_under_a_max_memory_past_4_gib(max_memory):
+    # The TypeScript shell and jq run as 32-bit Wasm and take a cap past
+    # its address space as the largest there is; the native module counts
+    # it as it is.
+    ws = Workspace(
+        {"/data": RAMVFS()}, max_memory=max_memory, max_env=max_memory
+    )
+    try:
+        io = await ws.shell(
+            'x=$(echo hi); echo "$x"; echo \'{"a":1}\' | jq -c .'
+        )
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (
+            0,
+            'hi\n{"a":1}\n',
+            "",
+        )
+    finally:
+        await ws.close()
