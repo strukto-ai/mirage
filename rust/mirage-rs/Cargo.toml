@@ -28,7 +28,7 @@ jiff-tzdb = "0.1.9"
 libm = "0.2.16"
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "encoder", "xz"] }
 md5.workspace = true
-mail-parser = { version = "=0.11.9", features = ["full_encoding", "serde"] }
+mail-parser = { workspace = true, features = ["full_encoding", "serde"] }
 memchr.workspace = true
 pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto"], optional = true }
 num-derive = "0.4"

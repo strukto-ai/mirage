@@ -3738,6 +3738,7 @@ limitations under the License.
 ------------------------------------------------------------------------
 
 Apache License 2.0, used by:
+- mail-parser 0.11.9 (https://github.com/stalwartlabs/mail-parser)
 - arrayvec 0.7.8 (https://github.com/bluss/arrayvec)
 - base64 0.23.1 (https://github.com/marshallpierce/rust-base64)
 - bitflags 2.13.2 (https://github.com/bitflags/bitflags)
@@ -3760,7 +3761,6 @@ Apache License 2.0, used by:
 - jpeg-decoder 0.3.2 (https://github.com/image-rs/jpeg-decoder)
 - js-sys 0.3.107 (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - log 0.4.33 (https://github.com/rust-lang/log)
-- mail-parser 0.11.9 (https://github.com/stalwartlabs/mail-parser)
 - num-bigint 0.4.8 (https://github.com/rust-num/num-bigint)
 - num-derive 0.4.2 (https://github.com/rust-num/num-derive)
 - num-integer 0.1.47 (https://github.com/rust-num/num-integer)

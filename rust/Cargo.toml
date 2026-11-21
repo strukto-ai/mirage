@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["fuse", "gh-wasm", "mirage-rs", "pdf-wasm", "python", "shell-wasm", "wasm"]
-exclude = ["vendor/grep-regex"]
+exclude = ["vendor/grep-regex", "vendor/mail-parser"]
 
 [workspace.package]
 version = "0.1.0-alpha.3"
@@ -13,6 +13,7 @@ rust-version = "1.88"
 [workspace.dependencies]
 mirage-rs = { path = "mirage-rs" }
 grep-regex = { path = "vendor/grep-regex", version = "=0.1.13" }
+mail-parser = { path = "vendor/mail-parser", version = "=0.11.9" }
 grep-matcher = "=0.1.7"
 md5 = { package = "md-5", version = "0.11", default-features = false }
 sha1 = { version = "0.11", default-features = false }

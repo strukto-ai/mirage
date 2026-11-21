@@ -1,0 +1,30 @@
+[package]
+name = "mail-parser"
+description = "Fast and robust e-mail parsing library for Rust"
+version = "0.11.9"
+edition = "2024"
+authors = [ "Stalwart Labs <hello@stalw.art>"]
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/stalwartlabs/mail-parser"
+homepage = "https://github.com/stalwartlabs/mail-parser"
+keywords = ["email", "mail", "parser", "parse", "mime"]
+categories = ["email", "parser-implementations"]
+resolver = "2"
+
+[dependencies]
+hashify = { version = "0.2" }
+memchr = { version = "2.7", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+rkyv = { version = "0.8", optional = true }
+
+[features]
+default = []
+full_encoding = ["encoding_rs"]
+serde = ["dep:serde"]
+rkyv = ["dep:rkyv"]
+base64_slice = ["dep:memchr"]
+
+
+[lib]
+doctest = false
