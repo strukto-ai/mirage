@@ -30,6 +30,7 @@ from mirage.policy import (
     MountRootPolicy,
     NetworkContext,
     NetworkResultContext,
+    Outcome,
     Pending,
     Policies,
     Policy,
@@ -48,6 +49,7 @@ from mirage.policy.composition import Composition
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.policies import agreed, settled
 from mirage.policy.types import RouteContext
+from mirage.runtime.types import ScriptSource
 from mirage.types import (
     FileStat,
     Limit,
@@ -58,7 +60,9 @@ from mirage.types import (
 )
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Session
 from mirage.workspace.dispatcher.constants import CALLS
+from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
 
 
@@ -652,9 +656,9 @@ class ForEveryone(Policy):
 
 @pytest.mark.asyncio
 async def test_wants_for_refines_wants_per_session():
-    # The static answer is yes as soon as any policy overrides the method,
-    # and the entry points keep gating on it; the per-session answer asks a
-    # session-scoped policy whether this session is one of its.
+    # The static answer is yes as soon as any policy overrides the method;
+    # the per-session answer asks a session-scoped policy whether this
+    # session is one of its.
     scoped = Policies([ForSomeSessions()])
     assert scoped.wants("pre_network")
     assert await scoped.wants_for("pre_network", "a") is True
@@ -1094,3 +1098,226 @@ async def test_a_check_among_some_policies_leaves_no_order(monkeypatch):
     for among in [(first,), (second,), (first,), (first, second)]:
         await policies.post_network(ctx, among)
     assert len(opened) == 4
+
+
+def _tree() -> RAMVFS:
+    vfs = RAMVFS()
+    vfs._store.dirs.add("/tree")
+    for i in range(10):
+        vfs._store.files[f"/tree/f{i}.txt"] = b"needle\n"
+    return vfs
+
+
+class PassesOps(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_vfs_gate_fast_path_skips_evaluate_and_caches_files(
+    monkeypatch,
+):
+    eval_calls = 0
+    for_session_calls = 0
+    orig_eval = Policies._evaluate
+    orig_for_session = Files._for_session
+
+    async def spy_eval(self, method, *args, **kwargs):
+        nonlocal eval_calls
+        if method == "pre_vfs":
+            eval_calls += 1
+        return await orig_eval(self, method, *args, **kwargs)
+
+    def spy_for_session(self, sid):
+        nonlocal for_session_calls
+        for_session_calls += 1
+        return orig_for_session(self, sid)
+
+    monkeypatch.setattr(Policies, "_evaluate", spy_eval)
+    monkeypatch.setattr(Files, "_for_session", spy_for_session)
+    ws = Workspace({"/m": _tree()}, mode=MountMode.WRITE)
+    try:
+        entries = await ws.vfs.readdir("/m/tree")
+        assert len(entries) == 10
+        for i in range(10):
+            await ws.vfs.read(f"/m/tree/f{i}.txt")
+        assert eval_calls == 0
+        assert for_session_calls == 0
+        res = await ws.shell("grep -r needle /m/tree")
+        assert res.exit_code == 0
+        assert eval_calls == 0
+        assert for_session_calls <= 1
+        for_session_calls = 0
+        res2 = await ws.shell("grep -r needle /m/tree")
+        assert res2.exit_code == 0
+        assert eval_calls == 0
+        assert for_session_calls == 0
+    finally:
+        await ws.close()
+    ws2 = Workspace(
+        {"/m": _tree()}, mode=MountMode.WRITE, policies=[PassesOps()]
+    )
+    for_session_calls = 0
+    try:
+        res = await ws2.shell("grep -r needle /m/tree")
+        assert res.exit_code == 0
+        assert eval_calls > 0
+        assert for_session_calls <= 1
+    finally:
+        await ws2.close()
+
+
+@pytest.mark.asyncio
+async def test_pre_vfs_gate_refuses_a_write_on_a_read_only_mount_unasked():
+    policies = Policies()
+    assert not await policies.wants_for("pre_vfs", "")
+    with pytest.raises(OSError) as info:
+        await pre_vfs_gate(
+            policies,
+            CALLS["write"],
+            _path("/data/x"),
+            True,
+            "/data/",
+            mode=MountMode.READ,
+        )
+    assert info.value.errno == errno.EROFS
+    await pre_vfs_gate(
+        policies, CALLS["write"], _path("/data/x"), True, "/data/"
+    )
+    vfs = RAMVFS()
+    vfs._store.files["/a"] = b"a\n"
+    ws = Workspace({"/m": vfs}, mode=MountMode.READ)
+    try:
+        assert not await ws.policies.wants_for("pre_vfs", "")
+        ran = await ws.shell("echo x > /m/new")
+        assert ran.exit_code == 1
+        assert b"Read-only file system" in ran.stderr
+        ran = await ws.shell("rm /m/a")
+        assert ran.exit_code == 1
+        assert b"Read-only file system" in ran.stderr
+        assert sorted(vfs._store.files) == ["/a"]
+    finally:
+        await ws.close()
+
+
+class NoReadOfA(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.path.virtual == "/m/a" and not ctx.write:
+            return Deny("policy says no")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_vfs_gate_judges_a_policy_added_after_the_first_op():
+    policies = Policies()
+    await pre_vfs_gate(policies, CALLS["read"], _path("/data/x"), False, "")
+    policies.add(DenyReadOps())
+    with pytest.raises(PermissionError):
+        await pre_vfs_gate(
+            policies, CALLS["read"], _path("/data/x"), False, ""
+        )
+    vfs = RAMVFS()
+    vfs._store.files["/a"] = b"a\n"
+    vfs._store.files["/b"] = b"b\n"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("cat /m/a")).exit_code == 0
+        ws.policies.add(NoReadOfA())
+        ran = await ws.shell("cat /m/a")
+        assert (ran.exit_code, ran.stderr) == (
+            1,
+            b"cat: /m/a: Permission denied\n",
+        )
+        assert (await ws.shell("cat /m/b")).stdout == b"b\n"
+        with pytest.raises(PermissionError):
+            await ws.vfs.read("/m/a")
+    finally:
+        await ws.close()
+
+
+NO_READ_OF_A = """
+def pre_vfs(ctx):
+    if not ctx['write'] and ctx['path'] == '/m/a':
+        return {'kind': 'deny', 'reason': 'guarded'}
+"""
+
+
+@pytest.mark.asyncio
+async def test_pre_vfs_gate_judges_a_session_whose_program_came_later():
+    vfs = RAMVFS()
+    vfs._store.files["/a"] = b"a\n"
+    ws = Workspace(
+        {"/m": vfs},
+        mode=MountMode.WRITE,
+        profiles={
+            "guard": {
+                "policy": {
+                    "pre_vfs": [
+                        {
+                            "script": ScriptSource(NO_READ_OF_A),
+                            "runtime": "monty",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    try:
+        assert (await ws.shell("cat /m/a")).exit_code == 0
+        assert await ws.vfs.read("/m/a") == b"a\n"
+        ws.create_session("s", profile="guard")
+        assert await ws.policies.wants_for("pre_vfs", "s")
+        assert not await ws.policies.wants_for("pre_vfs", "")
+        ran = await ws.shell("cat /m/a", session_id="s")
+        assert (ran.exit_code, ran.stderr) == (
+            1,
+            b"cat: /m/a: Permission denied\n",
+        )
+        with pytest.raises(PermissionError):
+            await Session(ws, "s").vfs.read("/m/a")
+        assert (await ws.shell("cat /m/a")).stdout == b"a\n"
+        assert await ws.vfs.read("/m/a") == b"a\n"
+    finally:
+        await ws.close()
+
+
+class WritesWhileDeciding(Policy):
+    """Writes through its own files while it decides ``cat``."""
+
+    def __init__(self) -> None:
+        self.errors: list[int | None] = []
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        if ctx.command == "cat" and ctx.vfs is not None:
+            try:
+                await ctx.vfs.write("/m/stamp", b"x")
+            except OSError as exc:
+                self.errors.append(exc.errno)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_deciding_policys_write_is_refused_where_no_policy_wants_ops():
+    vfs = RAMVFS()
+    vfs._store.files["/a"] = b"a\n"
+    writer = WritesWhileDeciding()
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE, policies=[writer])
+    try:
+        assert not await ws.policies.wants_for("pre_vfs", "")
+        for _ in range(2):
+            ran = await ws.shell("cat /m/a")
+            assert (ran.exit_code, ran.stdout) == (0, b"a\n")
+        assert writer.errors == [errno.EROFS, errno.EROFS]
+        assert sorted(vfs._store.files) == ["/a"]
+        ws.create_session("s")
+        said = await Session(ws, "s").explain.vfs.read("/m/a")
+        assert (said.outcome, said.error, said.answers) == (
+            Outcome.ALLOW,
+            "",
+            (),
+        )
+        said = await Session(ws, "s").explain.vfs.write("/m/new", b"x")
+        assert (said.outcome, said.error) == (Outcome.ALLOW, "")
+        assert sorted(vfs._store.files) == ["/a"]
+    finally:
+        await ws.close()
