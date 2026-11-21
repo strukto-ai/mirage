@@ -17,3 +17,10 @@ export function toHex(bytes: Uint8Array): string {
   for (const b of bytes) s += b.toString(16).padStart(2, '0')
   return s
 }
+
+/** The bytes a run of hex digits spells, two digits a byte. */
+export function fromHex(text: string): Uint8Array {
+  const out = new Uint8Array(text.length >> 1)
+  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(text.slice(2 * i, 2 * i + 2), 16)
+  return out
+}

@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
+import { deflateSync, inflateSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import git from 'isomorphic-git'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -25,7 +26,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
-import { configValues, gitFs } from './fs.ts'
+import { applyDelta, configValues, gitFs, openPacks, packedObject } from './fs.ts'
 import { ensureDir } from './io.ts'
 import type { CallerDispatchFn } from '../../../../context/session_context.ts'
 import { Files } from '../../../../workspace/files.ts'
@@ -117,6 +118,41 @@ describe('gitFs', () => {
     ])
   })
 
+  it("serves a packed object as a loose one, the pack index out of the library's sight", async () => {
+    const at = PathSpec.fromStrPath('/repo/.git')
+    const bridged = gitFs(dispatch, {
+      gitdir: at,
+      commondir: at,
+      worktree: PathSpec.fromStrPath('/repo'),
+      mountRoot: PathSpec.fromStrPath('/repo'),
+    })
+    const pack = join(tmp, 'repo', '.git', 'objects', 'pack')
+    const idx = readdirSync(pack).find((name) => name.endsWith('.idx')) ?? ''
+    const listed = execFileSync('git', ['verify-pack', '-v', join(pack, idx)], { encoding: 'utf8' })
+    const [, oid = '', type = ''] = /^([0-9a-f]{40}) (commit|tree|blob) /m.exec(listed) ?? []
+    const loose = `/repo/.git/objects/${oid.slice(0, 2)}/${oid.slice(2)}`
+    expect(await dispatch.exists(PathSpec.fromStrPath(loose))).toBe(false)
+    const content = execFileSync('git', ['-C', join(tmp, 'repo'), 'cat-file', type, oid])
+    const read = bridged.promises.readFile as unknown as (path: string) => Promise<Uint8Array>
+    const exists = bridged.promises.exists as unknown as (path: string) => Promise<boolean>
+    const readdir = bridged.promises.readdir as unknown as (path: string) => Promise<string[]>
+    expect(Buffer.from(inflateSync(await read(loose)))).toEqual(
+      Buffer.concat([Buffer.from(`${type} ${String(content.length)}\0`), content]),
+    )
+    expect(await exists(loose)).toBe(true)
+    expect(await exists(`/repo/.git/objects/${oid.slice(0, 2)}/${'0'.repeat(38)}`)).toBe(false)
+    const names = await readdir('/repo/.git/objects/pack')
+    expect(names.some((name) => name.endsWith('.pack'))).toBe(true)
+    expect(names.some((name) => name.endsWith('.idx'))).toBe(false)
+    const log = await git.log({ fs: bridged as never, dir: '/repo', gitdir: '/repo/.git' })
+    expect(log.map((c) => c.commit.message.trim())).toEqual([
+      'add two',
+      'add docs',
+      'add delta',
+      'first commit',
+    ])
+  })
+
   it('writes an object back through the mount', async () => {
     const oid = await git.writeBlob({ ...opts(), blob: new TextEncoder().encode('written\n') })
     const back = await git.readBlob({ ...opts(), oid })
@@ -176,4 +212,75 @@ it('restores typed repository roots across the library string boundary', async (
     '/hidden/../checkout/refs/worktree/local',
     '/private/../work/file',
   ])
+})
+
+const LONE = `ab${'0'.repeat(38)}`
+
+/** A repository whose one pack holds `entry` at offset 12, under a v1 index naming it LONE. */
+async function lonePack(entry: Uint8Array): Promise<Files> {
+  const vfs = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }).vfs
+  const pack = new Uint8Array([
+    0x50,
+    0x41,
+    0x43,
+    0x4b,
+    0,
+    0,
+    0,
+    2,
+    0,
+    0,
+    0,
+    1,
+    ...entry,
+    ...new Uint8Array(20),
+  ])
+  const idx = new Uint8Array(256 * 4 + 24 + 40)
+  const view = new DataView(idx.buffer)
+  for (let byte = 0xab; byte < 256; byte++) view.setUint32(byte * 4, 1)
+  view.setUint32(256 * 4, 12)
+  idx.set([0xab], 256 * 4 + 4)
+  const dir = PathSpec.fromStrPath('/r/.git/objects/pack')
+  await ensureDir(vfs, dir)
+  await vfs.write(dir.join('pack-x.pack'), pack)
+  await vfs.write(dir.join('pack-x.idx'), idx)
+  return vfs
+}
+
+describe('packed reads of a damaged pack', () => {
+  const at = PathSpec.fromStrPath('/r/.git')
+
+  it('refuses a delta that ends inside a size or an operand', () => {
+    const abcd = new TextEncoder().encode('abcd')
+    expect(() => applyDelta(new Uint8Array([0x00]), new Uint8Array())).toThrow(
+      'delta ends inside an instruction',
+    )
+    expect(() => applyDelta(new Uint8Array([0x04, 0x04, 0x91, 0x00]), abcd)).toThrow(
+      'delta ends inside an instruction',
+    )
+    expect(applyDelta(new Uint8Array([0x04, 0x04, 0x90, 0x04]), abcd)).toEqual(abcd)
+  })
+
+  it('refuses an offset delta whose base does not come before it', async () => {
+    const vfs = await lonePack(new Uint8Array([0x60, 0x00, ...deflateSync(new Uint8Array([0, 0]))]))
+    await expect(packedObject(openPacks(vfs, at), LONE)).rejects.toThrow(
+      'pack has bad object at offset 12: delta base offset is out of bound',
+    )
+  })
+
+  it('reports an object that does not inflate as unreadable, not missing', async () => {
+    const vfs = await lonePack(new Uint8Array([0x35, 0x78, 0x9c, 0xff, 0xff, 0xff]))
+    const bridged = gitFs(vfs, {
+      gitdir: at,
+      commondir: at,
+      worktree: at.parent,
+      mountRoot: at.parent,
+    })
+    const read = (oid: string): Promise<unknown> =>
+      git.readBlob({ fs: bridged as never, gitdir: '/r/.git', oid })
+    const err: unknown = await read(LONE).catch((caught: unknown) => caught)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(git.Errors.NotFoundError)
+    await expect(read('cd'.padEnd(40, '0'))).rejects.toBeInstanceOf(git.Errors.NotFoundError)
+  })
 })

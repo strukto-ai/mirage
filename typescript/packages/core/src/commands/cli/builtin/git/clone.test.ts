@@ -12,13 +12,42 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { expect, it } from 'vitest'
-import { MountMode } from '../../../../types.ts'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, relative, sep } from 'node:path'
+import { expect, it, vi } from 'vitest'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { defaultDirectory, remoteHead } from './clone.ts'
 import { GIT } from './index.ts'
+import { ensureDir } from './io.ts'
+import type * as PackModule from './pack.ts'
 import type { Advertisement } from './transport.ts'
+
+const failing = vi.hoisted(() => ({ on: false }))
+
+vi.mock('./pack.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof PackModule>()
+  return {
+    ...actual,
+    storePack: (...args: Parameters<typeof actual.storePack>) =>
+      failing.on
+        ? Promise.reject(new RangeError('over the memory limit'))
+        : actual.storePack(...args),
+  }
+})
+
+function walk(root: string, base = root): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(root)) {
+    const full = join(root, entry)
+    if (statSync(full).isDirectory()) out.push(...walk(full, base))
+    else out.push(relative(base, full).split(sep).join('/'))
+  }
+  return out
+}
 
 const C = 'c'.repeat(40)
 const B = 'b'.repeat(40)
@@ -80,5 +109,38 @@ it('refuses a third operand as too many arguments', async () => {
     )
   } finally {
     await ws.close()
+  }
+})
+
+it("takes back everything a clone wrote when it fails past git's own refusals", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'mirage-git-clone-'))
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
+  ws.registerCli('git', GIT)
+  try {
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'A',
+      GIT_AUTHOR_EMAIL: 'a@example.com',
+      GIT_COMMITTER_NAME: 'A',
+      GIT_COMMITTER_EMAIL: 'a@example.com',
+    }
+    execFileSync('git', ['init', '-q', '-b', 'main', tmp], { env })
+    execFileSync('git', ['-C', tmp, 'commit', '-q', '--allow-empty', '-m', 'one'], { env })
+    for (const rel of walk(tmp)) {
+      const target = `/w/work/${rel}`
+      await ensureDir(ws.vfs, PathSpec.fromStrPath(target).parent)
+      await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(tmp, rel)))])
+    }
+    failing.on = true
+    const result = await ws.shell('cd /w && git clone work dst')
+    expect([result.exitCode, new TextDecoder().decode(result.stderr)]).toEqual([
+      1,
+      'git clone: over the memory limit\n',
+    ])
+    expect((await ws.shell('ls /w')).stdout).toEqual(new TextEncoder().encode('work\n'))
+  } finally {
+    failing.on = false
+    await ws.close()
+    rmSync(tmp, { recursive: true, force: true })
   }
 })

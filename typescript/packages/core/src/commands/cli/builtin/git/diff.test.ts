@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -105,6 +114,39 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(tmp, { recursive: true, force: true })
+})
+
+describe('trees that swap a file for a directory beside an untouched subtree', () => {
+  beforeAll(async () => {
+    repoPath = mkdtempSync(join(tmp, 'repo-'))
+    native(['init', '-q', '-b', 'main'])
+    mkdirSync(join(repoPath, 'deep', 'x'), { recursive: true })
+    writeFileSync(join(repoPath, 'deep', 'x', 'y.txt'), 'kept\n')
+    commit('a', 'a file\n', 'first')
+    commit('m.txt', 'mode\n', 'second')
+    rmSync(join(repoPath, 'a'))
+    mkdirSync(join(repoPath, 'a'))
+    writeFileSync(join(repoPath, 'a', 'b.txt'), 'now a directory\n')
+    chmodSync(join(repoPath, 'm.txt'), 0o755)
+    native(['add', '-A'])
+    native(['commit', '-q', '-m', 'third'])
+    ws = await mounted()
+  })
+
+  it.each([
+    'diff --name-status HEAD~1 HEAD',
+    'diff --raw HEAD~1 HEAD',
+    'diff --stat HEAD~2 HEAD',
+    'diff -p HEAD HEAD~1',
+    'diff --name-only HEAD~1 HEAD -- a',
+    'show --format= --name-status HEAD',
+    'show --format= --stat HEAD~1',
+    'diff-tree -r --name-status HEAD',
+    'diff-tree -r --root --name-only HEAD~2',
+    'log --format=%s --name-status',
+  ])('matches git: %s', async (command) => {
+    expect(await run(command)).toEqual(native(command.split(' ')))
+  })
 })
 
 describe('a merge stopped on a conflict', () => {

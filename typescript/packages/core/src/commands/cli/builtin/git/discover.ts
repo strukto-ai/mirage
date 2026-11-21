@@ -168,6 +168,17 @@ export async function discover(
       await enter(vfs, start)
       first = false
     }
+    // A directory that is itself a bare repository, as `git init --bare` and
+    // `git clone --bare` leave one, is taken after the `.git` git looks for
+    // first. One whose core.bare is unset or false is a checkout's `.git`,
+    // found from the checkout above.
+    if ((await statOf(vfs, current.join('HEAD')))?.type === FileType.FILE) {
+      const common = await validated(vfs, current)
+      if (common !== null) {
+        const found = await location(vfs, current, common, current, worktree, root)
+        if (await isBare(vfs, found)) return found
+      }
+    }
     if (current.virtual === root.virtual || current.virtual === '/') throw new NotARepositoryError()
     current = current.parent
   }

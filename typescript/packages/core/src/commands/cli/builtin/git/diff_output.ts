@@ -470,6 +470,50 @@ export async function entries(
 }
 
 /**
+ * The entries two trees disagree about, a map for each side, limited to a
+ * pathspec: the trees are walked side by side and a subtree both name by the
+ * same id is skipped, as git's tree diff skips it, so a commit that touches
+ * one file reads the trees on that file's path, not every tree it holds.
+ * What both sides hold alike is no change, so leaving it out changes no
+ * comparison (`deltas` drops it too).
+ *
+ * @param repo repository to read
+ * @param before the old tree id, null for the empty tree
+ * @param after the new tree id, null for the empty tree
+ * @param pathspecs repository-relative patterns, all paths when empty
+ */
+export async function changedEntries(
+  repo: Repo,
+  before: string | null,
+  after: string | null,
+  pathspecs: readonly string[] = [],
+): Promise<Side> {
+  const old = new Map<string, TreeEntry>()
+  const fresh = new Map<string, TreeEntry>()
+  const walk = async (left: string | null, right: string | null, prefix: string): Promise<void> => {
+    const items = async (tree: string | null) =>
+      new Map(tree === null ? [] : decoded(await storedItems(repo, tree)).map((e) => [e.path, e]))
+    const [a, b] = [await items(left), await items(right)]
+    for (const name of new Set([...a.keys(), ...b.keys()])) {
+      const x = a.get(name)
+      const y = b.get(name)
+      if (x !== undefined && x.oid === y?.oid && x.mode === y.mode) continue
+      const path = prefix ? `${prefix}/${name}` : name
+      const xTree = x?.mode === TREE_MODE
+      const yTree = y?.mode === TREE_MODE
+      if (xTree || yTree) await walk(xTree ? x.oid : null, yTree ? y.oid : null, path)
+      if (x !== undefined && !xTree) old.set(path, { mode: x.mode, oid: x.oid })
+      if (y !== undefined && !yTree) fresh.set(path, { mode: y.mode, oid: y.oid })
+    }
+  }
+  await walk(before, after, '')
+  return [
+    limited(shownEntries(repo, old), pathspecs),
+    limited(shownEntries(repo, fresh), pathspecs),
+  ]
+}
+
+/**
  * The entries a pathspec names, all of them for none.
  *
  * Applied before pairing, so a rename is found only where both paths match
@@ -600,6 +644,13 @@ export async function commitSides(
   if (!trees.length && !root) return []
   if (trees.length === 1 || flags.merge === 'first-parent') trees = trees.slice(0, 1)
   else if (trees.length > 1 && flags.merge === 'off') return []
+  if (recursive) {
+    if (!trees.length) return [await changedEntries(repo, null, commit.tree, flags.pathspecs)]
+    const sides: Side[] = []
+    for (const tree of trees)
+      sides.push(await changedEntries(repo, tree, commit.tree, flags.pathspecs))
+    return sides
+  }
   const after = await entries(repo, commit.tree, recursive, flags.pathspecs)
   if (!trees.length) return [[new Map(), after]]
   const sides: Side[] = []

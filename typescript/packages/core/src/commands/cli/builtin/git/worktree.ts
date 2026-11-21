@@ -279,7 +279,7 @@ class Scanner {
     const entries = (await this.names(relative)).sort(compareCodePoints)
     for (const entry of entries) {
       const name = entryName(entry)
-      if (name === '' || (relative === '' && name === GIT_DIR)) continue
+      if (name === '' || name === GIT_DIR) continue
       const child = relative === '' ? name : `${relative}/${name}`
       if (!this.reaches(child)) continue
       const info = await this.entryStat(child)

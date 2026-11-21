@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import base64
 import os
 import shutil
 import subprocess
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -33,6 +34,7 @@ from mirage.commands.cli.builtin.git.transport import (
     parse_advertisement,
     pkt_line,
     pkt_lines,
+    pkt_stream,
 )
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -58,6 +60,30 @@ def test_pkt_lines_round_trip_with_flushes():
 def test_a_bad_length_is_git_s_protocol_error():
     with pytest.raises(GitError, match="bad line length character: zz00"):
         list(pkt_lines(b"zz00"))
+
+
+async def _bytewise(data: bytes) -> AsyncIterator[bytes]:
+    for byte in data:
+        await asyncio.sleep(0)
+        yield bytes([byte])
+
+
+async def _streamed(data: bytes) -> list[bytes | None]:
+    return [line async for line in pkt_stream(_bytewise(data))]
+
+
+@pytest.mark.asyncio
+async def test_pkt_lines_arriving_a_byte_at_a_time_are_split():
+    stream = pkt_line(b"one\n") + b"0000" + pkt_line(b"two")
+    assert await _streamed(stream) == [b"one\n", None, b"two"]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_cut_inside_a_line_is_a_hang_up():
+    with pytest.raises(GitError, match="the remote end hung up unexpectedly"):
+        await _streamed(pkt_line(b"one\n")[:6])
+    with pytest.raises(GitError, match="bad line length character: zz00"):
+        await _streamed(b"zz00")
 
 
 def test_an_advertisement_reads_refs_peeled_tags_and_the_head_symref():

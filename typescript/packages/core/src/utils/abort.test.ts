@@ -22,6 +22,7 @@ import {
   runCancellable,
   runWithDeadline,
   makeAbortError,
+  mergeSignals,
   sleep,
   stopSignal,
 } from './abort.ts'
@@ -281,5 +282,19 @@ describe('SignalStop', () => {
     expect(thrown instanceof Error && thrown.name === 'AbortError').toBe(true)
     expect(stopSignal(controller.signal)).toBe(15)
     expect(stopSignal(AbortSignal.any([controller.signal]))).toBe(15)
+  })
+})
+
+describe('mergeSignals', () => {
+  it('hands back one fold per pair, so a run of ops builds none of its own', () => {
+    const [a, b] = [new AbortController(), new AbortController()]
+    const merged = mergeSignals(a.signal, b.signal)
+    expect(mergeSignals(a.signal, b.signal)).toBe(merged)
+    expect(mergeSignals(a.signal, null)).toBe(a.signal)
+    expect(mergeSignals(undefined, b.signal)).toBe(b.signal)
+    expect(mergeSignals(a.signal, a.signal)).toBe(a.signal)
+    b.abort('stop')
+    expect(merged?.aborted).toBe(true)
+    expect(merged?.reason).toBe('stop')
   })
 })

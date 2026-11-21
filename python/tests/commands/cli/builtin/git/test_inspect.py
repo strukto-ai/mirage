@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -217,3 +218,61 @@ async def test_dash_h_is_help_only_as_the_verbs_one_word(git_ws, verb):
     repeated = await git_ws.shell(f"git -C /repo {verb} HEAD {verb} -h")
     assert repeated.exit_code != 0
     assert b"usage:" not in (repeated.stdout or b"")
+
+
+@pytest.fixture(scope="module")
+def bare_root(tmp_path_factory) -> Path:
+    """A directory holding only a bare clone, ``repo.git``.
+
+    Args:
+        tmp_path_factory (TempPathFactory): pytest's module temp dirs.
+    """
+    root = tmp_path_factory.mktemp("bare")
+    env = {
+        **ENV,
+        "GIT_AUTHOR_NAME": "Ada",
+        "GIT_AUTHOR_EMAIL": "ada@example.com",
+        "GIT_COMMITTER_NAME": "Ada",
+        "GIT_COMMITTER_EMAIL": "ada@example.com",
+    }
+    source = root / "source"
+    for args, cwd in (
+        (["init", "-q", "-b", "main", str(source)], root),
+        (["commit", "-q", "--allow-empty", "-m", "A"], source),
+        (["clone", "-q", "--bare", str(source), str(root / "repo.git")], root),
+        (["branch", "trunk"], root / "repo.git"),
+    ):
+        subprocess.run(["git", *args], cwd=cwd, env=env, check=True)
+    shutil.rmtree(source)
+    return root
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "directory, line",
+    [
+        (
+            "repo.git",
+            "rev-parse --is-bare-repository --is-inside-work-tree --is-inside-git-dir",
+        ),
+        ("repo.git", "log --format=%s"),
+        ("repo.git/refs", "rev-parse --is-bare-repository"),
+        ("repo.git", "status"),
+    ],
+)
+async def test_a_bare_repository_is_found_as_git_finds_it(
+    bare_root, directory, line
+):
+    native = subprocess.run(
+        ["git", *shlex.split(line)],
+        cwd=bare_root / directory,
+        env=ENV,
+        capture_output=True,
+    )
+    with mounted_rw(bare_root) as ws:
+        got = await ws.shell(f"git -C /repo/{directory} {line}")
+    assert (got.exit_code, got.stdout or b"", got.stderr or b"") == (
+        native.returncode,
+        native.stdout,
+        native.stderr,
+    )

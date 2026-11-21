@@ -335,7 +335,7 @@ class Scanner:
         rules = await self._descend(relative, ignores)
         for entry in sorted(await self._names(relative)):
             name = entry_name(entry)
-            if not name or (not relative and name == GIT_DIR):
+            if not name or name == GIT_DIR:
                 continue
             child = f"{relative}/{name}" if relative else name
             if not self._reaches(child):

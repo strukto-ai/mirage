@@ -19,7 +19,11 @@ import git, { Errors } from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
-import { materialize } from '../../../../io/types.ts'
+import { materialize, type ByteSource } from '../../../../io/types.ts'
+import { chunks } from '../../../../io/cooperative.ts'
+import { closeQuietly } from '../../../../io/stream.ts'
+import { Digest } from '../../../../utils/hash.ts'
+import { fromHex } from '../../../../utils/hex.ts'
 import type { Context } from '../../../config.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
@@ -27,6 +31,7 @@ import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
 import {
+  rawObject,
   readCommit,
   objectType,
   openRepo,
@@ -74,8 +79,8 @@ export interface Advertisement {
 
 /** What one fetch brought back. */
 export interface Fetched {
-  /** The packfile, empty for none. */
-  readonly pack: Uint8Array
+  /** The packfile as it arrives, nothing for none. */
+  readonly pack: AsyncIterable<Uint8Array>
   /** The commits whose parents were left out, for `.git/shallow`. */
   readonly shallow: readonly string[]
 }
@@ -121,6 +126,81 @@ export function* pktLines(data: Uint8Array): Generator<Uint8Array | null> {
     }
     yield data.subarray(at + 4, at + size)
     at += size
+  }
+}
+
+/**
+ * Split a pkt-line stream as it arrives, yielding null for each flush; only
+ * the line being read is held.
+ */
+export async function* pktStream(body: ByteSource): AsyncGenerator<Uint8Array | null> {
+  let held: Uint8Array = new Uint8Array(0)
+  for await (const chunk of chunks(body)) {
+    held = held.length ? concat([held, chunk]) : chunk
+    let at = 0
+    while (held.length - at >= 4) {
+      const head = DEC.decode(held.subarray(at, at + 4))
+      if (!/^[0-9a-fA-F]{4}$/.test(head))
+        throw new GitError(`protocol error: bad line length character: ${head}`)
+      const size = parseInt(head, 16)
+      if (size === 0) {
+        yield null
+        at += 4
+        continue
+      }
+      if (held.length - at < size) break
+      yield held.subarray(at + 4, at + size)
+      at += size
+    }
+    held = held.subarray(at)
+  }
+  if (held.length) throw new GitError('the remote end hung up unexpectedly')
+}
+
+/** zlib's deflate of `data`. */
+async function deflate(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+
+/** A pack with nothing in it, as a fetch that needs nothing gets. */
+function nothing(): AsyncIterable<Uint8Array> {
+  return chunks(new Uint8Array())
+}
+
+/**
+ * A pack of `oids` as git's pack-objects writes one without deltas: each
+ * object read and compressed in turn, so only one is held, then the checksum
+ * of every byte before it.
+ */
+async function* packChunks(repo: Repo, oids: readonly string[]): AsyncGenerator<Uint8Array> {
+  const kinds: Record<string, number> = { commit: 1, tree: 2, blob: 3, tag: 4 }
+  const sum = new Digest('sha1')
+  try {
+    const header = new Uint8Array(12)
+    header.set(ENC.encode('PACK'))
+    const view = new DataView(header.buffer)
+    view.setUint32(4, 2, false)
+    view.setUint32(8, oids.length, false)
+    sum.update(header)
+    yield header
+    for (const oid of oids) {
+      const { type, raw } = await rawObject(repo, oid)
+      let size = raw.byteLength
+      const head = [((kinds[type] ?? 0) << 4) | (size & 15)]
+      size = Math.floor(size / 16)
+      while (size > 0) {
+        head[head.length - 1] = (head[head.length - 1] ?? 0) | 0x80
+        head.push(size & 0x7f)
+        size = Math.floor(size / 128)
+      }
+      const entry = concat([Uint8Array.from(head), await deflate(raw)])
+      sum.update(entry)
+      yield entry
+    }
+    yield fromHex(sum.digest())
+  } finally {
+    sum.close()
   }
 }
 
@@ -299,9 +379,7 @@ export class LocalTransport implements Transport {
     depth: number | null = null,
   ): Promise<Fetched> {
     const [oids, shallow] = await missingObjects(this.repo, wants, has, depth)
-    if (!oids.length) return { pack: new Uint8Array(), shallow }
-    const { packfile } = await git.packObjects({ ...repoArgs(this.repo), oids })
-    return { pack: packfile ?? new Uint8Array(), shallow }
+    return { pack: oids.length ? packChunks(this.repo, oids) : nothing(), shallow }
   }
 }
 
@@ -337,7 +415,7 @@ export class HttpTransport implements Transport {
     method: string,
     headers: Record<string, string>,
     body: Uint8Array | undefined,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     let resp
     try {
       resp = await httpRequest(url, {
@@ -346,38 +424,41 @@ export class HttpTransport implements Transport {
         ...(body === undefined ? {} : { body }),
         timeoutMs: null,
         followRedirects: true,
+        stream: true,
       })
     } catch (err) {
       if (err instanceof HttpConnectError)
         throw new GitError(`unable to access '${this.url}/': ${err.message}`)
       throw err
     }
-    if (resp.status === 401 || resp.status === 403) {
-      if (this.configured || Object.keys(this.credentials).length)
-        throw new GitError(`Authentication failed for '${this.url}/'`)
-      const host = new URL(this.url).origin
-      throw new GitError(`could not read Username for '${host}': terminal prompts disabled`)
+    try {
+      if (resp.status === 401 || resp.status === 403) {
+        if (this.configured || Object.keys(this.credentials).length)
+          throw new GitError(`Authentication failed for '${this.url}/'`)
+        const host = new URL(this.url).origin
+        throw new GitError(`could not read Username for '${host}': terminal prompts disabled`)
+      }
+      if (resp.status === 404) throw new GitError(`repository '${this.url}/' not found`)
+      if (resp.status >= 400)
+        throw new GitError(
+          `unable to access '${this.url}/': The requested URL returned error: ${String(resp.status)}`,
+        )
+    } catch (err) {
+      await closeQuietly(resp.body)
+      throw err
     }
-    if (resp.status === 404) throw new GitError(`repository '${this.url}/' not found`)
-    if (resp.status >= 400)
-      throw new GitError(
-        `unable to access '${this.url}/': The requested URL returned error: ${String(resp.status)}`,
-      )
     if (method === 'GET') {
       const moved = resp.url.split('/info/refs')[0] ?? this.url
       if (new URL(moved).origin !== new URL(this.url).origin) this.credentials = {}
       this.url = moved
     }
-    return await materialize(resp.body)
+    return resp.body
   }
 
   /** GET `info/refs` for upload-pack and read what it lists. */
   async advertise(): Promise<Advertisement> {
-    const body = await this.request(
-      `${this.url}/info/refs?service=${SERVICE}`,
-      'GET',
-      {},
-      undefined,
+    const body = await materialize(
+      await this.request(`${this.url}/info/refs?service=${SERVICE}`, 'GET', {}, undefined),
     )
     const lines = pktLines(body)
     const first = lines.next()
@@ -391,11 +472,11 @@ export class HttpTransport implements Transport {
   }
 
   /**
-   * POST the wants and haves to upload-pack; return the pack. A shallow
-   * receiver names its shallow commits, so the server does not count what lies
-   * past them as held, and a depth sends `deepen`; both ask for the `shallow`
-   * capability, and the server names each commit it cut in a `shallow` line
-   * ahead of the pack.
+   * POST the wants and haves to upload-pack; return the pack as it arrives.
+   * A shallow receiver names its shallow commits, so the server does not
+   * count what lies past them as held, and a depth sends `deepen`; both ask
+   * for the `shallow` capability, and the server names each commit it cut in
+   * a `shallow` line ahead of the pack, which is read before this returns.
    */
   async fetchPack(
     wants: readonly string[],
@@ -405,7 +486,7 @@ export class HttpTransport implements Transport {
     shallow: readonly string[] = [],
   ): Promise<Fetched> {
     const [first, ...rest] = wants
-    if (first === undefined) return { pack: new Uint8Array(), shallow: [] }
+    if (first === undefined) return { pack: nothing(), shallow: [] }
     const caps = depth === null && !shallow.length ? CAPABILITIES : `${CAPABILITIES} shallow`
     const parts = [
       pktLine(`want ${first} ${caps}\n`),
@@ -425,21 +506,47 @@ export class HttpTransport implements Transport {
       },
       concat(parts),
     )
-    const pack: Uint8Array[] = []
+    const lines = pktStream(reply)
     const cut: string[] = []
-    for (const line of pktLines(reply)) {
-      if (line === null) continue
-      const text = DEC.decode(line.subarray(0, 4))
-      if (text.startsWith('NAK') || text === 'ACK ') continue
-      if (DEC.decode(line.subarray(0, SHALLOW_LINE.length)) === SHALLOW_LINE) {
-        cut.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
-        continue
+    // The pack's first bytes, the line that ended the preamble; null when the
+    // reply ends with no pack.
+    const payload = async (): Promise<Uint8Array | null> => {
+      for (let next = await lines.next(); next.done !== true; next = await lines.next()) {
+        const line = next.value
+        if (line === null) continue
+        const text = DEC.decode(line.subarray(0, 4))
+        if (text.startsWith('NAK') || text === 'ACK ') continue
+        if (DEC.decode(line.subarray(0, SHALLOW_LINE.length)) === SHALLOW_LINE) {
+          cut.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
+          continue
+        }
+        if (line[0] === PACK_BAND) return line.subarray(1)
+        if (line[0] === ERROR_BAND)
+          throw new GitError(`remote error: ${DEC.decode(line.subarray(1)).trim()}`)
       }
-      if (line[0] === PACK_BAND) pack.push(line.subarray(1))
-      else if (line[0] === ERROR_BAND)
-        throw new GitError(`remote error: ${DEC.decode(line.subarray(1)).trim()}`)
+      return null
     }
-    return { pack: concat(pack), shallow: cut }
+    let head: Uint8Array | null
+    try {
+      head = await payload()
+    } catch (err) {
+      await lines.return(undefined)
+      throw err
+    }
+    if (head === null) {
+      await lines.return(undefined)
+      return { pack: nothing(), shallow: cut }
+    }
+    const opening: Uint8Array = head
+    async function* pack(): AsyncGenerator<Uint8Array> {
+      try {
+        yield opening
+        for (let more = await payload(); more !== null; more = await payload()) yield more
+      } finally {
+        await lines.return(undefined)
+      }
+    }
+    return { pack: pack(), shallow: cut }
   }
 }
 

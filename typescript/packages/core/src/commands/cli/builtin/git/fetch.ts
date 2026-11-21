@@ -16,6 +16,7 @@ import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
+import { SYSTEM_IDS, type IdSource } from '../../../../utils/ids.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -39,7 +40,8 @@ import {
   validRefName,
   writeRef,
 } from './refs.ts'
-import { addShallow, readCommit, objectType, openRepo, storePack, type Repo } from './repo.ts'
+import { storePack } from './pack.ts'
+import { addShallow, readCommit, objectType, openRepo, type Repo } from './repo.ts'
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import {
@@ -166,6 +168,7 @@ async function receive(
   repo: Repo,
   transport: Transport,
   wants: readonly string[],
+  ids: IdSource,
   depth: number | null = null,
   held: readonly string[] = [],
 ): Promise<Repo> {
@@ -181,7 +184,7 @@ async function receive(
     depth,
     [...repo.shallow].sort(compareCodePoints),
   )
-  await storePack(repo, fetched.pack)
+  await storePack(repo.vfs, repo.location.commondir, fetched.pack, ids)
   await addShallow(repo, fetched.shallow)
   return openRepo(repo.vfs, repo.location, repo.ambiguous)
 }
@@ -239,12 +242,14 @@ export async function fetchObjects(
   adv: Advertisement,
   wants: readonly ReturnType<typeof wanted>[],
   follow: boolean,
+  ids: IdSource,
   depth: number | null = null,
 ): Promise<[Repo, ReturnType<typeof wanted>[]]> {
   let current = await receive(
     repo,
     transport,
     wants.map((want) => want.oid),
+    ids,
     depth,
   )
   if (!follow) return [current, [...wants]]
@@ -254,6 +259,7 @@ export async function fetchObjects(
       current,
       transport,
       tags.map((tag) => tag.oid),
+      ids,
       depth,
       wants.map((want) => want.oid),
     )
@@ -534,7 +540,14 @@ export async function fetch(
       )
   const tagOpt = await values(`remote.${name}.tagopt`)
   const follow = !fl.asBool('no_tags') && tagOpt.at(-1) !== '--no-tags'
-  const [fetched, taken] = await fetchObjects(repo, transport, adv, wants, follow)
+  const [fetched, taken] = await fetchObjects(
+    repo,
+    transport,
+    adv,
+    wants,
+    follow,
+    ctx.ids ?? SYSTEM_IDS,
+  )
   const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
   const reason = ['fetch', ...leafArgs(ctx.argv ?? [], 'fetch')].join(' ')
   const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
