@@ -367,6 +367,42 @@ describe('git add', () => {
     expect(git(await h.drain(), ['ls-files'])).not.toContain('sub')
   })
 
+  // git 2.47.3: naming the gitlink stages nothing, a path inside it is
+  // refused, `-A` leaves what it holds alone, and status says nothing.
+  it('keeps the files of a gitlink with no repository there out', async () => {
+    const h = await harness((repo) => {
+      embedded(repo)
+    })
+    const head = git(join(h.repo, 'sub'), ['rev-parse', 'HEAD']).trim()
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('commit -qm sub'))[0]).toBe(0)
+    expect((await h.ws.shell('rm -rf /repo/sub/.git')).exitCode).toBe(0)
+    await write(h, 'sub/file', 'x\n')
+    expect((await h.run('add sub'))[0]).toBe(0)
+    expect(await h.run('add sub/file')).toEqual([
+      128,
+      '',
+      "fatal: Pathspec 'sub/file' is in submodule 'sub'\n",
+    ])
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('status --porcelain'))[1]).toBe('')
+    const index = git(await h.drain(), ['ls-files', '-s'])
+    expect(index).toContain(`160000 ${head} 0\tsub\n`)
+    expect(index).not.toContain('sub/file')
+  })
+
+  it('refuses an ignored embedded repository named outright', async () => {
+    const h = await harness((repo) => {
+      embedded(repo)
+      writeFileSync(join(repo, '.gitignore'), 'sub/\n')
+    })
+    const [code, , err] = await h.run('add sub')
+    expect(code).toBe(1)
+    expect(
+      err.startsWith('The following paths are ignored by one of your .gitignore files:\nsub\n'),
+    ).toBe(true)
+  })
+
   it('refuses an embedded repository without a commit', async () => {
     const h = await harness((repo) => {
       embedded(repo, false)
@@ -2069,14 +2105,15 @@ describe('a gitlink in the tree', () => {
   })
 
   it('keeps a child the restored source drops', async () => {
-    // The entry asks for the directory and nothing under it: git drops the
-    // child's index entry and leaves the file alone. Removing it here loses
-    // content nothing has a copy of, since the source tree never held it.
+    // The entry asks for the directory and nothing under it: git leaves a
+    // file standing there alone. Removing it here loses content nothing has
+    // a copy of, since the source tree never held it. git refuses to stage
+    // the child at all (`is in submodule`), so the index never holds both.
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
     await write(h, 'sub/child.md', 'child\n')
-    expect((await h.run('add sub/child.md'))[0]).toBe(0)
+    expect((await h.run('add sub/child.md'))[0]).toBe(128)
     expect(await h.run('restore --staged --worktree sub')).toEqual([0, '', ''])
     expect(await h.read('/repo/sub/child.md')).not.toBeNull()
     const drained = await h.drain()

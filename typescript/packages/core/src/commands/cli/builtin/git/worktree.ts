@@ -77,6 +77,7 @@ class Scanner {
     private readonly roots: readonly string[] | null = null,
     private readonly perDirectory: string | null = GITIGNORE,
     private readonly keepEmpty = false,
+    private readonly gitlinks: ReadonlySet<string> = new Set(),
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
@@ -296,7 +297,11 @@ class Scanner {
         const skipped = ignored || rules.isIgnored(child, true)
         // An ignored directory the walk passes over is not probed: nothing
         // about it would be reported either way.
-        const needed = !skipped || this.showIgnored || this.tracked.has(child)
+        const needed =
+          !skipped ||
+          this.showIgnored ||
+          this.tracked.has(child) ||
+          this.roots?.includes(child) === true
         if (!this.directories.has(child) && needed && (await this.embedded(child))) {
           this.found.repos.push(child)
           if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
@@ -304,6 +309,9 @@ class Scanner {
           else if (this.showIgnored) this.found.ignored.push(`${child}/`)
           continue
         }
+        // A gitlink whose repository is not there: what its directory holds
+        // is not this one's.
+        if (this.gitlinks.has(child)) continue
         await this.visitDirectory(child, skipped, rules)
         continue
       }
@@ -343,6 +351,7 @@ export async function scan(
   ignores: IgnoreStack | null = null,
   perDirectory: string | null = GITIGNORE,
   keepEmpty = false,
+  gitlinks: ReadonlySet<string> = new Set(),
 ): Promise<WorkTree> {
   const rules = ignores ?? (await loadIgnores(vfs, location.commondir, location.worktree))
   const scanner = new Scanner(
@@ -354,6 +363,7 @@ export async function scan(
     roots,
     perDirectory,
     keepEmpty,
+    gitlinks,
   )
   await scanner.walk('', false, rules)
   return scanner.found

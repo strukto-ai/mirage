@@ -163,10 +163,15 @@ async function resolve(
     // git refuses it under a gitlink the index holds and passes over it
     // otherwise (git 2.47.3).
     const holder = found.repos.find((repo) => under(target, repo))
+    const gitlink = [...linked].find((path) => under(target, path))
+    if (gitlink !== undefined) throw new SubmodulePathspecError(operand, gitlink)
     if (holder !== undefined) {
       if (tracked.has(holder)) throw new SubmodulePathspecError(operand, holder)
       continue
     }
+    // A gitlink with no repository there (a submodule never checked out)
+    // has nothing to stage.
+    if (linked.has(target) && !found.repos.includes(target)) continue
     const repos = matched(found.repos, target)
     for (const repo of repos) {
       if (force || tracked.has(repo) || found.untracked.includes(`${repo}/`)) stage.add(repo)
@@ -181,7 +186,9 @@ async function resolve(
       else ignored.push(target)
       continue
     }
-    const hits = matched(present, target)
+    const hits = new Set(
+      [...matched(present, target)].filter((path) => ![...linked].some((at) => under(path, at))),
+    )
     if (hits.size > 0 || gone.length > 0 || repos.size > 0) {
       for (const path of force ? hits : keepAddable(hits, tracked, ignores)) stage.add(path)
       for (const path of gone) remove.add(path)
@@ -335,7 +342,19 @@ export async function add(
     true,
   )
   // `-f` walks ignored directories too, as git enters them for it.
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, parsed.force, roots)
+  const gitlinks = new Set([...tracked].filter((path) => state.entries.get(path)?.mode === GITLINK))
+  const found = await scan(
+    vfs,
+    repo.location,
+    tracked,
+    UNTRACKED_ALL,
+    parsed.force,
+    roots,
+    null,
+    undefined,
+    false,
+    gitlinks,
+  )
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
   const present = new Set([...found.files.keys(), ...found.repos])
   const linked = await standingGitlinks(vfs, repo.location, state, tracked)
@@ -350,7 +369,9 @@ export async function add(
     stage = new Set([...scope].filter((path) => present.has(path)))
     remove = new Set([...scope].filter(missing))
   } else if (parsed.every && texts.length === 0) {
-    stage = parsed.force ? new Set(present) : keepAddable(found.files.keys(), tracked, ignores)
+    // A file under a gitlink is its repository's, whatever stands there.
+    const own = [...found.files.keys()].filter((path) => ![...linked].some((at) => under(path, at)))
+    stage = parsed.force ? new Set([...own, ...found.repos]) : keepAddable(own, tracked, ignores)
     for (const path of found.repos)
       if (parsed.force || tracked.has(path) || found.untracked.includes(`${path}/`)) stage.add(path)
     remove = new Set([...tracked].filter(missing))

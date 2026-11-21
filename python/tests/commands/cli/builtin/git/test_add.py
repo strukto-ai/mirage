@@ -496,3 +496,39 @@ async def test_short_status_names_what_changed_in_a_gitlink(
     code, _out, err = await run(git_rw, "add -A")
     assert (code, err) == (0, b"")
     assert b"sub" not in staged(repo_path)
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_with_no_repository_there_keeps_its_files_out(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: naming the gitlink stages nothing, a path inside it is
+    # refused, ``-A`` leaves what it holds alone, and status says nothing.
+    head = _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    assert (await git_rw.shell("rm -rf /repo/sub/.git")).exit_code == 0
+    (repo_path / "sub" / "file").write_text("x\n", encoding="utf-8")
+    assert (await run(git_rw, "add sub"))[0] == 0
+    assert (await run(git_rw, "add sub/file"))[0:3:2] == (
+        128,
+        b"fatal: Pathspec 'sub/file' is in submodule 'sub'\n",
+    )
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert staged(repo_path)[b"sub"] == head.encode()
+    assert b"sub/file" not in staged(repo_path)
+    assert (await run(git_rw, "status --porcelain"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_naming_an_ignored_embedded_repository_is_refused(
+    git_rw, repo_path: Path
+):
+    _embedded(repo_path)
+    (repo_path / ".gitignore").write_text("sub/\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "add sub")
+    assert code == 1
+    assert err.startswith(
+        b"The following paths are ignored by one of your .gitignore "
+        b"files:\nsub\n"
+    )

@@ -247,9 +247,16 @@ async def _resolve(
         # stage: git refuses it under a gitlink the index holds and
         # passes over it otherwise (git 2.47.3).
         holder = next((r for r in found.repos if under(target, r)), None)
+        gitlink = next((p for p in linked if under(target, p)), None)
+        if gitlink is not None:
+            raise SubmodulePathspecError(operand, gitlink)
         if holder is not None:
             if holder in tracked:
                 raise SubmodulePathspecError(operand, holder)
+            continue
+        # A gitlink with no repository there (a submodule never checked
+        # out) has nothing to stage.
+        if target in linked and target not in found.repos:
             continue
         repos = matched(set(found.repos), target)
         for repo in repos:
@@ -266,7 +273,11 @@ async def _resolve(
             else:
                 ignored.append(target)
             continue
-        hits = matched(present, target)
+        hits = {
+            path
+            for path in matched(present, target)
+            if not any(under(path, at) for at in linked)
+        }
         if hits or gone or repos:
             stage |= hits if force else keep_addable(hits, tracked, ignores)
             remove |= gone
@@ -461,6 +472,12 @@ async def add(
             (repo_relative(location, start, text) for text in texts),
             literal=True,
         ),
+        gitlinks=frozenset(
+            path
+            for path in tracked
+            if (entry := state.entries.get(path.encode())) is not None
+            and entry.mode == GITLINK
+        ),
     )
     ignores = await load_ignores(vfs, location.commondir, location.worktree)
     present = set(found.files) | set(found.repos)
@@ -480,10 +497,16 @@ async def add(
         stage = scope & present
         remove = scope - present - linked
     elif parsed.every and not texts:
+        # A file under a gitlink is its repository's, whatever stands there.
+        own = {
+            path
+            for path in found.files
+            if not any(under(path, at) for at in linked)
+        }
         stage = (
-            set(present)
+            own | set(found.repos)
             if parsed.force
-            else keep_addable(set(found.files), tracked, ignores)
+            else keep_addable(own, tracked, ignores)
         )
         stage |= {
             path

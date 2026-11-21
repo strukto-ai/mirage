@@ -384,6 +384,7 @@ async function embeddedChange(
   vfs: Files,
   path: string,
   recorded: string,
+  mode: string,
 ): Promise<EmbeddedChange | null> {
   const location = await embeddedLocation(vfs, outer.location.worktree.join(path))
   if (location === null) return null
@@ -393,7 +394,7 @@ async function embeddedChange(
   const [all] = await collect(
     await openRepo(vfs, location, null),
     vfs,
-    UNTRACKED_NORMAL,
+    mode === UNTRACKED_NO ? UNTRACKED_NO : UNTRACKED_NORMAL,
     false,
     null,
     new Map(),
@@ -429,12 +430,13 @@ export async function workChanges(
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
   embedded: Map<string, EmbeddedChange> | null = null,
+  mode: string = UNTRACKED_NORMAL,
 ): Promise<Map<string, string>> {
   const changes = new Map<string, string>()
   for (const [path, entry] of entries) {
     if (entry.mode === Number.parseInt(GITLINK_MODE, 8)) {
       if (embedded === null || !found.repos.includes(path)) continue
-      const change = await embeddedChange(repo, vfs, path, entry.oid)
+      const change = await embeddedChange(repo, vfs, path, entry.oid, mode)
       if (change === null) continue
       changes.set(path, MODIFIED)
       embedded.set(path, change)
@@ -662,7 +664,23 @@ export async function collect(
     ...visibleEntries(repo.location, state.entries).keys(),
     ...visibleEntries(repo.location, state.conflicts).keys(),
   ])
-  const found = await scan(vfs, repo.location, tracked, mode, showIgnored, roots)
+  const gitlinks = new Set(
+    [...state.entries]
+      .filter(([, entry]) => entry.mode === Number.parseInt(GITLINK_MODE, 8))
+      .map(([path]) => path),
+  )
+  const found = await scan(
+    vfs,
+    repo.location,
+    tracked,
+    mode,
+    showIgnored,
+    roots,
+    null,
+    undefined,
+    false,
+    gitlinks,
+  )
   const unstaged = await workChanges(
     repo,
     vfs,
@@ -670,6 +688,7 @@ export async function collect(
     state.entries,
     found,
     embedded,
+    mode,
   )
   // With untracked files not reported, git says nothing of a gitlink whose
   // repository only has untracked content (git 2.47.3).

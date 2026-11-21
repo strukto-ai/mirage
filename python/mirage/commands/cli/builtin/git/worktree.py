@@ -83,6 +83,8 @@ class Scanner:
         roots (tuple[str, ...] | None): the repository-relative paths
             the walk is narrowed to; None for the whole tree.
         keep_empty (bool): list a directory holding nothing to report.
+        gitlinks (frozenset[str]): the gitlinks the index holds, whose
+            directory the walk never enters.
     """
 
     def __init__(
@@ -95,8 +97,10 @@ class Scanner:
         roots: tuple[str, ...] | None = None,
         per_directory: str | None = GITIGNORE,
         keep_empty: bool = False,
+        gitlinks: frozenset[str] = frozenset(),
     ) -> None:
         self._vfs = vfs
+        self._gitlinks = gitlinks
         self._per_directory = per_directory
         self._keep_empty = keep_empty
         self._worktree = worktree
@@ -363,7 +367,10 @@ class Scanner:
                 # An ignored directory the walk passes over is not probed:
                 # nothing about it would be reported either way.
                 needed = (
-                    not skipped or self._show_ignored or child in self._tracked
+                    not skipped
+                    or self._show_ignored
+                    or child in self._tracked
+                    or (self._roots is not None and child in self._roots)
                 )
                 if (
                     child not in self._directories
@@ -377,6 +384,10 @@ class Scanner:
                         self.found.untracked.append(f"{child}/")
                     elif self._show_ignored:
                         self.found.ignored.append(f"{child}/")
+                    continue
+                # A gitlink whose repository is not there: what its
+                # directory holds is not this one's.
+                if child in self._gitlinks:
                     continue
                 await self._visit_directory(child, skipped, rules)
                 continue
@@ -400,6 +411,7 @@ async def scan(
     ignores: IgnoreStack | None = None,
     per_directory: str | None = GITIGNORE,
     keep_empty: bool = False,
+    gitlinks: frozenset[str] = frozenset(),
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -424,6 +436,8 @@ async def scan(
         per_directory (str | None): the exclude file each directory may
             hold, None for none.
         keep_empty (bool): list a directory holding nothing to report.
+        gitlinks (frozenset[str]): the gitlinks the index holds, whose
+            directory the walk never enters.
     """
     rules = (
         ignores
@@ -439,6 +453,7 @@ async def scan(
         roots,
         per_directory,
         keep_empty,
+        gitlinks,
     )
     await scanner.walk("", False, rules)
     return scanner.found

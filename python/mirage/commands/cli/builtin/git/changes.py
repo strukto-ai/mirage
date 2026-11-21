@@ -413,7 +413,7 @@ class EmbeddedChange:
 
 
 async def _embedded_change(
-    vfs: Files, worktree: PathSpec, name: str, recorded: bytes
+    vfs: Files, worktree: PathSpec, name: str, recorded: bytes, mode: str
 ) -> EmbeddedChange | None:
     """What changed in the repository a gitlink records, as git's long
     format names it: commits past the recorded one, then modified and
@@ -424,6 +424,8 @@ async def _embedded_change(
         worktree (PathSpec): the outer working tree's root.
         name (str): the gitlink's repository-relative path.
         recorded (bytes): the commit the index records.
+        mode (str): the outer status's untracked mode, which the nested
+            one takes for ``no``.
     """
     location = await embedded_location(vfs, worktree.join(name))
     if location is None:
@@ -435,7 +437,7 @@ async def _embedded_change(
         vfs,
         await open_repo(vfs, location),
         location,
-        UNTRACKED_NORMAL,
+        UNTRACKED_NO if mode == UNTRACKED_NO else UNTRACKED_NORMAL,
         embedded={},
     )
     rows = [r for r in every if reader_of(vfs).visible(r.path)]
@@ -467,6 +469,7 @@ async def work_changes(
     entries: dict[bytes, IndexEntry],
     found: WorkTree,
     embedded: dict[str, EmbeddedChange] | None = None,
+    mode: str = UNTRACKED_NORMAL,
 ) -> dict[str, str]:
     """Compare the index with the working tree: what is not staged yet.
 
@@ -487,6 +490,8 @@ async def work_changes(
         embedded (dict[str, EmbeddedChange] | None): where to keep what
             changed in each gitlink's repository; None reads gitlinks
             unchanged.
+        mode (str): the untracked mode, which a gitlink's own status takes
+            for ``no``.
     """
     changes: dict[str, str] = {}
     for path, entry in entries.items():
@@ -494,7 +499,9 @@ async def work_changes(
         if entry.mode == GITLINK:
             if embedded is None or name not in found.repos:
                 continue
-            change = await _embedded_change(vfs, worktree, name, entry.sha)
+            change = await _embedded_change(
+                vfs, worktree, name, entry.sha, mode
+            )
             if change is not None:
                 changes[name] = MODIFIED
                 embedded[name] = change
@@ -769,9 +776,16 @@ async def collect(
     # untracked, as it would in a checkout of what the session sees.
     tracked = decoded(visible_entries(location, state.entries))
     tracked |= decoded(visible_entries(location, state.conflicts))
-    found = await scan(vfs, location, tracked, mode, show_ignored, roots)
+    gitlinks = frozenset(
+        path.decode("utf-8", errors="replace")
+        for path, entry in state.entries.items()
+        if entry.mode == GITLINK
+    )
+    found = await scan(
+        vfs, location, tracked, mode, show_ignored, roots, gitlinks=gitlinks
+    )
     unstaged = await work_changes(
-        vfs, location.worktree, state.entries, found, embedded
+        vfs, location.worktree, state.entries, found, embedded, mode
     )
     # With untracked files not reported, git says nothing of a gitlink
     # whose repository only has untracked content (git 2.47.3).
