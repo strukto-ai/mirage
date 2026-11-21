@@ -20,7 +20,7 @@ import { fromHex, toHex } from '../../../../utils/hex.ts'
 import type { IdSource } from '../../../../utils/ids.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { IDX_SUFFIX, PACK_DIR } from './constants.ts'
+import { IDX_SUFFIX, PACK_CACHE_BYTES, PACK_DIR } from './constants.ts'
 import { GitError } from './errors.ts'
 import {
   applyDelta,
@@ -92,8 +92,11 @@ async function packIndex(
 /**
  * Each delta's id, read back from the stored pack: a base's content is read
  * once and every delta on it rebuilt from it, depth first, so only the chain
- * being rebuilt is held. The pack is read a block at a time, the last few
- * blocks kept, since the objects of a pack sit side by side.
+ * being rebuilt is held, and a base is let go once its last delta is rebuilt.
+ * Past the cache budget the bases furthest from the top let go too, and one is
+ * rebuilt from its whole object when its next delta comes up, as git's
+ * index-pack does. The pack is read a block at a time, the last few blocks
+ * kept, since the objects of a pack sit side by side.
  */
 async function deltaIds(
   vfs: Files,
@@ -128,21 +131,35 @@ async function deltaIds(
   for (const entry of scanned) {
     if (entry.kind >= OFS_DELTA || (!onOffset.has(entry.offset) && !onId.has(entry.base))) continue
     const kind = KINDS[entry.kind - 1] ?? 'blob'
-    const stack: [Uint8Array, Scanned[]][] = [
-      [await content(entry), children(entry.offset, entry.base)],
+    // Each frame: the deltas from the whole object down to it, its body (null
+    // once let go), and the deltas still waiting on it.
+    const stack: [Scanned[], Uint8Array | null, Scanned[]][] = [
+      [[], await content(entry), children(entry.offset, entry.base)],
     ]
     for (let top = stack.at(-1); top !== undefined; top = stack.at(-1)) {
-      const [base, waiting] = top
+      const [path, held, waiting] = top
       const child = waiting.shift()
       if (child === undefined) {
         stack.pop()
         continue
       }
+      let base = held
+      if (base === null) {
+        base = await content(entry)
+        for (const link of path) base = applyDelta(await content(link), base)
+      }
       const rebuilt = applyDelta(await content(child), base)
-      if (!waiting.length) stack.pop()
+      if (waiting.length) top[1] = base
+      else stack.pop()
       const oid = await sha1Hex(wrapped(kind, rebuilt))
       ids.set(child.offset, oid)
-      stack.push([rebuilt, children(child.offset, oid)])
+      stack.push([[...path, child], rebuilt, children(child.offset, oid)])
+      let total = stack.reduce((sum, frame) => sum + (frame[1]?.byteLength ?? 0), 0)
+      for (const frame of stack.slice(0, -1)) {
+        if (total <= PACK_CACHE_BYTES) break
+        total -= frame[1]?.byteLength ?? 0
+        frame[1] = null
+      }
     }
   }
   const left = [...onOffset.values(), ...onId.values()].reduce((sum, list) => sum + list.length, 0)

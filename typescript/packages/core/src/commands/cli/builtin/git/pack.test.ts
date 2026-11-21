@@ -16,15 +16,23 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { SYSTEM_IDS } from '../../../../utils/ids.ts'
+import type * as ConstantsModule from './constants.ts'
 import { GitError } from './errors.ts'
 import { storePack } from './pack.ts'
+
+// No delta base outlives its next sibling, so every base with deltas still
+// waiting is let go and rebuilt from its whole object.
+vi.mock('./constants.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof ConstantsModule>()),
+  PACK_CACHE_BYTES: 0,
+}))
 
 let tmp: string
 let packBytes: Uint8Array
@@ -69,6 +77,10 @@ beforeAll(() => {
     lines[round * 50] = `changed in round ${String(round)}`
     writeFileSync(join(tmp, 'big.txt'), `${lines.join('\n')}\n`)
     writeFileSync(join(tmp, `small${String(round)}.txt`), `${String(round)}\n`)
+    writeFileSync(
+      join(tmp, `variant${String(round)}.txt`),
+      `${lines.map((line, n) => (n === 399 - round ? `variant ${String(round)}` : line)).join('\n')}\n`,
+    )
     git(tmp, 'add', '-A')
     git(tmp, 'commit', '-q', '-m', `round ${String(round)}`)
   }
@@ -86,9 +98,16 @@ afterAll(() => {
 
 describe('storePack', () => {
   it('keeps the pack and writes the index git writes, deltas resolved', async () => {
-    expect(
-      git(tmp, 'verify-pack', '-v', join(tmp, '.git', 'objects', 'pack', `${stem}.idx`)),
-    ).toMatch(/chain length = [1-9]/)
+    const listed = git(
+      tmp,
+      'verify-pack',
+      '-v',
+      join(tmp, '.git', 'objects', 'pack', `${stem}.idx`),
+    )
+    const bases = [
+      ...listed.matchAll(/^[0-9a-f]{40}\s+\w+\s+\d+\s+\d+\s+\d+\s+\d+\s+([0-9a-f]{40})$/gm),
+    ].map((match) => match[1])
+    expect(bases.some((base, n) => bases.indexOf(base) !== n)).toBe(true)
     const vfs = files()
     await storePack(vfs, gitdir, chunked(packBytes, 997), SYSTEM_IDS)
     const dir = gitdir.join('objects/pack')

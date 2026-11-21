@@ -15,6 +15,7 @@
 import asyncio
 import importlib
 import os
+import re
 import subprocess
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -71,6 +72,11 @@ def packed(tmp_path_factory) -> tuple[Path, str, bytes, bytes]:
         lines[round_ * 50] = f"changed in round {round_}"
         (root / "big.txt").write_text("\n".join(lines) + "\n")
         (root / f"small{round_}.txt").write_text(f"{round_}\n")
+        variant = [
+            f"variant {round_}" if n == 399 - round_ else line
+            for n, line in enumerate(lines)
+        ]
+        (root / f"variant{round_}.txt").write_text("\n".join(variant) + "\n")
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", f"round {round_}")
     _git(root, "repack", "-a", "-d", "-f", "-q", "--depth=50", "--window=10")
@@ -93,11 +99,25 @@ def files():
 
 
 @pytest.mark.asyncio
-async def test_the_pack_is_kept_with_the_index_git_writes(packed, files):
+@pytest.mark.parametrize("budget", [None, 0])
+async def test_the_pack_is_kept_with_the_index_git_writes(
+    packed, files, monkeypatch, budget
+):
     root, stem, pack, idx = packed
     directory = root / ".git" / "objects" / "pack"
     verify = _git(root, "verify-pack", "-v", str(directory / f"{stem}.idx"))
-    assert "chain length = " in verify
+    bases = re.findall(
+        r"^[0-9a-f]{40}\s+\w+\s+\d+\s+\d+\s+\d+\s+\d+\s+([0-9a-f]{40})$",
+        verify,
+        re.M,
+    )
+    assert len(set(bases)) < len(bases)
+    if budget is not None:
+        monkeypatch.setattr(
+            importlib.import_module("mirage.commands.cli.builtin.git.pack"),
+            "PACK_CACHE_BYTES",
+            budget,
+        )
     await store_pack(files, GITDIR, _chunked(pack, 997), SystemIdSource())
     out = GITDIR.join("objects/pack")
     names = sorted(p.rsplit("/", 1)[-1] for p in await files.readdir(out))

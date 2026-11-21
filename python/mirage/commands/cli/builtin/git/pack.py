@@ -26,6 +26,7 @@ from mirage.commands.cli.builtin.git.constants import (
     IDX_SUFFIX,
     PACK_BLOCK,
     PACK_BLOCKS,
+    PACK_CACHE_BYTES,
     PACK_DIR,
 )
 from mirage.commands.cli.builtin.git.errors import GitError
@@ -85,9 +86,12 @@ async def delta_ids(
     """Each delta's id, read back from the stored pack.
 
     A base's content is read once and every delta on it rebuilt from
-    it, depth first, so only the chain being rebuilt is held. The pack
-    is read a block at a time, the last few blocks kept, since the
-    objects of a pack sit side by side.
+    it, depth first, so only the chain being rebuilt is held, and a base
+    is let go once its last delta is rebuilt. Past the cache budget the
+    bases furthest from the top let go too, and one is rebuilt from its
+    whole object when its next delta comes up, as git's index-pack does.
+    The pack is read a block at a time, the last few blocks kept, since
+    the objects of a pack sit side by side.
 
     Args:
         vfs (Files): the session's files.
@@ -136,6 +140,12 @@ async def delta_ids(
     def children(offset: int, oid: bytes) -> list[Scanned]:
         return on_offset.pop(offset, []) + on_id.pop(oid, [])
 
+    async def rebuild(root: Scanned, chain: list[Scanned]) -> bytes:
+        body = await content(root)
+        for link in chain:
+            body = b"".join(apply_delta(body, await content(link)))
+        return body
+
     for entry in scanned:
         if entry.kind >= OFS_DELTA or (
             entry.offset not in on_offset and entry.base not in on_id
@@ -148,15 +158,20 @@ async def delta_ids(
                 f"unknown object type {entry.kind}"
             )
         kind = cls.type_name
-        stack = [(await content(entry), children(entry.offset, entry.base))]
+        stack: list[tuple[list[Scanned], bytes | None, list[Scanned]]] = [
+            ([], await content(entry), children(entry.offset, entry.base))
+        ]
         while stack:
-            base, waiting = stack[-1]
+            chain, held, waiting = stack[-1]
             if not waiting:
                 stack.pop()
                 continue
             child = waiting.pop(0)
+            base = held if held is not None else await rebuild(entry, chain)
             rebuilt = b"".join(apply_delta(base, await content(child)))
-            if not waiting:
+            if waiting:
+                stack[-1] = (chain, base, waiting)
+            else:
                 stack.pop()
             oid = (
                 hashlib.sha1(b"%s %d\0" % (kind, len(rebuilt)) + rebuilt)
@@ -164,7 +179,16 @@ async def delta_ids(
                 .encode()
             )
             ids[child.offset] = oid
-            stack.append((rebuilt, children(child.offset, oid)))
+            stack.append(
+                ([*chain, child], rebuilt, children(child.offset, oid))
+            )
+            total = sum(len(body or b"") for _, body, _ in stack)
+            for at in range(len(stack) - 1):
+                if total <= PACK_CACHE_BYTES:
+                    break
+                kept_chain, body, kept_waiting = stack[at]
+                total -= len(body or b"")
+                stack[at] = (kept_chain, None, kept_waiting)
     left = sum(map(len, on_offset.values())) + sum(map(len, on_id.values()))
     if left:
         raise GitError(
