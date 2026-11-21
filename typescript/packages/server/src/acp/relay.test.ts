@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
@@ -116,6 +116,22 @@ function agent(...args: string[]): string[] {
   const script = join(dir, 'agent.mjs')
   writeFileSync(script, AGENT)
   return [process.execPath, script, ...args]
+}
+
+// An agent that writes its pid to the file it is given, prints one line and
+// waits on its stdin.
+function waitingAgent(): [string[], string] {
+  const dir = mkdtempSync(join(tmpdir(), 'mirage-acp-stop-'))
+  const script = join(dir, 'waits.mjs')
+  const pidFile = join(dir, 'agent.pid')
+  writeFileSync(
+    script,
+    "import { writeFileSync } from 'node:fs'\n" +
+      'writeFileSync(process.argv[2], String(process.pid))\n' +
+      "process.stdout.write('{}\\n')\n" +
+      "process.stdin.on('data', () => undefined)\n",
+  )
+  return [[process.execPath, script, pidFile], pidFile]
 }
 
 function nothing(): AsyncIterable<string> {
@@ -274,25 +290,31 @@ describe('relayAgent', () => {
   }, 30_000)
 
   it('stops the agent when the relay fails', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-acp-stop-'))
-    const script = join(dir, 'waits.mjs')
-    const pidFile = join(dir, 'agent.pid')
-    writeFileSync(
-      script,
-      "import { writeFileSync } from 'node:fs'\n" +
-        'writeFileSync(process.argv[2], String(process.pid))\n' +
-        "process.stdout.write('{}\\n')\n" +
-        "process.stdin.on('data', () => undefined)\n",
-    )
+    const [argv, pidFile] = waitingAgent()
     async function* forever(): AsyncGenerator<string> {
       await new Promise<never>(() => undefined)
       yield ''
     }
     await expect(
-      relayAgent([process.execPath, script, pidFile], noCall, SERVER, '/', forever(), () =>
+      relayAgent(argv, noCall, SERVER, '/', forever(), () =>
         Promise.reject(new Error('client gone')),
       ),
     ).rejects.toThrow('client gone')
+    expect(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0)).toThrow()
+  }, 30_000)
+
+  it('stops the agent when the client stream fails', async () => {
+    const [argv, pidFile] = waitingAgent()
+    async function* broken(): AsyncGenerator<string> {
+      while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8') === '') {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      yield* []
+      throw new Error('client stream broke')
+    }
+    await expect(
+      relayAgent(argv, noCall, SERVER, '/', broken(), () => Promise.resolve()),
+    ).rejects.toThrow('client stream broke')
     expect(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0)).toThrow()
   }, 30_000)
 

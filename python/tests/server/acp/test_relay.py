@@ -299,8 +299,7 @@ async def test_a_failed_workspace_call_answers_an_error(tmp_path):
     assert (status, codes) == (0, [-32603, -32603, -32603, -32602])
 
 
-@pytest.mark.asyncio
-async def test_a_cancelled_relay_stops_the_agent(tmp_path):
+def waiting_agent(tmp_path: Path) -> tuple[list[str], Path]:
     pid_file = tmp_path / "agent.pid"
     script = tmp_path / "waits.py"
     script.write_text(
@@ -308,29 +307,51 @@ async def test_a_cancelled_relay_stops_the_agent(tmp_path):
         "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
         "sys.stdin.read()\n"
     )
+    return [sys.executable, str(script), str(pid_file)], pid_file
+
+
+async def started(pid_file: Path) -> None:
+    while not pid_file.exists() or not pid_file.read_text():
+        await asyncio.sleep(0.01)
+
+
+async def no_write(line: str) -> None:
+    raise AssertionError(line)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_relay_stops_the_agent(tmp_path):
+    argv, pid_file = waiting_agent(tmp_path)
 
     async def lines() -> AsyncIterator[str]:
         await asyncio.Event().wait()
         yield ""
 
-    async def write(line: str) -> None:
-        raise AssertionError(line)
-
     running = asyncio.create_task(
-        relay.relay_agent(
-            [sys.executable, str(script), str(pid_file)],
-            no_call,
-            SERVER,
-            "/",
-            lines(),
-            write,
-        )
+        relay.relay_agent(argv, no_call, SERVER, "/", lines(), no_write)
     )
-    while not pid_file.exists() or not pid_file.read_text():
-        await asyncio.sleep(0.01)
+    await started(pid_file)
     running.cancel()
     with pytest.raises(asyncio.CancelledError):
         await running
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_client_stream_stops_the_agent(tmp_path):
+    argv, pid_file = waiting_agent(tmp_path)
+
+    async def lines() -> AsyncIterator[str]:
+        await started(pid_file)
+        raise OSError("client stream broke")
+        yield ""
+
+    with pytest.raises(OSError, match="client stream broke"):
+        await asyncio.wait_for(
+            relay.relay_agent(argv, no_call, SERVER, "/", lines(), no_write),
+            30,
+        )
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid_file.read_text()), 0)
 

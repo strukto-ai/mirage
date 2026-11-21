@@ -344,6 +344,8 @@ async def relay_agent(
 
     Raises:
         FileNotFoundError: no program ``argv[0]``.
+        Exception: what ended the client's lines early; the agent is
+            stopped first.
     """
     agent = await asyncio.create_subprocess_exec(
         *argv,
@@ -354,10 +356,15 @@ async def relay_agent(
     relay = AgentRelay(agent, call, server, root, host_write)
 
     async def pump() -> None:
-        async for line in host_lines:
-            text = line.rstrip("\r\n")
-            if text.strip():
-                await relay.from_host(text)
+        try:
+            async for line in host_lines:
+                text = line.rstrip("\r\n")
+                if text.strip():
+                    await relay.from_host(text)
+        except Exception:
+            if agent.returncode is None:
+                agent.kill()
+            raise
         if agent.stdin is not None:
             agent.stdin.close()
 
@@ -369,6 +376,10 @@ async def relay_agent(
             if text.strip():
                 await relay.from_agent(text)
         status = await agent.wait()
+        if client.done() and not client.cancelled():
+            failed = client.exception()
+            if failed is not None:
+                raise failed
     finally:
         client.cancel()
         await asyncio.gather(client, return_exceptions=True)

@@ -297,7 +297,8 @@ export class AgentRelay {
  * workspace's RPC, `server` is the workspace's MCP server for each session
  * and `root` the workspace path a session's folder stands for. Resolves to
  * the agent's exit status, 128 plus the signal for one a signal ended;
- * rejects with an ENOENT error when there is no program `argv[0]`.
+ * rejects with an ENOENT error when there is no program `argv[0]`, and with
+ * what ended the client's lines early, after stopping the agent.
  */
 export async function relayAgent(
   argv: string[],
@@ -328,6 +329,7 @@ export async function relayAgent(
     logger.debug('acp agent stdin closed: %s', err)
   })
   const relay = new AgentRelay(agent, call, server, root, hostWrite)
+  const client: { failed: Error | null } = { failed: null }
   void (async () => {
     for (let next = await incoming.next(); next.done !== true; next = await incoming.next()) {
       const text = next.value.replace(/\r?\n$/, '')
@@ -335,14 +337,18 @@ export async function relayAgent(
     }
     agent.stdin.end()
   })().catch((err: unknown) => {
-    logger.debug('acp client stream ended: %s', err)
+    logger.debug('acp client stream failed: %s', err)
+    client.failed = err instanceof Error ? err : new Error(String(err))
+    agent.kill('SIGKILL')
   })
   try {
     for await (const line of createInterface({ input: agent.stdout, crlfDelay: Infinity })) {
       if (line.length > LINE_LIMIT) throw new Error('acp: an agent line is over the limit')
       if (line.trim() !== '') await relay.fromAgent(line)
     }
-    return await exited
+    const status = await exited
+    if (client.failed !== null) throw client.failed
+    return status
   } finally {
     if (agent.exitCode === null && agent.signalCode === null) {
       agent.kill('SIGKILL')
