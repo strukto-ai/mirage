@@ -179,11 +179,18 @@ describe('curl', () => {
     expect(headers['X-Auth']).toBe('token')
   })
 
-  it('sends default Mozilla User-Agent when none provided', async () => {
+  // curl 8.14.1 names itself and takes anything unless the line names
+  // either; an empty -A, or a -H with no value, sends neither.
+  it("sends curl's own User-Agent and Accept unless the line names them", async () => {
     const calls = mockFetch('ok')
     await runCurl(['https://x.test/p'])
-    const headers = calls[0]?.init?.headers as Record<string, string>
-    expect(headers['User-Agent']).toMatch(/^Mozilla\/5\.0/)
+    expect(calls[0]?.init?.headers).toEqual({ 'User-Agent': 'curl/8.14.1', Accept: '*/*' })
+    const bare = mockFetch('ok')
+    await runCurl(['https://x.test/p'], { user_agent: '' })
+    expect(bare[0]?.init?.headers).toEqual({ Accept: '*/*' })
+    const none = mockFetch('ok')
+    await runCurl(['https://x.test/p'], { header: ['User-Agent:', 'Accept:'] })
+    expect(none[0]?.init?.headers).toEqual({})
   })
 
   it('-A overrides default User-Agent', async () => {
@@ -287,7 +294,11 @@ describe('curl option surface (#1065)', () => {
       user_agent: 'agent/1',
     })
     expect(calls[0]?.init?.method).toBe('PUT')
-    expect(calls[0]?.init?.headers).toEqual({ 'X-Mirage-Test': 'yes', 'User-Agent': 'agent/1' })
+    expect(calls[0]?.init?.headers).toEqual({
+      'User-Agent': 'agent/1',
+      Accept: '*/*',
+      'X-Mirage-Test': 'yes',
+    })
   })
 
   it('--max-time turns a stalled transfer into exit 28', async () => {
@@ -400,7 +411,7 @@ describe('curl option surface (#1065)', () => {
     expect(r.err).toBe(
       '> GET /f?q=1 HTTP/1.1\r\n' +
         '> Host: x.test\r\n' +
-        '> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n' +
+        '> User-Agent: curl/8.14.1\r\n' +
         '> Accept: */*\r\n' +
         '> \r\n' +
         responseLines.map((line) => `< ${line}\r\n`).join(''),
@@ -453,7 +464,8 @@ describe('curl option surface (#1065)', () => {
     const calls = mockFetch('ok')
     await runCurl(['http://x.test/f'], { data: 'a=1' })
     expect(calls[0]?.init?.headers).toEqual({
-      'User-Agent': 'Mozilla/5.0 (compatible; mirage/1.0)',
+      'User-Agent': 'curl/8.14.1',
+      Accept: '*/*',
       'Content-Type': 'application/x-www-form-urlencoded',
     })
     const custom = mockFetch('ok')
@@ -464,13 +476,14 @@ describe('curl option surface (#1065)', () => {
       silent: true,
     })
     expect(custom[0]?.init?.headers).toEqual({
-      'User-Agent': 'Mozilla/5.0 (compatible; mirage/1.0)',
+      'User-Agent': 'curl/8.14.1',
+      Accept: '*/*',
       'Content-Type': 'application/json',
     })
     expect(r.err.split('< ')[0]).toBe(
       '> POST /f HTTP/1.1\r\n' +
         '> Host: x.test\r\n' +
-        '> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n' +
+        '> User-Agent: curl/8.14.1\r\n' +
         '> Accept: */*\r\n' +
         '> Content-Type: application/json\r\n' +
         '> Content-Length: 2\r\n' +
@@ -809,13 +822,13 @@ describe('curl -b and -c', () => {
       .filter((line) => line.startsWith('> ') && !line.startsWith('> Host'))
     expect(requests).toEqual([
       '> GET /jar/x HTTP/1.1',
-      '> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)',
+      '> User-Agent: curl/8.14.1',
       '> Accept: */*',
       '> Cookie: y=2',
       '> X-A: 1',
       '> ',
       '> GET /jar/next HTTP/1.1',
-      '> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)',
+      '> User-Agent: curl/8.14.1',
       '> Accept: */*',
       '> Cookie: h=1; y=2',
       '> X-A: 1',

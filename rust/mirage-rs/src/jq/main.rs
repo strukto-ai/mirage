@@ -67,7 +67,10 @@ pub(super) struct Config {
     pub(super) linked: Option<Linked>,
     /// The bytes jq may hold, the workspace's room; None for jq_eval's
     /// own limit, which a run reports as its error instead.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::saturating_usize_opt"
+    )]
     pub(super) memory: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) steps: Option<u64>,

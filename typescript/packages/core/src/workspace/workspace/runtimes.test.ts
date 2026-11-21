@@ -116,7 +116,7 @@ describe('the default world', () => {
       expect([io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]).toEqual([
         127,
         '',
-        `${command}: command not found\n`,
+        `bash: line 1: ${command}: command not found\n`,
       ])
     } finally {
       await ws.close()

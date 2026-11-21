@@ -280,6 +280,21 @@ fn optional_size(item: Option<Item>) -> Result<Option<usize>, String> {
         .transpose()
 }
 
+/// A byte cap a workspace sets (`max_env`, the room left under
+/// `max_memory`), None for no cap. A cap past what this module's address
+/// space can hold bounds nothing it could build, so it stands as the
+/// largest one there is rather than refusing the operation.
+fn optional_cap(item: Option<Item>) -> Result<Option<usize>, String> {
+    item.map(|item| {
+        let value = one(item, Args::int)?;
+        if value < 0 {
+            return Err("a size is out of range".to_owned());
+        }
+        Ok(usize::try_from(value).unwrap_or(usize::MAX))
+    })
+    .transpose()
+}
+
 fn letter(item: Option<Item>) -> Result<Option<u8>, String> {
     Ok(item
         .map(|item| one(item, Args::string))
@@ -846,7 +861,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let argv0 = args.bytes()?;
             let options = flags_in(args.item()?)?;
             let shopts = flags_in(args.item()?)?;
-            let env_limit = optional_size(args.maybe()?)?;
+            let env_limit = optional_cap(args.maybe()?)?;
             let outside = size(args.int()?)?;
             let pipe_status = args
                 .list()?
@@ -878,7 +893,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 call_lines,
                 source_files: words(args.list()?)?,
                 paren: args.flag()?,
-                memory_room: optional_size(args.maybe()?)?,
+                memory_room: optional_cap(args.maybe()?)?,
                 line: size(args.int()?)?,
                 bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,

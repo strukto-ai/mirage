@@ -6,10 +6,10 @@
       "targets": [
         "http-ram"
       ],
-      "command": "wget -q -O /data/wgot.txt {http}/hello",
+      "command": "wget -q -O /data/wgot.txt {http}/hello && wget -qO- {http}/headers",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "accept=*/*\naccept-encoding=identity\nuser-agent=Wget/1.25.0\n",
         "stderr": ""
       }
     },

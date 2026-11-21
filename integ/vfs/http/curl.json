@@ -6,10 +6,10 @@
       "targets": [
         "http-ram"
       ],
-      "command": "curl -s {http}/hello",
+      "command": "curl -s {http}/hello; curl -s {http}/headers; curl -s -A '' -H 'Accept:' {http}/headers",
       "expect": {
         "exit": 0,
-        "stdout": "hello from http\n",
+        "stdout": "hello from http\naccept=*/*\nuser-agent=curl/8.14.1\n",
         "stderr": ""
       }
     },

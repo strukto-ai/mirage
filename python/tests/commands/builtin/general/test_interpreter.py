@@ -88,7 +88,7 @@ def test_not_bound_answers_command_not_found():
     """No captured runtime means refusal, not a hidden interpreter."""
     stdout, io = not_bound("python3")
     assert io.exit_code == 127
-    assert io.stderr == b"python3: command not found\n"
+    assert io.stderr == b"bash: python3: command not found\n"
 
 
 async def _ran(output, errors) -> RunResult:

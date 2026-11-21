@@ -105,6 +105,29 @@ def test_args_O_sets_destination(monkeypatch):
     assert written == {"/tmp/dest.bin": b"file-body"}
 
 
+def test_sends_wgets_own_headers(monkeypatch):
+    # GNU Wget 1.25.0 names itself, takes anything and asks for the bytes
+    # as stored, on every request.
+    seen: list[dict[str, str] | None] = []
+
+    async def fake(
+        url, headers=None, timeout=30, follow_redirects=True, stream=False
+    ):
+        seen.append(headers)
+        return _ok()
+
+    monkeypatch.setitem(wget.__wrapped__.__globals__, "http_get", fake)
+    _run_writing("http://x.test/f", args_O="/tmp/d", q=True)
+    assert seen == [
+        {
+            "User-Agent": "Wget/1.25.0",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Connection": "Keep-Alive",
+        }
+    ]
+
+
 def test_quiet_silences_the_report(monkeypatch):
     _stub(monkeypatch)
     _body, io = _run("http://x.test/f", args_O="/tmp/d", q=True)

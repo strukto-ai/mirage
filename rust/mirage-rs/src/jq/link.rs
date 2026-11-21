@@ -211,7 +211,7 @@ struct Config {
     cwd: Option<String>,
     #[serde(default)]
     home: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::saturating_usize_opt")]
     memory: Option<usize>,
     #[serde(default)]
     links: Links,

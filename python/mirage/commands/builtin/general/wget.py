@@ -43,6 +43,15 @@ EXIT_GENERIC = 1
 EXIT_NETWORK = 4
 EXIT_SERVER_ERROR = 8
 
+# The headers wget sends on every request, the version of the pinned
+# image's wget.
+HEADERS = {
+    "User-Agent": "Wget/1.25.0",
+    "Accept": "*/*",
+    "Accept-Encoding": "identity",
+    "Connection": "Keep-Alive",
+}
+
 USAGE = (
     "wget: missing URL\n"
     "Usage: wget [OPTION]... [URL]...\n"
@@ -82,6 +91,7 @@ async def wget(
     try:
         resp = await http_get(
             url,
+            headers=HEADERS,
             timeout=(
                 HTTP_TIMEOUT_SECONDS if timeout is None else (timeout or None)
             ),

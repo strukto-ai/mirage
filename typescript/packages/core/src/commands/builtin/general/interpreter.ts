@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, withCaller } from '../../../context/session_context.ts'
+import { currentCaller, missingProgram, withCaller } from '../../../context/session_context.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { checkMemory } from '../../../io/memory.ts'
 import { BytePipe } from '../../../io/pipe.ts'
@@ -245,11 +245,20 @@ function failed(label: string, message: string, exitCode: number): [null, IOResu
 }
 
 /**
- * The answer of an interpreter command no runtime runs: bash's
- * `command not found`, exit 127, whatever the operands say.
+ * The answer of an interpreter command no runtime runs: what the shell says
+ * of a program it cannot find (`bash: line 1: python3: command not found`,
+ * or the words of a program that execs it, such as `timeout`), exit 127,
+ * whatever the operands say. Mirrors Python's `not_bound`.
  */
 export function notBound(label: string): CommandFnResult {
-  return failed(label, 'command not found', NOT_FOUND_STATUS)
+  const [lead, reason] = missingProgram(label)
+  return [
+    null,
+    new IOResult({
+      exitCode: NOT_FOUND_STATUS,
+      stderr: new TextEncoder().encode(`${lead}: ${reason}\n`),
+    }),
+  ]
 }
 
 /**

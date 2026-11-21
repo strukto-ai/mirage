@@ -26,7 +26,6 @@ import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
 import { type CookieJar, cookieValue, sameOrigin } from './cookie.ts'
 
-export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
 const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
 
 export interface HttpResponse {
@@ -78,15 +77,6 @@ export function isHttpError(resp: HttpResponse): boolean {
   return resp.status >= 400
 }
 
-function withDefaultUa(headers: Record<string, string> | undefined): Record<string, string> {
-  // Header names are case-insensitive, so a `user-agent` the caller set
-  // replaces the default rather than riding beside it.
-  const given = headers ?? {}
-  return Object.keys(given).some((name) => name.toLowerCase() === 'user-agent')
-    ? { ...given }
-    : { 'User-Agent': DEFAULT_USER_AGENT, ...given }
-}
-
 function endpoint(url: string): { host: string; port: number } {
   try {
     const parsed = new URL(url)
@@ -97,15 +87,22 @@ function endpoint(url: string): { host: string; port: number } {
   }
 }
 
-// A fetch that does not verify the server's certificate, which curl's -k
-// asks for. fetch itself takes no TLS options, so this runtime-agnostic core
-// cannot build one; a host that can registers it (the node package: undici
-// over an agent with `rejectUnauthorized: false`). The browser registers
-// none, since the platform always verifies, so there -k still verifies.
-let insecureFetch: typeof fetch | null = null
+/**
+ * A fetch that sends what fetch alone cannot: only the headers a command
+ * names, as curl and wget do, where fetch adds its own Accept,
+ * Accept-Encoding, Accept-Language, Sec-Fetch-Mode and User-Agent; and,
+ * when `verify` is false, no check of the server's certificate, which
+ * curl's -k asks for.
+ */
+export type HostFetch = (url: string, init: RequestInit, verify: boolean) => Promise<Response>
 
-export function registerInsecureFetch(fn: typeof fetch | null): void {
-  insecureFetch = fn
+// This runtime-agnostic core cannot build one; a host that can registers it
+// (the node package: undici). The browser registers none: its fetch always
+// verifies and adds the headers it adds, a divergence the platform forces.
+let hostFetch: HostFetch | null = null
+
+export function registerHostFetch(fn: HostFetch | null): void {
+  hostFetch = fn
 }
 
 export interface HttpRequestOptions {
@@ -117,7 +114,7 @@ export interface HttpRequestOptions {
   timeoutMs?: number | null
   followRedirects?: boolean
   // False skips certificate verification (curl's -k), where the host
-  // registered a fetch that can (`registerInsecureFetch`).
+  // registered a fetch that can (`registerHostFetch`).
   verify?: boolean
   // The invocation's cancellation, which aborts the request with it.
   signal?: AbortSignal
@@ -186,7 +183,9 @@ export async function httpRequest(
 ): Promise<HttpResponse> {
   const timeoutMs =
     options.timeoutMs === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : options.timeoutMs
-  const send = options.verify === false && insecureFetch !== null ? insecureFetch : fetch
+  const verify = options.verify !== false
+  const send = (target: string, init: RequestInit): Promise<Response> =>
+    hostFetch !== null ? hostFetch(target, init, verify) : fetch(target, init)
   const started = Date.now()
   // What the invocation answers to: its own signal and the call's (a line's
   // stop, a job's kill or limit), so a stopped CLI that reaches here (git)
@@ -202,7 +201,7 @@ export async function httpRequest(
   // A streamed body takes the deadline with it.
   let handed = false
   try {
-    let headers = withDefaultUa(options.headers)
+    let headers = { ...options.headers }
     const follow = options.followRedirects !== false
     // Redirects are followed by hand so every hop stays observable, the way
     // httpx keeps `response.history` for the python twin; one deadline
