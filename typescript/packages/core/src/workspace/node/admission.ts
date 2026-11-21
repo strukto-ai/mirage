@@ -71,6 +71,7 @@ import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
 import { INTERPRETER_NAMES, WRITING_PROGRAMS } from '../lookup/constants.ts'
+import { pathProgram } from '../lookup/lookup.ts'
 import {
   Consumer,
   isTool,
@@ -485,6 +486,25 @@ function writes(
   })
 }
 
+/**
+ * The name a path-spelled command's program is judged by too: a machine execs
+ * the path, so a rule or a coded check naming the program speaks for it there.
+ * Null for a word with no slash, and for a `/usr/bin` path Mirage runs as its
+ * program by name (`pathProgram`), judged by that name when it is dispatched.
+ */
+function programNamed(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+): string | null {
+  if (!name.includes('/')) return null
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  const links = namespace === null ? null : namespace.sessionLinks(session)
+  if (base === '' || pathProgram(name, session, registry, links) !== null) return null
+  return base
+}
+
 export async function gate(
   name: string,
   args: readonly string[],
@@ -514,17 +534,11 @@ export async function gate(
   await budget.run()
   const facts = lineFacts(name, [name, ...operands], session.cwd)
   const follows = facts.follows !== Follow.NONE
+  const links =
+    namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null
   const paths = seen(
     session,
-    linePaths(
-      name,
-      reading,
-      follows,
-      namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
-      session.cwd,
-      implied,
-      redirects,
-    ),
+    linePaths(name, reading, follows, links, session.cwd, implied, redirects),
     unread,
   )
   const words = seenWords(session, contextWords(name, reading, redirects), unread)
@@ -552,6 +566,68 @@ export async function gate(
     ...registry.policies.views?.(session.sessionId, session),
   }
   const answers = [...(await registry.policies.answers('preCommand', ctx, every, rulesOnly))]
+  const named = programNamed(name, session, registry, namespace)
+  if (named !== null) {
+    // Only a named entry speaks (no tree root), so a name grants nothing; the
+    // path's run is placed by its own words, so a route of the name does not
+    // move it.
+    // Its words are classified by the program's own grammar.
+    const classified = (await classifiedWords(named, args, session, registry)).slice(1)
+    const own = readLine(
+      registry,
+      named,
+      args,
+      classified,
+      session.cwd,
+      env,
+      sessionAccess(session),
+    )
+    const ownImplied =
+      named in CWD_DEFAULT_RAW
+        ? defaultCwdOperand([named, ...classified], named, registry, session.cwd, stdin)
+        : null
+    const ownFacts = lineFacts(named, [named, ...classified], session.cwd)
+    const programCtx: CommandContext = {
+      ...ctx,
+      command: named,
+      tool: false,
+      tokens: [...own.tokens],
+      program: [...own.program],
+      read: own.read,
+      walks: ownFacts.walks,
+      write: writes(
+        named,
+        args,
+        classified,
+        own,
+        ownFacts,
+        session,
+        registry,
+        namespace,
+        ownImplied,
+      ),
+      subtree: ownFacts.subtree,
+      moveTarget: ownFacts.moveTarget,
+      paths: seen(
+        session,
+        linePaths(
+          named,
+          own,
+          // The path's program never reaches Mirage's own link resolution, so
+          // it follows links as the path does.
+          follows,
+          links,
+          session.cwd,
+          ownImplied,
+          redirects,
+        ),
+        unread,
+      ),
+      words: seenWords(session, contextWords(named, own, redirects), unread),
+    }
+    const byName = await registry.policies.answers('preCommand', programCtx, every, rulesOnly)
+    answers.push(...byName.filter((a) => a.kind === 'deny' || a.kind === 'ask'))
+  }
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',

@@ -107,9 +107,9 @@ another machine capturing it exits 126.
   session. A `host` machine or a provider is handed the wrapper with the
   program, so it makes the change there.
 - An absolute path Mirage has no file for, such as `/usr/bin/ffmpeg`, goes to
-  the `@external` machine. A profile's `commands` judges it by its name, so
-  under `"*": deny` it runs only when the tree names it: `ffmpeg: allow`
-  lets `/usr/bin/ffmpeg` run.
+  the `@external` machine, and so does a file the machine holds itself
+  (`/tmp/venv/bin/python`). A profile's `commands` refuses it by a deny or
+  an ask of its program's name, and under `"*": deny` it does not run.
 - On a `host` machine or a provider, a program a captured program
   starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
   launcher on the same machine as the tool. A Pyodide script's `subprocess`

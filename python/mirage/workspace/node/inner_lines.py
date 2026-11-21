@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -23,6 +24,9 @@ from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
+from mirage.workspace.executor.builtins.script.constants import (
+    BASH_LONG_OPTIONS,
+)
 from mirage.workspace.lookup.constants import read_wrapper
 from mirage.workspace.lookup.lookup import lookup, path_program
 from mirage.workspace.lookup.types import Consumer
@@ -166,11 +170,14 @@ class InnerLine:
         open (bool): whether the runtime appends operands the gate
             cannot read (``xargs``'s items, ``find``'s ``{}`` paths,
             the index and record ``mapfile -C`` hands its callback).
+        chdir (Word | None): the folder the command runs in, as ``cd``
+            would take it (``env -C``); None for the caller's own.
     """
 
     line: str | None = None
     argv: tuple[Word, ...] = ()
     open: bool = False
+    chdir: Word | None = None
 
     @property
     def readable(self) -> bool:
@@ -180,6 +187,21 @@ class InnerLine:
 
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-0", "--null", "-"})
+_ENV_VALUED = ("unset", "chdir", "argv0")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Variables a whole line's shell expands or sources on its own.
+HOOK_VARS = frozenset({"PS4", "BASH_ENV", "BASH_CMDS", "BASH_ALIASES"})
+
+
+def is_hook(name: str) -> bool:
+    """Whether a variable sets what a whole line's shell runs on its own:
+    one it expands or sources (``HOOK_VARS``), or a function bash imports
+    from the environment (``BASH_FUNC_NAME%%``).
+
+    Args:
+        name (str): the variable's name.
+    """
+    return name in HOOK_VARS or name.startswith("BASH_FUNC_")
 
 
 def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
@@ -187,9 +209,12 @@ def _tail(args: Sequence[Word], count: int) -> tuple[Word, ...]:
 
 
 def _command_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``command [-pVv] name [arg ...]``: ``-v``/``-V`` only report."""
+    """``command [-pVv] name [arg ...]``: ``-v``/``-V`` only report; an
+    option only the run expands may be either, so it is unreadable."""
     i = 0
     while i < len(args) and args[i].value.startswith("-"):
+        if args[i].text is None:
+            return [InnerLine()]
         word = args[i].value
         i += 1
         if word == "--":
@@ -201,14 +226,25 @@ def _command_inner(args: Sequence[Word]) -> list[InnerLine]:
 
 
 def _exec_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``exec [-cl] [-a name] [command [arg ...]]``."""
+    """``exec [-cl] [-a name] [command [arg ...]]``; ``-l``, or a name
+    starting with ``-``, starts a shell as a login shell, which sources
+    rc files the gate cannot read; an option only the run expands may be
+    either, so it is unreadable."""
     i = 0
     while i < len(args) and args[i].value.startswith("-"):
+        if args[i].text is None:
+            return [InnerLine()]
         word = args[i].value
         i += 1
         if word == "--":
             break
+        if "l" in word:
+            return [InnerLine()]
         if word.endswith("a"):
+            if i < len(args) and (
+                args[i].text is None or args[i].value.startswith("-")
+            ):
+                return [InnerLine()]
             i += 1
     rest = tuple(args[i:])
     return [InnerLine(argv=rest)] if rest else []
@@ -234,26 +270,109 @@ def _splits(word: str) -> bool:
     return False
 
 
+def _takes_next(word: str) -> bool:
+    """Whether an ``env`` option word takes the next word as its value:
+    a detached ``--unset``, ``--chdir`` or ``--argv0`` (or a prefix of
+    one), or a cluster whose first of ``u``, ``C``, ``a`` ends it, since
+    getopt hands such a letter the rest of its cluster when there is one.
+
+    Args:
+        word (str): one option word.
+    """
+    if word.startswith("--"):
+        name, eq, _ = word[2:].partition("=")
+        return not eq and any(
+            long.startswith(name) for long in _ENV_VALUED if name
+        )
+    for at, flag in enumerate(word[1:], 1):
+        if flag in "uCa":
+            return at == len(word) - 1
+    return False
+
+
+def _env_letters(word: str) -> frozenset[str]:
+    """The options an ``env`` option word sets, as short letters: a
+    cluster's up to its first of ``u``, ``C``, ``a`` (the rest is that
+    one's value), or the letter a long option or its prefix stands for
+    (``-`` for one only GNU's env takes).
+
+    Args:
+        word (str): one option word.
+    """
+    if word.startswith("--"):
+        name = word[2:].split("=", 1)[0]
+        longs = {"ignore-environment": "i", "unset": "u", "null": "0"}
+        return frozenset(
+            next(
+                (f for long, f in longs.items() if long.startswith(name)), "-"
+            )
+        )
+    end = next((at for at, f in enumerate(word) if f in "uCa"), len(word) - 1)
+    return frozenset(word[1 : end + 1])
+
+
+def _value_of(
+    word: Word, after: Word | None, letter: str, long: str
+) -> Word | None:
+    """An ``env`` option word's value for ``-letter`` or ``--long``,
+    attached or the next word; None for any other option.
+
+    Args:
+        word (Word): one option word.
+        after (Word | None): the word after it.
+        letter (str): the short option, ``C`` or ``a``.
+        long (str): the long option, ``chdir`` or ``argv0``.
+    """
+    value = word.value
+    if value.startswith("--"):
+        name, eq, attached = value[2:].partition("=")
+        if not name or not long.startswith(name):
+            return None
+        if not eq:
+            return after
+    else:
+        at = next((at for at, f in enumerate(value) if f in "uCa"), 0)
+        if not at or value[at] != letter:
+            return None
+        attached = value[at + 1 :]
+        if not attached:
+            return after
+    return Word(attached, None if word.text is None else attached)
+
+
 def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``,
-    read the way the tree's ``env`` builtin reads it."""
+    read the way the tree's ``env`` builtin reads it; an option only the
+    run expands may be any of them, so it is unreadable."""
+    chdir: Word | None = None
+    changed = foreign = False
     i = 0
     while i < len(args):
         word = args[i].value
+        if word.startswith("-") and args[i].text is None:
+            return [InnerLine()]
         if word == "--":
             i += 1
             break
         if _splits(word):
             return [InnerLine()]
-        if word in _ENV_FLAGS or word.startswith("--unset="):
+        if word in _ENV_FLAGS:
+            changed = changed or word not in ("-0", "--null")
             i += 1
             continue
-        if word in ("-u", "--unset"):
-            i += 2
-            continue
         if word.startswith("-") and len(word) > 1:
-            # A cluster ending in `u` takes the next word as the name.
-            i += 2 if word.endswith("u") else 1
+            letters = _env_letters(word)
+            changed = changed or bool(letters & {"i", "u"})
+            foreign = foreign or bool(letters - {"i", "u", "0"})
+            after = args[i + 1] if i + 1 < len(args) else None
+            chdir = _value_of(args[i], after, "C", "chdir") or chdir
+            argv0 = _value_of(args[i], after, "a", "argv0")
+            if argv0 is not None and (
+                argv0.text is None or argv0.value.startswith("-")
+            ):
+                # A leading `-` in argv0 makes a shell a login shell.
+                return [InnerLine()]
+            i += 2 if _takes_next(word) else 1
             continue
         break
     while (
@@ -261,9 +380,20 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         and "=" in args[i].value
         and not args[i].value.startswith("=")
     ):
+        name = args[i].value.partition("=")[0]
+        # A name only the run expands may be a hook's.
+        if is_hook(name) or (
+            args[i].text is None and not _ENV_NAME.fullmatch(name)
+        ):
+            return [InnerLine()]
+        changed = True
         i += 1
+    if changed and foreign:
+        # The tree's env refuses an option the machine's takes, so the
+        # environment its command runs in is not one the gate can build.
+        return [InnerLine()]
     rest = tuple(args[i:])
-    return [InnerLine(argv=rest)] if rest else []
+    return [InnerLine(argv=rest, chdir=chdir)] if rest else []
 
 
 def _spec_operands(name: str, args: Sequence[Word]) -> tuple[Word, ...] | None:
@@ -350,6 +480,46 @@ def _time_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
+def _trap_inner(args: Sequence[Word]) -> list[InnerLine]:
+    """``trap [-lp] [[ACTION] CONDITION...]``: the action is a line the
+    shell runs when a condition fires. ``-`` or a number first resets the
+    conditions, a lone operand resets it, and an option only lists.
+
+    Args:
+        args (Sequence[Word]): the words after ``trap``.
+    """
+    first = args[0].value if args else ""
+    if first.startswith("-") and args[0].text is None:
+        # The run may expand it to `--`, leaving an action to run.
+        return [InnerLine()]
+    if first.startswith("-") and first not in ("-", "--"):
+        return []
+    rest = args[1:] if first == "--" else args
+    action = rest[0].value if rest else ""
+    if len(rest) < 2 or action == "-" or action.isascii() and action.isdigit():
+        return []
+    return [InnerLine(line=rest[0].value)]
+
+
+def _loads(args: Sequence[Word], letter: str) -> list[InnerLine]:
+    """A builtin whose option ``letter`` loads what a later word runs from
+    a file the gate cannot read (``hash -p``, ``enable -f``).
+
+    Args:
+        args (Sequence[Word]): the words after the builtin.
+        letter (str): the loading option.
+    """
+    for word in args:
+        if word.text is None:
+            # The run may expand it to the loading option.
+            return [InnerLine()]
+        if word.value == "--" or not word.value.startswith("-"):
+            break
+        if letter in word.value[1:]:
+            return [InnerLine()]
+    return []
+
+
 def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``builtin`` runs the remaining words verbatim, after an optional
     leading ``--``.
@@ -359,6 +529,34 @@ def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
     """
     rest = tuple(args[1:] if args and args[0].value == "--" else args)
     return [InnerLine(argv=rest)] if rest else []
+
+
+def _starts_rc(words: Sequence[str]) -> bool:
+    """Whether a shell's startup options make it interactive or a login
+    shell (``-i``, ``-l``, ``--login``), which sources rc files (``ENV``,
+    ``~/.bashrc``, ``~/.profile``) the gate cannot read.
+
+    Args:
+        words (Sequence[str]): the words after ``sh`` or ``bash``.
+    """
+    skip = 0
+    for word in words:
+        if skip:
+            # Each `o` or `O` in a group takes the next word.
+            skip -= 1
+            continue
+        # bash reads `+` words as options too, and `+l` still logs in.
+        if word in ("-", "--") or word[:1] not in ("-", "+"):
+            return False
+        if word.startswith("--"):
+            if word == "--login":
+                return True
+            skip = bool(BASH_LONG_OPTIONS.get(word[2:]))
+            continue
+        if "i" in word or "l" in word:
+            return True
+        skip = word.count("o") + word.count("O")
+    return False
 
 
 def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
@@ -375,6 +573,8 @@ def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
         if word.text is None or word.glob:
             break
         literal.append(word.text)
+    if _starts_rc(literal):
+        return [InnerLine()]
     parsed = parse_bash_args(literal)
     if parsed.help or parsed.version:
         return []
@@ -432,6 +632,21 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _wrapper_inner(head, args)
     if head == "time":
         return _time_inner(args)
+    if head == "trap":
+        return _trap_inner(args)
+    if head == "coproc":
+        return [InnerLine(argv=tuple(args))] if args else []
+    if head == "hash":
+        return _loads(args, "p")
+    if head == "enable":
+        return _loads(args, "f")
+    if head == "alias" and any(
+        w.text is None
+        or ("=" in w.value and not w.value.startswith(("=", "-")))
+        for w in args
+    ):
+        # A whole line's shell expands a later word to the value.
+        return [InnerLine()]
     return []
 
 

@@ -684,6 +684,300 @@
           }
         }
       ]
+    },
+    {
+      "id": "whole_line_spellings",
+      "note": "A line run whole is judged on what each spelling runs: env's -C and -a take a value, and the first of them in an option cluster takes the rest of it; a trap's action and a coproc's command are commands of the line; an alias definition, hash -p, enable -f, PS4 or BASH_ENV set by an assignment or a builtin that stores into it, a BASH_FUNC_ function handed through env, and an interactive or login shell set what the shell runs later where the gate cannot read it; ENV is no hook outside an interactive shell; an option word only the run expands may be any option, and each o or O in a bash option group takes a word; declare, typeset and local with leading -p, -f or -F only print.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "hostname": "deny"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "env -C tmp hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env -a x hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env --chdir tmp hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "env -vC tmp echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:env -vC tmp echo hi\n"
+          }
+        },
+        {
+          "command": "trap hostname EXIT",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "coproc hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "PS4='$(hostname)'; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "hash -p /bin/hostname ls; ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "hash: Permission denied\n"
+          }
+        },
+        {
+          "command": "alias x=hostname\nx",
+          "expect": {
+            "exit": 126,
+            "stderr": "alias: Permission denied\n"
+          }
+        },
+        {
+          "command": "trap 'echo bye' EXIT; echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:trap 'echo bye' EXIT; echo hi\n"
+          }
+        },
+        {
+          "command": "read PS4 <<< x; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "env: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash -ic :",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "ENV=production echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:ENV=production echo hi\n"
+          }
+        },
+        {
+          "command": "PS4[0]=x; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "BASH_CMDS[ls]=/bin/hostname; ls",
+          "expect": {
+            "exit": 126,
+            "stderr": "BASH_CMDS: Permission denied\n"
+          }
+        },
+        {
+          "command": "exec -l bash -c :",
+          "expect": {
+            "exit": 126,
+            "stderr": "exec: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash -c -x hostname",
+          "expect": {
+            "exit": 126,
+            "stderr": "hostname: Permission denied\n"
+          }
+        },
+        {
+          "command": "declare -p PS4",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -p PS4\n"
+          }
+        },
+        {
+          "command": "declare -n -p PS4",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -n -p PS4\n"
+          }
+        },
+        {
+          "command": "declare -p PS4=after",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:declare -p PS4=after\n"
+          }
+        },
+        {
+          "command": "declare PS4=after -p; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "PS4: Permission denied\n"
+          }
+        },
+        {
+          "command": "p=r; read -$p PS4 <<< x; set -x; :",
+          "expect": {
+            "exit": 126,
+            "stderr": "read: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash -oe nounset -i -c :",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "e=; trap --$e hostname EXIT",
+          "expect": {
+            "exit": 126,
+            "stderr": "trap: Permission denied\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_paths",
+      "note": "A path rule on a line run whole reads the file the machine's shell opens: a `~` once the line sets HOME, or for a user Mirage does not know, is refused as a word only the machine can expand, and `//` is `/`; env -C runs its command in its folder, and an environment env sets beside an option the tree's env refuses is unread, and a `~` after an assignment-shaped word's `=` is the machine's to expand.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "s\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "*": [
+                "allow",
+                {
+                  "decision": "deny",
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/secret.txt"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "HOME=/ram; cat ~/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat ~backup/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat //ram/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: //ram/secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat ~/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:cat ~/secret.txt\n"
+          }
+        },
+        {
+          "command": "env -C /ram cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "dd if=~/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr": "dd: Permission denied\n"
+          }
+        },
+        {
+          "command": "env -C /tmp HOME=/ram bash -c 'cat ~/secret.txt'",
+          "expect": {
+            "exit": 126,
+            "stderr": "env: Permission denied\n"
+          }
+        }
+      ]
     }
   ]
 }

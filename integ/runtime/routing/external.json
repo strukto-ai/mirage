@@ -998,6 +998,52 @@
       ]
     },
     {
+      "id": "external_path_is_judged_by_its_program_s_name",
+      "note": "The machine execs a path Mirage has no file for, so a deny of the program's name refuses the path, bare or under a wrapper.",
+      "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "native-tool": "deny"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "/opt/native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "/opt/native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nice /opt/native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "/opt/other-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"/opt/other-tool\",\"a\"]\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "external_wrapper_route_yields_to_its_program_s_own",
       "world": {
         "machines": {

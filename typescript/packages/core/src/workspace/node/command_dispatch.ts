@@ -1479,8 +1479,11 @@ async function runResolved(
   const routing = context.frame.routing
   let operands = [...argv.operands]
 
-  if (target.kind === Consumer.EXTERNAL)
+  if (target.kind === Consumer.EXTERNAL) {
+    const unread = name.includes('/') ? unreadable(name, session) : null
+    if (unread !== null) return refused([name, ...argv.args].join(' '), unread)
     return runExternal(argv, stdin, session, registry, target.runtime, signal, sink, target.cwd)
+  }
   if (target.kind === 'path') {
     const absent = target.fallback
     const onTheRuntime =

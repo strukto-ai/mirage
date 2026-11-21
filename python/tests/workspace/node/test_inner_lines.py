@@ -75,7 +75,59 @@ def _argv(inner: InnerLine) -> list[str]:
         ("env", ["--split-string=rm /x"], [("none", None, False)]),
         ("env", ["-iS", "rm /x"], [("none", None, False)]),
         ("env", ["-uPATHS", "rm"], [("argv", ["rm"], False)]),
+        # -C and -a take a value as -u does, and the first of them in a
+        # cluster takes the rest of it: `-Cu tmp` changes to `u`.
+        ("env", ["-C", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-a", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-vC", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["-Cu", "tmp", "rm"], [("argv", ["tmp", "rm"], False)]),
+        ("env", ["-ua", "x", "rm"], [("argv", ["x", "rm"], False)]),
+        ("env", ["--chdir", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--chd", "tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--chdir=tmp", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--argv0", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--arg", "x", "rm"], [("argv", ["rm"], False)]),
+        ("env", ["--uns", "HOME", "rm"], [("argv", ["rm"], False)]),
         ("ionice", ["-c", "3", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
+        # A trap's action is a line the shell runs when a condition fires;
+        # `-`, a number first, one operand or an option sets no action.
+        ("trap", ["rm /x", "EXIT"], [("line", "rm /x", False)]),
+        ("trap", ["--", "rm /x", "INT", "TERM"], [("line", "rm /x", False)]),
+        ("trap", ["-", "EXIT"], []),
+        ("trap", ["2", "3"], []),
+        ("trap", ["\u0663", "INT"], [("line", "\u0663", False)]),
+        ("trap", ["EXIT"], []),
+        ("trap", ["-p", "EXIT"], []),
+        ("trap", ["-l"], []),
+        ("coproc", ["rm", "/x"], [("argv", ["rm", "/x"], False)]),
+        ("coproc", [], []),
+        # What later words run, loaded from where the gate cannot read.
+        ("hash", ["-p", "/bin/rm", "ls"], [("none", None, False)]),
+        ("hash", ["-rp", "/bin/rm", "ls"], [("none", None, False)]),
+        ("hash", ["-r"], []),
+        ("enable", ["-f", "x.so", "rm"], [("none", None, False)]),
+        ("enable", ["-n", "echo"], []),
+        ("alias", ["x=rm /x"], [("none", None, False)]),
+        ("alias", ["-p"], []),
+        ("alias", ["ll"], []),
+        ("env", ["PS4=$(rm)", "bash", "-xc", ":"], [("none", None, False)]),
+        ("env", ["-i", "BASH_ENV=/x", "sh"], [("none", None, False)]),
+        ("env", ["ENV=/x", "sh"], [("argv", ["sh"], False)]),
+        ("env", ["BASH_FUNC_ls%%=() { rm; }", "ls"], [("none", None, False)]),
+        ("bash", ["-ic", "rm /x"], [("none", None, False)]),
+        ("sh", ["-l", "-c", "rm /x"], [("none", None, False)]),
+        ("bash", ["--login", "-c", "rm /x"], [("none", None, False)]),
+        ("bash", ["-o", "vi", "-lc", "rm /x"], [("none", None, False)]),
+        ("bash", ["+x", "-lc", "rm /x"], [("none", None, False)]),
+        ("bash", ["+l", "-c", "rm /x"], [("none", None, False)]),
+        ("bash", ["+O", "extglob", "-lc", "rm /x"], [("none", None, False)]),
+        ("bash", ["-c", "rm /x", "-i"], [("line", "rm /x", False)]),
+        ("bash", ["-c", "-l", "rm /x"], [("none", None, False)]),
+        ("bash", ["-c", "-x", "rm /x"], [("line", "rm /x", False)]),
+        ("env", ["-a", "-sh", "sh"], [("none", None, False)]),
+        ("env", ["--argv0=-sh", "sh"], [("none", None, False)]),
+        ("exec", ["-l", "bash"], [("none", None, False)]),
+        ("exec", ["-a", "-bash", "bash"], [("none", None, False)]),
         ("time", ["-p", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         # Operands the runtime appends: stdin items, matched paths.
         ("xargs", ["-n", "1", "rm", "-f"], [("argv", ["rm", "-f"], True)]),
@@ -127,6 +179,28 @@ def test_inner_words_keep_what_the_gate_could_not_read():
     assert inner.line == 'rm "$p"'
     (inner,) = inner_lines("bash", [*_words("-c"), dynamic, *_words("rm /x")])
     assert not inner.readable
+    assert inner_lines("alias", [Word('"$a"', None)]) == [InnerLine()]
+    # An option only the run expands may be `-l`, `-C DIR` or `-p FILE`.
+    option = Word("-$o", None)
+    for name in ("exec", "env"):
+        assert inner_lines(name, [option, *_words("rm")]) == [InnerLine()]
+    for name in ("hash", "enable"):
+        assert inner_lines(name, [Word("$o", None), *_words("ls")]) == [
+            InnerLine()
+        ]
+    # A dynamic argv0 may start with `-`, and a dynamic name be a hook's.
+    named = Word('"$n"', None)
+    assert inner_lines("exec", [*_words("-a"), named, *_words("bash")]) == [
+        InnerLine()
+    ]
+    assert inner_lines("env", [*_words("-a"), named, *_words("bash")]) == [
+        InnerLine()
+    ]
+    assert inner_lines("env", [Word('"$k=/x"', None), *_words("bash")]) == [
+        InnerLine()
+    ]
+    (inner,) = inner_lines("env", [Word('A="$x"', None), *_words("rm")])
+    assert [w.value for w in inner.argv] == ["rm"]
     assert inner_lines("bash", [*_words("--version"), dynamic]) == []
     (inner,) = inner_lines("sh", [*_words("-c", "echo safe"), dynamic])
     assert inner.line == "echo safe"

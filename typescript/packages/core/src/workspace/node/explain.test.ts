@@ -28,6 +28,8 @@ import type {
 } from '../../policy/index.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
+import { VarAttr } from '../../shell/variable.ts'
+import { seedVar, setAttr } from '../session/state.ts'
 import { DryRun } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
@@ -221,6 +223,104 @@ const HIDDEN_HOSTNAME = [
   'xargs <<< hostname',
   'hostnam?',
   'env hostnam?',
+] as const
+
+const ANOTHER_SPELLING = [
+  'env -C tmp hostname',
+  'env --chdir tmp hostname',
+  'env --chd tmp hostname',
+  'env -a x hostname',
+  'env --argv0 x hostname',
+  'env -vC tmp hostname',
+  'trap hostname EXIT',
+  "trap 'hostname' DEBUG; :",
+  'coproc hostname',
+  "PS4='$(hostname)'; set -x; :",
+  "export PS4='$(hostname)'; set -x; :",
+  'BASH_ENV=/data/e bash -c :',
+  'ENV=/data/e sh -i',
+  "env PS4='$(hostname)' bash -xc :",
+  `eval "PS4='\\$(hostname)'"; set -x; :`,
+  'hash -p /bin/hostname ls; ls',
+  'enable -f /data/x.so hostname',
+  'alias x=hostname\nx',
+  "read PS4 <<< '$(hostname)'; set -x; :",
+  "printf -v PS4 '$(hostname)'; set -x; :",
+  'mapfile -t PS4 <<< x; set -x; :',
+  'for PS4 in x; do set -x; :; done',
+  'declare -n r=PS4; r=x; set -x; :',
+  'read BASH_ENV <<< /data/e; bash -c :',
+  "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+  'bash -ic :',
+  'bash -lc :',
+  'sh --login -c :',
+  "PS4[0]='$(hostname)'; set -x; :",
+  "read 'PS4[0]' <<< x; set -x; :",
+  'read -a PS4 <<< x; set -x; :',
+  "command -p printf -v PS4 '$(hostname)'; set -x; :",
+  "empty=; printf $empty -v PS4 '$(hostname)'; set -x; :",
+  "v=p; command -$v printf -v PS4 '$(hostname)'; set -x; :",
+  'v=p; command -$v hostname',
+  "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
+  'declare -n r; r=PS4; r=x; set -x; :',
+  'v=PS4; printf -v "$v" x; set -x; :',
+  'BASH_CMDS[ls]=/bin/hostname; ls',
+  'BASH_ALIASES[x]=hostname\nx',
+  'bash -c -l :',
+  'bash -c -x hostname',
+  'env -a -bash bash -c :',
+  'exec -l bash -c :',
+  'exec -a -bash bash -c :',
+  'a=x=hostname; alias "$a"\nx',
+  `v='PS4=$(hostname)'; declare "$v"; set -x; :`,
+  "declare PS4\\='$(hostname)'; set -x; :",
+  'o=l; exec -$o bash -c :',
+  'o=l; env -$o bash -c :',
+  'o=p; hash -$o /bin/hostname ls; ls',
+  "o='-p /bin/hostname'; hash $o ls; ls",
+  "builtin declare 'PS4=$(hostname)'; set -x; :",
+  "command typeset 'PS4=$(hostname)'; set -x; :",
+  "builtin export 'PS4=$(hostname)'; set -x; :",
+  "export -p 'PS4=$(hostname)'; set -x; :",
+  'n=-bash; exec -a "$n" bash -c :',
+  'n=-bash; env -a "$n" bash -c :',
+  'k=BASH_ENV; env "$k=/data/e" bash -c :',
+  "declare PS4='$(hostname)' -p; set -x; :",
+  'declare -p x=$(read PS4 <<< x); set -x; :',
+  "p=r; read -$p PS4 <<< '$(hostname)'; set -x; :",
+  'bash -oe nounset -i -c :',
+  'empty=; trap --$empty hostname EXIT',
+] as const
+
+const STILL_RUNS = [
+  "trap 'rm -f /data/t' EXIT; echo hi",
+  'trap - EXIT; trap -p',
+  'coproc echo hi',
+  'hash -r; alias',
+  'ENV=production echo hi',
+  'printf PS4',
+  "bash -c 'echo hi'",
+  "bash -c ': -l'",
+  'exec -a name echo hi',
+  "printf '%s\\n' -v PS4",
+  'command -v read PS4',
+] as const
+
+// Lines a rule leaves alone (a coded policy refuses their `$` words).
+const STILL_RUNS_UNDER_RULES = [
+  'read -r line < /data/f',
+  'printf -v x %s y',
+  'for f in a b; do echo hi; done',
+  'declare -i n=1',
+  'g() { local x=1; }; g',
+  'read -p "Name: $USER " ans < /data/f',
+  'getopts ":ab:" opt "$@"',
+  'export -n FOO',
+  'g() { local x="$1"; }; g a',
+  'declare -p PS4',
+  'typeset -F PS4',
+  'declare -n -p PS4',
+  'declare -p PS4=after',
 ] as const
 
 /** Every command an explained tree holds, nested scopes included. */
@@ -952,6 +1052,120 @@ describe('prejudge', () => {
     30_000,
   )
 
+  it.each([false, true])(
+    'reads what another spelling runs on a whole line (coded %s)',
+    async (coded) => {
+      // Each line runs hostname on the machine by a spelling the gate follows,
+      // so a deny of hostname refuses it, in code or as a rule.
+      const box = new LineBox()
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: {
+            r: SessionProfile(coded ? {} : { commands: { hostname: 'deny' } }),
+          },
+          policies: coded ? [noHostname] : [],
+          machines: [box],
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'r' })
+      for (const line of ANOTHER_SPELLING) {
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        expect([line, ran.exitCode]).toEqual([line, 126])
+        expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
+      }
+      expect(box.lines).toEqual([])
+      const still = [...STILL_RUNS, ...(coded ? [] : STILL_RUNS_UNDER_RULES)]
+      for (const line of still) {
+        expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
+      }
+      expect(box.lines).toEqual(still)
+    },
+    30_000,
+  )
+
+  it.each([
+    ['trap hostname EXIT', ['trap', 'echo']],
+    ["PS4='$(hostname)'; set -x; echo hi", ['set', 'echo', ':']],
+    ['coproc hostname', ['coproc']],
+  ] as const)('holds an allow list against what %s runs', async (line, allowed) => {
+    // A trap's action, a coproc's command and a PS4 the trace expands are what
+    // the line runs: a closed list that names none of them refuses.
+    const box = new LineBox()
+    const commands = { '*': 'deny', ...Object.fromEntries(allowed.map((n) => [n, 'allow'])) }
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: { r: SessionProfile({ commands }) },
+        machines: [box],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(126)
+    expect([said.exitCode, said.stderr]).toEqual([126, DEC.decode(ran.stderr)])
+    expect(box.lines).toEqual([])
+  })
+
+  // The machine's shell gets the session's exported environment, so a hook an
+  // earlier line exported runs there on a line that reads clean.
+  it.each([
+    ['PS4', false],
+    ['PS4', true],
+    ['BASH_FUNC_ls%%', false],
+    ['BASH_FUNC_ls%%', true],
+  ] as const)('holds a whole line while the session exports %s (coded %s)', async (name, coded) => {
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: {
+          r: SessionProfile(coded ? {} : { commands: { hostname: 'deny' } }),
+        },
+        policies: coded ? [noHostname] : [],
+        machines: [box],
+      },
+    )
+    open.push(w)
+    const session = w.createSession('s', { profile: 'r' })
+    seedVar(session, name, '$(hostname)')
+    expect((await w.shell('set -x; :', { sessionId: 's' })).exitCode).toBe(0)
+    setAttr(session, name, VarAttr.Export)
+    const said = await w.explain('set -x; :', 's')
+    const ran = await w.shell('set -x; :', { sessionId: 's' })
+    expect(ran.exitCode).toBe(126)
+    expect([said.exitCode, said.stderr]).toEqual([126, DEC.decode(ran.stderr)])
+    expect(box.lines).toEqual(['set -x; :'])
+  })
+
+  it('hands an env option cluster its value from the rest of it', async () => {
+    // GNU getopt gives `-Cu` the value `u`, so env runs `tmp`: an allow list
+    // naming env and hostname refuses it and admits `-C tmp hostname`.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: {
+          r: SessionProfile({ commands: { '*': 'deny', env: 'allow', hostname: 'allow' } }),
+        },
+        machines: [box],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    expect((await w.shell('env -Cu tmp hostname', { sessionId: 's' })).exitCode).toBe(126)
+    expect((await w.shell('env -C tmp hostname', { sessionId: 's' })).exitCode).toBe(0)
+    expect(box.lines).toEqual(['env -C tmp hostname'])
+  })
+
   it('runs a whole line as typed with no policy at preCommand', async () => {
     // Mirage's own preCommand policies and a policy with no say at preCommand
     // leave the line as it was: the runtime takes it whole.
@@ -1142,6 +1356,86 @@ describe('prejudge', () => {
       }
       expect(box.lines).toEqual(sealed === null ? [line, line, line] : [])
     },
+  )
+
+  // What a path check reads must be the file the machine opens: its shell
+  // expands `~` with its own HOME and user database, and `//` is `/`.
+  it.each([false, true])(
+    'reads the file a whole line opens in a path check (coded %s)',
+    async (coded) => {
+      const sealedSecret: Policy = {
+        preCommand: (ctx: CommandContext): Action | null =>
+          ctx.paths.some((p) => p.virtual === '/data/secret.txt')
+            ? { kind: 'deny', reason: 'sealed' }
+            : null,
+      }
+      const rule = SessionProfile({
+        commands: {
+          '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] }],
+        },
+      })
+      const box = new LineBox()
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: { r: coded ? SessionProfile({}) : rule },
+          policies: coded ? [sealedSecret] : [],
+          machines: [box],
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'r' })
+      const lines = [
+        'HOME=/data; cat ~/secret.txt',
+        'export HOME=/data; cat ~/secret.txt',
+        "HOME=/data; eval 'cat ~/secret.txt'",
+        'cat ~backup/secret.txt',
+        'cat //data/secret.txt',
+        'diff --from-file=/data/secret.txt /data/pub',
+        'diff --to-file=/data/secret.txt /data/pub',
+        'read HOME <<< /data; cat ~/secret.txt',
+        'printf -v HOME /data; cat ~/secret.txt',
+        'dd if=~/secret.txt',
+        'env -C /data cat secret.txt',
+        'env --chdir=/data cat secret.txt',
+        'HOME[0]=/data; cat ~/secret.txt',
+        "bash -c 'HOME=/data; cat ~/secret.txt'",
+        'declare -n h; h=HOME; h=/data; cat ~/secret.txt',
+        "env -C /tmp HOME=/data bash -c 'cat ~/secret.txt'",
+        "env -v HOME=/data bash -c 'cat ~/secret.txt'",
+        ...(coded
+          ? [
+              'find /data/pub -fprint /data/secret.txt',
+              'find /data/pub -fprint0 /data/secret.txt',
+              'find /data/pub -fls /data/secret.txt',
+              'find -O3 /data/pub -fprint /data/secret.txt',
+            ]
+          : []),
+      ]
+      for (const line of lines) {
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        expect([line, ran.exitCode === 0]).toEqual([line, false])
+        expect([line, said.exitCode, said.stderr]).toEqual([
+          line,
+          ran.exitCode,
+          DEC.decode(ran.stderr),
+        ])
+      }
+      expect(box.lines).toEqual([])
+      const still = [
+        'cat ~/secret.txt',
+        'cat ~root/secret.txt',
+        'env -C /data cat other.txt',
+        'echo x="a:~"',
+      ]
+      for (const line of still) {
+        expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 0])
+      }
+      expect(box.lines).toEqual(still)
+    },
+    30_000,
   )
 
   it('has a coded policy judge a whole line where it may stand', async () => {
@@ -2178,8 +2472,12 @@ it('leaves a relative path after a cd the pass lost to the gate', async () => {
     { mode: MountMode.EXEC, machines: { m: { provider: 'in_process', runtime: 'monty' } } },
   )
   open.push(w)
+  // Read against the directory the pass last knew, ./python3 named the
+  // /usr/bin program, which a closed tree refuses.
   w.createSession('s', {
-    profile: SessionProfile({ commands: { python3: { decision: 'deny', reason: 'no' } } }),
+    profile: SessionProfile({
+      commands: { '*': 'deny', cd: 'allow', echo: 'allow', printf: 'allow' },
+    }),
   })
   await w.shell("printf 'echo harmless\\n' > /data/python3; cd /usr/bin", { sessionId: 's' })
   const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })

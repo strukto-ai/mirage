@@ -75,7 +75,59 @@ describe('innerLines', () => {
     ['env', ['--split-string=rm /x'], [['none', null, false]]],
     ['env', ['-iS', 'rm /x'], [['none', null, false]]],
     ['env', ['-uPATHS', 'rm'], [['argv', ['rm'], false]]],
+    // -C and -a take a value as -u does, and the first of them in a cluster
+    // takes the rest of it: `-Cu tmp` changes to `u`.
+    ['env', ['-C', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-a', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-vC', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['-Cu', 'tmp', 'rm'], [['argv', ['tmp', 'rm'], false]]],
+    ['env', ['-ua', 'x', 'rm'], [['argv', ['x', 'rm'], false]]],
+    ['env', ['--chdir', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--chd', 'tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--chdir=tmp', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--argv0', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--arg', 'x', 'rm'], [['argv', ['rm'], false]]],
+    ['env', ['--uns', 'HOME', 'rm'], [['argv', ['rm'], false]]],
     ['ionice', ['-c', '3', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    // A trap's action is a line the shell runs when a condition fires; `-`, a
+    // number first, one operand or an option sets no action.
+    ['trap', ['rm /x', 'EXIT'], [['line', 'rm /x', false]]],
+    ['trap', ['--', 'rm /x', 'INT', 'TERM'], [['line', 'rm /x', false]]],
+    ['trap', ['-', 'EXIT'], []],
+    ['trap', ['2', '3'], []],
+    ['trap', ['\u0663', 'INT'], [['line', '\u0663', false]]],
+    ['trap', ['EXIT'], []],
+    ['trap', ['-p', 'EXIT'], []],
+    ['trap', ['-l'], []],
+    ['coproc', ['rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    ['coproc', [], []],
+    // What later words run, loaded from where the gate cannot read.
+    ['hash', ['-p', '/bin/rm', 'ls'], [['none', null, false]]],
+    ['hash', ['-rp', '/bin/rm', 'ls'], [['none', null, false]]],
+    ['hash', ['-r'], []],
+    ['enable', ['-f', 'x.so', 'rm'], [['none', null, false]]],
+    ['enable', ['-n', 'echo'], []],
+    ['alias', ['x=rm /x'], [['none', null, false]]],
+    ['alias', ['-p'], []],
+    ['alias', ['ll'], []],
+    ['env', ['PS4=$(rm)', 'bash', '-xc', ':'], [['none', null, false]]],
+    ['env', ['-i', 'BASH_ENV=/x', 'sh'], [['none', null, false]]],
+    ['env', ['ENV=/x', 'sh'], [['argv', ['sh'], false]]],
+    ['env', ['BASH_FUNC_ls%%=() { rm; }', 'ls'], [['none', null, false]]],
+    ['bash', ['-ic', 'rm /x'], [['none', null, false]]],
+    ['sh', ['-l', '-c', 'rm /x'], [['none', null, false]]],
+    ['bash', ['--login', '-c', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-o', 'vi', '-lc', 'rm /x'], [['none', null, false]]],
+    ['bash', ['+x', '-lc', 'rm /x'], [['none', null, false]]],
+    ['bash', ['+l', '-c', 'rm /x'], [['none', null, false]]],
+    ['bash', ['+O', 'extglob', '-lc', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-c', 'rm /x', '-i'], [['line', 'rm /x', false]]],
+    ['bash', ['-c', '-l', 'rm /x'], [['none', null, false]]],
+    ['bash', ['-c', '-x', 'rm /x'], [['line', 'rm /x', false]]],
+    ['env', ['-a', '-sh', 'sh'], [['none', null, false]]],
+    ['env', ['--argv0=-sh', 'sh'], [['none', null, false]]],
+    ['exec', ['-l', 'bash'], [['none', null, false]]],
+    ['exec', ['-a', '-bash', 'bash'], [['none', null, false]]],
     ['time', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     // Operands the runtime appends: stdin items, matched paths.
     ['xargs', ['-n', '1', 'rm', '-f'], [['argv', ['rm', '-f'], true]]],
@@ -124,6 +176,29 @@ describe('innerLines', () => {
     expect(line?.line).toBe('rm "$p"')
     const [unknown] = innerLines('bash', [...words('-c'), dynamic, ...words('rm /x')])
     expect(unknown && innerReadable(unknown)).toBe(false)
+    const [alias] = innerLines('alias', [{ raw: '"$a"', text: null }])
+    expect(alias && innerReadable(alias)).toBe(false)
+    // An option only the run expands may be `-l`, `-C DIR` or `-p FILE`.
+    for (const [name, raw] of [
+      ['exec', '-$o'],
+      ['env', '-$o'],
+      ['hash', '$o'],
+      ['enable', '$o'],
+    ] as const) {
+      const [held] = innerLines(name, [{ raw, text: null }, ...words('rm')])
+      expect([name, held && innerReadable(held)]).toEqual([name, false])
+    }
+    // A dynamic argv0 may start with `-`, and a dynamic name be a hook's.
+    const named: Word = { raw: '"$n"', text: null }
+    for (const line of [
+      innerLines('exec', [...words('-a'), named, ...words('bash')]),
+      innerLines('env', [...words('-a'), named, ...words('bash')]),
+      innerLines('env', [{ raw: '"$k=/x"', text: null }, ...words('bash')]),
+    ]) {
+      expect(line.map(innerReadable)).toEqual([false])
+    }
+    const [assigned] = innerLines('env', [{ raw: 'A="$x"', text: null }, ...words('rm')])
+    expect(assigned?.argv.map(wordValue)).toEqual(['rm'])
     expect(innerLines('bash', [...words('--version'), dynamic])).toEqual([])
     const [stable] = innerLines('sh', [...words('-c', 'echo safe'), dynamic])
     expect(stable?.line).toBe('echo safe')

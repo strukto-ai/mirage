@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+import re
 from collections.abc import (
     AsyncIterator,
     Callable,
@@ -105,9 +106,11 @@ from mirage.workspace.node.admission import (
     unowned_redirects,
 )
 from mirage.workspace.node.inner_lines import (
+    HOOK_VARS,
     InnerLine,
     Word,
     inner_lines,
+    is_hook,
     program_lines,
     read_word,
     reads_of_test,
@@ -127,7 +130,12 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import tilde_homes
-from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
+from mirage.workspace.session.state import (
+    env_is_readonly,
+    env_snapshot,
+    seed_var,
+    set_attr,
+)
 
 # How the explanation tree names a parse node that shapes a line; a node
 # not here (a redirected or negated statement) is read through.
@@ -191,6 +199,20 @@ PLACES_LIMIT = 8
 # Why the gate refuses, under a rule, a command that runs lines it cannot
 # see into: a sourced file, a script, a bash option mirage does not read.
 UNREADABLE_LINES = "runs lines the gate cannot read"
+HOME_VAR = frozenset({"HOME"})
+# Builtins that store into the variables they name, with their options
+# that take a value.
+_STORES = {
+    "read": "adinNptu",
+    "mapfile": "dnOsuCc",
+    "readarray": "dnOsuCc",
+    "getopts": "",
+}
+# The declarations whose `-n` makes a nameref (`export -n` unexports).
+_NAMEREFS = frozenset({"declare", "typeset", "local"})
+_DECLARES = _NAMEREFS | {"export", "readonly"}
+# An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
+_ASSIGNED_TILDE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?:[^~'\"\\]*[:=])?~")
 
 
 class JudgmentMode(StrEnum):
@@ -584,14 +606,17 @@ async def _judge_words(
         namespace (Namespace | None): the link table.
         mode (JudgmentMode): how this judgment reads the command and policies.
     """
+    whole_line = takes_whole_line(mode)
     words = item.words
+    redirect_words = item.redirects
+    if whole_line:
+        words = [_machine_word(w) for w in words]
+        redirect_words = tuple(_machine_word(w) for w in redirect_words)
     occurrence = item.occurrence
     session = item.session
-    redirect_words = item.redirects
     intrinsic = item.intrinsic
     lost = item.lost
     open_ = item.open_
-    whole_line = takes_whole_line(mode)
     head = words[0]
     rules = session.commands
     if whole_line and await registry.policies.wants_for(
@@ -663,6 +688,9 @@ async def _judge_words(
             open_,
         )
     )
+    if name == "trap" and not whole_line:
+        # Mirage's shell judges a trap's action when it fires.
+        inners = []
     coded = whole_line and await registry.policies.wants_for(
         "pre_command", session.session_id, coded_only=True
     )
@@ -750,14 +778,20 @@ async def _judge_words(
             within = whole_occurrence(
                 argv_frame([w.value for w in argv], occurrence)
             )
+            place, moved = inner_session, lost
+            if inner.chdir is not None:
+                # `env -C` runs its command where `cd` would have gone.
+                place, moved, _ = _after_cd(
+                    [Word("cd", "cd"), inner.chdir], inner_session, lost, ()
+                )
             async for one in _judge_words(
                 Walked(
                     argv,
                     (),
-                    inner_session,
+                    place,
                     within,
                     stated=stated and not inner.open,
-                    lost=lost,
+                    lost=moved,
                     open_=inner.open,
                     pipeline=pipeline,
                 ),
@@ -1465,6 +1499,7 @@ def _walked_line(
     lost: bool = False,
     opens: bool = False,
     pipeline: _PipelineWalk | None = None,
+    homes: Mapping[str, str] | None = None,
 ) -> Iterator[Walked]:
     """Every command of a line with its redirect targets, the session
     it is judged in and its place on the line.
@@ -1486,14 +1521,16 @@ def _walked_line(
         opens (bool): also yield each statement's redirects no command
             owns, as an item with no words, where the statement stands
             (``explain_redirects``).
+        homes (Mapping[str, str] | None): the homes each ``~name`` names;
+            None for the session's own.
     """
     if frame is None:
         frame = root_frame(ast, None)
     if pipeline is None:
         pipeline = _pipeline_walk()
-    for item in _walk_node(
-        ast, session, tilde_homes(session), frame, pipeline, lost
-    ):
+    if homes is None:
+        homes = tilde_homes(session)
+    for item in _walk_node(ast, session, homes, frame, pipeline, lost):
         if item.words or opens:
             yield item
 
@@ -2114,7 +2151,34 @@ async def _judge_line(
         # The runtime receives the line, cwd and environment. Its shell
         # options are independent of the workspace's.
         pipeline = _PipelineWalk(guest=True)
-    for item in _walked_line(ast, session, frame, lost, pipeline=pipeline):
+    # What the machine's shell runs on its own: a hook set on the line, or
+    # one the session's environment hands it.
+    hooked = _written(ast, HOOK_VARS) if whole_line else None
+    carried = (
+        next((n for n in env_snapshot(session) if is_hook(n)), None)
+        if whole_line
+        else None
+    )
+    if (hooked is not None or carried is not None) and (
+        has_rules(session.commands)
+        or await registry.policies.wants_for(
+            "pre_command", session.session_id, coded_only=True
+        )
+    ):
+        node, name = hooked if hooked is not None else (ast, str(carried))
+        yield Judged(
+            _denied(name, UNREADABLE_LINES), occurrence_in(node, frame), False
+        )
+        return
+    homes = tilde_homes(session)
+    if whole_line and (
+        _written(ast, HOME_VAR) or _written(_typed_line(ast, frame), HOME_VAR)
+    ):
+        # The machine's shell expands a later `~` with the HOME it was set.
+        homes = {name: home for name, home in homes.items() if name}
+    for item in _walked_line(
+        ast, session, frame, lost, pipeline=pipeline, homes=homes
+    ):
         if not whole_line or not item.elsewhere:
             async for one in judged(item, item.session):
                 yield one
@@ -2125,6 +2189,240 @@ async def _judge_line(
         ]
         for one in _strictest(places):
             yield one
+
+
+def _typed_line(ast: Any, frame: Frame) -> Any:
+    """The parse of the line a frame's text was typed in: ``ast`` itself
+    for a typed line, else the outermost line it was evaluated from.
+
+    Args:
+        ast (Any): the parsed root node of the frame's text.
+        frame (Frame): the scope the line is read in.
+    """
+    at = frame.parent
+    if at is None:
+        return ast
+    while at.parent is not None:
+        at = at.parent
+    return parse(at.source)
+
+
+def _machine_word(word: Word) -> Word:
+    """A word as a whole line's gate reads it: a leading ``~`` the gate
+    left unexpanded (a user it does not know, ``~+``, or ``~`` once the
+    line set HOME) names what only the machine's shell can say.
+
+    Args:
+        word (Word): the word as the walk read it.
+    """
+    if word.text is None:
+        return word
+    if word.raw[:1] == word.text[:1] == "~" or _ASSIGNED_TILDE.match(word.raw):
+        return Word(word.raw, None, word.glob)
+    return word
+
+
+def _written(ast: Any, names: frozenset[str]) -> tuple[Any, str] | None:
+    """The first node anywhere on a line (a function body or a
+    substitution's included) that sets one of ``names``, with the name:
+    an assignment, a loop variable, a ``declare -n`` aimed at one, or a
+    builtin storing into one (``read``, ``mapfile``, ``readarray``,
+    ``getopts``, ``printf -v``); None when there is none.
+
+    Args:
+        ast (Any): the parsed root node.
+        names (frozenset[str]): the variables asked about.
+    """
+    stack = [ast]
+    while stack:
+        node = stack.pop()
+        name = _sets(node, names)
+        if name is not None:
+            return node, name
+        kids = node.children
+        if node.type == NodeType.DECLARATION_COMMAND:
+            # The declaration read its assignments' names; only their
+            # values are left to walk.
+            kids = [
+                part
+                for kid in kids
+                for part in (
+                    kid.children
+                    if kid.type == NodeType.VARIABLE_ASSIGNMENT
+                    else [kid]
+                )
+            ]
+        stack.extend(reversed(kids))
+    return None
+
+
+def _sets(node: Any, names: frozenset[str]) -> str | None:
+    """The one of ``names`` a node sets itself (an element of it
+    included), None when it sets none. A node setting a variable the gate
+    cannot name (a ``declare -n`` nameref, a store into a word only the
+    run expands) answers with its command's name.
+
+    Args:
+        node (Any): one parsed node.
+        names (frozenset[str]): the variables asked about.
+    """
+    kids = node.children
+    if node.type == NodeType.EXPANSION and not any(
+        k.type in (":=", "=") for k in kids
+    ):
+        return None
+    if node.type in (
+        NodeType.VARIABLE_ASSIGNMENT,
+        NodeType.FOR_STATEMENT,
+        NodeType.EXPANSION,
+    ):
+        for kid in kids[:3]:
+            if kid.type == NodeType.SUBSCRIPT and kid.children:
+                kid = kid.children[0]
+            if kid.type == NodeType.VARIABLE_NAME and get_text(kid) in names:
+                return get_text(kid)
+        return None
+    if node.type == NodeType.DECLARATION_COMMAND:
+        head = get_text(kids[0]) if kids else ""
+        # An assignment is read by its name, the value aside; any other
+        # word is a flag or a NAME[=VALUE] the builtin parses at run time.
+        words = [
+            (
+                Word(
+                    get_text(k.children[0]) + "=",
+                    get_text(k.children[0]) + "=",
+                )
+                if k.type == NodeType.VARIABLE_ASSIGNMENT
+                else Word(get_text(k), get_text(k))
+                if k.type == NodeType.VARIABLE_NAME
+                else read_word(k, None)
+            )
+            for k in kids[1:]
+        ]
+        return _declared(head, words, names)
+    if node.type != NodeType.COMMAND:
+        return None
+    words = _words_of(node, None)
+    while words and words[0].value in ("command", "builtin"):
+        words = words[1:]
+        while words and words[0].value[:1] == "-" and words[0].value != "-":
+            option = words[0].value
+            words = words[1:]
+            if option == "--":
+                break
+            if "v" in option or "V" in option:
+                # `command -v`/`-V` only looks names up.
+                return None
+    if not words:
+        return None
+    head = words[0].value
+    if head in _DECLARES:
+        return _declared(head, words[1:], names)
+    if head == "printf":
+        words = _printf_target(words[1:])
+    elif head in _STORES:
+        words = _stored(head, words[1:])
+    else:
+        return None
+    for word in words:
+        if word.text is None:
+            return head
+        if word.text.split("[", 1)[0] in names:
+            return word.text.split("[", 1)[0]
+    return None
+
+
+def _declared(
+    head: str, words: Sequence[Word], names: frozenset[str]
+) -> str | None:
+    """The one of ``names`` a declaration builtin's words set, as
+    ``_sets`` answers; none when ``declare``, ``typeset`` or ``local``
+    only prints (``-p``, ``-f``, ``-F``).
+
+    Args:
+        head (str): the builtin, one of ``_DECLARES``.
+        words (Sequence[Word]): its words after the name, flags and
+            NAME[=VALUE] operands the builtin parses at run time.
+        names (frozenset[str]): the variables asked about.
+    """
+    if head in _NAMEREFS:
+        for word in words:
+            if word.text is None or word.text[:1] != "-" or word.text == "--":
+                break
+            if any(flag in word.text for flag in "pfF"):
+                return None
+    for word in words:
+        if word.text is None:
+            return head
+        if head in _NAMEREFS and word.text[:1] == "-" and "n" in word.text:
+            return head
+        name = word.text.split("=", 1)[0].split("[", 1)[0]
+        if name in names:
+            return name
+    return None
+
+
+def _printf_target(args: Sequence[Word]) -> list[Word]:
+    """The variable ``printf -v`` stores into, read off its options
+    before the format; none when it prints.
+
+    Args:
+        args (Sequence[Word]): the words after ``printf``.
+    """
+    for at, word in enumerate(args):
+        if word.text is None:
+            # The run may expand it to an option, `-v NAME` among them.
+            return [word]
+        if word.value[:1] != "-" or word.value in ("-", "--"):
+            return []
+        if word.value == "-v":
+            return list(args[at + 1 : at + 2])
+        if word.value.startswith("-v"):
+            rest = word.value[2:]
+            return [Word(rest, rest)]
+    return []
+
+
+def _stored(head: str, args: Sequence[Word]) -> list[Word]:
+    """The words a storing builtin stores into: ``read``'s operands and
+    its ``-a`` array, ``mapfile``'s array, ``getopts``'s name after its
+    optstring; an option's value is no target.
+
+    Args:
+        head (str): the builtin, one of ``_STORES``.
+        args (Sequence[Word]): the words after it.
+    """
+    valued = _STORES[head]
+    targets: list[Word] = []
+    i = 0
+    while i < len(args) and args[i].value[:1] == "-" and args[i].value != "-":
+        word = args[i]
+        i += 1
+        if word.text is None:
+            # The run may expand it to options that store into anything.
+            return [word]
+        if word.value == "--":
+            break
+        for at, flag in enumerate(word.value[1:], 1):
+            if flag not in valued:
+                continue
+            rest = word.value[at + 1 :]
+            value = (
+                Word(rest, rest)
+                if rest
+                else (args[i] if i < len(args) else None)
+            )
+            if not rest:
+                i += 1
+            if flag == "a" and value is not None:
+                targets.append(value)
+            break
+    operands = list(args[i:])
+    if head == "getopts":
+        operands = operands[1:2]
+    elif head != "read":
+        operands = operands[:1]
+    return [*targets, *operands]
 
 
 def _strictest(places: list[list[Judged]]) -> list[Judged]:
