@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import git from 'isomorphic-git'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -114,6 +115,41 @@ describe('gitFs', () => {
       'docs/readme.md',
       'letters.txt',
       'numbers.txt',
+    ])
+  })
+
+  it("serves a packed object as a loose one, the pack index out of the library's sight", async () => {
+    const at = PathSpec.fromStrPath('/repo/.git')
+    const bridged = gitFs(dispatch, {
+      gitdir: at,
+      commondir: at,
+      worktree: PathSpec.fromStrPath('/repo'),
+      mountRoot: PathSpec.fromStrPath('/repo'),
+    })
+    const pack = join(tmp, 'repo', '.git', 'objects', 'pack')
+    const idx = readdirSync(pack).find((name) => name.endsWith('.idx')) ?? ''
+    const listed = execFileSync('git', ['verify-pack', '-v', join(pack, idx)], { encoding: 'utf8' })
+    const [, oid = '', type = ''] = /^([0-9a-f]{40}) (commit|tree|blob) /m.exec(listed) ?? []
+    const loose = `/repo/.git/objects/${oid.slice(0, 2)}/${oid.slice(2)}`
+    expect(await dispatch.exists(PathSpec.fromStrPath(loose))).toBe(false)
+    const content = execFileSync('git', ['-C', join(tmp, 'repo'), 'cat-file', type, oid])
+    const read = bridged.promises.readFile as unknown as (path: string) => Promise<Uint8Array>
+    const exists = bridged.promises.exists as unknown as (path: string) => Promise<boolean>
+    const readdir = bridged.promises.readdir as unknown as (path: string) => Promise<string[]>
+    expect(Buffer.from(inflateSync(await read(loose)))).toEqual(
+      Buffer.concat([Buffer.from(`${type} ${String(content.length)}\0`), content]),
+    )
+    expect(await exists(loose)).toBe(true)
+    expect(await exists(`/repo/.git/objects/${oid.slice(0, 2)}/${'0'.repeat(38)}`)).toBe(false)
+    const names = await readdir('/repo/.git/objects/pack')
+    expect(names.some((name) => name.endsWith('.pack'))).toBe(true)
+    expect(names.some((name) => name.endsWith('.idx'))).toBe(false)
+    const log = await git.log({ fs: bridged as never, dir: '/repo', gitdir: '/repo/.git' })
+    expect(log.map((c) => c.commit.message.trim())).toEqual([
+      'add two',
+      'add docs',
+      'add delta',
+      'first commit',
     ])
   })
 

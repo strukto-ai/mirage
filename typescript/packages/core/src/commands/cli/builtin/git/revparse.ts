@@ -34,6 +34,7 @@ import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { BRANCH_PREFIX, loadRefs, mapped, parseRefspec, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
 import {
   commitFacts,
+  expandedId,
   readCommit,
   rawObject,
   refOid,
@@ -244,7 +245,7 @@ async function namedObject(repo: Repo, spelled: string, revision: string): Promi
     if (!(err instanceof Errors.NotFoundError)) throw err
     if (base.length < MINIMUM_ABBREV) throw new AmbiguousArgumentError(revision)
     try {
-      return await git.expandOid({ ...repoArgs(repo), oid: base })
+      return await expandedId(repo, base)
     } catch (missed) {
       if (missed instanceof Errors.NotFoundError || missed instanceof Errors.AmbiguousError)
         throw new AmbiguousArgumentError(revision)
@@ -720,7 +721,7 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
     if (!(err instanceof Errors.NotFoundError)) throw err
     if (stem.length < MINIMUM_ABBREV) return null
     try {
-      oid = await git.expandOid({ ...repoArgs(repo), oid: stem })
+      oid = await expandedId(repo, stem)
     } catch (missed) {
       if (missed instanceof Errors.NotFoundError || missed instanceof Errors.AmbiguousError)
         return null

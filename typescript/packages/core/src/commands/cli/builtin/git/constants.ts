@@ -69,6 +69,14 @@ export const PACK_DIR = 'objects/pack'
 export const IDX_SUFFIX = '.idx'
 export const FANOUT_LEN = 2
 
+// A pack is read a block at a time, the last few blocks kept, so the many
+// small objects side by side cost one read; and the bytes of resolved packed
+// objects one invocation keeps, so the bases a run of deltas shares are
+// rebuilt once.
+export const PACK_BLOCK = 1 << 16
+export const PACK_BLOCKS = 32
+export const PACK_CACHE_BYTES = 8 * 1024 * 1024
+
 // The commits a shallow repository holds without their parents, and the label
 // git decorates each of them with.
 export const SHALLOW_FILE = 'shallow'

@@ -194,3 +194,38 @@ async def test_a_resolved_merge_matches_git(git_ws, repo_path, command):
     await native(repo_path, "add a.txt")
     await native(repo_path, "commit -q -m merge")
     await assert_matches_git(git_ws, repo_path, command)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "diff --name-status HEAD~1 HEAD",
+        "diff --raw HEAD~1 HEAD",
+        "diff --stat HEAD~2 HEAD",
+        "diff -p HEAD HEAD~1",
+        "diff --name-only HEAD~1 HEAD -- a",
+        "show --format= --name-status HEAD",
+        "show --format= --stat HEAD~1",
+        "diff-tree -r --name-status HEAD",
+        "diff-tree -r --root --name-only HEAD~2",
+        "log --format=%s --name-status",
+    ],
+)
+async def test_a_file_swapped_for_a_directory_matches_git(
+    git_ws, repo_path, command
+):
+    (repo_path / "deep" / "x").mkdir(parents=True)
+    (repo_path / "deep" / "x" / "y.txt").write_text("kept\n", encoding="utf-8")
+    (repo_path / "a").write_text("a file\n", encoding="utf-8")
+    await native(repo_path, "add -A")
+    await native(repo_path, "commit -q -m swap-first")
+    (repo_path / "a").unlink()
+    (repo_path / "a").mkdir()
+    (repo_path / "a" / "b.txt").write_text(
+        "now a directory\n", encoding="utf-8"
+    )
+    (repo_path / "a.txt").chmod(0o755)
+    await native(repo_path, "add -A")
+    await native(repo_path, "commit -q -m swap-second")
+    await assert_matches_git(git_ws, repo_path, command)

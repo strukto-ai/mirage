@@ -286,8 +286,11 @@ async def clone(
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
         notes += await _populate(ctx, transport, target, stored, local, typed)
-    except GitError as exc:
-        # A refused checkout leaves the clone behind, as git does.
+    except Exception as exc:
+        # A refused checkout leaves the clone behind, as git does; any
+        # other failure takes back what the clone wrote, mirage's own
+        # refusals (its memory limit) included, as git cleans up on any
+        # failure.
         if not isinstance(exc, CloneCheckoutError):
             if info is None:
                 await remove_tree(vfs, target)
@@ -295,6 +298,8 @@ async def clone(
                 for entry in await read_names(vfs, target):
                     child = posixpath.basename(entry.rstrip("/"))
                     await remove_tree(vfs, target.join(child))
+        if not isinstance(exc, GitError):
+            raise
         refusal = str(exc) if exc.prefix is None else f"{exc.prefix}: {exc}"
         return None, IOResult(
             exit_code=exc.exit_code, stderr=f"{notes}{refusal}\n".encode()
@@ -416,7 +421,7 @@ async def _populate(
         )[len(BRANCH_PREFIX) :]
     one = narrowed if single else None
     repo, wanted = await fetch_objects(
-        vfs, location, transport, adv, wanted, one is not None, depth
+        vfs, location, transport, adv, wanted, one is not None, ctx.ids, depth
     )
     for want in wanted:
         if want.local is not None:

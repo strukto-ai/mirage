@@ -36,7 +36,7 @@ def block_size(monkeypatch):
     Args:
         monkeypatch (MonkeyPatch): pytest patcher.
     """
-    monkeypatch.setattr(lazyfile, "BLOCK", SMALL_BLOCK)
+    monkeypatch.setattr(lazyfile, "PACK_BLOCK", SMALL_BLOCK)
 
 
 async def opened(ws) -> LazyFile:
@@ -118,6 +118,26 @@ async def test_a_read_only_fetches_the_blocks_it_lands_in(
     await asyncio.to_thread(f.seek, SMALL_BLOCK * 4)
     await asyncio.to_thread(f.read, 2)
     assert calls == [(SMALL_BLOCK * 4, SMALL_BLOCK)]
+
+
+@pytest.mark.asyncio
+async def test_the_last_blocks_read_are_kept_the_oldest_let_go(
+    ram_ws, block_size, monkeypatch
+):
+    calls = []
+    original = lazyfile.read_range
+
+    async def counting(dispatch, path, offset, size):
+        calls.append(offset // SMALL_BLOCK)
+        return await original(dispatch, path, offset, size)
+
+    monkeypatch.setattr(lazyfile, "read_range", counting)
+    monkeypatch.setattr(lazyfile, "PACK_BLOCKS", 2)
+    f = await opened(ram_ws)
+    for block in (0, 1, 0, 2, 0, 1):
+        await asyncio.to_thread(f.seek, block * SMALL_BLOCK)
+        await asyncio.to_thread(f.read, 1)
+    assert calls == [0, 1, 2, 1]
 
 
 @pytest.mark.asyncio

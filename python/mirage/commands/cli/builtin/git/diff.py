@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.changes import (
 from mirage.commands.cli.builtin.git.constants import WILDCARDS
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    changed_entries,
     compare,
     filtered,
     limited,
@@ -151,11 +152,7 @@ def _sides(
                     f"warning: {texts[0]}: multiple merge bases, "
                     f"using {old.id.decode()}\n"
                 ).encode()
-    return (
-        shown_entries(repo, tree_entries(repo, old.tree)),
-        shown_entries(repo, tree_entries(repo, new.tree)),
-        warning,
-    )
+    return (*changed_entries(repo, old.tree, new.tree), warning)
 
 
 async def diff(

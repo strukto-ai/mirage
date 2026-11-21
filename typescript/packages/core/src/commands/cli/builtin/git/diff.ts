@@ -17,6 +17,7 @@ import { headEntries, stagedEntries, workEntries } from './changes.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import {
+  changedEntries,
   compare,
   limited,
   renderChanges,
@@ -42,7 +43,7 @@ import {
   patternRoots,
   visiblePath,
 } from './pathspec.ts'
-import { configBool, type Repo } from './repo.ts'
+import { configBool, readCommit, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { shownEntries } from './seen.ts'
 import { opened } from './session.ts'
@@ -82,23 +83,20 @@ async function sides(
   const ends = texts.length === 1 ? await rangeCommits(repo, first) : null
   if (ends === null) {
     const second = texts[1]
-    return [
-      shownEntries(repo, await commitEntries(repo, await resolveCommit(repo, first))),
-      second === undefined
-        ? null
-        : shownEntries(repo, await commitEntries(repo, await resolveCommit(repo, second))),
-      '',
-    ]
+    const left = await resolveCommit(repo, first)
+    if (second === undefined) return [shownEntries(repo, await commitEntries(repo, left)), null, '']
+    const right = await resolveCommit(repo, second)
+    const tree = async (oid: string): Promise<string> => (await readCommit(repo, oid)).tree
+    return [...(await changedEntries(repo, await tree(left), await tree(right))), '']
   }
   const [left, right, symmetric] = ends
-  const after = shownEntries(repo, await treeEntries(repo, right.tree))
-  if (!symmetric) return [shownEntries(repo, await treeEntries(repo, left.tree)), after, '']
+  if (!symmetric) return [...(await changedEntries(repo, left.tree, right.tree)), '']
   const bases = await mergeBases(repo, left, right)
   const base = bases[0]
   if (base === undefined) throw new NoMergeBaseError(first)
   const warning =
     bases.length > 1 ? `warning: ${first}: multiple merge bases, using ${base.oid}\n` : ''
-  return [shownEntries(repo, await treeEntries(repo, base.tree)), after, warning]
+  return [...(await changedEntries(repo, base.tree, right.tree)), warning]
 }
 
 /**

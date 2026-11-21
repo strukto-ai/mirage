@@ -241,6 +241,21 @@ async def test_force_stages_it_anyway(git_rw, repo_path: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["add -f .", "add -A -f"])
+async def test_force_stages_what_an_ignored_directory_holds(
+    git_rw, repo_path: Path, line
+):
+    (repo_path / ".gitignore").write_text("build/\n*.log\n", encoding="utf-8")
+    (repo_path / "build").mkdir()
+    (repo_path / "build" / "out.o").write_text("x\n", encoding="utf-8")
+    (repo_path / "noisy.log").write_text("x\n", encoding="utf-8")
+    assert (await run(git_rw, line))[0] == 0
+    index = staged(repo_path)
+    assert b"build/out.o" in index
+    assert b"noisy.log" in index
+
+
+@pytest.mark.asyncio
 async def test_a_directory_operand_skips_the_ignored_ones_quietly(
     git_rw, repo_path: Path
 ):

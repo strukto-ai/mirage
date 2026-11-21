@@ -16,8 +16,8 @@ import git, { Errors, type CommitObject } from 'isomorphic-git'
 
 import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
-import { configValues, gitFs } from './fs.ts'
-import { exists, readNames, readOptional, readRange, writeFile } from './io.ts'
+import { configValues, FANOUT_SIZE, gitFs, IDX_MAGIC, SHA_BYTES, V2_HEADER } from './fs.ts'
+import { readNames, readOptional, readRange, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { toHex } from '../../../../utils/hex.ts'
@@ -36,13 +36,10 @@ import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
 // A v2 pack index is a 8-byte header then 256 fanout entries; the last one is
-// the object count, so the total is four bytes at a fixed offset.
-const FANOUT_END = 8 + 256 * 4
-const FANOUT_SIZE = 256 * 4
-// A v2 index opens with this magic; a v1 one has none and starts with the
-// fanout, its entries an offset and a name each rather than names alone.
-const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
-const SHA_BYTES = 20
+// the object count, so the total is four bytes at a fixed offset. A v1 index
+// has no header and starts with the fanout, its entries an offset and a name
+// each rather than names alone.
+const FANOUT_END = V2_HEADER + FANOUT_SIZE
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
 // One rewrite of each `.git/shallow` at a time, so fetches running side by
@@ -163,6 +160,25 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   return [...found].sort(compareCodePoints)
 }
 
+/**
+ * The one id an abbreviation names, read off the index buckets and loose
+ * directory its first two digits fall in (`idsUnder`), as isomorphic-git's
+ * expandOid did before packs left its sight (`fs.ts`).
+ *
+ * @param repo the opened repository
+ * @param short the id as typed, at least four hex digits
+ * @throws Errors.NotFoundError when no object starts with it, or it is not hex
+ * @throws Errors.AmbiguousError when more than one does
+ */
+export async function expandedId(repo: Repo, short: string): Promise<string> {
+  if (!/^[0-9a-f]{2,40}$/.test(short)) throw new Errors.NotFoundError(short)
+  const found = (await idsUnder(repo, short.slice(0, 2))).filter((oid) => oid.startsWith(short))
+  const [only] = found
+  if (only === undefined) throw new Errors.NotFoundError(short)
+  if (found.length > 1) throw new Errors.AmbiguousError('oids', short, found)
+  return only
+}
+
 /** An object's type and its bytes as stored, whichever kind of object it is. */
 export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
   // Deprecated upstream for being general, but the general answer is what the
@@ -231,23 +247,6 @@ export async function objectType(repo: Repo, oid: string): Promise<string | null
     if (err instanceof Errors.NotFoundError) return null
     throw err
   }
-}
-
-/**
- * Keep a fetched pack whole, beside the index git reads it through.
- *
- * Named by the pack's own checksum, as git names one it receives, and indexed
- * after the pack is written, so a reader that lists `.idx` files never finds
- * one whose pack is not there yet. An empty pack stores nothing.
- */
-export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
-  if (!data.length) return
-  const checksum = toHex(data.subarray(data.length - 20))
-  const dir = repo.location.commondir.join(PACK_DIR)
-  const name = `pack-${checksum}.pack`
-  if (await exists(repo.vfs, dir.join(name.replace(/\.pack$/, IDX_SUFFIX)))) return
-  await writeFile(repo.vfs, dir.join(name), data)
-  await git.indexPack({ ...repoArgs(repo), dir: dir.virtual, filepath: name })
 }
 
 /** List more commits in `.git/shallow`, one id a line, sorted; none writes nothing. */

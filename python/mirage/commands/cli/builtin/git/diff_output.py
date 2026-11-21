@@ -699,6 +699,66 @@ def entries(
     return limited(shown_entries(repo, found), pathspecs)
 
 
+def changed_entries(
+    repo: BaseRepo,
+    before: bytes | None,
+    after: bytes | None,
+    pathspecs: tuple[str, ...] = (),
+) -> Side:
+    """The entries two trees disagree about, a dict for each side,
+    limited to a pathspec.
+
+    The trees are walked side by side and a subtree both name by the
+    same id is skipped, as git's tree diff skips it, so a commit that
+    touches one file reads the trees on that file's path, not every tree
+    it holds. What both sides hold alike is no change, so leaving it out
+    changes no comparison (``deltas`` drops it too). Synchronous, for a
+    worker thread: it reads trees.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        before (bytes | None): the old tree id, None for the empty tree.
+        after (bytes | None): the new tree id, None for the empty tree.
+        pathspecs (tuple[str, ...]): repository-relative patterns, all
+            paths when empty.
+    """
+    old: dict[bytes, tuple[int, bytes]] = {}
+    fresh: dict[bytes, tuple[int, bytes]] = {}
+
+    def items(tree: bytes | None) -> dict[bytes, tuple[int, bytes]]:
+        if tree is None:
+            return {}
+        obj = repo.object_store[ObjectID(tree)]
+        assert isinstance(obj, Tree)
+        return {e.path: (e.mode, e.sha) for e in decoded(obj).iteritems()}
+
+    def walk(left: bytes | None, right: bytes | None, prefix: bytes) -> None:
+        a, b = items(left), items(right)
+        for name in {**a, **b}:
+            x, y = a.get(name), b.get(name)
+            if x == y:
+                continue
+            path = prefix + b"/" + name if prefix else name
+            x_tree = x is not None and stat.S_ISDIR(x[0])
+            y_tree = y is not None and stat.S_ISDIR(y[0])
+            if x_tree or y_tree:
+                walk(
+                    x[1] if x is not None and x_tree else None,
+                    y[1] if y is not None and y_tree else None,
+                    path,
+                )
+            if x is not None and not x_tree:
+                old[path] = x
+            if y is not None and not y_tree:
+                fresh[path] = y
+
+    walk(before, after, b"")
+    return (
+        limited(shown_entries(repo, old), pathspecs),
+        limited(shown_entries(repo, fresh), pathspecs),
+    )
+
+
 def limited(
     found: dict[bytes, tuple[int, bytes]], pathspecs: tuple[str, ...]
 ) -> dict[bytes, tuple[int, bytes]]:
@@ -814,6 +874,13 @@ def commit_sides(
         trees = trees[:1]
     elif len(trees) > 1 and flags.merge == "off":
         return []
+    if recursive:
+        if not trees:
+            return [changed_entries(repo, None, commit.tree, flags.pathspecs)]
+        return [
+            changed_entries(repo, tree, commit.tree, flags.pathspecs)
+            for tree in trees
+        ]
     after = entries(repo, commit.tree, recursive, flags.pathspecs)
     if not trees:
         return [({}, after)]

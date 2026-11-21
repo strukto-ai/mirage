@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections import OrderedDict
 from io import SEEK_CUR, SEEK_END, SEEK_SET
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.commands.cli.builtin.git.constants import PACK_BLOCK, PACK_BLOCKS
 from mirage.commands.cli.builtin.git.io import read_range
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
@@ -27,7 +29,6 @@ from mirage.workspace.files import Files
 # GET is tens of milliseconds. 256 KiB is the middle. Note that 19 of
 # those fetches only want a 12-byte pack header, so any block size
 # over-fetches them.
-BLOCK = 1 << 18
 
 
 class LazyFile:
@@ -36,9 +37,10 @@ class LazyFile:
     dulwich reaches a packfile through nothing but ``seek`` and ``read``,
     so a packfile living in a mount never has to be pulled whole: reads
     are served from a block cache and only the blocks a read lands in are
-    fetched. Pulling one commit out of a 400 MB pack costs a block or
-    two, which is the same trick git plays with mmap windows, minus the
-    kernel doing it for us.
+    fetched, the last few kept, so a walk over the whole pack holds a few
+    blocks rather than the pack. Pulling one commit out of a 400 MB pack
+    costs a block or two, which is the same trick git plays with mmap
+    windows, minus the kernel doing it for us.
 
     Blocking by design. The dulwich object store is synchronous, so the
     caller runs it on a worker thread and each fetch is marshalled back
@@ -62,23 +64,26 @@ class LazyFile:
         self._path = path
         self._size = size
         self._loop = loop
-        self._blocks: dict[int, bytes] = {}
+        self._blocks: OrderedDict[int, bytes] = OrderedDict()
         self._position = 0
 
     def _block(self, index: int) -> bytes:
         """Fetch one block, or serve it from the cache.
 
         Args:
-            index (int): block number, counted in BLOCK-sized units.
+            index (int): block number, counted in PACK_BLOCK-sized units.
         """
         cached = self._blocks.get(index)
         if cached is not None:
+            self._blocks.move_to_end(index)
             return cached
-        start = index * BLOCK
-        length = min(BLOCK, self._size - start)
+        start = index * PACK_BLOCK
+        length = min(PACK_BLOCK, self._size - start)
         data = run_async_from_sync(
             read_range(self._dispatch, self._path, start, length), self._loop
         )
+        if len(self._blocks) >= PACK_BLOCKS:
+            self._blocks.popitem(last=False)
         self._blocks[index] = data
         return data
 
@@ -96,7 +101,7 @@ class LazyFile:
         chunks = []
         remaining = size
         while remaining > 0:
-            index, inside = divmod(self._position, BLOCK)
+            index, inside = divmod(self._position, PACK_BLOCK)
             piece = self._block(index)[inside : inside + remaining]
             if not piece:
                 break

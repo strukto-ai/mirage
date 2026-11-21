@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -137,3 +138,21 @@ async def test_clone_keeps_the_repository_when_checkout_meets_an_empty_name(
     assert sorted(p.name for p in dst.iterdir()) == [".git"]
     log = await git_parent.shell("git -C /w/dst log --format=%s -1")
     assert log.stdout == b"odd\n"
+
+
+@pytest.mark.asyncio
+async def test_a_clone_failing_past_gits_refusals_leaves_nothing_behind(
+    git_parent, repo_path: Path, monkeypatch
+):
+    async def refused(vfs, commondir, chunks, ids):
+        await chunks.aclose()
+        raise MemoryError("over the memory limit")
+
+    fetch = importlib.import_module("mirage.commands.cli.builtin.git.fetch")
+    monkeypatch.setattr(fetch, "store_pack", refused)
+    result = await git_parent.shell("cd /w && git clone work dst")
+    assert (result.exit_code, result.stderr) == (
+        1,
+        b"git clone: over the memory limit\n",
+    )
+    assert not (repo_path.parent / "dst").exists()

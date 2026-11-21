@@ -281,7 +281,8 @@ export async function add(
     texts.map((text) => repoRelative(repo.location, start, text)),
     true,
   )
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, false, roots)
+  // `-f` walks ignored directories too, as git enters them for it.
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, parsed.force, roots)
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
   const present = new Set(found.files.keys())
   let stage: Set<string>
@@ -294,7 +295,7 @@ export async function add(
     stage = new Set([...scope].filter((path) => present.has(path)))
     remove = new Set([...scope].filter((path) => !present.has(path)))
   } else if (parsed.every && texts.length === 0) {
-    stage = keepAddable(present, tracked, ignores)
+    stage = parsed.force ? new Set(present) : keepAddable(present, tracked, ignores)
     remove = new Set([...tracked].filter((path) => !present.has(path)))
   } else {
     ;[stage, remove] = await resolve(

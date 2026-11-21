@@ -14,17 +14,19 @@
 
 import asyncio
 import base64
+import hashlib
 import logging
 import re
+import stat
+import struct
+import zlib
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Callable, Iterator, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass, field
-from io import BytesIO
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from dulwich.object_format import SHA1
-from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
-from dulwich.pack import write_pack_objects
+from dulwich.objects import Commit, ObjectID, Tag, Tree
 from dulwich.repo import BaseRepo
 
 from mirage.commands.builtin.errors import HttpConnectError
@@ -42,7 +44,8 @@ from mirage.commands.cli.builtin.git.refs import SYMREF_PREFIX, read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.util import require_vfs
 from mirage.commands.config import Context
-from mirage.io.types import materialize
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource, materialize
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -88,17 +91,23 @@ class Advertisement:
     symrefs: dict[str, str] = field(default_factory=dict)
 
 
+def _nothing() -> AsyncGenerator[bytes, None]:
+    """A pack with nothing in it, as a fetch that needs nothing gets."""
+    return chunks(b"")
+
+
 @dataclass(frozen=True, slots=True)
 class Fetched:
     """What one fetch brought back.
 
     Args:
-        pack (bytes): the packfile, empty for none.
+        pack (AsyncGenerator[bytes, None]): the packfile as it arrives,
+            nothing for none.
         shallow (tuple[str, ...]): the commits whose parents were left
             out, which a shallow repository lists in ``.git/shallow``.
     """
 
-    pack: bytes = b""
+    pack: AsyncGenerator[bytes, None] = field(default_factory=_nothing)
     shallow: tuple[str, ...] = ()
 
 
@@ -133,6 +142,70 @@ def pkt_lines(data: bytes) -> Iterator[bytes | None]:
             continue
         yield data[at + 4 : at + size]
         at += size
+
+
+async def pkt_stream(body: ByteSource) -> AsyncGenerator[bytes | None, None]:
+    """Split a pkt-line stream as it arrives, yielding None for each
+    flush; only the line being read is held.
+
+    Args:
+        body (ByteSource): the stream.
+    """
+    held = b""
+    async with aclosing(chunks(body)) as source:
+        async for chunk in source:
+            held += chunk
+            at = 0
+            while len(held) - at >= 4:
+                head = held[at : at + 4]
+                try:
+                    size = int(head, 16)
+                except ValueError:
+                    raise GitError(
+                        "protocol error: bad line length character: "
+                        f"{head.decode('latin-1')}"
+                    ) from None
+                if size == 0:
+                    yield None
+                    at += 4
+                    continue
+                if len(held) - at < size:
+                    break
+                yield held[at + 4 : at + size]
+                at += size
+            held = held[at:]
+    if held:
+        raise GitError("the remote end hung up unexpectedly")
+
+
+async def _pack_chunks(
+    repo: BaseRepo, oids: list[ObjectID]
+) -> AsyncGenerator[bytes, None]:
+    """A pack of ``oids`` as git's pack-objects writes one without
+    deltas: each object read and compressed in turn, so only one is
+    held, then the checksum of every byte before it.
+
+    Args:
+        repo (BaseRepo): the repository sending objects.
+        oids (list[ObjectID]): the objects to send.
+    """
+    total = hashlib.sha1()
+    header = b"PACK" + struct.pack(">II", 2, len(oids))
+    total.update(header)
+    yield header
+    for oid in oids:
+        kind, raw = await asyncio.to_thread(repo.object_store.get_raw, oid)
+        size = len(raw)
+        head = bytearray([(kind << 4) | (size & 15)])
+        size >>= 4
+        while size:
+            head[-1] |= 0x80
+            head.append(size & 0x7F)
+            size >>= 7
+        entry = bytes(head) + zlib.compress(raw)
+        total.update(entry)
+        yield entry
+    yield total.digest()
 
 
 def parse_advertisement(lines: Iterator[bytes | None]) -> Advertisement:
@@ -181,7 +254,7 @@ def missing_objects(
     wants: list[str],
     has: Callable[[ObjectID], bool],
     depth: int | None = None,
-) -> tuple[list[ShaFile], list[bytes]]:
+) -> tuple[list[ObjectID], list[bytes]]:
     """Every object reachable from ``wants`` that the other side lacks.
 
     Commits the other side has stop the walk; the trees of those boundary
@@ -201,10 +274,10 @@ def missing_objects(
         depth (int | None): ``--depth``, None for the whole history.
 
     Returns:
-        tuple[list[ShaFile], list[bytes]]: the objects to send, and the
-        commits cut shallow.
+        tuple[list[ObjectID], list[bytes]]: the ids of the objects to
+        send, and the commits cut shallow.
     """
-    sending: list[ShaFile] = []
+    sending: list[ObjectID] = []
     boundary: list[bytes] = []
     shallow: list[bytes] = []
     seen: set[bytes] = set()
@@ -222,7 +295,7 @@ def missing_objects(
             boundary.append(oid)
             continue
         obj = repo.object_store[ObjectID(oid)]
-        sending.append(obj)
+        sending.append(ObjectID(oid))
         if isinstance(obj, Tag):
             now((obj.object[1], level))
         elif isinstance(obj, Commit):
@@ -247,16 +320,19 @@ def _walk_tree(
     repo: BaseRepo,
     tree: bytes,
     held: set[bytes],
-    sending: list[ShaFile] | None,
+    sending: list[ObjectID] | None,
 ) -> None:
     """Visit a tree once, collecting what is new into ``sending``.
+
+    A tree's entries say which are trees, so only trees are read; a
+    blob is sent by id, read once its pack is written.
 
     Args:
         repo (BaseRepo): the repository holding the tree.
         tree (bytes): the tree id.
         held (set[bytes]): ids already visited or already held.
-        sending (list[ShaFile] | None): where new objects go, None to
-            only mark the tree as held.
+        sending (list[ObjectID] | None): where new ids go, None to only
+            mark the tree as held.
     """
     stack = [tree]
     while stack:
@@ -264,13 +340,20 @@ def _walk_tree(
         if oid in held:
             continue
         held.add(oid)
-        obj = repo.object_store[ObjectID(oid)]
         if sending is not None:
-            sending.append(obj)
-        if isinstance(obj, Tree):
-            stack.extend(
-                sha for _, mode, sha in obj.iteritems() if mode != GITLINK
-            )
+            sending.append(ObjectID(oid))
+        obj = repo.object_store[ObjectID(oid)]
+        if not isinstance(obj, Tree):
+            continue
+        for _, mode, sha in obj.iteritems():
+            if mode == GITLINK or sha in held:
+                continue
+            if stat.S_ISDIR(mode):
+                stack.append(sha)
+                continue
+            held.add(sha)
+            if sending is not None:
+                sending.append(ObjectID(sha))
 
 
 class LocalTransport:
@@ -322,7 +405,8 @@ class LocalTransport:
         depth: int | None = None,
         shallow: tuple[str, ...] = (),
     ) -> Fetched:
-        """A pack of everything reachable from ``wants`` the receiver lacks.
+        """A pack of everything reachable from ``wants`` the receiver
+        lacks, as it is written.
 
         Args:
             wants (list[str]): the object ids asked for.
@@ -335,21 +419,13 @@ class LocalTransport:
             shallow (tuple[str, ...]): the receiver's shallow commits;
                 unused here, where ``has`` answers directly.
         """
-        return await asyncio.to_thread(self._packed, wants, has, depth)
-
-    def _packed(
-        self,
-        wants: list[str],
-        has: Callable[[ObjectID], bool],
-        depth: int | None,
-    ) -> Fetched:
-        objects, shallow = missing_objects(self._repo, wants, has, depth)
-        cut = tuple(oid.decode() for oid in shallow)
+        objects, cut = await asyncio.to_thread(
+            missing_objects, self._repo, wants, has, depth
+        )
+        shallow_cut = tuple(oid.decode() for oid in cut)
         if not objects:
-            return Fetched(shallow=cut)
-        out = BytesIO()
-        write_pack_objects(out, objects, SHA1, deltify=False)
-        return Fetched(out.getvalue(), cut)
+            return Fetched(shallow=shallow_cut)
+        return Fetched(_pack_chunks(self._repo, objects), shallow_cut)
 
 
 class HttpTransport:
@@ -381,7 +457,7 @@ class HttpTransport:
         method: str,
         headers: dict[str, str],
         body: bytes | None,
-    ) -> bytes:
+    ) -> ByteSource:
         try:
             resp = await http_request(
                 url,
@@ -417,12 +493,14 @@ class HttpTransport:
             ):
                 self._credentials = {}
             self._url = moved
-        return await materialize(resp.body)
+        return resp.body
 
     async def advertise(self) -> Advertisement:
         """GET ``info/refs`` for upload-pack and read what it lists."""
-        body = await self._request(
-            f"{self._url}/info/refs?service={SERVICE}", "GET", {}, None
+        body = await materialize(
+            await self._request(
+                f"{self._url}/info/refs?service={SERVICE}", "GET", {}, None
+            )
         )
         lines = pkt_lines(body)
         first = next(lines, None)
@@ -443,13 +521,14 @@ class HttpTransport:
         depth: int | None = None,
         shallow: tuple[str, ...] = (),
     ) -> Fetched:
-        """POST the wants and haves to upload-pack; return the pack.
+        """POST the wants and haves to upload-pack; return the pack as it
+        arrives.
 
         A shallow receiver names its shallow commits, so the server does
         not count what lies past them as held, and a depth sends
         ``deepen``; both ask for the ``shallow`` capability, and the
         server names each commit it cut in a ``shallow`` line ahead of
-        the pack.
+        the pack, which is read before this returns.
 
         Args:
             wants (list[str]): the object ids asked for.
@@ -485,23 +564,41 @@ class HttpTransport:
             },
             b"".join(body),
         )
-        pack = bytearray()
+        lines = pkt_stream(reply)
         cut: list[str] = []
-        for line in pkt_lines(reply):
-            if line is None or line.startswith((b"NAK", b"ACK ")):
-                continue
-            if line.startswith(SHALLOW_LINE):
-                cut.append(line[len(SHALLOW_LINE) :].strip().decode())
-                continue
-            band, payload = line[0], line[1:]
-            if band == PACK_BAND:
-                pack += payload
-            elif band == ERROR_BAND:
-                raise GitError(
-                    "remote error: "
-                    + payload.decode("utf-8", "replace").strip()
-                )
-        return Fetched(bytes(pack), tuple(cut))
+
+        async def payload() -> bytes | None:
+            async for line in lines:
+                if line is None or line.startswith((b"NAK", b"ACK ")):
+                    continue
+                if line.startswith(SHALLOW_LINE):
+                    cut.append(line[len(SHALLOW_LINE) :].strip().decode())
+                    continue
+                band, data = line[0], line[1:]
+                if band == PACK_BAND:
+                    return data
+                if band == ERROR_BAND:
+                    raise GitError(
+                        "remote error: "
+                        + data.decode("utf-8", "replace").strip()
+                    )
+            return None
+
+        head = await payload()
+        if head is None:
+            await lines.aclose()
+            return Fetched(shallow=tuple(cut))
+
+        async def pack() -> AsyncGenerator[bytes, None]:
+            try:
+                more: bytes | None = head
+                while more is not None:
+                    yield more
+                    more = await payload()
+            finally:
+                await lines.aclose()
+
+        return Fetched(pack(), tuple(cut))
 
 
 def _credentials(url: str) -> tuple[str, dict[str, str]]:
