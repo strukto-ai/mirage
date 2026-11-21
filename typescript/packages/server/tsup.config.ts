@@ -42,6 +42,7 @@ export default defineConfig({
     'src/ssh/server.ts',
     'src/mcp/index.ts',
     'src/rpc/index.ts',
+    'src/acp/index.ts',
   ],
   platform: 'node',
 })

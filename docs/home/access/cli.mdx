@@ -6,8 +6,8 @@ icon: /images/mirage-icon-light.svg
 
 `mirage` is a client of the server's [HTTP routes](/home/access/http), with the
 same commands in Python and TypeScript. When its `url` is on this machine,
-`workspace create`, `workspace load`, `mcp`, `rpc`, `ssh-proxy` and
-`codex-exec` start the server if it is not running; other commands need it
+`workspace create`, `workspace load`, `mcp`, `acp`, `rpc`, `ssh-proxy`
+and `codex-exec` start the server if it is not running; other commands need it
 running. A remote server is never started.
 
 ## Install
@@ -189,6 +189,7 @@ mirage workspace vfs read /data/img.png -w demo > img.png
 | Command | Does |
 | --- | --- |
 | `mirage mcp [CONFIG] [-w ID] [-s S] [--all-calls]` | Serve a session's [MCP](/home/access/mcp) tools on stdio. `--all-calls` adds the [VFS calls](/home/access/mcp#vfs-calls). |
+| `mirage acp [-c CONFIG \| -w ID] [-s S] [--root P] -- AGENT...` | Run an [ACP](/home/agents/acp) agent for an ACP client, its files and tools the workspace's. |
 | `mirage rpc [CONFIG] [-w ID] [-s S]` | Serve [RPC](/home/access/rpc) on stdio. |
 | `mirage ssh-proxy ID` | Carry [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`. |
 | `mirage codex-exec ID [--listen HOST:PORT]` | Serve workspace `ID` on a local port to [`codex exec-server forward`](/home/agents/codex#exec-server-forward). |

@@ -254,9 +254,12 @@ there yourself. Once connected, run the shared
 - The machine needs only `sshfs`. No Mirage, keys or open port.
 - Each file call is a round trip to the workspace. With `both`, keep bulk
   data on the machine's own mounts.
-- A machine shows one session's view, the first that runs a line there. An
-  sshfs already serving a path Mirage serves is left alone and the line exits
-  1. Give each agent and each workspace its own machine.
+- A machine shows the view of the first session that runs a line there, and
+  serves every later session with the same view: the same profile and
+  standing decisions, as each SSH login of one key has. A session with
+  another view is refused. An sshfs already serving a path Mirage serves is
+  left alone and the line exits 1. Give each agent and each workspace its own
+  machine.
 - If the machine restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
 - A write the workspace refuses, such as one past a mount's `capacity`,

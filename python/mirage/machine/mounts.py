@@ -58,6 +58,7 @@ from mirage.machine.constants import (
     SSHFS_SOURCE_PREFIX,
     SYNTHETIC_CONF,
     UNMOUNT_WAIT_SECONDS,
+    VIEW_KEYS,
     machine_dir_line,
     mount_field,
 )
@@ -72,7 +73,7 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.types import FileType
+from mirage.types import FileType, JsonValue
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files, reader_of
 from mirage.workspace.session import SessionState
@@ -104,6 +105,21 @@ def pipe_server(transport: Transport) -> Any:
         if exc.name != "asyncssh":
             raise
         raise ImportError(PIPE_SERVER_HINT) from exc
+
+
+def view_of(session: SessionState) -> tuple[JsonValue, ...]:
+    """What a served machine shows ``session``: its record's ``VIEW_KEYS``.
+
+    Each SSH login, port forward and reconnect is a session of its own, so
+    a machine compares views, not sessions: one whose view matches the
+    session it first served runs there too, and that session stays the one
+    compared against.
+
+    Args:
+        session (SessionState): the session a line runs as.
+    """
+    record = session.to_dict(variables=False)
+    return tuple(record.get(key) for key in VIEW_KEYS)
 
 
 OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
@@ -717,7 +733,11 @@ class MachineMounts:
                 )
             served = self._session
             session = binding.get_session(current.session_id)
-            if served is not None and served is not session:
+            if (
+                served is not None
+                and served is not session
+                and view_of(served) != view_of(session)
+            ):
                 earlier = (
                     "an earlier "
                     if served.session_id == current.session_id
@@ -752,7 +772,11 @@ class MachineMounts:
                 await errors(f"{unmounted(self._provider, lost)}\n".encode())
                 return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
             unserved = self._unserved(ruled)
-            if self._mount_type != "own" and (not unserved or self._served):
+            if (
+                served is None
+                and self._mount_type != "own"
+                and (not unserved or self._served)
+            ):
                 self._session = session
         if unserved:
             return await refused_run(

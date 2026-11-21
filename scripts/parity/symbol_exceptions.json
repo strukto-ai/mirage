@@ -371,6 +371,7 @@
   "machine/mounts": {
    "typescript_only": {
     "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
+    "keysInOrder": "a JSON.stringify replacer that sorts object keys, so two views compare equal whatever order their mappings were built in; Python compares the view tuples directly, and dict equality already ignores key order.",
     "pipeServers": "the file server each transport's import registered (registerPipeServer); Python imports the transport's server module on the first mount (pipe_server).",
     "registerPipeServer": "a host opts into serving files by importing mount/sftp or mount/fsproto, each registering its server for its transport, since a bundle that cannot run ssh2 (the browser) must not import mount/sftp; Python imports the server module directly.",
     "sleep": "asyncio.sleep in Python.",
@@ -1733,6 +1734,18 @@
   "workspace/session/validate": {
    "typescript_only": {
     "nodeKey": "Python compares the normalized subtrees two mounts' grammars give with dataclass equality; a TypeScript tree of Maps has no structural equality, so it compares their JSON with each Map as its entries."
+   }
+  },
+  "cli/acp": {
+   "typescript_only": {
+    "registerAcpCommand": "Typer registers one function per verb, so the acp verb is a module-level `acp_cmd`; the TypeScript CLI builds the same verb on a commander program inside registerAcpCommand."
+   }
+  },
+  "server/acp/relay": {
+   "typescript_only": {
+    "Agent": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
+    "JsonRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
+    "isRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process."
    }
   }
  }

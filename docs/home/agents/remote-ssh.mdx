@@ -1,13 +1,21 @@
 ---
 title: Editors over SSH
-description: Open a Mirage workspace in Cursor, VS Code or Antigravity through their SSH remote feature.
+sidebarTitle: Overview
+description: Open a Mirage workspace in Cursor, VS Code or Antigravity through their SSH remote feature, with the editor's server on a machine.
 icon: laptop-code
 ---
 
 Cursor, VS Code and Antigravity open a remote project by installing their own
-server on the host over SSH and reaching it through port forwards. Pointed at
-Mirage, that server runs on a [machine](/home/setup/machine/overview) the
-workspace sends its lines to, and works on the workspace's mounts there.
+server on the host over SSH and reaching it through port forwards. Mirage does
+not run that server itself: it runs on a [machine](/home/setup/machine/overview)
+the workspace sends its lines to, which sees the workspace's mounts at the
+same paths.
+
+| Editor | Server on the machine |
+| --- | --- |
+| <img noZoom src="/images/cursor-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Cursor | Cursor's server, from its Remote-SSH extension |
+| <img noZoom src="/images/vscode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />VS Code | The VS Code Server, from the Remote - SSH extension |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Antigravity | Antigravity's server, from an SSH Host project |
 
 ## Set up
 
@@ -43,9 +51,9 @@ workspace sends its lines to, and works on the workspace's mounts there.
     ```bash
     mirage workspace create workspace.yaml --id demo
     ```
-    `@line` runs every SSH line whole on the machine. `timeout_seconds: 0`
-    lifts the 10 minute line limit, since the editor's setup line stays open
-    as long as its window does.
+    `@line` runs every SSH line whole on the machine, and `mount_type: ssh`
+    shows the mounts there. `timeout_seconds: 0` lifts the 10 minute line
+    limit, since the editor's setup line stays open as long as its window does.
   </Step>
 </Steps>
 
@@ -65,19 +73,35 @@ instead and connect to `demo@mirage`.
 
 | Editor | Open the workspace |
 | --- | --- |
-| Cursor | **Remote-SSH: Connect to Host...** from the Command Palette, pick `mirage-demo`, then open `/project`. |
-| VS Code | Install the Remote - SSH extension, then the same as Cursor. |
-| Antigravity | **New Project**, then **SSH Host...**, pick `mirage-demo`, then open `/project`. |
+| <img noZoom src="/images/cursor-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Cursor | **Remote-SSH: Connect to Host...** from the Command Palette, pick `mirage-demo`, then open `/project`. |
+| <img noZoom src="/images/vscode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />VS Code | Install the Remote - SSH extension, then the same as Cursor. |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Antigravity | **New Project**, then **SSH Host...**, pick `mirage-demo`, then open `/project`. |
 
-The editor's terminal, tasks and extensions run on the machine, and the files
-under `/project` are the workspace's.
+The files under `/project` are the workspace's. The editor's terminal, tasks
+and extensions run on the machine, the terminal with a real terminal device,
+so a coding agent installed on the machine runs in it as in any terminal.
+
+## Without a machine
+
+Plain `ssh`, `sftp`, `scp` and `sshfs` need no machine, and neither does
+Codex's [SSH](/home/agents/codex#ssh): its tools run in the workspace itself.
+To edit without a machine, show the workspace as a local folder with
+[SSHFS](/home/access/ssh#connect) or [FUSE](/home/setup/fuse) and open that
+folder. The editor's extensions and terminal then run on the local computer,
+and each file call into the folder still goes through the workspace.
 
 ## How it behaves
 
 - A dropped connection leaves the editor's server running, as sshd does, so
   the editor reconnects to the same server.
-- Each port forward runs as a line of its own session, so the login's
-  [profile](/home/configuration/session) and policies judge it as any line.
+- Each SSH connection and port forward is a session of its own, judged by the
+  login's [profile](/home/configuration/session) and policies as any line.
+  The machine serves every session with the first one's view: the same
+  profile and standing decisions. A login under another profile needs a
+  machine of its own.
+- A line that comes over SSH runs on the machine without a terminal device.
+  Run an interactive program, such as a coding agent's full-screen interface,
+  in the editor's terminal; one that needs no terminal runs from `ssh` too.
 - The editor's server runs its own commands on the machine. Mirage's command
   rules see the lines that come over SSH, and every file call into a mount
   still goes through the workspace.

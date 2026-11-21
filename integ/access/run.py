@@ -608,6 +608,84 @@ async def codex_exec(server: Server, report: Report) -> None:
         report.check(f"{server.key} codex_exec.{key}", got.get(key), want)
 
 
+async def acp(server: Server, report: Report) -> None:
+    """``mirage acp`` between an ACP client and an agent.
+
+    The relay starts ``acp_agent.py`` on the seed workspace with the CLI's
+    token, as ``codex-exec`` does. The client sends ``initialize``, a new
+    session for a folder of its own and a prompt; the agent writes a file
+    in that folder through the client and reads it back, and both land in
+    the workspace's root.
+
+    Args:
+        server (Server): the deployment.
+        report (Report): where the checks go.
+    """
+    d = server.d
+    token = d.issuer.oauth_token() if d.name == "jwt" else None
+    agent = Path(__file__).with_name("acp_agent.py")
+    child = await asyncio.create_subprocess_exec(
+        *server.cli("acp", "-w", SEED, "--", sys.executable, str(agent)),
+        env=server.env(token),
+        cwd=ROOT,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert child.stdin is not None and child.stdout is not None
+    assert child.stderr is not None
+    sent = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": {}},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/new",
+            "params": {"cwd": "/home/integ/proj", "mcpServers": []},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/prompt",
+            "params": {"sessionId": "s1", "prompt": []},
+        },
+    ]
+    replies: dict[int, dict[str, Any]] = {}
+    got: dict[str, Any] = {}
+    try:
+        child.stdin.write("".join(json.dumps(m) + "\n" for m in sent).encode())
+        await child.stdin.drain()
+        while 3 not in replies:
+            line = await asyncio.wait_for(child.stdout.readline(), 30)
+            if not line:
+                break
+            reply = json.loads(line)
+            replies[reply.get("id")] = reply
+        child.stdin.close()
+        got["status"] = await asyncio.wait_for(child.wait(), 30)
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+    if got.get("status") != 0:
+        print((await child.stderr.read()).decode(), flush=True)
+    meta = {
+        i: replies.get(i, {}).get("result", {}).get("_meta", {})
+        for i in (1, 2, 3)
+    }
+    answers = meta[3].get("answers") or [{}, {}]
+    got["files"] = meta[1].get("fs")
+    got["mcp"] = meta[2].get("mcp")
+    got["write"] = answers[0].get("result")
+    got["read"] = answers[1].get("result")
+    for key, want in CASES["acp"].items():
+        report.check(f"{server.key} acp.{key}", got.get(key), want)
+
+
 async def isolation(server: Server, report: Report) -> None:
     """Time a quiet line beside a busy one, in another workspace and in
     another session of the busy workspace.
@@ -1804,6 +1882,7 @@ async def main(args: argparse.Namespace) -> int:
                         await cross_host(server, recorder, report)
                     if "cli" in wanted:
                         await codex_exec(server, report)
+                        await acp(server, report)
                     await isolation(server, report)
                     if name != "dev":
                         await trace_parents(
