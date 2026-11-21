@@ -440,25 +440,19 @@ async def _embedded_change(
     )
     rows = [r for r in every if reader_of(vfs).visible(r.path)]
 
-    def untracked(row: StatusRow) -> bool:
-        return (
-            row.index_status == UNTRACKED
-            or row.embedded == "untracked content"
-        )
-
     notes = [
         *([] if head == recorded.decode() else ["new commits"]),
         *(
             ["modified content"]
             if any(
-                r.index_status != IGNORED and not untracked(r) for r in rows
+                r.index_status != IGNORED and not _untracked(r) for r in rows
             )
             else []
         ),
         *(
             ["untracked content"]
             if any(
-                untracked(r) or "untracked content" in (r.embedded or "")
+                _untracked(r) or "untracked content" in (r.embedded or "")
                 for r in rows
             )
             else []
@@ -671,6 +665,17 @@ class StatusRow:
     end: tuple[int, bytes] | None = None
     unmerged: bool = False
     embedded: str | None = None
+
+
+def _untracked(row: StatusRow) -> bool:
+    """Whether a row of an embedded repository's status is untracked
+    content: an untracked path, or a gitlink of its own whose repository
+    has only that.
+
+    Args:
+        row (StatusRow): the row.
+    """
+    return row.index_status == UNTRACKED or row.embedded == "untracked content"
 
 
 def assembled(

@@ -367,6 +367,14 @@ export interface EmbeddedChange {
 }
 
 /**
+ * Whether a row of an embedded repository's status is untracked content: an
+ * untracked path, or a gitlink of its own whose repository has only that.
+ */
+function untracked(row: StatusRow): boolean {
+  return row.indexStatus === UNTRACKED || row.embedded === 'untracked content'
+}
+
+/**
  * What changed in the repository a gitlink records, as git's long format
  * names it: commits past the recorded one, then modified and untracked
  * content. Null when nothing did, or no repository is there.
@@ -391,8 +399,6 @@ async function embeddedChange(
     new Map(),
   )
   const rows = all.filter((row) => readerOf(vfs).visible(row.path))
-  const untracked = (row: StatusRow): boolean =>
-    row.indexStatus === UNTRACKED || row.embedded === 'untracked content'
   const notes = [
     ...(head === recorded ? [] : ['new commits']),
     ...(rows.some((row) => row.indexStatus !== IGNORED && !untracked(row))
