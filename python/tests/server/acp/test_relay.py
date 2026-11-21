@@ -20,6 +20,27 @@ CONFIG = {"config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}}
 
 SERVER = {"name": "mirage", "command": "/bin/mirage", "args": [], "env": []}
 
+PROMPT = [
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": 1, "clientCapabilities": {}},
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "session/new",
+        "params": {"cwd": "/home/me/proj", "mcpServers": []},
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/prompt",
+        "params": {"sessionId": "s1", "prompt": []},
+    },
+]
+
 AGENT = """
 import json
 import sys
@@ -179,6 +200,18 @@ def test_text_slice(line, limit, expected):
     assert relay.text_slice("one\ntwo\nthree", line, limit) == expected
 
 
+@pytest.mark.parametrize(
+    ("text", "line", "limit", "expected"),
+    [
+        ("a\rb\r", 2, 1, "b\r"),
+        ("a\r\nb\nc", 2, None, "b\nc"),
+        ("a\vb\fc\nd", 2, 1, "d"),
+    ],
+)
+def test_text_slice_ends_lines_at_crlf_cr_or_lf(text, line, limit, expected):
+    assert relay.text_slice(text, line, limit) == expected
+
+
 @pytest.mark.asyncio
 async def test_answers_the_agents_files_from_the_workspace(
     tmp_path, monkeypatch
@@ -203,27 +236,7 @@ async def test_answers_the_agents_files_from_the_workspace(
             stdout = Lines(until=3)
             monkeypatch.setattr(relay.sys, "stdin", stdin)
             monkeypatch.setattr(relay.sys, "stdout", stdout)
-            sent = [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {"protocolVersion": 1, "clientCapabilities": {}},
-                },
-                {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/new",
-                    "params": {"cwd": "/home/me/proj", "mcpServers": []},
-                },
-                {
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/prompt",
-                    "params": {"sessionId": "s1", "prompt": []},
-                },
-            ]
-            client.write("".join(json.dumps(m) + "\n" for m in sent))
+            client.write("".join(json.dumps(m) + "\n" for m in PROMPT))
             client.flush()
             running = asyncio.create_task(
                 relay.relay_stdio(
@@ -255,6 +268,71 @@ async def test_answers_the_agents_files_from_the_workspace(
     methods = [m.get("method") for m in stdout.messages()]
     assert methods.count("session/update") == 1
     assert not {"fs/read_text_file", "fs/write_text_file"} & set(methods)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_workspace_call_answers_an_error(tmp_path):
+    done = asyncio.Event()
+    written: list[JsonObject] = []
+
+    async def write(line: str) -> None:
+        written.append(json.loads(line))
+        if written[-1].get("id") == 3:
+            done.set()
+
+    async def lines() -> AsyncIterator[str]:
+        for message in PROMPT:
+            yield json.dumps(message)
+        await done.wait()
+
+    async def unreachable(method: str, params: JsonObject) -> JsonValue:
+        raise httpx.ConnectError("connection refused")
+
+    status = await asyncio.wait_for(
+        relay.relay_agent(
+            agent(tmp_path), unreachable, SERVER, "/", lines(), write
+        ),
+        30,
+    )
+    answers = written[-1]["result"]["_meta"]["answers"]
+    codes = [answer["error"]["code"] for answer in answers]
+    assert (status, codes) == (0, [-32603, -32603, -32603, -32602])
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_relay_stops_the_agent(tmp_path):
+    pid_file = tmp_path / "agent.pid"
+    script = tmp_path / "waits.py"
+    script.write_text(
+        "import os, sys\n"
+        "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+        "sys.stdin.read()\n"
+    )
+
+    async def lines() -> AsyncIterator[str]:
+        await asyncio.Event().wait()
+        yield ""
+
+    async def write(line: str) -> None:
+        raise AssertionError(line)
+
+    running = asyncio.create_task(
+        relay.relay_agent(
+            [sys.executable, str(script), str(pid_file)],
+            no_call,
+            SERVER,
+            "/",
+            lines(),
+            write,
+        )
+    )
+    while not pid_file.exists() or not pid_file.read_text():
+        await asyncio.sleep(0.01)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
 
 
 @pytest.mark.asyncio

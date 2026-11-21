@@ -840,6 +840,22 @@ async def test_sessions_with_one_view_share_the_machine():
 
 
 @pytest.mark.asyncio
+async def test_sessions_share_whatever_order_their_mounts_were_listed_in():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    first = await ws.session(
+        "first", mounts={"/data": "read", "/my notes": "read"}
+    )
+    second = await ws.session(
+        "second", mounts={"/my notes": "read", "/data": "read"}
+    )
+    assert (await first.shell("python3 job.py")).exit_code == 0
+    result = await second.shell("python3 job.py")
+    assert (result.exit_code, await result.stderr_str()) == (0, "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_session_made_again_under_its_view_shares_the_machine():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)

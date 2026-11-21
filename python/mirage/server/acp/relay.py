@@ -32,10 +32,12 @@ from mirage.server.acp.constants import (
     FILE_METHODS,
     FORK_SESSION,
     INITIALIZE,
+    LINE_BREAK,
     LINE_LIMIT,
     NEW_SESSION,
     READ_TEXT_FILE,
     RPC_NOT_FOUND,
+    RPC_TIMEOUT,
     SESSION_METHODS,
 )
 from mirage.server.acp.errors import WorkspaceCallError
@@ -114,7 +116,8 @@ def workspace_path(path: str, cwd: str | None, root: str) -> str:
 
 
 def text_slice(text: str, line: int | None, limit: int | None) -> str:
-    """The lines ACP's ``line`` (1-based) and ``limit`` pick from a file.
+    """The lines ACP's ``line`` (1-based) and ``limit`` pick from a file,
+    each ending at CRLF, CR or LF.
 
     Args:
         text (str): the file's text.
@@ -125,7 +128,10 @@ def text_slice(text: str, line: int | None, limit: int | None) -> str:
     """
     if line is None and limit is None:
         return text
-    lines = text.splitlines(keepends=True)
+    parts = LINE_BREAK.split(text)
+    lines = [a + b for a, b in zip(parts[::2], parts[1::2], strict=False)]
+    if parts[-1]:
+        lines.append(parts[-1])
     start = max(line - 1, 0) if line is not None else 0
     end = start + limit if limit is not None else None
     return "".join(lines[start:end])
@@ -253,6 +259,13 @@ class AgentRelay:
                 "id": message["id"],
                 "error": {"code": code, "message": e.message},
             }
+        except Exception as exc:
+            logger.debug("acp file request failed: %r", exc)
+            reply = {
+                "jsonrpc": "2.0",
+                "id": message["id"],
+                "error": {"code": ACP_INTERNAL_ERROR, "message": str(exc)},
+            }
         await self._to_agent(json.dumps(reply))
 
     def _path(self, params: JsonObject) -> str:
@@ -359,6 +372,9 @@ async def relay_agent(
     finally:
         client.cancel()
         await asyncio.gather(client, return_exceptions=True)
+        if agent.returncode is None:
+            agent.kill()
+            await agent.wait()
         await relay.close()
     return status if status >= 0 else 128 - status
 
@@ -408,15 +424,25 @@ async def relay_stdio(
     ) as http:
 
         async def call(method: str, params: JsonObject) -> JsonValue:
-            response = await http.post(
-                url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": next(ids),
-                    "method": method,
-                    "params": params,
-                },
-            )
+            try:
+                async with asyncio.timeout(RPC_TIMEOUT):
+                    response = await http.post(
+                        url,
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": next(ids),
+                            "method": method,
+                            "params": params,
+                        },
+                    )
+            except (httpx.HTTPError, TimeoutError) as exc:
+                logger.debug("acp workspace call failed: %r", exc)
+                raise WorkspaceCallError(
+                    ACP_INTERNAL_ERROR,
+                    "the workspace did not answer in time"
+                    if isinstance(exc, TimeoutError)
+                    else f"the workspace is unreachable: {exc}",
+                ) from exc
             try:
                 body = response.json()
             except ValueError as exc:

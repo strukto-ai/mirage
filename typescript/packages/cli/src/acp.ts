@@ -17,7 +17,7 @@ import type { Command } from 'commander'
 import { MCP_ENV_NAMES, relayWorkspace } from './mcp.ts'
 import { fail } from './output.ts'
 
-export const ACP_SERVER_NAME = 'mirage'
+const ACP_SERVER_NAME = 'mirage'
 
 /** The workspace id in a `/v1/workspaces/:id/...` URL. */
 export function workspaceOf(url: string): string {
@@ -56,7 +56,7 @@ export function registerAcpCommand(program: Command): void {
     .option('-w, --workspace <id>', 'Serve this daemon workspace instead of loading a config')
     .option('-s, --session <id>', "Session the agent acts as; the workspace's default when absent")
     .option('--root <path>', "Workspace path the client's project folder stands for", '/')
-    .allowUnknownOption()
+    .passThroughOptions()
     .description('Run an ACP agent on a Mirage workspace.')
     .action(acpCmd)
 }

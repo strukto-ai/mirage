@@ -55,7 +55,8 @@ function resolveVersion(): string {
 /**
  * The `mirage` program. A usage error exits 2, as the Python CLI's does,
  * where commander would exit 1; help and the version still exit 0. Every
- * subcommand inherits that.
+ * subcommand inherits that. `--context` goes before the subcommand, as in
+ * the Python CLI.
  */
 export function buildProgram(): Command {
   const program = new Command()
@@ -64,6 +65,7 @@ export function buildProgram(): Command {
     .description('Mirage daemon CLI: manage workspaces and run shell lines.')
     .exitOverride((err) => process.exit(err.exitCode === 1 ? 2 : err.exitCode))
     .version(resolveVersion())
+    .enablePositionalOptions()
     .option(
       '--context <name>',
       'Run this one command in another context; $MIRAGE_CONTEXT does the same',

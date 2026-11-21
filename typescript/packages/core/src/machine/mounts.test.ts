@@ -900,6 +900,17 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
+  it('lets sessions share whatever order their mounts were listed in', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const first = await ws.session('first', { mounts: { '/data': 'read', '/my notes': 'read' } })
+    const second = await ws.session('second', { mounts: { '/my notes': 'read', '/data': 'read' } })
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    const result = await second.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+    await ws.close()
+  })
+
   it('lets a session made again under its view share the machine', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox)

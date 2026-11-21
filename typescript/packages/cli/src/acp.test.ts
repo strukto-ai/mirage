@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Command } from 'commander'
 import { describe, expect, it } from 'vitest'
-import { mcpServer, workspaceOf } from './acp.ts'
+import { mcpServer, registerAcpCommand, workspaceOf } from './acp.ts'
 
 describe('workspaceOf', () => {
   it.each([
@@ -33,5 +34,29 @@ describe('mcpServer', () => {
       env: [],
     })
     expect(mcpServer('demo', undefined).args).not.toContain('--session')
+  })
+})
+
+describe('registerAcpCommand', () => {
+  it.each([
+    [
+      ['-w', 'demo', 'agent', '--config', 'agent.yaml'],
+      ['agent', '--config', 'agent.yaml'],
+    ],
+    [
+      ['-w', 'demo', '--', 'agent', '-w', 'x'],
+      ['agent', '-w', 'x'],
+    ],
+  ])('leaves the options after the agent to the agent (%j)', async (argv, agent) => {
+    const program = new Command().enablePositionalOptions()
+    registerAcpCommand(program)
+    const seen: [string[], Record<string, string | undefined>][] = []
+    program.commands
+      .find((command) => command.name() === 'acp')
+      ?.action((given: string[], options: Record<string, string | undefined>) => {
+        seen.push([given, options])
+      })
+    await program.parseAsync(['acp', ...argv], { from: 'user' })
+    expect(seen).toEqual([[agent, { workspace: 'demo', root: '/' }]])
   })
 })

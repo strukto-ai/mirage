@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 # The Agent Client Protocol methods the relay reads or answers. The client
 # says in initialize which of its methods an agent may call; the relay adds
 # the two file methods and answers them from the workspace.
@@ -39,3 +41,10 @@ RPC_NOT_FOUND = -32004
 
 # The longest line read from the agent: one message carries a whole file.
 LINE_LIMIT = 64 * 1024 * 1024
+
+# Seconds a workspace RPC call may take before the agent's file request is
+# answered with an error.
+RPC_TIMEOUT = 300.0
+
+# A line ends at CRLF, CR or LF, as an editor counts lines.
+LINE_BREAK = re.compile(r"(\r\n|\r|\n)")

@@ -18,6 +18,7 @@ import { createInterface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
 import { debuglog } from 'node:util'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { traceHeaders } from '../env.ts'
 import {
   ACP_INTERNAL_ERROR,
@@ -26,10 +27,12 @@ import {
   FILE_METHODS,
   FORK_SESSION,
   INITIALIZE,
+  LINE_BREAK,
   LINE_LIMIT,
   NEW_SESSION,
   READ_TEXT_FILE,
   RPC_NOT_FOUND,
+  RPC_TIMEOUT,
   SESSION_METHODS,
 } from './constants.ts'
 import { WorkspaceCallError } from './errors.ts'
@@ -87,20 +90,24 @@ export function withMirage(params: JsonRecord, server: JsonRecord): JsonRecord {
  */
 export function workspacePath(path: string, cwd: string | null, root: string): string {
   if (cwd !== null) {
-    const base = cwd.replace(/\/+$/, '')
+    const base = rstripSlash(cwd)
     if (path === (base === '' ? '/' : base)) return root
-    if (path.startsWith(`${base}/`)) return root.replace(/\/+$/, '') + path.slice(base.length)
+    if (path.startsWith(`${base}/`)) return rstripSlash(root) + path.slice(base.length)
   }
   return path
 }
 
 /**
  * The lines ACP's `line` (1-based, null from the top) and `limit` (null to
- * the end) pick from a file.
+ * the end) pick from a file, each ending at CRLF, CR or LF.
  */
 export function textSlice(text: string, line: number | null, limit: number | null): string {
   if (line === null && limit === null) return text
-  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  const parts = text.split(LINE_BREAK)
+  const lines: string[] = []
+  for (let i = 0; i + 1 < parts.length; i += 2) lines.push(`${parts[i] ?? ''}${parts[i + 1] ?? ''}`)
+  const last = parts[parts.length - 1] ?? ''
+  if (last !== '') lines.push(last)
   const start = line !== null ? Math.max(line - 1, 0) : 0
   const end = limit !== null ? start + limit : undefined
   return lines.slice(start, end).join('')
@@ -210,14 +217,19 @@ export class AgentRelay {
         message.method === READ_TEXT_FILE ? await this.read(params) : await this.write(params)
       reply = { jsonrpc: '2.0', id, result }
     } catch (error) {
-      if (!(error instanceof WorkspaceCallError)) throw error
-      const code =
-        error.code === RPC_NOT_FOUND
-          ? ACP_RESOURCE_NOT_FOUND
-          : error.code === ACP_INVALID_PARAMS
-            ? ACP_INVALID_PARAMS
-            : ACP_INTERNAL_ERROR
-      reply = { jsonrpc: '2.0', id, error: { code, message: error.message } }
+      if (error instanceof WorkspaceCallError) {
+        const code =
+          error.code === RPC_NOT_FOUND
+            ? ACP_RESOURCE_NOT_FOUND
+            : error.code === ACP_INVALID_PARAMS
+              ? ACP_INVALID_PARAMS
+              : ACP_INTERNAL_ERROR
+        reply = { jsonrpc: '2.0', id, error: { code, message: error.message } }
+      } else {
+        logger.debug('acp file request failed: %s', error)
+        const message = error instanceof Error ? error.message : String(error)
+        reply = { jsonrpc: '2.0', id, error: { code: ACP_INTERNAL_ERROR, message } }
+      }
     }
     await this.toAgent(JSON.stringify(reply))
   }
@@ -312,6 +324,9 @@ export async function relayAgent(
       resolve(code ?? 128 + (signal !== null ? constants.signals[signal] : 0))
     })
   })
+  agent.stdin.on('error', (err) => {
+    logger.debug('acp agent stdin closed: %s', err)
+  })
   const relay = new AgentRelay(agent, call, server, root, hostWrite)
   void (async () => {
     for (let next = await incoming.next(); next.done !== true; next = await incoming.next()) {
@@ -329,6 +344,10 @@ export async function relayAgent(
     }
     return await exited
   } finally {
+    if (agent.exitCode === null && agent.signalCode === null) {
+      agent.kill('SIGKILL')
+      await exited
+    }
     await relay.close()
   }
 }
@@ -351,21 +370,39 @@ export async function relayStdio(
   const call: WorkspaceCall = async (method, params) => {
     ids += 1
     const bearer = await token()
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        ...traceHeaders(process.env),
-        ...(bearer !== '' ? { Authorization: `Bearer ${bearer}` } : {}),
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ids, method, params }),
-    })
+    const signal = AbortSignal.timeout(RPC_TIMEOUT * 1000)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          ...traceHeaders(process.env),
+          ...(bearer !== '' ? { Authorization: `Bearer ${bearer}` } : {}),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ids, method, params }),
+        signal,
+      })
+    } catch (err) {
+      logger.debug('acp workspace call failed: %s', err)
+      throw new WorkspaceCallError(
+        ACP_INTERNAL_ERROR,
+        signal.aborted
+          ? 'the workspace did not answer in time'
+          : `the workspace is unreachable: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
     let body: JsonValue
     try {
       body = (await response.json()) as JsonValue
     } catch (err) {
       logger.debug('acp rpc answer is not JSON: %s', err)
-      throw new WorkspaceCallError(ACP_INTERNAL_ERROR, `error ${String(response.status)}`)
+      throw new WorkspaceCallError(
+        ACP_INTERNAL_ERROR,
+        signal.aborted
+          ? 'the workspace did not answer in time'
+          : `error ${String(response.status)}`,
+      )
     }
     const error = isRecord(body) ? body.error : undefined
     if (isRecord(error)) {
@@ -387,5 +424,9 @@ export async function relayStdio(
       })
     })
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
-  return relayAgent(argv, call, server, root, lines, write)
+  try {
+    return await relayAgent(argv, call, server, root, lines, write)
+  } finally {
+    lines.close()
+  }
 }

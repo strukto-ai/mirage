@@ -19,7 +19,7 @@ export const INITIALIZE = 'initialize'
 export const NEW_SESSION = 'session/new'
 export const FORK_SESSION = 'session/fork'
 export const READ_TEXT_FILE = 'fs/read_text_file'
-export const WRITE_TEXT_FILE = 'fs/write_text_file'
+const WRITE_TEXT_FILE = 'fs/write_text_file'
 export const FILE_METHODS: ReadonlySet<string> = new Set([READ_TEXT_FILE, WRITE_TEXT_FILE])
 
 // The requests that start or reopen a session and so take MCP servers. The
@@ -42,3 +42,10 @@ export const RPC_NOT_FOUND = -32004
 
 // The longest line read from the agent: one message carries a whole file.
 export const LINE_LIMIT = 64 * 1024 * 1024
+
+// Seconds a workspace RPC call may take before the agent's file request is
+// answered with an error.
+export const RPC_TIMEOUT = 300
+
+// A line ends at CRLF, CR or LF, as an editor counts lines.
+export const LINE_BREAK = /(\r\n|\r|\n)/

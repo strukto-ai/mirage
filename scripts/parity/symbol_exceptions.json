@@ -371,6 +371,7 @@
   "machine/mounts": {
    "typescript_only": {
     "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
+    "keysInOrder": "a JSON.stringify replacer that sorts object keys, so two views compare equal whatever order their mappings were built in; Python compares the view tuples directly, and dict equality already ignores key order.",
     "pipeServers": "the file server each transport's import registered (registerPipeServer); Python imports the transport's server module on the first mount (pipe_server).",
     "registerPipeServer": "a host opts into serving files by importing mount/sftp or mount/fsproto, each registering its server for its transport, since a bundle that cannot run ssh2 (the browser) must not import mount/sftp; Python imports the server module directly.",
     "sleep": "asyncio.sleep in Python.",

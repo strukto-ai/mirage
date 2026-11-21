@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
@@ -25,6 +25,22 @@ import { relayAgent, relayStdio, textSlice, withFiles, withMirage, workspacePath
 type JsonRecord = Record<string, JsonValue>
 
 const SERVER: JsonRecord = { name: 'mirage', command: '/bin/mirage', args: [], env: [] }
+
+const PROMPT = [
+  {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: 1, clientCapabilities: {} },
+  },
+  {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'session/new',
+    params: { cwd: '/home/me/proj', mcpServers: [] },
+  },
+  { jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } },
+]
 
 const AGENT = `
 import { createInterface } from 'node:readline'
@@ -157,6 +173,14 @@ describe('textSlice', () => {
   ])('line %s limit %s', (line, limit, expected) => {
     expect(textSlice('one\ntwo\nthree', line, limit)).toBe(expected)
   })
+
+  it.each([
+    ['a\rb\r', 2, 1, 'b\r'],
+    ['a\r\nb\nc', 2, null, 'b\nc'],
+    ['a\vb\fc\nd', 2, 1, 'd'],
+  ])('ends lines at CRLF, CR or LF (%j)', (text, line, limit, expected) => {
+    expect(textSlice(text, line, limit)).toBe(expected)
+  })
 })
 
 describe('relayStdio', () => {
@@ -183,22 +207,7 @@ describe('relayStdio', () => {
       callback?.()
       return true
     })
-    const sent = [
-      {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: { protocolVersion: 1, clientCapabilities: {} },
-      },
-      {
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'session/new',
-        params: { cwd: '/home/me/proj', mcpServers: [] },
-      },
-      { jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } },
-    ]
-    stdin.write(sent.map((one) => `${JSON.stringify(one)}\n`).join(''))
+    stdin.write(PROMPT.map((one) => `${JSON.stringify(one)}\n`).join(''))
     const running = relayStdio(agent(), url, () => Promise.resolve(''), SERVER, '/')
     await answered
     stdin.end()
@@ -241,6 +250,51 @@ describe('relayAgent', () => {
     })
     expect([status, written]).toEqual([3, []])
   })
+
+  it('answers an error for a failed workspace call', async () => {
+    const written: JsonRecord[] = []
+    let done: () => void = () => undefined
+    const answered = new Promise<void>((resolve) => {
+      done = resolve
+    })
+    async function* lines(): AsyncGenerator<string> {
+      for (const message of PROMPT) yield JSON.stringify(message)
+      await answered
+    }
+    const unreachable = (): Promise<JsonValue> => Promise.reject(new TypeError('fetch failed'))
+    const status = await relayAgent(agent(), unreachable, SERVER, '/', lines(), (line) => {
+      written.push(JSON.parse(line) as JsonRecord)
+      if (written.at(-1)?.id === 3) done()
+      return Promise.resolve()
+    })
+    const answers = ((written.at(-1)?.result as JsonRecord)._meta as JsonRecord)
+      .answers as JsonRecord[]
+    const codes = answers.map((one) => (one.error as JsonRecord).code)
+    expect([status, codes]).toEqual([0, [-32603, -32603, -32603, -32602]])
+  }, 30_000)
+
+  it('stops the agent when the relay fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-acp-stop-'))
+    const script = join(dir, 'waits.mjs')
+    const pidFile = join(dir, 'agent.pid')
+    writeFileSync(
+      script,
+      "import { writeFileSync } from 'node:fs'\n" +
+        'writeFileSync(process.argv[2], String(process.pid))\n' +
+        "process.stdout.write('{}\\n')\n" +
+        "process.stdin.on('data', () => undefined)\n",
+    )
+    async function* forever(): AsyncGenerator<string> {
+      await new Promise<never>(() => undefined)
+      yield ''
+    }
+    await expect(
+      relayAgent([process.execPath, script, pidFile], noCall, SERVER, '/', forever(), () =>
+        Promise.reject(new Error('client gone')),
+      ),
+    ).rejects.toThrow('client gone')
+    expect(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0)).toThrow()
+  }, 30_000)
 
   it('rejects a missing agent with ENOENT', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-acp-none-'))

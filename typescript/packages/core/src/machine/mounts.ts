@@ -105,11 +105,19 @@ const ENCODER = new TextEncoder()
  * What a served machine shows `session`: its record's `VIEW_KEYS`. Each SSH
  * login, port forward and reconnect is a session of its own, so a machine
  * compares views, not sessions: one whose view matches the served session's
- * runs there too.
+ * runs there too. Keys compare in any order, as Python's dicts do.
  */
 function viewOf(session: SessionState): string {
   const record = session.toDict(false)
-  return JSON.stringify(VIEW_KEYS.map((key) => record[key] ?? null))
+  return JSON.stringify(
+    VIEW_KEYS.map((key) => record[key] ?? null),
+    keysInOrder,
+  )
+}
+
+function keysInOrder(_key: string, value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 const OCTAL_ESCAPE = /\\([0-7]{3})/g
