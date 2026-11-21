@@ -1498,6 +1498,62 @@ def _walked_line(
             yield item
 
 
+def may_prejudge(
+    ast: Any,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    handed: HandOff,
+) -> bool:
+    """Whether :func:`line_judgments` may judge two commands of ``ast``,
+    the least :func:`prejudge_line` refuses a line on.
+
+    It walks the line as that pass does and stops at the second command;
+    for a line with one, that command is judged once more only for the
+    lines it runs (``eval``, ``sh -c``, ``env``, ``xargs``, ``find
+    -exec``), read as the pass reads them. False means the pass would
+    judge fewer than two commands, so a one-command line skips it and
+    its command is judged once, by the per-command gate. True only
+    sends the line through the pass, which counts again.
+
+    Args:
+        ast (Any): the parsed root node.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the CLI installs and
+            mount lookups.
+        namespace (Namespace | None): the link table.
+        handed (HandOff): the line's hand-off, whose origin places each
+            command on the line.
+    """
+    frame = root_frame(ast, handed.origin)
+    only: Walked | None = None
+    for item in _walked_line(ast, session, frame):
+        if item.words[0].text is None:
+            continue
+        if only is not None:
+            return True
+        only = item
+    if only is None:
+        return False
+    name = only.words[0].value
+    if runs_function(name, only.session, registry):
+        return False
+    inners = (
+        inner_lines(name, only.words[1:])
+        if only.lost and not name.startswith("/")
+        else program_lines(
+            only.words,
+            only.session,
+            registry,
+            None
+            if namespace is None
+            else namespace.session_links(only.session),
+            only.open_,
+        )
+    )
+    return any(inner.readable for inner in inners)
+
+
 async def line_judgments(
     ast: Any,
     session: SessionState,
@@ -1658,6 +1714,8 @@ async def prejudge_line(
         The line's refusal, or None to run it.
     """
     if judged is None:
+        if not may_prejudge(ast, session, registry, namespace, handed):
+            return None
         judged = await line_judgments(
             ast, session, registry, namespace, handed
         )

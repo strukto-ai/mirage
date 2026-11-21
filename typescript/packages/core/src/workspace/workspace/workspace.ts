@@ -366,7 +366,12 @@ export class Workspace {
   private readonly programMachine: string | null
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
-  private keptView: { session: SessionState; policies: Policies; view: SessionView } | null = null
+  private keptView: {
+    session: SessionState
+    policies: Policies
+    view: SessionView
+    vfs: Files
+  } | null = null
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private readonly policyFunctions: Readonly<Record<string, (...args: never[]) => unknown>>
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
@@ -845,18 +850,22 @@ export class Workspace {
       session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
     }
     if (session === null) return null
-    if (this.keptView?.session !== session || this.keptView.policies !== this.policies)
+    if (
+      this.keptView?.session !== session ||
+      this.keptView.policies !== this.policies ||
+      this.keptView.vfs.sessionId !== session.sessionId
+    )
       this.keptView = {
         session,
         policies: this.policies,
         view: Object.freeze(sessionView(session, undefined, true)),
+        // A method decides: its files say so on each op's own caller, so its
+        // reads run and its writes are refused wherever it runs.
+        vfs: withCaller(this.vfs.forSession(session.sessionId), {
+          explaining: DryRun.DECIDING,
+        }),
       }
-    const view = this.keptView.view
-    // A method decides: its files say so on each op's own caller, so its
-    // reads run and its writes are refused wherever it runs.
-    const vfs = withCaller(this.vfs.forSession(session.sessionId), {
-      explaining: DryRun.DECIDING,
-    })
+    const { view, vfs } = this.keptView
     return { session: view, vfs, caller: policyCaller(session, this.policies.account) }
   }
 

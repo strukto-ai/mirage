@@ -378,6 +378,12 @@ async def pre_vfs_gate(
     one refuses with the ask id on the record. Inside a line an Ask
     refuses like a deny, since the line was admitted without it.
 
+    The chain runs only where it can speak: when some policy will answer
+    ``pre_vfs`` for this session (``Policies.wants_for``, asked on every
+    call, so a policy added or a program a session's profile gains later
+    is judged from the next op), or for a write on a mount with a mode,
+    which the mount mode answers alone.
+
     Args:
         policies (Policies): the workspace's admission policies.
         call (VfsCall): the function called; a destination's with
@@ -406,18 +412,18 @@ async def pre_vfs_gate(
     """
     if caller is None:
         caller = current_caller()
-    ctx = VfsContext(
-        call=call,
-        path=path,
-        write=write,
-        prefix=prefix,
-        session_id=session_id,
-        mode=mode,
-        caller=policy_caller(caller.session, policies.account),
-    )
     trace = caller.explaining
     line = caller.refusals is not None
     if isinstance(trace, list):
+        ctx = VfsContext(
+            call=call,
+            path=path,
+            write=write,
+            prefix=prefix,
+            session_id=session_id,
+            mode=mode,
+            caller=policy_caller(caller.session, policies.account),
+        )
         token = set_explaining(DryRun.DECIDING)
         try:
             noted = await _apart(_explained_op(policies, ctx, decisions, line))
@@ -427,12 +433,23 @@ async def pre_vfs_gate(
         if final or noted.error:
             raise Explained()
         return
-    deciding = trace is DryRun.DECIDING
-    if deciding and write:
-        raise erofs(path.virtual)
-    if not (policies.wants("pre_vfs") or (write and mode is not None)):
+    if trace is DryRun.DECIDING:
+        if write:
+            raise erofs(path.virtual)
         return
-    answer = await _apart(policies.pre_vfs(ctx, rules_only=deciding))
+    wants = await policies.wants_for("pre_vfs", session_id)
+    if not (wants or (write and mode is not None)):
+        return
+    ctx = VfsContext(
+        call=call,
+        path=path,
+        write=write,
+        prefix=prefix,
+        session_id=session_id,
+        mode=mode,
+        caller=policy_caller(caller.session, policies.account),
+    )
+    answer = await _apart(policies.pre_vfs(ctx, rules_only=not wants))
     await _refuse_op(ctx, answer, None if line else decisions, caller)
 
 
@@ -869,8 +886,9 @@ class Policies:
     def wants(self, method: str) -> bool:
         """True when any policy overrides ``method``.
 
-        O(1); the op seams gate on it so a workspace with no op
-        policies pays nothing per VFS op.
+        O(1), the static answer: true for every session as soon as one
+        policy overrides the method. The VFS op gate asks ``wants_for``
+        instead, so a session no policy speaks for pays nothing per op.
 
         Args:
             method (str): method name (pre_command, pre_vfs, post_vfs).
@@ -884,10 +902,12 @@ class Policies:
 
         The per-session refinement of ``wants``: a policy that overrides
         the method counts, unless it speaks per session
-        (``SessionScopedMixin``) and says this is not one of its. For
-        a seam that pays ahead for a method rather than gating on it, a
-        profile's policy at that entry point is one profile's, not every
-        session's.
+        (``SessionScopedMixin``) and says this is not one of its. A
+        profile's policy at an entry point is one profile's, not every
+        session's, so a seam that gates on it or pays ahead for a method
+        charges only the sessions it speaks for. It is asked afresh on
+        each call: a policy added or a program a session gains later
+        counts from the next.
 
         Args:
             method (str): method name (pre_command, pre_vfs, pre_network).
@@ -1198,9 +1218,9 @@ class Policies:
 
         Args:
             ctx (VfsContext): the op about to run.
-            rules_only (bool): ask the profile's path rules alone, for an
-                op a running command makes; the mount mode answers either
-                way.
+            rules_only (bool): ask the profile's rules alone, for an op
+                no registered policy speaks for in this session; the
+                mount mode answers either way.
         """
         action, _, _ = await self._fire("pre_vfs", ctx, rules_only=rules_only)
         return action

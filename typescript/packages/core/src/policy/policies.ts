@@ -389,6 +389,11 @@ async function explainedOp(
  * decides that op throws EROFS, since the dry run may change nothing, and
  * an ask its read meets reads the ledger and records nothing. `caller` is
  * who makes the call; without one, the gate reads the async context's.
+ * The chain runs only where it can speak: when some policy will answer
+ * `preVfs` for this session (`Policies.wantsFor`, asked on every call, so a
+ * policy added or a program a session's profile gains later is judged from
+ * the next op), or for a write on a mount with a mode, which the mount mode
+ * answers alone.
  */
 /**
  * A VFS call's policy answer, the policy's own reads recorded apart. They
@@ -418,19 +423,19 @@ export async function preVfsGate(
   } = {},
 ): Promise<void> {
   const { decisions = null, final = true, caller, ...context } = access
-  const ctx: VfsContext = {
-    call,
-    path,
-    write,
-    prefix,
-    sessionId,
-    ...(issuer !== undefined ? { issuer } : {}),
-    ...context,
-    caller: policyCaller((caller ?? currentCaller()).session, policies.account),
-  }
   const trace = caller === undefined ? explaining() : caller.explaining
   const line = caller === undefined ? lineRunning() : caller.refusals !== null
   if (Array.isArray(trace)) {
+    const ctx: VfsContext = {
+      call,
+      path,
+      write,
+      prefix,
+      sessionId,
+      ...(issuer !== undefined ? { issuer } : {}),
+      ...context,
+      caller: policyCaller((caller ?? currentCaller()).session, policies.account),
+    }
     const decide = (): Promise<VfsExplanation> =>
       apart(() => explainedOp(policies, ctx, decisions, line))
     // Without task isolation the binding would reach other tasks' ops; there
@@ -442,10 +447,23 @@ export async function preVfsGate(
     if (final || noted.error !== '') throw new Explained()
     return
   }
-  const deciding = trace === DryRun.DECIDING
-  if (deciding && write) throw erofs(path)
-  if (!(policies.wants('preVfs') || (write && context.mode !== undefined))) return
-  const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, deciding))
+  if (trace === DryRun.DECIDING) {
+    if (write) throw erofs(path)
+    return
+  }
+  const wants = await policies.wantsFor('preVfs', sessionId)
+  if (!(wants || (write && context.mode !== undefined))) return
+  const ctx: VfsContext = {
+    call,
+    path,
+    write,
+    prefix,
+    sessionId,
+    ...(issuer !== undefined ? { issuer } : {}),
+    ...context,
+    caller: policyCaller((caller ?? currentCaller()).session, policies.account),
+  }
+  const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, !wants))
   await refuseOp(ctx, answer, line ? null : decisions, caller)
 }
 
@@ -690,8 +708,10 @@ export class Policies {
   }
 
   /**
-   * True when any policy defines `method`. O(1); the op seam gates on it
-   * so a workspace with no op policies pays nothing per VFS op.
+   * True when any policy defines `method`. O(1), the static answer: true
+   * for every session as soon as one policy defines the method. The VFS op
+   * gate asks `wantsFor` instead, so a session no policy speaks for pays
+   * nothing per op.
    */
   wants(method: PolicyMethod): boolean {
     return this.wanted.has(method)
@@ -701,10 +721,12 @@ export class Policies {
    * True when some policy will speak at `method` for this session. The
    * per-session refinement of `wants`: a policy that defines the method
    * counts, unless it speaks per session (`SessionScopedMixin`) and says this
-   * is not one of its. For a seam that pays ahead for a method rather than
-   * gating on it, a profile's policy at that entry point is one profile's,
-   * not every session's. `codedOnly` leaves the profile's rules out, for a
-   * caller whose line's gate already answers for them.
+   * is not one of its. A profile's policy at an entry point is one profile's,
+   * not every session's, so a seam that gates on it or pays ahead for a
+   * method charges only the sessions it speaks for. It is asked afresh on
+   * each call: a policy added or a program a session gains later counts from
+   * the next. `codedOnly` leaves the profile's rules out, for a caller whose
+   * line's gate already answers for them.
    */
   async wantsFor(method: PolicyMethod, sessionId: string, codedOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
@@ -962,8 +984,8 @@ export class Policies {
    * gets here: the dispatcher's walk answers it as absent first (`sees`),
    * so a refusal never tells a session a hidden name exists. The built-in
    * mount mode answers after the policies, whether or not any policy
-   * overrides the method; `rulesOnly` asks the profile's path rules alone,
-   * for an op a running command makes.
+   * overrides the method; `rulesOnly` asks the profile's rules alone, for
+   * an op no registered policy speaks for in this session.
    */
   async preVfs(ctx: VfsContext, rulesOnly = false): Promise<Deny | Ask | null> {
     const [action] = await this.fire('preVfs', ctx, false, rulesOnly)

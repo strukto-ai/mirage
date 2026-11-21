@@ -43,6 +43,7 @@ import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
 import type { Policy } from '../../policy/base.ts'
+import { type AskHandler, Outcome, Scope } from '../../policy/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { followedDay } from '../../core/time_range.ts'
@@ -3822,10 +3823,16 @@ it.each(['/data/file', '/unmounted'])(
 
 class CountedRemoval extends RAMVFS {
   removals = 0
+  unlinks = 0
 
   override rmR(path: PathSpec): Promise<void> {
     this.removals += 1
     return super.rmR(path)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    this.unlinks += 1
+    return super.unlink(path)
   }
 }
 
@@ -3846,6 +3853,37 @@ it.each([
     await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
     await ws.shell('rm -r /d/t', { sessionId: 'agent' })
     expect(vfs.removals).toBe(removals)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps the one-call tree removal under an approved ask', async () => {
+  // The nod the gate took for the line answers for every entry below it, so
+  // no entry is left to judge and the backend removes the tree in one call;
+  // the nod is spent, so the next line asks again.
+  const asked: string[] = []
+  const allowsOnce: AskHandler = (record) => {
+    asked.push(record.id)
+    return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+  }
+  const vfs = new CountedRemoval()
+  const ws = new Workspace({ '/d': vfs }, { mode: MountMode.WRITE, onAsk: allowsOnce })
+  try {
+    ws.createSession('agent', {
+      profile: SessionProfile({
+        commands: { rm: { decision: 'ask', reason: 'confirm', paths: ['/d/t/*'] } },
+      }),
+    })
+    for (const run of [1, 2]) {
+      await ws.shell('mkdir -p /d/t/a /d/t/b && echo 1 > /d/t/a/f && echo 2 > /d/t/b/g')
+      const io = await ws.shell('rm -rf /d/t', { sessionId: 'agent' })
+      expect(io.exitCode).toBe(0)
+      expect(asked).toHaveLength(run)
+      expect([vfs.removals, vfs.unlinks]).toEqual([run, 0])
+      const listed = await ws.shell('ls /d')
+      expect(DEC.decode(await materialize(listed.stdout))).toBe('')
+    }
   } finally {
     await ws.close()
   }

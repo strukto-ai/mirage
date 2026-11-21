@@ -165,26 +165,42 @@ def naming_rules(
     return Encoded(json.dumps(walked))
 
 
+def _granted_indices(
+    rules: AdmissionRules, granted: Collection[CommandRule]
+) -> list[int]:
+    return [i for i, rule in enumerate(rule_table(rules)) if rule in granted]
+
+
 def io_reach(
-    rules: AdmissionRules | None, named: Encoded | None, virtual: str
+    rules: AdmissionRules | None,
+    named: Encoded | None,
+    virtual: str,
+    granted: Collection[CommandRule] = (),
 ) -> bool:
     """Whether a leaf the running line walked could refuse an entry at
     or under this path: its paths could cover something in the subtree.
 
     What a native walk asks before it trusts the raw tree, per operand
     the way a hide is: a leaf on ``/repo/.env`` leaves ``find /s3`` its
-    native op.
+    native op. An ask the line holds a grant for refuses no entry
+    (``io_refusal``), so it reaches none: ``rm -rf /x`` approved under
+    an ask on ``/x/*`` keeps the backend's one-call removal.
 
     Args:
         rules (AdmissionRules | None): the session's command trees.
         named (Encoded | None): the line's walk (``naming_rules``).
         virtual (str): absolute virtual path of the walk's start point.
+        granted (Collection[CommandRule]): the asks the line runs under
+            a grant for.
     """
     return (
         rules is not None
         and named is not None
         and admission_matcher(rules).ask(
-            "io_reach", walked=named, path=units(virtual)
+            "io_reach",
+            walked=named,
+            path=units(virtual),
+            granted=_granted_indices(rules, granted),
         )
         is True
     )
@@ -216,14 +232,15 @@ def io_refusal(
     """
     if rules is None or named is None:
         return None
-    table = rule_table(rules)
     result = admission_matcher(rules).ask(
         "io_refusal",
         walked=named,
         path=units(virtual),
-        granted=[i for i, rule in enumerate(table) if rule in granted],
+        granted=_granted_indices(rules, granted),
     )
-    return None if result is None else reason_of(table[result], None)
+    return (
+        None if result is None else reason_of(rule_table(rules)[result], None)
+    )
 
 
 def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:

@@ -88,6 +88,8 @@ enum Request {
     IoReach {
         walked: Vec<Walked>,
         path: Text,
+        #[serde(default)]
+        granted: Vec<usize>,
     },
     IoRefusal {
         walked: Vec<Walked>,
@@ -198,9 +200,13 @@ impl Policy {
             Request::NamingRules { tokens, line, tool } => {
                 reply(out, rules.naming(&tokens, line.as_ref(), tool))
             }
-            Request::IoReach { walked, path } => {
-                in_range(&walked, &[], rules.tree_count(), rules.rules().len())?;
-                reply(out, rules.io_reach(&walked, &path))
+            Request::IoReach {
+                walked,
+                path,
+                granted,
+            } => {
+                in_range(&walked, &granted, rules.tree_count(), rules.rules().len())?;
+                reply(out, rules.io_reach(&walked, &path, &granted))
             }
             Request::IoRefusal {
                 walked,
@@ -305,6 +311,15 @@ mod tests {
         assert_eq!(ask(&config, &entry), "1");
         let reach = format!(r#"{{"op": "io_reach", "walked": {walked}, "path": [47,114]}}"#);
         assert_eq!(ask(&config, &reach), "true");
+        let cp = ask(
+            &config,
+            r#"{"op": "naming_rules", "tokens": [[99,112],[47,114]]}"#,
+        );
+        let granted =
+            format!(r#"{{"op": "io_reach", "walked": {cp}, "path": [47,114], "granted": [0]}}"#);
+        assert_eq!(ask(&config, &granted), "false");
+        let held = format!(r#"{{"op": "io_reach", "walked": {cp}, "path": [47,114]}}"#);
+        assert_eq!(ask(&config, &held), "true");
         assert!(ask(&config, r#"{"op": "rules"}"#).contains(r#""at":[47,114,109,47,42]"#));
     }
 
@@ -314,6 +329,9 @@ mod tests {
         assert!(err.unwrap().message.starts_with("bad policy request"));
         let entry = br#"{"op": "io_refusal", "walked": [], "path": [47], "granted": [0]}"#;
         let (_, err) = crate::run("policy", "{}", &[entry]);
+        assert_eq!(err.unwrap().message, "policy rule index is out of range");
+        let reach = br#"{"op": "io_reach", "walked": [], "path": [47], "granted": [0]}"#;
+        let (_, err) = crate::run("policy", "{}", &[reach]);
         assert_eq!(err.unwrap().message, "policy rule index is out of range");
         let refused = crate::open("policy", br#"{"bogus": 1}"#).err().unwrap();
         assert!(refused.message.starts_with("bad stream config"));
