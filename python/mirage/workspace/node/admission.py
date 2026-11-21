@@ -700,7 +700,9 @@ async def gate(
                 line_paths(
                     named,
                     own,
-                    own_facts.follows is not Follow.NONE,
+                    # The path's program never reaches Mirage's own link
+                    # resolution, so it follows links as the path does.
+                    follows,
                     links,
                     session.cwd,
                     own_implied,

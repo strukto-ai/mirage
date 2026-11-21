@@ -749,6 +749,25 @@ describe('a wrapper over a path-spelled program', () => {
 
   // `ls` with no operand lists the cwd, so the name pass judges that folder as
   // `ls` alone would.
+  it('judges the target of a link a path program is handed', async () => {
+    // Mirage's chmod resolves a link itself, later; the machine's never
+    // reaches that, so the name pass judges the link's target.
+    const ws = spelledWs({
+      profiles: {
+        default: SessionProfile({
+          commands: { chmod: { decision: 'deny', reason: 'r', paths: ['/d/s'] } },
+        }),
+      },
+    })
+    try {
+      await ws.shell('mkdir /d && echo x > /d/s && ln -s /d/s /d/l')
+      const r = await ws.shell('/opt/chmod 600 /d/l')
+      expect([r.exitCode === 0, text(r.stdout)]).toEqual([false, ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('judges a path program as a writer when its name writes', async () => {
     // A coded policy sees the name pass's context as `rm` alone gives it.
     const ws = spelledWs({ policies: [new NoWriter()] })

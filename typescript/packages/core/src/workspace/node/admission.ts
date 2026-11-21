@@ -613,7 +613,9 @@ export async function gate(
         linePaths(
           named,
           own,
-          ownFacts.follows !== Follow.NONE,
+          // The path's program never reaches Mirage's own link resolution, so
+          // it follows links as the path does.
+          follows,
           links,
           session.cwd,
           ownImplied,

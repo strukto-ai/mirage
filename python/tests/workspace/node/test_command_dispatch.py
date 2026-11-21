@@ -748,6 +748,20 @@ async def test_a_path_s_name_reaches_the_tree_its_program_removes():
 
 
 @pytest.mark.asyncio
+async def test_a_path_s_name_judges_the_target_of_a_link_it_is_handed():
+    # Mirage's chmod resolves a link itself, later; the machine's never
+    # reaches that, so the name pass judges the link's target.
+    deny = {"chmod": {"decision": "deny", "reason": "r", "paths": ["/d/s"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir /d && echo x > /d/s && ln -s /d/s /d/l")
+        r = await ws.shell("/opt/chmod 600 /d/l")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_path_s_name_writes_as_its_program_does():
     # A coded policy sees the name pass's context as `rm` alone gives it.
     ws = _spelled(policies=[NoWriter()])
