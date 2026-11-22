@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import weakref
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -27,6 +28,7 @@ from mirage.core.sql.inode import Inode, InoRef, by_ino, inode_of, is_dir
 from mirage.errors.fs import eisdir, enoent, enotdir, listing_error
 from mirage.types import PathSpec
 from mirage.utils.path import norm
+from mirage.vfs.sql.types import SqlDriver
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,27 @@ class Walk:
     p: str
     names: tuple[str, ...]
     chain: tuple[Inode | None, ...]
+
+
+@dataclass(frozen=True)
+class Folder:
+    """The folder a driver's last walk went through: its names from the
+    database's root, the inode each reaches, the root's first, and the
+    accessor's ``structure`` when it was read. Mirrors TypeScript's
+    ``Folder``.
+    """
+
+    mark: int
+    names: tuple[str, ...]
+    chain: tuple[Inode, ...]
+
+
+# The last folder walked on each driver that is its database's only writer.
+# Nothing else moves that folder, so the next path through it asks for its
+# last name alone, as a kernel's dentry cache answers the names above.
+FOLDERS: "weakref.WeakKeyDictionary[SqlDriver, Folder]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def names_of(p: str) -> tuple[str, ...]:
@@ -99,15 +122,39 @@ async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
     names = names_of(p)
     every = (*accessor.root_names, *names)
     skip = len(accessor.root_names)
-    start = (await _walk_all(accessor, every))[skip:]
+    driver = accessor.driver
+    remembers = driver.exclusive and bool(names)
+    mark = accessor.structure()
+    kept = FOLDERS.get(driver) if remembers else None
+    if kept is not None and kept.mark == mark and kept.names == every[:-1]:
+        parent, leaf = await _walk_from(
+            accessor, kept.chain[-1].ino, every[-1:]
+        )
+        if (
+            parent is not None
+            and is_dir(parent)
+            and accessor.structure() == mark
+        ):
+            return Walk(p, names, (*kept.chain[:-1], parent, leaf)[skip:])
+        FOLDERS.pop(driver, None)
+    whole = await _walk_all(accessor, every)
     # The mount's folder always stands: one gone since is made again, as
     # the first op made it, and a file standing at it is ENOTDIR.
-    if not _standing(start):
+    if not _standing(whole[skip:]):
         await run_blocking(accessor.root_ino)
-        start = (await _walk_all(accessor, every))[skip:]
+        whole = await _walk_all(accessor, every)
+    start = whole[skip:]
     # Gone again since it was made: every name misses.
     if not _standing(start):
         return Walk(p, names, tuple(None for _ in start))
+    if remembers and accessor.structure() == mark:
+        chain = tuple(
+            node
+            for node in whole[: len(every)]
+            if node is not None and is_dir(node)
+        )
+        if len(chain) == len(every):
+            FOLDERS[driver] = Folder(mark, every[:-1], chain)
     return Walk(p, names, tuple(start))
 
 

@@ -160,4 +160,8 @@ def restore(
     if renumbered is not None:
         statements.append(SqlStatement(renumbered))
     statements.append(SqlStatement(SQL["drop_base"]))
-    accessor.driver.batch(statements)
+    accessor.reshaped()
+    try:
+        accessor.driver.batch(statements)
+    finally:
+        accessor.reshaped()

@@ -16,7 +16,17 @@ import git, { Errors, type CommitObject } from 'isomorphic-git'
 
 import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
-import { configValues, FANOUT_SIZE, gitFs, IDX_MAGIC, SHA_BYTES, V2_HEADER } from './fs.ts'
+import {
+  configValues,
+  FANOUT_SIZE,
+  gitFs,
+  IDX_MAGIC,
+  packedObject,
+  SHA_BYTES,
+  V2_HEADER,
+  type Packed,
+  type Packs,
+} from './fs.ts'
 import { readNames, readOptional, readRange, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
@@ -62,6 +72,8 @@ const SHALLOW_WRITERS = new Map<string, Promise<void>>()
 export interface Repo {
   readonly fs: ReturnType<typeof gitFs>
   readonly vfs: Files
+  /** The object database's packs, the ones `fs` reads for isomorphic-git. */
+  readonly packs: Packs | null
   readonly location: RepoLocation
   /** Parsed packs shared by this invocation, never retained across commands. */
   readonly cache: Record<symbol, unknown>
@@ -179,8 +191,23 @@ export async function expandedId(repo: Repo, short: string): Promise<string> {
   return only
 }
 
-/** An object's type and its bytes as stored, whichever kind of object it is. */
+/**
+ * An object's type and its bytes as stored, whichever kind of object it is.
+ *
+ * Looked for in the packs before the loose objects, as git looks (and
+ * Python's VfsObjectStore.get_raw): a packed one is its own entry inflated,
+ * with none of the loose file's gitdir check, probe, wrapping and rehash on
+ * the way. One no pack holds, or whose entry does not read, is isomorphic-git's
+ * to find or word as git does.
+ */
 export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
+  let found: Packed | null = null
+  try {
+    found = repo.packs === null ? null : await packedObject(repo.packs, oid)
+  } catch (err) {
+    console.debug('packed object unreadable:', err)
+  }
+  if (found !== null) return { oid, type: found.type, raw: found.content }
   // Deprecated upstream for being general, but the general answer is what the
   // callers need: which kind this id names and its stored content, without
   // reading it as each kind in turn until one does not throw.
@@ -305,9 +332,11 @@ export async function openRepo(
     packed += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
   }
   const shallow = await readOptional(vfs, location.commondir.join(SHALLOW_FILE))
+  const fs = gitFs(vfs, location)
   return {
-    fs: gitFs(vfs, location),
+    fs,
     vfs,
+    packs: fs.packs,
     location,
     cache: {},
     abbrev: abbrevLength(packed),
@@ -331,11 +360,15 @@ export async function openRepo(
 
 /**
  * A blob's bytes, a held one first: what `git diff` hashes from the working
- * tree is rendered like any blob, but git writes none of it. Mirrors
- * Python's VfsObjectStore.hold.
+ * tree is rendered like any blob, but git writes none of it. Then the packs,
+ * then the loose objects, as git looks. Mirrors Python's VfsObjectStore.hold.
  */
 export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array> {
-  return repo.held.get(oid) ?? (await git.readBlob({ ...repoArgs(repo), oid })).blob
+  const held = repo.held.get(oid)
+  if (held !== undefined) return held
+  const stored = await rawObject(repo, oid)
+  // Anything else is git.readBlob's to peel or refuse, as a tag or a tree.
+  return stored.type === 'blob' ? stored.raw : (await git.readBlob({ ...repoArgs(repo), oid })).blob
 }
 
 /**

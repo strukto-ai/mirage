@@ -24,6 +24,8 @@ from mirage.core.sql.copy import copy as _copy
 from mirage.core.sql.create import create as _create
 from mirage.core.sql.exists import exists as _exists
 from mirage.core.sql.mkdir import mkdir as _mkdir
+from mirage.core.sql.path import Walk
+from mirage.core.sql.path import walk as _walk
 from mirage.core.sql.read import read as _read
 from mirage.core.sql.readdir import readdir as _readdir
 from mirage.core.sql.readdir import tree as _tree
@@ -48,7 +50,13 @@ from mirage.types import (
     VFSName,
 )
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.capacity import Charge, StorageUsage, charge, storage_usage
+from mirage.vfs.capacity import (
+    Charge,
+    SizeOf,
+    StorageUsage,
+    charge,
+    storage_usage,
+)
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.types import SqlDriver
@@ -90,6 +98,7 @@ class SqlVFS(BaseVFS):
     index_ttl: float = 0
 
     reads_ranges: bool = True
+    refuses_taken: bool = True
     local: bool = True
     walk_limit: int = LOCAL_WALK_LIMIT
 
@@ -131,7 +140,9 @@ class SqlVFS(BaseVFS):
         self.usage = _shared_usage(self.name, opened, capacity)
         self.sole_writer = opened.exclusive
 
-    def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
+    def _charge(
+        self, path: PathSpec, measure: SizeOf | None = None
+    ) -> AbstractAsyncContextManager[Charge]:
         # The usage tells writes on one file apart by path, and mounts on
         # one driver share it, so its key names the file from the
         # database's root: ``/w/f`` through ``/`` and ``/f`` through a
@@ -151,7 +162,36 @@ class SqlVFS(BaseVFS):
         async def size_of(_: PathSpec) -> int:
             return await _size_of(self.accessor, path)
 
-        return charge(self.usage, key, size_of, partial(_count, self.accessor))
+        return charge(
+            self.usage, key, measure or size_of, partial(_count, self.accessor)
+        )
+
+    async def _land(
+        self, path: PathSpec, data: ByteSource, append: bool, atomic: bool
+    ) -> None:
+        # A capped write walks its path once: the walk that measures the
+        # file before the write is the one the write lands through, and
+        # the bytes it took say what the file holds after. The write takes
+        # that walk only while no entry has gone or moved since it was read.
+        found: list[tuple[int, Walk]] = []
+
+        async def size_of(_: PathSpec) -> int:
+            mark = self.accessor.structure()
+            found.append((mark, await _walk(self.accessor, path)))
+            return await _size_of(self.accessor, path, found[-1][1])
+
+        async with self._charge(path, size_of) as held:
+            await _write(
+                self.accessor,
+                path,
+                held.stream(data, append=append),
+                append=append,
+                atomic=atomic,
+                walked=found[0][1]
+                if found and found[0][0] == self.accessor.structure()
+                else None,
+            )
+            held.after = (held.before if append else 0) + held.written
 
     def storage_location(self) -> str:
         # The folder joins the location, so a file reads as one key
@@ -193,17 +233,10 @@ class SqlVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        async with self._charge(path) as held:
-            await _write(self.accessor, path, held.stream(data), atomic=atomic)
+        await self._land(path, data, False, atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        async with self._charge(path) as held:
-            await _write(
-                self.accessor,
-                path,
-                held.stream(data, append=True),
-                append=True,
-            )
+        await self._land(path, data, True, False)
 
     async def create(self, path: PathSpec) -> None:
         async with self._charge(path):

@@ -16,7 +16,10 @@ import pytest
 
 from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.commands.cli.builtin.git.io import (
+    LeadingDirs,
     blocking_ancestor,
+    ensure_dir,
+    lstat,
     refuse_mount,
     remove_empty_parents,
     remove_tree,
@@ -106,7 +109,7 @@ def file_at_slot(path: PathSpec) -> FileType:
         (only_dirs, "slot", {"/repo/slot"}, None),
         (only_dirs, "other/child", {"/repo/slot"}, None),
         # No link anywhere: what is in the way is an ordinary file, which
-        # only the stat can report.
+        # the lstat reports as itself.
         (file_at_slot, "slot/child", set(), "/repo/slot"),
         (only_dirs, "slot/child", set(), None),
         # stat dereferences, so a link to a directory stats as a
@@ -117,6 +120,50 @@ def file_at_slot(path: PathSpec) -> FileType:
 async def test_blocking_ancestor(kind, name, links, expected):
     found = await blocking_ancestor(files(stats(kind, links)), REPO, name)
     assert (None if found is None else found.virtual) == expected
+
+
+@pytest.mark.asyncio
+async def test_leading_dirs_ask_each_directory_once():
+    # git's lstat cache: a checkout asks each leading directory once, not
+    # once per entry under it, and nothing under one it made or found
+    # missing.
+    asked: list[str] = []
+
+    async def dispatch(op: str, path: PathSpec, **kwargs):
+        if op == "mkdir":
+            return None, None
+        asked.append(path.virtual)
+        if path.virtual.startswith("/repo/gone"):
+            raise FileNotFoundError(path.virtual)
+        name = path.virtual.rsplit("/", 1)[-1]
+        return FileStat(name=name, type=FileType.DIRECTORY), None
+
+    vfs = files(dispatch)
+    dirs = LeadingDirs()
+    for name in ["a/b/one", "a/b/two", "a/three", "gone/x/four", "gone/y"]:
+        assert await blocking_ancestor(vfs, REPO, name, dirs) is None
+    assert asked == ["/repo/a", "/repo/a/b", "/repo/gone"]
+    dirs.made(REPO.join("new"))
+    assert await blocking_ancestor(vfs, REPO, "new/deep/five", dirs) is None
+    assert asked == ["/repo/a", "/repo/a/b", "/repo/gone"]
+    assert not dirs.may_hold(REPO.join("new/deep/five"))
+    assert not dirs.may_hold(REPO.join("gone/x/four"))
+    assert dirs.may_hold(REPO.join("a/b/one"))
+    # What the pass wrote is looked at when a tree names the place again,
+    # and is in the way of an entry the tree puts below it.
+    dirs.made(REPO.join("new/deep"))
+    dirs.taken(REPO.join("new/deep/five"))
+    assert dirs.may_hold(REPO.join("new/deep/five"))
+    below = await blocking_ancestor(vfs, REPO, "new/deep/five/six", dirs)
+    assert below is not None and below.virtual == "/repo/new/deep/five"
+    assert asked == ["/repo/a", "/repo/a/b", "/repo/gone"]
+    # A directory made below one the pass never looked at is not kept:
+    # that one may yet be taken away, a link replaced by a real directory.
+    await ensure_dir(vfs, REPO.join("gone/x"), dirs)
+    assert not dirs.may_hold(REPO.join("gone/x/four"))
+    unseen = LeadingDirs()
+    await ensure_dir(vfs, REPO.join("gone/x"), unseen)
+    assert unseen.may_hold(REPO.join("gone/x/four"))
 
 
 class Recorder:
@@ -329,5 +376,6 @@ async def test_restoring_an_entry_sets_only_bits_that_change(
     # only when it changes the bits, a new file rendering 644 and a write
     # keeping what a file had.
     calls = Modes(present, had)
-    await restore_entry(files(calls), SLOT, mode, b"x\n")
+    vfs = files(calls)
+    await restore_entry(vfs, SLOT, mode, b"x\n", await lstat(vfs, SLOT))
     assert calls.set == expected

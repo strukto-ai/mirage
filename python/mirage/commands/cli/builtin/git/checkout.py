@@ -61,16 +61,16 @@ from mirage.commands.cli.builtin.git.index_file import (
     write_index,
 )
 from mirage.commands.cli.builtin.git.io import (
+    LeadingDirs,
     blocking_ancestor,
     drop_gitlink,
-    is_link,
     keep_gitlink,
+    lstat,
     refuse_replaced_mounts,
     remove_empty_parents,
     remove_file,
     remove_tree,
     restore_entry,
-    stat_of,
 )
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import (
@@ -415,11 +415,14 @@ async def switch_to(
         else:
             await remove_file(vfs, where)
         await remove_empty_parents(vfs, where, location.worktree)
+    # The leading directories, each looked at once for every entry below
+    # it, and after the removals above, which change them.
+    dirs = LeadingDirs()
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
         if mode == GITLINK:
-            await keep_gitlink(vfs, location.worktree.join(name))
+            await keep_gitlink(vfs, location.worktree.join(name), dirs)
             continue
         # Read before anything standing in the entry's way is removed, so
         # a blob that cannot be read takes nothing of the working tree
@@ -431,9 +434,10 @@ async def switch_to(
         # reaches here. git replaces it with the directory the entry
         # needs rather than writing through it, which is what keeps a
         # link's target tree, a path no branch named, out of the way.
-        above = await blocking_ancestor(vfs, location.worktree, name)
+        above = await blocking_ancestor(vfs, location.worktree, name, dirs)
         if above is not None:
             await remove_file(vfs, above)
+            dirs.missing(above)
         where = location.worktree.join(name)
         # And the same thing standing on the name itself rather than
         # above it: a directory holding only ignored files is in no
@@ -442,11 +446,14 @@ async def switch_to(
         # files by default and takes the whole directory with it. A
         # link is left to restore_entry, which retargets it; following
         # one to a directory here would delete a tree no branch named.
-        if not await is_link(vfs, where):
-            info = await stat_of(vfs, where)
-            if info is not None and info.type is FileType.DIRECTORY:
-                await remove_tree(vfs, where)
-        await restore_entry(vfs, where, mode, blob)
+        # Under a directory this pass made or found missing nothing
+        # stands to look at.
+        standing = await lstat(vfs, where) if dirs.may_hold(where) else None
+        if standing is not None and standing.type is FileType.DIRECTORY:
+            await remove_tree(vfs, where)
+            dirs.missing(where)
+            standing = None
+        await restore_entry(vfs, where, mode, blob, standing, dirs)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from enum import Enum
 
 from mirage.commands.cli.builtin.git.constants import (
     PERMISSION_BITS,
@@ -83,6 +84,102 @@ async def is_link(vfs: Files, path: PathSpec) -> bool:
     return info is not None and info.type is FileType.SYMLINK
 
 
+class Leading(Enum):
+    """What one checkout pass has learned of a directory above its entries."""
+
+    FOUND = "found"
+    """A directory that stood there, which may hold anything."""
+    MADE = "made"
+    """One this pass made, holding only what the pass has written into it."""
+    MISSING = "missing"
+    """Nothing there, nor anything below it."""
+    TAKEN = "taken"
+    """A file or link this pass wrote there."""
+
+
+class LeadingDirs:
+    """The leading directories one checkout pass has looked at.
+
+    As git's lstat cache keeps them: each is asked once however many
+    entries sit under it. One the pass made, or found missing, holds
+    nothing the pass has not written, so an entry under it is not
+    looked at at all. What the pass wrote is kept too: a tree that names
+    one place twice, or a file where it also names a directory, meets
+    its own entry there as it would any other.
+    """
+
+    def __init__(self) -> None:
+        self._seen: dict[str, Leading] = {}
+
+    def get(self, path: PathSpec) -> Leading | None:
+        """What the pass knows of a path, None when it has not asked.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        return self._seen.get(path.virtual)
+
+    def found(self, path: PathSpec) -> None:
+        """A directory standing at a path.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        self._seen[path.virtual] = Leading.FOUND
+
+    def made(self, path: PathSpec) -> None:
+        """A directory the pass made at a path.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        self._seen[path.virtual] = Leading.MADE
+
+    def taken(self, path: PathSpec) -> None:
+        """A file or link the pass wrote at a path.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        self._seen[path.virtual] = Leading.TAKEN
+
+    def missing(self, path: PathSpec) -> None:
+        """Nothing at a path any more, nor below it.
+
+        Only a directory the pass knew can have one it knows below it.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        if path.virtual in self._seen:
+            prefix = f"{path.virtual}/"
+            for key in [k for k in self._seen if k.startswith(prefix)]:
+                del self._seen[key]
+        self._seen[path.virtual] = Leading.MISSING
+
+    def may_hold(self, path: PathSpec) -> bool:
+        """Whether anything can stand at a path for the pass to look at.
+
+        What it put there itself, or anything at all unless the nearest
+        directory it knows of above the path is one it made or found
+        missing.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        own = self._seen.get(path.virtual)
+        if own is not None:
+            return own is not Leading.MISSING
+        at = path.parent
+        while True:
+            known = self._seen.get(at.virtual)
+            if known is not None:
+                return known is Leading.FOUND
+            if at.virtual == "/":
+                return True
+            at = at.parent
+
+
 async def entry_bytes(vfs: Files, path: PathSpec, info: FileStat) -> bytes:
     """The bytes git stores for one working-tree entry.
 
@@ -110,6 +207,8 @@ async def restore_entry(
     path: PathSpec,
     mode: int,
     blob: bytes,
+    held: FileStat | None,
+    dirs: LeadingDirs | None = None,
 ) -> None:
     """Materialize one tree entry into the working tree.
 
@@ -146,26 +245,36 @@ async def restore_entry(
         path (PathSpec): absolute virtual path to materialize at.
         mode (int): the tree entry's mode.
         blob (bytes): the entry's blob content.
+        held (FileStat | None): the caller's lstat of the path, None
+            when nothing stands there.
+        dirs (LeadingDirs | None): the checkout pass's leading
+            directories.
     """
-    held = await lstat(vfs, path)
     linked = held is not None and held.type is FileType.SYMLINK
     if mode == SYMLINK:
-        await remove_file(vfs, path)
+        if held is not None:
+            await remove_file(vfs, path)
         # symlink(2) needs the directory above the entry, as the write
         # below does, so a link alone in a new directory gets one too.
-        await ensure_dir(vfs, path.parent)
+        await ensure_dir(vfs, path.parent, dirs)
         await vfs.symlink(path, blob.decode("utf-8", errors="replace"))
+        if dirs is not None:
+            dirs.taken(path)
         return
     if linked:
         await remove_file(vfs, path)
-    await write_file(vfs, path, blob)
+    await write_file(vfs, path, blob, dirs)
+    if dirs is not None:
+        dirs.taken(path)
     bits = mode & PERMISSION_BITS
     had = None if held is None or linked else held.mode
     if (UNSET_PERMISSIONS if had is None else had) & PERMISSION_BITS != bits:
         await vfs.setattr(path, mode=bits)
 
 
-async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
+async def keep_gitlink(
+    vfs: Files, path: PathSpec, dirs: LeadingDirs | None = None
+) -> None:
     """Leave a submodule's working tree alone, but make sure it has one.
 
     A 160000 entry names a commit in another repository, which this one
@@ -182,6 +291,8 @@ async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the submodule.
+        dirs (LeadingDirs | None): a checkout pass's leading directories,
+            which learn the ones made.
     """
     linked = await is_link(vfs, path)
     info = None if linked else await stat_of(vfs, path)
@@ -189,7 +300,7 @@ async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
         return
     if linked or info is not None:
         await remove_file(vfs, path)
-    await ensure_dir(vfs, path)
+    await ensure_dir(vfs, path, dirs)
 
 
 async def drop_gitlink(vfs: Files, path: PathSpec, name: str) -> str | None:
@@ -274,7 +385,9 @@ async def read_names(vfs: Files, path: PathSpec) -> list[str]:
         return []
 
 
-async def ensure_dir(vfs: Files, path: PathSpec) -> None:
+async def ensure_dir(
+    vfs: Files, path: PathSpec, dirs: LeadingDirs | None = None
+) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -288,21 +401,40 @@ async def ensure_dir(vfs: Files, path: PathSpec) -> None:
     stat: on such a store a directory is the set of keys under it, so
     creating one again costs a no-op rather than an error.
 
+    ``dirs``, a checkout pass's leading directories, answers for the
+    ones the pass already knows and learns the ones it makes below one
+    it knows. One made below a directory the pass never looked at is not
+    kept: taking that directory away would leave it standing in what the
+    pass remembers.
+
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the directory.
+        dirs (LeadingDirs | None): the checkout pass's leading
+            directories.
     """
     missing: list[PathSpec] = []
     current = path
+    kept = False
     while current.virtual != "/":
-        try:
-            await vfs.stat(current)
+        known = dirs.get(current) if dirs is not None else None
+        if known is Leading.FOUND or known is Leading.MADE:
+            kept = True
             break
-        except MISS_ERRORS:
-            missing.append(current)
-            current = current.parent
+        if known is not Leading.MISSING:
+            try:
+                await vfs.stat(current)
+                break
+            except MISS_ERRORS:
+                pass
+        missing.append(current)
+        current = current.parent
     for target in reversed(missing):
         await vfs.mkdir(target)
+        if dirs is not None:
+            kept = kept or dirs.get(target) is Leading.MISSING
+            if kept:
+                dirs.made(target)
 
 
 async def is_directory(vfs: Files, path: PathSpec) -> bool:
@@ -334,15 +466,22 @@ async def exists(vfs: Files, path: PathSpec) -> bool:
     return True
 
 
-async def write_file(vfs: Files, path: PathSpec, data: bytes) -> None:
+async def write_file(
+    vfs: Files,
+    path: PathSpec,
+    data: bytes,
+    dirs: LeadingDirs | None = None,
+) -> None:
     """Write one virtual path, creating the directories above it.
 
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
+        dirs (LeadingDirs | None): a checkout pass's leading
+            directories.
     """
-    await ensure_dir(vfs, path.parent)
+    await ensure_dir(vfs, path.parent, dirs)
     await vfs.write(path, data)
 
 
@@ -395,7 +534,10 @@ async def write_once(vfs: Files, path: PathSpec, data: bytes) -> None:
 
 
 async def blocking_ancestor(
-    vfs: Files, worktree: PathSpec, name: str
+    vfs: Files,
+    worktree: PathSpec,
+    name: str,
+    dirs: LeadingDirs | None = None,
 ) -> PathSpec | None:
     """The nearest component above an entry that is not a directory.
 
@@ -408,9 +550,10 @@ async def blocking_ancestor(
     nothing at all, because the path never led there. Both halves are
     what git does, probed against git 2.50.1.
 
-    The lstat is asked before the stat, and the order is the whole
-    point: ``stat`` dereferences, so a link to a directory stats as a
-    directory and the walk would carry on straight through it.
+    Each component is asked with an lstat, never a stat: ``stat``
+    dereferences, so a link to a directory stats as a directory and the
+    walk would carry on straight through it. A missing component ends
+    the walk, as nothing stands below it.
 
     An exact-path lookup cannot see any of this, since what is in the
     way sits above the name being looked up rather than on it.
@@ -419,19 +562,36 @@ async def blocking_ancestor(
         vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         name (str): the entry, repository-relative.
+        dirs (LeadingDirs | None): a checkout pass's leading
+            directories, each asked once.
 
     Returns:
         PathSpec | None: absolute virtual path of the nearest such component,
         None when every component above the entry is a directory.
     """
+    if dirs is None:
+        dirs = LeadingDirs()
     current = worktree
+    made = False
     for part in name.split("/")[:-1]:
         current = current.join(part)
-        if await is_link(vfs, current):
+        known = dirs.get(current)
+        if known is Leading.MISSING:
+            return None
+        if known is Leading.TAKEN:
             return current
-        info = await stat_of(vfs, current)
-        if info is not None and info.type is not FileType.DIRECTORY:
+        if known is not None:
+            made = known is Leading.MADE
+            continue
+        # A directory this pass made holds only what it has made there
+        # since.
+        info = None if made else await lstat(vfs, current)
+        if info is None:
+            dirs.missing(current)
+            return None
+        if info.type is not FileType.DIRECTORY:
             return current
+        dirs.found(current)
     return None
 
 
@@ -509,7 +669,8 @@ async def refuse_replaced_mounts(
     collision check in these verbs already has: name what is in the way
     and change nothing. The condition mirrors the write loop's exactly,
     a link included, so a destination the loop would not clear is not
-    refused here either.
+    refused here either: a link or file above the destination is what
+    the loop removes, and a link on it is what the loop retargets.
 
     Args:
         vfs (Files): the session's files.
@@ -517,11 +678,14 @@ async def refuse_replaced_mounts(
         names (list[str]): repository-relative paths about to be
             written.
     """
+    dirs = LeadingDirs()
     for name in sorted(names):
         where = worktree.join(name)
-        if await is_link(vfs, where):
+        if await blocking_ancestor(vfs, worktree, name, dirs) is not None:
             continue
-        info = await stat_of(vfs, where)
+        if not dirs.may_hold(where):
+            continue
+        info = await lstat(vfs, where)
         if info is not None and info.type is FileType.DIRECTORY:
             refuse_mount(vfs, where)
 

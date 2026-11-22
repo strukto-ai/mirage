@@ -74,7 +74,11 @@ struct Metadata<'a> {
 }
 
 enum Matcher {
-    Posix(Box<Posix>),
+    Posix {
+        regex: Box<Posix>,
+        /// Texts one of which every match holds, when any are known.
+        needles: Option<Vec<Vec<u8>>>,
+    },
     Lines {
         regex: Box<Regex>,
         warnings: Vec<&'static str>,
@@ -121,9 +125,14 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 multiline,
                 word,
             };
-            Matcher::Posix(Box::new(
-                Posix::compile(&pattern, &options).map_err(StreamError::new)?,
-            ))
+            let regex = Posix::compile(&pattern, &options).map_err(StreamError::new)?;
+            let needles = parse::parse(&pattern, extended, utf8, dialect)
+                .ok()
+                .and_then(|parsed| posix::needles(&[&parsed.ast], ignore_case, utf8));
+            Matcher::Posix {
+                regex: Box::new(regex),
+                needles,
+            }
         }
         Config::Lines {
             patterns,
@@ -164,6 +173,15 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         tally: Tally::default(),
         busy: false,
     }))
+}
+
+fn texts(needles: &Option<Vec<Vec<u8>>>) -> Option<Vec<String>> {
+    needles.as_ref().map(|needles| {
+        needles
+            .iter()
+            .map(|needle| String::from_utf8_lossy(needle).into_owned())
+            .collect()
+    })
 }
 
 fn line_needles(
@@ -208,7 +226,7 @@ impl RegexStream {
         let hay = self.subject.as_slice();
         let out = &mut self.reply;
         match (&mut self.matcher, self.operation) {
-            (Matcher::Posix(regex), Operation::Search) => {
+            (Matcher::Posix { regex, .. }, Operation::Search) => {
                 if self.at <= hay.len() {
                     match regex.search(hay, self.at, budget) {
                         Step::Done(Some(spans)) => put_spans(out, &spans),
@@ -217,20 +235,20 @@ impl RegexStream {
                     }
                 }
             }
-            (Matcher::Posix(regex), Operation::All) => loop {
+            (Matcher::Posix { regex, .. }, Operation::All) => loop {
                 match regex.next(hay, &mut self.walk, budget) {
                     Step::Done(Some(spans)) => put_spans(out, &spans),
                     Step::Done(None) => break,
                     Step::Paused => return Ok(Step::Paused),
                 }
             },
-            (Matcher::Posix(regex), Operation::Contains) => {
+            (Matcher::Posix { regex, .. }, Operation::Contains) => {
                 match regex.contains(hay, &mut self.tally, budget) {
                     Step::Done(count) => put(out, Some(count)),
                     Step::Paused => return Ok(Step::Paused),
                 }
             }
-            (Matcher::Posix(regex), Operation::Test) => match regex.test(hay, budget) {
+            (Matcher::Posix { regex, .. }, Operation::Test) => match regex.test(hay, budget) {
                 Step::Done(hit) => put(out, Some(usize::from(hit))),
                 Step::Paused => return Ok(Step::Paused),
             },
@@ -285,7 +303,7 @@ impl RegexStream {
             self.subject.shrink_to(KEPT);
         }
         match &mut self.matcher {
-            Matcher::Posix(regex) => regex.release(),
+            Matcher::Posix { regex, .. } => regex.release(),
             Matcher::Lines { regex, .. } => regex.forget(),
         }
     }
@@ -335,22 +353,17 @@ impl Stream for RegexStream {
 
     fn metadata(&self, out: &mut Vec<u8>) {
         let metadata = match &self.matcher {
-            Matcher::Posix(regex) => Metadata {
+            Matcher::Posix { regex, needles } => Metadata {
                 groups: regex.groups(),
                 warnings: &[],
-                needles: None,
+                needles: texts(needles),
             },
             Matcher::Lines {
                 warnings, needles, ..
             } => Metadata {
                 groups: 0,
                 warnings,
-                needles: needles.as_ref().map(|needles| {
-                    needles
-                        .iter()
-                        .map(|needle| String::from_utf8_lossy(needle).into_owned())
-                        .collect()
-                }),
+                needles: texts(needles),
             },
         };
         if let Ok(json) = serde_json::to_vec(&metadata) {
@@ -431,6 +444,34 @@ mod tests {
             .unwrap();
         assert_eq!(err.message, parse::INVALID_PRECEDING);
         assert!(open(br#"{"mode":"posix","pattern":"a**","dialect":"posix"}"#).is_ok());
+    }
+
+    #[test]
+    fn a_posix_expression_names_the_texts_every_match_holds() {
+        let needles = |config: &[u8]| {
+            let stream = open(config).unwrap();
+            let mut meta = Vec::new();
+            stream.metadata(&mut meta);
+            String::from_utf8(meta).unwrap()
+        };
+        assert!(
+            needles(br#"{"mode":"posix","pattern":"FETCH_HEAD","dialect":"posix"}"#)
+                .contains(r#""needles":["FETCH_HEAD"]"#)
+        );
+        assert!(
+            needles(
+                br#"{"mode":"posix","pattern":"foo.*bar|baz1","extended":true,"dialect":"posix"}"#
+            )
+            .contains(r#""needles":["foo","baz1"]"#)
+        );
+        assert!(
+            needles(br#"{"mode":"posix","pattern":"Fetch","dialect":"posix","ignore_case":true}"#)
+                .contains(r#""needles":["fetch"]"#)
+        );
+        assert!(
+            needles(br#"{"mode":"posix","pattern":"a*","dialect":"posix"}"#)
+                .contains(r#""needles":null"#)
+        );
     }
 
     #[test]

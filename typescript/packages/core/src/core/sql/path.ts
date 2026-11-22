@@ -20,6 +20,7 @@ import { norm } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { INODE_COLUMNS, MAX_COLUMNS, MAX_PARAMS, ROOT_INO } from './constants.ts'
 import { byIno, inodeOf, isDir, type Inode, type InoRef } from './inode.ts'
+import type { SqlDriver } from '../../vfs/sql/types.ts'
 
 /**
  * A mount path resolved one name at a time from the mount's folder.
@@ -34,6 +35,22 @@ export interface Walk {
   readonly names: readonly string[]
   readonly chain: readonly (Inode | null)[]
 }
+
+/**
+ * The folder a driver's last walk went through: its names from the
+ * database's root, the inode each reaches, the root's first, and the
+ * accessor's `structure` when it was read. Mirrors Python's `Folder`.
+ */
+interface Folder {
+  readonly mark: number
+  readonly names: readonly string[]
+  readonly chain: readonly Inode[]
+}
+
+// The last folder walked on each driver that is its database's only writer.
+// Nothing else moves that folder, so the next path through it asks for its
+// last name alone, as a kernel's dentry cache answers the names above.
+const FOLDERS = new WeakMap<SqlDriver, Folder>()
 
 /** The names a normalized mount path walks from the root. */
 export function namesOf(p: string): string[] {
@@ -93,15 +110,46 @@ export async function walk(accessor: SqlAccessor, path: PathSpec | string): Prom
   const p = norm(typeof path === 'string' ? path : path.mountPath)
   const names = namesOf(p)
   const all = [...accessor.rootNames, ...names]
-  let from = (await walkAll(accessor, all)).slice(accessor.rootNames.length)
+  const skip = accessor.rootNames.length
+  const { driver } = accessor
+  const remembers = driver.exclusive && names.length > 0
+  const mark = accessor.structure()
+  const kept = remembers ? FOLDERS.get(driver) : undefined
+  if (
+    kept?.mark === mark &&
+    kept.names.length === all.length - 1 &&
+    kept.names.every((name, i) => name === all[i])
+  ) {
+    const above = kept.chain[kept.chain.length - 1]
+    if (above !== undefined) {
+      const [parent, leaf] = await walkFrom(accessor, above.ino, all.slice(-1))
+      if (
+        parent !== null &&
+        parent !== undefined &&
+        isDir(parent) &&
+        accessor.structure() === mark
+      ) {
+        return { p, names, chain: [...kept.chain.slice(0, -1), parent, leaf ?? null].slice(skip) }
+      }
+    }
+    FOLDERS.delete(driver)
+  }
+  let whole = await walkAll(accessor, all)
   // The mount's folder always stands: one gone since is made again, as the
   // first op made it, and a file standing at it is ENOTDIR.
-  if (!standing(from)) {
+  if (!standing(whole.slice(skip))) {
     await accessor.rootIno()
-    from = (await walkAll(accessor, all)).slice(accessor.rootNames.length)
+    whole = await walkAll(accessor, all)
   }
+  const from = whole.slice(skip)
   // Gone again since it was made: every name misses.
   if (!standing(from)) return { p, names, chain: from.map(() => null) }
+  if (remembers && accessor.structure() === mark) {
+    const chain = whole
+      .slice(0, all.length)
+      .filter((node): node is Inode => node !== null && isDir(node))
+    if (chain.length === all.length) FOLDERS.set(driver, { mark, names: all.slice(0, -1), chain })
+  }
   return { p, names, chain: from }
 }
 

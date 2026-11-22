@@ -108,7 +108,8 @@ async function landing(
  * other stream lands `FLUSH_BYTES` at a time, so a reader watches the file
  * grow: a replacement empties the file first and writes at its own position,
  * an append writes past the file's end. An append that brings nothing leaves
- * an existing file as it was (`true >> f`). Mirrors Python's `write`.
+ * an existing file as it was (`true >> f`). `walked` is the path as its caller
+ * walked it a step ago, which saves walking it again. Mirrors Python's `write`.
  */
 export async function write(
   accessor: SqlAccessor,
@@ -116,9 +117,10 @@ export async function write(
   data: ByteSource,
   append = false,
   atomic = false,
+  walked?: Walk,
 ): Promise<void> {
   const timer = startOp()
-  const w = await walk(accessor, path)
+  const w = walked ?? (await walk(accessor, path))
   checkDestParents(w, path)
   checkWriteTarget(w, path)
   const op = append ? 'append' : 'write'

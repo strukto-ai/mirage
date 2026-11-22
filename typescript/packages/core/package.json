@@ -129,6 +129,7 @@
     "@qdrant/js-client-rest": "^1.18.0",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.0",
+    "@types/pako": "^1.0.7",
     "@types/pg": "^8.11.0",
     "chromadb": "^3.4.3",
     "e2b": "^2.62.0",
@@ -154,6 +155,7 @@
     "bson": "^6.10.4",
     "buffer": "^6.0.3",
     "isomorphic-git": "^1.38.6",
+    "pako": "^1.0.11",
     "yaml": "^2.6.0",
     "zod": "^4.6.6"
   },

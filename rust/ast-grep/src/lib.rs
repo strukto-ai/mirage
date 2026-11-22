@@ -302,6 +302,17 @@ fn dispatch(options: &[u8], data: &[u8]) -> Result<Value> {
             });
             Ok(json!({"values":languages}))
         }
+        // The text every match of a pattern holds, as ast-grep itself rules
+        // a file out before parsing it; empty when it knows none.
+        "literal" => {
+            #[derive(Deserialize)]
+            struct Literal {
+                language: SupportLang,
+            }
+            let language = serde_json::from_slice::<Literal>(options)?.language;
+            let pattern = Pattern::try_new(source, language)?;
+            Ok(json!({"values":[pattern.fixed_string()]}))
+        }
         _ => execute(serde_json::from_slice(options)?, source),
     }
 }

@@ -7,7 +7,10 @@ from dulwich.objects import Blob
 from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.types import RegexSyntax
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.builtin.generic_bind.search import ruled_out
+from mirage.commands.builtin.grep_pushdown import search_terms
+from mirage.commands.builtin.types import RegexSyntax, SearchTerms
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.cli.builtin.git.constants import EXECUTABLE, REGULAR
 from mirage.commands.cli.builtin.git.discover import require_work_tree
@@ -23,6 +26,7 @@ from mirage.commands.cli.builtin.git.ignore import GITIGNORE, IgnoreStack
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
     exists,
+    is_directory,
     is_link,
     read_optional,
 )
@@ -31,6 +35,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     decoded,
     pathspec_patterns,
     pathspec_selects,
+    pattern_roots,
     repo_relative,
     visible_entries,
 )
@@ -90,6 +95,9 @@ class GrepFlags:
         heading (bool): name a file once, on its own line.
         between (bool): print a blank line between files.
         limit (int): most matches a file reports, -1 for no limit.
+        needles (tuple[bytes, ...] | None): texts one of which every
+            matching line holds, None when none are known.
+        ignore_case (bool): letters match in either case.
     """
 
     patterns: tuple[Callable[[str], Awaitable[bool]], ...]
@@ -107,6 +115,8 @@ class GrepFlags:
     heading: bool = False
     between: bool = False
     limit: int = -1
+    needles: tuple[bytes, ...] | None = None
+    ignore_case: bool = False
 
 
 def _line_matcher(
@@ -155,6 +165,7 @@ def parse_flags(
     ignore_case = fl.as_bool("ignore_case")
     whole_word = fl.as_bool("word_regexp")
     compiled = []
+    needles: tuple[bytes, ...] | None = ()
     for value in patterns:
         for part in value.split("\n"):
             view = byte_view(part, utf8)
@@ -170,6 +181,11 @@ def parse_flags(
             except RegexError as exc:
                 raise PatternCompileError(origin, part, exc.message) from exc
             compiled.append(_line_matcher(pattern, whole_word))
+            needles = (
+                None
+                if needles is None or pattern.needles is None
+                else needles + pattern.needles
+            )
     listing = (
         "files_without_match"
         if fl.as_bool("files_without_match")
@@ -208,6 +224,8 @@ def parse_flags(
         fl.as_bool("heading"),
         fl.as_bool("break"),
         fl.as_int("max_count", -1),
+        needles,
+        ignore_case,
     )
 
 
@@ -426,6 +444,43 @@ async def grep(
                 shown[name.encode("utf-8", "surrogateescape")] = (REGULAR, b"")
         sources.append(("", shown))
     mounts = mounts_of(ctx)
+    # The work tree's files no line can match in, as its mount's search
+    # rules them out for grep: one that lists the files without a match,
+    # or selects the lines that do not, reads every file. As grep's
+    # operands are, a directory a pathspec names is what the search is
+    # asked about, and a file one names is read whatever a search says.
+    misses: Callable[[PathSpec], Awaitable[bool]] | None = None
+    if (
+        not sources[0][0]
+        and not cached
+        and not flags.invert
+        and flags.listing != "files_without_match"
+    ):
+        asked = search_terms(
+            None, flags.needles, False, False, False, False, flags.ignore_case
+        )
+        scopes: list[PathSpec] = []
+        named: set[str] = set()
+        for root in (pattern_roots(specs) or ("",)) if asked else ():
+            at = location.worktree.join(root) if root else location.worktree
+            if await is_directory(ctx.vfs, at):
+                scopes.append(at)
+            else:
+                named.add(at.virtual)
+        if asked is not None:
+            misses = await ruled_out(
+                command_files(ctx, scopes),
+                ctx,
+                scopes,
+                named,
+                SearchTerms(
+                    asked[0],
+                    False,
+                    flags.ignore_case,
+                    False,
+                    flags.binary != "skip",
+                ),
+            )
     out: list[bytes] = []
     matched = False
     printed_any = False
@@ -440,6 +495,10 @@ async def grep(
             ):
                 continue
             target = location.worktree.join(relative)
+            # A file the search rules out is never read, so it counts for
+            # nothing.
+            if misses is not None and not revision and await misses(target):
+                continue
             if mounts is not None and mounts.walk_limit is not None:
                 # A blob is read from the repository, a working-tree file
                 # from the mount serving it, and each mount counts its own.

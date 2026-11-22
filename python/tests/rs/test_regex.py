@@ -140,6 +140,14 @@ def test_unicode_folding_drops_needles_it_could_miss():
     assert LineRegex(["KELVIN"], "fixed", True).needles == (b"kelvin",)
 
 
+def test_a_posix_expression_names_the_texts_every_match_holds():
+    assert PosixRegex("FETCH_HEAD").needles == (b"FETCH_HEAD",)
+    assert PosixRegex("foo.*bar|baz1", True).needles == (b"foo", b"baz1")
+    assert PosixRegex(posix_escape("a.b*c"), True).needles == (b"a.b*c",)
+    assert PosixRegex("Fetch", ignore_case=True).needles == (b"fetch",)
+    assert PosixRegex("a*").needles is None
+
+
 def test_threads_sharing_one_expression_keep_their_subjects_apart():
     regex = posix_regex("^a.*z$", extended=True)
     subjects = [("a" + "x" * n + ("z" if n % 2 else "y")) for n in range(64)]

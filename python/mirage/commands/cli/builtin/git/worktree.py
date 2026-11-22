@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from collections.abc import Awaitable
 from functools import partial
 from typing import cast
 
@@ -251,8 +252,11 @@ class Scanner:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing it.
         """
-        rules = await self._descend(relative, ignores)
-        for entry in await read_names(self._vfs, self._absolute(relative)):
+        entries = await self._listed(
+            relative, ignores, read_names(self._vfs, self._absolute(relative))
+        )
+        rules = await self._descend(relative, ignores, entries)
+        for entry in entries:
             name = entry_name(entry)
             if not name:
                 continue
@@ -271,16 +275,44 @@ class Scanner:
                 return True
         return False
 
-    async def _descend(
-        self, relative: str, ignores: IgnoreStack
-    ) -> IgnoreStack:
-        """The ignore rules inside a directory, given the ones outside.
+    async def _listed(
+        self,
+        relative: str,
+        ignores: IgnoreStack,
+        listing: Awaitable[list[str]],
+    ) -> list[str]:
+        """A directory's listing. One that refuses to be listed is asked
+        for its ignore file first, so what the walk reports is the refusal
+        it always met first there.
 
         Args:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing its parent.
+            listing (Awaitable[list[str]]): the listing asked for.
+        """
+        try:
+            return await listing
+        except Exception:
+            await self._descend(relative, ignores, [self._per_directory or ""])
+            raise
+
+    async def _descend(
+        self, relative: str, ignores: IgnoreStack, entries: list[str]
+    ) -> IgnoreStack:
+        """The ignore rules inside a directory, given the ones outside. A
+        directory that lists no ignore file is not asked for one, unless
+        the file is named by a path, which no listing holds.
+
+        Args:
+            relative (str): repository-relative path of the directory.
+            ignores (IgnoreStack): the rules governing its parent.
+            entries (list[str]): the directory's listing.
         """
         if not relative or self._per_directory is None:
+            return ignores
+        if "/" not in self._per_directory and all(
+            entry_name(entry) != self._per_directory for entry in entries
+        ):
             return ignores
         local = await read_optional(
             self._vfs, self._absolute(relative).join(self._per_directory)
@@ -356,8 +388,11 @@ class Scanner:
                 which case nothing inside it is reported untracked.
             ignores (IgnoreStack): the rules governing its parent.
         """
-        rules = await self._descend(relative, ignores)
-        for entry in sorted(await self._names(relative)):
+        entries = sorted(
+            await self._listed(relative, ignores, self._names(relative))
+        )
+        rules = await self._descend(relative, ignores, entries)
+        for entry in entries:
             name = entry_name(entry)
             if not name or name == GIT_DIR:
                 continue

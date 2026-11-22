@@ -16,11 +16,18 @@ import asyncio
 import logging
 import posixpath
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import cast
 
 from mirage.accessor.base import NOOPAccessor
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
+    dispatched_read_tree,
+)
+from mirage.commands.builtin.generic_bind.search import ruled_out
+from mirage.commands.builtin.grep_pushdown import search_terms
 from mirage.commands.builtin.rg_glob import (
     IgnoreSources,
     Overrides,
@@ -28,8 +35,19 @@ from mirage.commands.builtin.rg_glob import (
     walk_candidate,
 )
 from mirage.commands.builtin.rg_scan import IgnoreReader, dir_rules, root_stack
-from mirage.commands.builtin.utils.links import dispatch_of, mount_view
-from mirage.commands.builtin.utils.tree import WalkBudget, before_full_walk
+from mirage.commands.builtin.types import SearchTerms
+from mirage.commands.builtin.utils.links import (
+    dispatch_of,
+    link_location,
+    link_view,
+    mount_view,
+)
+from mirage.commands.builtin.utils.tree import (
+    WalkBudget,
+    WalkCall,
+    before_full_walk,
+    tree_walk,
+)
 from mirage.commands.cli.builtin.ast_grep.config import AstGrepConfig
 from mirage.commands.cli.builtin.ast_grep.engine import process
 from mirage.commands.cli.types import CLI, CLIHandler, DefaultCommandRoot
@@ -140,6 +158,8 @@ UNBUNDLED_EXTENSIONS = frozenset(
     }
 )
 _CURRENT_DIR = re.compile(r"^(?:\./)+")
+# A fixed token a mount's search is asked for: printable ASCII on one line.
+_PLAIN = re.compile(r"[\x20-\x7e]+")
 
 
 def _extension(path: str) -> str:
@@ -231,15 +251,39 @@ class _Walk:
         sources (IgnoreSources): the ignore files read.
         hidden (bool): hidden entries are walked.
         reader (IgnoreReader): how the ignore files are read.
+        readdir (WalkCall): the walk's listing, answered from one read of
+            a subtree where its mount gives one.
+        lstat (WalkCall): the walk's look at an entry without following a
+            link, answered the same way.
     """
 
     sources: IgnoreSources
     hidden: bool
     reader: IgnoreReader
+    readdir: WalkCall
+    lstat: WalkCall
 
 
 def _walk_of(off: frozenset[str], vfs: Files, max_memory: int) -> _Walk:
     vcs = "vcs" not in off
+    links = link_view(vfs)
+
+    async def listed(path: PathSpec, *, limit: int | None = None) -> list[str]:
+        children, _ = await vfs.dispatch(
+            "readdir", path, **({"limit": limit} if limit is not None else {})
+        )
+        return cast(list[str], children)
+
+    readdir, lstat = tree_walk(
+        dispatched_read_tree(
+            vfs.dispatch,
+            mount_view(vfs),
+            None if links is None else partial(link_location, links),
+            True,
+        ),
+        listed,
+        partial(vfs.stat, nofollow=True),
+    )
     return _Walk(
         IgnoreSources(
             vcs=vcs,
@@ -252,6 +296,8 @@ def _walk_of(off: frozenset[str], vfs: Files, max_memory: int) -> _Walk:
         ),
         "hidden" in off,
         _FilesReader(vfs, max_memory),
+        readdir,
+        lstat,
     )
 
 
@@ -276,7 +322,7 @@ async def _files(
     ]
     while pending:
         path, display, stack = pending.pop()
-        stat = await vfs.stat(path, nofollow=path != root)
+        stat = await vfs.stat(path) if path == root else await walk.lstat(path)
         is_dir = stat.type == FileType.DIRECTORY
         if path != root:
             verdict = globs.verdict(
@@ -294,10 +340,10 @@ async def _files(
             yield path, display
         elif is_dir and budget.opens(path.virtual):
             limit = budget.listing_limit(path.virtual)
-            children, _ = await vfs.dispatch(
-                "readdir",
-                path,
-                **({"limit": limit} if limit is not None else {}),
+            children = await (
+                walk.readdir(path)
+                if limit is None
+                else walk.readdir(path, limit=limit)
             )
             selected = []
             names: set[str] = set()
@@ -474,15 +520,59 @@ async def execute(
     walk = _walk_of(frozenset(fl.as_list("no_ignore")), vfs, max_memory)
     roots = paths or [ctx.cwd]
     directory = False
+    lone: set[str] = set()
     if not stdin:
         for root in roots:
             if (await vfs.stat(root)).type == FileType.DIRECTORY:
                 directory = True
                 await before_full_walk(dispatch_of(ctx), root, "ast-grep")
-            elif language is None and (ext := _extension(root.virtual)) in (
+                continue
+            lone.add(root.virtual)
+            if language is None and (ext := _extension(root.virtual)) in (
                 UNBUNDLED_EXTENSIONS
             ):
                 raise UsageError(f"ast-grep: unsupported language: {ext}")
+    # The files of each language no match of a ``run`` pattern can be in:
+    # the text ast-grep itself rules a file out by before it parses it
+    # (the pattern's longest fixed token), asked of the mount's search. A
+    # file named on the line is always read.
+    walked = [root for root in roots if root.virtual not in lone]
+    ruled: dict[str, Callable[[PathSpec], Awaitable[bool]] | None] = {}
+
+    async def misses(lang: str, path: PathSpec) -> bool:
+        if pattern is None or not walked:
+            return False
+        if lang not in ruled:
+            room = memory_room()
+            reply = await asyncio.to_thread(
+                process,
+                {"verb": "literal", "language": lang},
+                pattern.encode(),
+                room if room is not None else 2**53 - 1,
+                max_memory,
+            )
+            fixed = reply["values"][0] if reply["values"] else ""
+            asked = (
+                search_terms(
+                    None, (fixed.encode(),), False, False, False, False, False
+                )
+                if _PLAIN.fullmatch(fixed)
+                else None
+            )
+            ruled[lang] = (
+                None
+                if asked is None
+                else await ruled_out(
+                    command_files(ctx, walked),
+                    ctx,
+                    walked,
+                    lone,
+                    SearchTerms(asked[0], False, False, False, False),
+                )
+            )
+        rule = ruled[lang]
+        return rule is not None and await rule(path)
+
     options = dict[str, str | bool | None](
         verb=verb,
         pattern=pattern,
@@ -570,6 +660,8 @@ async def execute(
                     else EXTENSIONS.get(posixpath.splitext(path.virtual)[1])
                 )
                 if lang and (language is None or lang == language):
+                    if await misses(lang, path):
+                        continue
                     data = await _read(vfs, path, max_memory)
                     if not data:
                         continue

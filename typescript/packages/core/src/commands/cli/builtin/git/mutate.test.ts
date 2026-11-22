@@ -41,7 +41,10 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GITLINK_MODE, REGULAR_MODE, SYMLINK_MODE } from './constants.ts'
 import { GIT } from './index.ts'
 import {
+  blockingAncestor,
   ensureDir,
+  LeadingDirs,
+  lstat,
   readNames,
   readOptional,
   refuseMount,
@@ -219,17 +222,22 @@ function gitlinkIndex(repo: string, path: string): void {
  *
  * A branch switch onto a gitlink is only reachable while the current branch
  * does not carry one, so the index is put back where it was afterwards.
+ * `files` are regular files the branch records beside it.
  */
-function gitlinkBranch(repo: string, branch: string, path: string): void {
+function gitlinkBranch(
+  repo: string,
+  branch: string,
+  path: string,
+  files: readonly string[] = [],
+): void {
   const head = git(repo, ['rev-parse', 'HEAD']).trim()
-  execFileSync('git', [
-    '-C',
-    repo,
-    'update-index',
-    '--add',
-    '--cacheinfo',
-    `160000,${head},${path}`,
-  ])
+  const blob = execFileSync('git', ['-C', repo, 'hash-object', '-w', '--stdin'], {
+    input: 'beside\n',
+    encoding: 'utf8',
+  }).trim()
+  for (const cached of [`160000,${head},${path}`, ...files.map((f) => `100644,${blob},${f}`)]) {
+    execFileSync('git', ['-C', repo, 'update-index', '--add', '--cacheinfo', cached])
+  }
   const tree = git(repo, ['write-tree']).trim()
   const commit = git(repo, ['commit-tree', tree, '-p', head, '-m', 'gitlink']).trim()
   git(repo, ['update-ref', `refs/heads/${branch}`, commit])
@@ -2170,6 +2178,16 @@ describe('a gitlink in the tree', () => {
     expect(git(drained, ['ls-files', 'sub/child.md'])).toBe('')
   })
 
+  it('makes a directory the entries after it share', async () => {
+    // `a/0` makes `a`, the gitlink makes `a/b`, and `a/b/z` lands in the
+    // directory the gitlink made, which the checkout must not make again.
+    const h = await harness((repo) => {
+      gitlinkBranch(repo, 'linked', 'a/b/sub', ['a/0', 'a/b/z'])
+    })
+    expect((await h.run('checkout linked'))[0]).toBe(0)
+    expect(DEC.decode((await h.read('/repo/a/b/z')) ?? undefined)).toBe('beside\n')
+  })
+
   it('lands over a directory holding untracked files', async () => {
     // A gitlink asks for a directory, so the one already standing is what it
     // asked for and nothing in it is lost. The collision check read it as a
@@ -2924,15 +2942,57 @@ describe('restoreEntry', () => {
     'present %s with bits %s restored as %s sets %j',
     async (present, had, mode, want) => {
       const { state, dispatch } = holding(present, had)
-      await restoreEntry(
-        filesOver(dispatch),
-        PathSpec.fromStrPath('/repo/slot'),
-        mode,
-        new Uint8Array([120]),
-      )
+      const files = filesOver(dispatch)
+      const slot = PathSpec.fromStrPath('/repo/slot')
+      await restoreEntry(files, slot, mode, new Uint8Array([120]), await lstat(files, slot))
       expect(state.set).toEqual(want)
     },
   )
+})
+
+// git's lstat cache: a checkout asks each leading directory once, not once
+// per entry under it, and nothing under one it made or found missing.
+describe('LeadingDirs', () => {
+  it('asks each leading directory once and nothing under one made or missing', async () => {
+    const asked: string[] = []
+    const dispatch: CallerDispatchFn = (op, path) => {
+      if (op === 'mkdir') return Promise.resolve([null, new IOResult()])
+      asked.push(path.virtual)
+      if (path.virtual.startsWith('/repo/gone')) {
+        return Promise.reject(Object.assign(new Error(path.virtual), { code: 'ENOENT' }))
+      }
+      const name = path.virtual.slice(path.virtual.lastIndexOf('/') + 1)
+      return Promise.resolve([new FileStat({ name, type: FileType.DIRECTORY }), new IOResult()])
+    }
+    const files = filesOver(dispatch)
+    const repo = PathSpec.fromStrPath('/repo')
+    const dirs = new LeadingDirs()
+    for (const name of ['a/b/one', 'a/b/two', 'a/three', 'gone/x/four', 'gone/y']) {
+      expect(await blockingAncestor(files, repo, name, dirs)).toBeNull()
+    }
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    dirs.made(repo.join('new'))
+    expect(await blockingAncestor(files, repo, 'new/deep/five', dirs)).toBeNull()
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    expect(dirs.mayHold(repo.join('new/deep/five'))).toBe(false)
+    expect(dirs.mayHold(repo.join('gone/x/four'))).toBe(false)
+    expect(dirs.mayHold(repo.join('a/b/one'))).toBe(true)
+    // What the pass wrote is looked at when a tree names the place again,
+    // and is in the way of an entry the tree puts below it.
+    dirs.made(repo.join('new/deep'))
+    dirs.taken(repo.join('new/deep/five'))
+    expect(dirs.mayHold(repo.join('new/deep/five'))).toBe(true)
+    const below = await blockingAncestor(files, repo, 'new/deep/five/six', dirs)
+    expect(below?.virtual).toBe('/repo/new/deep/five')
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    // A directory made below one the pass never looked at is not kept: that
+    // one may yet be taken away, a link replaced by a real directory.
+    await ensureDir(files, repo.join('gone/x'), dirs)
+    expect(dirs.mayHold(repo.join('gone/x/four'))).toBe(false)
+    const unseen = new LeadingDirs()
+    await ensureDir(files, repo.join('gone/x'), unseen)
+    expect(unseen.mayHold(repo.join('gone/x/four'))).toBe(true)
+  })
 })
 
 describe('removeTree meeting a link', () => {

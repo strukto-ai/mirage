@@ -185,4 +185,12 @@ describe('LineRegex', () => {
     expect(new LineRegex(['kelvin'], 'fixed', true, true).needles).toBeNull()
     expect(new LineRegex(['KELVIN'], 'fixed', true).needles).toEqual(['kelvin'])
   })
+
+  it('names the texts every match of a POSIX expression holds', () => {
+    expect(new PosixRegex('FETCH_HEAD').needles).toEqual(['FETCH_HEAD'])
+    expect(new PosixRegex('foo.*bar|baz1', true).needles).toEqual(['foo', 'baz1'])
+    expect(new PosixRegex(posixEscape('a.b*c'), true).needles).toEqual(['a.b*c'])
+    expect(new PosixRegex('Fetch', false, 'posix', true).needles).toEqual(['fetch'])
+    expect(new PosixRegex('a*').needles).toBeNull()
+  })
 })

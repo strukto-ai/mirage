@@ -15,6 +15,7 @@
 import asyncio
 import contextlib
 import errno
+import functools
 import sqlite3
 from collections.abc import AsyncIterator, Sequence
 from unittest.mock import AsyncMock
@@ -22,6 +23,8 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
+from mirage.commands.cli.builtin.ast_grep import AST_GREP
+from mirage.commands.cli.builtin.git import GIT
 from mirage.core.sql.constants import (
     DEFAULT_CHUNK_SIZE,
     DIR,
@@ -31,10 +34,17 @@ from mirage.core.sql.constants import (
 from mirage.io.stream import materialize
 from mirage.observe.context import RecordingScope
 from mirage.types import CapacityState, FileType, MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.postgres import PostgresSqlDriver
 from mirage.vfs.sql.sql import SqlVFS
-from mirage.vfs.sql.types import SqlDialect, SqlDriver, SqlStatement
+from mirage.vfs.sql.types import (
+    SqlDialect,
+    SqlDriver,
+    SqlStatement,
+    SqlValue,
+)
 from mirage.vfs.testing import MutationFixture, check_mutation_contract
 from mirage.workspace import Workspace
 from mirage.workspace.record.sql import SqlRecordClient
@@ -53,6 +63,11 @@ def at(p: str) -> PathSpec:
 
 async def whole(vfs: SqlVFS, p: str) -> bytes:
     return await materialize(await vfs.read(at(p)))
+
+
+async def _streamed(*chunks: bytes) -> AsyncIterator[bytes]:
+    for chunk in chunks:
+        yield chunk
 
 
 def racing(vfs: SqlVFS, sql: list[str]) -> None:
@@ -885,6 +900,244 @@ async def test_two_writes_on_one_file_through_two_mounts_overlap():
     gate.set()
     await first
     driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capped_write_walks_its_path_once_and_counts_what_it_wrote():
+    driver = SqliteDriver()
+    vfs = SqlVFS(driver=driver, capacity=100)
+    usage = vfs.usage
+    assert usage is not None
+    await vfs.mkdir(at("/d"))
+    await vfs.write(at("/d/warm"), b"")
+    asked: list[str] = []
+    query = driver.query
+
+    def counting(sql: str, params: Sequence[SqlValue] = ()):
+        asked.append(sql)
+        return query(sql, params)
+
+    driver.query = counting  # type: ignore[method-assign]
+    await vfs.write(at("/d/f"), b"abcd")
+    assert len(asked) == 1
+    assert usage.used == 4
+    await vfs.write(at("/d/f"), b"xy")
+    assert usage.used == 2
+    await vfs.append(at("/d/f"), b"123")
+    assert usage.used == 5
+    await vfs.write(at("/d/f"), _streamed(b"ab", b"cd"))
+    assert usage.used == 4
+    await vfs.append(at("/d/f"), _streamed(b"ab", b"cd"))
+    assert usage.used == 8
+    assert await whole(vfs, "/d/f") == b"abcdabcd"
+    assert (
+        usage.used
+        == (
+            await vfs.accessor.query(
+                "SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE ino IN"
+                " (SELECT ino FROM fs_dentry WHERE name = 'f')"
+            )
+        )[0]["n"]
+    )
+    # A replacement refused part way has emptied the file, and the count
+    # follows the file as it stands, not as the write first found it.
+    small = SqlVFS(capacity=8)
+    await small.write(at("/f"), b"abcdefgh")
+    with pytest.raises(OSError) as raised:
+        await small.write(at("/f"), _streamed(b"123456789"))
+    assert raised.value.errno == errno.EDQUOT
+    assert small.usage is not None and small.usage.used == 0
+    await small.write(at("/g"), b"1")
+    assert small.usage.used == 1
+    await small.close()
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sole_writer_walks_one_name_through_the_folder_it_just_walked():
+    driver = SqliteDriver()
+    assert driver.exclusive
+    vfs = SqlVFS(driver=driver)
+    await vfs.mkdir(at("/a/b/c"), parents=True)
+    await vfs.write(at("/a/b/c/one"), b"1")
+    asked: list[str] = []
+    query = driver.query
+
+    def counting(sql: str, params: Sequence[SqlValue] = ()):
+        asked.append(sql)
+        return query(sql, params)
+
+    driver.query = counting  # type: ignore[method-assign]
+    await vfs.write(at("/a/b/c/two"), b"2")
+    assert [sql.count("LEFT JOIN fs_dentry") for sql in asked] == [1]
+    assert await whole(vfs, "/a/b/c/one") == b"1"
+    # A folder that moved is walked afresh: the old name misses, the new
+    # one holds what was written.
+    await vfs.rename(at("/a/b"), at("/a/z"))
+    with pytest.raises(OSError) as raised:
+        await vfs.write(at("/a/b/c/three"), b"3")
+    assert raised.value.errno == errno.ENOENT
+    assert await whole(vfs, "/a/z/c/two") == b"2"
+    # One removed and made again is not the one remembered.
+    await vfs.rm_r(at("/a/z/c"))
+    await vfs.mkdir(at("/a/other"))
+    with pytest.raises(OSError) as raised:
+        await vfs.write(at("/a/z/c/four"), b"4")
+    assert raised.value.errno == errno.ENOENT
+    assert not await vfs.exists(at("/a/other/four"))
+    await vfs.mkdir(at("/a/z/c"))
+    await vfs.write(at("/a/z/c/five"), b"5")
+    assert await whole(vfs, "/a/z/c/five") == b"5"
+    await vfs.close()
+
+
+SEARCHES = [
+    "git grep -n needle",
+    "git grep -in needle",
+    "git grep -c needle",
+    "git grep -l needle",
+    "git grep -L needle",
+    "git grep -vn needle -- b.txt",
+    "git grep -n 'nee[d]le'",
+    "git grep -n -e alpha -e beta",
+    "git grep -n absent",
+    "git grep -n needle -- src",
+    "git grep -qi needle -- d src; echo quiet=$?",
+    "git grep -in needle -- d src",
+    "ast-grep run -p 'needle($A)' .",
+    "ast-grep run -l ts -p 'needle($A)' .",
+    "ast-grep run -p '$A($B)' src",
+    "ast-grep run -p 'needle($A)' src/two.ts",
+    "grep -rn needle .",
+    "rg -n needle",
+]
+
+
+async def _searched(vfs: BaseVFS) -> tuple[Workspace, list[tuple]]:
+    ws = Workspace({"/": RAMVFS(), "/w": vfs}, mode=MountMode.WRITE)
+    ws.register_cli("git", GIT)
+    ws.register_cli("ast-grep", AST_GREP)
+    seeded = await ws.shell(
+        "cd /w && git init repo >/dev/null && cd repo && mkdir d src"
+        " && printf 'alpha needle\\n' > a.txt && printf 'beta\\n' > b.txt"
+        " && printf 'x\\nNeedle two\\n' > d/c.txt"
+        " && printf 'needle(1)\\n' > src/one.ts"
+        " && printf 'other(2)\\n' > src/two.ts"
+        " && printf 'needle(3)\\n' > src/three.py && git add -A"
+    )
+    assert seeded.exit_code == 0, seeded.stderr
+    ws.create_session(
+        "sealed",
+        profile={
+            "commands": {
+                "*": [
+                    "allow",
+                    {
+                        "decision": "deny",
+                        "reason": "sealed",
+                        "paths": ["/w/repo/b.txt"],
+                    },
+                ]
+            }
+        },
+    )
+    ws.create_session(
+        "walled",
+        profile={
+            "commands": {
+                "*": [
+                    "allow",
+                    {
+                        "decision": "deny",
+                        "reason": "walled",
+                        "paths": ["/w/repo/src"],
+                    },
+                ]
+            }
+        },
+    )
+    answers = []
+    for session in (None, "sealed", "walled"):
+        for line in SEARCHES:
+            ran = await ws.shell(
+                f"cd /w/repo && {line}",
+                **({} if session is None else {"session_id": session}),
+            )
+            answers.append((line, ran.stdout, ran.stderr, ran.exit_code))
+    return ws, answers
+
+
+@pytest.mark.asyncio
+async def test_a_search_narrowed_by_the_database_answers_as_a_full_read():
+    ram, read_all = await _searched(RAMVFS())
+    sql, narrowed = await _searched(SqlVFS(":memory:"))
+    try:
+        assert narrowed == read_all
+    finally:
+        await ram.close()
+        await sql.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, skipped, scope",
+    [
+        ("git grep -n needle", {"b.txt", "src/two.ts"}, "/w/repo"),
+        ("git grep -n needle -- src", {"src/two.ts"}, "/w/repo/src"),
+        ("git grep -n needle -- a.txt", {"b.txt"}, None),
+        ("git grep -n alpha", {"b.txt", "d/c.txt", "src/one.ts"}, "/w/repo"),
+        ("ast-grep run -p 'needle($A)' .", {"src/two.ts"}, "/w/repo"),
+    ],
+)
+async def test_a_search_reads_only_the_files_the_database_names(
+    line: str, skipped: set[str], scope: str | None
+):
+    # The database is asked about the folder the search covers, no wider,
+    # and not at all for a file the line names; no file it rules out is
+    # opened.
+    vfs = SqlVFS(":memory:")
+    ws, _ = await _searched(vfs)
+    try:
+        opened: list[str] = []
+        asked: list[str] = []
+        read, containing = vfs.read, vfs.files_containing
+
+        @functools.wraps(read)
+        async def reading(path: PathSpec, *args, **kwargs):
+            opened.append(path.virtual)
+            return await read(path, *args, **kwargs)
+
+        @functools.wraps(containing)
+        async def searching(path: PathSpec, *args, **kwargs):
+            asked.append(path.virtual)
+            return await containing(path, *args, **kwargs)
+
+        vfs.read = reading  # type: ignore[method-assign]
+        vfs.files_containing = searching  # type: ignore[method-assign]
+        ran = await ws.shell(f"cd /w/repo && {line}")
+        assert ran.exit_code == 0, ran.stderr
+        assert ran.stdout
+        assert set(asked) == ({scope} if scope else set())
+        assert not {f"/w/repo/{name}" for name in skipped} & set(opened)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_a_taken_name_itself():
+    vfs = SqlVFS()
+    assert vfs.refuses_taken
+    await vfs.mkdir(at("/d"))
+    await vfs.write(at("/f"), b"x")
+    for taken in ("/d", "/f"):
+        with pytest.raises(OSError) as raised:
+            await vfs.mkdir(at(taken))
+        assert raised.value.errno == errno.EEXIST
+    await vfs.mkdir(at("/d"), parents=True)
+    with pytest.raises(OSError) as raised:
+        await vfs.mkdir(at("/f"), parents=True)
+    assert raised.value.errno == errno.EEXIST
+    await vfs.close()
 
 
 @pytest.mark.asyncio

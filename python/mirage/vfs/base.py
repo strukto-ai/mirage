@@ -168,6 +168,11 @@ class BaseVFS:
     # only ever handed a window by a VFS that sets this.
     reads_ranges: bool = False
 
+    # Whether ``mkdir`` itself refuses a taken name as mkdir(2) does: any
+    # entry without ``parents``, a file with it. The mount looks the name
+    # up before the create only for a VFS that leaves this False.
+    refuses_taken: bool = False
+
     # Whether the data lives on the host filesystem, which lets a command
     # aggregate on the host instead of streaming through mirage.
     local: bool = False

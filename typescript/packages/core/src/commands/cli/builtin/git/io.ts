@@ -59,6 +59,75 @@ export async function isLink(vfs: Files, path: PathSpec): Promise<boolean> {
   return (await lstat(vfs, path))?.type === FileType.SYMLINK
 }
 
+/** What one checkout pass has learned of a directory above its entries. */
+enum Leading {
+  /** A directory that stood there, which may hold anything. */
+  FOUND = 'found',
+  /** One this pass made, holding only what the pass has written into it. */
+  MADE = 'made',
+  /** Nothing there, nor anything below it. */
+  MISSING = 'missing',
+  /** A file or link this pass wrote there. */
+  TAKEN = 'taken',
+}
+
+/**
+ * The leading directories one checkout pass has looked at, as git's lstat
+ * cache keeps them: each is asked once however many entries sit under it.
+ * One the pass made, or found missing, holds nothing the pass has not
+ * written, so an entry under it is not looked at at all. What the pass wrote
+ * is kept too: a tree that names one place twice, or a file where it also
+ * names a directory, meets its own entry there as it would any other.
+ */
+export class LeadingDirs {
+  private readonly seen = new Map<string, Leading>()
+
+  /** What the pass knows of `path`, undefined when it has not asked. */
+  get(path: PathSpec): Leading | undefined {
+    return this.seen.get(path.virtual)
+  }
+
+  /** A directory standing at `path`. */
+  found(path: PathSpec): void {
+    this.seen.set(path.virtual, Leading.FOUND)
+  }
+
+  /** A directory the pass made at `path`. */
+  made(path: PathSpec): void {
+    this.seen.set(path.virtual, Leading.MADE)
+  }
+
+  /** A file or link the pass wrote at `path`. */
+  taken(path: PathSpec): void {
+    this.seen.set(path.virtual, Leading.TAKEN)
+  }
+
+  /** Nothing at `path` any more, nor below it. */
+  missing(path: PathSpec): void {
+    // Only a directory the pass knew can have one it knows below it.
+    if (this.seen.has(path.virtual)) {
+      const prefix = `${path.virtual}/`
+      for (const key of this.seen.keys()) if (key.startsWith(prefix)) this.seen.delete(key)
+    }
+    this.seen.set(path.virtual, Leading.MISSING)
+  }
+
+  /**
+   * Whether anything can stand at `path` for the pass to look at: what it
+   * put there itself, or anything at all unless the nearest directory it
+   * knows of above the path is one it made or found missing.
+   */
+  mayHold(path: PathSpec): boolean {
+    const own = this.seen.get(path.virtual)
+    if (own !== undefined) return own !== Leading.MISSING
+    for (let at = path.parent; ; at = at.parent) {
+      const known = this.seen.get(at.virtual)
+      if (known !== undefined) return known === Leading.FOUND
+      if (at.virtual === '/') return true
+    }
+  }
+}
+
 /**
  * The bytes git stores for one working-tree entry.
  *
@@ -110,19 +179,22 @@ export async function restoreEntry(
   path: PathSpec,
   mode: string,
   blob: Uint8Array,
+  held: FileStat | null,
+  dirs?: LeadingDirs,
 ): Promise<void> {
-  const held = await lstat(vfs, path)
   const linked = held?.type === FileType.SYMLINK
   if (mode === SYMLINK_MODE) {
-    await removeFile(vfs, path)
+    if (held !== null) await removeFile(vfs, path)
     // symlink(2) needs the directory above the entry, as the write below
     // does, so a link alone in a new directory gets one too.
-    await ensureDir(vfs, path.parent)
+    await ensureDir(vfs, path.parent, dirs)
     await vfs.symlink(path, new TextDecoder().decode(blob))
+    dirs?.taken(path)
     return
   }
   if (linked) await removeFile(vfs, path)
-  await writeFile(vfs, path, blob)
+  await writeFile(vfs, path, blob, dirs)
+  dirs?.taken(path)
   // A write keeps the bits a file had, and a new file has none set, so the
   // setattr runs only when it changes them: a checkout writes thousands of
   // 644 files that need none.
@@ -147,13 +219,14 @@ export async function restoreEntry(
  *
  * @param vfs the session's files
  * @param path absolute virtual path of the submodule
+ * @param dirs a checkout pass's leading directories, which learn the ones made
  */
-export async function keepGitlink(vfs: Files, path: PathSpec): Promise<void> {
+export async function keepGitlink(vfs: Files, path: PathSpec, dirs?: LeadingDirs): Promise<void> {
   const linked = await isLink(vfs, path)
   const info = linked ? null : await statOf(vfs, path)
   if (info !== null && info.type === FileType.DIRECTORY) return
   if (linked || info !== null) await removeFile(vfs, path)
-  await ensureDir(vfs, path)
+  await ensureDir(vfs, path, dirs)
 }
 
 /**
@@ -244,22 +317,37 @@ export async function readNames(vfs: Files, path: PathSpec): Promise<string[]> {
  * and the reason this does not need the two-channel stat: on such a store a
  * directory is the set of keys under it, so creating one again costs a no-op
  * rather than an error.
+ *
+ * `dirs`, a checkout pass's leading directories, answers for the ones the
+ * pass already knows and learns the ones it makes below one it knows. One made
+ * below a directory the pass never looked at is not kept: taking that
+ * directory away would leave it standing in what the pass remembers.
  */
-export async function ensureDir(vfs: Files, path: PathSpec): Promise<void> {
+export async function ensureDir(vfs: Files, path: PathSpec, dirs?: LeadingDirs): Promise<void> {
   const missing: PathSpec[] = []
   let current = path
+  let kept = false
   while (current.virtual !== '/') {
-    try {
-      await vfs.stat(current)
+    const known = dirs?.get(current)
+    if (known === Leading.FOUND || known === Leading.MADE) {
+      kept = true
       break
-    } catch (err) {
-      if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
-      missing.push(current)
-      current = current.parent
     }
+    if (known !== Leading.MISSING) {
+      try {
+        await vfs.stat(current)
+        break
+      } catch (err) {
+        if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
+      }
+    }
+    missing.push(current)
+    current = current.parent
   }
   for (const target of missing.reverse()) {
     await vfs.mkdir(target)
+    kept ||= dirs?.get(target) === Leading.MISSING
+    if (kept) dirs?.made(target)
   }
 }
 
@@ -309,8 +397,13 @@ export async function takeLock(vfs: Files, path: PathSpec): Promise<void> {
 }
 
 /** Write one virtual path, creating the directories above it. */
-export async function writeFile(vfs: Files, path: PathSpec, data: Uint8Array): Promise<void> {
-  await ensureDir(vfs, path.parent)
+export async function writeFile(
+  vfs: Files,
+  path: PathSpec,
+  data: Uint8Array,
+  dirs?: LeadingDirs,
+): Promise<void> {
+  await ensureDir(vfs, path.parent, dirs)
   await vfs.write(path, data)
 }
 
@@ -340,9 +433,10 @@ export async function removeFile(vfs: Files, path: PathSpec): Promise<void> {
  * the entry does nothing at all, because the path never led there. Both halves
  * are what git does, probed against git 2.50.1.
  *
- * The lstat is asked before the stat, and the order is the whole point:
- * `stat` dereferences, so a link to a directory stats as a directory and the
- * walk would carry on straight through it.
+ * Each component is asked with an lstat, never a stat: `stat` dereferences,
+ * so a link to a directory stats as a directory and the walk would carry on
+ * straight through it. A missing component ends the walk, as nothing stands
+ * below it.
  *
  * An exact-path lookup cannot see any of this, since what is in the way sits
  * above the name being looked up rather than on it.
@@ -350,6 +444,7 @@ export async function removeFile(vfs: Files, path: PathSpec): Promise<void> {
  * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
  * @param name the entry, repository-relative
+ * @param dirs a checkout pass's leading directories, each asked once
  * @returns the absolute virtual path of the nearest such component, null when
  *   every component above the entry is a directory
  */
@@ -357,13 +452,27 @@ export async function blockingAncestor(
   vfs: Files,
   worktree: PathSpec,
   name: string,
+  dirs: LeadingDirs = new LeadingDirs(),
 ): Promise<PathSpec | null> {
   let current = worktree
+  let made = false
   for (const part of name.split('/').slice(0, -1)) {
     current = current.join(part)
-    if (await isLink(vfs, current)) return current
-    const info = await statOf(vfs, current)
-    if (info !== null && info.type !== FileType.DIRECTORY) return current
+    const known = dirs.get(current)
+    if (known === Leading.MISSING) return null
+    if (known === Leading.TAKEN) return current
+    if (known !== undefined) {
+      made = known === Leading.MADE
+      continue
+    }
+    // A directory this pass made holds only what it has made there since.
+    const info = made ? null : await lstat(vfs, current)
+    if (info === null) {
+      dirs.missing(current)
+      return null
+    }
+    if (info.type !== FileType.DIRECTORY) return current
+    dirs.found(current)
   }
   return null
 }
@@ -389,7 +498,9 @@ export async function renamePath(vfs: Files, source: PathSpec, target: PathSpec)
  * were. Asking first is the shape every other collision check in these verbs
  * already has: name what is in the way and change nothing. The condition
  * mirrors the write loop's exactly, a link included, so a destination the loop
- * would not clear is not refused here either.
+ * would not clear is not refused here either: a link or file above the
+ * destination is what the loop removes, and a link on it is what the loop
+ * retargets.
  *
  * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
@@ -400,11 +511,12 @@ export async function refuseReplacedMounts(
   worktree: PathSpec,
   names: readonly string[],
 ): Promise<void> {
+  const dirs = new LeadingDirs()
   for (const name of [...names].sort(compareCodePoints)) {
     const where = worktree.join(name)
-    if (await isLink(vfs, where)) continue
-    const info = await statOf(vfs, where)
-    if (info !== null && info.type === FileType.DIRECTORY) refuseMount(vfs, where)
+    if ((await blockingAncestor(vfs, worktree, name, dirs)) !== null) continue
+    if (!dirs.mayHold(where)) continue
+    if ((await lstat(vfs, where))?.type === FileType.DIRECTORY) refuseMount(vfs, where)
   }
 }
 

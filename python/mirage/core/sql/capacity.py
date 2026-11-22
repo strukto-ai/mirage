@@ -15,14 +15,22 @@
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
 from mirage.core.sql.inode import inode_of, is_dir, is_file
-from mirage.core.sql.path import target, walk
+from mirage.core.sql.path import Walk, target, walk
 from mirage.types import PathSpec
 
 
-async def size_of(accessor: SqlAccessor, path: PathSpec) -> int:
+async def size_of(
+    accessor: SqlAccessor, path: PathSpec, found: Walk | None = None
+) -> int:
     """The bytes at ``path``, a directory's files included; 0 for none.
-    Mirrors TypeScript's ``sizeOf``."""
-    node = target(await walk(accessor, path))
+    Mirrors TypeScript's ``sizeOf``.
+
+    Args:
+        accessor (SqlAccessor): the database.
+        path (PathSpec): the operand.
+        found (Walk | None): the path already walked.
+    """
+    node = target(await walk(accessor, path) if found is None else found)
     if node is None:
         return 0
     if not is_dir(node):
