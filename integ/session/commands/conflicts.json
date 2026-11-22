@@ -21,9 +21,9 @@
       ],
       "command": "rm /repo/letters.txt",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/repo/letters.txt': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -48,9 +48,9 @@
       "session": "granted",
       "command": "rm /scratch/both/locked/y",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/scratch/both/locked/y': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -91,9 +91,9 @@
       "session": "granted",
       "command": "rm /scratch/both/locked/y",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/scratch/both/locked/y': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -146,9 +146,9 @@
       ],
       "command": "rm /repo/sealed/x",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/repo/sealed/x': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -187,9 +187,9 @@
       "session": "spanner",
       "command": "cat /scratch/span/sealed/s",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/span/sealed/s: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {

@@ -3533,24 +3533,31 @@
           }
         },
         "spanner": {
-          "commands": {
-            "cat": [
-              {
-                "decision": "deny",
-                "reason": "span sealed",
-                "paths": [
-                  "/scratch/span/sealed/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "span review",
-                "paths": [
-                  "/scratch/span/*",
-                  "/scratch/deep/a/b/c/*"
-                ]
+          "mounts": {
+            "/scratch/span/sealed": {
+              "commands": {
+                "cat": {
+                  "decision": "deny",
+                  "reason": "span sealed"
+                }
               }
-            ]
+            },
+            "/scratch/span": {
+              "commands": {
+                "cat": {
+                  "decision": "ask",
+                  "reason": "span review"
+                }
+              }
+            },
+            "/scratch/deep/a/b/c": {
+              "commands": {
+                "cat": {
+                  "decision": "ask",
+                  "reason": "span review"
+                }
+              }
+            }
           }
         },
         "carver": {
@@ -3690,398 +3697,47 @@
         },
         "default": {
           "commands": {
-            "*": [
-              "deny",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "mkdir": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "tee": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "touch": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "ls": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "private",
-                "paths": [
-                  "/scratch/private"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "cat": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "private",
-                "paths": [
-                  "/scratch/private"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
+            "*": "deny",
+            "mkdir": "allow",
+            "tee": "allow",
+            "touch": "allow",
+            "ls": "allow",
+            "cat": "allow",
             "head": [
               "allow",
-              "ask",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
+              "ask"
             ],
-            "rm": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "no deletes in the repo",
-                "paths": [
-                  "/repo/*"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "both: locked",
-                "paths": [
-                  "/scratch/both/locked/*"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "both: locked, second voice",
-                "paths": [
-                  "/scratch/both/locked/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "sign-off",
-                "paths": [
-                  "/scratch/shared/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "both: needs a nod",
-                "paths": [
-                  "/scratch/both/*"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "find": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "grep": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "private",
-                "paths": [
-                  "/scratch/private"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
+            "rm": "allow",
+            "find": "allow",
+            "grep": "allow",
             "git": {
-              "*": [
-                "allow",
-                {
-                  "decision": "deny",
-                  "reason": "sealed until review",
-                  "paths": [
-                    "/repo/sealed/*"
-                  ]
-                }
-              ],
-              "branch": [
-                {
-                  "decision": "deny",
-                  "reason": "no branches"
-                },
-                {
-                  "decision": "deny",
-                  "reason": "sealed until review",
-                  "paths": [
-                    "/repo/sealed/*"
-                  ]
-                }
-              ]
+              "*": "allow",
+              "branch": {
+                "decision": "deny",
+                "reason": "no branches"
+              }
             },
-            "man": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "xargs": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "python3": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "ln": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "mv": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "rmdir": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "du": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "cp": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "tar": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "tree": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "stat": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "file": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "wc": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "zip": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "echo": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "cd": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "test": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "[": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "type": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "command": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ],
-            "which": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "sealed until review",
-                "paths": [
-                  "/repo/sealed/*"
-                ]
-              }
-            ]
+            "man": "allow",
+            "xargs": "allow",
+            "python3": "allow",
+            "ln": "allow",
+            "mv": "allow",
+            "rmdir": "allow",
+            "du": "allow",
+            "cp": "allow",
+            "tar": "allow",
+            "tree": "allow",
+            "stat": "allow",
+            "file": "allow",
+            "wc": "allow",
+            "zip": "allow",
+            "echo": "allow",
+            "cd": "allow",
+            "test": "allow",
+            "[": "allow",
+            "type": "allow",
+            "command": "allow",
+            "which": "allow"
           },
           "mounts": {
             "/repo": {
@@ -4108,10 +3764,197 @@
                 },
                 "rm": {
                   "decision": "deny",
-                  "reason": "owner: sealed",
-                  "paths": [
-                    "/repo/sealed/*"
-                  ]
+                  "reason": "no deletes in the repo"
+                }
+              }
+            },
+            "/repo/sealed": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "mkdir": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "tee": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "touch": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "ls": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "cat": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "head": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "rm": [
+                  {
+                    "decision": "deny",
+                    "reason": "sealed until review"
+                  },
+                  {
+                    "decision": "deny",
+                    "reason": "owner: sealed"
+                  }
+                ],
+                "find": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "grep": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "git": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed until review"
+                  },
+                  "branch": {
+                    "decision": "deny",
+                    "reason": "sealed until review"
+                  }
+                },
+                "man": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "xargs": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "python3": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "ln": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "mv": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "rmdir": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "du": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "cp": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "tar": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "tree": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "stat": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "file": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "wc": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "zip": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "echo": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "cd": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "test": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "[": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "type": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "command": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
+                "which": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                }
+              }
+            },
+            "/scratch/private": {
+              "commands": {
+                "ls": {
+                  "decision": "deny",
+                  "reason": "private"
+                },
+                "cat": {
+                  "decision": "deny",
+                  "reason": "private"
+                },
+                "grep": {
+                  "decision": "deny",
+                  "reason": "private"
+                }
+              }
+            },
+            "/scratch/both/locked": {
+              "commands": {
+                "rm": [
+                  {
+                    "decision": "deny",
+                    "reason": "both: locked"
+                  },
+                  {
+                    "decision": "deny",
+                    "reason": "both: locked, second voice"
+                  }
+                ]
+              }
+            },
+            "/scratch/shared": {
+              "commands": {
+                "rm": {
+                  "decision": "ask",
+                  "reason": "sign-off"
+                }
+              }
+            },
+            "/scratch/both": {
+              "commands": {
+                "rm": {
+                  "decision": "ask",
+                  "reason": "both: needs a nod"
                 }
               }
             }

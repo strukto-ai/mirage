@@ -8,9 +8,9 @@
       ],
       "command": "cd /repo && rm letters.txt",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove 'letters.txt': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -34,9 +34,9 @@
       ],
       "command": "mkdir -p /repo/sealed/deep",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "mkdir: cannot create directory '/repo/sealed/deep': Permission denied\n"
+        "stderr": "mkdir: Permission denied\n"
       }
     },
     {
@@ -60,9 +60,9 @@
       ],
       "command": "echo hi > /repo/sealed/x",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "echo: /repo/sealed/x: Permission denied\n"
+        "stderr": "echo: Permission denied\n"
       }
     },
     {
@@ -73,9 +73,9 @@
       ],
       "command": "echo a && ! cat < /scratch/private/k",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -123,7 +123,7 @@
       "targets": [
         "ram-commands"
       ],
-      "command": "cd /repo && git reset",
+      "command": "(cd /repo && git reset)",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -194,9 +194,9 @@
       "command": "mkdir -p /scratch/private && echo k > /scratch/private/k && ln -s /scratch/private/k /scratch/k && cat /scratch/k",
       "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -220,9 +220,9 @@
       ],
       "command": "mkdir -p /scratch/private && (cd /scratch/private && ls)",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "ls: cannot access '.': Permission denied\n"
+        "stderr": "ls: Permission denied\n"
       }
     },
     {
@@ -233,9 +233,9 @@
       ],
       "command": "mkdir -p /scratch/private && (cd /scratch/private && grep -r k)",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "grep: /scratch/private: Permission denied\n"
+        "stderr": "grep: Permission denied\n"
       }
     },
     {
@@ -287,9 +287,9 @@
       ],
       "command": "echo \"$(< /scratch/private/k)\"",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: Permission denied\n",
+        "stderr": "cat: Permission denied\n",
         "check": "[]\n"
       },
       "check": {
@@ -304,9 +304,9 @@
       ],
       "command": "(cd /scratch && echo \"$(< private/k)\")",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -317,9 +317,9 @@
       ],
       "command": "echo \"$(< /scratch/k)\"",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -330,9 +330,9 @@
       ],
       "command": "echo \"`< /scratch/private/k`\"",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -345,7 +345,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\n",
-        "stderr": "cat: /scratch/private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       },
       "explain_blind": true
     },

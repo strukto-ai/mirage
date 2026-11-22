@@ -22,9 +22,9 @@
       "session": "frozen",
       "command": "grep -r . /scratch/wk",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "exit": 2,
+        "stdout": "/scratch/wk/open/o:o\n",
+        "stderr": "grep: /scratch/wk/sealed: Permission denied\n"
       }
     },
     {
@@ -50,9 +50,9 @@
       "session": "frozen",
       "command": "ls -R /scratch/wk; ls -Rr /scratch/wk 2>&1",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "ls: Permission denied\n"
+        "exit": 1,
+        "stdout": "/scratch/wk:\nopen\nsealed\n\n/scratch/wk/open:\no\n/scratch/wk:\nsealed\nopen\nls: cannot open directory '/scratch/wk/sealed': Permission denied\n\n/scratch/wk/open:\no\n",
+        "stderr": "ls: cannot open directory '/scratch/wk/sealed': Permission denied\n"
       }
     },
     {
@@ -64,9 +64,9 @@
       "session": "frozen",
       "command": "find /scratch/wk",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "exit": 1,
+        "stdout": "/scratch/wk\n/scratch/wk/open\n/scratch/wk/open/o\n/scratch/wk/sealed\n",
+        "stderr": "find: '/scratch/wk/sealed': Permission denied\n"
       }
     },
     {
@@ -78,9 +78,9 @@
       "session": "frozen",
       "command": "du -a /scratch/wk",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 1,
+        "stdout": "4\t/scratch/wk/open/o\n8\t/scratch/wk/open\n4\t/scratch/wk/sealed\n16\t/scratch/wk\n",
+        "stderr": "du: cannot read directory '/scratch/wk/sealed': Permission denied\n"
       },
       "note": "GNU du still prints the row of a directory it may not open, at 0 bytes under -ab since it counted nothing below it."
     },
@@ -149,9 +149,9 @@
       "session": "frozen",
       "command": "tree /scratch/wk",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "tree: Permission denied\n"
+        "exit": 2,
+        "stdout": "/scratch/wk\n|-- open\n|   `-- o\n`-- sealed  [error opening dir]\n\n3 directories, 1 file\n",
+        "stderr": ""
       }
     },
     {
@@ -218,9 +218,9 @@
       ],
       "command": "echo before; find /scratch/wk -type f 2>/dev/null | cat; echo after=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "exit": 0,
+        "stdout": "before\n/scratch/wk/open/o\nafter=0\n",
+        "stderr": ""
       },
       "session": "frozen"
     },
@@ -232,9 +232,9 @@
       ],
       "command": "echo before; find /scratch/wk -type f 2>/dev/null; echo after=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "exit": 0,
+        "stdout": "before\n/scratch/wk/open/o\nafter=1\n",
+        "stderr": ""
       },
       "session": "frozen"
     },
@@ -246,9 +246,9 @@
       ],
       "command": "echo before; du -s /scratch/wk 2>/dev/null; echo after=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 0,
+        "stdout": "before\n16\t/scratch/wk\nafter=1\n",
+        "stderr": ""
       },
       "session": "frozen"
     },
@@ -260,9 +260,9 @@
       ],
       "command": "find /scratch/wk -maxdepth 1",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "exit": 0,
+        "stdout": "/scratch/wk\n/scratch/wk/open\n/scratch/wk/sealed\n",
+        "stderr": ""
       },
       "session": "frozen"
     }

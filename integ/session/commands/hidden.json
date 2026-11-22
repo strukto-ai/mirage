@@ -21,9 +21,9 @@
       ],
       "command": "cat /scratch/private/k",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {

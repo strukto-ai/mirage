@@ -161,9 +161,9 @@
       "session": "frozen",
       "command": "rm /repo/letters.txt",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/repo/letters.txt': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {

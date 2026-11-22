@@ -22,9 +22,9 @@
       "command": "cat /scratch/*/k",
       "explain_blind": "the runtime expands the glob, so the dry run reads the pattern and not the paths it names",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -49,9 +49,9 @@
       "command": "ls -d /scratch/priv*",
       "explain_blind": "the runtime expands the glob, so the dry run reads the pattern and not the paths it names",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "ls: cannot access '/scratch/private': Permission denied\n"
+        "stderr": "ls: Permission denied\n"
       }
     },
     {
@@ -78,9 +78,9 @@
       "session": "granted",
       "command": "rm -r /scratch/both",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/scratch/both': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
