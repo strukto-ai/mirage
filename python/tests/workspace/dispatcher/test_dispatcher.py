@@ -4130,16 +4130,30 @@ class _CountedRemoval(RAMVFS):
         await super().unlink(path)
 
 
+class _CountedCopy(RAMVFS):
+    """A RAM mount that counts the one-call tree copies it is asked
+    for."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.copies = 0
+
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None:
+        self.copies += 1
+        return await super().dir_copy(src, dst)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "sealed,removals", [("/other/sealed", 1), ("/d/t/a/f", 0)]
+    "sealed,copies", [("/other/sealed", 1), ("/d/t/a/f", 0)]
 )
-async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
-    sealed, removals
+async def test_a_lines_tree_copy_declines_only_for_a_rule_below_it(
+    sealed, copies
 ):
     # The line's gate answers for the profile's rules, scoped to the
-    # paths a walk reaches: a rule over another mount declines nothing.
-    vfs = _CountedRemoval()
+    # paths a walk reaches: a rule over another mount declines nothing,
+    # and a folder entry below the source sends the copy entry by entry.
+    vfs = _CountedCopy()
     mounts = {"/d/": vfs, "/other/": RAMVFS()}
     with Workspace(mounts, mode=MountMode.WRITE) as ws:
         ws.create_session(
@@ -4154,9 +4168,22 @@ async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
                 }
             },
         )
-        await ws.shell("mkdir -p /d/t/a && echo hi > /d/t/a/f")
-        await ws.shell("rm -r /d/t", session_id="agent")
-    assert vfs.removals == removals
+        await ws.shell(
+            "mkdir -p /d/t/a && echo hi > /d/t/a/f && echo g > /d/t/g"
+        )
+        copied = await ws.shell("cp -r /d/t /d/u", session_id="agent")
+        landed = await ws.shell("find /d/u -type f | sort")
+        err = await copied.stderr_str()
+    assert vfs.copies == copies
+    if copies:
+        assert (copied.exit_code, err) == (0, "")
+        assert landed.stdout == b"/d/u/a/f\n/d/u/g\n"
+    else:
+        assert (copied.exit_code, err) == (
+            1,
+            "cp: cannot open '/d/t/a/f' for reading: Permission denied\n",
+        )
+        assert landed.stdout == b"/d/u/g\n"
 
 
 @pytest.mark.asyncio

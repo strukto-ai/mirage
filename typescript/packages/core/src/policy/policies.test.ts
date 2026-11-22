@@ -248,6 +248,18 @@ function executableWorkspace(
   )
 }
 
+/**
+ * Refuses the agent a command naming a path under `/data/sec`, about that
+ * path as typed, as only a coded policy can now.
+ */
+const sealsSec: Policy = {
+  preCommand: (ctx: CommandContext): Action | null => {
+    if (ctx.sessionId !== 'agent') return null
+    const named = ctx.paths.find((p) => p.virtual.startsWith('/data/sec/'))
+    return named ? { kind: 'deny', reason: 'sealed', path: named.rawPath || named.virtual } : null
+  },
+}
+
 /** A user policy refusing every rm. */
 class UserRule implements Policy {
   preCommand(ctx: CommandContext): Action | null {
@@ -298,7 +310,8 @@ describe('Policies', () => {
     // a source, reads a source directory and creates each copy, mv moves a
     // source onto its target. A link cp copies as a link, or a source named
     // "dir/.", keeps the plain line. The wording's own stats are a deciding
-    // read, so a coded policy never changes them.
+    // read, so a coded policy never changes them. A folder entry refuses at
+    // the gate or per file, so only a coded policy's Deny names an operand.
     const refusesTargetStat: Policy = {
       preVfs: (ctx: VfsContext): Action | null =>
         ctx.call.name === 'stat' && ctx.path.virtual === '/data/sec/sub'
@@ -307,10 +320,9 @@ describe('Policies', () => {
     }
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, policies: [refusesTargetStat] },
+      { mode: MountMode.WRITE, policies: [sealsSec, refusesTargetStat] },
     )
-    const rule = { decision: 'deny', reason: 'sealed', paths: ['/data/sec/*'] }
-    ws.createSession('agent', { profile: SessionProfile({ commands: { '*': rule } }) })
+    ws.createSession('agent')
     try {
       await ws.shell(
         'mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; ' +
@@ -399,9 +411,8 @@ describe('Policies', () => {
     // cancellation guard, so one still waiting ends the line when it stops,
     // and no other operand is read.
     const ram = new StallingStat()
-    const ws = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE })
-    const rule = { decision: 'deny', reason: 'sealed', paths: ['/data/sec/*'] }
-    ws.createSession('agent', { profile: SessionProfile({ commands: { '*': rule } }) })
+    const ws = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE, policies: [sealsSec] })
+    ws.createSession('agent')
     try {
       await ws.shell('mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b')
       ram.armed = true

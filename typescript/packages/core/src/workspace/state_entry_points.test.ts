@@ -1742,9 +1742,12 @@ describe('command permissions end to end', () => {
   it('a bare listing in a ruled directory is refused', async () => {
     // `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the
     // working directory: the executor injects that operand after the
-    // gate, so the gate supplies it itself, typed as `.`.
+    // gate, so the gate supplies it itself, typed as `.`. Inside the
+    // folder the cwd alone refuses a line, whatever it names; from the
+    // parent of the mount the entry is keyed at, the implied `.` is what
+    // walks into it.
     const ws = new Workspace(
-      { '/repo': new RAMVFS() },
+      { '/repo': new RAMVFS(), '/repo/sealed': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         profiles: {
@@ -1764,31 +1767,33 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.shell('mkdir -p /repo/sealed && echo x > /repo/sealed/f')
+    await ws.shell('mkdir -p /repo/open && echo x > /repo/sealed/f && echo x > /repo/open/g')
     expect(await line(ws, 'ls /repo/sealed')).toEqual([
       126,
       '',
       'ls: Permission denied\npolicy denied: sealed\n',
     ])
-    expect(await line(ws, 'cd /repo/sealed && ls')).toEqual([
-      126,
-      '',
-      'ls: Permission denied\npolicy denied: sealed\n',
-    ])
-    expect(await line(ws, 'cd /repo/sealed && find -name f')).toEqual([
-      126,
-      '',
-      'find: Permission denied\npolicy denied: sealed\n',
-    ])
-    expect(await line(ws, 'cd /repo/sealed && grep -r x')).toEqual([
-      126,
-      '',
-      'grep: Permission denied\npolicy denied: sealed\n',
-    ])
+    for (const [text, name] of [
+      ['cd /repo/sealed && ls', 'ls'],
+      ['cd /repo/sealed && find -name f', 'find'],
+      ['cd /repo/sealed && grep -r x', 'grep'],
+      ['cd /repo/sealed && ls /repo', 'ls'],
+      ['cd /repo/sealed && echo x | grep x', 'grep'],
+      ['cd /repo && find -name f', 'find'],
+      ['cd /repo && grep -r x', 'grep'],
+    ] as const) {
+      expect([text, ...(await line(ws, text))]).toEqual([
+        text,
+        126,
+        '',
+        `${name}: Permission denied\npolicy denied: sealed\n`,
+      ])
+    }
     // With an operand, or without the recursion that reads the
     // directory, nothing is implied.
-    expect(await line(ws, 'cd /repo/sealed && ls /repo')).toEqual([0, 'sealed\n', ''])
-    expect(await line(ws, 'cd /repo/sealed && echo x | grep x')).toEqual([0, 'x\n', ''])
+    expect(await line(ws, 'cd /repo && grep -r x open')).toEqual([0, 'open/g:x\n', ''])
+    expect(await line(ws, 'cd /repo && ls')).toEqual([0, 'open\nsealed\n', ''])
+    expect(await line(ws, 'cd /repo && echo x | grep x')).toEqual([0, 'x\n', ''])
   })
 
   it('a hidden path reads as absent to every rule', async () => {
@@ -2354,17 +2359,25 @@ describe('a relayed walk meets the command rules', () => {
 
   // mktemp and unzip create their files and directories through the
   // dispatcher they are handed; a rule on the directory's contents refuses
-  // each create in the command's own voice, and nothing lands.
+  // each create in the command's own voice, and nothing lands. A directory
+  // mktemp takes from TMPDIR is no operand the gate reads, so its create
+  // meets the entry there; one named with -p is refused at the gate.
   it('holds a create through the command dispatcher to the rules', async () => {
     const ws = await relayWs()
     await ws.shell(
       'mkdir -p /data/tmpd /data/uz && cd /other && zip -r /other/z.zip src > /dev/null',
     )
-    expect(await line(ws, 'mktemp -d -p /data/tmpd')).toEqual([
-      126,
-      '',
-      'mktemp: Permission denied\npolicy denied: cut\n',
-    ])
+    for (const [flags, kind] of [
+      [' -d', 'directory'],
+      ['', 'file'],
+    ] as const) {
+      expect(await line(ws, `TMPDIR=/data/tmpd mktemp${flags}`)).toEqual([
+        1,
+        '',
+        `mktemp: failed to create ${kind} via template ` +
+          "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\npolicy denied: cut\n",
+      ])
+    }
     expect(await line(ws, 'mktemp -p /data/tmpd')).toEqual([
       126,
       '',

@@ -1597,42 +1597,54 @@ describe('prejudge', () => {
   })
 
   it('leaves a path the pass cannot read to the gate', async () => {
-    // Read as typed in the cwd the pass last knew, `$F` and a relative
-    // word after `cd "$d"` matched the rule's glob, refusing whole lines
-    // that remove only an allowed file, and `.` read as a mount root. A
-    // path a word names outright stays read though it is the lost cwd;
-    // a grep pattern spelling that cwd names no path.
-    const sealed = SessionProfile({
-      mounts: { '/data/prod': { commands: { grep: { decision: 'deny', reason: 'sealed' } } } },
+    // Read as typed in the cwd the pass last knew, a relative word after
+    // `cd "$d"` named a ruled file, refusing a line that removes only an
+    // allowed one, and `.` read as a mount root. A path a word names
+    // outright stays read though it is the lost cwd; a grep pattern
+    // spelling a ruled folder names no path. A line whose last known cwd
+    // is inside a folder entry is refused at the gate whatever it names.
+    const deny = { decision: 'deny', reason: 'kept' }
+    const kept = SessionProfile({
+      commands: COMMANDS,
+      mounts: Object.fromEntries(
+        ['/data/prod/w', '/data/prod/y', '/data/prod/v'].map((key) => [
+          key,
+          { commands: { rm: deny } },
+        ]),
+      ),
     })
+    const sealed = SessionProfile({ mounts: { '/data/prod': { commands: { grep: deny } } } })
     const w = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        profiles: { r: PROFILE, g: sealed },
+        profiles: { r: PROFILE, k: kept, g: sealed },
       },
     )
     open.push(w)
     w.createSession('s', { profile: 'r' })
+    w.createSession('k', { profile: 'k' })
     w.createSession('g', { profile: 'g' })
     w.createSession('t')
-    await w.shell('mkdir /data/prod; touch /data/x /data/w', { sessionId: 't' })
     for (const [session, line, code] of [
-      ['s', 'cd /data/prod; F=/data/x; rm $F; echo ok', 0],
-      ['s', 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 0],
-      ['s', 'd=/data; cd "$d" && rm /data/prod/y; echo ok', 1],
-      ['s', 'cd /data/prod; mkdir v; cd v; d=/data; cd "$d" && rm -r /data/prod/v; echo ok', 1],
+      ['k', 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 0],
+      ['k', 'd=/data; cd "$d" && rm /data/prod/y; echo ok', 126],
+      ['k', 'cd /data/prod; mkdir v; cd v; d=/data; cd "$d" && rm -r /data/prod/v; echo ok', 126],
+      ['g', 'mkdir -p /data/q; d=/data/q; cd "$d" && grep -r -e /data/prod; echo ok', 0],
+      ['t', 'cd /data; d=prod; cd "$d" && tar -cf /data/t.tar . && echo ok', 0],
+      ['s', 'cd /data/prod; F=/data/x; rm $F; echo ok', 126],
+      ['s', 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 126],
       [
         'g',
         'mkdir -p /data/q; cd /data/prod; d=/data/q; cd "$d" && grep -r -e /data/prod; echo ok',
-        0,
+        126,
       ],
-      ['t', 'cd /data; d=prod; cd "$d" && tar -cf /data/t.tar . && echo ok', 0],
     ] as const) {
+      await w.shell('mkdir -p /data/prod; touch /data/x /data/w /data/prod/y', { sessionId: 't' })
       const said = await judged(w, line, session)
       const ran = await w.shell(line, { sessionId: session })
       const err = DEC.decode(ran.stderr)
-      expect([ran.exitCode, err]).toEqual([code, code === 0 ? '' : err])
+      expect([line, ran.exitCode, err]).toEqual([line, code, code === 0 ? '' : err])
       expect(DEC.decode(ran.stdout)).toBe(code === 0 ? 'ok\n' : '')
       expect(said.filter((e) => e.exitCode !== 0).map((e) => [e.exitCode, e.stderr])).toEqual(
         code === 0 ? [] : [[code, err]],

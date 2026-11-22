@@ -1580,67 +1580,60 @@ async def test_a_whole_line_runtime_reads_only_literal_words():
 async def test_a_bare_listing_in_a_ruled_directory_is_refused():
     # `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the
     # working directory: the executor injects that operand after the
-    # gate, so the gate supplies it itself, typed as `.`.
+    # gate, so the gate supplies it itself, typed as `.`. Inside the
+    # folder the cwd alone refuses a line, whatever it names; from the
+    # parent of the mount the entry is keyed at, the implied `.` is what
+    # walks into it.
+    deny = {"decision": "deny", "reason": "sealed"}
     ws = Workspace(
-        {"/repo/": (RAMVFS(), MountMode.WRITE)},
+        {
+            "/repo/": (RAMVFS(), MountMode.WRITE),
+            "/repo/sealed/": (RAMVFS(), MountMode.WRITE),
+        },
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {
-                    "ls": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/repo/sealed"],
-                    },
-                    "find": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/repo/sealed"],
-                    },
-                    "grep": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/repo/sealed"],
-                    },
+                "mounts": {
+                    "/repo/sealed": {
+                        "commands": {"ls": deny, "find": deny, "grep": deny}
+                    }
                 }
             }
         },
     )
     try:
-        await ws.shell("mkdir -p /repo/sealed && echo x > /repo/sealed/f")
+        await ws.shell(
+            "mkdir -p /repo/open && echo x > /repo/sealed/f && "
+            "echo x > /repo/open/g"
+        )
         assert await _line(ws, "ls /repo/sealed") == (
-            1,
+            126,
             "",
-            "ls: cannot access '/repo/sealed': Permission denied\n"
-            "policy denied: sealed\n",
+            "ls: Permission denied\npolicy denied: sealed\n",
         )
-        assert await _line(ws, "cd /repo/sealed && ls") == (
-            1,
-            "",
-            "ls: cannot access '.': Permission denied\npolicy denied: sealed\n",
-        )
-        assert await _line(ws, "cd /repo/sealed && find -name f") == (
-            1,
-            "",
-            "find: '.': Permission denied\npolicy denied: sealed\n",
-        )
-        assert await _line(ws, "cd /repo/sealed && grep -r x") == (
-            1,
-            "",
-            "grep: /repo/sealed: Permission denied\npolicy denied: sealed\n",
-        )
+        for line, name in (
+            ("cd /repo/sealed && ls", "ls"),
+            ("cd /repo/sealed && find -name f", "find"),
+            ("cd /repo/sealed && grep -r x", "grep"),
+            ("cd /repo/sealed && ls /repo", "ls"),
+            ("cd /repo/sealed && echo x | grep x", "grep"),
+            ("cd /repo && find -name f", "find"),
+            ("cd /repo && grep -r x", "grep"),
+        ):
+            assert await _line(ws, line) == (
+                126,
+                "",
+                f"{name}: Permission denied\npolicy denied: sealed\n",
+            ), line
         # With an operand, or without the recursion that reads the
         # directory, nothing is implied.
-        assert await _line(ws, "cd /repo/sealed && ls /repo") == (
+        assert await _line(ws, "cd /repo && grep -r x open") == (
             0,
-            "sealed\n",
+            "open/g:x\n",
             "",
         )
-        assert await _line(ws, "cd /repo/sealed && echo x | grep x") == (
-            0,
-            "x\n",
-            "",
-        )
+        assert await _line(ws, "cd /repo && ls") == (0, "open\nsealed\n", "")
+        assert await _line(ws, "cd /repo && echo x | grep x") == (0, "x\n", "")
     finally:
         await ws.close()
 
@@ -2503,6 +2496,9 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
     # mktemp and unzip create their files and directories through the
     # dispatcher they are handed; a rule on the directory's contents
     # refuses each create in the command's own voice, and nothing lands.
+    # A directory mktemp takes from TMPDIR is no operand the gate reads,
+    # so its create meets the entry there; one named with -p is refused
+    # at the gate.
     ws = _relay_ws()
     try:
         await _seed_relay_tree(ws)
@@ -2510,11 +2506,16 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
             "mkdir -p /data/tmpd /data/uz && cd /other && "
             "zip -r /other/z.zip src > /dev/null"
         )
-        assert await _line(ws, "mktemp -d -p /data/tmpd", "g") == (
-            126,
-            "",
-            "mktemp: Permission denied\npolicy denied: cut\n",
-        )
+        for flags, kind in (("-d", "directory"), ("", "file")):
+            assert await _line(
+                ws, f"TMPDIR=/data/tmpd mktemp {flags}".rstrip(), "g"
+            ) == (
+                1,
+                "",
+                f"mktemp: failed to create {kind} via template "
+                "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n"
+                "policy denied: cut\n",
+            )
         assert await _line(ws, "mktemp -p /data/tmpd", "g") == (
             126,
             "",

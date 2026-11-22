@@ -139,14 +139,34 @@ async def test_admit_line_refuses_the_first_offending_command():
         await ws.close()
 
 
+def _refused_private(name: str) -> tuple[int, str]:
+    """A refusal of DOC's private folder as ``run`` reports it.
+
+    Args:
+        name (str): the refused command.
+    """
+    return 126, f"{name}: Permission denied\npolicy denied: private\n"
+
+
 @pytest.mark.asyncio
 async def test_a_bare_listing_reads_the_working_directory():
     # `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the cwd,
-    # an operand the executor injects after the gate; a rule on that
-    # directory has to see it here, as the operand typed `.`.
-    ws = _ws()
+    # an operand the executor injects after the gate; a walk from it
+    # into the mount a rule is keyed at has to be seen here, as the
+    # operand typed `.`. Inside the folder the cwd alone refuses.
+    ws = Workspace(
+        {
+            "/data/": (RAMVFS(), MountMode.WRITE),
+            "/data/private/": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+        profiles={"default": DOC},
+    )
     try:
-        await ws.shell("mkdir -p /data/private && echo x > /data/private/f")
+        await ws.shell(
+            "mkdir -p /data/open && echo x > /data/private/f && "
+            "echo x > /data/open/g && cd /data"
+        )
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
 
@@ -168,24 +188,18 @@ async def test_a_bare_listing_reads_the_working_directory():
             )
 
         assert await run("ls") is None
-        await ws.shell("cd /data/private")
-        assert await run("ls") == (
-            1,
-            "ls: cannot access '.': Permission denied\npolicy denied: private\n",
-        )
-        # A named operand replaces the implied one.
-        assert await run("ls", "/data") is None
-        # grep reads the cwd only under -r; rg yields to a piped stdin.
+        assert await run("grep", "-r", "x") == _refused_private("grep")
+        assert await run("rg", "x") == _refused_private("rg")
+        # A named operand replaces the implied one; grep reads the cwd
+        # only under -r; rg yields to a piped stdin.
+        assert await run("grep", "-r", "x", "/data/open") is None
         assert await run("grep", "x") is None
-        assert await run("grep", "-r", "x") == (
-            1,
-            "grep: /data/private: Permission denied\npolicy denied: private\n",
-        )
         assert await run("rg", "x", stdin=b"x\n") is None
-        assert await run("rg", "x") == (
-            1,
-            "rg: /data/private: Permission denied\npolicy denied: private\n",
-        )
+        await ws.shell("cd /data/private")
+        assert await run("ls") == _refused_private("ls")
+        assert await run("ls", "/data") == _refused_private("ls")
+        assert await run("grep", "x") == _refused_private("grep")
+        assert await run("rg", "x", stdin=b"x\n") == _refused_private("rg")
     finally:
         await ws.close()
 

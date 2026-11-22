@@ -3836,13 +3836,24 @@ class CountedRemoval extends RAMVFS {
   }
 }
 
+/** A RAM mount that counts the one-call tree copies it is asked for. */
+class CountedCopy extends RAMVFS {
+  copies = 0
+
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<unknown> {
+    this.copies += 1
+    return super.dirCopy(src, dst)
+  }
+}
+
 it.each([
   ['/other/sealed', 1],
   ['/d/t/a/f', 0],
-])("declines a line's tree removal only for a rule below it (%s)", async (sealed, removals) => {
+])("declines a line's tree copy only for a rule below it (%s)", async (sealed, copies) => {
   // The line's gate answers for the profile's rules, scoped to the paths a
-  // walk reaches: a rule over another mount declines nothing.
-  const vfs = new CountedRemoval()
+  // walk reaches: a rule over another mount declines nothing, and a folder
+  // entry below the source sends the copy entry by entry.
+  const vfs = new CountedCopy()
   const ws = new Workspace({ '/d': vfs, '/other': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     ws.createSession('agent', {
@@ -3850,9 +3861,16 @@ it.each([
         mounts: { [sealed]: { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
       }),
     })
-    await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
-    await ws.shell('rm -r /d/t', { sessionId: 'agent' })
-    expect(vfs.removals).toBe(removals)
+    await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f && echo g > /d/t/g')
+    const copied = await ws.shell('cp -r /d/t /d/u', { sessionId: 'agent' })
+    const landed = await ws.shell('find /d/u -type f | sort')
+    expect(vfs.copies).toBe(copies)
+    expect([copied.exitCode, DEC.decode(await materialize(copied.stderr))]).toEqual(
+      copies ? [0, ''] : [1, "cp: cannot open '/d/t/a/f' for reading: Permission denied\n"],
+    )
+    expect(DEC.decode(await materialize(landed.stdout))).toBe(
+      copies ? '/d/u/a/f\n/d/u/g\n' : '/d/u/g\n',
+    )
   } finally {
     await ws.close()
   }

@@ -281,6 +281,19 @@ SEALED_TRANSFERS = (
 )
 
 
+class SealsSec(Policy):
+    """Refuses the agent a command naming a path under ``/data/sec``,
+    about that path as typed, as only a coded policy can now."""
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        if ctx.session_id != "agent":
+            return None
+        for path in ctx.paths:
+            if path.virtual.startswith("/data/sec/"):
+                return Deny("sealed", path=path.raw_path or path.virtual)
+        return None
+
+
 class RefusesTargetStat(Policy):
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.call.name == "stat" and ctx.path.virtual == "/data/sec/sub":
@@ -294,14 +307,15 @@ async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
     # opens a source, reads a source directory and creates each copy, mv
     # moves a source onto its target. A link cp copies as a link, or a
     # source named "dir/.", keeps the plain line. The wording's own stats
-    # are a deciding read, so a coded policy never changes them.
+    # are a deciding read, so a coded policy never changes them. A folder
+    # entry refuses at the gate or per file, so only a coded policy's
+    # Deny names an operand.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        policies=[RefusesTargetStat()],
+        policies=[SealsSec(), RefusesTargetStat()],
     )
-    rule = {"decision": "deny", "reason": "sealed", "paths": ["/data/sec/*"]}
-    ws.create_session("agent", profile={"commands": {"*": rule}})
+    ws.create_session("agent")
     try:
         await ws.shell(
             "mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; "
@@ -343,9 +357,10 @@ async def test_a_cancel_stops_a_refused_cp_whose_operand_stat_stalls():
     # The wording's stats run while the line is judged; a cancel ends
     # one still waiting there, and no other operand is read.
     ram = StallingStat()
-    ws = Workspace({"/data/": ram}, mode=MountMode.WRITE)
-    rule = {"decision": "deny", "reason": "sealed", "paths": ["/data/sec/*"]}
-    ws.create_session("agent", profile={"commands": {"*": rule}})
+    ws = Workspace(
+        {"/data/": ram}, mode=MountMode.WRITE, policies=[SealsSec()]
+    )
+    ws.create_session("agent")
     try:
         await ws.shell(
             "mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b"

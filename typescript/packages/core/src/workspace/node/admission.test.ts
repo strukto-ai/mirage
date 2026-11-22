@@ -77,6 +77,11 @@ const DOC = SessionProfile({
   },
 })
 
+/** A refusal of DOC's private folder as the bare-listing test reports it. */
+function refusedPrivate(name: string): [number, string] {
+  return [126, `${name}: Permission denied\npolicy denied: private\n`]
+}
+
 const open: Workspace[] = []
 afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
@@ -122,10 +127,17 @@ describe('admission', () => {
 
   it('a bare listing reads the working directory', async () => {
     // `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the cwd,
-    // an operand the executor injects after the gate; a rule on that
-    // directory has to see it here, as the operand typed `.`.
-    const w = ws()
-    await w.shell('mkdir -p /data/private && echo x > /data/private/f')
+    // an operand the executor injects after the gate; a walk from it into
+    // the mount a rule is keyed at has to be seen here, as the operand
+    // typed `.`. Inside the folder the cwd alone refuses.
+    const w = new Workspace(
+      { '/data': new RAMVFS(), '/data/private': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { default: DOC } },
+    )
+    open.push(w)
+    await w.shell(
+      'mkdir -p /data/open && echo x > /data/private/f && echo x > /data/open/g && cd /data',
+    )
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (name: string, args: string[], stdin: Uint8Array | null = null) => {
       const words = await classifyParts([name, ...args], w.registry, session.cwd)
@@ -140,19 +152,20 @@ describe('admission', () => {
       )
       return decision instanceof Admitted ? null : [decision.exitCode, voicedStderr(decision)]
     }
+    const piped = new TextEncoder().encode('x\n')
     expect(await run('ls', [])).toBeNull()
-    await w.shell('cd /data/private')
-    expect(await run('ls', [])).toEqual([126, 'ls: Permission denied\npolicy denied: private\n'])
-    // A named operand replaces the implied one.
-    expect(await run('ls', ['/data'])).toBeNull()
-    // grep reads the cwd only under -r; rg yields to a piped stdin.
+    expect(await run('grep', ['-r', 'x'])).toEqual(refusedPrivate('grep'))
+    expect(await run('rg', ['x'])).toEqual(refusedPrivate('rg'))
+    // A named operand replaces the implied one; grep reads the cwd only
+    // under -r; rg yields to a piped stdin.
+    expect(await run('grep', ['-r', 'x', '/data/open'])).toBeNull()
     expect(await run('grep', ['x'])).toBeNull()
-    expect(await run('grep', ['-r', 'x'])).toEqual([
-      126,
-      'grep: Permission denied\npolicy denied: private\n',
-    ])
-    expect(await run('rg', ['x'], new TextEncoder().encode('x\n'))).toBeNull()
-    expect(await run('rg', ['x'])).toEqual([126, 'rg: Permission denied\npolicy denied: private\n'])
+    expect(await run('rg', ['x'], piped)).toBeNull()
+    await w.shell('cd /data/private')
+    expect(await run('ls', [])).toEqual(refusedPrivate('ls'))
+    expect(await run('ls', ['/data'])).toEqual(refusedPrivate('ls'))
+    expect(await run('grep', ['x'])).toEqual(refusedPrivate('grep'))
+    expect(await run('rg', ['x'], piped)).toEqual(refusedPrivate('rg'))
   })
 
   it('a hidden path is no path to any policy', async () => {

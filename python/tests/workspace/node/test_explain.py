@@ -1835,46 +1835,45 @@ async def test_explain_names_the_line_runtime_for_every_command_it_takes(
 
 @pytest.mark.asyncio
 async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
-    # Read as typed in the cwd the pass last knew, `$F` and a relative
-    # word after `cd "$d"` matched the rule's glob, refusing whole lines
-    # that remove only an allowed file, and `.` read as a mount root. A
-    # path a word names outright stays read though it is the lost cwd;
-    # a grep pattern spelling that cwd names no path.
-    sealed = {
-        "commands": {
-            "grep": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/prod"],
-            }
-        }
+    # Read as typed in the cwd the pass last knew, a relative word after
+    # `cd "$d"` named a ruled file, refusing a line that removes only an
+    # allowed one, and `.` read as a mount root. A path a word names
+    # outright stays read though it is the lost cwd; a grep pattern
+    # spelling a ruled folder names no path. A line whose last known cwd
+    # is inside a folder entry is refused at the gate whatever it names.
+    deny = {"decision": "deny", "reason": "kept"}
+    kept = {
+        **PROFILE,
+        "mounts": {
+            "/data/prod/w": {"commands": {"rm": deny}},
+            "/data/prod/y": {"commands": {"rm": deny}},
+            "/data/prod/v": {"commands": {"rm": deny}},
+        },
     }
+    sealed = {"mounts": {"/data/prod": {"commands": {"grep": deny}}}}
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
-        profiles={"r": PROFILE, "g": sealed},
+        profiles={"r": PROFILE, "k": kept, "g": sealed},
     )
     try:
         ws.create_session("s", profile="r")
+        ws.create_session("k", profile="k")
         ws.create_session("g", profile="g")
         ws.create_session("t")
-        await ws.shell(
-            "mkdir /data/prod; touch /data/x /data/w", session_id="t"
-        )
         for session, line, code in (
-            ("s", "cd /data/prod; F=/data/x; rm $F; echo ok", 0),
-            ("s", 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 0),
-            ("s", 'd=/data; cd "$d" && rm /data/prod/y; echo ok', 1),
+            ("k", 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 0),
+            ("k", 'd=/data; cd "$d" && rm /data/prod/y; echo ok', 126),
             (
-                "s",
+                "k",
                 'cd /data/prod; mkdir v; cd v; d=/data; cd "$d" && rm -r '
                 "/data/prod/v; echo ok",
-                1,
+                126,
             ),
             (
                 "g",
-                'mkdir -p /data/q; cd /data/prod; d=/data/q; cd "$d" && '
-                "grep -r -e /data/prod; echo ok",
+                'mkdir -p /data/q; d=/data/q; cd "$d" && grep -r -e '
+                "/data/prod; echo ok",
                 0,
             ),
             (
@@ -1882,11 +1881,23 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
                 'cd /data; d=prod; cd "$d" && tar -cf /data/t.tar . && echo ok',
                 0,
             ),
+            ("s", "cd /data/prod; F=/data/x; rm $F; echo ok", 126),
+            ("s", 'cd /data/prod; d=/data; cd "$d" && rm w; echo ok', 126),
+            (
+                "g",
+                'mkdir -p /data/q; cd /data/prod; d=/data/q; cd "$d" && '
+                "grep -r -e /data/prod; echo ok",
+                126,
+            ),
         ):
+            await ws.shell(
+                "mkdir -p /data/prod; touch /data/x /data/w /data/prod/y",
+                session_id="t",
+            )
             said = await _judged(ws, line, session)
             ran = await ws.shell(line, session_id=session)
             err = await ran.stderr_str()
-            assert ran.exit_code == code, err
+            assert ran.exit_code == code, (line, err)
             assert ran.stdout == (b"" if code else b"ok\n")
             assert [(e.exit_code, e.stderr) for e in said if e.exit_code] == (
                 [(code, err)] if code else []
