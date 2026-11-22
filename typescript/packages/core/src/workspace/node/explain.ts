@@ -294,6 +294,13 @@ export interface Judged {
    * before it in that line is where it stands.
    */
   readonly session?: SessionState
+  /**
+   * The line defines the command's name as a function somewhere, so
+   * whether the word calls it is known only when it runs, and the gate,
+   * not the pass, says whether a tree root's own decision speaks for it
+   * (`isTool`).
+   */
+  readonly defined?: boolean
 }
 
 /**
@@ -622,6 +629,7 @@ async function* judgeWords(
     unread,
     ctx,
     session,
+    defined: !intrinsic && item.pipeline?.functions.has(name) === true,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -1202,8 +1210,8 @@ function* walkedLine(
  * one. What stays out is the rule-less DENY, which `isVerdict` explains
  * is answered where it happens.
  */
-function isJudged(expl: Judgment): boolean {
-  return expl.exitCode === 0 || isVerdict(expl)
+function isJudged(one: Judged): boolean {
+  return one.judgment.exitCode === 0 || isVerdict(one)
 }
 
 /**
@@ -1269,13 +1277,18 @@ function asksFor(one: Judged): boolean {
  * the per-command gate, where earlier commands have established the live
  * cwd and namespace. Rule-less DENY results also wait, and so does a
  * top-level tree root's own decision (`byDefault`): an unavailable head
- * word, a command no tree names (a function the line defines first,
- * say), or words only the runtime can expand fail where they occur
- * rather than against the whole line. A mount entry's root speaks about
- * its folder, so it holds the line (`inFolder`).
+ * word, a command no tree names, or words only the runtime can expand
+ * fail where they occur rather than against the whole line. A mount
+ * entry's root speaks about its folder, so it holds the line
+ * (`inFolder`), except for a word the line defines as a function
+ * (`Judged.defined`): the call runs the function, whose body's commands
+ * are each judged, and the gate sees whether it does.
  */
-function isVerdict(expl: Judgment): boolean {
-  if (expl.exitCode === 0 || (byDefault(expl) && !inFolder(expl))) return false
+function isVerdict(one: Judged): boolean {
+  const expl = one.judgment
+  if (expl.exitCode === 0 || (byDefault(expl) && (one.defined === true || !inFolder(expl)))) {
+    return false
+  }
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
   // Filesystem refusals use the live cwd and fail only their command.
   const denied = expl.answers.find((a): a is Deny => a.kind === 'deny')
@@ -1454,7 +1467,7 @@ export async function prejudgeLine(
   if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
   for (const [, explained] of judged) {
     for (const one of explained) {
-      if (!isJudged(one.judgment) || !asksFor(one)) continue
+      if (!isJudged(one) || !asksFor(one)) continue
       // This pass judges on the gate's behalf and runs nothing itself, so a
       // grant the host gives here is claimed for the per-command gate that
       // runs the line, and spent when the line ends: one question per run,
@@ -1728,7 +1741,7 @@ async function commandRefused(
     // A question about a spelling the runtime completes is the gate's
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
-    if (!isVerdict(judged.judgment) || !asksFor(judged)) continue
+    if (!isVerdict(judged) || !asksFor(judged)) continue
     if (await verdictRefuses(judged, registry, handed, signal)) return true
   }
   return false
@@ -1821,7 +1834,7 @@ export async function lineHeld(
   for (const [, explained] of judged) {
     for (const one of explained) {
       const expl = one.judgment
-      if (!isVerdict(expl) || expl.exitCode === 0) continue
+      if (!isVerdict(one) || expl.exitCode === 0) continue
       if (refuses(expl)) return true
       const asked = refusal(expl.answers)
       if (one.ctx === undefined || asked?.kind !== 'ask' || !one.stated) continue
@@ -1837,8 +1850,8 @@ export async function lineHeld(
  * on the host (`isVerdict`), the line-level answer placement waits on.
  * Mirrors the Python `holds`.
  */
-export function holds(judgments: readonly Judgment[]): boolean {
-  return judgments.some((one) => isVerdict(one) && one.exitCode !== 0)
+export function holds(judged: readonly Judged[]): boolean {
+  return judged.some((one) => isVerdict(one) && one.judgment.exitCode !== 0)
 }
 
 /**
@@ -1933,8 +1946,7 @@ export function explainedLine(
   // (`find -exec`, `xargs`) is the gate's, asked where it runs, so it holds
   // nothing here either.
   const held = verdicts.find(
-    (one) =>
-      one.judgment.exitCode !== 0 && (wholeLine || (isVerdict(one.judgment) && asksFor(one))),
+    (one) => one.judgment.exitCode !== 0 && (wholeLine || (isVerdict(one) && asksFor(one))),
   )
   if (held !== undefined) {
     const judgment = held.judgment

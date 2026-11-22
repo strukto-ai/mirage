@@ -408,6 +408,10 @@ class Judged:
             judged in, set beside ``ctx``: for a command a line runs in
             turn (``eval``), the one its own walk reached, so a ``cd``
             before it in that line is where it stands.
+        defined (bool): the line defines the command's name as a
+            function somewhere, so whether the word calls it is known
+            only when it runs, and the gate, not the pass, says whether
+            a tree root's own decision speaks for it (``is_tool``).
     """
 
     judgment: Judgment
@@ -417,6 +421,7 @@ class Judged:
     unread: frozenset[str] = frozenset()
     ctx: CommandContext | None = None
     session: SessionState | None = None
+    defined: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -729,6 +734,9 @@ async def _judge_words(
         unread,
         ctx,
         session,
+        defined=not intrinsic
+        and item.pipeline is not None
+        and name in item.pipeline.functions,
     )
     # env's command runs in the environment env builds for it, and a
     # nested shell's line in a new shell started from this one.
@@ -800,7 +808,7 @@ async def _judge_words(
                 yield one
 
 
-def _is_verdict(expl: Judgment) -> bool:
+def _is_verdict(one: Judged) -> bool:
     """Whether an explanation refuses the line's intent, rather than
     just failing one command.
 
@@ -810,15 +818,20 @@ def _is_verdict(expl: Judgment) -> bool:
     commands have established the live cwd and namespace.
     Rule-less DENY results also wait, and so does a top-level tree
     root's own decision (``_by_default``): an unavailable head word, a
-    command no tree names (a function the line defines first, say), or
-    words only the runtime can expand fail where they occur rather than
-    against the whole line. A mount entry's root speaks about its
-    folder, so it holds the line (``_in_folder``).
+    command no tree names, or words only the runtime can expand fail
+    where they occur rather than against the whole line. A mount
+    entry's root speaks about its folder, so it holds the line
+    (``_in_folder``), except for a word the line defines as a function
+    (``Judged.defined``): the call runs the function, whose body's
+    commands are each judged, and the gate sees whether it does.
 
     Args:
-        expl (Judgment): one command's explanation.
+        one (Judged): one command's explanation and its place.
     """
-    if expl.exit_code == 0 or (_by_default(expl) and not _in_folder(expl)):
+    expl = one.judgment
+    if expl.exit_code == 0 or (
+        _by_default(expl) and (one.defined or not _in_folder(expl))
+    ):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
         return True
@@ -893,7 +906,7 @@ def _asks_for(one: Judged) -> bool:
     return one.stated or _refuses(one.judgment)
 
 
-def _is_judged(expl: Judgment) -> bool:
+def _is_judged(one: Judged) -> bool:
     """Whether the compound-line pass puts a command through the gate.
 
     A verdict is, so the line is refused whole. So is a command that
@@ -905,9 +918,9 @@ def _is_judged(expl: Judgment) -> bool:
     :func:`_is_verdict` explains is answered where it happens.
 
     Args:
-        expl (Judgment): one command's explanation.
+        one (Judged): one command's explanation and its place.
     """
-    return expl.exit_code == 0 or _is_verdict(expl)
+    return one.judgment.exit_code == 0 or _is_verdict(one)
 
 
 @dataclass(slots=True)
@@ -1764,7 +1777,7 @@ async def prejudge_line(
         return None
     for _, explained in judged:
         for one in explained:
-            if not _is_judged(one.judgment) or not _asks_for(one):
+            if not _is_judged(one) or not _asks_for(one):
                 continue
             # This pass judges on the gate's behalf and runs nothing
             # itself, so a grant the host gives here is claimed for the
@@ -2087,7 +2100,7 @@ async def _command_refused(
         # A question about a spelling the runtime completes is the
         # gate's (``_asks_for``); the node is kept, and over-keeping
         # only ever over-fetches.
-        if not _is_verdict(judged.judgment) or not _asks_for(judged):
+        if not _is_verdict(judged) or not _asks_for(judged):
             continue
         if await _verdict_refuses(judged, registry, handed, cancel):
             return True
@@ -2537,7 +2550,7 @@ async def line_held(
     for _, explained in judged:
         for one in explained:
             expl = one.judgment
-            if not _is_verdict(expl) or expl.exit_code == 0:
+            if not _is_verdict(one) or expl.exit_code == 0:
                 continue
             if _refuses(expl):
                 return True
@@ -2556,15 +2569,17 @@ async def line_held(
     return False
 
 
-def holds(judgments: Sequence[Judgment]) -> bool:
+def holds(judged: Sequence[Judged]) -> bool:
     """Whether some command's judgment is a verdict that refuses it or
     waits on the host (:func:`_is_verdict`), the line-level answer
     placement waits on.
 
     Args:
-        judgments (Sequence[Judgment]): a line's judgments.
+        judged (Sequence[Judged]): a line's judgments and their places.
     """
-    return any(_is_verdict(e) and e.exit_code != 0 for e in judgments)
+    return any(
+        _is_verdict(one) and one.judgment.exit_code != 0 for one in judged
+    )
 
 
 async def explain_line(
@@ -2745,7 +2760,7 @@ def explained_line(
             one
             for one in verdicts
             if one.judgment.exit_code
-            and (whole_line or (_is_verdict(one.judgment) and _asks_for(one)))
+            and (whole_line or (_is_verdict(one) and _asks_for(one)))
         ),
         None,
     )

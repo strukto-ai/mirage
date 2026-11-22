@@ -1076,7 +1076,7 @@ class Workspace:
         opened = explain_redirects(
             ast, session, self._registry, self._namespace
         )
-        if holds([one.judgment for one in verdicts]):
+        if holds(verdicts):
             # The run leaves a held line on its static bindings for the
             # gate to answer (``Router.decide``), whole when they take it
             # whole.

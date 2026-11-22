@@ -552,6 +552,43 @@ describe('explain', () => {
     expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
   })
 
+  it.each(
+    (['deny', 'ask'] as const).flatMap((decision) =>
+      (
+        [
+          ['f() { ls; }; f', 0, 'f.txt\n', ''],
+          ['f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+          ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
+          ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
+          ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
+          ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
+        ] as const
+      ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
+    ),
+  )(
+    "a function the line defines is not held by a folder's * %s: %s",
+    async (decision, line, code, out, err) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: { '/data/keep': { commands: { '*': decision, cd: 'allow', ls: 'allow' } } },
+        }),
+      })
+      await w.shell('cd /data/keep', { sessionId: 's' })
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        code,
+        out,
+        err,
+      ])
+      expect([said.exitCode, said.stderr]).toEqual([code, err])
+    },
+  )
+
   it.each([
     ['[[ ! -e /data/secret.txt ]]', '1'],
     ['[[ -e /data/a.txt && -e /data/secret.txt ]]', '0'],

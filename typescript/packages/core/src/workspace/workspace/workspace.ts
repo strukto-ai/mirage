@@ -1968,7 +1968,7 @@ export class Workspace {
         JudgmentMode.PREPASS,
       )
       const opened = await explainRedirects(root, session, this.registry, this.namespace, reparse)
-      if (holds(verdicts.map((one) => one.judgment))) {
+      if (holds(verdicts)) {
         // The run leaves a held line on its static bindings for the gate to
         // answer (`Router.decide`), whole when they take it whole.
         const whole = wholeLineRuntime(this.registry.runtimeBindings)
