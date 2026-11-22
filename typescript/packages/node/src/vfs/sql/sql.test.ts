@@ -27,7 +27,7 @@ import { SqlDialect, type SqlDriver } from '@struktoai/mirage-core/vfs/sql/types
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GIT } from '@struktoai/mirage-core'
+import { GIT } from '@struktoai/mirage-core/commands/cli/builtin/git/index'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { AST_GREP } from '../../clis/index.ts'
 import { Workspace } from '../../workspace.ts'
