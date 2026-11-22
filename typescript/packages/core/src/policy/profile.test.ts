@@ -505,6 +505,10 @@ it.each([
     'profile.commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
   ],
   [
+    { commands: { rm: { decision: 'deny', paths: ['/data/a/**', '/data/b/**'] } } },
+    'profile.commands.rm: a rule takes no paths; give each folder its own entry: mounts[/data/a].commands.rm and mounts[/data/b].commands.rm',
+  ],
+  [
     { commands: { cat: { decision: 'deny', paths: ['*.pem'] } } },
     'profile.commands.cat: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.cat, or hide those paths with paths.hide',
   ],

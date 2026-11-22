@@ -205,42 +205,69 @@ fn shown(name: &[u32]) -> String {
     Doc::Text(name.to_vec()).shown()
 }
 
-/// Where a rule's paths go now: the folder entry its first path names
+/// Where a rule's paths go now: the folder entry each path names
 /// (`/data/keep/*` and `/data/keep/**` give
-/// `mounts[/data/keep].commands.rm`), or, for a glob, a relative or an
-/// empty path, which no one folder spells, an entry per folder or a
-/// hide. `key` is the rule's place under its `commands` block.
+/// `mounts[/data/keep].commands.rm`), one entry per folder when the
+/// paths name several, or, when a path is a glob, relative or empty,
+/// which no one folder spells, an entry per folder or a hide. `key` is
+/// the rule's place under its `commands` block.
 fn no_paths(raw: &Doc, at: &str, key: &str) -> String {
-    let first = match raw.get("paths") {
-        Doc::List(items) => items.first(),
-        text @ Doc::Text(_) => Some(text),
-        _ => None,
+    let paths = match raw.get("paths") {
+        Doc::List(items) => items.iter().collect(),
+        text @ Doc::Text(_) => vec![text],
+        _ => Vec::new(),
     };
-    let folder = match first {
-        Some(Doc::Text(path)) if path.first() == Some(&47) => {
-            let path = path
-                .strip_suffix(&[47, 42, 42])
-                .or_else(|| path.strip_suffix(&[47, 42]))
-                .unwrap_or(path);
-            let path = path.strip_suffix(&[47]).unwrap_or(path);
-            if path.is_empty() {
-                Some("/".to_owned())
-            } else if crate::policy::is_glob(path) {
-                None
-            } else {
-                Some(shown(path))
-            }
+    let mut folders: Vec<String> = Vec::new();
+    for path in paths {
+        let Some(folder) = folder_of(path) else {
+            return format!(
+                "{at}: a rule takes no paths; scope it to each folder with mounts[<folder>].commands{key}, or hide those paths with paths.hide"
+            );
+        };
+        if !folders.contains(&folder) {
+            folders.push(folder);
         }
-        Some(Doc::Text(_)) => None,
-        _ => Some("<folder>".to_owned()),
-    };
-    match folder {
-        Some(folder) => format!(
+    }
+    match folders.as_slice() {
+        [] => format!(
+            "{at}: a rule takes no paths; scope it to a folder with mounts[<folder>].commands{key}"
+        ),
+        [folder] => format!(
             "{at}: a rule takes no paths; scope it to a folder with mounts[{folder}].commands{key}"
         ),
-        None => format!(
-            "{at}: a rule takes no paths; scope it to each folder with mounts[<folder>].commands{key}, or hide those paths with paths.hide"
-        ),
+        [rest @ .., last] => {
+            let entry = |folder: &String| format!("mounts[{folder}].commands{key}");
+            let rest: Vec<String> = rest.iter().map(entry).collect();
+            format!(
+                "{at}: a rule takes no paths; give each folder its own entry: {} and {}",
+                rest.join(", "),
+                entry(last)
+            )
+        }
+    }
+}
+
+/// The folder an old rule's absolute path names, with a trailing
+/// `/*` or `/**` dropped; `None` for a glob, a relative path, an empty
+/// path or a value that is not text.
+fn folder_of(path: &Doc) -> Option<String> {
+    let Doc::Text(path) = path else {
+        return None;
+    };
+    if path.first() != Some(&47) {
+        return None;
+    }
+    let path = path
+        .strip_suffix(&[47, 42, 42])
+        .or_else(|| path.strip_suffix(&[47, 42]))
+        .unwrap_or(path);
+    let path = path.strip_suffix(&[47]).unwrap_or(path);
+    if path.is_empty() {
+        Some("/".to_owned())
+    } else if crate::policy::is_glob(path) {
+        None
+    } else {
+        Some(shown(path))
     }
 }
 
@@ -1259,6 +1286,22 @@ mod tests {
             ),
             (
                 m(&[("rm", rule(texts(&[""])))]),
+                "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/data/a/**", "/data/b/**"])))]),
+                "commands.rm: a rule takes no paths; give each folder its own entry: mounts[/data/a].commands.rm and mounts[/data/b].commands.rm",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/a/*", "/b", "/c/**"])))]),
+                "commands.rm: a rule takes no paths; give each folder its own entry: mounts[/a].commands.rm, mounts[/b].commands.rm and mounts[/c].commands.rm",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/data/keep/*", "/data/keep/**"])))]),
+                "commands.rm: a rule takes no paths; scope it to a folder with mounts[/data/keep].commands.rm",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/data/a/*", "*.pem"])))]),
                 "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
             ),
             (

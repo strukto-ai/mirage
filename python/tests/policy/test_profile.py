@@ -3121,6 +3121,19 @@ def test_a_policy_names_its_programs_per_method():
             "mounts[/d/keep].commands.rm",
         ),
         (
+            {
+                "commands": {
+                    "rm": {
+                        "decision": "deny",
+                        "paths": ["/data/a/**", "/data/b/**"],
+                    }
+                }
+            },
+            "commands.rm: a rule takes no paths; give each folder its own "
+            "entry: mounts[/data/a].commands.rm and "
+            "mounts[/data/b].commands.rm",
+        ),
+        (
             {"commands": {"cat": {"decision": "deny", "paths": ["*.pem"]}}},
             "commands.cat: a rule takes no paths; scope it to each folder "
             "with mounts[<folder>].commands.cat, or hide those paths with "
