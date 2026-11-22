@@ -60,6 +60,7 @@ TRANSIENT_FIELDS = (
     "status_writer",
     "_borrowed",
     "substitutions",
+    "held_substitutions",
     "closed",
     "pending_signals",
     "signal_trap_running",

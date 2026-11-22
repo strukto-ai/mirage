@@ -18,6 +18,7 @@ from mirage.io import IOResult
 from mirage.shell.call_stack import CallStack
 from mirage.workspace.executor.traps import (
     clear_traps,
+    ignored_signals,
     inherit_traps,
     lift_function_traps,
     restore_function_traps,
@@ -118,3 +119,10 @@ def test_a_shell_outside_the_jobs_process_drops_its_int_ignore():
     start_job_traps(shell, True)
     clear_traps(shell)
     assert (shell.signal_traps, shell.entry_ignored) == ({}, frozenset())
+
+
+def test_what_a_shell_ignores_passes_on_but_kill_and_stop():
+    session = make_session()
+    session.signal_traps = {9: "", 15: "", 19: "", 2: "", 10: "echo u"}
+    session.job_ignored = frozenset({2})
+    assert ignored_signals(session) == frozenset({15})

@@ -32,7 +32,13 @@ import {
   snapshotStatus,
   type Written,
 } from './statement.ts'
-import { ERR_TRAP_EXEMPT_TYPES, SHELL_IGNORED_SIGNALS, SIGINT } from '../../shell/constants.ts'
+import {
+  ERR_TRAP_EXEMPT_TYPES,
+  SHELL_IGNORED_SIGNALS,
+  SIGINT,
+  SIGKILL,
+  SIGSTOP,
+} from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 /**
@@ -61,12 +67,19 @@ export function inheritTraps(session: SessionState): void {
 /**
  * The signals a shell ignores (`trap '' TERM`), which what it starts ignores
  * too, as a forked child keeps an ignore through exec; a background job's own
- * INT (`jobIgnored`) is not passed on. Mirrors Python's ignored_signals.
+ * INT (`jobIgnored`) is not passed on, nor KILL and STOP, which nothing
+ * ignores. Mirrors Python's ignored_signals.
  */
 export function ignoredSignals(session: SessionState): ReadonlySet<number> {
   return new Set(
     [...session.signalTraps]
-      .filter(([signal, action]) => action === '' && !session.jobIgnored.has(signal))
+      .filter(
+        ([signal, action]) =>
+          action === '' &&
+          !session.jobIgnored.has(signal) &&
+          signal !== SIGKILL &&
+          signal !== SIGSTOP,
+      )
       .map(([signal]) => signal),
   )
 }

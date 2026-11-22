@@ -27,6 +27,8 @@ from mirage.shell.constants import (
     ERR_TRAP_EXEMPT_TYPES,
     SHELL_IGNORED_SIGNALS,
     SIGINT,
+    SIGKILL,
+    SIGSTOP,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.node_kind import NodeKind, node_kind
@@ -75,7 +77,8 @@ def inherit_traps(session: SessionState) -> None:
 def ignored_signals(session: SessionState) -> frozenset[int]:
     """The signals a shell ignores (``trap '' TERM``), which what it
     starts ignores too, as a forked child keeps an ignore through exec; a
-    background job's own INT (``job_ignored``) is not passed on.
+    background job's own INT (``job_ignored``) is not passed on, nor KILL
+    and STOP, which nothing ignores.
 
     Args:
         session (SessionState): the shell.
@@ -83,7 +86,9 @@ def ignored_signals(session: SessionState) -> frozenset[int]:
     return frozenset(
         signal
         for signal, action in session.signal_traps.items()
-        if not action and signal not in session.job_ignored
+        if not action
+        and signal not in session.job_ignored
+        and signal not in (SIGKILL, SIGSTOP)
     )
 
 

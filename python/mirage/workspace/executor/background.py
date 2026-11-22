@@ -126,7 +126,6 @@ from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.session import let_go_held
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -726,11 +725,10 @@ async def handle_background(
     child_evaluation = child_context(context)
     bg_session = child_evaluation.session
     held_inputs = hold_inputs(bg_session.open_inputs())
-    held_substitutions = session.hold_substitutions(bg_session)
+    session.hold_substitutions(bg_session)
 
     async def drop_holds() -> None:
-        held, held_substitutions[:] = list(held_substitutions), []
-        let_go_held(held)
+        bg_session.let_go_of_held()
         failure: Exception | None = None
         while held_inputs:
             try:
@@ -746,7 +744,7 @@ async def handle_background(
         release_program()
 
     def drop_unrun_holds(task: asyncio.Task[Any]) -> None:
-        if held_inputs or held_substitutions:
+        if held_inputs or bg_session.held_substitutions:
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)

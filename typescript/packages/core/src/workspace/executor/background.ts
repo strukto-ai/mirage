@@ -65,7 +65,7 @@ import { LineHandle } from '../../execution/line/handle.ts'
 import { newLineId } from '../../execution/context.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
-import { letGoHeld, type SessionState } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
 import {
@@ -582,9 +582,9 @@ export async function handleBackground(
   const ends = oneCommand && !forks(command, session)
   const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)
   const heldInputs = holdInputs(bgSession.openInputs())
-  const heldSubstitutions = session.holdSubstitutions(bgSession)
+  session.holdSubstitutions(bgSession)
   const dropHolds = async (): Promise<void> => {
-    letGoHeld(heldSubstitutions.splice(0))
+    bgSession.letGoOfHeld()
     let failure: { error: unknown } | undefined
     while (heldInputs.length > 0) {
       try {

@@ -1603,6 +1603,21 @@
         "stdout": "via4\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_exec_job_closing_its_copy_lets_go",
+      "seq": 1346162,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "timeout 5 bash -c 'exec 3> >(cat; touch \"$1\"); { exec 3>&-; while [ ! -e \"$1\" ]; do sleep .1; done; echo jobdone; } & exec 3>&-; wait; echo waited' _ {mount}/procsub-done; echo rc=$?; rm -f {mount}/procsub-done",
+      "expect": {
+        "exit": 0,
+        "stdout": "jobdone\nwaited\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

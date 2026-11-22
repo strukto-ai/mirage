@@ -19,6 +19,7 @@ import { SessionState } from '../session/session.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import {
   clearTraps,
+  ignoredSignals,
   inheritTraps,
   liftFunctionTraps,
   restoreFunctionTraps,
@@ -138,5 +139,20 @@ describe('startJobTraps', () => {
     startJobTraps(shell, true)
     clearTraps(shell)
     expect([[...shell.signalTraps], [...shell.entryIgnored]]).toEqual([[], []])
+  })
+})
+
+describe('ignoredSignals', () => {
+  it('passes on what a shell ignores but KILL and STOP', () => {
+    const session = makeSession()
+    session.signalTraps = new Map([
+      [9, ''],
+      [15, ''],
+      [19, ''],
+      [2, ''],
+      [10, 'echo u'],
+    ])
+    session.jobIgnored = new Set([2])
+    expect([...ignoredSignals(session)]).toEqual([15])
   })
 })

@@ -30,7 +30,7 @@ import { captureHold, jobStreams } from '../executor/background.ts'
 import { ForkRoute } from '../executor/builtins/exec/index.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { closeReaders, letGoHeld } from '../session/session.ts'
+import { closeReaders, type SessionState } from '../session/session.ts'
 import type { Substitution } from './types.ts'
 
 class SubstitutionConsole extends JobConsole {
@@ -101,7 +101,7 @@ export class ProcessSubScope {
     const output = new SubstitutionConsole(endpoint, jobs, abort)
     const writers = this.context.frame.writers
     const holds: Hold[] = []
-    const inherited: Substitution[] = []
+    const shells: SessionState[] = []
     let begin = (): void => undefined
     const begun = new Promise<void>((resolve) => {
       begin = resolve
@@ -118,7 +118,8 @@ export class ProcessSubScope {
           signal,
           ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
           started: (process, shell) => {
-            inherited.push(...session.holdSubstitutions(shell))
+            session.holdSubstitutions(shell)
+            shells.push(shell)
             const pid = process.record.id.pid
             if (endpoint.readable) writers.push([path, pid])
             session.lastBgJobId = pid
@@ -143,7 +144,7 @@ export class ProcessSubScope {
         child.done = true
         begin()
         release()
-        letGoHeld(inherited)
+        for (const shell of shells) shell.letGoOfHeld()
         if (endpoint.readable) endpoint.pipe.end(child.failure)
         else endpoint.pipe.closeReader()
       })

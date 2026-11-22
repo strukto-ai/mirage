@@ -15,7 +15,7 @@
 from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.context import current_caller
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.constants import SIGNALS
+from mirage.shell.constants import SHELL_IGNORED_SIGNALS, SIGNALS
 from mirage.shell.signals import signal_name, signal_number
 from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.shared import (
@@ -120,21 +120,23 @@ def _own_traps(session: SessionState) -> None:
         session.signal_traps_inherited = False
 
 
-def _own_job_ignore(session: SessionState, signal: int) -> None:
-    """Make a signal a background job's shell ignores its own to answer:
-    its process stops ignoring it, so the shell's action, ignore or
-    default decides, as bash's job resets an INT it traps.
+def _own_signal(session: SessionState, signal: int) -> None:
+    """Make a signal the shell traps, ignores or resets its own to
+    answer: its process stops ignoring the signal its parent's ``trap ''``
+    or its job made it ignore, so the shell's action, ignore or default
+    decides, as bash's child resets one (``(trap - TERM; ...)``). The
+    QUIT every shell's process ignores stays ignored.
 
     Args:
         session (SessionState): the shell registering.
         signal (int): the signal.
     """
-    if signal not in session.job_ignored:
-        return
     session.job_ignored = session.job_ignored - {signal}
     process = current_caller().process
-    if process is not None:
-        process.ignores = process.ignores - {signal}
+    if process is None or signal in SHELL_IGNORED_SIGNALS:
+        return
+    process.ignores = process.ignores - {signal}
+    process.program_ignores = process.program_ignores - {signal}
 
 
 async def handle_trap(args: list[str], session: SessionState) -> Result:
@@ -229,7 +231,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
             _own_traps(session)
             if event in session.entry_ignored:
                 continue
-            _own_job_ignore(session, event)
+            _own_signal(session, event)
             if action == "-":
                 session.signal_traps.pop(event, None)
             else:

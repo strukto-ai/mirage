@@ -640,6 +640,12 @@ class SessionState:
     # command (`exec 3< <(cmd)`), which it ends once none names them, or
     # as it ends; a fork starts with none.
     substitutions: list[Substitution] = field(default_factory=list, repr=False)
+    # The substitutions the shell that started this one kept which a
+    # descriptor this one copied still names, held open until it closes
+    # them or ends (``hold_substitutions``); a fork starts with none.
+    held_substitutions: list[Substitution] = field(
+        default_factory=list, repr=False
+    )
     # Set as the shell ends and its descriptors close, so a child it
     # started writes on the stream it was given whatever the shell's own
     # last pointed at.
@@ -792,11 +798,12 @@ class SessionState:
             child.release()
         self.substitutions.append(child)
 
-    def hold_substitutions(self, job: "SessionState") -> list[Substitution]:
-        """The process substitutions this shell kept that a child's copied
-        descriptors name (``exec 3< <(cmd); cat <&3 &``, a later ``>( )``
-        writing to ``&3``), each held open until the child lets go of it
-        (``let_go_held``), as a forked child's copy keeps a pipe open.
+    def hold_substitutions(self, job: "SessionState") -> None:
+        """Hold open each process substitution this shell kept that a
+        child's copied descriptors name (``exec 3< <(cmd); cat <&3 &``, a
+        later ``>( )`` writing to ``&3``) until the child closes the last
+        of them or ends (``held_substitutions``), as a forked child's copy
+        keeps a pipe open.
 
         Args:
             job (SessionState): the child's shell: a job's, a substitution's.
@@ -804,7 +811,13 @@ class SessionState:
         held = [child for child in self.substitutions if job._names(child)]
         for child in held:
             child.holds += 1
-        return held
+        job.held_substitutions.extend(held)
+
+    def let_go_of_held(self) -> None:
+        """Let go of every substitution this shell holds of the shell that
+        started it, as it ends (``hold_substitutions``)."""
+        held, self.held_substitutions = self.held_substitutions, []
+        let_go_held(held)
 
     def _names(self, child: Substitution) -> bool:
         """Whether a descriptor of this shell still reads or writes a
@@ -840,8 +853,13 @@ class SessionState:
         no descriptor names any more (`exec 3<&-`), as closing the last
         descriptor on a pipe does: a `<( )` finds its reader gone, a
         `>( )` reads to the end. One that has ended gives its path back,
-        and one a job still holds is the job's to end.
+        and one a job still holds is the job's to end. One of its parent's
+        this shell held and names no more it lets go of.
         """
+        let_go_held([c for c in self.held_substitutions if not self._names(c)])
+        self.held_substitutions = [
+            c for c in self.held_substitutions if self._names(c)
+        ]
         left: list[Substitution] = []
         for child in self.substitutions:
             named = self._names(child)

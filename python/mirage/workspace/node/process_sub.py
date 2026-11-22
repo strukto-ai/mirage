@@ -40,7 +40,7 @@ from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.session import close_readers, let_go_held
+from mirage.workspace.session.session import close_readers
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +99,11 @@ class ProcessSubScope:
             asyncio.get_running_loop().create_future()
         )
         holds: list[Hold] = []
-        inherited: list[Substitution] = []
+        shells: list[SessionState] = []
 
         def started(process: ProcessHandle, shell: SessionState) -> None:
-            inherited.extend(session.hold_substitutions(shell))
+            session.hold_substitutions(shell)
+            shells.append(shell)
             pid = process.record.pid
             if endpoint.readable:
                 writers.append((path, pid))
@@ -121,7 +122,8 @@ class ProcessSubScope:
 
         def finished(task: asyncio.Task[None]) -> None:
             release()
-            let_go_held(inherited)
+            for shell in shells:
+                shell.let_go_of_held()
             if (
                 not task.cancelled()
                 and (error := task.exception()) is not None

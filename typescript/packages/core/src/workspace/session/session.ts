@@ -684,6 +684,11 @@ export class SessionState {
   // command (`exec 3< <(cmd)`), which it ends once none names them, or as it
   // ends; a fork starts with none. Mirrors Python's substitutions.
   substitutions: Substitution[] = []
+  // The substitutions the shell that started this one kept which a
+  // descriptor this one copied still names, held open until it closes them or
+  // ends (`holdSubstitutions`); a fork starts with none. Mirrors Python's
+  // held_substitutions.
+  heldSubstitutions: Substitution[] = []
   // Set as the shell ends and its descriptors close, so a child it started
   // writes on the stream it was given whatever the shell's own last pointed
   // at. Mirrors Python's closed.
@@ -1189,16 +1194,24 @@ export class SessionState {
    * substitution it kept. Mirrors Python's _names.
    */
   /**
-   * The process substitutions this shell kept that a child's copied
+   * Hold open each process substitution this shell kept that a child's copied
    * descriptors name (`exec 3< <(cmd); cat <&3 &`, a later `>( )` writing to
-   * `&3`), each held open until the child lets go of it (`letGoHeld`), as a
-   * forked child's copy keeps a pipe open. Mirrors Python's
-   * hold_substitutions.
+   * `&3`) until the child closes the last of them or ends
+   * (`heldSubstitutions`), as a forked child's copy keeps a pipe open.
+   * Mirrors Python's hold_substitutions.
    */
-  holdSubstitutions(job: SessionState): Substitution[] {
+  holdSubstitutions(job: SessionState): void {
     const held = this.substitutions.filter((child) => job.names(child))
     for (const child of held) child.holds += 1
-    return held
+    job.heldSubstitutions.push(...held)
+  }
+
+  /**
+   * Let go of every substitution this shell holds of the shell that started
+   * it, as it ends (`holdSubstitutions`). Mirrors Python's let_go_of_held.
+   */
+  letGoOfHeld(): void {
+    letGoHeld(this.heldSubstitutions.splice(0))
   }
 
   private names(child: Substitution): boolean {
@@ -1224,9 +1237,12 @@ export class SessionState {
    * descriptor names any more (`exec 3<&-`), as closing the last descriptor
    * on a pipe does: a `<( )` finds its reader gone, a `>( )` reads to the
    * end. One that has ended gives its path back, and one a job still holds
-   * is the job's to end. Mirrors Python's let_go_substitutions.
+   * is the job's to end. One of its parent's this shell held and names no
+   * more it lets go of. Mirrors Python's let_go_substitutions.
    */
   async letGoSubstitutions(): Promise<void> {
+    letGoHeld(this.heldSubstitutions.filter((child) => !this.names(child)))
+    this.heldSubstitutions = this.heldSubstitutions.filter((child) => this.names(child))
     const left: Substitution[] = []
     for (const child of this.substitutions) {
       const named = this.names(child)

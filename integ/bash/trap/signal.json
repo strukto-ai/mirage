@@ -909,6 +909,41 @@
         "stdout": "t\nrc=138\n",
         "stderr": "bash: line 1: wait: `bogus': not a pid or valid job spec\n"
       }
+    },
+    {
+      "id": "signal_trap_subshell_resets_an_inherited_ignore",
+      "seq": 512226,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'trap \"\" TERM; (trap - TERM; kill -TERM $BASHPID; echo bad); echo rc=$?; (trap \"echo caught\" TERM; kill -TERM $BASHPID; echo after); echo rc=$?'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=143\ncaught\nafter\nrc=0\n",
+        "stderr": "Terminated\n"
+      }
     }
   ]
 }

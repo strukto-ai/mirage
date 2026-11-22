@@ -17,7 +17,7 @@ import { currentCaller, type RedirectResult } from '../../../../context/session_
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { builtinError, builtinUsage, result } from '../shared.ts'
-import { SIGNALS } from '../../../../shell/constants.ts'
+import { SHELL_IGNORED_SIGNALS, SIGNALS } from '../../../../shell/constants.ts'
 import { signalName, signalNumber } from '../../../../shell/signals.ts'
 import { armSignals } from '../../traps.ts'
 import type { BuiltinCall } from '../types.ts'
@@ -151,7 +151,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Redi
     } else if (typeof event === 'number') {
       ownTraps(session)
       if (session.entryIgnored.has(event)) continue
-      ownJobIgnore(session, event)
+      ownSignal(session, event)
       if (action === '-') session.signalTraps.delete(event)
       else session.signalTraps.set(event, action)
     } else {
@@ -166,19 +166,21 @@ export function handleTrap(args: readonly string[], session: SessionState): Redi
 }
 
 /**
- * Make a signal a background job's shell ignores its own to answer: its
- * process stops ignoring it, so the shell's action, ignore or default decides,
- * as bash's job resets an INT it traps. Mirrors Python's _own_job_ignore.
+ * Make a signal the shell traps, ignores or resets its own to answer: its
+ * process stops ignoring the signal its parent's `trap ''` or its job made it
+ * ignore, so the shell's action, ignore or default decides, as bash's child
+ * resets one (`(trap - TERM; ...)`). The QUIT every shell's process ignores
+ * stays ignored. Mirrors Python's _own_signal.
  *
  * @param session the shell registering.
  * @param signal the signal.
  */
-function ownJobIgnore(session: SessionState, signal: number): void {
-  if (!session.jobIgnored.has(signal)) return
+function ownSignal(session: SessionState, signal: number): void {
   session.jobIgnored = new Set([...session.jobIgnored].filter((other) => other !== signal))
   const process = currentCaller().process
-  if (process !== null)
-    process.ignores = new Set([...process.ignores].filter((other) => other !== signal))
+  if (process === null || SHELL_IGNORED_SIGNALS.has(signal)) return
+  process.ignores = new Set([...process.ignores].filter((other) => other !== signal))
+  process.programIgnores = new Set([...process.programIgnores].filter((other) => other !== signal))
 }
 
 /** The `trap` arm. */
