@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.commands.cli.builtin.git.io import (
     LeadingDirs,
     blocking_ancestor,
+    ensure_dir,
     lstat,
     refuse_mount,
     remove_empty_parents,
@@ -129,6 +130,8 @@ async def test_leading_dirs_ask_each_directory_once():
     asked: list[str] = []
 
     async def dispatch(op: str, path: PathSpec, **kwargs):
+        if op == "mkdir":
+            return None, None
         asked.append(path.virtual)
         if path.virtual.startswith("/repo/gone"):
             raise FileNotFoundError(path.virtual)
@@ -154,6 +157,13 @@ async def test_leading_dirs_ask_each_directory_once():
     below = await blocking_ancestor(vfs, REPO, "new/deep/five/six", dirs)
     assert below is not None and below.virtual == "/repo/new/deep/five"
     assert asked == ["/repo/a", "/repo/a/b", "/repo/gone"]
+    # A directory made below one the pass never looked at is not kept:
+    # that one may yet be taken away, a link replaced by a real directory.
+    await ensure_dir(vfs, REPO.join("gone/x"), dirs)
+    assert not dirs.may_hold(REPO.join("gone/x/four"))
+    unseen = LeadingDirs()
+    await ensure_dir(vfs, REPO.join("gone/x"), unseen)
+    assert unseen.may_hold(REPO.join("gone/x/four"))
 
 
 class Recorder:

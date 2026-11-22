@@ -319,14 +319,20 @@ export async function readNames(vfs: Files, path: PathSpec): Promise<string[]> {
  * rather than an error.
  *
  * `dirs`, a checkout pass's leading directories, answers for the ones the
- * pass already knows and learns the ones it makes.
+ * pass already knows and learns the ones it makes below one it knows. One made
+ * below a directory the pass never looked at is not kept: taking that
+ * directory away would leave it standing in what the pass remembers.
  */
 export async function ensureDir(vfs: Files, path: PathSpec, dirs?: LeadingDirs): Promise<void> {
   const missing: PathSpec[] = []
   let current = path
+  let kept = false
   while (current.virtual !== '/') {
     const known = dirs?.get(current)
-    if (known === Leading.FOUND || known === Leading.MADE) break
+    if (known === Leading.FOUND || known === Leading.MADE) {
+      kept = true
+      break
+    }
     if (known !== Leading.MISSING) {
       try {
         await vfs.stat(current)
@@ -340,7 +346,8 @@ export async function ensureDir(vfs: Files, path: PathSpec, dirs?: LeadingDirs):
   }
   for (const target of missing.reverse()) {
     await vfs.mkdir(target)
-    dirs?.made(target)
+    kept ||= dirs?.get(target) === Leading.MISSING
+    if (kept) dirs?.made(target)
   }
 }
 

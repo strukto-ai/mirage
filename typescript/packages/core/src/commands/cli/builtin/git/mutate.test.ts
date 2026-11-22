@@ -2955,7 +2955,8 @@ describe('restoreEntry', () => {
 describe('LeadingDirs', () => {
   it('asks each leading directory once and nothing under one made or missing', async () => {
     const asked: string[] = []
-    const dispatch: CallerDispatchFn = (_op, path) => {
+    const dispatch: CallerDispatchFn = (op, path) => {
+      if (op === 'mkdir') return Promise.resolve([null, new IOResult()])
       asked.push(path.virtual)
       if (path.virtual.startsWith('/repo/gone')) {
         return Promise.reject(Object.assign(new Error(path.virtual), { code: 'ENOENT' }))
@@ -2984,6 +2985,13 @@ describe('LeadingDirs', () => {
     const below = await blockingAncestor(files, repo, 'new/deep/five/six', dirs)
     expect(below?.virtual).toBe('/repo/new/deep/five')
     expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    // A directory made below one the pass never looked at is not kept: that
+    // one may yet be taken away, a link replaced by a real directory.
+    await ensureDir(files, repo.join('gone/x'), dirs)
+    expect(dirs.mayHold(repo.join('gone/x/four'))).toBe(false)
+    const unseen = new LeadingDirs()
+    await ensureDir(files, repo.join('gone/x'), unseen)
+    expect(unseen.mayHold(repo.join('gone/x/four'))).toBe(true)
   })
 })
 

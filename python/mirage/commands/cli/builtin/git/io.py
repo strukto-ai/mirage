@@ -402,7 +402,10 @@ async def ensure_dir(
     creating one again costs a no-op rather than an error.
 
     ``dirs``, a checkout pass's leading directories, answers for the
-    ones the pass already knows and learns the ones it makes.
+    ones the pass already knows and learns the ones it makes below one
+    it knows. One made below a directory the pass never looked at is not
+    kept: taking that directory away would leave it standing in what the
+    pass remembers.
 
     Args:
         vfs (Files): the session's files.
@@ -412,9 +415,11 @@ async def ensure_dir(
     """
     missing: list[PathSpec] = []
     current = path
+    kept = False
     while current.virtual != "/":
         known = dirs.get(current) if dirs is not None else None
         if known is Leading.FOUND or known is Leading.MADE:
+            kept = True
             break
         if known is not Leading.MISSING:
             try:
@@ -427,7 +432,9 @@ async def ensure_dir(
     for target in reversed(missing):
         await vfs.mkdir(target)
         if dirs is not None:
-            dirs.made(target)
+            kept = kept or dirs.get(target) is Leading.MISSING
+            if kept:
+                dirs.made(target)
 
 
 async def is_directory(vfs: Files, path: PathSpec) -> bool:
