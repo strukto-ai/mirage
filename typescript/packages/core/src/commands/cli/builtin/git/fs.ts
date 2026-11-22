@@ -14,6 +14,7 @@
 
 import { GitConfigManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
+import pako from 'pako'
 
 import { isMissingPath } from '../../../../errors/fs.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
@@ -142,12 +143,29 @@ export function openPacks(vfs: Files, commondir: PathSpec): Packs {
   return { vfs, dir: commondir.join(PACK_DIR), files: null, resolved: new Map(), held: 0 }
 }
 
-/** zlib's inflate of one complete stream, its bytes exactly. */
-export async function inflate(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([data as BlobPart])
-    .stream()
-    .pipeThrough(new DecompressionStream('deflate'))
-  return new Uint8Array(await new Response(stream).arrayBuffer())
+/** pako's inflater, with what its declarations leave out and zlib's code as a number. */
+interface Inflater extends Omit<pako.Inflate, 'err'> {
+  err: number
+  ended: boolean
+  strm: { avail_in: number }
+}
+
+/**
+ * zlib's inflate of one complete stream, its bytes exactly: a stream cut
+ * short, or bytes past its end, fail it as a corrupt object does.
+ *
+ * Inflated in place, not through a DecompressionStream: a Durable Object
+ * holds an awaited stream's answer until the storage writes before it are
+ * confirmed, so a checkout writing a file between inflates waited out a
+ * round trip for every file.
+ */
+export function inflate(data: Uint8Array): Uint8Array {
+  const inflater = new pako.Inflate() as Inflater
+  inflater.push(data, false)
+  if (inflater.err !== 0 || !inflater.ended || inflater.strm.avail_in !== 0) {
+    throw new GitError(`inflate: ${inflater.msg || 'not one whole zlib stream'}`)
+  }
+  return inflater.result as Uint8Array
 }
 
 /**
@@ -418,7 +436,7 @@ async function readAt(packs: Packs, file: PackFile, offset: number): Promise<Pac
   const end = await entryEnd(packs, file, offset)
   const raw = await readBlocks(file.blocks, offset, end - offset)
   const { kind, at, base } = entryHead(raw, offset)
-  const data = await inflate(raw.subarray(at))
+  const data = inflate(raw.subarray(at))
   let object: Packed
   if (base === null) {
     const type = KINDS[kind - 1]
@@ -446,7 +464,7 @@ async function anyObject(packs: Packs, oid: string): Promise<Packed | null> {
     packs.dir.parent.join(`${oid.slice(0, 2)}/${oid.slice(2)}`),
   )
   if (stored === null) return null
-  const raw = await inflate(stored)
+  const raw = inflate(stored)
   const space = raw.indexOf(0x20)
   const nul = raw.indexOf(0)
   return { type: DEC.decode(raw.subarray(0, space)), content: raw.subarray(nul + 1) }
@@ -590,6 +608,8 @@ class GitStat {
  * indexes from it and answers for a packed object as for the loose file it
  * would be: its index bucket, its offset and its own entry are read, its
  * deltas applied (`pack.ts`), and the bytes handed over as stored zlib blocks.
+ * Those packs go out with it (`packs`), for a verb to read an object from
+ * them first as git does, sharing what either learns of them.
  *
  * Symlinks are refused rather than faked. mirage keeps links in the namespace
  * rather than in any backend, so a `readlink` here would have to consult a
@@ -601,6 +621,7 @@ export function gitFs(
   location?: RepoLocation,
 ): {
   promises: Record<string, (...args: never[]) => Promise<unknown>>
+  packs: Packs | null
 } {
   // isomorphic-git accepts one gitdir and does not follow commondir itself.
   // Route shared storage here so every library operation keeps the selected
@@ -709,6 +730,7 @@ export function gitFs(
         )
       },
     } as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
+    packs,
   }
 }
 

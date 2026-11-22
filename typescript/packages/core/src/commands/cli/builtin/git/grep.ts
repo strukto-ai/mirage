@@ -10,6 +10,9 @@ import { posixEscape, posixRegex, type PosixRegex } from '../../../../rs/regex.t
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { commandFiles } from '../../../builtin/generic_bind/files.ts'
+import { ruledOut } from '../../../builtin/generic_bind/search.ts'
+import { searchTerms } from '../../../builtin/grep_pushdown.ts'
 import { mountsOf } from '../../../builtin/utils/links.ts'
 import { requireWorkTree } from './discover.ts'
 import {
@@ -41,6 +44,9 @@ type LineMatcher = (line: string, signal?: AbortSignal) => Promise<boolean>
 /** A compiled search and presentation, independent of content source. */
 interface GrepFlags {
   readonly patterns: readonly LineMatcher[]
+  /** Texts one of which every matching line holds, null when none are known. */
+  readonly needles: readonly string[] | null
+  readonly ignoreCase: boolean
   readonly invert: boolean
   readonly numbers: boolean
   readonly count: boolean
@@ -82,6 +88,7 @@ function parseFlags(
   const ignoreCase = fl.asBool('ignore_case')
   const wholeWord = fl.asBool('word_regexp')
   const compiled: LineMatcher[] = []
+  let needles: string[] | null = []
   for (const value of patterns) {
     for (const part of value.split('\n')) {
       const view = byteView(part, utf8)
@@ -101,6 +108,8 @@ function parseFlags(
         throw err
       }
       compiled.push(lineMatcher(pattern, wholeWord))
+      needles =
+        needles === null || pattern.needles === null ? null : needles.concat(pattern.needles)
     }
   }
   const listing = fl.asBool('files_without_match')
@@ -121,6 +130,8 @@ function parseFlags(
   }
   return {
     patterns: compiled,
+    needles,
+    ignoreCase,
     invert: fl.asBool('invert_match'),
     numbers: fl.asBool('line_number'),
     count: fl.asBool('count'),
@@ -321,6 +332,31 @@ export async function grep(
     sources.push(['', shown])
   }
   const mounts = mountsOf(ctx)
+  // The work tree's files no line can match in, as its mount's search rules
+  // them out for grep: one that lists the files without a match, or selects
+  // the lines that do not, reads every file.
+  let misses: ((path: PathSpec) => Promise<boolean>) | null = null
+  if (!sources[0]?.[0] && !cached && !flags.invert && flags.listing !== 'files_without_match') {
+    const texts = searchTerms(
+      null,
+      flags.needles === null ? null : [...flags.needles],
+      false,
+      false,
+      false,
+      false,
+      flags.ignoreCase,
+    )
+    if (texts !== null) {
+      const worktree = [repo.location.worktree]
+      misses = await ruledOut(commandFiles(ctx, worktree), ctx, worktree, new Set(), {
+        texts: texts[0],
+        wholeWord: false,
+        ignoreCase: flags.ignoreCase,
+        lineOutput: false,
+        readsBinary: flags.binary !== 'skip',
+      })
+    }
+  }
   const out: Uint8Array[] = []
   let found = false
   let printedAny = false
@@ -338,6 +374,8 @@ export async function grep(
       )
         continue
       const target = repo.location.worktree.join(path)
+      // A file the search rules out is never read, so it counts for nothing.
+      if (misses !== null && !revision && (await misses(target))) continue
       if (mounts?.walkLimit !== undefined) {
         // A blob is read from the repository, a working-tree file from the
         // mount serving it, and each mount counts its own.

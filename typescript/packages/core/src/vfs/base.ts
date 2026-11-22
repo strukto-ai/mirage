@@ -236,6 +236,12 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly readsRanges: boolean = false
   /**
+   * Whether `mkdir` itself refuses a taken name as mkdir(2) does: any entry
+   * without `parents`, a file with it. The mount looks the name up before the
+   * create only for a VFS that leaves this false.
+   */
+  readonly refusesTaken: boolean = false
+  /**
    * Whether the data lives on the host filesystem, which lets a command
    * aggregate on the host instead of streaming through mirage.
    */

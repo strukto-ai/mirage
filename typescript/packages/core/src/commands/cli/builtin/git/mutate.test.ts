@@ -41,7 +41,10 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GITLINK_MODE, REGULAR_MODE, SYMLINK_MODE } from './constants.ts'
 import { GIT } from './index.ts'
 import {
+  blockingAncestor,
   ensureDir,
+  LeadingDirs,
+  lstat,
   readNames,
   readOptional,
   refuseMount,
@@ -2924,15 +2927,41 @@ describe('restoreEntry', () => {
     'present %s with bits %s restored as %s sets %j',
     async (present, had, mode, want) => {
       const { state, dispatch } = holding(present, had)
-      await restoreEntry(
-        filesOver(dispatch),
-        PathSpec.fromStrPath('/repo/slot'),
-        mode,
-        new Uint8Array([120]),
-      )
+      const files = filesOver(dispatch)
+      const slot = PathSpec.fromStrPath('/repo/slot')
+      await restoreEntry(files, slot, mode, new Uint8Array([120]), await lstat(files, slot))
       expect(state.set).toEqual(want)
     },
   )
+})
+
+// git's lstat cache: a checkout asks each leading directory once, not once
+// per entry under it, and nothing under one it made or found missing.
+describe('LeadingDirs', () => {
+  it('asks each leading directory once and nothing under one made or missing', async () => {
+    const asked: string[] = []
+    const dispatch: CallerDispatchFn = (_op, path) => {
+      asked.push(path.virtual)
+      if (path.virtual.startsWith('/repo/gone')) {
+        return Promise.reject(Object.assign(new Error(path.virtual), { code: 'ENOENT' }))
+      }
+      const name = path.virtual.slice(path.virtual.lastIndexOf('/') + 1)
+      return Promise.resolve([new FileStat({ name, type: FileType.DIRECTORY }), new IOResult()])
+    }
+    const files = filesOver(dispatch)
+    const repo = PathSpec.fromStrPath('/repo')
+    const dirs = new LeadingDirs()
+    for (const name of ['a/b/one', 'a/b/two', 'a/three', 'gone/x/four', 'gone/y']) {
+      expect(await blockingAncestor(files, repo, name, dirs)).toBeNull()
+    }
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    dirs.made(repo.join('new'))
+    expect(await blockingAncestor(files, repo, 'new/deep/five', dirs)).toBeNull()
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
+    expect(dirs.mayHold(repo.join('new/deep/five'))).toBe(false)
+    expect(dirs.mayHold(repo.join('gone/x/four'))).toBe(false)
+    expect(dirs.mayHold(repo.join('a/b/one'))).toBe(true)
+  })
 })
 
 describe('removeTree meeting a link', () => {

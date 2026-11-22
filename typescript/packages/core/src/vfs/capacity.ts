@@ -168,6 +168,9 @@ export class Charge {
   held = 0
   written = 0
   contended = false
+  /** The bytes at the operand once the write is done, when the write knows
+   * them; null has the store measure it. */
+  after: number | null = null
 
   constructor(
     readonly usage: StorageUsage | null,
@@ -223,8 +226,9 @@ export class Charge {
  * Reserve before a write's bytes go and land what it really changed. The
  * reservation is checked and taken in one synchronous step, so parallel
  * writers can never pass the store's capacity together. After the write,
- * however it ended, the operand is measured again and the change lands; one
- * that overlapped another in flight marks the count for a recount. An
+ * however it ended, the change lands: the size the write names (`after`)
+ * when it ended well with no other write over it, else the operand measured
+ * again. One that overlapped another in flight marks the count for a recount. An
  * uncapped store gets an inert charge and measures nothing. Mirrors Python's
  * `charge`.
  */
@@ -241,10 +245,10 @@ export async function charge<T>(
   usage.enter(held)
   try {
     const before = (held.before = await sizeOf(path))
-    const settle = async (): Promise<void> => {
+    const settle = async (known: number | null): Promise<void> => {
       let after: number
       try {
-        after = await sizeOf(path)
+        after = known ?? (await sizeOf(path))
       } catch (err) {
         usage.land(held.held, 0)
         usage.stale()
@@ -256,10 +260,10 @@ export async function charge<T>(
     try {
       result = await write(held)
     } catch (err) {
-      await settle()
+      await settle(null)
       throw err
     }
-    await settle()
+    await settle(held.contended ? null : held.after)
     return result
   } finally {
     usage.leave(held)

@@ -14,7 +14,6 @@
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { visibleEntries, matched, repoRelative, under as inside } from './pathspec.ts'
-import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../../types.ts'
@@ -37,6 +36,8 @@ import {
   dropGitlink,
   isLink,
   keepGitlink,
+  LeadingDirs,
+  lstat,
   readNames,
   readOptional,
   refuseReplacedMounts,
@@ -47,7 +48,7 @@ import {
   statOf,
 } from './io.ts'
 
-import { readCommit, repoArgs, type Repo } from './repo.ts'
+import { readBlobBytes, readCommit, type Repo } from './repo.ts'
 import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
 import { restored } from './reset.ts'
@@ -387,6 +388,9 @@ export async function restorePaths(
       }
       await removeEmptyParents(vfs, path, repo.location.worktree)
     }
+    // The leading directories, each looked at once for every entry below it,
+    // and after the removals above, which change them.
+    const dirs = new LeadingDirs()
     for (const name of present) {
       const entry = tree.get(name)
       if (entry === undefined) continue
@@ -395,32 +399,36 @@ export async function restorePaths(
         await keepGitlink(vfs, where)
         continue
       }
-      const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
+      const blob = await readBlobBytes(repo, entry.oid)
       // The write direction takes the same component the other way round:
       // the entry needs a directory where it stands, so git replaces it with
       // one rather than writing through it. A link's target tree is left
       // exactly as it was, and an untracked file standing there is replaced
       // in silence, which is what git does to any leading non-directory.
-      const above = await blockingAncestor(vfs, repo.location.worktree, name)
-      if (above !== null) await removeFile(vfs, above)
+      const above = await blockingAncestor(vfs, repo.location.worktree, name, dirs)
+      if (above !== null) {
+        await removeFile(vfs, above)
+        dirs.missing(above)
+      }
       // A directory can still stand here after the loop above: it removed
       // the tracked children, but an untracked one keeps it alive and the
       // write would fail on it with the index already updated. git replaces
       // the whole directory, untracked children included. A link is left to
       // restoreEntry, which retargets it; following one to a directory here
-      // would delete a tree no branch named.
+      // would delete a tree no branch named. Under a directory this pass made
+      // or found missing nothing stands to look at.
+      let standing = dirs.mayHold(where) ? await lstat(vfs, where) : null
       let current: Uint8Array | null = null
-      if (!(await isLink(vfs, where))) {
-        const info = await statOf(vfs, where)
-        if (info !== null && info.type === FileType.DIRECTORY) {
-          await removeTree(vfs, where)
-        } else if (info !== null && above === null) {
-          current = await readOptional(vfs, where)
-        }
+      if (standing?.type === FileType.DIRECTORY) {
+        await removeTree(vfs, where)
+        dirs.missing(where)
+        standing = null
+      } else if (standing !== null && standing.type !== FileType.SYMLINK) {
+        current = await readOptional(vfs, where)
       }
       if (current?.length !== blob.length || current.some((byte, at) => byte !== blob[at]))
         updated += 1
-      await restoreEntry(vfs, where, entry.mode, blob)
+      await restoreEntry(vfs, where, entry.mode, blob, standing, dirs)
     }
   }
   return [notes, updated]

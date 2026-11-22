@@ -28,7 +28,10 @@ export type LineSyntax = 'basic' | 'extended' | 'fixed' | 'perl'
 const UNSET = 0xffffffff
 const SPECIAL = /[\\.[\]()*+?{}|^$]/g
 const decoder = new TextDecoder()
-const posixMeta = z.object({ groups: z.number().int().nonnegative() })
+const posixMeta = z.object({
+  groups: z.number().int().nonnegative(),
+  needles: z.array(z.string()).nullable(),
+})
 const lineMeta = z.object({
   warnings: z.array(z.string()),
   needles: z.array(z.string()).nullable(),
@@ -194,6 +197,8 @@ class StreamPool {
  */
 export class PosixRegex {
   readonly groups: number
+  /** Texts one of which every match holds, when any are known. */
+  readonly needles: string[] | null
   private readonly streams: StreamPool
 
   constructor(
@@ -216,7 +221,9 @@ export class PosixRegex {
       word,
     }
     this.streams = new StreamPool(config)
-    this.groups = posixMeta.parse(this.streams.metadata).groups
+    const meta = posixMeta.parse(this.streams.metadata)
+    this.groups = meta.groups
+    this.needles = meta.needles
   }
 
   private spans(subject: Subject, found: readonly number[]): Groups {

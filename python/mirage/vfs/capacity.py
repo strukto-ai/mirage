@@ -227,6 +227,9 @@ class Charge:
         usage (StorageUsage | None): the store's usage; None when uncapped.
         path (PathSpec): the operand a refusal names.
         before (int): the bytes at ``path`` before the write.
+
+    ``after`` is the bytes at the operand once the write is done, when the
+    write knows them; None has the store measure it.
     """
 
     def __init__(
@@ -238,6 +241,7 @@ class Charge:
         self.held = 0
         self.written = 0
         self.contended = False
+        self.after: int | None = None
 
     def hold(self, size: int) -> None:
         """Reserve ``size`` more bytes, or refuse with EDQUOT.
@@ -306,10 +310,11 @@ async def charge(
 
     The reservation is checked and taken in one synchronous step, so
     parallel writers on the store's loop can never pass its capacity
-    together. After the write, however it ended, the operand is measured
-    again and the change lands; a write that overlapped another in flight
-    marks the count for a recount. An uncapped store yields an inert
-    charge and measures nothing.
+    together. After the write, however it ended, the change lands: the
+    size the write names (``after``) when it ended well with no other
+    write over it, else the operand measured again. A write that
+    overlapped another in flight marks the count for a recount. An
+    uncapped store yields an inert charge and measures nothing.
 
     Args:
         usage (StorageUsage | None): the store's usage; None when uncapped.
@@ -326,11 +331,13 @@ async def charge(
     usage.enter(held)
     try:
         before = held.before = await size_of(path)
+        known: int | None = None
         try:
             yield held
+            known = None if held.contended else held.after
         finally:
             try:
-                after = await size_of(path)
+                after = await size_of(path) if known is None else known
             except BaseException:
                 logger.debug(
                     "re-measuring %s failed; recounting", path.virtual

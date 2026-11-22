@@ -251,8 +251,9 @@ class Scanner:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing it.
         """
-        rules = await self._descend(relative, ignores)
-        for entry in await read_names(self._vfs, self._absolute(relative)):
+        entries = await read_names(self._vfs, self._absolute(relative))
+        rules = await self._descend(relative, ignores, entries)
+        for entry in entries:
             name = entry_name(entry)
             if not name:
                 continue
@@ -272,15 +273,19 @@ class Scanner:
         return False
 
     async def _descend(
-        self, relative: str, ignores: IgnoreStack
+        self, relative: str, ignores: IgnoreStack, entries: list[str]
     ) -> IgnoreStack:
-        """The ignore rules inside a directory, given the ones outside.
+        """The ignore rules inside a directory, given the ones outside. A
+        directory that lists no ignore file is not asked for one.
 
         Args:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing its parent.
+            entries (list[str]): the directory's listing.
         """
         if not relative or self._per_directory is None:
+            return ignores
+        if all(entry_name(entry) != self._per_directory for entry in entries):
             return ignores
         local = await read_optional(
             self._vfs, self._absolute(relative).join(self._per_directory)
@@ -356,8 +361,9 @@ class Scanner:
                 which case nothing inside it is reported untracked.
             ignores (IgnoreStack): the rules governing its parent.
         """
-        rules = await self._descend(relative, ignores)
-        for entry in sorted(await self._names(relative)):
+        entries = sorted(await self._names(relative))
+        rules = await self._descend(relative, ignores, entries)
+        for entry in entries:
             name = entry_name(entry)
             if not name or name == GIT_DIR:
                 continue

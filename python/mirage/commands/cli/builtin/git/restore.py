@@ -36,10 +36,12 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (
+    LeadingDirs,
     blocking_ancestor,
     drop_gitlink,
     is_link,
     keep_gitlink,
+    lstat,
     read_names,
     read_optional,
     refuse_replaced_mounts,
@@ -464,6 +466,9 @@ async def restore_paths(
             else:
                 await remove_file(vfs, path)
             await remove_empty_parents(vfs, path, location.worktree)
+        # The leading directories, each looked at once for every entry
+        # below it, and after the removals above, which change them.
+        dirs = LeadingDirs()
         for name in sorted(present):
             mode, sha = tree[name.encode()]
             where = location.worktree.join(name)
@@ -481,9 +486,10 @@ async def restore_paths(
             # exactly as it was, and an untracked file standing
             # there is replaced in silence, which is what git does
             # to any leading non-directory.
-            above = await blocking_ancestor(vfs, location.worktree, name)
+            above = await blocking_ancestor(vfs, location.worktree, name, dirs)
             if above is not None:
                 await remove_file(vfs, above)
+                dirs.missing(above)
             # A directory can still stand here after the loop
             # above: it removed the tracked children, but an
             # untracked one keeps it alive and the write would
@@ -491,15 +497,22 @@ async def restore_paths(
             # replaces the whole directory, untracked children
             # included. A link is left to restore_entry, which
             # retargets it; following one to a directory here
-            # would delete a tree no branch named.
+            # would delete a tree no branch named. Under a directory
+            # this pass made or found missing nothing stands to look
+            # at.
+            standing = (
+                await lstat(vfs, where) if dirs.may_hold(where) else None
+            )
             current: bytes | None = None
-            if not await is_link(vfs, where):
-                info = await stat_of(vfs, where)
-                if info is not None and info.type is FileType.DIRECTORY:
-                    await remove_tree(vfs, where)
-                elif info is not None and above is None:
-                    current = await read_optional(vfs, where)
+            if standing is not None and standing.type is FileType.DIRECTORY:
+                await remove_tree(vfs, where)
+                dirs.missing(where)
+                standing = None
+            elif (
+                standing is not None and standing.type is not FileType.SYMLINK
+            ):
+                current = await read_optional(vfs, where)
             if current != blob:
                 updated += 1
-            await restore_entry(vfs, where, mode, blob)
+            await restore_entry(vfs, where, mode, blob, standing, dirs)
     return notes, updated

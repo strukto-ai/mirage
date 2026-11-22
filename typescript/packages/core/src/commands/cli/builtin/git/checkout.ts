@@ -14,7 +14,6 @@
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -51,14 +50,14 @@ import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './in
 import {
   blockingAncestor,
   dropGitlink,
-  isLink,
   keepGitlink,
+  LeadingDirs,
+  lstat,
   refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
   removeTree,
   restoreEntry,
-  statOf,
 } from './io.ts'
 
 import { append, entry, IDENTITY, logged, record, ZERO } from './reflog.ts'
@@ -73,7 +72,7 @@ import {
   writeRef,
 } from './refs.ts'
 import { matched, repoRelative, under as inside, visibleEntries } from './pathspec.ts'
-import { commitFacts, refOid, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, readBlobBytes, refOid, type Repo } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
@@ -337,6 +336,9 @@ export async function switchTo(
     }
     await removeEmptyParents(vfs, where, repo.location.worktree)
   }
+  // The leading directories, each looked at once for every entry below it,
+  // and after the removals above, which change them.
+  const dirs = new LeadingDirs()
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
     const entry = changed.get(path)
     if (entry === undefined) continue
@@ -344,28 +346,32 @@ export async function switchTo(
       await keepGitlink(vfs, repo.location.worktree.join(path))
       continue
     }
-    const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
+    const blob = await readBlobBytes(repo, entry.oid)
     // Whatever the removals above did not take, a component above the entry
     // may still not be a directory: an ignored file or link is in neither tree
     // and in no collision list, so it reaches here. git replaces it with the
     // directory the entry needs rather than writing through it, which is what
     // keeps a link's target tree, a path no branch named, out of the way.
-    const above = await blockingAncestor(vfs, repo.location.worktree, path)
-    if (above !== null) await removeFile(vfs, above)
+    const above = await blockingAncestor(vfs, repo.location.worktree, path, dirs)
+    if (above !== null) {
+      await removeFile(vfs, above)
+      dirs.missing(above)
+    }
     const where = repo.location.worktree.join(path)
     // And the same thing standing on the name itself rather than above it: a
     // directory holding only ignored files is in no collision list either,
     // since the check that refuses one is about the untracked files it would
     // lose. git updates ignored files by default and takes the whole directory
     // with it. A link is left to restoreEntry, which retargets it; following
-    // one to a directory here would delete a tree no branch named.
-    if (!(await isLink(vfs, where))) {
-      const info = await statOf(vfs, where)
-      if (info !== null && info.type === FileType.DIRECTORY) {
-        await removeTree(vfs, where)
-      }
+    // one to a directory here would delete a tree no branch named. Under a
+    // directory this pass made or found missing nothing stands to look at.
+    let standing = dirs.mayHold(where) ? await lstat(vfs, where) : null
+    if (standing?.type === FileType.DIRECTORY) {
+      await removeTree(vfs, where)
+      dirs.missing(where)
+      standing = null
     }
-    await restoreEntry(vfs, where, entry.mode, blob)
+    await restoreEntry(vfs, where, entry.mode, blob, standing, dirs)
   }
   // The index is git's two-way merge, not a copy of the target tree: only a
   // path the two trees disagree about is decided by the target, and where they

@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { currentCaller } from '../../../../context/session_context.ts'
+import { callerSignal, currentCaller } from '../../../../context/session_context.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { MemoryExhausted } from '../../../../io/errors.ts'
 import { checkMemory, memoryRoom } from '../../../../io/memory.ts'
 import { readPrefix } from '../../../../io/cooperative.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import {
@@ -29,9 +29,12 @@ import {
   Verdict,
   walkCandidate,
 } from '../../../builtin/rg_glob.ts'
+import { commandFiles, dispatchedReadTree } from '../../../builtin/generic_bind/files.ts'
+import { ruledOut } from '../../../builtin/generic_bind/search.ts'
+import { searchTerms } from '../../../builtin/grep_pushdown.ts'
 import { type IgnoreReader, dirRules, rootStack } from '../../../builtin/rg_scan.ts'
-import { dispatchOf, mountView } from '../../../builtin/utils/links.ts'
-import { WalkBudget, beforeFullWalk } from '../../../builtin/utils/tree.ts'
+import { dispatchOf, linkLocation, linkView, mountView } from '../../../builtin/utils/links.ts'
+import { WalkBudget, beforeFullWalk, treeWalk, type WalkCall } from '../../../builtin/utils/tree.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -41,6 +44,8 @@ import { AstGrepConfig } from './config.ts'
 import { processor } from './engine.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
+// A fixed token a mount's search is asked for: printable ASCII on one line.
+const PLAIN = /^[\x20-\x7e]+$/
 const LANGUAGES = new Map([
   ['js', 'JavaScript'],
   ['jsx', 'JavaScript'],
@@ -165,17 +170,39 @@ const UPDATE = new Argument(['-U', '--update-all'], {
 /**
  * Which ignore files a walk reads and whether it walks hidden entries:
  * ast-grep's defaults with every `--no-ignore` value applied. `global`
- * names git's own config, which no workspace has.
+ * names git's own config, which no workspace has. `readdir` and `lstat` are
+ * the walk's listing and its look at an entry without following a link,
+ * answered from one read of a subtree where its mount gives one.
  */
 interface Walk {
   readonly sources: IgnoreSources
   readonly hidden: boolean
   readonly reader: IgnoreReader
+  readonly readdir: WalkCall<string[]>
+  readonly lstat: WalkCall<FileStat>
 }
 
 function walkOf(off: ReadonlySet<string>, vfs: Files, maxMemory: number): Walk {
   const vcs = !off.has('vcs')
+  const links = linkView(vfs)
+  const [readdir, lstat] = treeWalk<string[], FileStat>(
+    dispatchedReadTree(
+      vfs.dispatch,
+      mountView(vfs),
+      links === undefined ? null : (virtual) => linkLocation(links, virtual),
+      true,
+    ),
+    async (path, _nofollow, limit) =>
+      (
+        await vfs.dispatch('readdir', path, [], limit === undefined ? {} : { limit })
+      )[0] as string[],
+    (path) => vfs.stat(path, undefined, { nofollow: true }),
+    true,
+    callerSignal(),
+  )
   return {
+    readdir,
+    lstat,
     sources: {
       vcs,
       exclude: vcs && !off.has('exclude'),
@@ -234,7 +261,7 @@ async function* files(
     const entry = pending.pop()
     if (!entry) break
     const [path, display, stack] = entry
-    const stat = await vfs.stat(path, undefined, { nofollow: path !== root })
+    const stat = path === root ? await vfs.stat(path) : await walk.lstat(path, true)
     const isDir = stat.type === FileType.DIRECTORY
     if (path !== root) {
       let verdict = globs.verdict(walkCandidate(display, cwd.virtual), isDir)
@@ -248,10 +275,10 @@ async function* files(
     if (stat.type === FileType.FILE) yield [path, display]
     else if (isDir && budget.opens(path.virtual)) {
       const limit = budget.listingLimit(path.virtual)
-      const [children] = await vfs.dispatch('readdir', path, [], limit === null ? {} : { limit })
+      const children = await walk.readdir(path, false, limit ?? undefined)
       const selected: [PathSpec, string][] = []
       const names = new Set<string>()
-      for (const child of children as string[]) {
+      for (const child of children) {
         if (!budget.spend(path.virtual)) break
         const name = rstripSlash(child).split('/').pop() ?? ''
         names.add(name)
@@ -404,13 +431,18 @@ async function execute(
   const walk = walkOf(new Set(fl.asList('no_ignore')), vfs, maxMemory)
   const roots = paths.length ? paths : [ctx.cwd]
   let directory = false
+  const lone = new Set<string>()
   if (!stdin)
-    for (const root of roots)
+    for (const root of roots) {
       if ((await vfs.stat(root)).type === FileType.DIRECTORY) {
         directory = true
         await beforeFullWalk(dispatchOf(ctx), root, 'ast-grep')
-      } else if (!language && UNBUNDLED_EXTENSIONS.has(extensionOf(root.virtual)))
+        continue
+      }
+      lone.add(root.virtual)
+      if (!language && UNBUNDLED_EXTENSIONS.has(extensionOf(root.virtual)))
         throw new UsageError(`ast-grep: unsupported language: ${extensionOf(root.virtual)}`)
+    }
   const options = {
     verb,
     pattern,
@@ -426,6 +458,39 @@ async function execute(
     view: verb === 'outline' ? fl.asStr('view', 'auto') : 'auto',
     items: verb === 'outline' ? (fl.asStr('items') ?? null) : null,
     pub_members: verb === 'outline' && fl.asBool('pub_members'),
+  }
+  // The files of each language no match of a `run` pattern can be in: the
+  // text ast-grep itself rules a file out by before it parses it (the
+  // pattern's longest fixed token), asked of the mount's search. A file
+  // named on the line is always read.
+  const walked = roots.filter((root) => !lone.has(root.virtual))
+  const ruled = new Map<string, ((path: PathSpec) => Promise<boolean>) | null>()
+  async function misses(lang: string, path: PathSpec): Promise<boolean> {
+    if (pattern === null || walked.length === 0) return false
+    let rule = ruled.get(lang)
+    if (rule === undefined) {
+      const reply = await process(
+        { verb: 'literal', language: lang },
+        new TextEncoder().encode(pattern),
+        memoryRoom() ?? Number.MAX_SAFE_INTEGER,
+      )
+      const fixed = reply.values[0] ?? ''
+      const texts = PLAIN.test(fixed)
+        ? searchTerms(null, [fixed], false, false, false, false, false)
+        : null
+      rule =
+        texts === null
+          ? null
+          : await ruledOut(commandFiles(ctx, walked), ctx, walked, lone, {
+              texts: texts[0],
+              wholeWord: false,
+              ignoreCase: false,
+              lineOutput: false,
+              readsBinary: false,
+            })
+      ruled.set(lang, rule)
+    }
+    return rule !== null && (await rule(path))
   }
   const chunks: Uint8Array[] = []
   let size = 0,
@@ -480,6 +545,7 @@ async function execute(
         const lang =
           path === root && language ? language : EXTENSIONS.get(extensionOf(path.virtual))
         if (!lang || (language && lang !== language)) continue
+        if (await misses(lang, path)) continue
         const data = await read(vfs, path, maxMemory)
         if (data.length)
           await visit(

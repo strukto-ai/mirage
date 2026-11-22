@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+import re
+import weakref
 from collections.abc import Sequence
 
 from mirage.accessor.base import Accessor
@@ -32,6 +34,14 @@ from mirage.utils.path import norm
 from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
 
 logger = logging.getLogger(__name__)
+
+# How many times each driver's tree lost or moved an entry, through any
+# mount on it.
+STRUCTURE: "weakref.WeakKeyDictionary[SqlDriver, int]" = (
+    weakref.WeakKeyDictionary()
+)
+# A statement that removes or moves an entry or an inode.
+RESHAPES = re.compile(r"DELETE FROM fs_(?:inode|dentry)|UPDATE fs_dentry")
 
 
 class SqlAccessor(Accessor):
@@ -141,8 +151,27 @@ class SqlAccessor(Accessor):
 
     async def batch(self, statements: Sequence[SqlStatement]) -> None:
         """Run ``statements`` in one transaction, once the tables are
-        there."""
+        there. One that removes or moves an entry moves ``structure`` on,
+        before it runs and once it has, so nothing read while it ran is
+        kept."""
         if not statements:
             return
         await self.chunk_size()
-        await run_blocking(self.driver.batch, statements)
+        if not any(RESHAPES.search(s.sql) for s in statements):
+            await run_blocking(self.driver.batch, statements)
+            return
+        self.reshaped()
+        try:
+            await run_blocking(self.driver.batch, statements)
+        finally:
+            self.reshaped()
+
+    def structure(self) -> int:
+        """A count that moves whenever the driver's tree loses or moves an
+        entry: what a path resolved to is as it was only while this reads
+        the same."""
+        return STRUCTURE.get(self.driver, 0)
+
+    def reshaped(self) -> None:
+        """Mark the tree as having lost or moved an entry."""
+        STRUCTURE[self.driver] = self.structure() + 1

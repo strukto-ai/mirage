@@ -1952,7 +1952,10 @@ class MountEntry:
         index: IndexCacheStore = NULL_INDEX,
         parent: FileStat | None = None,
     ) -> Any:
-        await refuse_taken(functools.partial(self._stat, index), path, parents)
+        if not self.vfs.refuses_taken:
+            await refuse_taken(
+                functools.partial(self._stat, index), path, parents
+            )
         mkdir: Callable[..., Awaitable[Any]] = self.vfs.mkdir
         if parents and "parent" in _wants(mkdir):
             return await self._mkdir_levels(path, index)

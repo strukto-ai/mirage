@@ -690,6 +690,9 @@ importers:
       isomorphic-git:
         specifier: ^1.38.6
         version: 1.38.6
+      pako:
+        specifier: ^1.0.11
+        version: 1.0.11
       redis:
         specifier: ^5.0.0
         version: 5.12.1(@opentelemetry/api@1.10.0)
@@ -715,6 +718,9 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.0
         version: 8.0.0
+      '@types/pako':
+        specifier: ^1.0.7
+        version: 1.0.7
       '@types/pg':
         specifier: ^8.11.0
         version: 8.20.0
@@ -4073,6 +4079,9 @@ packages:
 
   '@types/nodemailer@8.0.0':
     resolution: {integrity: sha512-fyf8jWULsCo0d0BuoQ75i6IeoHs47qcqxWc7yUdUcV0pOZGjUTTOvwdG1PRXUDqN/8A64yQdQdnA2pZgcdi+cA==}
+
+  '@types/pako@1.0.7':
+    resolution: {integrity: sha512-YBtzT2ztNF6R/9+UXj2wTGFnC9NklAnASt3sC0h2m1bbH7G6FyBIkt4AN8ThZpNfxUo1b2iMVO0UawiJymEt8A==}
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
@@ -10996,6 +11005,8 @@ snapshots:
   '@types/nodemailer@8.0.0':
     dependencies:
       '@types/node': 22.19.17
+
+  '@types/pako@1.0.7': {}
 
   '@types/pg@8.20.0':
     dependencies:

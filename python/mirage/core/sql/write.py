@@ -114,6 +114,7 @@ async def write(
     data: ByteSource,
     append: bool = False,
     atomic: bool = False,
+    walked: Walk | None = None,
 ) -> None:
     """Replace a file's bytes, or add them to its end.
 
@@ -130,9 +131,11 @@ async def write(
         data (ByteSource): bytes consumed once.
         append (bool): append instead of replacing.
         atomic (bool): stage a stream until successful EOF.
+        walked (Walk | None): the path as its caller walked it a step ago,
+            which saves walking it again.
     """
     timer = start_op()
-    w = await walk(accessor, path)
+    w = await walk(accessor, path) if walked is None else walked
     check_dest_parents(w, path)
     check_write_target(w, path)
     op = "append" if append else "write"

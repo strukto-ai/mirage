@@ -194,8 +194,9 @@ class Scanner {
     ignores: IgnoreStack,
     includeIgnored = false,
   ): Promise<boolean> {
-    const rules = await this.descend(relative, ignores)
-    for (const entry of await readNames(this.vfs, this.absolute(relative))) {
+    const entries = await readNames(this.vfs, this.absolute(relative))
+    const rules = await this.descend(relative, ignores, entries)
+    for (const entry of entries) {
       const name = entryName(entry)
       if (name === '') continue
       const child = relative === '' ? name : `${relative}/${name}`
@@ -221,10 +222,20 @@ class Scanner {
     return (await embeddedLocation(this.vfs, dir)) !== null
   }
 
-  /** The ignore rules inside a directory, given the ones outside. */
-  private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
+  /**
+   * The ignore rules inside a directory, given the ones outside. `entries`
+   * is its listing: a directory that lists no ignore file is not asked for
+   * one.
+   */
+  private async descend(
+    relative: string,
+    ignores: IgnoreStack,
+    entries: readonly string[],
+  ): Promise<IgnoreStack> {
     if (relative === '') return ignores
     if (this.perDirectory === null) return ignores
+    const named = this.perDirectory
+    if (!entries.some((entry) => entryName(entry) === named)) return ignores
     const local = await readOptional(this.vfs, this.absolute(relative).join(this.perDirectory))
     return local === null ? ignores : ignores.push(relative, local)
   }
@@ -285,8 +296,8 @@ class Scanner {
    * @param ignores the rules governing its parent
    */
   async walk(relative: string, ignored: boolean, ignores: IgnoreStack): Promise<void> {
-    const rules = await this.descend(relative, ignores)
     const entries = (await this.names(relative)).sort(compareCodePoints)
+    const rules = await this.descend(relative, ignores, entries)
     for (const entry of entries) {
       const name = entryName(entry)
       if (name === '' || name === GIT_DIR) continue

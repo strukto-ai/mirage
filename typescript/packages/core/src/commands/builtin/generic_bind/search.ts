@@ -41,8 +41,8 @@ import { foldsCase } from '../rg_search.ts'
 import { compiledTerms, openRg, type Compiled } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
-import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
-import type { CommandFiles } from './files.ts'
+import { crossesMounts, linksOf, mountRoot, mountsOf, mountView } from '../utils/links.ts'
+import { dispatchedCall, type CommandFiles } from './files.ts'
 
 /**
  * What a grep line asks the mount's search; null when it must read every
@@ -406,6 +406,83 @@ export async function matchingTree(
 }
 
 /**
+ * A test for the walked files a search for `terms` cannot match, by the
+ * search of the mount serving each of `dirs`; null when one of them does not
+ * answer for every file below it. The test is true for a file the search
+ * rules out: one it does not name, among those it covers (`searchable`). A
+ * path named on the line (`named`) is never ruled out by a search asked about
+ * directories, nor one pinned to a revision, since a search sees the current
+ * content, nor a binary-extension file a search that reads those would open,
+ * nor a path a link leads elsewhere, which a mount's search never sees, nor a
+ * file the read cache holds (the warm read), which a read serves as it was
+ * cached. Each file ruled out is judged as the read it stands in for, so one
+ * a path rule refuses reports `Permission denied`. A command on one mount
+ * asks that mount; one that walks across mounts (`crossesMounts`: a CLI such
+ * as git) asks the mount each directory lands on, and rules out only the
+ * files of a mount that answered. Mirrors Python's `ruled_out`.
+ */
+export async function ruledOut(
+  files: CommandFiles,
+  ctx: Context,
+  dirs: readonly PathSpec[],
+  named: ReadonlySet<string>,
+  terms: SearchTerms,
+): Promise<((path: PathSpec) => Promise<boolean>) | null> {
+  const [first] = dirs
+  const vfs = ctx.vfs
+  if (first === undefined || vfs === undefined) return null
+  const crossing = crossesMounts(ctx)
+  const view = mountView(vfs)
+  if (
+    crossing
+      ? view === undefined || dirs.some((dir) => !view.answers(dir.virtual, 'files_containing'))
+      : !files.answers('files_containing')
+  )
+    return null
+  const answers = await Promise.all(
+    dirs.flatMap((scope) =>
+      terms.texts.map((text) =>
+        files.filesContaining(scope, text, {
+          wholeWord: terms.wholeWord,
+          ignoreCase: terms.ignoreCase,
+        }),
+      ),
+    ),
+  )
+  const found = new Set<string>()
+  for (const answer of answers) {
+    if (answer === null) return null
+    for (const hit of answer) found.add(hit.vfsPath.toLowerCase())
+  }
+  const links = linksOf(ctx)
+  const asked = new Set(dirs.map((dir) => view?.rootOf(dir.virtual)))
+  const served = mountRoot(ctx)
+  const covered = mountsOf(ctx)?.searchable(first.virtual) ?? null
+  return async (path) => {
+    if (linked(links, path.virtual)) return false
+    // A hit and a searchable glob are keyed below the mount, as its backend
+    // answers them.
+    const root = crossing ? view?.rootOf(path.virtual) : undefined
+    if (crossing && !asked.has(root)) return false
+    const key = mountKey(path.virtual, root === undefined ? served : rstripSlash(root))
+    const searchable = crossing ? (view?.searchable(path.virtual) ?? null) : covered
+    if (
+      named.has(path.virtual) ||
+      revisionFor(path.virtual) !== null ||
+      (terms.readsBinary && BINARY_EXTENSIONS.has(getExtension(path.virtual) ?? '')) ||
+      found.has(key.toLowerCase()) ||
+      !(searchable === null || searchable.some((glob) => globPrefixMatch(key, glob)))
+    )
+      return false
+    if (!crossing) return !(await files.isWarm(path))
+    return (
+      (await dispatchedCall(vfs.dispatch, 'read', path, [], { filetype: null, warm: true })) !==
+      true
+    )
+  }
+}
+
+/**
  * grep's or rg's reads, narrowed by the mount's search where it can.
  * `filesContaining` rules out walked files no match can be in, of those the
  * mount's `searchable` names, and `linesContaining` hands a file's matching
@@ -450,12 +527,10 @@ export async function searchReads(
   const walked = grep === null || grep.recursive
   const mounts = mountsOf(ctx)
   const [stream, charge] = cappedReads(files.read, walked ? paths : [], mounts)
-  const narrows = files.answers('files_containing')
+  const narrows = files.answers('files_containing') || crossesMounts(ctx)
   const lines = files.answers('lines_containing') ? files.linesContaining : undefined
   if (!narrows && lines === undefined) return stream
-  const searchable = mounts?.searchable(first.virtual) ?? null
   const links = linksOf(ctx)
-  const home = mountRoot(ctx)
   let terms: SearchTerms | null
   let rg: RgFlags | null = null
   try {
@@ -473,39 +548,13 @@ export async function searchReads(
   if (terms === null) return stream
   const asked = terms
   const dropsMark = rg !== null && rg.encoding !== 'none'
-  let hits: Set<string> | null = null
-  if (narrows && dirs.length > 0) {
-    const answers = await Promise.all(
-      dirs.flatMap((scope) =>
-        asked.texts.map((text) =>
-          files.filesContaining(scope, text, {
-            wholeWord: asked.wholeWord,
-            ignoreCase: asked.ignoreCase,
-          }),
-        ),
-      ),
-    )
-    if (answers.every((answer) => answer !== null)) {
-      hits = new Set(answers.flatMap((answer) => answer.map((hit) => hit.vfsPath.toLowerCase())))
-    }
-  }
-  if (hits === null && lines === undefined) return stream
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
-  const found = hits
+  const misses = narrows ? await ruledOut(files, ctx, dirs, named, asked) : null
+  if (misses === null && lines === undefined) return stream
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
-    // A hit and a searchable glob are keyed below the mount, as its backend
-    // answers them.
-    const key = mountKey(path.virtual, home)
     if (linked(links, path.virtual)) return null
-    const ruledOut =
-      found !== null &&
-      !named.has(path.virtual) &&
-      revisionFor(path.virtual) === null &&
-      !(asked.readsBinary && BINARY_EXTENSIONS.has(getExtension(path.virtual) ?? '')) &&
-      !found.has(key.toLowerCase()) &&
-      (searchable === null || searchable.some((glob) => globPrefixMatch(key, glob)))
-    if (ruledOut) return (await files.isWarm(path)) ? null : new Uint8Array(0)
+    if (misses !== null && (await misses(path))) return new Uint8Array(0)
     if (lines === undefined || (await files.isWarm(path))) return null
     charge(path)
     const ignoreCase = { ignoreCase: asked.ignoreCase }

@@ -18,6 +18,7 @@ import { copy as sqlCopy } from '../../core/sql/copy.ts'
 import { create as sqlCreate } from '../../core/sql/create.ts'
 import { exists as sqlExists } from '../../core/sql/exists.ts'
 import { mkdir as sqlMkdir } from '../../core/sql/mkdir.ts'
+import { walk, type Walk } from '../../core/sql/path.ts'
 import { read as sqlRead } from '../../core/sql/read.ts'
 import { readdir as sqlReaddir, tree as sqlTree } from '../../core/sql/readdir.ts'
 import { rename as sqlRename } from '../../core/sql/rename.ts'
@@ -95,6 +96,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   override readonly readsRanges: boolean = true
+  override readonly refusesTaken: boolean = true
   override readonly local: boolean = true
   override walkLimit: number = LOCAL_WALK_LIMIT
   override readonly accessor: SqlAccessor
@@ -124,7 +126,11 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   // driver share it, so its key names the file from the database's root:
   // `/w/f` through `/` and `/f` through a mount on `/w` are one file. The
   // ops and the error still take the mount's own path.
-  private charge<T>(path: PathSpec, write: (held: Charge) => Promise<T>): Promise<T> {
+  private charge<T>(
+    path: PathSpec,
+    write: (held: Charge) => Promise<T>,
+    sizeOf: () => Promise<number> = () => sqlSizeOf(this.accessor, path),
+  ): Promise<T> {
     const { root } = this.accessor
     const key =
       root === '/'
@@ -134,13 +140,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
             directory: path.directory,
             vfsPath: stripSlash(`${root}/${path.vfsPath}`),
           })
-    return charge(
-      this.usage,
-      key,
-      () => sqlSizeOf(this.accessor, path),
-      () => sqlCount(this.accessor),
-      write,
-    )
+    return charge(this.usage, key, sizeOf, () => sqlCount(this.accessor), write)
   }
 
   // The folder joins the location, so a file reads as one key through every
@@ -196,13 +196,29 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    return this.charge(path, (held) =>
-      sqlWrite(this.accessor, path, held.stream(data), false, atomic),
-    )
+    return this.land(path, data, false, atomic)
   }
 
   override append(path: PathSpec, data: ByteSource): Promise<void> {
-    return this.charge(path, (held) => sqlWrite(this.accessor, path, held.stream(data, true), true))
+    return this.land(path, data, true, false)
+  }
+
+  // A capped write walks its path once: the walk that measures the file
+  // before the write is the one the write lands through, and the bytes it
+  // took say what the file holds after.
+  private land(path: PathSpec, data: ByteSource, append: boolean, atomic: boolean): Promise<void> {
+    let found: Walk | undefined
+    return this.charge(
+      path,
+      async (held) => {
+        await sqlWrite(this.accessor, path, held.stream(data, append), append, atomic, found)
+        held.after = (append ? held.before : 0) + held.written
+      },
+      async () => {
+        found = await walk(this.accessor, path)
+        return sqlSizeOf(this.accessor, path, found)
+      },
+    )
   }
 
   override create(path: PathSpec): Promise<void> {

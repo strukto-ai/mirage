@@ -27,6 +27,9 @@ import { SqlDialect, type SqlDriver } from '@struktoai/mirage-core/vfs/sql/types
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GIT } from '@struktoai/mirage-core'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { AST_GREP } from '../../clis/index.ts'
 import { Workspace } from '../../workspace.ts'
 import { SqliteDriver } from './driver.ts'
 import { PostgresSqlDriver } from './postgres.ts'
@@ -476,6 +479,87 @@ describe.skipIf(POSTGRES_URL === undefined)('SqlVFS on a folder of a Postgres da
   })
 })
 
+const SEARCHES = [
+  'git grep -n needle',
+  'git grep -in needle',
+  'git grep -c needle',
+  'git grep -l needle',
+  'git grep -L needle',
+  'git grep -vn needle -- b.txt',
+  "git grep -n 'nee[d]le'",
+  'git grep -n -e alpha -e beta',
+  'git grep -n absent',
+  'git grep -n needle -- src',
+  "ast-grep run -p 'needle($A)' .",
+  "ast-grep run -l ts -p 'needle($A)' .",
+  "ast-grep run -p '$A($B)' src",
+  "ast-grep run -p 'needle($A)' src/two.ts",
+  'grep -rn needle .',
+  'rg -n needle',
+]
+
+// A repository on `vfs`, and what each search answers in it, with and without
+// a rule that seals one file.
+async function searched(vfs: BaseVFS): Promise<[Workspace, [string, string, string, number][]]> {
+  const ws = new Workspace({ '/': new RAMVFS(), '/w': vfs }, { mode: MountMode.WRITE })
+  ws.registerCli('git', GIT)
+  ws.registerCli('ast-grep', AST_GREP)
+  const seeded = await ws.shell(
+    "cd /w && git init repo >/dev/null && cd repo && mkdir d src && printf 'alpha needle\\n' > a.txt && printf 'beta\\n' > b.txt && printf 'x\\nNeedle two\\n' > d/c.txt && printf 'needle(1)\\n' > src/one.ts && printf 'other(2)\\n' > src/two.ts && printf 'needle(3)\\n' > src/three.py && git add -A",
+  )
+  expect([seeded.stderrText, seeded.exitCode]).toEqual(['', 0])
+  ws.createSession('sealed', {
+    profile: SessionProfile({
+      commands: {
+        '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/w/repo/b.txt'] }],
+      },
+    }),
+  })
+  const answers: [string, string, string, number][] = []
+  for (const session of [undefined, 'sealed']) {
+    for (const line of SEARCHES) {
+      const ran = await ws.shell(
+        `cd /w/repo && ${line}`,
+        session === undefined ? {} : { sessionId: session },
+      )
+      answers.push([line, ran.stdoutText, ran.stderrText, ran.exitCode])
+    }
+  }
+  return [ws, answers]
+}
+
+describe('searches narrowed by the database', () => {
+  it('answer as a full read does', async () => {
+    const [ram, readAll] = await searched(new RAMVFS())
+    const [sql, narrowed] = await searched(new SqlVFS({ driver: new SqliteDriver() }))
+    try {
+      expect(narrowed).toEqual(readAll)
+    } finally {
+      await ram.close()
+      await sql.close()
+    }
+  })
+
+  it.each([
+    ['git grep -n needle', ['b.txt', 'src/two.ts']],
+    ['git grep -n alpha', ['b.txt', 'd/c.txt', 'src/one.ts']],
+    ["ast-grep run -p 'needle($A)' .", ['src/two.ts']],
+  ])('read only the files the database names: %s', async (line, skipped) => {
+    const vfs = new SqlVFS({ driver: new SqliteDriver() })
+    const [ws] = await searched(vfs)
+    try {
+      const read = vi.spyOn(vfs, 'read')
+      const ran = await ws.shell(`cd /w/repo && ${line}`)
+      expect([ran.stderrText, ran.exitCode]).toEqual(['', 0])
+      expect(ran.stdoutText).not.toBe('')
+      const opened = new Set(read.mock.calls.map(([path]) => path.virtual))
+      expect(skipped.filter((name) => opened.has(`/w/repo/${name}`))).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('SqlVFS folders', () => {
   let driver: SqliteDriver
 
@@ -583,6 +667,82 @@ describe('SqlVFS folders', () => {
     expect(all.usage?.dirty).toBe(true)
     release()
     await first
+  })
+
+  it("walks a capped write's path once and counts what it wrote", async () => {
+    const vfs = new SqlVFS({ driver, capacity: 100 })
+    await vfs.mkdir(at('/d'))
+    await vfs.write(at('/d/warm'), new Uint8Array(0))
+    const query = driver.query.bind(driver)
+    let asked = 0
+    driver.query = (sql, params) => {
+      asked++
+      return query(sql, params)
+    }
+    await vfs.write(at('/d/f'), enc.encode('abcd'))
+    expect(asked).toBe(1)
+    expect(vfs.usage?.used).toBe(4)
+    await vfs.write(at('/d/f'), enc.encode('xy'))
+    expect(vfs.usage?.used).toBe(2)
+    await vfs.append(at('/d/f'), enc.encode('123'))
+    expect(vfs.usage?.used).toBe(5)
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async function* parts(): AsyncIterable<Uint8Array> {
+      yield enc.encode('ab')
+      yield enc.encode('cd')
+    }
+    await vfs.write(at('/d/f'), parts())
+    expect(vfs.usage?.used).toBe(4)
+    await vfs.append(at('/d/f'), parts())
+    expect(vfs.usage?.used).toBe(8)
+    expect(dec.decode(await bytes(vfs, '/d/f'))).toBe('abcdabcd')
+  })
+
+  it('walks one name through the folder a sole writer just walked', async () => {
+    const sole = new SqliteDriver()
+    expect(sole.exclusive).toBe(true)
+    const vfs = new SqlVFS({ driver: sole })
+    await vfs.mkdir(at('/a/b/c'), true)
+    await vfs.write(at('/a/b/c/one'), enc.encode('1'))
+    const query = sole.query.bind(sole)
+    const asked: string[] = []
+    sole.query = (sql, params) => {
+      asked.push(sql)
+      return query(sql, params)
+    }
+    await vfs.write(at('/a/b/c/two'), enc.encode('2'))
+    expect(asked.map((sql) => sql.split('LEFT JOIN fs_dentry').length - 1)).toEqual([1])
+    expect(dec.decode(await bytes(vfs, '/a/b/c/one'))).toBe('1')
+    // A folder that moved is walked afresh: the old name misses, the new
+    // one holds what was written.
+    await vfs.rename(at('/a/b'), at('/a/z'))
+    await expect(vfs.write(at('/a/b/c/three'), enc.encode('3'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(dec.decode(await bytes(vfs, '/a/z/c/two'))).toBe('2')
+    // One removed and made again is not the one remembered.
+    await vfs.rmR(at('/a/z/c'))
+    await vfs.mkdir(at('/a/other'))
+    await expect(vfs.write(at('/a/z/c/four'), enc.encode('4'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(await vfs.exists(at('/a/other/four'))).toBe(false)
+    await vfs.mkdir(at('/a/z/c'))
+    await vfs.write(at('/a/z/c/five'), enc.encode('5'))
+    expect(dec.decode(await bytes(vfs, '/a/z/c/five'))).toBe('5')
+    await vfs.close()
+  })
+
+  it('refuses a taken name in mkdir itself', async () => {
+    const vfs = new SqlVFS({ driver })
+    expect(vfs.refusesTaken).toBe(true)
+    await vfs.mkdir(at('/d'))
+    await vfs.write(at('/f'), enc.encode('x'))
+    for (const taken of ['/d', '/f']) {
+      await expect(vfs.mkdir(at(taken))).rejects.toMatchObject({ code: 'EEXIST' })
+    }
+    await vfs.mkdir(at('/d'), true)
+    await expect(vfs.mkdir(at('/f'), true)).rejects.toMatchObject({ code: 'EEXIST' })
   })
 
   it('count every file of the database against one capacity on one driver', async () => {

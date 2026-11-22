@@ -16,11 +16,14 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import type { PathSpec } from '../../types.ts'
 import { SQL } from './constants.ts'
 import { inodeOf, isDir, isFile } from './inode.ts'
-import { target, walk } from './path.ts'
+import { target, walk, type Walk } from './path.ts'
 
-/** The bytes at `path`, a directory's files included; 0 for none. Mirrors Python's `size_of`. */
-export async function sizeOf(accessor: SqlAccessor, path: PathSpec): Promise<number> {
-  const node = target(await walk(accessor, path))
+/**
+ * The bytes at `path`, a directory's files included; 0 for none. `found` is
+ * the path already walked. Mirrors Python's `size_of`.
+ */
+export async function sizeOf(accessor: SqlAccessor, path: PathSpec, found?: Walk): Promise<number> {
+  const node = target(found ?? (await walk(accessor, path)))
   if (node === null) return 0
   if (!isDir(node)) return node.size
   let total = 0

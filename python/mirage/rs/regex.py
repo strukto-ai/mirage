@@ -238,7 +238,15 @@ class PosixRegex:
                 "word": word,
             }
         )
-        self.groups: int = self._streams.metadata["groups"]
+        meta = self._streams.metadata
+        self.groups: int = meta["groups"]
+        needles = meta["needles"]
+        # Texts one of which every match holds, when any are known.
+        self.needles: tuple[bytes, ...] | None = (
+            None
+            if needles is None
+            else tuple(needle.encode("ascii") for needle in needles)
+        )
 
     def _groups(self, subject: _Subject, words: Sequence[int]) -> Groups:
         out: Groups = []

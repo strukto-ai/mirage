@@ -21,6 +21,12 @@ import { stripSlash } from '../utils/slash.ts'
 import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from '../vfs/sql/types.ts'
 import { Accessor } from './base.ts'
 
+// How many times each driver's tree lost or moved an entry, through any
+// mount on it.
+const STRUCTURE = new WeakMap<SqlDriver, number>()
+// A statement that removes or moves an entry or an inode.
+const RESHAPES = /DELETE FROM fs_(?:inode|dentry)|UPDATE fs_dentry/
+
 /**
  * A sql mount's database: its driver, the folder of it the mount serves,
  * and the tables the ops read, made on the first statement with the
@@ -115,10 +121,37 @@ export class SqlAccessor extends Accessor {
     return this.driver.query(sql, params)
   }
 
-  /** Run `statements` in one transaction, once the tables are there. */
+  /**
+   * Run `statements` in one transaction, once the tables are there. One
+   * that removes or moves an entry moves `structure` on, before it runs and
+   * once it has, so nothing read while it ran is kept.
+   */
   async batch(statements: readonly SqlStatement[]): Promise<void> {
     if (statements.length === 0) return
     await this.chunkSize()
-    await this.driver.batch(statements)
+    const reshapes = statements.some((statement) => RESHAPES.test(statement.sql))
+    if (!reshapes) {
+      await this.driver.batch(statements)
+      return
+    }
+    this.reshaped()
+    try {
+      await this.driver.batch(statements)
+    } finally {
+      this.reshaped()
+    }
+  }
+
+  /**
+   * A count that moves whenever the driver's tree loses or moves an entry:
+   * what a path resolved to is as it was only while this reads the same.
+   */
+  structure(): number {
+    return STRUCTURE.get(this.driver) ?? 0
+  }
+
+  /** Mark the tree as having lost or moved an entry. */
+  reshaped(): void {
+    STRUCTURE.set(this.driver, this.structure() + 1)
   }
 }

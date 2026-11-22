@@ -1232,7 +1232,7 @@ export class MountEntry {
     index: IndexCacheStore = this.index,
     handed?: Handed,
   ): Promise<unknown> {
-    await refuseTaken((p) => this.statAt(index, p), path, parents)
+    if (!this.vfs.refusesTaken) await refuseTaken((p) => this.statAt(index, p), path, parents)
     if (parents && this.wants('mkdir').includes('parent')) return this.mkdirLevels(path, index)
     const made = await this.vfs.mkdir(path, parents, handed)
     // A directory made new holds nothing yet.

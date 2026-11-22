@@ -20,7 +20,10 @@ from mirage.commands.builtin.generic.grep import (
     parse_flags as parse_grep_flags,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic_bind.files import CommandFiles
+from mirage.commands.builtin.generic_bind.files import (
+    CommandFiles,
+    dispatched_call,
+)
 from mirage.commands.builtin.grep_binary import GrepFlags
 from mirage.commands.builtin.grep_pattern import (
     compile_pattern,
@@ -33,8 +36,10 @@ from mirage.commands.builtin.rg_search import RgFlags, folds_case
 from mirage.commands.builtin.rg_stream import compiled_terms, open_rg
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import (
+    crosses_mounts,
     links_of,
     mount_root,
+    mount_view,
     mounts_of,
 )
 from mirage.commands.config import Context
@@ -462,6 +467,122 @@ async def matching_tree(
     return {folder: sorted(children) for folder, children in tree.items()}
 
 
+async def ruled_out(
+    files: CommandFiles,
+    ctx: Context,
+    dirs: list[PathSpec],
+    named: set[str],
+    terms: SearchTerms,
+) -> Callable[[PathSpec], Awaitable[bool]] | None:
+    """A test for the walked files a search for ``terms`` cannot match,
+    by the search of the mount serving each of ``dirs``; None when one of
+    them does not answer for every file below it.
+
+    The test is true for a file the search rules out: one it does not
+    name, among those it covers (``searchable``). A path named on the
+    line is never ruled out by a search asked about directories, nor one
+    pinned to a revision, since a search sees the current content, nor a
+    binary-extension file a search that reads those would open, nor a
+    path a link leads elsewhere, which a mount's search never sees, nor a
+    file the read cache holds (the warm read), which a read serves as it
+    was cached. Each file ruled out is judged as the read it stands in
+    for, so one a path rule refuses reports ``Permission denied``. A
+    command on one mount asks that mount; one that walks across mounts
+    (``crosses_mounts``: a CLI such as git) asks the mount each directory
+    lands on, and rules out only the files of a mount that answered.
+    Mirrors TypeScript's ``ruledOut``.
+
+    Args:
+        files (CommandFiles): the command's files.
+        ctx (Context): parsed invocation context.
+        dirs (list[PathSpec]): the directories the command walks.
+        named (set[str]): the virtual paths named on the line.
+        terms (SearchTerms): what the search is asked for.
+    """
+    vfs = ctx.vfs
+    if not dirs or vfs is None:
+        return None
+    crossing = crosses_mounts(ctx)
+    view = mount_view(vfs)
+    if crossing:
+        if view is None or view.answers is None:
+            return None
+        if not all(view.answers(d.virtual, "files_containing") for d in dirs):
+            return None
+    elif not files.answers("files_containing"):
+        return None
+    answers = await asyncio.gather(
+        *(
+            files.files_containing(
+                scope,
+                text,
+                whole_word=terms.whole_word,
+                ignore_case=terms.ignore_case,
+            )
+            for scope in dirs
+            for text in terms.texts
+        )
+    )
+    found: set[str] = set()
+    for answer in answers:
+        if answer is None:
+            return None
+        found.update(hit.vfs_path.lower() for hit in answer)
+    links = links_of(ctx)
+    asked = (
+        {view.root_of(d.virtual) for d in dirs} if view is not None else set()
+    )
+    served = mount_root(ctx)
+    mounts = mounts_of(ctx)
+    covered = (
+        mounts.searchable(dirs[0].virtual)
+        if mounts is not None and mounts.searchable is not None
+        else None
+    )
+    dispatch = vfs.dispatch
+
+    async def misses(path: PathSpec) -> bool:
+        if _linked(links, path.virtual):
+            return False
+        # A hit and a searchable glob are keyed below the mount, as its
+        # backend answers them.
+        home = served
+        searchable = covered
+        if crossing and view is not None:
+            root = view.root_of(path.virtual)
+            if root not in asked:
+                return False
+            home = root.rstrip("/")
+            searchable = (
+                view.searchable(path.virtual)
+                if view.searchable is not None
+                else None
+            )
+        key = mount_key(path.virtual, home)
+        if (
+            path.virtual in named
+            or revision_for(path.virtual) is not None
+            or (
+                terms.reads_binary
+                and get_extension(path.virtual) in BINARY_EXTENSIONS
+            )
+            or key.lower() in found
+            or not (
+                searchable is None
+                or any(glob_prefix_match(key, g) for g in searchable)
+            )
+        ):
+            return False
+        if not crossing:
+            return not await files.is_warm(path)
+        held = await dispatched_call(
+            dispatch, "read", path, filetype=None, warm=True
+        )
+        return held is not True
+
+    return misses
+
+
 async def search_reads(
     files: CommandFiles,
     name: str,
@@ -512,21 +633,13 @@ async def search_reads(
     walked = grep is None or grep.recursive
     mounts = mounts_of(ctx)
     read, charge = capped_reads(files.read, paths if walked else [], mounts)
-    containing = (
-        files.files_containing if files.answers("files_containing") else None
-    )
+    narrows = files.answers("files_containing") or crosses_mounts(ctx)
     lines = (
         files.lines_containing if files.answers("lines_containing") else None
     )
-    if containing is None and lines is None:
+    if not narrows and lines is None:
         return read
-    searchable = (
-        mounts.searchable(paths[0].virtual)
-        if mounts is not None and mounts.searchable is not None
-        else None
-    )
     links = links_of(ctx)
-    home = mount_root(ctx)
     try:
         f = grep if grep is not None else parse_rg_flags(fl)
         terms = (
@@ -541,53 +654,18 @@ async def search_reads(
     if terms is None:
         return read
     drops_mark = isinstance(f, RgFlags) and f.encoding != "none"
-    hits: set[str] | None = None
-    if containing is not None and dirs:
-        answers = await asyncio.gather(
-            *(
-                containing(
-                    scope,
-                    text,
-                    whole_word=terms.whole_word,
-                    ignore_case=terms.ignore_case,
-                )
-                for scope in dirs
-                for text in terms.texts
-            )
-        )
-        if all(answer is not None for answer in answers):
-            hits = {
-                hit.vfs_path.lower()
-                for answer in answers
-                if answer is not None
-                for hit in answer
-            }
-    if hits is None and lines is None:
-        return read
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
+    misses = (
+        await ruled_out(files, ctx, dirs, named, terms) if narrows else None
+    )
+    if misses is None and lines is None:
+        return read
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
-        # A hit and a searchable glob are keyed below the mount, as its
-        # backend answers them.
-        key = mount_key(path.virtual, home)
         if _linked(links, path.virtual):
             return None
-        ruled_out = (
-            hits is not None
-            and path.virtual not in named
-            and revision_for(path.virtual) is None
-            and not (
-                terms.reads_binary
-                and get_extension(path.virtual) in BINARY_EXTENSIONS
-            )
-            and key.lower() not in hits
-            and (
-                searchable is None
-                or any(glob_prefix_match(key, g) for g in searchable)
-            )
-        )
-        if ruled_out:
-            return None if await files.is_warm(path) else b""
+        if misses is not None and await misses(path):
+            return b""
         if lines is None or await files.is_warm(path):
             return None
         charge(path)
