@@ -27,7 +27,7 @@ from mirage.execution.types import (
     MachineResources,
     ProcessId,
 )
-from mirage.shell.constants import SIGCONT, SIGHUP, SIGKILL, SIGSTOP
+from mirage.shell.constants import SIGCHLD, SIGCONT, SIGHUP, SIGKILL, SIGSTOP
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
 
@@ -502,6 +502,11 @@ class ProcessTable:
             bool: whether the process was there to signal.
         """
         if signal in KEPT_SIGNALS:
+            # A kept signal the shell traps runs its action all the same
+            # (``trap ... WINCH``), CONT going on as well; STOP is never
+            # caught, and CHLD only for a child that ended.
+            if signal not in (0, SIGSTOP, SIGCHLD) and handle.catcher:
+                handle.catcher(signal, handle.record.pid)
             if signal == SIGSTOP:
                 self.pause(handle)
             elif signal == SIGCONT:

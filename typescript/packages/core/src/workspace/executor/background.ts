@@ -65,7 +65,7 @@ import { LineHandle } from '../../execution/line/handle.ts'
 import { newLineId } from '../../execution/context.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
-import type { SessionState } from '../session/session.ts'
+import { letGoHeld, type SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
 import {
@@ -78,7 +78,7 @@ import {
   reportedCommand,
   statementStdin,
 } from './statement.ts'
-import { armSignals, inheritTraps, startJobTraps } from './traps.ts'
+import { armSignals, ignoredSignals, inheritTraps, startJobTraps } from './traps.ts'
 import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
 import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
@@ -510,7 +510,8 @@ export function startShell(
       parent,
       limit: session.processes.max,
       ...(started === undefined ? {} : { started }),
-      ignores: SHELL_IGNORED_SIGNALS,
+      ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
+      programIgnores: ignoredSignals(session),
       oneCommand,
       stdin,
       traits: currentCaller().traits,
@@ -581,7 +582,9 @@ export async function handleBackground(
   const ends = oneCommand && !forks(command, session)
   const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)
   const heldInputs = holdInputs(bgSession.openInputs())
+  const heldSubstitutions = session.holdSubstitutions(bgSession)
   const dropHolds = async (): Promise<void> => {
+    await letGoHeld(heldSubstitutions.splice(0))
     let failure: { error: unknown } | undefined
     while (heldInputs.length > 0) {
       try {
@@ -793,6 +796,7 @@ export async function handleBackground(
       simple: oneProgram(left, session),
       program: programText(left, session),
       traits: currentCaller().traits,
+      ignores: ignoredSignals(session),
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

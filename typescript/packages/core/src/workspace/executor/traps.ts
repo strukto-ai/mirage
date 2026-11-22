@@ -17,6 +17,7 @@ import { asyncChain } from '../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { Channel } from '../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { currentCaller, isProgramInvocation, voiceName } from '../../context/session_context.ts'
@@ -58,18 +59,32 @@ export function inheritTraps(session: SessionState): void {
 }
 
 /**
+ * The signals a shell ignores (`trap '' TERM`), which what it starts ignores
+ * too, as a forked child keeps an ignore through exec; a background job's own
+ * INT (`jobIgnored`) is not passed on. Mirrors Python's ignored_signals.
+ */
+export function ignoredSignals(session: SessionState): ReadonlySet<number> {
+  return new Set(
+    [...session.signalTraps]
+      .filter(([signal, action]) => action === '' && !session.jobIgnored.has(signal))
+      .map(([signal]) => signal),
+  )
+}
+
+/**
  * Start a background job's shell, or a stage of a background pipeline: with
  * job control off, one that runs commands of its own (`{ trap -p; } &`) lists
  * the INT it ignores, as bash's does, and may trap or reset it; one that runs
  * a single command lists nothing, as bash ignores it only in the program that
- * command runs. Mirrors Python's start_job_traps.
+ * command runs. An INT its parent ignores (`trap '' INT`) stays the parent's,
+ * which its own children keep. Mirrors Python's start_job_traps.
  *
  * @param session the job's shell.
  * @param lists it runs commands of its own.
  */
 export function startJobTraps(session: SessionState, lists: boolean): void {
   dropJobIgnores(session, session.jobIgnored)
-  if (lists && session.shellOptions.monitor !== true) {
+  if (lists && session.shellOptions.monitor !== true && session.signalTraps.get(SIGINT) !== '') {
     session.signalTraps = new Map([...session.signalTraps, [SIGINT, '']])
     session.jobIgnored = new Set([SIGINT])
   }
@@ -309,12 +324,34 @@ export async function runSignalTraps(
       session.pendingSignals.delete(signal)
       const action = session.signalTraps.get(signal)
       if (action === undefined || action === '' || session.signalTrapsInherited) continue
-      written.push(...(await runAction(executeFn, action, 'trap', session, stdin, callStack)))
+      try {
+        written.push(...(await runAction(executeFn, action, 'trap', session, stdin, callStack)))
+      } catch (err) {
+        if (err instanceof ExitSignal || err instanceof ReturnSignal) await leadWith(err, written)
+        throw err
+      }
     }
   } finally {
     session.signalTrapRunning = false
   }
   return written
+}
+
+/**
+ * Put what the actions before the one that left wrote ahead of what it
+ * wrote, so a later `exit` keeps an earlier `echo`. Mirrors Python's
+ * _lead_with.
+ *
+ * @param err how the action left.
+ * @param written what the earlier actions wrote.
+ */
+async function leadWith(err: ExitSignal | ReturnSignal, written: Written[]): Promise<void> {
+  const stdout = written.filter(([channel]) => channel === Channel.STDOUT).map(([, data]) => data)
+  const stderr: Uint8Array[] = []
+  for (const [channel, data] of written)
+    if (channel === Channel.STDERR) stderr.push(await materialize(data))
+  err.stdout = asyncChain([...stdout, err.stdout])
+  err.stderr = concat([...stderr, err.stderr])
 }
 
 /**

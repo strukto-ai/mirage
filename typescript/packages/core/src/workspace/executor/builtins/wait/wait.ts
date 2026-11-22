@@ -97,7 +97,8 @@ async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promi
 /**
  * Wait for background jobs (`waitFor`) until they end or the shell takes a
  * signal it traps: then it answers 128 plus the signal at once, as bash's
- * does, and the action runs as it returns. Mirrors Python's handle_wait.
+ * does, with the operands it already refused, and the action runs as it
+ * returns. Mirrors Python's handle_wait.
  */
 export async function handleWait(
   jobTable: JobTable,
@@ -113,6 +114,7 @@ export async function handleWait(
     stop.abort()
   }
   if (session.pendingSignals.size > 0) stop.abort()
+  const said: string[] = []
   try {
     return await waitFor(
       jobTable,
@@ -120,13 +122,15 @@ export async function handleWait(
       session,
       view,
       mergeSignals(signal, stop.signal) ?? stop.signal,
+      said,
     )
   } catch (err) {
     if (!stop.signal.aborted || signal?.aborted === true) throw err
     const code = 128 + Math.min(...session.pendingSignals)
+    const stderr = said.join('')
     return [
       null,
-      new IOResult({ exitCode: code }),
+      new IOResult({ exitCode: code, ...(stderr === '' ? {} : { stderr: encodeText(stderr) }) }),
       new ExecutionNode({ command: parts.join(' '), exitCode: code }),
     ]
   } finally {
@@ -152,6 +156,7 @@ async function waitFor(
   session: SessionState | null = null,
   view: SessionView | null = null,
   signal?: AbortSignal,
+  said?: string[],
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
@@ -269,6 +274,7 @@ async function waitFor(
     if (answered === null) errors.push(`${shellVoice()}wait: ${refusal}`)
   }
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
+  said?.push(errText)
   const errBytes = errText !== '' ? encodeText(errText) : null
   if (nextJob) {
     const candidates = specs.length > 0 ? picked : visible

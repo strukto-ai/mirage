@@ -90,6 +90,8 @@ export class ProcessSubScope {
       begun: Promise.resolve(),
       done: false,
       readers: [],
+      holds: 0,
+      letGo: false,
     }
     const session = this.context.session
     // A producer is a child of the shell, as bash forks it: what it writes

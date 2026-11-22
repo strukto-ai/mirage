@@ -22,6 +22,7 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
+from mirage.shell.console import Channel
 from mirage.shell.constants import (
     ERR_TRAP_EXEMPT_TYPES,
     SHELL_IGNORED_SIGNALS,
@@ -71,19 +72,40 @@ def inherit_traps(session: SessionState) -> None:
         session.return_trap_hidden = True
 
 
+def ignored_signals(session: SessionState) -> frozenset[int]:
+    """The signals a shell ignores (``trap '' TERM``), which what it
+    starts ignores too, as a forked child keeps an ignore through exec; a
+    background job's own INT (``job_ignored``) is not passed on.
+
+    Args:
+        session (SessionState): the shell.
+    """
+    return frozenset(
+        signal
+        for signal, action in session.signal_traps.items()
+        if not action and signal not in session.job_ignored
+    )
+
+
 def start_job_traps(session: SessionState, lists: bool) -> None:
     """Start a background job's shell, or a stage of a background
     pipeline: with job control off, one that runs commands of its own
     (``{ trap -p; } &``) lists the INT it ignores, as bash's does, and may
     trap or reset it; one that runs a single command lists nothing, as
-    bash ignores it only in the program that command runs.
+    bash ignores it only in the program that command runs. An INT its
+    parent ignores (``trap '' INT``) stays the parent's, which its own
+    children keep.
 
     Args:
         session (SessionState): the job's shell.
         lists (bool): it runs commands of its own.
     """
     _drop_job_ignores(session, session.job_ignored)
-    if lists and not session.shell_options.get("monitor"):
+    if (
+        lists
+        and not session.shell_options.get("monitor")
+        and session.signal_traps.get(SIGINT) != ""
+    ):
         session.signal_traps = {**session.signal_traps, SIGINT: ""}
         session.job_ignored = frozenset({SIGINT})
 
@@ -373,12 +395,38 @@ async def run_signal_traps(
             action = session.signal_traps.get(signal)
             if not action or session.signal_traps_inherited:
                 continue
-            written += await _run_action(
-                execute_fn, action, "trap", session, stdin, call_stack
-            )
+            try:
+                written += await _run_action(
+                    execute_fn, action, "trap", session, stdin, call_stack
+                )
+            except (ExitSignal, ReturnSignal) as sig:
+                await _lead_with(sig, written)
+                raise
     finally:
         session.signal_trap_running = False
     return written
+
+
+async def _lead_with(
+    sig: ExitSignal | ReturnSignal, written: list[Written]
+) -> None:
+    """Put what the actions before the one that left wrote ahead of
+    what it wrote, so a later ``exit`` keeps an earlier ``echo``.
+
+    Args:
+        sig (ExitSignal | ReturnSignal): how the action left.
+        written (list[Written]): what the earlier actions wrote.
+    """
+    stdout = [
+        data for channel, data, _ in written if channel == Channel.STDOUT
+    ]
+    stderr = [
+        await materialize(data)
+        for channel, data, _ in written
+        if channel == Channel.STDERR
+    ]
+    sig.stdout = async_chain([*stdout, sig.stdout])
+    sig.stderr = b"".join(stderr) + sig.stderr
 
 
 async def _run_action(

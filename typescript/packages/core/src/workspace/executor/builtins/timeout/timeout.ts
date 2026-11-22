@@ -66,6 +66,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { programText } from '../../background.ts'
 import { redirectedBody, reportedCommand } from '../../statement.ts'
+import { ignoredSignals } from '../../traps.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
@@ -401,7 +402,8 @@ export async function handleTimeout(
         child.session.processId = forked.record.id.pid
         child.frame.shell = forked
       },
-      ignores: SHELL_IGNORED_SIGNALS,
+      ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
+      programIgnores: ignoredSignals(session),
       ownGroup: !foreground,
       oneCommand: true,
       traits: currentCaller().traits,

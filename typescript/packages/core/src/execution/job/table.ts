@@ -356,6 +356,8 @@ export class JobTable {
     program?: string | null
     // What the wrappers around the job changed for its process.
     traits?: ProcessTraits
+    // What its shell ignores, which the job and its program ignore too.
+    ignores?: ReadonlySet<number>
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -401,10 +403,10 @@ export class JobTable {
         init.abort.abort()
       },
       limit: init.limit ?? null,
-      ignores: IGNORED_SIGNALS,
+      ignores: new Set([...IGNORED_SIGNALS, ...(init.ignores ?? [])]),
       oneCommand: init.simple === true,
       background: true,
-      programIgnores: IGNORED_SIGNALS,
+      programIgnores: new Set([...IGNORED_SIGNALS, ...(init.ignores ?? [])]),
       ...(init.traits !== undefined ? { traits: init.traits } : {}),
     })
     const { line, group } = process.record
@@ -903,13 +905,19 @@ export class JobTable {
     // Its table runs the hook that tracks it just before starting it, so it
     // has something to join a microtask later.
     queueMicrotask(() => {
-      void process.join().then((record) => {
+      void process.join().then(async (record) => {
         started?.delete(process)
+        if (this.substitutions.get(pid) !== process) return
+        // Its status stands once it ends; a `wait` still finds it until what
+        // it wrote has gone where it writes.
+        if (record.exit !== null)
+          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
+        await settled?.catch((err: unknown) => {
+          console.debug('process substitution settled with an error:', err)
+        })
         if (this.substitutions.get(pid) !== process) return
         this.substitutions.delete(pid)
         this.settled.delete(pid)
-        if (record.exit !== null)
-          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
       })
     })
   }

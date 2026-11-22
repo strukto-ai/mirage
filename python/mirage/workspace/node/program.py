@@ -445,7 +445,12 @@ async def _run_program(
                 recorder, leave, own, sink, all_stdout, merged_io
             )
             merged_io = await land(
-                await run_signal_traps(execute_fn, session, stdin, call_stack),
+                await run_signal_traps(
+                    execute_fn,
+                    session,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                ),
                 sink,
                 all_stdout,
                 merged_io,

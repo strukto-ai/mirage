@@ -422,20 +422,31 @@ export async function handleConnection(
   })
   // A trapped signal the left command took is answered before the right one
   // runs, as bash answers one after each command.
-  const caught: (ByteSource | null)[] = [ranLeft]
+  let caught: (ByteSource | null)[] = [ranLeft]
   let leftIo = ranLeftIo
+  let leftRan = ranLeft
   try {
-    leftIo = await land(
-      await runSignalTraps(executeFn, session, stdin, callStack),
-      sink,
-      caught,
-      leftIo,
+    const written = await runSignalTraps(
+      executeFn,
+      session,
+      statementStdin(session, stdin, bound),
+      callStack,
     )
+    if (written.length > 0 && sink !== null) {
+      // What the left command wrote goes ahead of what the actions write, a
+      // nested shell's returned rather than streamed.
+      await pump(sink, Channel.STDOUT, leftRan)
+      await pump(sink, Channel.STDERR, leftIo.stderr)
+      leftRan = null
+      leftIo.stderr = null
+      caught = [null]
+    }
+    leftIo = await land(written, sink, caught, leftIo)
   } catch (err) {
-    if (isUnwinding(err)) throw await carried(err, ranLeft, ranLeftIo)
+    if (isUnwinding(err)) throw await carried(err, leftRan, leftIo)
     throw err
   }
-  const leftBytes = caught.length > 1 ? asyncChain(caught) : ranLeft
+  const leftBytes = caught.length > 1 ? asyncChain(caught) : leftRan
   const children = [leftExec]
   if (!connectionRunsRight(op, leftIo.exitCode)) {
     if (op === NT.AND) session.errexitImmune = true
@@ -661,7 +672,7 @@ export async function handleSubshell(
       )
       mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
       mergedIo = await land(
-        await runSignalTraps(runAction, session, stdin, callStack),
+        await runSignalTraps(runAction, session, statementStdin(session, stdin, bound), callStack),
         sink,
         allStdout,
         mergedIo,

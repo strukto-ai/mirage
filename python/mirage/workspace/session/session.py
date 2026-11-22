@@ -121,6 +121,33 @@ def _end_pipe(child: Substitution) -> None:
         child.endpoint.pipe.end()
 
 
+async def _settle(child: Substitution) -> None:
+    """End a kept process substitution, wait for it to run out and give
+    its path back.
+
+    Args:
+        child (Substitution): the substitution.
+    """
+    _end_pipe(child)
+    await asyncio.gather(child.task, return_exceptions=True)
+    await close_readers(child.endpoint)
+    child.release()
+
+
+async def let_go_held(held: list[Substitution]) -> None:
+    """A job's end lets go of the substitutions it held
+    (``SessionState.hold_substitutions``): the last holder of one its shell
+    let go of ends it.
+
+    Args:
+        held (list[Substitution]): what the job held.
+    """
+    for child in held:
+        child.holds -= 1
+        if not child.holds and child.let_go:
+            await _settle(child)
+
+
 # The file-creation mask a fresh shell starts with, as bash's.
 _FRESH_UMASK = 0o022
 
@@ -764,6 +791,20 @@ class SessionState:
             child.release()
         self.substitutions.append(child)
 
+    def hold_substitutions(self, job: "SessionState") -> list[Substitution]:
+        """The process substitutions this shell kept that a job's copied
+        descriptors name (``exec 3< <(cmd); cat <&3 &``), each held open
+        until the job lets go of it (``let_go_held``), as a forked child's
+        copy keeps a pipe open.
+
+        Args:
+            job (SessionState): the job's shell.
+        """
+        held = [child for child in self.substitutions if job._names(child)]
+        for child in held:
+            child.holds += 1
+        return held
+
     def _names(self, child: Substitution) -> bool:
         """Whether a descriptor of this shell still reads or writes a
         process substitution it kept.
@@ -797,11 +838,15 @@ class SessionState:
         """End the input of each process substitution this shell kept that
         no descriptor names any more (`exec 3<&-`), as closing the last
         descriptor on a pipe does: a `<( )` finds its reader gone, a
-        `>( )` reads to the end. One that has ended gives its path back.
+        `>( )` reads to the end. One that has ended gives its path back,
+        and one a job still holds is the job's to end.
         """
         left: list[Substitution] = []
         for child in self.substitutions:
             named = self._names(child)
+            if not named and child.holds:
+                child.let_go = True
+                continue
             if not named:
                 _end_pipe(child)
             if named or not child.task.done():
@@ -815,11 +860,17 @@ class SessionState:
         """End every process substitution this shell kept, as the shell
         ends and its descriptors close (``closed``).
 
+        One a job still holds is the job's to end, unless they are stopped.
+
         Args:
             wait (bool): wait for each to run out; False stops them.
         """
         self.closed = True
         ending, self.substitutions = self.substitutions, []
+        if wait:
+            for child in ending:
+                child.let_go = child.let_go or bool(child.holds)
+            ending = [child for child in ending if not child.holds]
         for child in ending:
             _end_pipe(child)
             if not wait:
@@ -1420,7 +1471,8 @@ class SessionState:
         substitution, a subshell) also inherits the reader's position, the
         aliases being expanded and the local scopes, and reseeds
         ``$RANDOM`` on its first draw instead of replaying this session's
-        seed.
+        seed. It lists this session's signal actions and runs none of them
+        (``timeout`` signalling the program it runs).
 
         Args:
             records (ShellVars | None): the child's variables when a
@@ -1438,6 +1490,7 @@ class SessionState:
         child._parse_head = self._parse_head
         child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
+        child.signal_traps_inherited = any(child.signal_traps.values())
         return child
 
     def new_shell(self) -> "SessionState":

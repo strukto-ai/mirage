@@ -427,6 +427,34 @@ function endPipe(child: Substitution): void {
   else child.endpoint.pipe.end()
 }
 
+/**
+ * End a kept process substitution, wait for it to run out and give its path
+ * back. Mirrors Python's _settle.
+ */
+async function settle(child: Substitution): Promise<void> {
+  endPipe(child)
+  try {
+    await runCancellable(child.task, child.signal)
+  } catch (error) {
+    console.debug('a kept process substitution was stopped', error)
+    child.abort.abort()
+  }
+  await closeReaders(child.endpoint)
+  child.release()
+}
+
+/**
+ * A job's end lets go of the substitutions it held
+ * (`SessionState.holdSubstitutions`): the last holder of one its shell let go
+ * of ends it. Mirrors Python's let_go_held.
+ */
+export async function letGoHeld(held: Substitution[]): Promise<void> {
+  for (const child of held) {
+    child.holds -= 1
+    if (child.holds === 0 && child.letGo) await settle(child)
+  }
+}
+
 /** A shell's draw from an id source, which holds no session: its secure draw (`secureDraw`). */
 function drawFrom(ids: IdSource): () => number {
   return secureDraw(ids)
@@ -904,7 +932,9 @@ export class SessionState {
    * copies what a session keeps; a child shell (a command substitution, a
    * subshell) also inherits the reader's position, the aliases being
    * expanded and the local scopes, and reseeds `$RANDOM` on its first draw
-   * instead of replaying this session's seed. `records` are the child's
+   * instead of replaying this session's seed. It lists this session's signal
+   * actions and runs none of them (`timeout` signalling the program it runs).
+   * `records` are the child's
    * variables when a running expansion made them (a substitution's child
    * shell); null copies this session's. Mirrors Python.
    */
@@ -918,6 +948,7 @@ export class SessionState {
     child.parseHead = this.parseHead
     child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
+    child.signalTrapsInherited = [...child.signalTraps.values()].some((action) => action !== '')
     return child
   }
 
@@ -1154,6 +1185,18 @@ export class SessionState {
    * Whether a descriptor of this shell still reads or writes a process
    * substitution it kept. Mirrors Python's _names.
    */
+  /**
+   * The process substitutions this shell kept that a job's copied
+   * descriptors name (`exec 3< <(cmd); cat <&3 &`), each held open until the
+   * job lets go of it (`letGoHeld`), as a forked child's copy keeps a pipe
+   * open. Mirrors Python's hold_substitutions.
+   */
+  holdSubstitutions(job: SessionState): Substitution[] {
+    const held = this.substitutions.filter((child) => job.names(child))
+    for (const child of held) child.holds += 1
+    return held
+  }
+
   private names(child: Substitution): boolean {
     if (!child.endpoint.readable) return this.namedPipes().has(child.path)
     return [...this.descriptors.values()].some(
@@ -1176,13 +1219,17 @@ export class SessionState {
    * End the input of each process substitution this shell kept that no
    * descriptor names any more (`exec 3<&-`), as closing the last descriptor
    * on a pipe does: a `<( )` finds its reader gone, a `>( )` reads to the
-   * end. One that has ended gives its path back. Mirrors Python's
-   * let_go_substitutions.
+   * end. One that has ended gives its path back, and one a job still holds
+   * is the job's to end. Mirrors Python's let_go_substitutions.
    */
   async letGoSubstitutions(): Promise<void> {
     const left: Substitution[] = []
     for (const child of this.substitutions) {
       const named = this.names(child)
+      if (!named && child.holds > 0) {
+        child.letGo = true
+        continue
+      }
       if (!named) endPipe(child)
       if (named || !child.done) left.push(child)
       else {
@@ -1195,13 +1242,18 @@ export class SessionState {
 
   /**
    * End every process substitution this shell kept, as the shell ends,
-   * each run out first unless `wait` is false or its line was cancelled.
-   * Mirrors Python's end_substitutions.
+   * each run out first unless `wait` is false or its line was cancelled. One
+   * a job still holds is the job's to end, unless they are stopped. Mirrors
+   * Python's end_substitutions.
    */
   async endSubstitutions(wait = true): Promise<void> {
     this.closed = true
-    const ending = this.substitutions
+    let ending = this.substitutions
     this.substitutions = []
+    if (wait) {
+      for (const child of ending) child.letGo ||= child.holds > 0
+      ending = ending.filter((child) => child.holds === 0)
+    }
     for (const child of ending) {
       endPipe(child)
       if (!wait) child.abort.abort()

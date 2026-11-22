@@ -1543,6 +1543,36 @@
         "stdout": "[a\nB]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_exec_kept_open_for_a_job",
+      "seq": 1346158,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3< <(sleep .2; echo hi); { sleep .1; cat <&3; } & exec 3<&-; wait); bash -c 'exec 3> >(cat); (sleep 0.1; echo child >&3) & exec 3>&-; wait'",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nchild\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_reads_one_char_at_once",
+      "seq": 1346159,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "bash -c 'exec 3< <(printf x; sleep 2); read -t 1 -n 1 -u 3 c; echo \"c=$c rc=$?\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "c=x rc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

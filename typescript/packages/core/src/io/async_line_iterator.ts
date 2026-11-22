@@ -366,8 +366,12 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         const pending = this.check(signal)
         if (pending !== undefined) await pending
         // One pull can split a character across chunks, so top the buffer
-        // up to the widest one before reading its first byte as a whole.
-        if (this.buf.byteLength < 4 && !this.exhausted) {
+        // up to what the next one takes before reading its first byte as a
+        // whole; no more, so a live pipe's lone `x` is read at once.
+        if (
+          !this.exhausted &&
+          (this.buf.byteLength === 0 || this.buf.byteLength < leadWidth(this.buf[0] ?? 0))
+        ) {
           const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
           else this.buf = concat([this.buf, result.value])
@@ -378,9 +382,9 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           return [joined(), false]
         }
         const buf = this.buf
-        const whole = this.exhausted ? buf.byteLength : buf.byteLength - 3
         let at = 0
-        while (at < whole && taken < count && !(delim !== null && buf[at] === delim)) {
+        while (at < buf.byteLength && taken < count && !(delim !== null && buf[at] === delim)) {
+          if (!this.exhausted && at + leadWidth(buf[at] ?? 0) > buf.byteLength) break
           const width = charWidth(buf, at)
           if (room !== null && size + at + width > room) throw new MemoryExhausted()
           at += width

@@ -331,6 +331,7 @@ class JobTable:
         simple: bool = False,
         program: str | None = None,
         traits: ProcessTraits = PLAIN_TRAITS,
+        ignores: frozenset[int] = frozenset(),
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -358,6 +359,8 @@ class JobTable:
                 None for the command line.
             traits (ProcessTraits): what the wrappers around the job
                 changed for its process.
+            ignores (frozenset[int]): what its shell ignores, which the
+                job and its program ignore too.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -392,9 +395,9 @@ class JobTable:
             run=execute,
             parent=parent,
             limit=limit,
-            ignores=IGNORED_SIGNALS,
+            ignores=IGNORED_SIGNALS | ignores,
             one_command=simple,
-            program_ignores=IGNORED_SIGNALS,
+            program_ignores=IGNORED_SIGNALS | ignores,
             background=True,
             traits=traits,
         )
@@ -913,16 +916,25 @@ class JobTable:
         if settled is not None:
             self._settled[(session_id, pid)] = settled
 
+        def forget(_: asyncio.Future[None] | None = None) -> None:
+            if self._substitutions.get((session_id, pid)) is process:
+                del self._substitutions[(session_id, pid)]
+                self._settled.pop((session_id, pid), None)
+
         def finished(_: asyncio.Task[int]) -> None:
+            # Its status stands once it ends; a `wait` still finds it until
+            # what it wrote has gone where it writes.
             if self._substitutions.get((session_id, pid)) is not process:
                 return
-            del self._substitutions[(session_id, pid)]
-            self._settled.pop((session_id, pid), None)
             ended = process.record
             if ended.exit is not None:
                 self._save_status(
                     session_id, pid, ended.shown_machine, ended.exit
                 )
+            if settled is None or settled.done():
+                forget()
+            else:
+                settled.add_done_callback(forget)
 
         # Its table runs the hook that tracks it just before starting it,
         # so its task is there a turn later.

@@ -51,6 +51,7 @@ import {
   ignoringErrexit,
   land,
   recordStatus,
+  statementStdin,
   writeErrorLine,
 } from './statement.ts'
 import { errTrapArmed, runErrTrap, runReturnTrap, runSignalTraps } from './traps.ts'
@@ -154,7 +155,7 @@ export async function executeBody(
         mergedIo,
       )
       mergedIo = await land(
-        await runSignalTraps(executeFn, session, stdin, callStack),
+        await runSignalTraps(executeFn, session, statementStdin(session, stdin, bound), callStack),
         sink,
         allStdout,
         mergedIo,

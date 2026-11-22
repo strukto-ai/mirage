@@ -483,12 +483,20 @@ async def handle_connection(
     # one runs, as bash answers one after each command.
     caught: list[ByteSource | None] = [left_bytes]
     try:
-        left_io = await land(
-            await run_signal_traps(execute_fn, session, stdin, call_stack),
-            sink,
-            caught,
-            left_io,
+        written = await run_signal_traps(
+            execute_fn,
+            session,
+            statement_stdin(session, stdin, bound),
+            call_stack,
         )
+        if written and sink is not None:
+            # What the left command wrote goes ahead of what the actions
+            # write, a nested shell's returned rather than streamed.
+            await pump(sink, Channel.STDOUT, left_bytes)
+            await pump(sink, Channel.STDERR, left_io.stderr)
+            left_bytes, left_io.stderr = None, None
+            caught = [None]
+        left_io = await land(written, sink, caught, left_io)
     except Unwinding as sig:
         raise await carried(sig, left_bytes, left_io)
     if len(caught) > 1:
@@ -761,7 +769,12 @@ async def handle_subshell(
                 recorder, leave, session.terminal, sink, all_stdout, merged_io
             )
             merged_io = await land(
-                await run_signal_traps(execute_fn, session, stdin, call_stack),
+                await run_signal_traps(
+                    execute_fn,
+                    session,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                ),
                 sink,
                 all_stdout,
                 merged_io,

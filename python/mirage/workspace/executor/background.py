@@ -118,6 +118,7 @@ from mirage.workspace.executor.statement import (
 )
 from mirage.workspace.executor.traps import (
     arm_signals,
+    ignored_signals,
     inherit_traps,
     start_job_traps,
 )
@@ -125,6 +126,7 @@ from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.session import let_go_held
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -592,7 +594,8 @@ def start_shell(
             parent=parent_pid,
             limit=session.processes.max,
             started=started,
-            ignores=SHELL_IGNORED_SIGNALS,
+            ignores=SHELL_IGNORED_SIGNALS | ignored_signals(session),
+            program_ignores=ignored_signals(session),
             one_command=one_command,
             stdin=stdin,
             traits=current_caller().traits,
@@ -723,8 +726,11 @@ async def handle_background(
     child_evaluation = child_context(context)
     bg_session = child_evaluation.session
     held_inputs = hold_inputs(bg_session.open_inputs())
+    held_substitutions = session.hold_substitutions(bg_session)
 
     async def drop_holds() -> None:
+        held, held_substitutions[:] = list(held_substitutions), []
+        await let_go_held(held)
         failure: Exception | None = None
         while held_inputs:
             try:
@@ -740,7 +746,7 @@ async def handle_background(
         release_program()
 
     def drop_unrun_holds(task: asyncio.Task[Any]) -> None:
-        if held_inputs:
+        if held_inputs or held_substitutions:
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
@@ -943,6 +949,7 @@ async def handle_background(
             simple=one_program(left, session),
             program=program_text(left, session),
             traits=current_caller().traits,
+            ignores=ignored_signals(session),
         )
     except BaseException as exc:
         release_job()

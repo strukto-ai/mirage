@@ -49,6 +49,7 @@ from mirage.workspace.executor.statement import (
     ignoring_errexit,
     land,
     record_status,
+    statement_stdin,
     write_error_line,
 )
 from mirage.workspace.executor.traps import (
@@ -173,7 +174,12 @@ async def execute_body(
                 merged_io,
             )
             merged_io = await land(
-                await run_signal_traps(execute_fn, session, stdin, call_stack),
+                await run_signal_traps(
+                    execute_fn,
+                    session,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                ),
                 sink,
                 all_stdout,
                 merged_io,

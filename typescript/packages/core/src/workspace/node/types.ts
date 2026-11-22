@@ -31,6 +31,10 @@ export interface Substitution {
   begun: Promise<void>
   done: boolean
   readers: AsyncLineIterator[]
+  // The jobs that copied a descriptor on it, which keep it open past its
+  // shell letting go of it (`letGo`).
+  holds: number
+  letGo: boolean
   failure?: Error
 }
 
