@@ -541,6 +541,61 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('reads three machines as one folder', async () => {
+    const a = new FakeFiles({ '/tmp/x': 'a', '/tmp/d/1': '1' })
+    const b = new FakeFiles({ '/tmp/x': 'b', '/tmp/d/2': '2' })
+    const c = new FakeFiles({
+      '/tmp/x': 'c',
+      '/tmp/d/3': '3',
+      '/tmp/only/kept': 'k',
+      '/tmp/src': 'new',
+    })
+    const all = [a, b, c]
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          a: new ScriptedMachine('a', a.answer),
+          b: new ScriptedMachine('b', b.answer),
+          c: new ScriptedMachine('c', c.answer),
+        },
+      },
+    )
+    c.answer('cat > /tmp/x', ENC.encode('last'))
+    expect(await run(ws, 'cat /tmp/x')).toEqual([0, 'last', ''])
+    b.answer('cat > /tmp/x', ENC.encode('later'))
+    expect(await run(ws, 'cat /tmp/x')).toEqual([0, 'later', ''])
+    expect(await run(ws, 'ls /tmp/d')).toEqual([0, '1\n2\n3\n', ''])
+    expect((await run(ws, 'echo n > /tmp/only/new'))[0]).toBe(0)
+    expect(all.map((m) => m.files.has('/tmp/only/new'))).toEqual([false, false, true])
+    expect((await run(ws, 'mv /tmp/d /tmp/e'))[0]).toBe(0)
+    expect(all.map((m) => [...m.files.keys()].filter((f) => f.includes('/e/')).sort())).toEqual([
+      ['/tmp/e/1'],
+      ['/tmp/e/2'],
+      ['/tmp/e/3'],
+    ])
+    expect((await run(ws, 'cp /tmp/src /tmp/x'))[0]).toBe(0)
+    expect(all.map((m) => m.files.has('/tmp/x'))).toEqual([false, false, true])
+    expect(await run(ws, 'cat /tmp/x')).toEqual([0, 'new', ''])
+    expect(await run(ws, 'rm /tmp/x')).toEqual([0, '', ''])
+    expect(all.some((m) => m.files.has('/tmp/x'))).toBe(false)
+    await ws.close()
+  })
+
+  it('runs a path-named writer on no machine under a file policy', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const ws = two(a, b)
+    ws.policies.add({ preVfs: (): Action | null => null })
+    await run(ws, '/tmp/tool | tee /tmp/out')
+    await run(ws, '/tmp/tool > /tmp/direct')
+    expect([a.ran, b.ran]).toEqual([[], []])
+    expect(Object.keys(texts(a)).sort()).toEqual(['/tmp/direct', '/tmp/out'])
+    expect(Object.keys(texts(b)).sort()).toEqual(['/tmp/tool'])
+    await ws.close()
+  })
+
   it('finds a wrapped writer named by its path on its machine', async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })

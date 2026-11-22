@@ -544,6 +544,64 @@ async def test_a_writer_named_from_its_folder_is_found_from_that_folder():
 
 
 @pytest.mark.asyncio
+async def test_three_machines_read_as_one_folder():
+    a = FakeFiles({"/tmp/x": b"a", "/tmp/d/1": b"1"})
+    b = FakeFiles({"/tmp/x": b"b", "/tmp/d/2": b"2"})
+    c = FakeFiles(
+        {
+            "/tmp/x": b"c",
+            "/tmp/d/3": b"3",
+            "/tmp/only/kept": b"k",
+            "/tmp/src": b"new",
+        }
+    )
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+            "c": ScriptedMachine("c", c.answer),
+        },
+    )
+    c.answer("cat > /tmp/x", b"last")
+    assert await run(ws, "cat /tmp/x") == (0, "last", "")
+    b.answer("cat > /tmp/x", b"later")
+    assert await run(ws, "cat /tmp/x") == (0, "later", "")
+    assert await run(ws, "ls /tmp/d") == (0, "1\n2\n3\n", "")
+    assert (await run(ws, "echo n > /tmp/only/new"))[0] == 0
+    assert ["/tmp/only/new" in m.files for m in (a, b, c)] == [
+        False,
+        False,
+        True,
+    ]
+    assert (await run(ws, "mv /tmp/d /tmp/e"))[0] == 0
+    assert [sorted(f for f in m.files if "/e/" in f) for m in (a, b, c)] == [
+        ["/tmp/e/1"],
+        ["/tmp/e/2"],
+        ["/tmp/e/3"],
+    ]
+    assert (await run(ws, "cp /tmp/src /tmp/x"))[0] == 0
+    assert ["/tmp/x" in m.files for m in (a, b, c)] == [False, False, True]
+    assert await run(ws, "cat /tmp/x") == (0, "new", "")
+    assert await run(ws, "rm /tmp/x") == (0, "", "")
+    assert not any("/tmp/x" in m.files for m in (a, b, c))
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_under_a_file_policy_no_machine_runs_a_path_named_writer():
+    a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b, policies=[Seen()])
+    await run(ws, "/tmp/tool | tee /tmp/out")
+    await run(ws, "/tmp/tool > /tmp/direct")
+    assert (a.ran, b.ran) == ([], [])
+    assert sorted(a.files) == ["/tmp/direct", "/tmp/out"]
+    assert sorted(b.files) == ["/tmp/tool"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_wrapped_writer_named_by_its_path_is_found_on_its_machine():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)
