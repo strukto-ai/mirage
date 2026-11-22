@@ -29,6 +29,7 @@ import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
+import { type Decision, Outcome, Scope } from '../../../policy/types.ts'
 
 it('reads the output inside the running command', async () => {
   // A fresh mount trusts only the listings the running command made, so a
@@ -193,23 +194,31 @@ it('asks the mount for head, tail and wc through the dispatcher', async () => {
   }
 })
 
-it('refuses the stand-ins through a link to a sealed file', async () => {
+it('holds the stand-ins through a link to the rule on its target', async () => {
+  const asked: string[] = []
+  const allowOnce = (record: Decision): Promise<Decision> => {
+    asked.push(record.reason)
+    return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+  }
   const vfs = lines(new Lines())
-  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, onAsk: allowOnce })
+  const dec = new TextDecoder()
   try {
     expect((await ws.shell('ln -s /m/f /m/l')).exitCode).toBe(0)
     await ws.setSessionProfile(
       ws.defaultSessionId,
       SessionProfile({
-        mounts: { '/m/f': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
+        mounts: { '/m/f': { commands: { '*': { decision: 'ask', reason: 'review' } } } },
       }),
     )
-    for (const line of ['head -n 2 /m/l', 'tail -n 1 /m/l', 'wc -l /m/l']) {
-      const refused = await ws.shell(line)
-      expect(refused.exitCode).toBe(126)
-      expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
-    }
-    expect(vfs.asked).toEqual([])
+    const out = [
+      dec.decode((await ws.shell('head -n 2 /m/l')).stdout),
+      dec.decode((await ws.shell('tail -n 1 /m/l')).stdout),
+      dec.decode((await ws.shell('wc -l /m/l')).stdout),
+    ]
+    expect(asked).toEqual(['review', 'review', 'review'])
+    expect(out).toEqual(['first\nfirst\n', 'last\n', '42 /m/l\n'])
+    expect(vfs.asked).toEqual(['firstLines 2', 'lastLines 1', 'lineCount'])
   } finally {
     await ws.close()
   }

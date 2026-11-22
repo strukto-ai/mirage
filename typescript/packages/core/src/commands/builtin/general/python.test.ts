@@ -48,11 +48,11 @@ function guarded(): Workspace {
 }
 
 describe('python3: a rule on the script', () => {
-  it.each([['python3 ./secret.py']])('reads %s however it is typed', async (line) => {
+  it('is refused at the gate when a folder entry seals the script', async () => {
     const ws = guarded()
     try {
       await ws.shell("printf 'print(1)\\n' > /secret.py")
-      const io = await ws.shell(line)
+      const io = await ws.shell('python3 ./secret.py')
       expect(io.exitCode).toBe(126)
       expect(stdoutStr(io)).toBe('')
       expect(stderrStr(io)).toBe('python3: Permission denied\n')

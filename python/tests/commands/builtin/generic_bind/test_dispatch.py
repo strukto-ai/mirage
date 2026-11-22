@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -22,6 +24,7 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
+from mirage.policy import Decision, Outcome, Scope
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
@@ -191,10 +194,16 @@ async def test_head_tail_and_wc_ask_the_mount_through_the_dispatcher():
 
 
 @pytest.mark.asyncio
-async def test_a_path_rule_refuses_the_stand_ins_through_a_link():
+async def test_a_rule_on_the_target_holds_the_stand_ins_through_a_link():
+    asked: list[str] = []
+
+    async def allows_once(record: Decision) -> Decision:
+        asked.append(record.reason)
+        return replace(record, outcome=Outcome.ALLOW, scope=Scope.ONCE)
+
     vfs = _Lines()
     vfs.load_state({"files": {"/f": b"a\nb\nc\n"}})
-    ws = Workspace({"/m/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/m/": vfs}, mode=MountMode.WRITE, on_ask=allows_once)
     try:
         assert (await ws.shell("ln -s /m/f /m/l")).exit_code == 0
         await ws.set_session_profile(
@@ -203,17 +212,22 @@ async def test_a_path_rule_refuses_the_stand_ins_through_a_link():
                 "mounts": {
                     "/m/f": {
                         "commands": {
-                            "*": {"decision": "deny", "reason": "sealed"}
+                            "*": {"decision": "ask", "reason": "review"}
                         }
                     }
                 }
             },
         )
-        for line in ("head -n 2 /m/l", "tail -n 1 /m/l", "wc -l /m/l"):
-            refused = await ws.shell(line)
-            assert refused.exit_code == 126
-            assert b"Permission denied" in (refused.stderr or b"")
-        assert vfs.asked == []
+        head = await ws.shell("head -n 2 /m/l")
+        tail = await ws.shell("tail -n 1 /m/l")
+        count = await ws.shell("wc -l /m/l")
+        assert asked == ["review", "review", "review"]
+        assert (head.stdout, tail.stdout, count.stdout) == (
+            b"first\nfirst\n",
+            b"last\n",
+            b"42 /m/l\n",
+        )
+        assert vfs.asked == ["first_lines 2", "last_lines 1", "line_count"]
     finally:
         await ws.close()
 

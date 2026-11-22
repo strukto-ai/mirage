@@ -54,8 +54,7 @@ GUARDED = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["python3 ./secret.py"])
-async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line):
+async def test_the_gate_refuses_a_script_a_folder_entry_seals():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -65,7 +64,7 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line):
     try:
         await ws.shell("printf 'print(1)\\n' > /secret.py")
         agent = await ws.session("agent", profile="guarded")
-        io = await agent.shell(line)
+        io = await agent.shell("python3 ./secret.py")
         assert io.exit_code == 126
         assert await io.stdout_str() == ""
         assert await io.stderr_str() == "python3: Permission denied\n"
