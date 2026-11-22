@@ -2660,7 +2660,9 @@ class Workspace:
         try:
             if recorded:
                 ws._adopt_profiles(
-                    args.profiles, args.profile if built_for_state else profile
+                    args.profiles,
+                    args.profile if built_for_state else profile,
+                    picked=profile is not None,
                 )
             await apply_state_dict(
                 ws, state, built_for_state=built_for_state, shared=shared
@@ -3023,23 +3025,36 @@ class Workspace:
         )
 
     def _adopt_profiles(
-        self, profiles: Mapping[str, SessionProfile], profile: str | None
+        self,
+        profiles: Mapping[str, SessionProfile],
+        profile: str | None,
+        picked: bool,
     ) -> None:
         """Take a recorded profile table as the workspace held it.
 
         A mode the table puts on a folder stays: the mount it named may
         have been unmounted since, leaving the folder inside another
         mount, and a session taking that profile is refused then
-        (``_check_modes``), not the restore.
+        (``_check_modes``), not the restore. A default the caller picks
+        is such a session taking it, so it is held against the mounts
+        the way ``create_session`` holds it.
 
         Args:
             profiles (Mapping[str, SessionProfile]): the table by name.
             profile (str | None): the default profile's name.
+            picked (bool): the caller named the default, rather than
+                the state recording it.
+
+        Raises:
+            PolicyError: a picked default puts a mode on a folder inside
+                a mount.
         """
         for name, doc in profiles.items():
             doc = SessionProfile.model_validate(doc)
             self._compile(doc, name)
             self._profiles[name] = doc
+        if picked and profile in self._profiles:
+            self._check_modes(self._profiles[profile])
         self._use_default_profile(profile)
 
     def _check_modes(self, *docs: SessionProfile | None) -> None:

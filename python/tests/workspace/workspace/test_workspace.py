@@ -1269,6 +1269,9 @@ async def test_a_snapshot_reloads_after_a_nested_profile_mount_is_unmounted():
         await Workspace.load(
             buf, profiles={"agent": {"mounts": {"/data/keep": "read"}}}
         )
+    buf.seek(0)
+    with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+        await Workspace.load(buf, profile="agent")
 
 
 async def _ran(accessor, paths, texts, ctx):

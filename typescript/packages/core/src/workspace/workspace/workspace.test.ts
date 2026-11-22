@@ -790,6 +790,7 @@ describe('profile modes', () => {
         profiles: { agent: SessionProfile({ mounts: { '/data/keep': 'read' } }) },
       }),
     ).rejects.toThrow(folderMode)
+    await expect(Workspace.load(tar, { profile: 'agent' })).rejects.toThrow(folderMode)
   })
 
   it('finds a typed mounts key as the parser spells it', async () => {

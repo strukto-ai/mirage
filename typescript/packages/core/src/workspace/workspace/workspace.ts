@@ -775,16 +775,21 @@ export class Workspace {
    * table puts on a folder stays: the mount it named may have been
    * unmounted since, leaving the folder inside another mount, and a
    * session taking that profile is refused then (`checkModes`), not the
-   * restore. Mirrors Python's `_adopt_profiles`.
+   * restore. A default the caller picks (`picked`) is such a session
+   * taking it, so it is held against the mounts the way `createSession`
+   * holds it. Mirrors Python's `_adopt_profiles`.
    */
   private adoptProfiles(
     profiles: Readonly<Record<string, SessionProfile>>,
     profile: string | null,
+    picked: boolean,
   ): void {
     for (const [name, doc] of Object.entries(profiles)) {
       this.compile(doc, name)
       this.profilesInternal[name] = doc
     }
+    const chosen = profile === null ? undefined : this.profilesInternal[profile]
+    if (picked && chosen !== undefined) this.checkModes(chosen)
     this.useDefaultProfile(profile)
     checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
   }
@@ -3084,6 +3089,7 @@ export class Workspace {
         ws.adoptProfiles(
           args.profiles,
           options.profile === undefined ? args.profile : options.profile,
+          options.profile != null,
         )
       }
       await applyStateDict(ws, state, {
