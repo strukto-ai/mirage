@@ -24,6 +24,6 @@ class MachineVFSConfig(BaseModel):
     root: str = "/"
     """The path on each machine that becomes the mount root."""
     default_machine: str | None = None
-    """Where a new name lands when the command writing it runs no program
-    on a machine; unset is the machine that runs the programs nothing in
+    """Where a new name lands when nothing says which machine its command
+    is about; unset is the machine that runs the programs nothing in
     Mirage resolves, else the first."""

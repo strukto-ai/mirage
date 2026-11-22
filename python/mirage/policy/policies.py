@@ -362,6 +362,7 @@ async def pre_vfs_gate(
     decisions: Decisions | None = None,
     final: bool = True,
     caller: Caller | None = None,
+    machine: str | None = None,
 ) -> None:
     """Fire pre_vfs at a dispatcher; a Deny becomes EACCES.
 
@@ -401,6 +402,8 @@ async def pre_vfs_gate(
             whose destination is gated next.
         caller (Caller | None): who makes the call; None for the caller
             bound here.
+        machine (str | None): the machine the owning mount says the call
+            acts on (``BaseVFS.acts_on``).
 
     Raises:
         Explained: in a dry run (``explaining``), once the gate's answer
@@ -423,6 +426,7 @@ async def pre_vfs_gate(
             session_id=session_id,
             mode=mode,
             caller=policy_caller(caller.session, policies.account),
+            machine=machine,
         )
         token = set_explaining(DryRun.DECIDING)
         try:
@@ -448,6 +452,7 @@ async def pre_vfs_gate(
         session_id=session_id,
         mode=mode,
         caller=policy_caller(caller.session, policies.account),
+        machine=machine,
     )
     answer = await _apart(policies.pre_vfs(ctx, rules_only=not wants))
     await _refuse_op(ctx, answer, None if line else decisions, caller)
@@ -540,6 +545,7 @@ async def post_vfs_gate(
     mode: MountMode | None = None,
     decisions: Decisions | None = None,
     caller: Caller | None = None,
+    machine: str | None = None,
 ) -> None:
     """Fire post_vfs at a dispatcher; a Deny, or an Ask the host has not
     approved, drops the result with EACCES.
@@ -562,6 +568,8 @@ async def post_vfs_gate(
             entry point that cannot ask.
         caller (Caller | None): who made the call; None for the caller
             bound here.
+        machine (str | None): the machine the owning mount said the call
+            acts on, as pre_vfs saw it.
     """
     if caller is None:
         caller = current_caller()
@@ -577,6 +585,7 @@ async def post_vfs_gate(
         session_id=session_id,
         mode=mode,
         caller=policy_caller(caller.session, policies.account),
+        machine=machine,
         result=result,
     )
     await _refuse_op(

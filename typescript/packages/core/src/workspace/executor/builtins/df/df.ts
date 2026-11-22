@@ -272,8 +272,8 @@ export async function handleDf(
   }
 
   // GNU resolves the mutually overriding size flags last-wins, so -h/-H
-  // (human) or -k/-B (block) is chosen by whichever appears last.
-  const lf = fl.typedOrder('human_readable', 'si', 'k', 'block_size').at(-1)
+  // (human) or -k/-m/-B (block) is chosen by whichever appears last.
+  const lf = fl.typedOrder('human_readable', 'si', 'k', 'm', 'block_size').at(-1)
   const si = lf === 'si'
   const human = lf === 'human_readable' || lf === 'si'
   let block = 1024
@@ -281,6 +281,9 @@ export async function handleDf(
   if (lf === 'block_size' && bParsed !== null) {
     block = bParsed[0]
     blockLabel = `${bParsed[1]}-blocks`
+  } else if (lf === 'm') {
+    block = 1024 ** 2
+    blockLabel = posix ? '1048576-blocks' : '1M-blocks'
   }
 
   const inodes = fl.asBool('inodes')
@@ -308,7 +311,7 @@ export async function handleDf(
   const data: string[][] = []
   for (const mount of mounts) {
     const cap = await mount.use(() => mount.vfs.capacity())
-    const cells = [mount.vfs.name]
+    const cells = [mount.vfs.filesystem()]
     if (showType) cells.push(mount.vfs.name)
     for (const item of numCells(cap, human, si, block, inodes)) cells.push(item)
     cells.push(pctCell(cap, inodes))

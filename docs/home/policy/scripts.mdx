@@ -277,6 +277,7 @@ runtime's file API, FUSE and SFTP. `cat notes.txt` makes a `stat`, then a
 | `path` | the path it names |
 | `write` | whether it writes |
 | `prefix`, `mode` | the mount that owns the path, and that mount's mode |
+| `machine` | the [machine](/home/setup/machine/machine_files#several-machines) whose files the call acts on, by its name under `machines:`: the one machine the mount shows, else the machine the command is about. `null` for a mount that is no machine's files, and where only the call itself finds which machine holds the name |
 
 ```python reports_read_only.py
 def pre_vfs(ctx):

@@ -118,18 +118,19 @@ def commit_entries(repo: BaseRepo, commit_id: ObjectID) -> Tree:
     return tree_entries(repo, parse_commit(repo, commit_id).tree)
 
 
-def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:
-    """Fetch several blobs at once, off the event loop.
+def blob_bytes(repo: BaseRepo, sha: bytes) -> bytes:
+    """One blob's bytes, read off the event loop as its entry is written.
+
+    One at a time rather than the whole tree first, as git checks out:
+    every blob of a clone held at once was most of what its checkout
+    cost in memory.
 
     Args:
         repo (BaseRepo): the opened repository.
-        shas (list[bytes]): the blob ids to read.
+        sha (bytes): the blob id.
     """
-    out: dict[bytes, bytes] = {}
-    for sha in shas:
-        obj = repo.object_store[ObjectID(sha)]
-        out[sha] = obj.data if isinstance(obj, Blob) else b""
-    return out
+    obj = repo.object_store[ObjectID(sha)]
+    return obj.data if isinstance(obj, Blob) else b""
 
 
 def resolve_tree(

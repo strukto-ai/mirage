@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from string import ascii_letters
 
 from dulwich.refs import Ref
@@ -39,6 +40,9 @@ OWNER_EXECUTE = 0o100
 # entry's own bits are set from, the object type above it being the
 # mount's business rather than the tree's.
 PERMISSION_BITS = 0o777
+# The bits a file renders with while none are set on it, 0666 under the
+# default umask.
+UNSET_PERMISSIONS = 0o644
 
 # The object types git knows, in its own order.
 OBJECT_TYPES = ("blob", "tree", "commit", "tag")
@@ -71,8 +75,8 @@ FANOUT_LEN = 2
 # stored pack's indexing keeps, past which the furthest are let go and
 # rebuilt when next needed.
 PACK_BLOCK = 1 << 16
-PACK_BLOCKS = 32
-PACK_CACHE_BYTES = 8 * 1024 * 1024
+PACK_BLOCKS = 16
+PACK_CACHE_BYTES = 2 * 1024 * 1024
 
 # The commits a shallow repository holds without their parents, and
 # the label git decorates each of them with.
@@ -86,6 +90,10 @@ TERMINATED_KINDS = ("oneline", "tformat")
 
 # The rules a short ref name is tried against, in the order
 # gitrevisions(7) lists them.
+# The names git reads as a file in the git directory rather than under
+# refs/: FETCH_HEAD, ORIG_HEAD, MERGE_HEAD and their kind.
+ROOT_REF = re.compile(r"[A-Z_]+_HEAD")
+
 DWIM_RULES = (
     "{}",
     "refs/{}",

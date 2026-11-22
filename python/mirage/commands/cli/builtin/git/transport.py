@@ -706,3 +706,41 @@ def is_local(url: str) -> bool:
         url (str): the remote as typed.
     """
     return REMOTE_HELPER.match(url) is None and SCP_LIKE.match(url) is None
+
+
+# How C's atoi and strtol(..., 0) read a number, which is how git reads
+# ``--depth``: atoi for the positive check, strtol for the value.
+ATOI = re.compile(r"\s*([+-]?\d+)")
+STRTOL = re.compile(r"\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)")
+
+
+def check_depth(text: str) -> None:
+    """Refuse a ``--depth`` git refuses, cloning or fetching.
+
+    Args:
+        text (str): the value as typed.
+
+    Raises:
+        GitError: a value C's atoi reads below one.
+    """
+    found = ATOI.match(text)
+    if found is None or int(found.group(1)) < 1:
+        raise GitError(f"depth {text} is not a positive number")
+
+
+def transport_depth(text: str) -> int:
+    """``--depth`` as the transport reads it, C's strtol in base 0.
+
+    Args:
+        text (str): the value as typed, already past ``check_depth``,
+            so it is never negative.
+
+    Raises:
+        GitError: a value strtol does not read whole.
+    """
+    found = STRTOL.fullmatch(text)
+    if found is None:
+        raise GitError(f"transport: invalid depth option '{text}'")
+    digits = found.group(1)
+    base = 16 if digits[:2] in ("0x", "0X") else 8 if digits[0] == "0" else 10
+    return int(digits, base)

@@ -1163,6 +1163,12 @@ class VfsContext:
         vfs (FileView | None): the session's files, read only.
         caller (PolicyCaller | None): who makes the call, read only: its
             ``session`` is the session above.
+        machine (str | None): the machine whose files the call acts on,
+            by its name under ``machines:``, as far as the mount tells
+            before the call runs: the one machine the mount shows, else
+            the machine the running command is about. None for a mount
+            that is no machine's files, and where only the call itself
+            finds which machine holds the name.
     """
 
     call: VfsCall
@@ -1174,6 +1180,7 @@ class VfsContext:
     session: SessionView | None = None
     vfs: FileView | None = None
     caller: PolicyCaller | None = None
+    machine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

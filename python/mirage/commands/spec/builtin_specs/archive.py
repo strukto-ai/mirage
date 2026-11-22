@@ -137,6 +137,8 @@ SPECS: dict[str, CommandSpec] = {
             # planner has to see them all, not just the last.
             Argument("-C", "--directory", type="path", action="append"),
             Argument("--strip-components"),
+            # Bare, the folder is the archive's name; `=` alone is none.
+            Argument("--one-top-level", nargs="?", attached_only=True),
             Argument("--exclude", action="append"),
             Argument("--one-file-system", action="store_true"),
             # Only -c reads the rest operands from the filesystem. Under -t

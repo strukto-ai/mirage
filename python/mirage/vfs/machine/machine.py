@@ -28,25 +28,28 @@ from mirage.core.machine.read import last_lines as _last_lines
 from mirage.core.machine.read import line_count as _line_count
 from mirage.core.machine.read import read as _read
 from mirage.core.machine.readdir import readdir as _readdir
+from mirage.core.machine.readdir import tree as _tree
 from mirage.core.machine.rename import rename as _rename
 from mirage.core.machine.rm import rm_r as _rm_r
 from mirage.core.machine.rmdir import rmdir as _rmdir
 from mirage.core.machine.search import files_containing as _files_containing
 from mirage.core.machine.set_attrs import set_attrs as _set_attrs
 from mirage.core.machine.stat import hidden_on as _hidden_on
+from mirage.core.machine.stat import holder_stat as _holder_stat
 from mirage.core.machine.stat import restricted as _restricted
 from mirage.core.machine.stat import stat as _stat
-from mirage.core.machine.stat import tree as _tree
 from mirage.core.machine.truncate import truncate as _truncate
+from mirage.core.machine.types import Holder
 from mirage.core.machine.unlink import unlink as _unlink
+from mirage.core.machine.utils import folder_of as _folder_of
+from mirage.core.machine.utils import leaf as _leaf
 from mirage.core.machine.write import write as _write
-from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, exdev
+from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, enotsup
 from mirage.execution.machine.table import MachineTable
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     FileStat,
-    FileType,
     PathSpec,
     VFSName,
 )
@@ -61,12 +64,16 @@ class MachineVFS(BaseVFS):
     workspace already holds for the machine: what its programs read and
     write, without serving or copying anything.
 
-    On several machines each op picks where it acts: a name is read,
-    removed or renamed on the machine holding it, a new name lands on the
-    machine running the command's program, else on ``default_machine``,
-    and a directory lists every machine's entries once. ``"@<machine>"``
-    in a mount table is this VFS over that machine at the same path, so
-    Mirage and the machine's programs name a file the same way.
+    Over several machines the mount shows one tree, as one machine would
+    hold it. A name several machines hold is the copy written last, for
+    every look at it and every change to it; a removal or a rename takes
+    the name off every machine; a new name lands where its folder is, on
+    the machine the command is about when that machine holds the folder;
+    and a directory lists every machine's entries once. No file is copied
+    between machines to keep them alike: a program opens its own
+    machine's disk, whatever another machine holds. ``"@<machine>"`` in a
+    mount table is this VFS over that machine at the same path, so Mirage
+    and the machine's programs name a file the same way.
     """
 
     accessor: MachineAccessor
@@ -107,20 +114,29 @@ class MachineVFS(BaseVFS):
         )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
-        hidden = await _hidden_on(self.accessor, path)
-        machines = [m for m in self.accessor.names() if m not in hidden]
+        machines = await place.asked(self.accessor, path)
         if not machines:
             raise enoent(path)
         return await _readdir(self.accessor, machines, path)
 
+    def acts_on(self) -> str | None:
+        if not self.accessor.bound:
+            return None
+        if not self.accessor.several:
+            return self.accessor.default_machine
+        return place.command_machine(self.accessor)
+
+    def filesystem(self) -> str:
+        if not self.accessor.bound:
+            return self.name
+        machine = self.acts_on() or self.accessor.default_machine
+        return f"{machine}:{self.config.root.rstrip('/') or '/'}"
+
     async def stat(self, path: PathSpec) -> FileStat:
-        held = await place.holders(self.accessor, path)
-        if not held:
-            raise enoent(path)
-        running = place.stage(self.accessor)
-        return await _stat(
-            self.accessor, running if running in held else held[0], path
-        )
+        one = place.chosen(self.accessor, await self._everywhere(path))
+        if one.entry is None:
+            return await _stat(self.accessor, one.machine, path)
+        return _holder_stat(_leaf(path), one)
 
     async def read(
         self,
@@ -150,10 +166,14 @@ class MachineVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         if _restricted(path):
             return None
-        held = await place.holders(self.accessor, path)
-        if not held:
-            raise enoent(path)
-        return await _tree(self.accessor, held, path)
+        held = await self._everywhere(path)
+        shown = await _tree(self.accessor, [h.machine for h in held], path)
+        if shown is None:
+            return None
+        return {
+            rel: _holder_stat(rel.rsplit("/", 1)[-1], one)
+            for rel, one in shown.items()
+        }
 
     async def files_containing(
         self,
@@ -167,87 +187,151 @@ class MachineVFS(BaseVFS):
             return None
         held = await place.holders(self.accessor, path)
         return await _files_containing(
-            self.accessor, held, path, text, ignore_case
+            self.accessor,
+            [h.machine for h in held],
+            path,
+            text,
+            ignore_case,
         )
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(self.accessor, path, replaces=True)
         await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(self.accessor, path)
         await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(self.accessor, path)
         await _pwrite(self.accessor, machine, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(self.accessor, path)
         await _create(self.accessor, machine, path)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(self.accessor, path)
         await _truncate(self.accessor, machine, path, length, no_create)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
-        machine = await place.lands(self.accessor, path)
+        machine = await place.write_machine(
+            self.accessor, path, parents=parents
+        )
         await _mkdir(self.accessor, machine, path, parents)
 
     async def unlink(self, path: PathSpec) -> None:
-        machine = await place.holder(self.accessor, path)
-        await _unlink(self.accessor, machine, path)
+        # Every machine's copy goes, or an older one would show again;
+        # a folder another machine holds at the name is left alone.
+        held = await self._everywhere(path)
+        shown = place.chosen(self.accessor, held)
+        await _unlink(self.accessor, shown.machine, path)
+        for one in held:
+            if one is not shown and not one.folder:
+                await _unlink(self.accessor, one.machine, path)
 
     async def rmdir(self, path: PathSpec) -> None:
-        for machine in await self._everywhere(path):
-            await _rmdir(self.accessor, machine, path)
+        held = await self._everywhere(path)
+        shown = place.chosen(self.accessor, held)
+        folders = [one.machine for one in held if one.folder]
+        # Asked of every machine before any removes its copy, so a folder
+        # one of them still fills is left whole on all of them.
+        if (
+            shown.folder
+            and len(folders) > 1
+            and await _readdir(self.accessor, folders, path)
+        ):
+            raise enotempty(path)
+        await _rmdir(self.accessor, shown.machine, path)
+        for one in held:
+            if one is not shown and one.folder:
+                await _rmdir(self.accessor, one.machine, path)
 
     async def rm_r(self, path: PathSpec) -> None:
-        for machine in await self._everywhere(path):
-            await _rm_r(self.accessor, machine, path)
+        for one in await self._everywhere(path):
+            await _rm_r(self.accessor, one.machine, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        machine = await place.holder(self.accessor, src)
-        several = len(self.accessor.names()) > 1
-        held = await place.holders(self.accessor, dst) if several else []
-        others = [m for m in held if m != machine]
-        folder = False
-        if others:
-            moved = await _stat(self.accessor, machine, src)
-            folder = moved.type is FileType.DIRECTORY
-            for other in others:
-                there = await _stat(self.accessor, other, dst)
-                if (there.type is FileType.DIRECTORY) is not folder:
-                    raise eisdir(dst) if not folder else enotdir(dst)
-                if folder and await _readdir(self.accessor, [other], dst):
-                    raise enotempty(dst)
-        parents = (
-            await place.holders(self.accessor, dst.dir) if several else []
+        held = await self._everywhere(src)
+        moved = place.chosen(self.accessor, held)
+        # A folder is renamed on every machine holding it, each keeping
+        # its own entries; a file on the machine whose copy it is, the
+        # other machines' copies of the old name going with it.
+        movers = (
+            [one.machine for one in held if one.folder]
+            if moved.folder
+            else [moved.machine]
         )
-        await _rename(
+        several = self.accessor.several
+        there = await place.holders(self.accessor, dst) if several else []
+        replaced = [one for one in there if one.machine not in movers]
+        # Every machine's copy of the new name is judged before any
+        # machine moves, so a refusal leaves the folder under one name.
+        for one in there:
+            if one.folder is not moved.folder:
+                raise enotdir(dst) if moved.folder else eisdir(dst)
+            if moved.folder and await _readdir(
+                self.accessor, [one.machine], dst
+            ):
+                raise enotempty(dst)
+        lacking = await self._lacking_folder(movers, dst)
+        for machine in movers:
+            await _rename(
+                self.accessor,
+                machine,
+                src,
+                dst,
+                make_parent=machine in lacking,
+            )
+        for one in replaced:
+            if moved.folder:
+                await _rmdir(self.accessor, one.machine, dst)
+            else:
+                await _unlink(self.accessor, one.machine, dst)
+        for one in held:
+            if one.machine not in movers and not one.folder:
+                await _unlink(self.accessor, one.machine, src)
+
+    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        # A copy never crosses: it is made where the source is, and is
+        # then the newest copy of its name.
+        machine = await place.holder(self.accessor, src)
+        await self._refuse_hidden(machine, dst)
+        await _copy(
             self.accessor,
             machine,
             src,
             dst,
-            make_parent=bool(parents) and machine not in parents,
+            make_parent=bool(await self._lacking_folder([machine], dst)),
         )
-        for other in others:
-            if folder:
-                await _rmdir(self.accessor, other, dst)
-            else:
-                await _unlink(self.accessor, other, dst)
-
-    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        machine = await self._same_machine(src, dst)
-        await _copy(self.accessor, machine, src, dst)
+        if not self.accessor.several:
+            return
+        # The copy replaces the name, so another machine's copy of it
+        # goes: one kept would show again once the new copy takes its
+        # source's older time (``cp -p``).
+        for one in await place.holders(self.accessor, dst):
+            if one.machine != machine and not one.folder:
+                await _unlink(self.accessor, one.machine, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
-        machine = await self._same_machine(src, dst)
-        await _dir_copy(self.accessor, machine, src, dst)
+        held = await self._everywhere(src)
+        if len(held) > 1:
+            # Each name under a folder several machines hold is copied
+            # where it is, one by one, so each stays the copy it was.
+            raise enotsup(self.name, "dir_copy", src)
+        machine = held[0].machine
+        await self._refuse_hidden(machine, dst)
+        await _dir_copy(
+            self.accessor,
+            machine,
+            src,
+            dst,
+            make_parent=bool(await self._lacking_folder([machine], dst)),
+        )
 
     async def setattr(
         self,
@@ -273,7 +357,9 @@ class MachineVFS(BaseVFS):
 
     async def capacity(self) -> CapacityResult:
         return await _capacity(
-            self.accessor, PathSpec.from_str_path(self.config.root)
+            self.accessor,
+            self.acts_on() or self.accessor.default_machine,
+            PathSpec.from_str_path(self.config.root),
         )
 
     def storage_location(self) -> str:
@@ -285,28 +371,54 @@ class MachineVFS(BaseVFS):
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    async def _everywhere(self, path: PathSpec) -> list[str]:
-        """The machines holding a directory, every one of which a removal
-        reaches.
+    async def _everywhere(self, path: PathSpec) -> list[Holder]:
+        """The machines holding a name, every one of which a removal or a
+        rename reaches.
 
         Args:
-            path (PathSpec): the directory.
+            path (PathSpec): the name.
+
+        Raises:
+            FileNotFoundError: no machine holds it.
         """
         held = await place.holders(self.accessor, path)
         if not held:
             raise enoent(path)
         return held
 
-    async def _same_machine(self, src: PathSpec, dst: PathSpec) -> str:
-        """The machine a copy runs on: the source's, when the copy lands
-        there too; EXDEV otherwise, so the bytes move through Mirage as
-        between two mounts.
+    async def _refuse_hidden(self, machine: str, path: PathSpec) -> None:
+        """Refuse a name a machine's own links lead to one the session
+        hides, before a program of the machine's writes through them.
 
         Args:
-            src (PathSpec): the source.
-            dst (PathSpec): the copy.
+            machine (str): the machine the write runs on.
+            path (PathSpec): the name written.
+
+        Raises:
+            FileNotFoundError: the name leads to a hidden one there.
         """
-        machine = await place.holder(self.accessor, src)
-        if await place.lands(self.accessor, dst) != machine:
-            raise exdev(dst)
-        return machine
+        if machine in await _hidden_on(self.accessor, path):
+            raise enoent(path)
+
+    async def _lacking_folder(
+        self, machines: list[str], path: PathSpec
+    ) -> list[str]:
+        """The machines a new name lands on that must make its folder
+        first, since only other machines hold it; none where no machine
+        holds the folder, whose lack the op reports.
+
+        Args:
+            machines (list[str]): the machines the name lands on.
+            path (PathSpec): the new name.
+
+        Raises:
+            NotADirectoryError: the copy shown of the folder is a file,
+                whatever an older folder on another machine is.
+        """
+        if not self.accessor.several:
+            return []
+        held = await place.holders(self.accessor, _folder_of(path))
+        if held and not place.chosen(self.accessor, held).folder:
+            raise enotdir(path)
+        folders = [one.machine for one in held if one.folder]
+        return [m for m in machines if folders and m not in folders]

@@ -18,19 +18,19 @@ import { singleQuote } from '../../utils/quote.ts'
 import { checked } from './utils.ts'
 
 /**
- * The space of the filesystem the root sits on, on the default machine,
- * from its `df -Pk`; UNKNOWN when it cannot say.
+ * The space of the filesystem the root sits on, on one machine, from its
+ * `df -Pk`; UNKNOWN when it cannot say.
  *
  * @param accessor the mount's machines.
+ * @param machine the machine asked.
  * @param path the mount root, for an error.
  */
-export async function capacity(accessor: MachineAccessor, path: PathSpec): Promise<CapacityResult> {
-  const out = await checked(
-    accessor,
-    accessor.defaultMachine,
-    `df -Pk -- ${singleQuote(accessor.root)}`,
-    path,
-  )
+export async function capacity(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<CapacityResult> {
+  const out = await checked(accessor, machine, `df -Pk -- ${singleQuote(accessor.root)}`, path)
   const lines = new TextDecoder().decode(out).trim().split('\n')
   const fields = lines.length > 1 ? (lines[lines.length - 1] ?? '').split(/\s+/) : []
   const [total, used, available] = fields.slice(1, 4)

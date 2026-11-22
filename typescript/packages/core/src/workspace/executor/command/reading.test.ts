@@ -23,6 +23,8 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import { linePaths, readLine } from './reading.ts'
 import { classifyParts } from '../../expand/classify/index.ts'
 import { lineFacts } from '../../lookup/index.ts'
+import '../../../clis/office.ts'
+import '../../../clis/pdf.ts'
 
 const SETUP = [
   'mkdir -p /workspace/outbox',

@@ -23,3 +23,8 @@ export const KINDS: Readonly<Record<string, FileType>> = {
   p: FileType.FIFO,
   c: FileType.CHAR_DEVICE,
 }
+
+// A kernel's own view of its machine. No machine's copy of a name under
+// these is the newer one, so each answers for the machine the command is
+// about.
+export const KERNEL_VIEWS = ['/proc', '/sys']

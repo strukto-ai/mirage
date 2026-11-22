@@ -178,6 +178,7 @@ from mirage.workspace.lookup.machine import (
     bin_program,
     link_machine,
     operand_machine,
+    preferred_machine,
     program_machine,
     several_machines,
 )
@@ -1015,7 +1016,10 @@ async def _run_argv(
                 return
             try:
                 context.frame.routing = routed(
-                    registry.runtime_entries, here.bindings, route.machine
+                    registry.runtime_entries,
+                    here.bindings,
+                    route.machine,
+                    here.machine,
                 )
             except ValueError as exc:
                 raise RouteError(str(exc)) from exc
@@ -1162,14 +1166,21 @@ async def _run_argv(
 
     # A name the command's redirects make lands on the machine its
     # program runs on (``python gen.py > /tmp/out``), or the machine a
-    # command runs on whole because its files are that machine's
-    # (``/tmp/tool > /tmp/out``), which matters only over several
-    # machines, so only then is it asked before the redirects open, once
-    # the command is admitted: a refused one never reaches a machine.
-    machine = _stage_machine(
+    # program named by its path runs on because the file is that
+    # machine's (``/tmp/tool > /tmp/out``), which matters only over
+    # several machines, so only then is it asked before the redirects
+    # open, once the command is admitted: a refused one never reaches a
+    # machine. A command of Mirage's own that a machine runs whole
+    # (``cat > /tmp/out``) is no program of that machine: what it
+    # writes goes where Mirage's own writes go.
+    machine = _running_machine(
         name, argv.args, session, registry, context.frame.routing
     )
-    if (runner is not None or redirects) and several_machines(registry):
+    if (
+        "/" in name
+        and (runner is not None or redirects)
+        and several_machines(registry)
+    ):
         denied = await guard((), stdin)
         if denied is not None:
             return denied
@@ -1179,9 +1190,22 @@ async def _run_argv(
             if held is None or held.runtime is None
             else held.runtime.machine
         )
+    preferred = await preferred_machine(
+        session,
+        registry,
+        context.frame.routing,
+        context.frame.stdin_writer,
+        deps.namespace,
+        deps.dispatch,
+    )
+    caller = current_caller()
     staged = (
-        bind_caller(current_caller().changed({"machine": machine}))
-        if machine != current_caller().machine
+        bind_caller(
+            caller.changed(
+                {"machine": machine, "preferred_machine": preferred}
+            )
+        )
+        if (machine, preferred) != (caller.machine, caller.preferred_machine)
         else None
     )
     try:
@@ -1224,7 +1248,7 @@ async def _matched(
     )
 
 
-def _stage_machine(
+def _running_machine(
     name: str,
     args: Sequence[str],
     session: SessionState,
@@ -1894,7 +1918,7 @@ async def run_resolved(
             # its programs follow them.
             if routing is None:
                 return None
-            machine = await link_machine(
+            on_machine = await link_machine(
                 [
                     (
                         plan.link_abs,
@@ -1911,16 +1935,25 @@ async def run_resolved(
                 session,
                 registry,
                 namespace.session_links(session),
+                all(
+                    plan.link_typed.startswith("/")
+                    and (
+                        flags.symbolic
+                        or word_text(plan.source).startswith("/")
+                    )
+                    for plan in plans
+                ),
             )
-            if machine is None:
+            if on_machine is None:
                 return None
             return await run_external(
                 argv,
                 None,
                 session,
                 registry,
-                machine,
+                on_machine.runtime,
                 sink,
+                on_machine.cwd,
             )
 
         return await _run_namespace_program(

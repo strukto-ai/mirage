@@ -19,6 +19,7 @@ import {
   bindCaller,
 } from '../context/session_context.ts'
 import { LostPaths, OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS, type Recorder } from './record.ts'
+import type { ProcessId } from '../execution/types.ts'
 import type { PathSpec } from '../types.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 
@@ -249,6 +250,22 @@ export function startOp(): OpTimer {
   return new OpTimer(currentCaller().recording?.clock ?? SYSTEM_CLOCK)
 }
 
+// Each process's id as its records name it, written once: a record per op
+// otherwise held its own copy, and a clone makes tens of thousands of them.
+const PROCESS_TEXT = new WeakMap<ProcessId, string>()
+
+/** The current process's id as its records name it, null outside one. */
+function processText(): string | null {
+  const id = currentProcessId()
+  if (id === null) return null
+  let text = PROCESS_TEXT.get(id)
+  if (text === undefined) {
+    text = id.toString()
+    PROCESS_TEXT.set(id, text)
+  }
+  return text
+}
+
 /**
  * Close `timer` and build the finished record.
  *
@@ -277,7 +294,7 @@ export function finishRecord(
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
-    process: currentProcessId()?.toString() ?? null,
+    process: processText(),
   })
 }
 
@@ -334,7 +351,7 @@ export function recordStream(
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
-    process: currentProcessId()?.toString() ?? null,
+    process: processText(),
   })
   rec.complete = false
   state.records.push(rec)

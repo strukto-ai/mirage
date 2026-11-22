@@ -907,7 +907,7 @@ async function forkSubshell(
     { jobTable: subTable },
   )
   if (sink !== undefined) subshellDeps.sink = sink
-  const child = childContext(context)
+  const child = childContext(context, null, stdin)
   const asProgram = isProgramInvocation(session)
   let subshellRan: RedirectResult | undefined
   // A body that is one nested shell (`( sh -c ... )`) is the subshell

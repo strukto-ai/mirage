@@ -36,7 +36,14 @@ import { DEFAULT_BRANCH } from './constants.ts'
 import { BRANCH_PREFIX, detachHead, setHead, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { openRepo } from './repo.ts'
 import { commitEntries } from './tree.ts'
-import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
+import {
+  checkDepth,
+  isLocal,
+  openTransport,
+  transportDepth,
+  type Advertisement,
+  type Transport,
+} from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 import { SYSTEM_IDS } from '../../../../utils/ids.ts'
@@ -44,29 +51,7 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
-// How C's atoi and strtol(..., 0) read a number, which is how git reads
-// `--depth`: atoi for the positive check, strtol for the value.
-const ATOI = /^\s*([+-]?\d+)/
-const STRTOL = /^\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)$/
 const LOCAL_DEPTH_WARNING = 'warning: --depth is ignored in local clones; use file:// instead.\n'
-
-/** Refuse a `--depth` git refuses before cloning: one C's atoi reads below one. */
-export function checkDepth(text: string): void {
-  const found = ATOI.exec(text)?.[1]
-  if (found === undefined || Number.parseInt(found, 10) < 1)
-    throw new GitError(`depth ${text} is not a positive number`)
-}
-
-/**
- * `--depth` as the transport reads it, C's strtol in base 0; the value is past
- * `checkDepth`, so it is never negative.
- */
-export function transportDepth(text: string): number {
-  const digits = STRTOL.exec(text)?.[1]
-  if (digits === undefined) throw new GitError(`transport: invalid depth option '${text}'`)
-  if (/^0[xX]/.test(digits)) return Number.parseInt(digits.slice(2), 16)
-  return Number.parseInt(digits, digits.startsWith('0') ? 8 : 10)
-}
 
 /** The directory git names a clone after when none is given. */
 export function defaultDirectory(url: string): string {

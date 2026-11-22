@@ -22,7 +22,7 @@ import type { FsCondition } from '../../errors/types.ts'
 // find's type letter, mode, size, times, owner and group ids, link count,
 // 512-byte blocks and relative path.
 export const FIND = 'env LC_ALL=C find -L'
-export const TREE_FORMAT = '%y %m %s %T@ %A@ %U %G %n %b %P\\0'
+export const ENTRY_FORMAT = '%y %m %s %T@ %A@ %U %G %n %b %P\\0'
 
 export const WC = 'env LC_ALL=C wc -l'
 

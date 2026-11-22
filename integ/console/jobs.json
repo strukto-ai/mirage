@@ -608,7 +608,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 & p=$!; sleep 0.4; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $? ) 2>/dev/null",
+      "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 & p=$!; until [ \"$(ps -o stat= -p $p | cut -c1)\" = T ]; do sleep 0.05; done; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $? ) 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "T\n137\n",
@@ -638,7 +638,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 > /data/c-to & p=$!; sleep 0.4; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?; rm /data/c-to ) 2>/dev/null",
+      "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 > /data/c-to & p=$!; until [ \"$(ps -o stat= -p $p | cut -c1)\" = T ]; do sleep 0.05; done; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?; rm /data/c-to ) 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "T\n137\n",

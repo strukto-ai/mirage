@@ -358,13 +358,16 @@ async def handle_df(
             )
 
     # GNU resolves the mutually overriding size flags last-wins, so -h/-H
-    # (human) or -k/-B (block) is chosen by whichever appears last.
-    order = fl.typed_order("human_readable", "si", "k", "block_size")
+    # (human) or -k/-m/-B (block) is chosen by whichever appears last.
+    order = fl.typed_order("human_readable", "si", "k", "m", "block_size")
     last_fmt = order[-1] if order else None
     si = last_fmt == "si"
     human = last_fmt in ("human_readable", "si")
     if last_fmt == "block_size" and b_parsed is not None:
         block, block_label = b_parsed[0], f"{b_parsed[1]}-blocks"
+    elif last_fmt == "m":
+        block = 1024**2
+        block_label = "1048576-blocks" if posix else "1M-blocks"
     else:
         block = 1024
         block_label = "1024-blocks" if posix else "1K-blocks"
@@ -395,7 +398,7 @@ async def handle_df(
     for mount in mounts:
         async with mount.use():
             cap = await mount.vfs.capacity()
-        cells = [mount.vfs.name]
+        cells = [mount.vfs.filesystem()]
         if show_type:
             cells.append(mount.vfs.name)
         cells += _num_cells(cap, human, si, block, inodes)

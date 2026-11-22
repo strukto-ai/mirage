@@ -68,6 +68,19 @@ a workspace from outside.
   install its CLI. One token can serve both.
 - `gh --help` lists a program's groups, `gh issue list --help` its flags and
   `man gh` its manual.
+- `ast-grep`, `gh`, `office`, `pdfinfo` and `pdftotext` carry an engine, so a
+  browser page or a Worker installs each by importing its entry before the
+  workspace loads, and carries only the engines it imports. Python and Node
+  install all of them.
+
+  ```typescript
+  import '@struktoai/mirage-cloudflare/clis/gh' // or @struktoai/mirage-browser/clis/gh
+  import '@struktoai/mirage-cloudflare/clis/ast_grep'
+  import '@struktoai/mirage-cloudflare/clis/office'
+  import '@struktoai/mirage-cloudflare/clis/pdf' // pdfinfo and pdftotext
+  ```
+
+  A config naming one its host did not import fails with the import to add.
 
 ## Supported CLIs
 

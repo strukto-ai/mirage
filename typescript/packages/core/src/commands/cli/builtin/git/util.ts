@@ -432,6 +432,7 @@ export function parseConfigKey(
   if (name === '') throw new error(`key does not contain variable name: ${key}`)
   if (!/^[A-Za-z0-9-]+$/.test(section) || !/^[A-Za-z][A-Za-z0-9-]*$/.test(name))
     throw new error(`invalid key: ${key}`)
+  if (key.slice(first + 1, last).includes('\n')) throw new error(`invalid key (newline): ${key}`)
   return `${section.toLowerCase()}${key.slice(first, last)}.${name.toLowerCase()}`
 }
 
@@ -532,12 +533,18 @@ export function configSection(
 ): string {
   const quoted = name.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
   let text = `[${section} "${quoted}"]\n`
-  for (const [key, value] of pairs) {
-    let body = value.replace(/[\n\t"\\]/g, (ch) => VALUE_ESCAPES[ch] ?? ch)
-    if (value.startsWith(' ') || value.endsWith(' ') || /[;#]/.test(value)) body = `"${body}"`
-    text += `\t${key} = ${body}\n`
-  }
+  for (const [key, value] of pairs) text += `\t${key} = ${configValue(value)}\n`
   return text
+}
+
+/**
+ * A value the way git's config writer spells it: `"`, `\\`, newline and tab
+ * escaped, and the whole quoted when it starts or ends with a space or holds
+ * `;` or `#`.
+ */
+export function configValue(value: string): string {
+  const body = value.replace(/[\n\t"\\]/g, (ch) => VALUE_ESCAPES[ch] ?? ch)
+  return value.startsWith(' ') || value.endsWith(' ') || /[;#\r]/.test(value) ? `"${body}"` : body
 }
 
 /**

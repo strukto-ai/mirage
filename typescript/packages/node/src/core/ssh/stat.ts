@@ -16,7 +16,7 @@ import { eacces, enoent, exdev } from '@struktoai/mirage-core/errors/fs'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
-import { parseTree, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
+import { parseEntries, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
 import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 import { mountedPath, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
@@ -138,7 +138,7 @@ export async function tree(
     console.debug(`ssh tree left to the walk: ${String(error)}`)
     return null
   }
-  const found = status === 0 && err.length === 0 ? parseTree(out) : null
+  const found = status === 0 && err.length === 0 ? parseEntries(out) : null
   if (found === null) return null
   const rows = new Map<string, FileStat>()
   let top = false

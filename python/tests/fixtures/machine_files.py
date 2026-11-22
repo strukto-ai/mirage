@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import itertools
 import posixpath
 import shlex
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.posix.constants import TREE_FORMAT
+from mirage.core.posix.constants import ENTRY_FORMAT
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
@@ -43,13 +44,19 @@ def spec(path: str, prefix: str = "/tmp") -> PathSpec:
     )
 
 
-def holding(*paths: str):
-    """An answer holding ``paths`` as files and every other stat missing."""
+def holding(*paths: str, written: int = 1700000000):
+    """An answer holding ``paths`` as files and every other stat missing.
+
+    Args:
+        paths (str): the files it holds.
+        written (int): when they were written, in epoch seconds.
+    """
+    entry = f"f 644 3 {written} 1700000001 0 50 1 0 \0".encode()
 
     def answer(line, data):
         if "-maxdepth 0" in line:
             if any(f"'{p}'" in line for p in paths):
-                return ok(ROW)
+                return ok(entry)
             return failed(b"find: 'x': No such file or directory\n")
         return ok(b"hi\n")
 
@@ -60,10 +67,15 @@ class FakeFiles:
     """One machine's own files, answering the lines a machine mount sends
     as its POSIX tools would.
 
+    Every write stamps its file from one clock all the machines share,
+    so the copy written last is the same whichever machine is asked.
+
     Args:
         files (dict[str, bytes] | None): the files by absolute path.
         programs (tuple[str, ...]): the programs ``command -v`` finds.
     """
+
+    clock = itertools.count(1)
 
     def __init__(
         self,
@@ -71,6 +83,7 @@ class FakeFiles:
         programs: tuple[str, ...] = (),
     ) -> None:
         self.files = dict(files or {})
+        self.written: dict[str, int] = {}
         self.dirs = {"/", "/tmp", "/dev", "/dev/shm"}
         for path in self.files:
             while (path := posixpath.dirname(path)) not in self.dirs:
@@ -93,11 +106,30 @@ class FakeFiles:
                 break
         return result
 
+    def _stamp(self, path: str) -> None:
+        self.written[path] = next(FakeFiles.clock)
+
     def _row(self, path: str, rel: str) -> bytes:
+        at = self.written.get(path, 0)
         if path in self.dirs:
-            return f"d 755 4096 0 0 0 0 2 8 {rel}\0".encode()
+            return f"d 755 4096 {at} 0 0 0 2 8 {rel}\0".encode()
         size = len(self.files[path])
-        return f"f 644 {size} 0 0 0 0 1 0 {rel}\0".encode()
+        return f"f 644 {size} {at} 0 0 0 1 0 {rel}\0".encode()
+
+    def _move_folder(self, src: str, dst: str) -> RunAnswer:
+        if posixpath.dirname(dst) not in self.dirs:
+            return self._missing("mv", dst)
+        for name in sorted(self.dirs):
+            if name == src or name.startswith(src + "/"):
+                self.dirs.discard(name)
+                self.dirs.add(dst + name[len(src) :])
+        for name in sorted(self.files):
+            if name.startswith(src + "/"):
+                self.files[dst + name[len(src) :]] = self.files.pop(name)
+        for name in sorted(self.written):
+            if name == src or name.startswith(src + "/"):
+                self.written[dst + name[len(src) :]] = self.written.pop(name)
+        return ok()
 
     def _missing(self, tool: str, path: str) -> RunAnswer:
         return failed(
@@ -113,7 +145,7 @@ class FakeFiles:
                 return failed(b"")
             return ok(f"{real}\n".encode())
         if words[:4] == ["env", "LC_ALL=C", "find", "-L"]:
-            assert words[-2:] == ["-printf", TREE_FORMAT], words
+            assert words[-2:] == ["-printf", ENTRY_FORMAT], words
             path = self._real(words[4])
             depth = int(words[6]) if words[5] == "-maxdepth" else None
             if any(path.startswith(f + "/") for f in self.files):
@@ -139,6 +171,7 @@ class FakeFiles:
                 return self._missing("sh", path)
             old = self.files.get(path, b"") if words[1] == ">>" else b""
             self.files[path] = old + (data or b"")
+            self._stamp(path)
             return ok()
         if words[0] == "mkdir":
             path = words[-1]
@@ -174,13 +207,18 @@ class FakeFiles:
             return ok()
         if words[0] in ("mv", "cp"):
             src, dst = words[-2], words[-1]
+            if words[0] == "mv" and src in self.dirs:
+                return self._move_folder(src, dst)
             if src not in self.files:
                 return self._missing(words[0], src)
             if posixpath.dirname(dst) not in self.dirs:
                 return self._missing(words[0], dst)
             self.files[dst] = self.files[src]
+            self.written[dst] = self.written.get(src, 0)
             if words[0] == "mv":
                 del self.files[src]
+            else:
+                self._stamp(dst)
             return ok()
         self.ran.append(shlex.join(words))
         return ok(b"ran\n")

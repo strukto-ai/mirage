@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AST_GREP } from '@struktoai/mirage-core'
+import { AST_GREP } from '@struktoai/mirage-browser/clis/ast_grep'
+import { OFFICE } from '@struktoai/mirage-browser/clis/office'
+import { PDFINFO, PDFTOTEXT } from '@struktoai/mirage-browser/clis/pdf'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
@@ -24,9 +26,6 @@ import {
   buildRuntime,
   JobConsole,
   MountMode,
-  OFFICE,
-  PDFINFO,
-  PDFTOTEXT,
   RAMVFS,
   S3VFS,
   Workspace,

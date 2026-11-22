@@ -57,16 +57,16 @@ is none of them is refused when the workspace is built.
   The path on each machine that becomes the mount root.
 </ResponseField>
 <ResponseField name="defaultMachine" type={"string"}>
-  Where a new name lands when the command writing it runs no program on a machine; unset is the machine that runs the programs nothing in Mirage resolves, else the first.
+  Where a new name lands when nothing says which machine its command is about; unset is the machine that runs the programs nothing in Mirage resolves, else the first.
 </ResponseField>
 {/* generated: config-table machine end */}
 
 ## Behavior
 
 - **Caching:** none; every read and listing asks the machine.
-- **Placement:** on several machines a read goes to the machine holding the
-  name and a new name lands on the machine running the command's program,
-  else on `defaultMachine`. See
+- **Placement:** several machines show as one tree. A name several hold is
+  the copy written last, a removal reaches every machine, and a new name
+  lands where its folder is. See
   [Several machines](/home/setup/machine/machine_files#several-machines).
 - **Commands:** a command whose every path is one machine's own runs on that
   machine whole. See

@@ -106,5 +106,8 @@
   "git clone -b bad odd c3; echo $?; ls -A c3; git -C c3 log --format=%s -1; test -e above.txt || echo absent",
   "git clone -q -b bad odd c4; cd c4 && git reset; echo $?; git ls-files; git reset -q -- fresh; echo $?; git ls-files",
   "git clone -q -b ntfs odd c5; cd c5 && git reset -- .gitmodules; echo $?; git ls-files",
-  "mkdir e6 && git clone -q -b ntfs odd e6; echo $?; ls -A e6"
+  "mkdir e6 && git clone -q -b ntfs odd e6; echo $?; ls -A e6",
+  "git clone -q src f1 && cd f1 && git fetch -q origin topic && git rev-parse FETCH_HEAD && git checkout --detach FETCH_HEAD; echo $?; git status | head -1",
+  "cd f1 && git fetch -q --depth 0 origin topic; echo $?; git fetch -q --depth 1x origin topic; echo $?; git fetch -q --depth; echo $?",
+  "cd f1 && git branch FETCH_HEAD main && git rev-parse FETCH_HEAD && git log -1 --format=%s FETCH_HEAD && git checkout --detach FETCH_HEAD; echo $?; git status | head -1"
 ]

@@ -26,6 +26,8 @@ export const OWNER_EXECUTE = 0o100
 // entry's own bits are set from, the object type above it being the mount's
 // business rather than the tree's.
 export const PERMISSION_BITS = 0o777
+/** The bits a file renders with while none are set on it, 0666 under the default umask. */
+export const UNSET_PERMISSIONS = 0o644
 // The same mode as `SYMLINK`, in the spelling a tree entry carries. The index
 // records a number and a tree records git's octal string, so both spellings
 // are real here and neither is a stand-in for the other.
@@ -75,8 +77,8 @@ export const FANOUT_LEN = 2
 // rebuilt once, which also bounds the delta bases a stored pack's indexing
 // keeps.
 export const PACK_BLOCK = 1 << 16
-export const PACK_BLOCKS = 32
-export const PACK_CACHE_BYTES = 8 * 1024 * 1024
+export const PACK_BLOCKS = 16
+export const PACK_CACHE_BYTES = 2 * 1024 * 1024
 
 // The commits a shallow repository holds without their parents, and the label
 // git decorates each of them with.
@@ -90,6 +92,10 @@ export const TERMINATED_KINDS: readonly string[] = ['oneline', 'tformat']
 
 // The rules a short ref name is tried against, in the order gitrevisions(7)
 // lists them.
+// The names git reads as a file in the git directory rather than under
+// refs/: FETCH_HEAD, ORIG_HEAD, MERGE_HEAD and their kind.
+export const ROOT_REF = /^[A-Z_]+_HEAD$/
+
 export const DWIM_RULES = [
   '{}',
   'refs/{}',

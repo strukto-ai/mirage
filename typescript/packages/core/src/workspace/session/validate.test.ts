@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
+import '../../clis/gh.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'

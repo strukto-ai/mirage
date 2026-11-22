@@ -17,7 +17,7 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.posix.stat import parse_tree, tree_command
+from mirage.core.posix.stat import parse_entries, tree_command
 from mirage.core.posix.utils import join_root
 from mirage.core.ssh.constants import SFTP_KINDS
 from mirage.errors.fs import eacces, enoent, exdev
@@ -142,7 +142,7 @@ async def tree(
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh tree left to the walk: %s", exc)
         return None
-    found = parse_tree(out) if status == 0 and not err else None
+    found = parse_entries(out) if status == 0 and not err else None
     if found is None:
         return None
     rows: dict[str, FileStat] = {}

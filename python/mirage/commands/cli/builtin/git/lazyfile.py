@@ -34,13 +34,13 @@ from mirage.workspace.files import Files
 class LazyFile:
     """A read-only seekable file over a mount path, fetched in blocks.
 
-    dulwich reaches a packfile through nothing but ``seek`` and ``read``,
-    so a packfile living in a mount never has to be pulled whole: reads
-    are served from a block cache and only the blocks a read lands in are
-    fetched, the last few kept, so a walk over the whole pack holds a few
-    blocks rather than the pack. Pulling one commit out of a 400 MB pack
-    costs a block or two, which is the same trick git plays with mmap
-    windows, minus the kernel doing it for us.
+    Reads are served from a block cache and only the blocks a read lands
+    in are fetched, the last few kept, so a walk over the whole file holds
+    a few blocks rather than the file: the same trick git plays with mmap
+    windows, minus the kernel doing it for us. dulwich once read a
+    packfile through nothing but ``seek`` and ``read``, which made
+    pulling one commit out of a 400 MB pack cost a block or two; the
+    version locked now reads the whole window when it opens a pack.
 
     Blocking by design. The dulwich object store is synchronous, so the
     caller runs it on a worker thread and each fetch is marshalled back

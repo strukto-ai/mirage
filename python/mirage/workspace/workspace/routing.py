@@ -421,7 +421,10 @@ class Router:
         """
         try:
             return routed(
-                self._runtimes.entries, decision.bindings, route.machine
+                self._runtimes.entries,
+                decision.bindings,
+                route.machine,
+                decision.machine,
             )
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
@@ -661,6 +664,7 @@ class Router:
             RouteDecision(
                 bindings={**self._registry.runtime_bindings, **overlay},
                 fallback=catch_all(entries),
+                machine=machine,
             ),
             machine,
         )

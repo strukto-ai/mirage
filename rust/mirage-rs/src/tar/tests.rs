@@ -174,6 +174,89 @@ fn strip_components_counts_from_the_name_without_its_slashes() {
 }
 
 #[test]
+fn one_top_level_puts_members_under_one_folder() {
+    // GNU tar 1.35 on debian:stable-slim: a member already under the
+    // folder is not put under it twice.
+    let tar = [member("web/x", (0, b"")), archive("other/o", (0, b""))].concat();
+    let mut host = Host::default();
+    let typed = json!([
+        ["file", "logs.tar.gz"],
+        ["extract", ""],
+        ["one_top_level", "web"]
+    ]);
+    let (status, _, _) = read(&mut host, &tar, json!({"mode": "extract", "typed": typed}));
+    assert_eq!(status, 0);
+    assert_eq!(host.files["/out/web/x"], b"hello\n");
+    assert_eq!(host.files["/out/web/other/o"], b"hello\n");
+    let mut host = Host::default();
+    let typed = json!([
+        ["file", "d/logs.tar.gz"],
+        ["extract", ""],
+        ["one_top_level", ""]
+    ]);
+    let (status, _, _) = read(&mut host, &tar, json!({"mode": "extract", "typed": typed}));
+    assert_eq!(status, 0);
+    assert_eq!(host.files["/out/logs/web/x"], b"hello\n");
+    let mut host = Host::default();
+    let typed = json!([["extract", ""], ["one_top_level", "/abs"]]);
+    let (status, _, _) = read(&mut host, &tar, json!({"mode": "extract", "typed": typed}));
+    assert_eq!(status, 0);
+    assert_eq!(host.files["/abs/web/x"], b"hello\n");
+}
+
+#[test]
+fn one_top_level_takes_a_name_left_empty() {
+    // GNU tar 1.35 on debian:stable-slim: `./`, or a name
+    // --strip-components empties, is the folder itself.
+    let mut host = Host::default();
+    let members = json!([{"name": "./", "kind": "dir", "mtime": 978_307_200}]);
+    let config = json!({"archive": "a.tar", "output": "a.tar", "members": members});
+    assert_eq!(run(&mut host, config), (0, String::new(), String::new()));
+    let tar = host.files["a.tar"].clone();
+    let typed = json!([["extract", ""], ["one_top_level", "top"]]);
+    let options = json!({"mode": "extract", "typed": typed});
+    assert_eq!(read(&mut host, &tar, options).0, 0);
+    assert_eq!(host.mtimes["/out/top"], 978_307_200);
+    let mut host = Host::default();
+    let typed = json!([
+        ["extract", ""],
+        ["one_top_level", "top"],
+        ["strip_components", "2"]
+    ]);
+    let tar = archive("x/f", (0, b""));
+    let options = json!({"mode": "extract", "typed": typed});
+    assert_eq!(read(&mut host, &tar, options).0, 0);
+    assert_eq!(host.files["/out/top"], b"hello\n");
+}
+
+#[test]
+fn one_top_level_names_the_folder_after_the_archive() {
+    // GNU tar 1.35 on debian:stable-slim, `tar -xf NAME --one-top-level`.
+    for (name, top) in [
+        ("a.tar", Some("a")),
+        ("a.tar.gz", Some("a")),
+        ("a.tgz", Some("a")),
+        ("a.taZ", Some("a")),
+        ("a.tar.lzma", Some("a")),
+        ("a.gz", Some("a")),
+        ("x.tar.tar", Some("x.tar")),
+        ("dir.d/weird.name.tar", Some("weird.name")),
+        ("noext", None),
+        ("a.tz", None),
+        ("a.tar.foo", None),
+        ("A.TAR", None),
+        (".tar", None),
+        ("-", None),
+    ] {
+        assert_eq!(
+            super::options::top_of(name.as_bytes()).as_deref(),
+            top.map(str::as_bytes),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn a_pax_record_longer_than_its_header_ends_the_records() {
     let mut pax = header::Pax::default();
     pax.read(b"6 a=b\n18446744073709551615 x=y\n");

@@ -136,14 +136,28 @@ export function programRuntime(
   session: SessionState,
   routing: RouteDecision<Runtime>,
 ): Runtime | null | undefined {
-  let head = words[0] ?? ''
-  let args: readonly string[] = words.slice(1).filter((word) => word !== null)
-  if (args.length === words.length - 1)
-    [head, args] = unwrapped(head, args, session, registry, routing)
+  const head = programHead(registry, words, session, routing)
   if (Object.hasOwn(routing.bindings, head)) return routing.bindings[head]
   if (lookup(head, session, registry, routing) === Consumer.EXTERNAL)
     return routing.bindings[EXTERNAL_COMMANDS]
   return routing.fallback
+}
+
+/**
+ * The word naming the program a command's words run: the first, or the one
+ * a chain of wrappers Mirage runs comes to (`nice ./tool`), when every word
+ * is known before it runs. Mirrors Python's `program_head`.
+ */
+export function programHead(
+  registry: MountRegistry,
+  words: readonly (string | null)[],
+  session: SessionState,
+  routing: RouteDecision<Runtime>,
+): string {
+  const head = words[0] ?? ''
+  const args = words.slice(1).filter((word) => word !== null)
+  if (args.length !== words.length - 1) return head
+  return unwrapped(head, args, session, registry, routing)[0]
 }
 
 /**

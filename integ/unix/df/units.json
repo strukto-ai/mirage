@@ -6,14 +6,16 @@
       "targets": [
         "ram"
       ],
-      "command": "df -k /data",
+      "command": "df -k /data; df -m /data; df -Pm /data",
       "expect": {
         "exit": 0,
-        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\n",
+        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\nFilesystem     1M-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\nFilesystem     1048576-blocks Used Available Capacity Mounted on\nram                         -    -         -        - /data\n",
         "stderr": ""
       },
       "flags": [
-        "k"
+        "k",
+        "m",
+        "P"
       ]
     },
     {

@@ -116,6 +116,7 @@ _TYPED = (
     "owner",
     "group",
     "transform",
+    "absolute_names",
 )
 _MATCHING = (
     "exclude",
@@ -157,6 +158,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
         )
         for name, text in fl.texts(*_TYPED)
     )
+    top = None
+    for _, value in fl.occurrences("one_top_level"):
+        top = "" if value is True else value or None
+    if isinstance(top, str):
+        typed += (("one_top_level", top),)
     try:
         open_stream("tar", {"typed": _typed_config(typed)})
     except StreamRefusal as refusal:

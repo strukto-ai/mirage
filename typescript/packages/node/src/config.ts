@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import './clis/index.ts'
 import type {
   PolicyMethod,
   ProfileScript,

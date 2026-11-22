@@ -36,6 +36,7 @@ from mirage.commands.cli.builtin.git.constants import (
     FANOUT_LEN,
     IDX_SUFFIX,
     OBJECTS_DIR,
+    PACK_CACHE_BYTES,
     PACK_DIR,
     SHALLOW_FILE,
 )
@@ -246,8 +247,8 @@ class VfsObjectStore(PackCapableObjectStore):
     Loose objects are fetched by id when something asks for them, so a
     repository with thousands of them costs nothing to open. A pack
     contributes its index, which says whether an object is here and
-    where it sits; the packfile itself is a window that fetches only the
-    blocks a read lands in.
+    where it sits, and its packfile, which dulwich reads whole when the
+    store opens it (see ``load_packs``).
 
     Being lazy means the store reflects the backend as it is now rather
     than as it was when the store was built, which is also what git does.
@@ -391,11 +392,14 @@ async def load_packs(
     """Open every packfile under ``.git/objects/pack``.
 
     The index is read whole, because dulwich unpacks it through the
-    buffer protocol and it is the small half. The packfile is opened as
-    a lazy window instead: dulwich reaches pack data through nothing but
-    seek and read, so a lookup fetches the blocks it lands in rather than
-    the whole file. A backend that cannot report a size has to be read
-    whole, which is correct but costs what this exists to avoid.
+    buffer protocol and it is the small half. The packfile is handed
+    over as a lazy window, but dulwich reads pack data whole when it
+    opens a pack, mapping a real file and reading any other end to end,
+    so the window is read through once rather than block by block. A
+    backend that cannot report a size is read up front instead. The
+    objects dulwich resolves are cached within the same budget as the
+    TypeScript bridge's, not dulwich's 96 MiB default, which a checkout
+    otherwise fills with blobs it has already written.
 
     Args:
         vfs (Files): the session's files.
@@ -415,14 +419,26 @@ async def load_packs(
         size = (await vfs.stat(pack_path)).size
         if size is None:
             raw = await read_file(vfs, pack_path)
-            data = PackData.from_file(BytesIO(raw), SHA1, len(raw))
+            data = PackData(
+                stem,
+                SHA1,
+                file=BytesIO(raw),
+                size=len(raw),
+                delta_base_cache_limit=PACK_CACHE_BYTES,
+            )
         else:
             # Cast because LazyFile implements the four methods dulwich
             # actually calls on pack data (read, seek, tell, close) and
             # not the rest of IO[bytes], most of which is writing and
             # means nothing for a read-only window.
             window = cast(IO[bytes], LazyFile(vfs, pack_path, size, loop))
-            data = PackData.from_file(window, SHA1, size)
+            data = PackData(
+                stem,
+                SHA1,
+                file=window,
+                size=size,
+                delta_base_cache_limit=PACK_CACHE_BYTES,
+            )
         packs.append(Pack.from_objects(data, index))
     return packs
 

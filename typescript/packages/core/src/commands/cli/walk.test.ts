@@ -17,6 +17,7 @@ import { ScriptSource } from '../../runtime/types.ts'
 import { CLI, CLIHandler } from './types.ts'
 import { Argument, CommandSpec, UsageStyle } from '../spec/types.ts'
 import { parseCommand } from '../spec/parser.ts'
+import '../../clis/gh.ts'
 import { cliSpecFor } from './specs.ts'
 import {
   envNames,

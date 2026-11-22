@@ -902,6 +902,14 @@ export interface VfsContext {
    * (`sessionId`, `cwd`). Filled when a method is asked.
    */
   caller?: PolicyCaller
+  /**
+   * The machine whose files the call acts on, by its name under
+   * `machines:`, as far as the mount tells before the call runs: the one
+   * machine the mount shows, else the machine the running command is
+   * about. Null for a mount that is no machine's files, and where only the
+   * call itself finds which machine holds the name.
+   */
+  machine?: string | null
 }
 
 /**

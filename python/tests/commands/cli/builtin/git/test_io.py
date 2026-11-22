@@ -20,6 +20,7 @@ from mirage.commands.cli.builtin.git.io import (
     refuse_mount,
     remove_empty_parents,
     remove_tree,
+    restore_entry,
 )
 from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
 from mirage.utils.hidden import classify_paths
@@ -266,3 +267,67 @@ async def test_pruning_empty_parents_takes_an_ordinary_directory():
         REPO,
     )
     assert ("rmdir", "/repo/docs") in calls.ops
+
+
+class Modes:
+    """A dispatcher holding a file at ``/repo/slot`` with the bits it was
+    given, or nothing there, under directories; it records each setattr.
+
+    Args:
+        present (bool): a file stands at the path.
+        mode (int | None): the bits set on it, None for none.
+    """
+
+    def __init__(self, present: bool, mode: int | None) -> None:
+        self.present = present
+        self.mode = mode
+        self.set: list[int] = []
+
+    async def __call__(self, op: str, path, **kwargs):
+        """Answer one op.
+
+        Args:
+            op (str): the op name.
+            path (PathSpec): the path it is asked for.
+            **kwargs (object): the call's arguments.
+        """
+        where = path.virtual
+        if op == "stat":
+            if where != "/repo/slot":
+                name = where.rsplit("/", 1)[-1]
+                return FileStat(name=name, type=FileType.DIRECTORY), None
+            if not self.present:
+                raise FileNotFoundError(where)
+            return FileStat(
+                name="slot", type=FileType.FILE, mode=self.mode
+            ), None
+        if op == "write":
+            self.present = True
+        if op == "setattr":
+            self.set.append(kwargs["mode"])
+            self.mode = kwargs["mode"]
+            return {}, None
+        return None, None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "present, had, mode, expected",
+    [
+        (False, None, 0o100644, []),
+        (False, None, 0o100755, [0o755]),
+        (True, None, 0o100644, []),
+        (True, 0o755, 0o100644, [0o644]),
+        (True, 0o644, 0o100755, [0o755]),
+        (True, 0o755, 0o100755, []),
+    ],
+)
+async def test_restoring_an_entry_sets_only_bits_that_change(
+    present, had, mode, expected
+):
+    # A checkout writes thousands of files: the setattr after each runs
+    # only when it changes the bits, a new file rendering 644 and a write
+    # keeping what a file had.
+    calls = Modes(present, had)
+    await restore_entry(files(calls), SLOT, mode, b"x\n")
+    assert calls.set == expected

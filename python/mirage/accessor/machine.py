@@ -68,6 +68,11 @@ class MachineAccessor(Accessor):
             )
         self._default = chosen or (default if default in names else names[0])
 
+    @property
+    def bound(self) -> bool:
+        """Whether the mount is in a workspace that has machines."""
+        return self._machines is not None and bool(self._machines.names())
+
     def names(self) -> list[str]:
         """The machines the mount shows, in the order ``machines:`` lists
         them.
@@ -78,6 +83,12 @@ class MachineAccessor(Accessor):
         if self._machines is None or not self._machines.names():
             raise ValueError("machine: the mount is not bound to machines")
         return list(self.config.machines or self._machines.names())
+
+    @property
+    def several(self) -> bool:
+        """Whether the mount shows more than one machine, the only case
+        where several can hold one name."""
+        return len(self.names()) > 1
 
     @property
     def default_machine(self) -> str:
