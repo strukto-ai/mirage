@@ -2373,4 +2373,38 @@ describe('JobTable.waitSubstitution', () => {
       expect(joined).toBe(true)
     })
   })
+
+  it("holds its request's join until a child shell's ended substitution settles", async () => {
+    const jt = new JobTable()
+    const child = jt.child()
+    let settle = (): void => undefined
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    await inRequest(async () => {
+      const process = child.processes.start({
+        sessionId: 's',
+        command: 'sub',
+        cwd: PathSpec.fromStrPath('/'),
+        cancel: () => undefined,
+        run: () => Promise.resolve(0),
+        started: (started) => {
+          child.trackSubstitution(started, settled)
+        },
+      })
+      const request = currentRequest()
+      if (request === null) throw new Error('no request')
+      await process.join()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      let joined = false
+      const joining = jt.joinRequest(request).then(() => {
+        joined = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(joined).toBe(false)
+      settle()
+      await joining
+      expect(joined).toBe(true)
+    })
+  })
 })
