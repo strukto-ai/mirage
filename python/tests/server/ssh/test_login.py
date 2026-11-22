@@ -117,7 +117,7 @@ async def test_a_key_bound_to_a_profile_runs_under_it(tmp_path):
     finally:
         await stop_harness(harness)
     assert open_read.stdout == "token\n"
-    assert sealed.exit_status == 1
+    assert sealed.exit_status == 126
     assert "the vault is sealed" in sealed.stderr
 
 

@@ -131,11 +131,14 @@ async def vault_workspace() -> Workspace:
         {"/": (RAMVFS(), MountMode.WRITE)},
         profiles={
             "guarded": {
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "the vault is sealed",
-                        "paths": ["/vault/*"],
+                "mounts": {
+                    "/vault": {
+                        "commands": {
+                            "*": {
+                                "decision": "deny",
+                                "reason": "the vault is sealed",
+                            }
+                        }
                     }
                 }
             }

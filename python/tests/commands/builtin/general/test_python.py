@@ -43,22 +43,19 @@ async def ws_cpython():
 
 
 GUARDED = {
-    "commands": {
-        "python3": {
-            "decision": "deny",
-            "reason": "protected",
-            "paths": ["/secret.py"],
+    "mounts": {
+        "/secret.py": {
+            "commands": {
+                "python3": {"decision": "deny", "reason": "protected"}
+            }
         }
     }
 }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line, shown",
-    [("python3 ./secret.py", "./secret.py")],
-)
-async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
+@pytest.mark.parametrize("line", ["python3 ./secret.py"])
+async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line):
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -69,11 +66,9 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
         await ws.shell("printf 'print(1)\\n' > /secret.py")
         agent = await ws.session("agent", profile="guarded")
         io = await agent.shell(line)
-        assert io.exit_code == 1
+        assert io.exit_code == 126
         assert await io.stdout_str() == ""
-        assert (
-            await io.stderr_str() == f"python3: {shown}: Permission denied\n"
-        )
+        assert await io.stderr_str() == "python3: Permission denied\n"
         assert io.decision is not None and io.decision.reason == "protected"
     finally:
         await ws.close()

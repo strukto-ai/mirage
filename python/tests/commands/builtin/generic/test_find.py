@@ -749,12 +749,9 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
 
 
 _SEALED_DOC = {
-    "commands": {
-        "*": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/s/d/hdir", "/s/d/hdir/*", "/v/ax/hl"],
-        }
+    "mounts": {
+        path: {"commands": {"*": {"decision": "deny", "reason": "sealed"}}}
+        for path in ("/s/d/hdir", "/v/ax/hl")
     }
 }
 _SEALED_SEED = (

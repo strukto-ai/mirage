@@ -288,11 +288,9 @@ async def test_all_refuses_an_unreadable_file_in_git_words(
     await git_rw.set_session_profile(
         git_rw.default_session_id,
         {
-            "commands": {
-                "*": {
-                    "decision": "deny",
-                    "reason": "sealed",
-                    "paths": ["/repo/a.txt"],
+            "mounts": {
+                "/repo/a.txt": {
+                    "commands": {"*": {"decision": "deny", "reason": "sealed"}}
                 }
             }
         },

@@ -200,18 +200,18 @@ async def test_a_path_rule_refuses_the_stand_ins_through_a_link():
         await ws.set_session_profile(
             ws.default_session_id,
             {
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/m/f"],
+                "mounts": {
+                    "/m/f": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
                     }
                 }
             },
         )
         for line in ("head -n 2 /m/l", "tail -n 1 /m/l", "wc -l /m/l"):
             refused = await ws.shell(line)
-            assert refused.exit_code == 1
+            assert refused.exit_code == 126
             assert b"Permission denied" in (refused.stderr or b"")
         assert vfs.asked == []
     finally:

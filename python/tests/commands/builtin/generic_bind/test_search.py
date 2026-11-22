@@ -131,16 +131,14 @@ def _run(
             session = None
             if hide or deny:
                 session = "agent"
-                sealed = {
-                    "decision": "deny",
-                    "reason": "sealed",
-                    "paths": list(deny),
-                }
+                sealed = {"decision": "deny", "reason": "sealed"}
                 ws.create_session(
                     session,
                     profile={
                         "paths": {"hide": list(hide)},
-                        **({"commands": {"*": sealed}} if deny else {}),
+                        "mounts": {
+                            path: {"commands": {"*": sealed}} for path in deny
+                        },
                     },
                 )
             result = await ws.shell(line, session_id=session)
@@ -416,7 +414,7 @@ def test_a_path_rule_below_the_walk_keeps_greps_answer(line):
     # The dispatcher asks no search below the rule and judges each line
     # search as a read of its file, so a sealed file is reported as the
     # plain walk reports it.
-    deny = ("/d/sub/*",)
+    deny = ("/d/sub",)
     assert _run(SearchRAM(), line, deny=deny) == _run(
         RAMVFS(), line, deny=deny
     )
