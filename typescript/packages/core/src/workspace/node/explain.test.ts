@@ -560,7 +560,8 @@ describe('explain', () => {
           ['f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
           ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
           ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
-          ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
+          ['f; f() { ls; }', 0, '', 'f: Permission denied\n'],
+          ['g() { f; }; f() { ls; }; g', 0, 'f.txt\n', ''],
           ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
         ] as const
       ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),

@@ -851,7 +851,8 @@
     {"op": "explain", "session": "kept", "command": "f() { ls; }; f", "expect": {"value": {"outcome": "allow", "exit_code": 0, "stderr": ""}}},
     {"op": "exec", "session": "kept", "command": "f() { cat f.txt; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "f() { ls; }; f; cat f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
-    {"op": "exec", "session": "kept", "command": "g; g() { ls; }", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "g: Permission denied\n", "decision": "kept"}}}
+    {"op": "exec", "session": "kept", "command": "h() { k; }; k() { ls; }; h", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "g; g() { ls; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "g: Permission denied\n"}}}
    ]
   },
   {

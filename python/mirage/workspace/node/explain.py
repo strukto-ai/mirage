@@ -736,7 +736,7 @@ async def _judge_words(
         session,
         defined=not intrinsic
         and item.pipeline is not None
-        and name in item.pipeline.functions,
+        and name in item.pipeline.defined,
     )
     # env's command runs in the environment env builds for it, and a
     # nested shell's line in a new shell started from this one.
@@ -925,12 +925,17 @@ def _is_judged(one: Judged) -> bool:
 
 @dataclass(slots=True)
 class _PipelineWalk:
-    """Options may change before the static walk reaches a pipeline."""
+    """Options may change before the static walk reaches a pipeline.
+
+    ``functions`` holds the functions defined before the walk's place,
+    ``defined`` every one the line defines anywhere, a body's included.
+    """
 
     background: bool = False
     options_may_change: bool = False
     guest: bool = False
     functions: frozenset[str] = frozenset()
+    defined: frozenset[str] = frozenset()
 
 
 def _pipeline_walk() -> _PipelineWalk:
@@ -1545,6 +1550,7 @@ def _walked_line(
         frame = root_frame(ast, None)
     if pipeline is None:
         pipeline = _pipeline_walk()
+    pipeline.defined |= _defined_functions(ast)
     if homes is None:
         homes = tilde_homes(session)
     for item in _walk_node(ast, session, homes, frame, pipeline, lost):
@@ -2019,6 +2025,22 @@ def _defines_function(node: Any) -> bool:
             return True
         stack.extend(current.named_children)
     return False
+
+
+def _defined_functions(node: Any) -> frozenset[str]:
+    """The name of every function the node defines anywhere in its tree.
+
+    Args:
+        node (Any): the parsed node to scan.
+    """
+    names: set[str] = set()
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type == "function_definition":
+            names.add(get_function_name(current))
+        stack.extend(current.named_children)
+    return frozenset(names)
 
 
 def _sole_literal_command(
