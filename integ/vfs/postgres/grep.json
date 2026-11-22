@@ -200,9 +200,9 @@
       ],
       "command": "grep -r epsilon /pg/public/tables 2>/dev/null; echo grep=$?; grep -rF epsilon /pg/public/tables 2>/dev/null; echo grepF=$?; rg -F epsilon /pg/public/tables 2>/dev/null; echo rgF=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "exit": 0,
+        "stdout": "grep=2\ngrepF=2\nrgF=2\n",
+        "stderr": ""
       },
       "session": "postgres-deny",
       "session_profiles": {

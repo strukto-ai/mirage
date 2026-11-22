@@ -269,9 +269,9 @@
       "session": "sealed",
       "command": "du /trunc/src 2>/dev/null | grep '/cache$'",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 0,
+        "stdout": "4\t/trunc/src/cache\n",
+        "stderr": ""
       },
       "note": "A truncated GitHub tree uses the generic folder walk: an unreadable subtree keeps its zero-byte directory row and du exits 1, as GNU coreutils 9.7 does."
     },
@@ -284,9 +284,9 @@
       "session": "sealed",
       "command": "find /trunc/src",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "exit": 1,
+        "stdout": "/trunc/src\n/trunc/src/auth\n/trunc/src/auth/__init__.py\n/trunc/src/auth/step_1.py\n/trunc/src/auth/step_2.py\n/trunc/src/auth/step_3.py\n/trunc/src/auth/step_4.py\n/trunc/src/auth/step_5.py\n/trunc/src/auth/step_6.py\n/trunc/src/auth/step_7.py\n/trunc/src/auth/step_8.py\n/trunc/src/cache\n/trunc/src/codec\n/trunc/src/codec/__init__.py\n/trunc/src/codec/step_1.py\n/trunc/src/codec/step_2.py\n/trunc/src/codec/step_3.py\n/trunc/src/codec/step_4.py\n/trunc/src/codec/step_5.py\n/trunc/src/codec/step_6.py\n/trunc/src/codec/step_7.py\n/trunc/src/codec/step_8.py\n/trunc/src/index\n/trunc/src/index/__init__.py\n/trunc/src/index/step_1.py\n/trunc/src/index/step_2.py\n/trunc/src/index/step_3.py\n/trunc/src/index/step_4.py\n/trunc/src/index/step_5.py\n/trunc/src/index/step_6.py\n/trunc/src/index/step_7.py\n/trunc/src/index/step_8.py\n/trunc/src/mount\n/trunc/src/mount/__init__.py\n/trunc/src/mount/step_1.py\n/trunc/src/mount/step_2.py\n/trunc/src/mount/step_3.py\n/trunc/src/mount/step_4.py\n/trunc/src/mount/step_5.py\n/trunc/src/mount/step_6.py\n/trunc/src/mount/step_7.py\n/trunc/src/mount/step_8.py\n/trunc/src/parse\n/trunc/src/parse/__init__.py\n/trunc/src/parse/step_1.py\n/trunc/src/parse/step_2.py\n/trunc/src/parse/step_3.py\n/trunc/src/parse/step_4.py\n/trunc/src/parse/step_5.py\n/trunc/src/parse/step_6.py\n/trunc/src/parse/step_7.py\n/trunc/src/parse/step_8.py\n/trunc/src/query\n/trunc/src/query/__init__.py\n/trunc/src/query/step_1.py\n/trunc/src/query/step_2.py\n/trunc/src/query/step_3.py\n/trunc/src/query/step_4.py\n/trunc/src/query/step_5.py\n/trunc/src/query/step_6.py\n/trunc/src/query/step_7.py\n/trunc/src/query/step_8.py\n/trunc/src/route\n/trunc/src/route/__init__.py\n/trunc/src/route/step_1.py\n/trunc/src/route/step_2.py\n/trunc/src/route/step_3.py\n/trunc/src/route/step_4.py\n/trunc/src/route/step_5.py\n/trunc/src/route/step_6.py\n/trunc/src/route/step_7.py\n/trunc/src/route/step_8.py\n/trunc/src/shell\n/trunc/src/shell/__init__.py\n/trunc/src/shell/step_1.py\n/trunc/src/shell/step_2.py\n/trunc/src/shell/step_3.py\n/trunc/src/shell/step_4.py\n/trunc/src/shell/step_5.py\n/trunc/src/shell/step_6.py\n/trunc/src/shell/step_7.py\n/trunc/src/shell/step_8.py\n/trunc/src/store\n/trunc/src/store/__init__.py\n/trunc/src/store/step_1.py\n/trunc/src/store/step_2.py\n/trunc/src/store/step_3.py\n/trunc/src/store/step_4.py\n/trunc/src/store/step_5.py\n/trunc/src/store/step_6.py\n/trunc/src/store/step_7.py\n/trunc/src/store/step_8.py\n/trunc/src/sync\n/trunc/src/sync/__init__.py\n/trunc/src/sync/step_1.py\n/trunc/src/sync/step_2.py\n/trunc/src/sync/step_3.py\n/trunc/src/sync/step_4.py\n/trunc/src/sync/step_5.py\n/trunc/src/sync/step_6.py\n/trunc/src/sync/step_7.py\n/trunc/src/sync/step_8.py\n/trunc/src/watch\n/trunc/src/watch/__init__.py\n/trunc/src/watch/step_1.py\n/trunc/src/watch/step_2.py\n/trunc/src/watch/step_3.py\n/trunc/src/watch/step_4.py\n/trunc/src/watch/step_5.py\n/trunc/src/watch/step_6.py\n/trunc/src/watch/step_7.py\n/trunc/src/watch/step_8.py\n",
+        "stderr": "find: '/trunc/src/cache': Permission denied\n"
       }
     },
     {
@@ -298,9 +298,9 @@
       "session": "sealed",
       "command": "du -a /trunc/src",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 1,
+        "stdout": "4\t/trunc/src/auth/__init__.py\n4\t/trunc/src/auth/step_1.py\n4\t/trunc/src/auth/step_2.py\n4\t/trunc/src/auth/step_3.py\n4\t/trunc/src/auth/step_4.py\n4\t/trunc/src/auth/step_5.py\n4\t/trunc/src/auth/step_6.py\n4\t/trunc/src/auth/step_7.py\n4\t/trunc/src/auth/step_8.py\n40\t/trunc/src/auth\n4\t/trunc/src/cache\n4\t/trunc/src/codec/__init__.py\n4\t/trunc/src/codec/step_1.py\n4\t/trunc/src/codec/step_2.py\n4\t/trunc/src/codec/step_3.py\n4\t/trunc/src/codec/step_4.py\n4\t/trunc/src/codec/step_5.py\n4\t/trunc/src/codec/step_6.py\n4\t/trunc/src/codec/step_7.py\n4\t/trunc/src/codec/step_8.py\n40\t/trunc/src/codec\n4\t/trunc/src/index/__init__.py\n4\t/trunc/src/index/step_1.py\n4\t/trunc/src/index/step_2.py\n4\t/trunc/src/index/step_3.py\n4\t/trunc/src/index/step_4.py\n4\t/trunc/src/index/step_5.py\n4\t/trunc/src/index/step_6.py\n4\t/trunc/src/index/step_7.py\n4\t/trunc/src/index/step_8.py\n40\t/trunc/src/index\n4\t/trunc/src/mount/__init__.py\n4\t/trunc/src/mount/step_1.py\n4\t/trunc/src/mount/step_2.py\n4\t/trunc/src/mount/step_3.py\n4\t/trunc/src/mount/step_4.py\n4\t/trunc/src/mount/step_5.py\n4\t/trunc/src/mount/step_6.py\n4\t/trunc/src/mount/step_7.py\n4\t/trunc/src/mount/step_8.py\n40\t/trunc/src/mount\n4\t/trunc/src/parse/__init__.py\n4\t/trunc/src/parse/step_1.py\n4\t/trunc/src/parse/step_2.py\n4\t/trunc/src/parse/step_3.py\n4\t/trunc/src/parse/step_4.py\n4\t/trunc/src/parse/step_5.py\n4\t/trunc/src/parse/step_6.py\n4\t/trunc/src/parse/step_7.py\n4\t/trunc/src/parse/step_8.py\n40\t/trunc/src/parse\n4\t/trunc/src/query/__init__.py\n4\t/trunc/src/query/step_1.py\n4\t/trunc/src/query/step_2.py\n4\t/trunc/src/query/step_3.py\n4\t/trunc/src/query/step_4.py\n4\t/trunc/src/query/step_5.py\n4\t/trunc/src/query/step_6.py\n4\t/trunc/src/query/step_7.py\n4\t/trunc/src/query/step_8.py\n40\t/trunc/src/query\n4\t/trunc/src/route/__init__.py\n4\t/trunc/src/route/step_1.py\n4\t/trunc/src/route/step_2.py\n4\t/trunc/src/route/step_3.py\n4\t/trunc/src/route/step_4.py\n4\t/trunc/src/route/step_5.py\n4\t/trunc/src/route/step_6.py\n4\t/trunc/src/route/step_7.py\n4\t/trunc/src/route/step_8.py\n40\t/trunc/src/route\n4\t/trunc/src/shell/__init__.py\n4\t/trunc/src/shell/step_1.py\n4\t/trunc/src/shell/step_2.py\n4\t/trunc/src/shell/step_3.py\n4\t/trunc/src/shell/step_4.py\n4\t/trunc/src/shell/step_5.py\n4\t/trunc/src/shell/step_6.py\n4\t/trunc/src/shell/step_7.py\n4\t/trunc/src/shell/step_8.py\n40\t/trunc/src/shell\n4\t/trunc/src/store/__init__.py\n4\t/trunc/src/store/step_1.py\n4\t/trunc/src/store/step_2.py\n4\t/trunc/src/store/step_3.py\n4\t/trunc/src/store/step_4.py\n4\t/trunc/src/store/step_5.py\n4\t/trunc/src/store/step_6.py\n4\t/trunc/src/store/step_7.py\n4\t/trunc/src/store/step_8.py\n40\t/trunc/src/store\n4\t/trunc/src/sync/__init__.py\n4\t/trunc/src/sync/step_1.py\n4\t/trunc/src/sync/step_2.py\n4\t/trunc/src/sync/step_3.py\n4\t/trunc/src/sync/step_4.py\n4\t/trunc/src/sync/step_5.py\n4\t/trunc/src/sync/step_6.py\n4\t/trunc/src/sync/step_7.py\n4\t/trunc/src/sync/step_8.py\n40\t/trunc/src/sync\n4\t/trunc/src/watch/__init__.py\n4\t/trunc/src/watch/step_1.py\n4\t/trunc/src/watch/step_2.py\n4\t/trunc/src/watch/step_3.py\n4\t/trunc/src/watch/step_4.py\n4\t/trunc/src/watch/step_5.py\n4\t/trunc/src/watch/step_6.py\n4\t/trunc/src/watch/step_7.py\n4\t/trunc/src/watch/step_8.py\n40\t/trunc/src/watch\n448\t/trunc/src\n",
+        "stderr": "du: cannot read directory '/trunc/src/cache': Permission denied\n"
       }
     },
     {
@@ -405,9 +405,9 @@
       "session": "sealed",
       "command": "find /repo/src -path '/repo/src/cache/*'",
       "expect": {
-        "exit": 126,
+        "exit": 1,
         "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "stderr": "find: '/repo/src/cache': Permission denied\n"
       }
     },
     {
@@ -419,9 +419,9 @@
       "session": "sealed",
       "command": "du -s /repo/src",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 1,
+        "stdout": "448\t/repo/src\n",
+        "stderr": "du: cannot read directory '/repo/src/cache': Permission denied\n"
       }
     },
     {
@@ -433,9 +433,9 @@
       "session": "sealed",
       "command": "grep -r cache_step_1 /repo/src",
       "expect": {
-        "exit": 126,
+        "exit": 2,
         "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "stderr": "grep: /repo/src/cache: Permission denied\n"
       }
     },
     {
@@ -447,9 +447,9 @@
       "session": "sealed",
       "command": "rg cache_step_1 /repo/src",
       "expect": {
-        "exit": 126,
+        "exit": 2,
         "stdout": "",
-        "stderr": "rg: Permission denied\n"
+        "stderr": "rg: /repo/src/cache: Permission denied (os error 13)\n"
       }
     },
     {
@@ -461,9 +461,9 @@
       "session": "sealed",
       "command": "find /trunc/src -path '/trunc/src/cache/*'",
       "expect": {
-        "exit": 126,
+        "exit": 1,
         "stdout": "",
-        "stderr": "find: Permission denied\n"
+        "stderr": "find: '/trunc/src/cache': Permission denied\n"
       }
     },
     {
@@ -475,9 +475,9 @@
       "session": "sealed",
       "command": "du -s /trunc/src",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "du: Permission denied\n"
+        "exit": 1,
+        "stdout": "448\t/trunc/src\n",
+        "stderr": "du: cannot read directory '/trunc/src/cache': Permission denied\n"
       }
     },
     {
@@ -489,9 +489,9 @@
       "session": "sealed",
       "command": "grep -r cache_step_1 /trunc/src",
       "expect": {
-        "exit": 126,
+        "exit": 2,
         "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "stderr": "grep: /trunc/src/cache: Permission denied\n"
       }
     },
     {
@@ -503,9 +503,9 @@
       "session": "sealed",
       "command": "rg cache_step_1 /trunc/src",
       "expect": {
-        "exit": 126,
+        "exit": 2,
         "stdout": "",
-        "stderr": "rg: Permission denied\n"
+        "stderr": "rg: /trunc/src/cache: Permission denied (os error 13)\n"
       }
     }
   ]

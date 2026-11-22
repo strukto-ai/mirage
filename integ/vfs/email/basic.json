@@ -869,9 +869,9 @@
       ],
       "command": "grep -rlw Budget /mail/INBOX 2>/dev/null; echo grepw=$?; find /mail/INBOX -name '*Budget*' 2>/dev/null; echo find=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "exit": 0,
+        "stdout": "grepw=2\nfind=1\n",
+        "stderr": ""
       },
       "session": "email-deny",
       "session_profiles": {

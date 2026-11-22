@@ -214,9 +214,9 @@
       ],
       "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo grepw=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo rgw=$?",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "grep: Permission denied\n"
+        "exit": 0,
+        "stdout": "grepw=2\nrgw=2\n",
+        "stderr": ""
       },
       "session": "discord-deny",
       "session_profiles": {
