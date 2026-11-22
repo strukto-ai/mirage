@@ -297,15 +297,36 @@ def program_runtime(
         session (SessionState): shell session (function table).
         routing (RouteDecision): the line's placement.
     """
-    head = str(words[0])
-    args = [word for word in words[1:] if word is not None]
-    if len(args) == len(words) - 1:
-        head, args = _unwrapped(head, args, session, registry, routing)
+    head = program_head(registry, words, session, routing)
     if head in routing.bindings:
         return routing.bindings[head]
     if lookup(head, session, registry, routing) is Consumer.EXTERNAL:
         return routing.bindings.get(EXTERNAL_COMMANDS)
     return routing.fallback
+
+
+def program_head(
+    registry: MountRegistry,
+    words: Sequence[str | None],
+    session: SessionState,
+    routing: RouteDecision[RuntimeIdentity],
+) -> str:
+    """The word naming the program a command's words run: the first, or
+    the one a chain of wrappers Mirage runs comes to (``nice ./tool``),
+    when every word is known before it runs.
+
+    Args:
+        registry (MountRegistry): mount registry (command registration).
+        words (Sequence[str | None]): the program's words, None for one
+            only known when it runs.
+        session (SessionState): shell session (function table).
+        routing (RouteDecision): the line's placement.
+    """
+    head = str(words[0])
+    args = [word for word in words[1:] if word is not None]
+    if len(args) == len(words) - 1:
+        head, _ = _unwrapped(head, args, session, registry, routing)
+    return head
 
 
 def _unwrapped(

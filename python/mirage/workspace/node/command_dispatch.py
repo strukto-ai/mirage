@@ -168,6 +168,7 @@ from mirage.workspace.lookup.constants import (
 from mirage.workspace.lookup.lookup import (
     CliTarget,
     external_target,
+    program_head,
     program_runtime,
     resolve_target,
     runs_as,
@@ -1307,7 +1308,7 @@ async def _pipe_writer_machine(
     """The machine a pipe's writer runs on, placed as it runs, from the
     folder its pipeline started in: by its words, through the wrappers
     Mirage runs (``nice gen | tee log``), and one named by its path on
-    the machine holding that file (``/tmp/tool | tee log``). Asked once
+    the machine holding that file (``nice /tmp/tool | tee log``). Asked once
     for the pipe, so a reader that moves (``gen | (cd /srv; tee log)``)
     or runs many commands asks no more.
 
@@ -1323,7 +1324,7 @@ async def _pipe_writer_machine(
     """
     session = context.session
     registry = deps.registry
-    head = str(fed_by.words[0])
+    head = program_head(registry, fed_by.words, session, routing)
     held: RuntimeIdentity | None = None
     if "/" in head and not (
         await registry.policies.wants_for("pre_vfs", session.session_id)

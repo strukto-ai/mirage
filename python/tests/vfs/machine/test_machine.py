@@ -544,6 +544,15 @@ async def test_a_writer_named_from_its_folder_is_found_from_that_folder():
 
 
 @pytest.mark.asyncio
+async def test_a_wrapped_writer_named_by_its_path_is_found_on_its_machine():
+    a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b)
+    assert (await run(ws, "nice /tmp/tool | tee /tmp/out"))[0] == 0
+    assert ("/tmp/out" in a.files, "/tmp/out" in b.files) == (False, True)
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_what_reads_a_path_named_program_s_pipe_writes_on_its_machine():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)

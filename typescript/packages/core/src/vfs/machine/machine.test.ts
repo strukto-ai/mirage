@@ -541,6 +541,15 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('finds a wrapped writer named by its path on its machine', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const ws = two(a, b)
+    expect((await run(ws, 'nice /tmp/tool | tee /tmp/out'))[0]).toBe(0)
+    expect(['/tmp/out' in texts(a), '/tmp/out' in texts(b)]).toEqual([false, true])
+    await ws.close()
+  })
+
   it("writes on its machine what reads a path-named program's pipe", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })

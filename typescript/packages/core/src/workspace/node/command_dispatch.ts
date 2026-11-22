@@ -127,6 +127,7 @@ import {
 } from '../lookup/constants.ts'
 import {
   externalTarget,
+  programHead,
   programRuntime,
   resolveTarget,
   runsAs,
@@ -1217,7 +1218,7 @@ async function preferredMachine(
  * The machine a pipe's writer runs on, placed as it runs, from the folder
  * its pipeline started in: by its words, through the wrappers Mirage runs
  * (`nice gen | tee log`), and one named by its path on the machine holding
- * that file (`/tmp/tool | tee log`). Asked once for the pipe, so a reader
+ * that file (`nice /tmp/tool | tee log`). Asked once for the pipe, so a reader
  * that moves (`gen | (cd /srv; tee log)`) or runs many commands asks no more.
  * Mirrors Python's `_pipe_writer_machine`.
  *
@@ -1238,7 +1239,7 @@ async function pipeWriterMachine(
 ): Promise<string | null> {
   const { session } = context
   const { registry, namespace, dispatch } = deps
-  const head = fedBy.words[0] ?? ''
+  const head = programHead(registry, fedBy.words, session, routing)
   let held: Runtime | null | undefined = null
   if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
     held = await programMachine(
