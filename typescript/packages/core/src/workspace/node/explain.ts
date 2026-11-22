@@ -295,10 +295,10 @@ export interface Judged {
    */
   readonly session?: SessionState
   /**
-   * The line defines the command's name as a function somewhere, so
-   * whether the word calls it is known only when it runs, and the gate,
-   * not the pass, says whether a tree root's own decision speaks for it
-   * (`isTool`).
+   * The word calls a function the line has defined where the word runs
+   * (`withCalls`), or it is a word such a call's arguments spell, which
+   * never runs as written; either way the gate, which sees the call, says
+   * whether a tree root's own decision speaks for it (`isTool`).
    */
   readonly defined?: boolean
 }
@@ -629,7 +629,6 @@ async function* judgeWords(
     unread,
     ctx,
     session,
-    defined: !intrinsic && item.pipeline?.defined.has(name) === true,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -731,16 +730,11 @@ function seeded(
   return forked
 }
 
-/**
- * `functions` holds the functions defined before the walk's place,
- * `defined` every one the line defines anywhere, a body's included.
- */
 interface PipelineWalk {
   readonly wholeLine: boolean
   readonly background: boolean
   optionsMayChange: boolean
   functions: ReadonlySet<string>
-  defined: ReadonlySet<string>
 }
 
 /** Detect option edits the walk cannot assume ran, or successfully changed the shell. */
@@ -796,7 +790,6 @@ function pipelineWalk(wholeLine = false): PipelineWalk {
     // A runtime taking a raw line does not receive the workspace shell's options.
     optionsMayChange: wholeLine,
     functions: new Set(),
-    defined: new Set(),
   }
 }
 
@@ -1192,7 +1185,6 @@ function* walkedLine(
   pipeline = pipelineWalk(),
   homes: Readonly<Record<string, string>> = tildeHomes(session),
 ): Generator<Walked> {
-  pipeline.defined = new Set([...pipeline.defined, ...definedFunctions(root)])
   for (const item of walkNode(
     root,
     session,
@@ -1382,7 +1374,18 @@ export async function lineJudgments(
     }
     judged.push([item, explained])
   }
-  return judged
+  const marked = withCalls(
+    root,
+    judged.flatMap(([, explained]) => explained),
+    session,
+    handed.origin,
+  )
+  let at = 0
+  return judged.map(([item, explained]) => {
+    const own = marked.slice(at, at + explained.length)
+    at += explained.length
+    return [item, own]
+  })
 }
 
 /**
@@ -1678,17 +1681,6 @@ async function verdictRefuses(
  * not be read as the node's own: judging it would refuse a line that
  * only stores text, and the read walks already charge nothing for it.
  */
-/** The name of every function the node defines anywhere in its tree. */
-function definedFunctions(node: TSNodeLike): Set<string> {
-  const names = new Set<string>()
-  const stack = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (current.type === 'function_definition') names.add(getFunctionName(current))
-    for (const child of current.namedChildren) stack.push(child)
-  }
-  return names
-}
-
 function definesFunction(node: TSNodeLike): boolean {
   const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
@@ -1909,7 +1901,7 @@ export async function explainLine(
   )) {
     judged.push(one)
   }
-  return judged
+  return withCalls(root, judged, session, null)
 }
 
 /**
@@ -2001,21 +1993,6 @@ export function explainedLine(
       stderr: '',
     }
   }
-  const tree = reparse(line)
-  const commands = new Map<string, Judgment[]>()
-  const keys: (string | null)[] = []
-  for (const one of judged) {
-    const at = one.occurrence
-    if (at.parent !== null) {
-      keys.push(null)
-      continue
-    }
-    const span = `${String(at.start)}:${String(at.end)}`
-    const list = commands.get(span) ?? []
-    keys.push(`${span}:${String(list.length)}`)
-    list.push(one.judgment)
-    commands.set(span, list)
-  }
   const redirects = new Map<string, Judgment[]>()
   for (const open of opened) {
     const at = open.occurrence
@@ -2025,9 +2002,9 @@ export function explainedLine(
     list.push(open.judgment)
     redirects.set(span, list)
   }
-  const traced = lineStatus(tree, commands, redirects, session)
+  const [traced, calling] = functionCalls(reparse(line), judged, session, null, redirects)
   const parts = inLineOrder(
-    judged.filter((one, i) => !callsFunction(one, keys[i] ?? null, traced)),
+    judged.filter((_, i) => calling[i] !== true),
     opened,
   )
   let strictest = Outcome.ALLOW
@@ -2085,6 +2062,74 @@ interface Traced {
 }
 
 /**
+ * What the line does (`lineStatus`), and for each of its judgments whether
+ * it is a tree root's own decision about a word that calls a function
+ * (`callsFunction`); `origin` is the node the line was evaluated from, null
+ * for a typed line. Mirrors the Python `_function_calls`.
+ */
+function functionCalls(
+  tree: TSNodeLike,
+  judged: readonly Judged[],
+  session: SessionState,
+  origin: Occurrence | null,
+  redirects: ReadonlyMap<string, readonly Judgment[]> = new Map(),
+): [Traced, boolean[]] {
+  const commands = new Map<string, Judgment[]>()
+  const keys: (string | null)[] = []
+  for (const one of judged) {
+    const at = one.occurrence
+    if (!sameAt(at.parent, origin)) {
+      keys.push(null)
+      continue
+    }
+    const span = `${String(at.start)}:${String(at.end)}`
+    const list = commands.get(span) ?? []
+    keys.push(`${span}:${String(list.length)}`)
+    list.push(one.judgment)
+    commands.set(span, list)
+  }
+  const traced = lineStatus(tree, commands, redirects, session)
+  return [traced, judged.map((one, i) => callsFunction(one, keys[i] ?? null, traced, origin))]
+}
+
+/**
+ * The line's judgments with `Judged.defined` set where the word calls a
+ * function the line has defined where it runs, or where a command is
+ * spelled by such a call's arguments (`timeout() { :; }; timeout 1 rm f`),
+ * which runs the function and not the command. Whether a definition counts
+ * follows the shell: one in a subshell, a pipeline segment or a
+ * substitution is gone when it ends, and a body sees the functions defined
+ * at every call of it. The fold runs only when a folder entry's root
+ * refuses some command, the one verdict `defined` changes. Mirrors the
+ * Python `_with_calls`.
+ */
+function withCalls(
+  root: TSNodeLike,
+  judged: readonly Judged[],
+  session: SessionState,
+  origin: Occurrence | null,
+): Judged[] {
+  const folder = judged.some(
+    (one) => one.judgment.exitCode !== 0 && byDefault(one.judgment) && inFolder(one.judgment),
+  )
+  if (!folder) return [...judged]
+  const [, calling] = functionCalls(root, judged, session, origin)
+  const callers = judged.filter((_, i) => calling[i] === true).map((one) => one.occurrence)
+  return judged.map((one, i) => ({
+    ...one,
+    defined: calling[i] === true || runsUnder(one.occurrence, callers),
+  }))
+}
+
+/** Whether a command stands in a line some caller's words spell. Mirrors the Python `_runs_under`. */
+function runsUnder(at: Occurrence, callers: readonly Occurrence[]): boolean {
+  for (let parent = at.parent; parent !== null; parent = parent.parent) {
+    if (callers.some((caller) => sameAt(parent, caller))) return true
+  }
+  return false
+}
+
+/**
  * Whether a judgment is a tree root's own decision about a command that
  * calls a function, which no root's own decision speaks for (`isTool`); a
  * rule that names the function still does. The walk reads the line before
@@ -2095,9 +2140,14 @@ interface Traced {
  * substitution or a line a command runs, when the function was defined
  * where that command stands. Mirrors the Python `_calls_function`.
  */
-function callsFunction(one: Judged, key: string | null, traced: Traced): boolean {
+function callsFunction(
+  one: Judged,
+  key: string | null,
+  traced: Traced,
+  origin: Occurrence | null,
+): boolean {
   if (key !== null && traced.reached.has(key)) return traced.calls.has(key)
-  const start = lineStart(one.occurrence)
+  const start = lineStart(one.occurrence, origin)
   const visible = traced.bodies.get(start) ?? traced.at.get(start) ?? new Set<string>()
   return visible.has(one.judgment.command) && byDefault(one.judgment)
 }
@@ -2119,13 +2169,14 @@ function inLineOrder(judged: readonly Judged[], opened: readonly Opened[]): Judg
 }
 
 /**
- * Where on the typed line a part stands: its own start, or for a part a
- * nested line runs, the start of what runs that line. Mirrors the Python
+ * Where on the line a part stands: its own start, or for a part a nested
+ * line runs, the start of what runs that line; `origin` is the node the
+ * line was evaluated from, null for a typed line. Mirrors the Python
  * `_line_start`.
  */
-function lineStart(at: Occurrence): number {
+function lineStart(at: Occurrence, origin: Occurrence | null = null): number {
   let top = at
-  while (top.parent !== null) top = top.parent
+  while (top.parent !== null && !sameAt(top.parent, origin)) top = top.parent
   return top.start
 }
 

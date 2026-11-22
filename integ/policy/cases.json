@@ -820,7 +820,13 @@
     {"op": "exec", "session": "kept", "command": "f() { cat f.txt; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "f() { ls; }; f; cat f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "h() { k; }; k() { ls; }; h", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "kept", "command": "g; g() { ls; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "g: Permission denied\n"}}}
+    {"op": "exec", "session": "kept", "command": "g; g() { ls; }", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "g: Permission denied\n", "decision": "kept"}}},
+    {"op": "session", "id": "scoped", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "printf": "allow", ":": "allow"}}}}},
+    {"op": "exec", "session": "scoped", "command": "cd /data/keep", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "scoped", "command": "printf x > /data/marker; cat f.txt; (cat() { :; })", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "scoped", "command": "printf x > /data/marker; cat f.txt; v=$(cat() { :; })", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "scoped", "command": "timeout() { :; }; timeout 1 rm f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}
    ]
   },
   {
