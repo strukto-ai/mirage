@@ -60,7 +60,7 @@ from mirage.workspace.executor.background import (
     handle_background,
     one_program,
     program_text,
-    program_word,
+    program_words,
     pump,
     report_reaped,
     run_program,
@@ -102,6 +102,7 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.frame import PipeWriter
 from mirage.workspace.node.program import StatementRecorder
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -169,7 +170,7 @@ async def handle_pipe(
         background_pipeline=owner is not None and owner.pipeline,
     )
     children = [
-        child_context(context)
+        child_context(context, stdin=stdin if i == 0 else None)
         if pipeline_stage_forks(i == len(commands) - 1, scope)
         else context
         for i in range(len(commands))
@@ -193,12 +194,17 @@ async def handle_pipe(
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
-        fed_by = child_evaluation.frame.stdin_program
+        fed_by = child_evaluation.frame.stdin_writer
         if i > 0:
             child_evaluation.frame.stdin = input_stream
-            child_evaluation.frame.stdin_program = (
-                program_word(commands[i - 1], session)
+            words = (
+                program_words(commands[i - 1], session)
                 if processes is not None
+                else None
+            )
+            child_evaluation.frame.stdin_writer = (
+                PipeWriter(input_stream, tuple(words))
+                if words and input_stream is not None
                 else None
             )
         io = IOResult()
@@ -306,7 +312,7 @@ async def handle_pipe(
             child_nodes[i] = child_exec
             reset_caller(token)
             if in_parent:
-                child_evaluation.frame.stdin_program = fed_by
+                child_evaluation.frame.stdin_writer = fed_by
                 left = session.open_inputs()
                 (
                     session.exec_stdin,

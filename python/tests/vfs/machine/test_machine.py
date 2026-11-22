@@ -20,8 +20,8 @@ from mirage.runtime.types import RunAnswer
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.machine import ScriptedMachine, failed
-from tests.fixtures.machine_files import FakeFiles
+from tests.fixtures.machine import ScriptedMachine, failed, table_of
+from tests.fixtures.machine_files import FakeFiles, spec
 
 
 def two(a: FakeFiles, b: FakeFiles, **kwargs) -> Workspace:
@@ -232,12 +232,29 @@ async def test_cp_stays_on_the_source_s_machine():
 
 
 @pytest.mark.asyncio
-async def test_cp_onto_another_machine_s_name_makes_the_newest_copy():
+async def test_cp_onto_another_machine_s_name_replaces_it():
     a, b = FakeFiles({"/tmp/dst": b"old"}), FakeFiles({"/tmp/src": b"new"})
     ws = two(a, b)
+    a.answer("cat > /tmp/dst", b"old")
     assert (await run(ws, "cp /tmp/src /tmp/dst"))[0] == 0
-    assert (a.files["/tmp/dst"], b.files["/tmp/dst"]) == (b"old", b"new")
+    assert ("/tmp/dst" in a.files, b.files["/tmp/dst"]) == (False, b"new")
     assert await run(ws, "cat /tmp/dst") == (0, "new", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cp_through_a_machine_s_link_to_a_hidden_name_is_refused():
+    a = FakeFiles({"/tmp/src": b"new", "/tmp/secret": b"s"})
+    a.links["/tmp/public"] = "/tmp/secret"
+    ws = two(
+        a,
+        FakeFiles(),
+        profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
+    )
+    agent = await ws.session("agent", profile="agent")
+    done = await agent.shell("cp /tmp/src /tmp/public")
+    assert done.exit_code == 1
+    assert sorted(a.files) == ["/tmp/secret", "/tmp/src"]
     await ws.close()
 
 
@@ -479,4 +496,82 @@ async def test_what_reads_a_program_s_pipe_writes_on_the_program_s_machine():
     assert (await run(ws, "cd /srv && gen | tee /tmp/from-b"))[0] == 0
     assert sorted(a.files) == ["/tmp/piped"]
     assert sorted(b.files) == ["/srv/k", "/tmp/alone", "/tmp/from-b"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_child_shell_reading_the_pipe_keeps_its_writer_s_machine():
+    a, b = FakeFiles(), FakeFiles()
+    tmp = MachineVFS(MachineVFSConfig(root="/tmp", default_machine="b"))
+    ws = two(a, b, mounts={"/tmp": tmp})
+    assert (await run(ws, "gen | (tee /tmp/sub)"))[0] == 0
+    assert (await run(ws, "gen | ( (tee /tmp/nested) )"))[0] == 0
+    assert (await run(ws, "gen | { tee /tmp/group | cat; }"))[0] == 0
+    assert (await run(ws, "nice gen | tee /tmp/wrapped"))[0] == 0
+    assert (await run(ws, "gen | (tee /tmp/other) < /tmp/sub"))[0] == 0
+    assert sorted(a.files) == [
+        "/tmp/group",
+        "/tmp/nested",
+        "/tmp/sub",
+        "/tmp/wrapped",
+    ]
+    assert sorted(b.files) == ["/tmp/other"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_what_reads_a_path_named_program_s_pipe_writes_on_its_machine():
+    a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b)
+    assert (await run(ws, "/tmp/tool | tee /tmp/by-tool"))[0] == 0
+    assert ("/tmp/by-tool" in a.files, "/tmp/by-tool" in b.files) == (
+        False,
+        True,
+    )
+    await ws.close()
+
+
+def shared(a: FakeFiles, b: FakeFiles) -> MachineVFS:
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(
+        table_of(
+            ScriptedMachine("a", a.answer), ScriptedMachine("b", b.answer)
+        ),
+        "a",
+    )
+    return vfs
+
+
+@pytest.mark.asyncio
+async def test_a_folder_one_machine_cannot_move_moves_on_none():
+    a = FakeFiles({"/tmp/src/x": b"1"})
+    b = FakeFiles({"/tmp/src/y": b"2", "/tmp/dst/kept": b"k"})
+    with pytest.raises(OSError, match="not empty"):
+        await shared(a, b).rename(spec("/src"), spec("/dst"))
+    assert (a.files, sorted(b.files)) == (
+        {"/tmp/src/x": b"1"},
+        ["/tmp/dst/kept", "/tmp/src/y"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_rmdir_of_a_folder_one_machine_still_fills_removes_none():
+    a, b = FakeFiles(), FakeFiles({"/tmp/d/x": b"1"})
+    a.dirs.add("/tmp/d")
+    with pytest.raises(OSError, match="not empty"):
+        await shared(a, b).rmdir(spec("/d"))
+    assert "/tmp/d" in a.dirs
+    del b.files["/tmp/d/x"]
+    await shared(a, b).rmdir(spec("/d"))
+    assert "/tmp/d" not in a.dirs | b.dirs
+
+
+@pytest.mark.asyncio
+async def test_a_new_name_below_a_file_shown_over_a_folder_is_refused():
+    a, b = FakeFiles({"/tmp/k/in": b"1"}), FakeFiles({"/tmp/k": b"f"})
+    ws = two(a, b)
+    b.answer("cat > /tmp/k", b"newer")
+    code, _, err = await run(ws, "echo x > /tmp/k/new")
+    assert (code, "Not a directory" in err) == (1, True)
+    assert sorted(a.files) == ["/tmp/k/in"]
     await ws.close()

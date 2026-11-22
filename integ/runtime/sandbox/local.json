@@ -344,7 +344,7 @@
     },
     {
       "id": "tmp_on_two_machines",
-      "note": "Over two machines /tmp shows one tree. A name both hold reads as the copy written last, rm takes it off every machine, mv renames where the file is, and cp stays on the source's machine. A new name a machine's program writes lands on that machine; one Mirage makes lands where its folder is, else on the first.",
+      "note": "Over two machines /tmp shows one tree. A name both hold reads as the copy written last, rm takes it off every machine, mv renames where the file is, and cp stays on the source's machine, where it replaces the name on every machine. A new name a machine's program writes lands on that machine; one Mirage makes lands where its folder is, else on the first.",
       "runtimes": [
         "docker"
       ],
@@ -527,6 +527,23 @@
           "expect": {
             "exit": 0,
             "stdout": "not-here\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cp -p $d/a.txt $d/same.txt && cat $d/same.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/same.txt\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
             "stderr": ""
           }
         },

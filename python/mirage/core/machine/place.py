@@ -20,7 +20,7 @@ from mirage.core.machine.constants import KERNEL_VIEWS
 from mirage.core.machine.stat import hidden_on, stat_entry
 from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import folder_of, remote
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
 
 
@@ -54,7 +54,9 @@ def command_machine(accessor: MachineAccessor) -> str | None:
     return preferred if preferred in accessor.names() else None
 
 
-def kernel_view(accessor: MachineAccessor, path: PathSpec) -> str | None:
+def kernel_view(
+    accessor: MachineAccessor, path: PathSpec, below: str = ""
+) -> str | None:
     """The one machine a name answers for when it is a kernel's own view
     of its machine (``/proc/cpuinfo``), which no rule merges: the machine
     the command is about, else the mount's default. None for any other
@@ -62,11 +64,15 @@ def kernel_view(accessor: MachineAccessor, path: PathSpec) -> str | None:
 
     Args:
         accessor (MachineAccessor): the mount's machines.
-        path (PathSpec): the name.
+        path (PathSpec): the name, or a folder above it.
+        below (str): the name's path under ``path``, as a listing of the
+            folder gives it; empty for ``path`` itself.
     """
     if len(accessor.names()) == 1:
         return None
     real = remote(accessor, path)
+    if below:
+        real = f"{real.rstrip('/')}/{below}"
     if not any(real == at or real.startswith(at + "/") for at in KERNEL_VIEWS):
         return None
     return command_machine(accessor) or accessor.default_machine
@@ -154,11 +160,18 @@ async def new_name_machine(
         parents (bool): the folders above are made too (``mkdir -p``),
             so the folder is the nearest one above that any machine
             holds.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file,
+            whatever an older copy on another machine is.
     """
     about = command_machine(accessor) or accessor.default_machine
     above = folder_of(path)
     while True:
-        folders = [one for one in await holders(accessor, above) if one.folder]
+        held = await holders(accessor, above)
+        if held and not chosen(accessor, held).folder:
+            raise enotdir(path)
+        folders = [one for one in held if one.folder]
         if folders or not parents or not above.vfs_path:
             break
         above = folder_of(above)

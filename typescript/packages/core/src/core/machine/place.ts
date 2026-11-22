@@ -14,11 +14,12 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { currentCaller } from '../../context/session_context.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { KERNEL_VIEWS } from './constants.ts'
 import { hiddenOn, statEntry } from './stat.ts'
 import { Holder } from './types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { folderOf, remote } from './utils.ts'
 
 /**
@@ -55,11 +56,14 @@ export function commandMachine(accessor: MachineAccessor): string | null {
  * mount that shows one machine.
  *
  * @param accessor the mount's machines.
- * @param path the name.
+ * @param path the name, or a folder above it.
+ * @param below the name's path under `path`, as a listing of the folder
+ *   gives it; empty for `path` itself.
  */
-export function kernelView(accessor: MachineAccessor, path: PathSpec): string | null {
+export function kernelView(accessor: MachineAccessor, path: PathSpec, below = ''): string | null {
   if (accessor.names().length === 1) return null
-  const real = remote(accessor, path)
+  const base = remote(accessor, path)
+  const real = below === '' ? base : `${rstripSlash(base)}/${below}`
   if (!KERNEL_VIEWS.some((at) => real === at || real.startsWith(`${at}/`))) return null
   return commandMachine(accessor) ?? accessor.defaultMachine
 }
@@ -138,6 +142,8 @@ export async function holder(accessor: MachineAccessor, path: PathSpec): Promise
  * @param path the new name.
  * @param parents the folders above are made too (`mkdir -p`), so the
  *   folder is the nearest one above that any machine holds.
+ * @throws ENOTDIR when the copy shown of the folder is a file, whatever an
+ *   older copy on another machine is.
  */
 export async function newNameMachine(
   accessor: MachineAccessor,
@@ -146,10 +152,13 @@ export async function newNameMachine(
 ): Promise<string> {
   const about = commandMachine(accessor) ?? accessor.defaultMachine
   let above = folderOf(path)
-  let folders = (await holders(accessor, above)).filter((one) => one.folder)
-  while (folders.length === 0 && parents && above.vfsPath !== '') {
+  let folders: Holder[] = []
+  for (;;) {
+    const held = await holders(accessor, above)
+    if (held.length > 0 && !chosen(accessor, held).folder) throw enotdir(path)
+    folders = held.filter((one) => one.folder)
+    if (folders.length > 0 || !parents || above.vfsPath === '') break
     above = folderOf(above)
-    folders = (await holders(accessor, above)).filter((one) => one.folder)
   }
   if (folders.length === 0 || folders.some((one) => one.machine === about)) return about
   return chosen(accessor, folders).machine

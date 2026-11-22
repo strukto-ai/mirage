@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from mirage.execution.process.handle import ProcessHandle
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.console import JobConsole
@@ -21,6 +22,20 @@ class ProcessSubLine(Protocol):
         sink: JobConsole | None = None,
         started: Callable[[ProcessHandle, SessionState], None] | None = None,
     ) -> IOResult: ...
+
+
+@dataclass(frozen=True)
+class PipeWriter:
+    """The one program writing a pipe a pipeline stage reads.
+
+    Args:
+        pipe (ByteSource): the pipe, as the stage is handed it.
+        words (tuple[str | None, ...]): the program's words, None for
+            one only known when it runs.
+    """
+
+    pipe: ByteSource
+    words: tuple[str | None, ...]
 
 
 @dataclass
@@ -42,10 +57,11 @@ class ExecutionFrame:
     bash's inherit the descriptor.
     ``stdin`` is the pipe a pipeline stage reads, which a program the
     stage starts reads too while its standard input is still that pipe.
-    ``stdin_program`` is the word naming the one program that writes that
-    pipe (``gen | tee log``), None when the stage before is anything
-    else, and in a pipeline with no process table: what the stage writes
-    is about the machine that program runs on.
+    ``stdin_writer`` is the one program that writes that pipe
+    (``gen | tee log``), None when the stage before is anything else,
+    and in a pipeline with no process table: what the stage writes is
+    about the machine that program runs on. A child shell that reads the
+    same pipe keeps it (``gen | (tee log)``).
     ``ending`` is the id of the command a job runs as a whole, whose
     redirects its shell never puts back: it ends with the command, so
     bash keeps no copy of what they replace.
@@ -65,26 +81,35 @@ class ExecutionFrame:
     substitution: bool = False
     writers: list[tuple[str | None, int]] = field(default_factory=list)
     stdin: ByteSource | None = None
-    stdin_program: str | None = None
+    stdin_writer: PipeWriter | None = None
     ending: int | None = None
 
-    def fork(self) -> ExecutionFrame:
+    def fork(self, stdin: ByteSource | None = None) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the
         line's routing decision, since nested lines never re-route, its
         time limit, which a job it starts runs under from its own start,
-        the process whose shell it is part of, and whether that shell is
-        a substitution's.
+        the process whose shell it is part of, whether that shell is a
+        substitution's, and the writer of the pipe it reads when that is
+        the pipe this frame's stage reads.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
 
         Args:
-            None
+            stdin (ByteSource | None): the input a child shell reads in
+                its parent's place (a subshell, a pipeline's first
+                stage); None for one that reads none of it (a
+                substitution, a job).
         """
+        given = stdin.lines.input if isinstance(stdin, SharedInput) else stdin
+        writer = self.stdin_writer
         return ExecutionFrame(
             routing=self.routing,
             runs_on_machine=self.runs_on_machine,
             line_timeout=self.line_timeout,
             shell=self.shell,
             substitution=self.substitution,
+            stdin_writer=(
+                writer if writer is not None and given is writer.pipe else None
+            ),
         )

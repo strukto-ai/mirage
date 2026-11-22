@@ -545,9 +545,12 @@ export async function linkMachine(
   }
   for (const [link] of made) scope(parent(link), true)
   if (!symbolic) for (const [, target] of made) scope(target, false)
-  const runtime =
-    (await machineHolding([...scopes.values()], session, registry, links, null)) ??
-    (await newNameRuntime(made, symbolic, session, registry, links))
+  let runtime = await machineHolding([...scopes.values()], session, registry, links, null)
+  if (
+    runtime === null ||
+    (symbolic && !(await holdsTargets(runtime, made, session, registry, links)))
+  )
+    runtime = await newNameRuntime(made, symbolic, session, registry, links)
   if (runtime === null || !(await runtime.handle().hasProgram('ln'))) return null
   const cwd = norm(session.cwd)
   if (cwd === '/' || (await holdsFolder(runtime, cwd, session, registry, links)))
@@ -593,15 +596,49 @@ async function holdsFolder(
 }
 
 /**
+ * Whether a machine's symbolic links would lead where Mirage reads their
+ * targets: the copy shown of each target some machine holds (`chosen`) is
+ * that machine's, so none dangles there or leads to an older copy. Mirrors
+ * Python's `_holds_targets`.
+ *
+ * @param runtime the machine's runtime.
+ * @param made each link's absolute path and its target, resolved as the
+ *   link will resolve it.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ */
+async function holdsTargets(
+  runtime: RemoteRuntime,
+  made: readonly (readonly [string, string])[],
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+): Promise<boolean> {
+  const aimed = made.map(([, target]): [string, boolean] => [target, false])
+  const mounts = heldMounts(aimed, session, registry, links)
+  if (mounts === null) return false
+  for (const [at, [target]] of aimed.entries()) {
+    const entry = mounts[at]
+    if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return false
+    const held = await holders(entry.vfs.accessor, onMount(entry, target))
+    if (held.length > 0 && chosen(entry.vfs.accessor, held).machine !== runtime.defaultMachine)
+      return false
+  }
+  return true
+}
+
+/**
  * The machine links in folders several machines hold are made on, when one
  * machine takes them all: the machine holding each link's target (`chosen`),
  * so the link leads somewhere on the machine it is made on, when that
  * machine holds the link's folder too. A symbolic link to a name no machine
  * holds is a new name like any other (`newNameMachine`). Null when a path
  * is off a machine mount, the session's rules or a coded file policy speak
- * for the mount, a target's machine lacks the link's folder, or the links
- * land on different machines: the link is then Mirage's own. Mirrors
- * Python's `_new_name_runtime`.
+ * for the mount, a target's machine lacks the link's folder, another
+ * machine holds a link's name already, or the links land on different
+ * machines: the link is then Mirage's own, and Mirage's `ln` answers for a
+ * name that exists. Mirrors Python's `_new_name_runtime`.
  *
  * @param made each link's absolute path and its target, resolved as the
  *   link will resolve it.
@@ -632,16 +669,25 @@ async function newNameRuntime(
     if (aimed === undefined || !(aimed.vfs instanceof MachineVFS)) return null
     const spec = onMount(folder, link)
     const held = await holders(aimed.vfs.accessor, onMount(aimed, target))
+    let machine: string
     if (held.length === 0) {
       if (!symbolic) return null
-      machines.add(await newNameMachine(folder.vfs.accessor, spec))
-      continue
+      try {
+        machine = await newNameMachine(folder.vfs.accessor, spec)
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOTDIR') throw error
+        console.debug(`${link}: its folder is a file:`, error)
+        return null
+      }
+    } else {
+      machine = chosen(aimed.vfs.accessor, held).machine
+      const folders = (await holders(folder.vfs.accessor, folderOf(spec)))
+        .filter((one) => one.folder)
+        .map((one) => one.machine)
+      if (!folders.includes(machine)) return null
     }
-    const machine = chosen(aimed.vfs.accessor, held).machine
-    const folders = (await holders(folder.vfs.accessor, folderOf(spec)))
-      .filter((one) => one.folder)
-      .map((one) => one.machine)
-    if (!folders.includes(machine)) return null
+    const named = await holders(folder.vfs.accessor, spec)
+    if (named.some((one) => one.machine !== machine)) return null
     machines.add(machine)
   }
   if (machines.size !== 1) return null

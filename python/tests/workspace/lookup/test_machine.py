@@ -323,6 +323,29 @@ async def test_a_link_in_a_folder_both_machines_hold_is_made_on_a_machine():
 
 
 @pytest.mark.asyncio
+async def test_a_link_another_machine_would_break_stays_mirage_s():
+    a = FakeFiles(
+        {"/tmp/only/kept": b"k", "/tmp/existing": b"e"}, programs=("ln",)
+    )
+    b = FakeFiles({"/tmp/target": b"t"}, programs=("ln",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    await ws.shell("ln -s /tmp/target /tmp/only/link")
+    assert await out(ws, "readlink /tmp/only/link") == "/tmp/target\n"
+    taken = await ws.shell("ln -sT /tmp/target /tmp/existing")
+    assert taken.exit_code == 1
+    assert "File exists" in await taken.stderr_str()
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_link_to_another_mount_stays_mirage_s_and_reads_through():
     files = FakeFiles({"/tmp/a.py": b"x"}, programs=(*TOOLS, "ln", "readlink"))
     ws = one(files, {"/data": RAMVFS()})

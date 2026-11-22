@@ -288,6 +288,25 @@ describe('operand routing', () => {
     await ws.close()
   })
 
+  it("keeps a link Mirage's that another machine would break", async () => {
+    const a = new FakeFiles({ '/tmp/only/kept': 'k', '/tmp/existing': 'e' }, ['ln'])
+    const b = new FakeFiles({ '/tmp/target': 't' }, ['ln'])
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    await ws.shell('ln -s /tmp/target /tmp/only/link')
+    expect(await out(ws, 'readlink /tmp/only/link')).toBe('/tmp/target\n')
+    const taken = await ws.shell('ln -sT /tmp/target /tmp/existing')
+    expect(taken.exitCode).toBe(1)
+    expect(new TextDecoder().decode(taken.stderr)).toContain('File exists')
+    expect([a.ran, b.ran]).toEqual([[], []])
+    await ws.close()
+  })
+
   it("keeps a link to another mount Mirage's, read through", async () => {
     const files = new FakeFiles({ '/tmp/a.py': 'x' }, [...TOOLS, 'ln', 'readlink'])
     const ws = one(files, { '/data': new RAMVFS() })

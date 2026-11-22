@@ -16,7 +16,7 @@ import asyncio
 import logging
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.place import chosen
+from mirage.core.machine.place import chosen, kernel_view
 from mirage.core.machine.stat import entries, entry_stat
 from mirage.core.machine.types import Holder
 from mirage.core.posix.types import PosixEntry
@@ -30,27 +30,46 @@ def _merged(
     accessor: MachineAccessor,
     machines: list[str],
     listed: list[list[PosixEntry]],
-) -> dict[str, PosixEntry]:
+    scope: PathSpec,
+) -> dict[str, Holder]:
     """Every machine's entries below one directory as one listing, each
-    name once: the entry of the machine every look at the name goes to
-    (``chosen``).
+    name once: the copy every look at the name goes to (``chosen``). A
+    kernel's view of its machine is the one machine's it answers for
+    (``kernel_view``), and nothing is listed below a name whose copy
+    shown is a file, whatever an older folder there holds.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         machines (list[str]): the machines listed, in order.
         listed (list[list[PosixEntry]]): what each printed, the
             directory's own entry left out.
+        scope (PathSpec): the directory.
     """
     held: dict[str, list[Holder]] = {}
     for machine, found in zip(machines, listed):
         for entry in found:
             held.setdefault(entry.rel, []).append(Holder(machine, entry))
-    merged: dict[str, PosixEntry] = {}
+    several = len(machines) > 1
+    merged: dict[str, Holder] = {}
+    over: set[str] = set()
     for rel, copies in held.items():
-        picked = chosen(accessor, copies).entry
-        assert picked is not None
-        merged[rel] = picked
-    return merged
+        own = kernel_view(accessor, scope, rel) if several else None
+        if own is not None:
+            copies = [one for one in copies if one.machine == own]
+            if not copies:
+                continue
+        merged[rel] = chosen(accessor, copies)
+        if not merged[rel].folder and any(one.folder for one in copies):
+            over.add(rel)
+    if not over:
+        return merged
+    return {
+        rel: one
+        for rel, one in merged.items()
+        if not any(
+            rel[:cut] in over for cut in range(len(rel)) if rel[cut] == "/"
+        )
+    }
 
 
 async def readdir(
@@ -65,12 +84,16 @@ async def readdir(
         accessor (MachineAccessor): the mount's machines.
         machines (list[str]): the machines to list.
         path_spec (PathSpec): the directory, or a glob in it.
+
+    Raises:
+        NotADirectoryError: the copy shown of the directory is a file.
     """
     scope = path_spec.dir if path_spec.pattern else path_spec
     found = await asyncio.gather(
         *(entries(accessor, m, scope, 1) for m in machines),
         return_exceptions=True,
     )
+    tops: list[Holder] = []
     listing: list[str] = []
     listed: list[list[PosixEntry]] = []
     failure: OSError | None = None
@@ -83,6 +106,7 @@ async def readdir(
                 raise result
             failure = failure or result
             continue
+        tops.append(Holder(machine, result[0]))
         if result[0].kind != "d":
             failure = enotdir(scope)
             continue
@@ -91,17 +115,32 @@ async def readdir(
     if not listing:
         assert failure is not None
         raise failure
-    merged = _merged(accessor, listing, listed)
-    return [entry_stat(name, merged[name]) for name in sorted(merged)]
+    if not chosen(accessor, tops).folder:
+        raise enotdir(scope)
+    merged = _merged(accessor, listing, listed, scope)
+    return [
+        entry_stat(name, _listed_entry(merged[name]))
+        for name in sorted(merged)
+    ]
 
 
-async def tree(
+def _listed_entry(one: Holder) -> PosixEntry:
+    """The entry a listed copy was listed with.
+
+    Args:
+        one (Holder): a copy a listing found.
+    """
+    assert one.entry is not None
+    return one.entry
+
+
+async def _trees(
     accessor: MachineAccessor, machines: list[str], path: PathSpec
-) -> dict[str, FileStat] | None:
-    """Every entry under a directory on the machines that hold it, merged
-    by path as a listing merges them, from one find on each, where a walk
-    sends a listing per directory. A machine whose find fails leaves the
-    walk to readdir, which reports it.
+) -> dict[str, Holder] | None:
+    """The copy shown of every entry under a directory on the machines
+    that hold it, by its path there, from one find on each; None when a
+    machine's find fails or finds no directory, which leaves the walk to
+    readdir.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -126,8 +165,43 @@ async def tree(
         if result[0].kind != "d":
             return None
         listed.append(result[1:])
-    merged = _merged(accessor, machines, listed)
+    return _merged(accessor, machines, listed, path)
+
+
+async def tree(
+    accessor: MachineAccessor, machines: list[str], path: PathSpec
+) -> dict[str, FileStat] | None:
+    """Every entry under a directory on the machines that hold it, merged
+    by path as a listing merges them, from one find on each, where a walk
+    sends a listing per directory. A machine whose find fails leaves the
+    walk to readdir, which reports it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machines (list[str]): the machines holding the directory.
+        path (PathSpec): the directory.
+    """
+    merged = await _trees(accessor, machines, path)
+    if merged is None:
+        return None
     return {
-        rel: entry_stat(rel.rsplit("/", 1)[-1], entry)
-        for rel, entry in merged.items()
+        rel: entry_stat(rel.rsplit("/", 1)[-1], _listed_entry(one))
+        for rel, one in merged.items()
     }
+
+
+async def tree_machines(
+    accessor: MachineAccessor, machines: list[str], path: PathSpec
+) -> dict[str, str] | None:
+    """The machine whose copy of each entry under a directory is the one
+    shown, by the entry's path there; None as ``tree`` answers it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machines (list[str]): the machines holding the directory.
+        path (PathSpec): the directory.
+    """
+    merged = await _trees(accessor, machines, path)
+    if merged is None:
+        return None
+    return {rel: one.machine for rel, one in merged.items()}

@@ -1051,7 +1051,7 @@ async def _fork_subshell(
     sub_table = deps.job_table.child()
     sub_deps = with_opts(deps, {"job_table": sub_table})
     sub_recurse = partial(execute_node, replace(sub_deps, sink=None))
-    child = child_context(context)
+    child = child_context(context, stdin=stdin)
     as_program = is_program_invocation(session)
     results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
 

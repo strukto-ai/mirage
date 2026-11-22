@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
+from mirage.core.machine.readdir import tree_machines
 from mirage.core.posix.search import (
     files_containing as posix_files_containing,
 )
@@ -28,7 +29,8 @@ async def files_containing(
 ) -> list[PathSpec] | None:
     """The files under a directory holding ``text``, by grep on each
     machine that holds it; any machine that cannot answer leaves every
-    file to be read.
+    file to be read. A file several machines hold counts by the copy
+    shown, as a read of it finds it: a match in an older copy is none.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -37,12 +39,23 @@ async def files_containing(
         text (str): the plain text.
         ignore_case (bool): fold ASCII case.
     """
-    hits: dict[str, PathSpec] = {}
+    found: list[list[PathSpec]] = []
     for machine in machines:
-        found = await posix_files_containing(
+        matched = await posix_files_containing(
             accessor.runner(machine), accessor.root, text, [path], ignore_case
         )
-        if found is None:
+        if matched is None:
             return None
-        hits.update((p.virtual, p) for p in found)
+        found.append(matched)
+    shown = None
+    if len(machines) > 1:
+        shown = await tree_machines(accessor, machines, path)
+        if shown is None:
+            return None
+    under = path.virtual.rstrip("/") + "/"
+    hits: dict[str, PathSpec] = {}
+    for machine, matched in zip(machines, found):
+        for p in matched:
+            if shown is None or shown.get(p.virtual[len(under) :]) == machine:
+                hits[p.virtual] = p
     return [hits[name] for name in sorted(hits)]

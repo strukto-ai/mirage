@@ -1191,9 +1191,7 @@ async def _run_argv(
             if held is None or held.runtime is None
             else held.runtime.machine
         )
-    preferred = _preferred_machine(
-        session, registry, context.frame.routing, context.frame.stdin_program
-    )
+    preferred = await _preferred_machine(deps, context)
     caller = current_caller()
     staged = (
         bind_caller(
@@ -1269,11 +1267,8 @@ def _stage_machine(
     return None if runtime is None else runtime.machine
 
 
-def _preferred_machine(
-    session: SessionState,
-    registry: MountRegistry,
-    routing: RouteDecision[RuntimeIdentity] | None,
-    feeder: str | None,
+async def _preferred_machine(
+    deps: ExecuteNodeDeps, context: EvaluationContext
 ) -> str | None:
     """The machine a command Mirage runs itself is about
     (``Caller.preferred_machine``): the one the line names, else the one
@@ -1281,27 +1276,39 @@ def _preferred_machine(
     on; None when nothing says, and in a workspace that runs programs on
     one machine, where nothing is to choose.
 
+    The pipe's writer is placed as it runs: by its words, through the
+    wrappers Mirage runs (``nice gen | tee log``), and one named by its
+    path on the machine holding that file (``/tmp/tool | tee log``).
+
     Args:
-        session (SessionState): the session.
-        registry (MountRegistry): the mount registry.
-        routing (RouteDecision | None): the line's placement.
-        feeder (str | None): the word naming the program that writes the
-            pipe the command reads.
+        deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
+        context (EvaluationContext): the session and current placement.
     """
+    session = context.session
+    registry = deps.registry
+    routing = context.frame.routing
     if routing is None or not several_machines(registry):
         return None
     if routing.machine is not None:
         return routing.machine
-    writer = (
-        writer_machine(
-            program_runtime(registry, [feeder], session, routing),
-            session.cwd,
-            registry,
-        )
-        if feeder
-        else None
+    fed_by = context.frame.stdin_writer
+    writer: RuntimeIdentity | None = None
+    if fed_by is not None:
+        head = str(fed_by.words[0])
+        if "/" in head:
+            writer = await program_machine(
+                head,
+                session,
+                registry,
+                deps.namespace.session_links(session),
+                deps.dispatch,
+                None,
+            )
+        if writer is None:
+            writer = program_runtime(registry, fed_by.words, session, routing)
+    return writer_machine(writer, session.cwd, registry) or folder_machine(
+        session.cwd, registry
     )
-    return writer or folder_machine(session.cwd, registry)
 
 
 async def _held_machine(

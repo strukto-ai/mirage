@@ -331,7 +331,7 @@ def program_word(left: TSNodeLike, session: SessionState) -> str | None:
         left (TSNodeLike): the job's command.
         session (SessionState): the session the job is forked from.
     """
-    words = _program_words(left, session)
+    words = program_words(left, session)
     return words[0] if words else None
 
 
@@ -373,13 +373,13 @@ def program_text(left: TSNodeLike, session: SessionState) -> str | None:
     if name is None:
         return None
     typed = [name, *command_args(command)]
-    words = _program_words(left, session)
+    words = program_words(left, session)
     if words:
         typed = typed[len(typed) - len(words) :]
     return " ".join(get_text(word) for word in typed)
 
 
-def _program_words(
+def program_words(
     left: TSNodeLike, session: SessionState
 ) -> list[str | None] | None:
     """``program_word``'s word and the words after it, None when the job
@@ -423,7 +423,7 @@ def _on_a_machine(left: TSNodeLike, context: EvaluationContext) -> bool:
     """
     session = context.session
     routing = context.frame.routing
-    words = _program_words(left, session)
+    words = program_words(left, session)
     if not words or routing is None:
         return False
     if context.frame.runs_on_machine is not None:

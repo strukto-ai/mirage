@@ -143,6 +143,12 @@ export class FakeFiles {
         this.files.set(dst + name.slice(src.length), data)
       }
     }
+    for (const [name, at] of [...this.written]) {
+      if (name === src || name.startsWith(`${src}/`)) {
+        this.written.delete(name)
+        this.written.set(dst + name.slice(src.length), at)
+      }
+    }
     return ok()
   }
 

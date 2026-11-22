@@ -14,12 +14,16 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { filesContaining as posixFilesContaining } from '../posix/search.ts'
+import { treeMachines } from './readdir.ts'
 
 /**
  * The files under a directory holding `text`, by grep on each machine that
- * holds it; any machine that cannot answer leaves every file to be read.
+ * holds it; any machine that cannot answer leaves every file to be read. A
+ * file several machines hold counts by the copy shown, as a read of it
+ * finds it: a match in an older copy is none.
  *
  * @param accessor the mount's machines.
  * @param machines the machines holding the directory.
@@ -34,17 +38,27 @@ export async function filesContaining(
   text: string,
   ignoreCase: boolean,
 ): Promise<PathSpec[] | null> {
-  const hits = new Map<string, PathSpec>()
+  const found: PathSpec[][] = []
   for (const machine of machines) {
-    const found = await posixFilesContaining(
+    const matched = await posixFilesContaining(
       accessor.runner(machine),
       accessor.root,
       text,
       [path],
       ignoreCase,
     )
-    if (found === null) return null
-    for (const p of found) hits.set(p.virtual, p)
+    if (matched === null) return null
+    found.push(matched)
+  }
+  const shown = machines.length > 1 ? await treeMachines(accessor, machines, path) : null
+  if (machines.length > 1 && shown === null) return null
+  const under = `${rstripSlash(path.virtual)}/`
+  const hits = new Map<string, PathSpec>()
+  for (const [at, matched] of found.entries()) {
+    for (const p of matched) {
+      if (shown === null || shown.get(p.virtual.slice(under.length)) === machines[at])
+        hits.set(p.virtual, p)
+    }
   }
   return [...hits].sort(([a], [b]) => compareCodePoints(a, b)).map(([, p]) => p)
 }

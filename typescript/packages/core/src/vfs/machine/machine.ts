@@ -254,6 +254,15 @@ export class MachineVFS extends BaseVFS {
   override async rmdir(path: PathSpec): Promise<void> {
     const held = await this.everywhere(path)
     const shown = chosen(this.accessor, held)
+    const folders = held.filter((one) => one.folder).map((one) => one.machine)
+    // Asked of every machine before any removes its copy, so a folder one
+    // of them still fills is left whole on all of them.
+    if (
+      shown.folder &&
+      folders.length > 1 &&
+      (await machineReaddir(this.accessor, folders, path)).length > 0
+    )
+      throw enotempty(path)
     await machineRmdir(this.accessor, shown.machine, path)
     for (const one of held) {
       if (one !== shown && one.folder) await machineRmdir(this.accessor, one.machine, path)
@@ -279,7 +288,9 @@ export class MachineVFS extends BaseVFS {
     const several = this.accessor.names().length > 1
     const there = several ? await holders(this.accessor, dst) : []
     const replaced = there.filter((one) => !movers.includes(one.machine))
-    for (const one of replaced) {
+    // Every machine's copy of the new name is judged before any machine
+    // moves, so a refusal leaves the folder under one name.
+    for (const one of there) {
       if (one.folder !== folder) throw folder ? enotdir(dst) : eisdir(dst)
       if (folder && (await machineReaddir(this.accessor, [one.machine], dst)).length > 0)
         throw enotempty(dst)
@@ -310,7 +321,16 @@ export class MachineVFS extends BaseVFS {
     // A copy never crosses: it is made where the source is, and is then the
     // newest copy of its name.
     const machine = await holder(this.accessor, src)
+    await this.refuseHidden(machine, dst)
     await machineCopy(this.accessor, machine, src, dst, await this.lacksFolder(machine, dst))
+    if (this.accessor.names().length === 1) return
+    // The copy replaces the name, so another machine's copy of it goes: one
+    // kept would show again once the new copy takes its source's older
+    // time (`cp -p`).
+    for (const one of await holders(this.accessor, dst)) {
+      if (one.machine !== machine && !one.folder)
+        await machineUnlink(this.accessor, one.machine, dst)
+    }
   }
 
   override async dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
@@ -319,6 +339,7 @@ export class MachineVFS extends BaseVFS {
     // Each name under a folder several machines hold is copied where it is,
     // one by one, so each stays the copy it was.
     if (held.length > 1 || only === undefined) throw enotsup(this.name, 'dir_copy', src)
+    await this.refuseHidden(only.machine, dst)
     await machineDirCopy(
       this.accessor,
       only.machine,
@@ -366,6 +387,18 @@ export class MachineVFS extends BaseVFS {
     const held = await holders(this.accessor, path)
     if (held.length === 0) throw enoent(path)
     return held
+  }
+
+  /**
+   * Refuse a name a machine's own links lead to one the session hides,
+   * before a program of the machine's writes through them.
+   *
+   * @param machine the machine the write runs on.
+   * @param path the name written.
+   * @throws ENOENT when the name leads to a hidden one there.
+   */
+  private async refuseHidden(machine: string, path: PathSpec): Promise<void> {
+    if ((await hiddenOn(this.accessor, path)).includes(machine)) throw enoent(path)
   }
 
   /**

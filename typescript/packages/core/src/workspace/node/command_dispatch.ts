@@ -1175,12 +1175,7 @@ async function runArgv(
     const [held] = await heldMachine(argv, deps, context, stdin)
     if (held?.runtime) machine = held.runtime.machine
   }
-  const preferred = preferredMachine(
-    session,
-    registry,
-    context.frame.routing,
-    context.frame.stdinProgram,
-  )
+  const preferred = await preferredMachine(deps, context)
   const outer = currentCaller()
   if (
     (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
@@ -1197,25 +1192,38 @@ async function runArgv(
  * nothing says, and in a workspace that runs programs on one machine, where
  * nothing is to choose. Mirrors Python's `_preferred_machine`.
  *
- * @param session the session.
- * @param registry the mount registry.
- * @param routing the line's placement.
- * @param feeder the word naming the program that writes the pipe the command
- *   reads.
+ * The pipe's writer is placed as it runs: by its words, through the wrappers
+ * Mirage runs (`nice gen | tee log`), and one named by its path on the
+ * machine holding that file (`/tmp/tool | tee log`).
+ *
+ * @param deps the registry, namespace and dispatcher.
+ * @param context the session and current placement.
  */
-function preferredMachine(
-  session: SessionState,
-  registry: MountRegistry,
-  routing: RouteDecision<Runtime> | undefined,
-  feeder: string | null,
-): string | null {
+async function preferredMachine(
+  deps: ExecuteNodeDeps,
+  context: EvaluationContext,
+): Promise<string | null> {
+  const { session } = context
+  const { registry, namespace, dispatch } = deps
+  const routing = context.frame.routing
   if (routing === undefined || !severalMachines(registry)) return null
   if (routing.machine !== undefined) return routing.machine
-  const writer =
-    feeder === null || feeder === ''
-      ? null
-      : writerMachine(programRuntime(registry, [feeder], session, routing), session.cwd, registry)
-  return writer ?? folderMachine(session.cwd, registry)
+  const fedBy = context.frame.stdinWriter
+  let writer: Runtime | null | undefined = null
+  if (fedBy !== null) {
+    const head = fedBy.words[0] ?? ''
+    if (head.includes('/'))
+      writer = await programMachine(
+        head,
+        session,
+        registry,
+        namespace.sessionLinks(session),
+        dispatch,
+        null,
+      )
+    writer ??= programRuntime(registry, fedBy.words, session, routing)
+  }
+  return writerMachine(writer, session.cwd, registry) ?? folderMachine(session.cwd, registry)
 }
 
 /**

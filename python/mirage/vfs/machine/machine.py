@@ -243,6 +243,15 @@ class MachineVFS(BaseVFS):
     async def rmdir(self, path: PathSpec) -> None:
         held = await self._everywhere(path)
         shown = place.chosen(self.accessor, held)
+        folders = [one.machine for one in held if one.folder]
+        # Asked of every machine before any removes its copy, so a folder
+        # one of them still fills is left whole on all of them.
+        if (
+            shown.folder
+            and len(folders) > 1
+            and await _readdir(self.accessor, folders, path)
+        ):
+            raise enotempty(path)
         await _rmdir(self.accessor, shown.machine, path)
         for one in held:
             if one is not shown and one.folder:
@@ -266,7 +275,9 @@ class MachineVFS(BaseVFS):
         several = len(self.accessor.names()) > 1
         there = await place.holders(self.accessor, dst) if several else []
         replaced = [one for one in there if one.machine not in movers]
-        for one in replaced:
+        # Every machine's copy of the new name is judged before any
+        # machine moves, so a refusal leaves the folder under one name.
+        for one in there:
             if one.folder is not moved.folder:
                 raise enotdir(dst) if moved.folder else eisdir(dst)
             if moved.folder and await _readdir(
@@ -302,6 +313,7 @@ class MachineVFS(BaseVFS):
         # A copy never crosses: it is made where the source is, and is
         # then the newest copy of its name.
         machine = await place.holder(self.accessor, src)
+        await self._refuse_hidden(machine, dst)
         await _copy(
             self.accessor,
             machine,
@@ -309,6 +321,14 @@ class MachineVFS(BaseVFS):
             dst,
             make_parent=await self._lacks_folder(machine, dst),
         )
+        if len(self.accessor.names()) == 1:
+            return
+        # The copy replaces the name, so another machine's copy of it
+        # goes: one kept would show again once the new copy takes its
+        # source's older time (``cp -p``).
+        for one in await place.holders(self.accessor, dst):
+            if one.machine != machine and not one.folder:
+                await _unlink(self.accessor, one.machine, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         held = await self._everywhere(src)
@@ -317,6 +337,7 @@ class MachineVFS(BaseVFS):
             # where it is, one by one, so each stays the copy it was.
             raise enotsup(self.name, "dir_copy", src)
         machine = held[0].machine
+        await self._refuse_hidden(machine, dst)
         await _dir_copy(
             self.accessor,
             machine,
@@ -377,6 +398,20 @@ class MachineVFS(BaseVFS):
         if not held:
             raise enoent(path)
         return held
+
+    async def _refuse_hidden(self, machine: str, path: PathSpec) -> None:
+        """Refuse a name a machine's own links lead to one the session
+        hides, before a program of the machine's writes through them.
+
+        Args:
+            machine (str): the machine the write runs on.
+            path (PathSpec): the name written.
+
+        Raises:
+            FileNotFoundError: the name leads to a hidden one there.
+        """
+        if machine in await _hidden_on(self.accessor, path):
+            raise enoent(path)
 
     async def _lacks_folder(self, machine: str, path: PathSpec) -> bool:
         """Whether a new name's folder is on other machines only, so the

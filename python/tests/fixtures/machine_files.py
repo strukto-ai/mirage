@@ -126,6 +126,9 @@ class FakeFiles:
         for name in sorted(self.files):
             if name.startswith(src + "/"):
                 self.files[dst + name[len(src) :]] = self.files.pop(name)
+        for name in sorted(self.written):
+            if name == src or name.startswith(src + "/"):
+                self.written[dst + name[len(src) :]] = self.written.pop(name)
         return ok()
 
     def _missing(self, tool: str, path: str) -> RunAnswer:

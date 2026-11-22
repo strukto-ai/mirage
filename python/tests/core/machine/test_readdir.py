@@ -20,6 +20,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.core.machine.readdir import readdir, tree
+from mirage.types import PathSpec
 from tests.fixtures.machine import ScriptedMachine, failed, ok
 from tests.fixtures.machine_files import DIR, bound, spec
 
@@ -140,3 +141,71 @@ async def test_tree_merges_every_machine_and_leaves_a_failure_to_the_walk():
     assert (found["s/both"].name, found["s/both"].size) == ("both", 2)
     gone = ScriptedMachine("gone", lambda line, data: failed(b"find: lost\n"))
     assert await tree(bound(a, gone), ["a", "gone"], spec("/d")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_newer_file_over_another_machine_s_folder_is_not_listed():
+    a = ScriptedMachine("a", listing(b"f 644 1 0 0 0 0 1 0 in\0"))
+    newer = ScriptedMachine(
+        "newer", lambda line, data: ok(b"f 644 1 1700000009 0 0 0 1 0 \0")
+    )
+    with pytest.raises(NotADirectoryError):
+        await readdir(bound(a, newer), ["a", "newer"], spec("/d"))
+    older = ScriptedMachine(
+        "older", lambda line, data: ok(b"f 644 1 5 0 0 0 1 0 \0")
+    )
+    found = await readdir(bound(a, older), ["a", "older"], spec("/d"))
+    assert [s.name for s in found] == ["in"]
+
+
+@pytest.mark.asyncio
+async def test_tree_lists_nothing_below_a_name_whose_copy_shown_is_a_file():
+    a = ScriptedMachine(
+        "a",
+        listing(
+            b"d 755 4096 3 0 0 0 2 8 x\0",
+            b"f 644 1 3 0 0 0 1 0 x/y\0",
+            b"f 644 1 3 0 0 0 1 0 z\0",
+        ),
+    )
+    b = ScriptedMachine("b", listing(b"f 644 2 9 0 0 0 1 0 x\0"))
+    found = await tree(bound(a, b), ["a", "b"], spec("/d"))
+    assert found is not None
+    assert sorted(found) == ["x", "z"]
+    assert found["x"].size == 2
+
+
+@pytest.mark.asyncio
+async def test_a_kernel_s_view_lists_as_the_command_s_machine_has_it():
+    a = ScriptedMachine(
+        "a",
+        listing(
+            b"d 555 0 3 0 0 0 2 0 proc\0",
+            b"f 444 1 3 0 0 0 1 0 proc/uptime\0",
+        ),
+    )
+    b = ScriptedMachine(
+        "b",
+        listing(
+            b"d 555 0 9 0 0 0 7 0 proc\0",
+            b"f 444 2 9 0 0 0 1 0 proc/uptime\0",
+            b"f 444 2 9 0 0 0 1 0 proc/only-b\0",
+        ),
+    )
+    accessor = bound(a, b, root="/")
+    root = PathSpec.from_str_path("/", "")
+    listed = await readdir(accessor, ["a", "b"], root)
+    assert [(s.name, s.nlink) for s in listed if s.name == "proc"] == [
+        ("proc", 2)
+    ]
+    found = await tree(accessor, ["a", "b"], root)
+    assert found is not None
+    assert sorted(found) == ["proc", "proc/uptime"]
+    assert found["proc/uptime"].size == 1
+    token = bind_caller(current_caller().changed({"preferred_machine": "b"}))
+    try:
+        found = await tree(accessor, ["a", "b"], root)
+        assert found is not None
+        assert sorted(found) == ["proc", "proc/only-b", "proc/uptime"]
+    finally:
+        reset_caller(token)

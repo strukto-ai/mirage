@@ -608,7 +608,10 @@ async def link_machine(
     runtime = await _machine_holding(
         list(scopes), session, registry, links, None
     )
-    if runtime is None:
+    if runtime is None or (
+        symbolic
+        and not await _holds_targets(runtime, made, session, registry, links)
+    ):
         runtime = await _new_name_runtime(
             made, symbolic, session, registry, links
         )
@@ -665,6 +668,40 @@ async def _holds_folder(
     )
 
 
+async def _holds_targets(
+    runtime: RemoteRuntime,
+    made: Sequence[tuple[str, str]],
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+) -> bool:
+    """Whether a machine's symbolic links would lead where Mirage reads
+    their targets: the copy shown of each target some machine holds
+    (``chosen``) is that machine's, so none dangles there or leads to an
+    older copy.
+
+    Args:
+        runtime (RemoteRuntime): the machine's runtime.
+        made (Sequence[tuple[str, str]]): each link's absolute path and
+            its target, resolved as the link will resolve it.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+    """
+    aimed = [(target, False) for _, target in made]
+    mounts = _held_mounts(aimed, session, registry, links)
+    if mounts is None:
+        return False
+    for entry, (target, _) in zip(mounts, aimed):
+        assert isinstance(entry.vfs, MachineVFS)
+        held = await holders(entry.vfs.accessor, _on_mount(entry, target))
+        if held and (
+            chosen(entry.vfs.accessor, held).machine != runtime.default_machine
+        ):
+            return False
+    return True
+
+
 async def _new_name_runtime(
     made: Sequence[tuple[str, str]],
     symbolic: bool,
@@ -679,8 +716,10 @@ async def _new_name_runtime(
     link to a name no machine holds is a new name like any other
     (``new_name_machine``). None when a path is off a machine mount, the
     session's rules or a coded file policy speak for the mount, a
-    target's machine lacks the link's folder, or the links land on
-    different machines: the link is then Mirage's own.
+    target's machine lacks the link's folder, another machine holds a
+    link's name already, or the links land on different machines: the
+    link is then Mirage's own, and Mirage's ``ln`` answers for a name
+    that exists.
 
     Args:
         made (Sequence[tuple[str, str]]): each link's absolute path and
@@ -709,15 +748,22 @@ async def _new_name_runtime(
         if not held:
             if not symbolic:
                 return None
-            machines.add(await new_name_machine(folder.vfs.accessor, spec))
-            continue
-        machine = chosen(aimed.vfs.accessor, held).machine
-        folders = {
-            one.machine
-            for one in await holders(folder.vfs.accessor, folder_of(spec))
-            if one.folder
-        }
-        if machine not in folders:
+            try:
+                machine = await new_name_machine(folder.vfs.accessor, spec)
+            except NotADirectoryError:
+                logger.debug("%s: its folder is a file", link, exc_info=True)
+                return None
+        else:
+            machine = chosen(aimed.vfs.accessor, held).machine
+            folders = {
+                one.machine
+                for one in await holders(folder.vfs.accessor, folder_of(spec))
+                if one.folder
+            }
+            if machine not in folders:
+                return None
+        named = await holders(folder.vfs.accessor, spec)
+        if any(one.machine != machine for one in named):
             return None
         machines.add(machine)
     if len(machines) != 1:
