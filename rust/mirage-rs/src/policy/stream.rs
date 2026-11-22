@@ -282,6 +282,34 @@ mod tests {
     }
 
     #[test]
+    fn a_leaf_is_one_mapping_with_its_decision() {
+        let config = |root: &str| format!(r#"{{"rules": {{"trees": [{{"root": {root}}}]}}}}"#);
+        let refused = |root: &str| {
+            super::open(config(root).as_bytes())
+                .err()
+                .map(|e| e.message)
+                .unwrap_or_default()
+        };
+        for root in [
+            r#"{"decision": []}"#,
+            r#"{"decision": [{"decision": "deny", "reason": []}]}"#,
+            r#"{"decision": {"reason": []}}"#,
+            r#"{"decision": {"decision": "deny", "reason": [], "paths": [[47]]}}"#,
+            r#"{"subcommands": [[[114,109], {"decision": {"decision": "deny", "paths": [[47]]}}]]}"#,
+            r#"{"other_options": []}"#,
+        ] {
+            assert!(!refused(root).is_empty(), "{root} was accepted");
+        }
+        for root in [
+            r#"{"decision": null}"#,
+            r#"{"decision": {"decision": "deny"}}"#,
+            r#"{"decision": {"decision": "ask", "reason": [110,111]}, "other_options": null}"#,
+        ] {
+            assert_eq!(refused(root), "", "{root} was refused");
+        }
+    }
+
+    #[test]
     fn decides_with_host_supplied_subtree_facts() {
         let config = tree("/r/k", r#"{"rm": {"decision": "deny", "reason": "no"}}"#);
         let facts = |subtree: bool| {

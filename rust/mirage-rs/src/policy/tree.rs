@@ -7,12 +7,46 @@ use crate::glob::CompiledGlob;
 
 const STAR: u32 = 42;
 
-/// One decision a profile writes at a node, an option or a value.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
+/// One decision a profile writes at a node, an option or a value. A
+/// host sends it as a mapping with its `decision`, and nothing else: a
+/// list, a missing decision or a key such as an old rule's `paths` is
+/// refused rather than read as a default `allow` or a command-wide rule.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Leaf {
     pub decision: Outcome,
     pub reason: Text,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LeafFields {
+    decision: Outcome,
+    #[serde(default)]
+    reason: Text,
+}
+
+struct LeafVisitor;
+
+impl<'de> serde::de::Visitor<'de> for LeafVisitor {
+    type Value = Leaf;
+
+    fn expecting(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result {
+        out.write_str("a leaf mapping with a decision")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Leaf, A::Error> {
+        let fields = LeafFields::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+        Ok(Leaf {
+            decision: fields.decision,
+            reason: fields.reason,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Leaf {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(LeafVisitor)
+    }
 }
 
 /// A word map as the host sends it: each word or glob with its target,
