@@ -251,6 +251,21 @@ async function branchHolding(h: Harness, name: string, path: string, text: strin
   await h.run('checkout main')
 }
 
+/**
+ * A repository of its own at `sub` with one commit, or with HEAD on a branch
+ * that has none yet when told so.
+ */
+function embedded(repo: string, checkedOut = true): void {
+  const sub = join(repo, 'sub')
+  mkdirSync(sub)
+  execFileSync('git', ['-C', sub, 'init', '-q'])
+  writeFileSync(join(sub, 'in.txt'), 'inner\n')
+  const who = ['-C', sub, '-c', 'user.name=a', '-c', 'user.email=a@b']
+  execFileSync('git', [...who, 'add', '.'])
+  execFileSync('git', [...who, 'commit', '-qm', 'inner'])
+  if (!checkedOut) execFileSync('git', ['-C', sub, 'checkout', '-q', '--orphan', 'unborn'])
+}
+
 describe('git add', () => {
   it('stages an edit, and the real binary agrees', async () => {
     const h = await harness()
@@ -305,21 +320,6 @@ describe('git add', () => {
       expect(status).not.toContain('.git/HEAD')
     },
   )
-
-  /**
-   * A repository of its own at `sub` with one commit, or with HEAD on a
-   * branch that has none yet when told so.
-   */
-  function embedded(repo: string, checkedOut = true): void {
-    const sub = join(repo, 'sub')
-    mkdirSync(sub)
-    execFileSync('git', ['-C', sub, 'init', '-q'])
-    writeFileSync(join(sub, 'in.txt'), 'inner\n')
-    const who = ['-C', sub, '-c', 'user.name=a', '-c', 'user.email=a@b']
-    execFileSync('git', [...who, 'add', '.'])
-    execFileSync('git', [...who, 'commit', '-qm', 'inner'])
-    if (!checkedOut) execFileSync('git', ['-C', sub, 'checkout', '-q', '--orphan', 'unborn'])
-  }
 
   // git 2.47.3: the repository's HEAD commit at mode 160000, never its files,
   // and the warning with its advice on stderr.
@@ -414,6 +414,20 @@ describe('git add', () => {
       "error: 'sub/' does not have a commit checked out\nfatal: adding files failed\n",
     ])
     expect(git(await h.drain(), ['status', '--porcelain'])).toContain('?? fresh.txt')
+  })
+
+  // git 2.47.3: a link, even to a directory, or a file standing where a gitlink
+  // was is staged in its place, `T` in short status.
+  it('stages what replaces a gitlink as a type change', async () => {
+    const h = await harness((repo) => {
+      embedded(repo)
+    })
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('commit -qm sub'))[0]).toBe(0)
+    const line = 'mkdir /repo/d && rm -rf /repo/sub && ln -s d /repo/sub'
+    expect((await h.ws.shell(line)).exitCode).toBe(0)
+    expect(await h.run('add sub')).toEqual([0, '', ''])
+    expect((await h.run('status -s'))[1]).toBe('T  sub\n')
   })
 
   it('says what it did not do with no pathspec', async () => {
@@ -940,6 +954,41 @@ describe('git checkout', () => {
         'by checkout:\n\tfresh.txt\nPlease move or remove them before you ' +
         'switch branches.\nAborting\n',
     )
+  })
+
+  // git 2.47.3: a switch checks an untracked embedded repository's files as it
+  // does any directory's, and its .git is untracked content a file in its
+  // place would lose; a file it does not hold is written beside them.
+  it('checks the files of an untracked embedded repository', async () => {
+    const h = await harness((repo) => {
+      const who = ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b']
+      const branches: [string, string][] = [
+        ['over', 'sub/in.txt'],
+        ['beside', 'sub/x.txt'],
+        ['file', 'sub'],
+      ]
+      for (const [branch, path] of branches) {
+        execFileSync('git', [...who, 'checkout', '-qb', branch])
+        if (path.includes('/')) mkdirSync(join(repo, 'sub'))
+        writeFileSync(join(repo, path), 'theirs\n')
+        execFileSync('git', [...who, 'add', path])
+        execFileSync('git', [...who, 'commit', '-qm', branch])
+        execFileSync('git', [...who, 'checkout', '-q', '-'])
+      }
+      embedded(repo)
+    })
+    let [code, , err] = await h.run('checkout over')
+    expect(code).toBe(1)
+    expect(err).toContain('would be overwritten by checkout:\n\tsub/in.txt\n')
+    ;[code, , err] = await h.run('checkout file')
+    expect(code).toBe(1)
+    expect(err).toContain('would lose untracked files in them:\n\tsub\n')
+    expect((await h.ws.shell('rm /repo/sub/in.txt')).exitCode).toBe(0)
+    expect((await h.run('checkout file'))[0]).toBe(1)
+    expect((await h.run('checkout beside'))[0]).toBe(0)
+    const drained = await h.drain()
+    expect(readFileSync(join(drained, 'sub', 'x.txt'), 'utf8')).toBe('theirs\n')
+    expect(existsSync(join(drained, 'sub', '.git', 'HEAD'))).toBe(true)
   })
 })
 

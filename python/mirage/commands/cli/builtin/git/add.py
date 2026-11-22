@@ -43,6 +43,7 @@ from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (
     entry_bytes,
+    lstat,
     stat_of,
 )
 from mirage.commands.cli.builtin.git.objects import store_blob
@@ -393,7 +394,8 @@ async def _standing_gitlinks(
         entry = state.entries.get(path.encode())
         if entry is None or entry.mode != GITLINK:
             continue
-        info = await stat_of(vfs, location.worktree.join(path))
+        # lstat: a link or a file put in its place is a change to stage.
+        info = await lstat(vfs, location.worktree.join(path))
         if info is not None and info.type is FileType.DIRECTORY:
             standing.add(path)
     return standing

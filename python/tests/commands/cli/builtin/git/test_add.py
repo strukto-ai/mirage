@@ -532,3 +532,18 @@ async def test_naming_an_ignored_embedded_repository_is_refused(
         b"The following paths are ignored by one of your .gitignore "
         b"files:\nsub\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_what_replaces_a_gitlink_is_staged_as_a_type_change(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: a link, even to a directory, or a file standing where a
+    # gitlink was is staged in its place, ``T`` in short status.
+    _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    line = "mkdir /repo/d && rm -rf /repo/sub && ln -s d /repo/sub"
+    assert (await git_rw.shell(line)).exit_code == 0
+    assert await run(git_rw, "add sub") == (0, b"", b"")
+    assert (await run(git_rw, "status -s"))[1] == b"T  sub\n"

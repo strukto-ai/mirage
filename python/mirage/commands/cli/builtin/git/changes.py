@@ -300,6 +300,10 @@ def staged_letters(
             staged[name] = ADDED
             shas[name] = entry.sha
             kinds[name] = S_IFMT(entry.mode)
+        elif S_IFMT(recorded[0]) != S_IFMT(entry.mode):
+            # A file, a link and a gitlink are kinds of entry; the
+            # executable bit is not one.
+            staged[name] = TYPE_CHANGED
         elif recorded[1] != entry.sha or recorded[0] != entry.mode:
             staged[name] = MODIFIED
     for path, (mode, sha) in tree.items():

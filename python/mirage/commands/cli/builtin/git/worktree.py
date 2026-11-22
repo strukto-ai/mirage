@@ -85,6 +85,9 @@ class Scanner:
         keep_empty (bool): list a directory holding nothing to report.
         gitlinks (frozenset[str]): the gitlinks the index holds, whose
             directory the walk never enters.
+        through_repos (bool): walk an untracked embedded repository as a
+            plain directory, its ``.git`` one untracked entry, rather than
+            report it whole.
     """
 
     def __init__(
@@ -98,9 +101,11 @@ class Scanner:
         per_directory: str | None = GITIGNORE,
         keep_empty: bool = False,
         gitlinks: frozenset[str] = frozenset(),
+        through_repos: bool = False,
     ) -> None:
         self._vfs = vfs
         self._gitlinks = gitlinks
+        self._through_repos = through_repos
         self._per_directory = per_directory
         self._keep_empty = keep_empty
         self._worktree = worktree
@@ -380,6 +385,14 @@ class Scanner:
                     self.found.repos.append(child)
                     if child in self._tracked or self._mode == UNTRACKED_NO:
                         continue
+                    if self._through_repos:
+                        # A switch writes into it as into any directory,
+                        # and its .git is untracked content there too
+                        # (git 2.47.3).
+                        if not skipped:
+                            self.found.untracked.append(f"{child}/{GIT_DIR}")
+                        await self._visit_directory(child, skipped, rules)
+                        continue
                     if not skipped:
                         self.found.untracked.append(f"{child}/")
                     elif self._show_ignored:
@@ -412,6 +425,7 @@ async def scan(
     per_directory: str | None = GITIGNORE,
     keep_empty: bool = False,
     gitlinks: frozenset[str] = frozenset(),
+    through_repos: bool = False,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -438,6 +452,9 @@ async def scan(
         keep_empty (bool): list a directory holding nothing to report.
         gitlinks (frozenset[str]): the gitlinks the index holds, whose
             directory the walk never enters.
+        through_repos (bool): walk an untracked embedded repository as a
+            plain directory, its ``.git`` one untracked entry, as a switch
+            checks what it would write over.
     """
     rules = (
         ignores
@@ -454,6 +471,7 @@ async def scan(
         per_directory,
         keep_empty,
         gitlinks,
+        through_repos,
     )
     await scanner.walk("", False, rules)
     return scanner.found

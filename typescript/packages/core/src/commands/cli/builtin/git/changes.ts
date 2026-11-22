@@ -280,6 +280,10 @@ function stagedLetters(
       staged.set(path, ADDED)
       oids.set(path, entry.oid)
       kinds.set(path, kindOf(entry.mode.toString(8)))
+    } else if (kindOf(recorded.mode) !== kindOf(entry.mode.toString(8))) {
+      // A file, a link and a gitlink are kinds of entry; the executable bit is
+      // not one.
+      staged.set(path, TYPE_CHANGED)
     } else if (recorded.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode) {
       staged.set(path, MODIFIED)
     }

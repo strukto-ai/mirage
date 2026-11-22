@@ -78,6 +78,7 @@ class Scanner {
     private readonly perDirectory: string | null = GITIGNORE,
     private readonly keepEmpty = false,
     private readonly gitlinks: ReadonlySet<string> = new Set(),
+    private readonly throughRepos = false,
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
@@ -305,6 +306,13 @@ class Scanner {
         if (!this.directories.has(child) && needed && (await this.embedded(child))) {
           this.found.repos.push(child)
           if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
+          if (this.throughRepos) {
+            // A switch writes into it as into any directory, and its .git is
+            // untracked content there too (git 2.47.3).
+            if (!skipped) this.found.untracked.push(`${child}/${GIT_DIR}`)
+            await this.visitDirectory(child, skipped, rules)
+            continue
+          }
           if (!skipped) this.found.untracked.push(`${child}/`)
           else if (this.showIgnored) this.found.ignored.push(`${child}/`)
           continue
@@ -340,6 +348,9 @@ class Scanner {
  * @param roots narrow the walk to these repository-relative paths and what
  *   lies under them, for a verb whose pathspecs say what it reads; null walks
  *   it all
+ * @param throughRepos walk an untracked embedded repository as a plain
+ *   directory, its `.git` one untracked entry, as a switch checks what it
+ *   would write over
  */
 export async function scan(
   vfs: Files,
@@ -352,6 +363,7 @@ export async function scan(
   perDirectory: string | null = GITIGNORE,
   keepEmpty = false,
   gitlinks: ReadonlySet<string> = new Set(),
+  throughRepos = false,
 ): Promise<WorkTree> {
   const rules = ignores ?? (await loadIgnores(vfs, location.commondir, location.worktree))
   const scanner = new Scanner(
@@ -364,6 +376,7 @@ export async function scan(
     perDirectory,
     keepEmpty,
     gitlinks,
+    throughRepos,
   )
   await scanner.walk('', false, rules)
   return scanner.found

@@ -35,7 +35,7 @@ import { embeddedHead, embeddedLocation } from './embedded.ts'
 import { configValues } from './fs.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { entryBytes, statOf } from './io.ts'
+import { entryBytes, lstat, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
@@ -279,7 +279,8 @@ async function standingGitlinks(
   const standing = new Set<string>()
   for (const path of tracked) {
     if (state.entries.get(path)?.mode !== GITLINK) continue
-    if ((await statOf(vfs, location.worktree.join(path)))?.type === FileType.DIRECTORY)
+    // lstat: a link or a file put in its place is a change to stage.
+    if ((await lstat(vfs, location.worktree.join(path)))?.type === FileType.DIRECTORY)
       standing.add(path)
   }
   return standing
