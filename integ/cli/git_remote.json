@@ -77,11 +77,11 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "(cd /repo && git clone -q . c && cd c && git fetch origin topic; status=$?; cat .git/FETCH_HEAD; cd /repo && rm -rf c; exit $status)",
+      "command": "(cd /repo && git clone -q . c && cd c && git fetch origin topic; status=$?; cat .git/FETCH_HEAD; git rev-parse FETCH_HEAD; git checkout --detach FETCH_HEAD; git status | head -1; git fetch -q --depth 0 origin topic; echo depth=$?; git fetch -q --depth 1x origin topic; echo depth=$?; cd /repo && rm -rf c; exit $status)",
       "expect": {
         "exit": 0,
-        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\t\tbranch 'topic' of /repo/.\n",
-        "stderr": "From /repo/.\n * branch            topic      -> FETCH_HEAD\n"
+        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\t\tbranch 'topic' of /repo/.\n225f39c50d27e015653a38d589474ce2880399e6\nHEAD detached at FETCH_HEAD\ndepth=128\ndepth=128\n",
+        "stderr": "From /repo/.\n * branch            topic      -> FETCH_HEAD\nHEAD is now at 225f39c add docs\nfatal: depth 0 is not a positive number\nfatal: transport: invalid depth option '1x'\n"
       }
     },
     {
@@ -245,10 +245,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "(cd /repo && git clone --depth 1 file:///repo c; status=$?; cat c/.git/shallow; git -C c log --oneline --decorate; git -C c branch -a; git -C c config remote.origin.fetch; git -C c rev-parse --is-shallow-repository; ls c; rm -rf c; exit $status)",
+      "command": "(cd /repo && git clone --depth 1 file:///repo c; status=$?; cat c/.git/shallow; git -C c log --oneline --decorate; git -C c branch -a; git -C c config remote.origin.fetch; git -C c rev-parse --is-shallow-repository; ls c; git -C c fetch -q --depth 1 origin topic; sort c/.git/shallow; git -C c log --oneline -1 FETCH_HEAD; rm -rf c; exit $status)",
       "expect": {
         "exit": 0,
-        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef2542 (grafted, HEAD -> main, origin/main, origin/HEAD) add two\n* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n+refs/heads/main:refs/remotes/origin/main\ntrue\ndocs\nletters.txt\nnumbers.txt\n",
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef2542 (grafted, HEAD -> main, origin/main, origin/HEAD) add two\n* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n+refs/heads/main:refs/remotes/origin/main\ntrue\ndocs\nletters.txt\nnumbers.txt\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c add docs\n",
         "stderr": "Cloning into 'c'...\n"
       }
     },

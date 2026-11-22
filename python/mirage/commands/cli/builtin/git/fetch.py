@@ -58,9 +58,11 @@ from mirage.commands.cli.builtin.git.transport import (
     Advertisement,
     HttpTransport,
     LocalTransport,
+    check_depth,
     display_url,
     extra_headers,
     open_transport,
+    transport_depth,
 )
 from mirage.commands.cli.builtin.git.types import Refspec, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -681,6 +683,10 @@ async def fetch(
     """
     fl = FlagView(ctx.flags)
     check_switches(ctx, texts)
+    # Checked before anything is read, as git refuses the value up front.
+    depth = fl.as_str("depth")
+    if depth is not None:
+        check_depth(depth)
     _, location = await opened(ctx, fl)
     vfs = require_vfs(ctx)
     cfg = await read_config(vfs, location)
@@ -739,7 +745,14 @@ async def fetch(
     tag_opt = multivar(cfg, (b"remote", name.encode()), b"tagopt")
     follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
     repo, taken = await fetch_objects(
-        vfs, location, transport, adv, wanted, follow, ctx.ids
+        vfs,
+        location,
+        transport,
+        adv,
+        wanted,
+        follow,
+        ctx.ids,
+        None if depth is None else transport_depth(depth),
     )
     pruned = []
     if fl.as_bool("prune") and not typed:

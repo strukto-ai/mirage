@@ -45,9 +45,11 @@ import { addShallow, readCommit, objectType, openRepo, type Repo } from './repo.
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import {
+  checkDepth,
   displayUrl,
   extraHeaders,
   openTransport,
+  transportDepth,
   type Advertisement,
   type Transport,
 } from './transport.ts'
@@ -497,6 +499,9 @@ export async function fetch(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   checkSwitches(ctx, texts)
+  // Checked before anything is read, as git refuses the value up front.
+  const depth = fl.asStr('depth') ?? null
+  if (depth !== null) checkDepth(depth)
   const repo = await opened(ctx, fl)
   const { location } = repo
   const values = (path: string): Promise<string[]> => configValues(repo.vfs, location, path)
@@ -547,6 +552,7 @@ export async function fetch(
     wants,
     follow,
     ctx.ids ?? SYSTEM_IDS,
+    depth === null ? null : transportDepth(depth),
   )
   const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
   const reason = ['fetch', ...leafArgs(ctx.argv ?? [], 'fetch')].join(' ')

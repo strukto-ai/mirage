@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git, { Errors } from 'isomorphic-git'
-import { DWIM_RULES, GITLINK_MODE, HEAD, LOGS_DIR } from './constants.ts'
+import { DWIM_RULES, GITLINK_MODE, HEAD, LOGS_DIR, ROOT_REF } from './constants.ts'
 
 import {
   AmbiguousArgumentError,
@@ -243,6 +243,8 @@ async function namedObject(repo: Repo, spelled: string, revision: string): Promi
     oid = await refOid(repo, base)
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
+    const root = await rootRef(repo, base)
+    if (root !== null) return root
     if (base.length < MINIMUM_ABBREV) throw new AmbiguousArgumentError(revision)
     try {
       return await expandedId(repo, base)
@@ -254,6 +256,25 @@ async function namedObject(repo: Repo, spelled: string, revision: string): Promi
   }
   await noteAmbiguity(repo, base)
   return oid
+}
+
+/**
+ * The id a root ref names, null when the name is none or its file is missing.
+ *
+ * FETCH_HEAD and its kind live in the git directory itself, and git reads one
+ * by the id that leads its first line: FETCH_HEAD's lines go on to say where
+ * each ref came from, which no ref parser takes (pinned against git 2.47.3).
+ *
+ * @param repo repository to resolve against
+ * @param name the name as typed
+ */
+export async function rootRef(repo: Repo, name: string): Promise<string | null> {
+  if (!ROOT_REF.test(name)) return null
+  const data = await readOptional(repo.vfs, repo.location.gitdir.join(name))
+  if (data === null) return null
+  const first = new TextDecoder().decode(data).split('\n', 1)[0] ?? ''
+  const oid = first.split(/\s/, 1)[0] ?? ''
+  return oid === '' ? null : oid
 }
 
 /**

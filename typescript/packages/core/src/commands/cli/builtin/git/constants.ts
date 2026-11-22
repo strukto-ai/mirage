@@ -92,6 +92,10 @@ export const TERMINATED_KINDS: readonly string[] = ['oneline', 'tformat']
 
 // The rules a short ref name is tried against, in the order gitrevisions(7)
 // lists them.
+// The names git reads as a file in the git directory rather than under
+// refs/: FETCH_HEAD, ORIG_HEAD, MERGE_HEAD and their kind.
+export const ROOT_REF = /^[A-Z_]+_HEAD$/
+
 export const DWIM_RULES = [
   '{}',
   'refs/{}',

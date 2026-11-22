@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from string import ascii_letters
 
 from dulwich.refs import Ref
@@ -89,6 +90,10 @@ TERMINATED_KINDS = ("oneline", "tformat")
 
 # The rules a short ref name is tried against, in the order
 # gitrevisions(7) lists them.
+# The names git reads as a file in the git directory rather than under
+# refs/: FETCH_HEAD, ORIG_HEAD, MERGE_HEAD and their kind.
+ROOT_REF = re.compile(r"[A-Z_]+_HEAD")
+
 DWIM_RULES = (
     "{}",
     "refs/{}",

@@ -42,7 +42,7 @@ import {
   TAG_PREFIX,
 } from './refs.ts'
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
-import { refsNamed, trackingRef } from './revparse.ts'
+import { refsNamed, rootRef, trackingRef } from './revparse.ts'
 import {
   commitFacts,
   idsUnder,
@@ -367,6 +367,9 @@ async function detachedLabel(repo: Repo, target: string, moved: string): Promise
     while ((await objectType(repo, oid)) === 'tag')
       oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
     if (oid === moved) return only.replace(/^refs\/tags\//, '').replace(/^refs\/remotes\//, '')
+  } else if (found.length === 0 && (await rootRef(repo, target)) === moved) {
+    // A root ref such as FETCH_HEAD is named as the checkout spelled it.
+    return target
   }
   return short(moved, repo.abbrev)
 }

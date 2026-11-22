@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.constants import (
     DWIM_RULES,
     HEAD,
     LOGS_DIR,
+    ROOT_REF,
 )
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
@@ -217,7 +218,13 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
     try:
         commit = parse_commit(repo, base)
     except (KeyError, ValueError) as exc:
-        raise AmbiguousArgumentError(revision) from exc
+        root = root_ref(repo, base)
+        if root is None:
+            raise AmbiguousArgumentError(revision) from exc
+        try:
+            commit = parse_commit(repo, root)
+        except (KeyError, ValueError) as missed:
+            raise AmbiguousArgumentError(revision) from missed
     note_ambiguity(repo, base)
     for op in ops:
         if isinstance(op, AncestryStep):
@@ -1033,6 +1040,31 @@ def note_ambiguity(repo: BaseRepo, name: str) -> None:
         repo.ambiguous.append(f"warning: refname '{name}' is ambiguous.\n")
 
 
+def root_ref(repo: BaseRepo, name: str) -> ObjectID | None:
+    """The id a root ref names, None when the name is none or its file is
+    missing.
+
+    FETCH_HEAD and its kind live in the git directory itself, and git
+    reads one by the id that leads its first line: FETCH_HEAD's lines go
+    on to say where each ref came from, which no ref parser takes
+    (pinned against git 2.47.3).
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        name (str): the name as typed.
+    """
+    if not isinstance(repo, Repo) or ROOT_REF.fullmatch(name) is None:
+        return None
+    data = run_async_from_sync(
+        read_optional(repo.dispatch, repo.location.gitdir.join(name)),
+        repo.loop,
+    )
+    if data is None:
+        return None
+    first = data.split(b"\n", 1)[0].split(maxsplit=1)
+    return ObjectID(first[0]) if first else None
+
+
 def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
     """The object a name or id stands for, an annotated tag unpeeled.
 
@@ -1054,6 +1086,8 @@ def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
             raise AmbiguousArgumentError(revision) from exc
         note_ambiguity(repo, name)
         obj = _object_by_id(repo, ObjectID(sha), revision)
+    elif (root := root_ref(repo, name)) is not None:
+        obj = _object_by_id(repo, root, revision)
     else:
         try:
             obj = object_at(repo, name)

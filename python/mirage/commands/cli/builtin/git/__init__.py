@@ -1395,6 +1395,10 @@ GIT = CLI(
                         action="store_true",
                         help="Follow no tags",
                     ),
+                    Argument(
+                        "--depth",
+                        help="Fetch only this many commits of history",
+                    ),
                     REVISION,
                 ),
             ),

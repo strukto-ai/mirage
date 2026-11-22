@@ -53,7 +53,11 @@ from mirage.commands.cli.builtin.git.render import (
     NO_BRANCH,
 )
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
-from mirage.commands.cli.builtin.git.revparse import refs_named, tracking_ref
+from mirage.commands.cli.builtin.git.revparse import (
+    refs_named,
+    root_ref,
+    tracking_ref,
+)
 from mirage.commands.cli.builtin.git.seen import (
     guarded,
     shown_raw,
@@ -517,6 +521,9 @@ def _detached_label(repo: BaseRepo, target: str, moved: bytes) -> str:
             return (
                 found[0].removeprefix(TAG_PREFIX).removeprefix(REMOTE_PREFIX)
             )
+    elif not found and root_ref(repo, target) == moved:
+        # A root ref such as FETCH_HEAD is named as the checkout spelled it.
+        return target
     return short(moved, abbrev_for(repo))
 
 
