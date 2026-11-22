@@ -24,7 +24,7 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { exists, isLink, readOptional } from './io.ts'
+import { exists, isDirectory, isLink, readOptional } from './io.ts'
 import { GITIGNORE, IgnoreStack } from './ignore.ts'
 import { pathspecPatterns, pathspecSelects, repoRelative, visibleEntries } from './pathspec.ts'
 import { UNTRACKED_ALL, scan } from './worktree.ts'
@@ -334,7 +334,9 @@ export async function grep(
   const mounts = mountsOf(ctx)
   // The work tree's files no line can match in, as its mount's search rules
   // them out for grep: one that lists the files without a match, or selects
-  // the lines that do not, reads every file.
+  // the lines that do not, reads every file. The search is asked about the
+  // deepest directory every selected file sits under, so a narrow pathspec
+  // searches no more than its own folder.
   let misses: ((path: PathSpec) => Promise<boolean>) | null = null
   if (!sources[0]?.[0] && !cached && !flags.invert && flags.listing !== 'files_without_match') {
     const texts = searchTerms(
@@ -346,9 +348,26 @@ export async function grep(
       false,
       flags.ignoreCase,
     )
-    if (texts !== null) {
-      const worktree = [repo.location.worktree]
-      misses = await ruledOut(commandFiles(ctx, worktree), ctx, worktree, new Set(), {
+    let shared: string[] | null = null
+    for (const [path, entry] of texts === null ? [] : (sources[0]?.[1] ?? [])) {
+      if (
+        ![REGULAR_MODE, EXECUTABLE_MODE].includes(entry.mode) ||
+        (path && !pathspecSelects(path, specs))
+      )
+        continue
+      const above = path.split('/').slice(0, -1)
+      let same = 0
+      while (shared !== null && same < shared.length && shared[same] === above[same]) same += 1
+      shared = shared === null ? above : shared.slice(0, same)
+    }
+    const scope =
+      shared === null
+        ? null
+        : shared.length > 0
+          ? repo.location.worktree.join(shared.join('/'))
+          : repo.location.worktree
+    if (texts !== null && scope !== null && (await isDirectory(repo.vfs, scope))) {
+      misses = await ruledOut(commandFiles(ctx, [scope]), ctx, [scope], new Set(), {
         texts: texts[0],
         wholeWord: false,
         ignoreCase: flags.ignoreCase,

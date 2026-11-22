@@ -123,7 +123,12 @@ export async function walk(accessor: SqlAccessor, path: PathSpec | string): Prom
     const above = kept.chain[kept.chain.length - 1]
     if (above !== undefined) {
       const [parent, leaf] = await walkFrom(accessor, above.ino, all.slice(-1))
-      if (parent !== null && parent !== undefined && isDir(parent)) {
+      if (
+        parent !== null &&
+        parent !== undefined &&
+        isDir(parent) &&
+        accessor.structure() === mark
+      ) {
         return { p, names, chain: [...kept.chain.slice(0, -1), parent, leaf ?? null].slice(skip) }
       }
     }

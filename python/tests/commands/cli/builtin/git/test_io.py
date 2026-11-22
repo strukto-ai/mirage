@@ -146,6 +146,14 @@ async def test_leading_dirs_ask_each_directory_once():
     assert not dirs.may_hold(REPO.join("new/deep/five"))
     assert not dirs.may_hold(REPO.join("gone/x/four"))
     assert dirs.may_hold(REPO.join("a/b/one"))
+    # What the pass wrote is looked at when a tree names the place again,
+    # and is in the way of an entry the tree puts below it.
+    dirs.made(REPO.join("new/deep"))
+    dirs.taken(REPO.join("new/deep/five"))
+    assert dirs.may_hold(REPO.join("new/deep/five"))
+    below = await blocking_ancestor(vfs, REPO, "new/deep/five/six", dirs)
+    assert below is not None and below.virtual == "/repo/new/deep/five"
+    assert asked == ["/repo/a", "/repo/a/b", "/repo/gone"]
 
 
 class Recorder:

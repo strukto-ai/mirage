@@ -540,18 +540,23 @@ describe('searches narrowed by the database', () => {
     }
   })
 
+  // The database is asked about the folder the search covers, no wider, and
+  // no file it rules out is opened.
   it.each([
-    ['git grep -n needle', ['b.txt', 'src/two.ts']],
-    ['git grep -n alpha', ['b.txt', 'd/c.txt', 'src/one.ts']],
-    ["ast-grep run -p 'needle($A)' .", ['src/two.ts']],
-  ])('read only the files the database names: %s', async (line, skipped) => {
+    ['git grep -n needle', ['b.txt', 'src/two.ts'], '/w/repo'],
+    ['git grep -n needle -- src', ['src/two.ts'], '/w/repo/src'],
+    ['git grep -n alpha', ['b.txt', 'd/c.txt', 'src/one.ts'], '/w/repo'],
+    ["ast-grep run -p 'needle($A)' .", ['src/two.ts'], '/w/repo'],
+  ])('read only the files the database names: %s', async (line, skipped, scope) => {
     const vfs = new SqlVFS({ driver: new SqliteDriver() })
     const [ws] = await searched(vfs)
     try {
       const read = vi.spyOn(vfs, 'read')
+      const containing = vi.spyOn(vfs, 'filesContaining')
       const ran = await ws.shell(`cd /w/repo && ${line}`)
       expect([ran.stderrText, ran.exitCode]).toEqual(['', 0])
       expect(ran.stdoutText).not.toBe('')
+      expect([...new Set(containing.mock.calls.map(([path]) => path.virtual))]).toEqual([scope])
       const opened = new Set(read.mock.calls.map(([path]) => path.virtual))
       expect(skipped.filter((name) => opened.has(`/w/repo/${name}`))).toEqual([])
     } finally {
@@ -696,6 +701,19 @@ describe('SqlVFS folders', () => {
     await vfs.append(at('/d/f'), parts())
     expect(vfs.usage?.used).toBe(8)
     expect(dec.decode(await bytes(vfs, '/d/f'))).toBe('abcdabcd')
+    // A replacement refused part way has emptied the file, and the count
+    // follows the file as it stands, not as the write first found it.
+    const small = new SqlVFS({ driver: new SqliteDriver(), capacity: 8 })
+    await small.write(at('/f'), enc.encode('abcdefgh'))
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async function* over(): AsyncIterable<Uint8Array> {
+      yield enc.encode('123456789')
+    }
+    await expect(small.write(at('/f'), over())).rejects.toMatchObject({ code: 'EDQUOT' })
+    expect(small.usage?.used).toBe(0)
+    await small.write(at('/g'), enc.encode('1'))
+    expect(small.usage?.used).toBe(1)
+    await small.close()
   })
 
   it('walks one name through the folder a sole writer just walked', async () => {

@@ -67,13 +67,17 @@ enum Leading {
   MADE = 'made',
   /** Nothing there, nor anything below it. */
   MISSING = 'missing',
+  /** A file or link this pass wrote there. */
+  TAKEN = 'taken',
 }
 
 /**
  * The leading directories one checkout pass has looked at, as git's lstat
  * cache keeps them: each is asked once however many entries sit under it.
  * One the pass made, or found missing, holds nothing the pass has not
- * written, so an entry under it is not looked at at all.
+ * written, so an entry under it is not looked at at all. What the pass wrote
+ * is kept too: a tree that names one place twice, or a file where it also
+ * names a directory, meets its own entry there as it would any other.
  */
 export class LeadingDirs {
   private readonly seen = new Map<string, Leading>()
@@ -93,6 +97,11 @@ export class LeadingDirs {
     this.seen.set(path.virtual, Leading.MADE)
   }
 
+  /** A file or link the pass wrote at `path`. */
+  taken(path: PathSpec): void {
+    this.seen.set(path.virtual, Leading.TAKEN)
+  }
+
   /** Nothing at `path` any more, nor below it. */
   missing(path: PathSpec): void {
     // Only a directory the pass knew can have one it knows below it.
@@ -104,11 +113,13 @@ export class LeadingDirs {
   }
 
   /**
-   * Whether anything the pass did not write can stand at `path`: false under
-   * a directory it made or found missing, which the nearest one it knows of
-   * above the path decides.
+   * Whether anything can stand at `path` for the pass to look at: what it
+   * put there itself, or anything at all unless the nearest directory it
+   * knows of above the path is one it made or found missing.
    */
   mayHold(path: PathSpec): boolean {
+    const own = this.seen.get(path.virtual)
+    if (own !== undefined) return own !== Leading.MISSING
     for (let at = path.parent; ; at = at.parent) {
       const known = this.seen.get(at.virtual)
       if (known !== undefined) return known === Leading.FOUND
@@ -178,10 +189,12 @@ export async function restoreEntry(
     // does, so a link alone in a new directory gets one too.
     await ensureDir(vfs, path.parent, dirs)
     await vfs.symlink(path, new TextDecoder().decode(blob))
+    dirs?.taken(path)
     return
   }
   if (linked) await removeFile(vfs, path)
   await writeFile(vfs, path, blob, dirs)
+  dirs?.taken(path)
   // A write keeps the bits a file had, and a new file has none set, so the
   // setattr runs only when it changes them: a checkout writes thousands of
   // 644 files that need none.
@@ -206,13 +219,14 @@ export async function restoreEntry(
  *
  * @param vfs the session's files
  * @param path absolute virtual path of the submodule
+ * @param dirs a checkout pass's leading directories, which learn the ones made
  */
-export async function keepGitlink(vfs: Files, path: PathSpec): Promise<void> {
+export async function keepGitlink(vfs: Files, path: PathSpec, dirs?: LeadingDirs): Promise<void> {
   const linked = await isLink(vfs, path)
   const info = linked ? null : await statOf(vfs, path)
   if (info !== null && info.type === FileType.DIRECTORY) return
   if (linked || info !== null) await removeFile(vfs, path)
-  await ensureDir(vfs, path)
+  await ensureDir(vfs, path, dirs)
 }
 
 /**
@@ -439,6 +453,7 @@ export async function blockingAncestor(
     current = current.join(part)
     const known = dirs.get(current)
     if (known === Leading.MISSING) return null
+    if (known === Leading.TAKEN) return current
     if (known !== undefined) {
       made = known === Leading.MADE
       continue

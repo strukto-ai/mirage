@@ -171,12 +171,14 @@ class SqlVFS(BaseVFS):
     ) -> None:
         # A capped write walks its path once: the walk that measures the
         # file before the write is the one the write lands through, and
-        # the bytes it took say what the file holds after.
-        found: list[Walk] = []
+        # the bytes it took say what the file holds after. The write takes
+        # that walk only while no entry has gone or moved since it was read.
+        found: list[tuple[int, Walk]] = []
 
         async def size_of(_: PathSpec) -> int:
-            found.append(await _walk(self.accessor, path))
-            return await _size_of(self.accessor, path, found[0])
+            mark = self.accessor.structure()
+            found.append((mark, await _walk(self.accessor, path)))
+            return await _size_of(self.accessor, path, found[-1][1])
 
         async with self._charge(path, size_of) as held:
             await _write(
@@ -185,7 +187,9 @@ class SqlVFS(BaseVFS):
                 held.stream(data, append=append),
                 append=append,
                 atomic=atomic,
-                walked=found[0] if found else None,
+                walked=found[0][1]
+                if found and found[0][0] == self.accessor.structure()
+                else None,
             )
             held.after = (held.before if append else 0) + held.written
 

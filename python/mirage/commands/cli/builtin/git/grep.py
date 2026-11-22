@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import posixpath
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -26,6 +27,7 @@ from mirage.commands.cli.builtin.git.ignore import GITIGNORE, IgnoreStack
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
     exists,
+    is_directory,
     is_link,
     read_optional,
 )
@@ -444,7 +446,9 @@ async def grep(
     mounts = mounts_of(ctx)
     # The work tree's files no line can match in, as its mount's search
     # rules them out for grep: one that lists the files without a match,
-    # or selects the lines that do not, reads every file.
+    # or selects the lines that do not, reads every file. The search is
+    # asked about the deepest directory every selected file sits under, so
+    # a narrow pathspec searches no more than its own folder.
     misses: Callable[[PathSpec], Awaitable[bool]] | None = None
     if (
         not sources[0][0]
@@ -455,12 +459,26 @@ async def grep(
         asked = search_terms(
             None, flags.needles, False, False, False, False, flags.ignore_case
         )
-        if asked is not None:
-            worktree = [location.worktree]
+        above: list[str] = []
+        for path, (mode, _) in sources[0][1].items() if asked else ():
+            chosen = path.decode("utf-8", "surrogateescape")
+            if mode in (REGULAR, EXECUTABLE) and (
+                not chosen or pathspec_selects(chosen, specs)
+            ):
+                above.append(posixpath.dirname(chosen))
+        shared = posixpath.commonpath(above) if above else ""
+        scope = [
+            location.worktree.join(shared) if shared else location.worktree
+        ]
+        if (
+            asked is not None
+            and above
+            and await is_directory(ctx.vfs, scope[0])
+        ):
             misses = await ruled_out(
-                command_files(ctx, worktree),
+                command_files(ctx, scope),
                 ctx,
-                worktree,
+                scope,
                 set(),
                 SearchTerms(
                     asked[0],

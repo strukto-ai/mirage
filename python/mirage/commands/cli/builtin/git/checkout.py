@@ -422,7 +422,7 @@ async def switch_to(
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
         if mode == GITLINK:
-            await keep_gitlink(vfs, location.worktree.join(name))
+            await keep_gitlink(vfs, location.worktree.join(name), dirs)
             continue
         # Read before anything standing in the entry's way is removed, so
         # a blob that cannot be read takes nothing of the working tree

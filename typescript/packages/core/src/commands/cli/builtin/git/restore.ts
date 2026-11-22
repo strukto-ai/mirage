@@ -396,7 +396,7 @@ export async function restorePaths(
       if (entry === undefined) continue
       const where = repo.location.worktree.join(name)
       if (entry.mode === GITLINK_MODE) {
-        await keepGitlink(vfs, where)
+        await keepGitlink(vfs, where, dirs)
         continue
       }
       const blob = await readBlobBytes(repo, entry.oid)

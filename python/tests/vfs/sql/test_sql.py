@@ -934,6 +934,21 @@ async def test_a_capped_write_walks_its_path_once_and_counts_what_it_wrote():
             )
         )[0]["n"]
     )
+    # A replacement refused part way has emptied the file, and the count
+    # follows the file as it stands, not as the write first found it.
+    small = SqlVFS(capacity=8)
+    await small.write(at("/f"), b"abcdefgh")
+
+    async def over() -> AsyncIterator[bytes]:
+        yield b"123456789"
+
+    with pytest.raises(OSError) as raised:
+        await small.write(at("/f"), over())
+    assert raised.value.errno == errno.EDQUOT
+    assert small.usage is not None and small.usage.used == 0
+    await small.write(at("/g"), b"1")
+    assert small.usage.used == 1
+    await small.close()
     driver.close()
 
 
@@ -1047,31 +1062,42 @@ async def test_a_search_narrowed_by_the_database_answers_as_a_full_read():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, skipped",
+    "line, skipped, scope",
     [
-        ("git grep -n needle", {"b.txt", "src/two.ts"}),
-        ("git grep -n alpha", {"b.txt", "d/c.txt", "src/one.ts"}),
-        ("ast-grep run -p 'needle($A)' .", {"src/two.ts"}),
+        ("git grep -n needle", {"b.txt", "src/two.ts"}, "/w/repo"),
+        ("git grep -n needle -- src", {"src/two.ts"}, "/w/repo/src"),
+        ("git grep -n alpha", {"b.txt", "d/c.txt", "src/one.ts"}, "/w/repo"),
+        ("ast-grep run -p 'needle($A)' .", {"src/two.ts"}, "/w/repo"),
     ],
 )
 async def test_a_search_reads_only_the_files_the_database_names(
-    line: str, skipped: set[str]
+    line: str, skipped: set[str], scope: str
 ):
+    # The database is asked about the folder the search covers, no wider,
+    # and no file it rules out is opened.
     vfs = SqlVFS(":memory:")
     ws, _ = await _searched(vfs)
     try:
         opened: list[str] = []
-        read = vfs.read
+        asked: list[str] = []
+        read, containing = vfs.read, vfs.files_containing
 
         @functools.wraps(read)
-        async def recording(path: PathSpec, *args, **kwargs):
+        async def reading(path: PathSpec, *args, **kwargs):
             opened.append(path.virtual)
             return await read(path, *args, **kwargs)
 
-        vfs.read = recording  # type: ignore[method-assign]
+        @functools.wraps(containing)
+        async def searching(path: PathSpec, *args, **kwargs):
+            asked.append(path.virtual)
+            return await containing(path, *args, **kwargs)
+
+        vfs.read = reading  # type: ignore[method-assign]
+        vfs.files_containing = searching  # type: ignore[method-assign]
         ran = await ws.shell(f"cd /w/repo && {line}")
         assert ran.exit_code == 0, ran.stderr
         assert ran.stdout
+        assert set(asked) == {scope}
         assert not {f"/w/repo/{name}" for name in skipped} & set(opened)
     finally:
         await ws.close()

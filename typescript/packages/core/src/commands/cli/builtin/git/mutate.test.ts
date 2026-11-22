@@ -222,17 +222,22 @@ function gitlinkIndex(repo: string, path: string): void {
  *
  * A branch switch onto a gitlink is only reachable while the current branch
  * does not carry one, so the index is put back where it was afterwards.
+ * `files` are regular files the branch records beside it.
  */
-function gitlinkBranch(repo: string, branch: string, path: string): void {
+function gitlinkBranch(
+  repo: string,
+  branch: string,
+  path: string,
+  files: readonly string[] = [],
+): void {
   const head = git(repo, ['rev-parse', 'HEAD']).trim()
-  execFileSync('git', [
-    '-C',
-    repo,
-    'update-index',
-    '--add',
-    '--cacheinfo',
-    `160000,${head},${path}`,
-  ])
+  const blob = execFileSync('git', ['-C', repo, 'hash-object', '-w', '--stdin'], {
+    input: 'beside\n',
+    encoding: 'utf8',
+  }).trim()
+  for (const cached of [`160000,${head},${path}`, ...files.map((f) => `100644,${blob},${f}`)]) {
+    execFileSync('git', ['-C', repo, 'update-index', '--add', '--cacheinfo', cached])
+  }
   const tree = git(repo, ['write-tree']).trim()
   const commit = git(repo, ['commit-tree', tree, '-p', head, '-m', 'gitlink']).trim()
   git(repo, ['update-ref', `refs/heads/${branch}`, commit])
@@ -2173,6 +2178,16 @@ describe('a gitlink in the tree', () => {
     expect(git(drained, ['ls-files', 'sub/child.md'])).toBe('')
   })
 
+  it('makes a directory the entries after it share', async () => {
+    // `a/0` makes `a`, the gitlink makes `a/b`, and `a/b/z` lands in the
+    // directory the gitlink made, which the checkout must not make again.
+    const h = await harness((repo) => {
+      gitlinkBranch(repo, 'linked', 'a/b/sub', ['a/0', 'a/b/z'])
+    })
+    expect((await h.run('checkout linked'))[0]).toBe(0)
+    expect(DEC.decode((await h.read('/repo/a/b/z')) ?? undefined)).toBe('beside\n')
+  })
+
   it('lands over a directory holding untracked files', async () => {
     // A gitlink asks for a directory, so the one already standing is what it
     // asked for and nothing in it is lost. The collision check read it as a
@@ -2961,6 +2976,14 @@ describe('LeadingDirs', () => {
     expect(dirs.mayHold(repo.join('new/deep/five'))).toBe(false)
     expect(dirs.mayHold(repo.join('gone/x/four'))).toBe(false)
     expect(dirs.mayHold(repo.join('a/b/one'))).toBe(true)
+    // What the pass wrote is looked at when a tree names the place again,
+    // and is in the way of an entry the tree puts below it.
+    dirs.made(repo.join('new/deep'))
+    dirs.taken(repo.join('new/deep/five'))
+    expect(dirs.mayHold(repo.join('new/deep/five'))).toBe(true)
+    const below = await blockingAncestor(files, repo, 'new/deep/five/six', dirs)
+    expect(below?.virtual).toBe('/repo/new/deep/five')
+    expect(asked).toEqual(['/repo/a', '/repo/a/b', '/repo/gone'])
   })
 })
 

@@ -205,16 +205,20 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
 
   // A capped write walks its path once: the walk that measures the file
   // before the write is the one the write lands through, and the bytes it
-  // took say what the file holds after.
+  // took say what the file holds after. The write takes that walk only while
+  // no entry has gone or moved since it was read.
   private land(path: PathSpec, data: ByteSource, append: boolean, atomic: boolean): Promise<void> {
     let found: Walk | undefined
+    let mark = -1
     return this.charge(
       path,
       async (held) => {
-        await sqlWrite(this.accessor, path, held.stream(data, append), append, atomic, found)
+        const walked = mark === this.accessor.structure() ? found : undefined
+        await sqlWrite(this.accessor, path, held.stream(data, append), append, atomic, walked)
         held.after = (append ? held.before : 0) + held.written
       },
       async () => {
+        mark = this.accessor.structure()
         found = await walk(this.accessor, path)
         return sqlSizeOf(this.accessor, path, found)
       },

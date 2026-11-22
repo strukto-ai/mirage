@@ -473,7 +473,7 @@ async def restore_paths(
             mode, sha = tree[name.encode()]
             where = location.worktree.join(name)
             if mode == GITLINK:
-                await keep_gitlink(vfs, where)
+                await keep_gitlink(vfs, where, dirs)
                 continue
             # Read before anything standing in the entry's way is
             # removed, so a blob that cannot be read takes nothing of the

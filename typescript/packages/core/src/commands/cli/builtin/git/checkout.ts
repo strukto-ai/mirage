@@ -343,7 +343,7 @@ export async function switchTo(
     const entry = changed.get(path)
     if (entry === undefined) continue
     if (entry.mode === GITLINK_MODE) {
-      await keepGitlink(vfs, repo.location.worktree.join(path))
+      await keepGitlink(vfs, repo.location.worktree.join(path), dirs)
       continue
     }
     const blob = await readBlobBytes(repo, entry.oid)

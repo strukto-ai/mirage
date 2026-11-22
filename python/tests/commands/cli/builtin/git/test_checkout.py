@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.objects import Blob, Tree
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
@@ -36,6 +37,7 @@ from tests.commands.cli.builtin.git.conftest import (
     branch_with_paths,
     commit_gitlink,
     conflict_index,
+    write_branch,
 )
 from tests.commands.cli.builtin.git.conftest import head_ref as head_ref
 from tests.commands.cli.builtin.git.conftest import run as run
@@ -759,6 +761,47 @@ async def test_a_branch_that_adds_a_gitlink_makes_a_directory_for_it(
     branch_with_gitlink(repo_path, "linked", "sub")
     assert (await run(git_rw, "checkout linked"))[0] == 0
     assert (repo_path / "sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_makes_a_directory_the_entries_after_it_share(
+    git_rw, repo_path: Path
+):
+    # `a/0` makes `a`, the gitlink makes `a/b`, and `a/b/z` lands in the
+    # directory the gitlink made, which the checkout must not make again.
+    branch_with_paths(
+        repo_path,
+        "linked",
+        {"a/0": b"0\n", "a/b/sub": b"", "a/b/z": b"z\n"},
+        {"a/b/sub": GITLINK},
+    )
+    assert (await run(git_rw, "checkout linked"))[0] == 0
+    assert (repo_path / "a/b/z").read_text(encoding="utf-8") == "z\n"
+    assert (repo_path / "a/b/sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_two_entries_on_one_name_never_write_through_a_link(
+    git_rw, repo_path: Path
+):
+    # Two names that differ only in bytes no text holds decode to one
+    # path. The link the first leaves there is replaced by the second and
+    # never followed: the file it points at, which no entry names, stays.
+    (repo_path / "victim").write_text("safe\n", encoding="utf-8")
+    with Repo(str(repo_path)) as repo:
+        root = repo[repo[repo.refs[b"HEAD"]].tree]
+        assert isinstance(root, Tree)
+        link = Blob.from_string(b"../victim")
+        data = Blob.from_string(b"written\n")
+        inner = Tree()
+        inner.add(b"\xfe", SYMLINK, link.id)
+        inner.add(b"\xff", MODE, data.id)
+        root.add(b"d", 0o40000, inner.id)
+        for made in (link, data, inner, root):
+            repo.object_store.add_object(made)
+        write_branch(repo, "twice", root.id, b"twice")
+    assert (await run(git_rw, "checkout twice"))[0] == 0
+    assert (repo_path / "victim").read_text(encoding="utf-8") == "safe\n"
 
 
 @pytest.mark.asyncio

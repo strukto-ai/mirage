@@ -130,7 +130,11 @@ async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
         parent, leaf = await _walk_from(
             accessor, kept.chain[-1].ino, every[-1:]
         )
-        if parent is not None and is_dir(parent):
+        if (
+            parent is not None
+            and is_dir(parent)
+            and accessor.structure() == mark
+        ):
             return Walk(p, names, (*kept.chain[:-1], parent, leaf)[skip:])
         FOLDERS.pop(driver, None)
     whole = await _walk_all(accessor, every)

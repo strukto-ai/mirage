@@ -93,6 +93,8 @@ class Leading(Enum):
     """One this pass made, holding only what the pass has written into it."""
     MISSING = "missing"
     """Nothing there, nor anything below it."""
+    TAKEN = "taken"
+    """A file or link this pass wrote there."""
 
 
 class LeadingDirs:
@@ -101,7 +103,9 @@ class LeadingDirs:
     As git's lstat cache keeps them: each is asked once however many
     entries sit under it. One the pass made, or found missing, holds
     nothing the pass has not written, so an entry under it is not
-    looked at at all.
+    looked at at all. What the pass wrote is kept too: a tree that names
+    one place twice, or a file where it also names a directory, meets
+    its own entry there as it would any other.
     """
 
     def __init__(self) -> None:
@@ -131,6 +135,14 @@ class LeadingDirs:
         """
         self._seen[path.virtual] = Leading.MADE
 
+    def taken(self, path: PathSpec) -> None:
+        """A file or link the pass wrote at a path.
+
+        Args:
+            path (PathSpec): absolute virtual path.
+        """
+        self._seen[path.virtual] = Leading.TAKEN
+
     def missing(self, path: PathSpec) -> None:
         """Nothing at a path any more, nor below it.
 
@@ -146,14 +158,18 @@ class LeadingDirs:
         self._seen[path.virtual] = Leading.MISSING
 
     def may_hold(self, path: PathSpec) -> bool:
-        """Whether anything the pass did not write can stand at a path.
+        """Whether anything can stand at a path for the pass to look at.
 
-        False under a directory it made or found missing, which the
-        nearest one it knows of above the path decides.
+        What it put there itself, or anything at all unless the nearest
+        directory it knows of above the path is one it made or found
+        missing.
 
         Args:
             path (PathSpec): absolute virtual path.
         """
+        own = self._seen.get(path.virtual)
+        if own is not None:
+            return own is not Leading.MISSING
         at = path.parent
         while True:
             known = self._seen.get(at.virtual)
@@ -242,17 +258,23 @@ async def restore_entry(
         # below does, so a link alone in a new directory gets one too.
         await ensure_dir(vfs, path.parent, dirs)
         await vfs.symlink(path, blob.decode("utf-8", errors="replace"))
+        if dirs is not None:
+            dirs.taken(path)
         return
     if linked:
         await remove_file(vfs, path)
     await write_file(vfs, path, blob, dirs)
+    if dirs is not None:
+        dirs.taken(path)
     bits = mode & PERMISSION_BITS
     had = None if held is None or linked else held.mode
     if (UNSET_PERMISSIONS if had is None else had) & PERMISSION_BITS != bits:
         await vfs.setattr(path, mode=bits)
 
 
-async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
+async def keep_gitlink(
+    vfs: Files, path: PathSpec, dirs: LeadingDirs | None = None
+) -> None:
     """Leave a submodule's working tree alone, but make sure it has one.
 
     A 160000 entry names a commit in another repository, which this one
@@ -269,6 +291,8 @@ async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the submodule.
+        dirs (LeadingDirs | None): a checkout pass's leading directories,
+            which learn the ones made.
     """
     linked = await is_link(vfs, path)
     info = None if linked else await stat_of(vfs, path)
@@ -276,7 +300,7 @@ async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
         return
     if linked or info is not None:
         await remove_file(vfs, path)
-    await ensure_dir(vfs, path)
+    await ensure_dir(vfs, path, dirs)
 
 
 async def drop_gitlink(vfs: Files, path: PathSpec, name: str) -> str | None:
@@ -547,6 +571,8 @@ async def blocking_ancestor(
         known = dirs.get(current)
         if known is Leading.MISSING:
             return None
+        if known is Leading.TAKEN:
+            return current
         if known is not None:
             made = known is Leading.MADE
             continue
