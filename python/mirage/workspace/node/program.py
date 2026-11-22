@@ -71,6 +71,7 @@ from mirage.workspace.executor.traps import (
     err_trap_armed,
     run_err_trap,
     run_exit_trap,
+    run_signal_traps,
 )
 from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session.session import SessionState
@@ -442,6 +443,17 @@ async def _run_program(
             )
             merged_io = await land_late(
                 recorder, leave, own, sink, all_stdout, merged_io
+            )
+            merged_io = await land(
+                await run_signal_traps(
+                    execute_fn,
+                    session,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
             )
         except Unwinding as sig:
             # What it wrote before it left; the ERR action answering it

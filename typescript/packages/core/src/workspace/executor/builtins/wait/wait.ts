@@ -20,7 +20,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 import type { JobHandle, JobTable } from '../../../../execution/job/index.ts'
-import { abortable } from '../../../../utils/abort.ts'
+import { abortable, mergeSignals } from '../../../../utils/abort.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -95,6 +95,50 @@ async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promi
 }
 
 /**
+ * Wait for background jobs (`waitFor`) until they end or the shell takes a
+ * signal it traps: then it answers 128 plus the signal at once, as bash's
+ * does, with the operands it already refused, and the action runs as it
+ * returns. Mirrors Python's handle_wait.
+ */
+export async function handleWait(
+  jobTable: JobTable,
+  parts: string[],
+  session: SessionState | null = null,
+  view: SessionView | null = null,
+  signal?: AbortSignal,
+): Promise<RedirectResult> {
+  if (session === null || ![...session.signalTraps.values()].some((action) => action !== ''))
+    return waitFor(jobTable, parts, session, view, signal)
+  const stop = new AbortController()
+  session.signalArrived = () => {
+    stop.abort()
+  }
+  if (session.pendingSignals.size > 0) stop.abort()
+  const said: string[] = []
+  try {
+    return await waitFor(
+      jobTable,
+      parts,
+      session,
+      view,
+      mergeSignals(signal, stop.signal) ?? stop.signal,
+      said,
+    )
+  } catch (err) {
+    if (!stop.signal.aborted || signal?.aborted === true) throw err
+    const code = 128 + Math.min(...session.pendingSignals)
+    const stderr = said.join('')
+    return [
+      null,
+      new IOResult({ exitCode: code, ...(stderr === '' ? {} : { stderr: encodeText(stderr) }) }),
+      new ExecutionNode({ command: parts.join(' '), exitCode: code }),
+    ]
+  } finally {
+    session.signalArrived = null
+  }
+}
+
+/**
  * Wait for background jobs, with bash's option surface. A job's output
  * went where its shell writes as it was written, so `wait` prints none,
  * as bash's does. Bare `wait` joins every job; `wait ID...` joins those
@@ -106,12 +150,13 @@ async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promi
  *
  * `-p` stores the managed PID, matching `$!` and `jobs -p`.
  */
-export async function handleWait(
+async function waitFor(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
   view: SessionView | null = null,
   signal?: AbortSignal,
+  said?: string[],
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
@@ -226,7 +271,10 @@ export async function handleWait(
       answered = saved
       if (ambiguous) refusal = `${spec}: ${AMBIGUOUS_SPEC}`
     }
-    if (answered === null) errors.push(`${shellVoice()}wait: ${refusal}`)
+    if (answered === null) {
+      errors.push(`${shellVoice()}wait: ${refusal}`)
+      said?.push(`${shellVoice()}wait: ${refusal}\n`)
+    }
   }
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
   const errBytes = errText !== '' ? encodeText(errText) : null

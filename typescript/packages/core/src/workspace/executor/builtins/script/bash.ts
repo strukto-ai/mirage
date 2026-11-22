@@ -227,7 +227,6 @@ export async function handleBash(
     return [null, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
   }
   session.shellNesting = cs.nesting + 1
-  clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.scriptName = scriptName
   // A script file names its diagnostics, and the functions it defines, as a
@@ -248,6 +247,7 @@ export async function handleBash(
   const program = script
   const run = async (signal: AbortSignal | null = null): Promise<IOResult> => {
     const stops = signal === null ? {} : { signal }
+    clearTraps(shellSession)
     try {
       return await clearProgramInvocation(async () =>
         finishShell(

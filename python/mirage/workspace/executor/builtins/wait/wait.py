@@ -56,11 +56,14 @@ async def _wait_first(job_table: JobTable, jobs: list[JobHandle]) -> JobHandle:
         asyncio.ensure_future(job_table.wait(job.id, job.session_id)): job
         for job in jobs
     }
-    done, pending = await asyncio.wait(
-        tasks, return_when=asyncio.FIRST_COMPLETED
-    )
-    for task in pending:
-        task.cancel()
+    try:
+        done, _ = await asyncio.wait(
+            tasks, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     first = min(done, key=lambda t: tasks[t].id)
     return tasks[first]
 
@@ -93,6 +96,54 @@ async def handle_wait(
     session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Wait for background jobs (``_wait_for``) until they end or the shell
+    takes a signal it traps: then it answers 128 plus the signal at once,
+    as bash's does, with the operands it already refused, and the action
+    runs as it returns.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        parts (list[str]): the command words, `wait` first.
+        session (SessionState | None): shell session state, for `-p`.
+        view (SessionView | None): the gated session view.
+    """
+    if session is None or not any(session.signal_traps.values()):
+        return await _wait_for(job_table, parts, session, view)
+    arrived = session.signal_arrived = asyncio.Event()
+    if session.pending_signals:
+        arrived.set()
+    said: list[str] = []
+    waiting = asyncio.ensure_future(
+        _wait_for(job_table, parts, session, view, said)
+    )
+    signalled = asyncio.ensure_future(arrived.wait())
+    try:
+        await asyncio.wait(
+            (waiting, signalled), return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        session.signal_arrived = None
+        signalled.cancel()
+        if not waiting.done():
+            waiting.cancel()
+            await asyncio.wait((waiting,))
+    if not waiting.cancelled():
+        return waiting.result()
+    code = 128 + min(session.pending_signals)
+    return (
+        None,
+        IOResult(exit_code=code, stderr=encode_text("".join(said)) or None),
+        ExecutionNode(command=" ".join(parts), exit_code=code),
+    )
+
+
+async def _wait_for(
+    job_table: JobTable,
+    parts: list[str],
+    session: SessionState | None = None,
+    view: SessionView | None = None,
+    said: list[str] | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Wait for background jobs, with bash's option surface.
 
     A job's output went where its shell writes as it was written, so
@@ -116,6 +167,8 @@ async def handle_wait(
         parts (list[str]): the command words, `wait` first.
         session (SessionState | None): shell session state, for `-p`.
         view (SessionView | None): the gated session view.
+        said (list[str] | None): takes each operand's refusal as it is
+            found, for a wait a signal cuts short to report.
     """
     cmd_str = " ".join(parts)
     sid = session_of(session)
@@ -227,6 +280,8 @@ async def handle_wait(
                 refusal = f"{spec}: {AMBIGUOUS_SPEC}"
         if answered is None:
             errors.append(f"{shell_voice()}wait: {refusal}")
+            if said is not None:
+                said.append(errors[-1] + "\n")
     err_text = ("\n".join(errors) + "\n") if errors else ""
     if next_job:
         candidates = picked if specs else visible

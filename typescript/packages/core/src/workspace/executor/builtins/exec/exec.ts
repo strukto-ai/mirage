@@ -259,13 +259,21 @@ export class ForkRoute extends JobOutput {
 
   /**
    * The terminal stream the child was given on `channel` once the shell has
-   * pointed its own elsewhere; null while it has not, or when the child was
-   * given no terminal stream there.
+   * pointed its own elsewhere; null while it has not, once it has ended, or
+   * when the child was given no terminal stream there. Between the shell's
+   * lines no program routes its terminal, which is then where its jobs write
+   * (`bash -c 'exec > >(cat); echo b'` draining once its last line ended).
    */
   private moved(channel: Channel): Inherited | null {
     const name = this.given.get(channel)
     const fd = channel === Channel.STDOUT ? FD_STDOUT : FD_STDERR
-    if (name === undefined || descriptorName(this.session, fd) === name) return null
+    if (
+      name === undefined ||
+      this.session.closed ||
+      !this.session.lineOpen ||
+      descriptorName(this.session, fd) === name
+    )
+      return null
     if (name === TO_STDOUT) return new Inherited(this.session.terminal, Channel.STDOUT)
     if (name === TO_STDERR) return new Inherited(this.session.terminal, Channel.STDERR)
     return null
@@ -459,6 +467,7 @@ export async function installExecRedirects(
   }
   if (err === null) {
     await session.releaseInputs([...before, ...owned])
+    await session.letGoSubstitutions()
     settleHolds(session)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   }

@@ -101,6 +101,8 @@ from mirage.workspace.executor.traps import (
     inherit_traps,
     run_err_trap,
     run_exit_trap,
+    run_signal_traps,
+    start_job_traps,
 )
 from mirage.workspace.frame import PipeWriter
 from mirage.workspace.node.program import StatementRecorder
@@ -188,6 +190,9 @@ async def handle_pipe(
         in_parent = child_evaluation is context
         if not in_parent:
             inherit_traps(child)
+            start_job_traps(
+                child, scope.background_pipeline and not simple_command(cmd)
+            )
             child.terminal_output = (
                 session.terminal_output and i == len(commands) - 1
             )
@@ -443,6 +448,7 @@ async def handle_connection(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Handle ``&&`` and ``||``.
 
@@ -459,6 +465,8 @@ async def handle_connection(
         stdin (ByteSource | None): its standard input.
         call_stack (CallStack | None): its frames.
         execute_fn (Callable[..., Any] | None): runs the ERR action.
+        sink (JobConsole | None): where each side writes as it ends, which
+            a signal's action between them writes to as well.
     """
     session = context.session
     bound = fd0_binding(session)
@@ -471,6 +479,28 @@ async def handle_connection(
         return await finish_statement(stdout, io, session, left), io, ran
 
     left_bytes, left_io, left_exec = await run_program(left, context, tested)
+    # A trapped signal the left command took is answered before the right
+    # one runs, as bash answers one after each command.
+    caught: list[ByteSource | None] = [left_bytes]
+    try:
+        written = await run_signal_traps(
+            execute_fn,
+            session,
+            statement_stdin(session, stdin, bound),
+            call_stack,
+        )
+        if written and sink is not None:
+            # What the left command wrote goes ahead of what the actions
+            # write, a nested shell's returned rather than streamed.
+            await pump(sink, Channel.STDOUT, left_bytes)
+            await pump(sink, Channel.STDERR, left_io.stderr)
+            left_bytes, left_io.stderr = None, None
+            caught = [None]
+        left_io = await land(written, sink, caught, left_io)
+    except Unwinding as sig:
+        raise await carried(sig, left_bytes, left_io)
+    if len(caught) > 1:
+        left_bytes = async_chain(caught)
     children = [left_exec]
     if not connection_runs_right(op, left_io.exit_code):
         if op == NT.AND:
@@ -738,6 +768,17 @@ async def handle_subshell(
             merged_io = await land_late(
                 recorder, leave, session.terminal, sink, all_stdout, merged_io
             )
+            merged_io = await land(
+                await run_signal_traps(
+                    execute_fn,
+                    session,
+                    statement_stdin(session, stdin, bound),
+                    call_stack,
+                ),
+                sink,
+                all_stdout,
+                merged_io,
+            )
         except (ExitSignal, ReturnSignal) as sig:
             merged_io, last_exec = await _subshell_ended(
                 sig, recorder, session, sink, all_stdout, merged_io
@@ -767,6 +808,7 @@ async def handle_subshell(
     cleanup = await run_exit_trap(
         execute_fn, session, merged_io.exit_code, stdin, call_stack
     )
+    await session.end_substitutions()
     if cleanup is not None:
         merged_io = await land(
             as_written(

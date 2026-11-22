@@ -79,39 +79,6 @@ describe('AsyncLineIterator', () => {
     for await (const line of it) lines.push(decode(line))
     expect(lines).toEqual(['a', '', 'b'])
   })
-  it('loads the rest of its source and reads on from memory', async () => {
-    let ended = false
-    async function* source(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      try {
-        yield encode('a\nb')
-        yield encode('\nc\n')
-      } finally {
-        ended = true
-      }
-    }
-    const lines = new AsyncLineIterator(source())
-    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('a')
-    await lines.loadRest()
-    expect(ended).toBe(true)
-    const rest: string[] = []
-    for await (const line of lines) rest.push(decode(line))
-    expect(rest).toEqual(['b', 'c'])
-  })
-  it('loads many chunks in order around the lines read between them', async () => {
-    const lines = new AsyncLineIterator(
-      fromChunks([
-        encode('a\n'),
-        ...Array.from({ length: 50 }, () => encode('x')),
-        encode('\nb\n'),
-      ]),
-    )
-    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('a')
-    await lines.loadRest()
-    const rest: string[] = []
-    for await (const line of lines) rest.push(decode(line))
-    expect(rest).toEqual(['x'.repeat(50), 'b'])
-  })
 
   it('read1 answers what one pull brings, up to its size, and keeps the rest', async () => {
     let pulled = 0
@@ -147,21 +114,12 @@ describe('AsyncLineIterator', () => {
 describe('the memory budget', () => {
   const first = (parts: string[]) => () =>
     new AsyncLineIterator(fromChunks(parts.map(encode))).readline()
-  const load = (parts: string[]) => () =>
-    new AsyncLineIterator(fromChunks(parts.map(encode))).loadRest()
 
   it('refuses a line past it', async () => {
     const line = await runWithMemory(new MemoryBudget(8, () => 0), first(['abcd', 'ef\n']))
     expect(line === null ? null : decode(line)).toBe('abcdef')
     await expect(
       runWithMemory(new MemoryBudget(8, () => 0), first(['abcd', 'efgh', 'ij\n'])),
-    ).rejects.toThrow(MemoryExhausted)
-  })
-
-  it('counts what a reader loads', async () => {
-    await runWithMemory(new MemoryBudget(8, () => 0), load(['abcd', 'efgh']))
-    await expect(
-      runWithMemory(new MemoryBudget(8, () => 0), load(['abcd', 'efgh', 'i'])),
     ).rejects.toThrow(MemoryExhausted)
   })
 })
@@ -314,14 +272,12 @@ it('keeps what readChars took out of a reader that runs while it waits', async (
   expect(decode(taken) + decode(rest ?? new Uint8Array())).toBe('abcdef')
 })
 
-it('lets go of the rest a kept descriptor read', async () => {
+it('lets go of a long line it read', async () => {
   const big = new Uint8Array((1 << 17) + 5).fill(0x78)
   big.set(encode('\nend\n'), 1 << 17)
   const lines = new AsyncLineIterator(fromChunks([big]))
-  await lines.loadRest()
   expect((await lines.readline())?.byteLength).toBe(1 << 17)
-  const buf = (lines as unknown as { buf: Uint8Array }).buf
-  expect([buf.byteLength, buf.byteOffset]).toEqual([4, 0])
+  expect((lines as unknown as { buf: Uint8Array }).buf.byteLength).toBe(4)
   expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('end')
   expect((lines as unknown as { buf: Uint8Array }).buf.buffer.byteLength).toBe(0)
 })

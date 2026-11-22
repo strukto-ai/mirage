@@ -116,7 +116,12 @@ from mirage.workspace.executor.statement import (
     reported_command,
     statement_stdin,
 )
-from mirage.workspace.executor.traps import inherit_traps
+from mirage.workspace.executor.traps import (
+    arm_signals,
+    ignored_signals,
+    inherit_traps,
+    start_job_traps,
+)
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
@@ -588,7 +593,8 @@ def start_shell(
             parent=parent_pid,
             limit=session.processes.max,
             started=started,
-            ignores=SHELL_IGNORED_SIGNALS,
+            ignores=SHELL_IGNORED_SIGNALS | ignored_signals(session),
+            program_ignores=ignored_signals(session),
             one_command=one_command,
             stdin=stdin,
             traits=current_caller().traits,
@@ -627,6 +633,7 @@ async def run_program(
     runner = current_caller().process
     if runner is not None:
         runner.program_signaled(None)
+    arm_signals(context.session)
     shell = context.frame.shell
     if shell is None or not _forked(node, context.session):
         return await run()
@@ -718,8 +725,10 @@ async def handle_background(
     child_evaluation = child_context(context)
     bg_session = child_evaluation.session
     held_inputs = hold_inputs(bg_session.open_inputs())
+    session.hold_substitutions(bg_session)
 
     async def drop_holds() -> None:
+        bg_session.let_go_of_held()
         failure: Exception | None = None
         while held_inputs:
             try:
@@ -735,10 +744,16 @@ async def handle_background(
         release_program()
 
     def drop_unrun_holds(task: asyncio.Task[Any]) -> None:
-        if held_inputs:
+        if held_inputs or bg_session.held_substitutions:
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
+    body = (
+        left.named_children[0]
+        if left.type == NT.NEGATED_COMMAND and left.named_children
+        else left
+    )
+    start_job_traps(bg_session, not simple_command(body))
     output = ForkRoute(session.job_output or session.tty.jobs, session)
     # A job is a shell of its own: what jobs it starts write into the
     # statement it runs, then where it writes.
@@ -932,6 +947,7 @@ async def handle_background(
             simple=one_program(left, session),
             program=program_text(left, session),
             traits=current_caller().traits,
+            ignores=ignored_signals(session),
         )
     except BaseException as exc:
         release_job()

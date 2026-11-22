@@ -17,7 +17,15 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { SessionState } from '../session/session.ts'
 import type { ExecuteFn } from '../expand/types.ts'
-import { liftFunctionTraps, restoreFunctionTraps, runExitTrap } from './traps.ts'
+import {
+  clearTraps,
+  ignoredSignals,
+  inheritTraps,
+  liftFunctionTraps,
+  restoreFunctionTraps,
+  runExitTrap,
+  startJobTraps,
+} from './traps.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -77,5 +85,74 @@ describe('liftFunctionTraps', () => {
     if (!traced) [session.errTrap, session.returnTrap] = body
     restoreFunctionTraps(session, lifted)
     expect([session.errTrap, session.returnTrap]).toEqual(after)
+  })
+})
+
+describe('startJobTraps', () => {
+  it.each<[boolean, boolean, [number, string][]]>([
+    [
+      true,
+      false,
+      [
+        [15, ''],
+        [2, ''],
+      ],
+    ],
+    [
+      false,
+      false,
+      [
+        [15, ''],
+        [2, 'echo i'],
+      ],
+    ],
+    [
+      true,
+      true,
+      [
+        [15, ''],
+        [2, 'echo i'],
+      ],
+    ],
+  ])("lists a job's INT ignore when it runs commands (%j, %j)", (lists, monitor, traps) => {
+    const session = makeSession()
+    session.signalTraps = new Map([
+      [15, ''],
+      [2, 'echo i'],
+    ])
+    session.shellOptions.monitor = monitor
+    startJobTraps(session, lists)
+    expect([...session.signalTraps]).toEqual(traps)
+    expect([...session.jobIgnored]).toEqual(new Map(traps).get(2) === '' ? [2] : [])
+  })
+
+  it("drops the ignore in a shell outside the job's process", () => {
+    const job = makeSession()
+    startJobTraps(job, true)
+    startJobTraps(job, false)
+    expect([[...job.signalTraps], [...job.jobIgnored]]).toEqual([[], []])
+    const child = makeSession()
+    startJobTraps(child, true)
+    inheritTraps(child)
+    expect([[...child.signalTraps], [...child.jobIgnored]]).toEqual([[], []])
+    const shell = makeSession()
+    startJobTraps(shell, true)
+    clearTraps(shell)
+    expect([[...shell.signalTraps], [...shell.entryIgnored]]).toEqual([[], []])
+  })
+})
+
+describe('ignoredSignals', () => {
+  it('passes on what a shell ignores but KILL and STOP', () => {
+    const session = makeSession()
+    session.signalTraps = new Map([
+      [9, ''],
+      [15, ''],
+      [19, ''],
+      [2, ''],
+      [10, 'echo u'],
+    ])
+    session.jobIgnored = new Set([2])
+    expect([...ignoredSignals(session)]).toEqual([15])
   })
 })

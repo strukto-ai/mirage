@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VersionHistory } from '../../cache/versions.ts'
+import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { releaseInputs, type SharedInput } from '../../io/async_line_iterator.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
@@ -39,6 +40,8 @@ import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types
 import { SystemIdSource, secureDraw, type IdSource } from '../../utils/ids.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StatusWriter } from '../types.ts'
+import { runCancellable } from '../../utils/abort.ts'
+import type { Substitution } from '../node/types.ts'
 import { STARTUP_VALUES } from './constants.ts'
 import { functionSources, type FunctionSite } from './functions.ts'
 import {
@@ -407,6 +410,54 @@ function restoredVars(
   return out
 }
 
+/**
+ * Close the streams readers opened on a pipe that ends: a later read finds
+ * the end of input either way, and nothing is left open. Mirrors Python's
+ * close_readers.
+ */
+export async function closeReaders(endpoint: DevicePipe): Promise<void> {
+  const readers = [...endpoint.readers]
+  endpoint.readers.clear()
+  for (const reader of readers) await reader.deref()?.close()
+}
+
+/** End a process substitution's side of its pipe: the reader of a `<( )`, the input of a `>( )`. */
+function endPipe(child: Substitution): void {
+  if (child.endpoint.readable) child.endpoint.pipe.closeReader()
+  else child.endpoint.pipe.end()
+}
+
+/**
+ * Give a kept process substitution's path back once it has run out. Mirrors
+ * Python's _settle.
+ */
+async function settle(child: Substitution): Promise<void> {
+  try {
+    await runCancellable(child.task, child.signal)
+  } catch (error) {
+    console.debug('a kept process substitution was stopped', error)
+    child.abort.abort()
+  }
+  await closeReaders(child.endpoint)
+  child.release()
+}
+
+/**
+ * A holder's end lets go of the substitutions it held
+ * (`SessionState.holdSubstitutions`): the last holder of one its shell let go
+ * of ends its pipe, and goes on without waiting for its command, as bash's
+ * job does not wait for a `<( )` it inherited. Mirrors Python's let_go_held.
+ */
+export function letGoHeld(held: Substitution[]): void {
+  for (const child of held) {
+    child.holds -= 1
+    if (child.holds === 0 && child.letGo) {
+      endPipe(child)
+      void settle(child)
+    }
+  }
+}
+
 /** A shell's draw from an id source, which holds no session: its secure draw (`secureDraw`). */
 function drawFrom(ids: IdSource): () => number {
   return secureDraw(ids)
@@ -491,6 +542,26 @@ export class SessionState {
   // shell starts with neither running.
   errTrapRunning = false
   returnTrapRunning = false
+  // The `trap ... TERM` actions by signal number, '' for an ignored signal.
+  // A child shell keeps its parent's with `signalTrapsInherited` set: it
+  // lists them, as bash's `trap -p` does there, and runs none, while one it
+  // ignores stays ignored. A new shell keeps only the ignored ones.
+  signalTraps = new Map<number, string>()
+  signalTrapsInherited = false
+  // The signals ignored as this shell started, which it can neither trap nor
+  // reset: its parent's ignored ones, and a background job's INT and QUIT.
+  entryIgnored: ReadonlySet<number> = new Set()
+  // The signals this shell lists as ignored because its process is a
+  // background job's, which ignores them (bash's INT, job control off): it
+  // may still trap or reset them, and a shell it forks into a process of its
+  // own lists none of them.
+  jobIgnored: ReadonlySet<number> = new Set()
+  // The trapped signals that arrived while a command ran, whose actions run
+  // once it ends; a child shell starts with none.
+  pendingSignals = new Set<number>()
+  signalTrapRunning = false
+  // Resolved when a trapped signal arrives while `wait` waits.
+  signalArrived: (() => void) | null = null
   trapStatus: number | null = null
   tty = new Terminal()
   jobOutput: JobOutput | null = null
@@ -609,6 +680,19 @@ export class SessionState {
   // The readers a fork inherited: its parent still holds them, so the fork
   // closing one never closes the parent's. Mirrors Python's _borrowed.
   borrowed: SharedInput[] = []
+  // The process substitutions a descriptor of this shell kept past their
+  // command (`exec 3< <(cmd)`), which it ends once none names them, or as it
+  // ends; a fork starts with none. Mirrors Python's substitutions.
+  substitutions: Substitution[] = []
+  // The substitutions the shell that started this one kept which a
+  // descriptor this one copied still names, held open until it closes them or
+  // ends (`holdSubstitutions`); a fork starts with none. Mirrors Python's
+  // held_substitutions.
+  heldSubstitutions: Substitution[] = []
+  // Set as the shell ends and its descriptors close, so a child it started
+  // writes on the stream it was given whatever the shell's own last pointed
+  // at. Mirrors Python's closed.
+  closed = false
   // The records running prefix assignments set aside, held until put back.
   prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
   // Runtime memo of `positionalBytes`.
@@ -818,6 +902,10 @@ export class SessionState {
     forked.returnTrap = this.returnTrap
     forked.errTrapHidden = this.errTrapHidden
     forked.returnTrapHidden = this.returnTrapHidden
+    forked.signalTraps = new Map(this.signalTraps)
+    forked.signalTrapsInherited = this.signalTrapsInherited
+    forked.entryIgnored = this.entryIgnored
+    forked.jobIgnored = this.jobIgnored
     forked.tty = this.tty
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits
@@ -852,7 +940,9 @@ export class SessionState {
    * copies what a session keeps; a child shell (a command substitution, a
    * subshell) also inherits the reader's position, the aliases being
    * expanded and the local scopes, and reseeds `$RANDOM` on its first draw
-   * instead of replaying this session's seed. `records` are the child's
+   * instead of replaying this session's seed. It lists this session's signal
+   * actions and runs none of them (`timeout` signalling the program it runs).
+   * `records` are the child's
    * variables when a running expansion made them (a substitution's child
    * shell); null copies this session's. Mirrors Python.
    */
@@ -866,6 +956,7 @@ export class SessionState {
     child.parseHead = this.parseHead
     child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
+    child.signalTrapsInherited = [...child.signalTraps.values()].some((action) => action !== '')
     return child
   }
 
@@ -1051,8 +1142,159 @@ export class SessionState {
    * inherited stay with the shell that opened them. Mirrors Python's
    * close_inputs.
    */
-  closeInputs(): Promise<void> {
-    return releaseInputs(this.openInputs(), this.borrowed)
+  async closeInputs(): Promise<void> {
+    await releaseInputs(this.openInputs(), this.borrowed)
+    await this.endSubstitutions()
+  }
+
+  /**
+   * How this shell answers `signal` sent to `pid`: true when it keeps it for
+   * its action, which runs once the running command ends and cuts a `wait`
+   * short; false when it ignores it (`trap '' TERM`); null when it leaves it
+   * to what the signal does. An action it only lists, its parent's, is not
+   * its own, and a signal sent to the shell whose process it runs in
+   * (`$(kill $$)`) is not for it. Mirrors Python's catch_signal.
+   */
+  catchSignal(signal: number, pid: number): boolean | null {
+    const action = this.signalTraps.get(signal)
+    if (
+      action === undefined ||
+      (action !== '' && this.signalTrapsInherited) ||
+      (this.processId !== null && pid !== this.processId)
+    )
+      return null
+    if (action === '') return false
+    this.pendingSignals.add(signal)
+    this.signalArrived?.()
+    return true
+  }
+
+  /**
+   * Keep a process substitution a descriptor of this shell names past its
+   * command. A `<( )` gives its path back, as bash closes the pipe's own
+   * descriptor once it is duplicated: the descriptors reading it go on
+   * through their line buffers (`readers`). Mirrors Python's
+   * keep_substitution.
+   */
+  keepSubstitution(child: Substitution): void {
+    if (child.endpoint.readable) {
+      for (const descriptor of this.descriptors.values()) {
+        const source = descriptor.source
+        if (source?.pipe?.virtual !== child.path) continue
+        if (!child.readers.includes(source.lines)) child.readers.push(source.lines)
+        source.pipe = null
+      }
+      child.release()
+    }
+    this.substitutions.push(child)
+  }
+
+  /**
+   * Whether a descriptor of this shell still reads or writes a process
+   * substitution it kept. Mirrors Python's _names.
+   */
+  /**
+   * Hold open each process substitution this shell kept that a child's copied
+   * descriptors name (`exec 3< <(cmd); cat <&3 &`, a later `>( )` writing to
+   * `&3`) until the child closes the last of them or ends
+   * (`heldSubstitutions`), as a forked child's copy keeps a pipe open.
+   * Mirrors Python's hold_substitutions.
+   */
+  holdSubstitutions(job: SessionState): void {
+    const held = this.substitutions.filter((child) => job.names(child))
+    for (const child of held) child.holds += 1
+    job.heldSubstitutions.push(...held)
+  }
+
+  /**
+   * Let go of every substitution this shell holds of the shell that started
+   * it, as it ends (`holdSubstitutions`). Mirrors Python's let_go_of_held.
+   */
+  letGoOfHeld(): void {
+    letGoHeld(this.heldSubstitutions.splice(0))
+  }
+
+  private names(child: Substitution): boolean {
+    if (!child.endpoint.readable) return this.namedPipes().has(child.path)
+    return [...this.descriptors.values()].some(
+      (descriptor) => descriptor.source !== null && child.readers.includes(descriptor.source.lines),
+    )
+  }
+
+  /** The paths of the live pipes this shell's descriptors read or write. */
+  namedPipes(): Set<string> {
+    const named = new Set<string>()
+    for (const descriptor of this.descriptors.values()) {
+      const pipe = descriptor.source?.pipe
+      if (pipe != null) named.add(pipe.virtual)
+      if (descriptor.file?.pipe === true) named.add(descriptor.file.where.virtual)
+    }
+    return named
+  }
+
+  /**
+   * End the input of each process substitution this shell kept that no
+   * descriptor names any more (`exec 3<&-`), as closing the last descriptor
+   * on a pipe does: a `<( )` finds its reader gone, a `>( )` reads to the
+   * end. One that has ended gives its path back, and one a job still holds
+   * is the job's to end. One of its parent's this shell held and names no
+   * more it lets go of. Mirrors Python's let_go_substitutions.
+   */
+  async letGoSubstitutions(): Promise<void> {
+    letGoHeld(this.heldSubstitutions.filter((child) => !this.names(child)))
+    this.heldSubstitutions = this.heldSubstitutions.filter((child) => this.names(child))
+    const left: Substitution[] = []
+    for (const child of this.substitutions) {
+      const named = this.names(child)
+      if (!named && child.holds > 0) {
+        child.letGo = true
+        continue
+      }
+      if (!named) endPipe(child)
+      if (named || !child.done) left.push(child)
+      else {
+        await closeReaders(child.endpoint)
+        child.release()
+      }
+    }
+    this.substitutions = left
+  }
+
+  /**
+   * End every process substitution this shell kept, as the shell ends,
+   * each run out first unless `wait` is false or its line was cancelled. One
+   * a job still holds is the job's to end, unless they are stopped. Mirrors
+   * Python's end_substitutions.
+   */
+  async endSubstitutions(wait = true): Promise<void> {
+    this.closed = true
+    let ending = this.substitutions
+    this.substitutions = []
+    if (wait) {
+      for (const child of ending) child.letGo ||= child.holds > 0
+      ending = ending.filter((child) => child.holds === 0)
+    }
+    for (const child of ending) {
+      endPipe(child)
+      if (!wait) child.abort.abort()
+    }
+    try {
+      await Promise.all(
+        ending.map(async (child) => {
+          try {
+            await runCancellable(child.task, child.signal)
+          } catch (error) {
+            console.debug('a kept process substitution was stopped', error)
+            child.abort.abort()
+          }
+        }),
+      )
+    } finally {
+      for (const child of ending) {
+        await closeReaders(child.endpoint)
+        child.release()
+      }
+    }
   }
 
   /**
@@ -1192,6 +1434,13 @@ export class SessionState {
     if (this.exitTrap !== null) data.exit_trap = this.exitTrap
     if (this.errTrap !== null) data.err_trap = this.errTrap
     if (this.returnTrap !== null) data.return_trap = this.returnTrap
+    if (this.signalTraps.size > 0) {
+      data.signal_traps = Object.fromEntries(
+        [...this.signalTraps]
+          .sort(([a], [b]) => a - b)
+          .map(([signal, action]) => [String(signal), action]),
+      )
+    }
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -1270,6 +1519,7 @@ export class SessionState {
     exit_trap?: string | null
     err_trap?: string | null
     return_trap?: string | null
+    signal_traps?: Record<string, string> | null
   }): SessionState {
     const older = data.command_trees == null && data.commands != null
     const commands = commandsFromDict(data.command_trees ?? undefined, data.commands ?? undefined)
@@ -1371,6 +1621,9 @@ export class SessionState {
     session.exitTrap = data.exit_trap ?? null
     session.errTrap = data.err_trap ?? null
     session.returnTrap = data.return_trap ?? null
+    session.signalTraps = new Map(
+      Object.entries(data.signal_traps ?? {}).map(([signal, action]) => [Number(signal), action]),
+    )
     return session
   }
 }

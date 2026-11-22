@@ -17,9 +17,11 @@ import { asyncChain } from '../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { Channel } from '../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
-import { isProgramInvocation, voiceName } from '../../context/session_context.ts'
+import { currentCaller, isProgramInvocation, voiceName } from '../../context/session_context.ts'
+import { IGNORED_SIGNALS } from '../../execution/job/constants.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
@@ -30,7 +32,13 @@ import {
   snapshotStatus,
   type Written,
 } from './statement.ts'
-import { ERR_TRAP_EXEMPT_TYPES } from '../../shell/constants.ts'
+import {
+  ERR_TRAP_EXEMPT_TYPES,
+  SHELL_IGNORED_SIGNALS,
+  SIGINT,
+  SIGKILL,
+  SIGSTOP,
+} from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 /**
@@ -39,21 +47,114 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
  * The session's `exitTrap` is the `trap ... EXIT` action, '' for an
  * ignored EXIT. A child shell keeps its parent's with `exitTrapInherited`
  * set: it lists it, as bash's `trap -p` does there, and runs none of it
- * until it registers its own. It keeps the ERR action hidden unless
+ * until it registers its own. Its signal actions likewise, while a signal its
+ * parent ignores stays ignored. It keeps the ERR action hidden unless
  * `set -E` and the RETURN action unless `set -T`, and lists them all the
- * same. It is live shell state, which a session store keeps none of.
+ * same. It is live shell state, which a session store keeps none of. A
+ * background job's ignore (`jobIgnored`) stays only while the child runs in
+ * the job's own process (`( trap -p ) &`).
  */
 export function inheritTraps(session: SessionState): void {
+  const ignores = currentCaller().process?.ignores ?? new Set<number>()
+  dropJobIgnores(session, new Set([...session.jobIgnored].filter((signal) => !ignores.has(signal))))
   session.exitTrapInherited = session.exitTrap !== null
+  session.signalTrapsInherited = [...session.signalTraps.values()].some((action) => action !== '')
   session.trapStatus = null
   if (session.shellOptions.errtrace !== true) session.errTrapHidden = true
   if (session.shellOptions.functrace !== true) session.returnTrapHidden = true
 }
 
-/** Start a new shell (`bash -c`, a script): it has no actions. */
+/**
+ * The signals a shell ignores (`trap '' TERM`), which what it starts ignores
+ * too, as a forked child keeps an ignore through exec; a background job's own
+ * INT (`jobIgnored`) is not passed on, nor KILL and STOP, which nothing
+ * ignores. Mirrors Python's ignored_signals.
+ */
+export function ignoredSignals(session: SessionState): ReadonlySet<number> {
+  return new Set(
+    [...session.signalTraps]
+      .filter(
+        ([signal, action]) =>
+          action === '' &&
+          !session.jobIgnored.has(signal) &&
+          signal !== SIGKILL &&
+          signal !== SIGSTOP,
+      )
+      .map(([signal]) => signal),
+  )
+}
+
+/**
+ * Start a background job's shell, or a stage of a background pipeline: with
+ * job control off, one that runs commands of its own (`{ trap -p; } &`) lists
+ * the INT it ignores, as bash's does, and may trap or reset it; one that runs
+ * a single command lists nothing, as bash ignores it only in the program that
+ * command runs. An INT its parent ignores (`trap '' INT`) stays the parent's,
+ * which its own children keep. Mirrors Python's start_job_traps.
+ *
+ * @param session the job's shell.
+ * @param lists it runs commands of its own.
+ */
+export function startJobTraps(session: SessionState, lists: boolean): void {
+  dropJobIgnores(session, session.jobIgnored)
+  if (lists && session.shellOptions.monitor !== true && session.signalTraps.get(SIGINT) !== '') {
+    session.signalTraps = new Map([...session.signalTraps, [SIGINT, '']])
+    session.jobIgnored = new Set([SIGINT])
+  }
+}
+
+/**
+ * Stop listing a background job's ignore of `signals`.
+ *
+ * @param session the shell.
+ * @param signals the signals.
+ */
+function dropJobIgnores(session: SessionState, signals: ReadonlySet<number>): void {
+  if (signals.size === 0) return
+  session.signalTraps = new Map([...session.signalTraps].filter(([signal]) => !signals.has(signal)))
+  session.jobIgnored = new Set([...session.jobIgnored].filter((signal) => !signals.has(signal)))
+}
+
+/**
+ * Make the shell the one that answers a signal its process gets, as it runs
+ * a statement there: one it traps or ignores, it takes
+ * (`SessionState.catchSignal`), any other does what it does. A process hosts
+ * each shell that runs in place in it in turn (a script, a job's own
+ * subshell), so the innermost shell running answers. Mirrors Python's
+ * arm_signals.
+ */
+export function armSignals(session: SessionState): void {
+  const process = currentCaller().process
+  if (process !== null)
+    process.catcher =
+      session.signalTraps.size > 0 ? (signal, pid) => session.catchSignal(signal, pid) : null
+}
+
+/**
+ * Start a new shell (`bash -c`, a script): it has no actions, and ignores for
+ * good the signals ignored as it starts: its parent's, and a background job's
+ * INT and QUIT (`entryIgnored`).
+ */
 export function clearTraps(session: SessionState): void {
   session.exitTrap = null
   session.exitTrapInherited = false
+  const entry = new Set(
+    [...session.signalTraps]
+      .filter(([signal, action]) => action === '' && !session.jobIgnored.has(signal))
+      .map(([signal]) => signal),
+  )
+  session.jobIgnored = new Set()
+  const process = currentCaller().process
+  if (process !== null) {
+    const ignored = [...process.ignores].filter((signal) => !SHELL_IGNORED_SIGNALS.has(signal))
+    for (const signal of ignored) entry.add(signal)
+    if (ignored.some((signal) => IGNORED_SIGNALS.has(signal)))
+      for (const signal of IGNORED_SIGNALS) entry.add(signal)
+  }
+  session.signalTraps = new Map([...entry].sort((a, b) => a - b).map((signal) => [signal, '']))
+  session.entryIgnored = entry
+  session.signalTrapsInherited = false
+  session.pendingSignals = new Set()
   session.trapStatus = null
   session.errTrap = null
   session.returnTrap = null
@@ -174,7 +275,7 @@ export async function runErrTrap(
     return []
   session.errTrapRunning = true
   try {
-    return await runAction(executeFn, action, 'error', session, stdin, callStack)
+    return await runAction(executeFn, action, 'error trap', session, stdin, callStack)
   } finally {
     session.errTrapRunning = false
   }
@@ -206,10 +307,64 @@ export async function runReturnTrap(
     return []
   session.returnTrapRunning = true
   try {
-    return await runAction(executeFn, action, 'return', session, stdin, callStack)
+    return await runAction(executeFn, action, 'return trap', session, stdin, callStack)
   } finally {
     session.returnTrapRunning = false
   }
+}
+
+/**
+ * Run the action of each trapped signal that arrived while the last command
+ * ran, in signal order, as bash does once that command ends. `$?` is the
+ * command's status while each runs and again after it; an `exit` in one ends
+ * the shell, a `return` the function it runs in. One that arrives while an
+ * action runs waits for the next command boundary after it. Returns what the
+ * actions wrote, for the caller to land. Mirrors Python's run_signal_traps.
+ */
+export async function runSignalTraps(
+  executeFn: ExecuteFn | null,
+  session: SessionState,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Written[]> {
+  if (executeFn === null || session.pendingSignals.size === 0 || session.signalTrapRunning)
+    return []
+  const written: Written[] = []
+  session.signalTrapRunning = true
+  try {
+    while (session.pendingSignals.size > 0) {
+      const signal = Math.min(...session.pendingSignals)
+      session.pendingSignals.delete(signal)
+      const action = session.signalTraps.get(signal)
+      if (action === undefined || action === '' || session.signalTrapsInherited) continue
+      try {
+        written.push(...(await runAction(executeFn, action, 'trap', session, stdin, callStack)))
+      } catch (err) {
+        if (err instanceof ExitSignal || err instanceof ReturnSignal) await leadWith(err, written)
+        throw err
+      }
+    }
+  } finally {
+    session.signalTrapRunning = false
+  }
+  return written
+}
+
+/**
+ * Put what the actions before the one that left wrote ahead of what it
+ * wrote, so a later `exit` keeps an earlier `echo`. Mirrors Python's
+ * _lead_with.
+ *
+ * @param err how the action left.
+ * @param written what the earlier actions wrote.
+ */
+async function leadWith(err: ExitSignal | ReturnSignal, written: Written[]): Promise<void> {
+  const stdout = written.filter(([channel]) => channel === Channel.STDOUT).map(([, data]) => data)
+  const stderr: Uint8Array[] = []
+  for (const [channel, data] of written)
+    if (channel === Channel.STDERR) stderr.push(await materialize(data))
+  err.stdout = asyncChain([...stdout, err.stdout])
+  err.stderr = concat([...stderr, err.stderr])
 }
 
 /**
@@ -219,7 +374,8 @@ export async function runReturnTrap(
  * `set -e` answer for the statement it answers as it was. A failure `set -e`
  * acts on in it ends the shell with its status, and an `exit` or `return` in
  * it leaves with what it wrote, for the redirects of its statement to route.
- * A syntax error in it leads with `bash: <name> trap: `.
+ * A syntax error in it leads with `bash: <name>: `, `name` being `error
+ * trap`, `return trap` or `trap` for a signal's.
  */
 async function runAction(
   executeFn: ExecuteFn,
@@ -232,7 +388,7 @@ async function runAction(
   const held = snapshotStatus(session)
   const immune = session.errexitImmune
   const outerHead = session.parseHead
-  session.parseHead = `${voiceName(session)}: ${name} trap: `
+  session.parseHead = `${voiceName(session)}: ${name}: `
   let io: IOResult
   try {
     io = await executeFn(action, {
@@ -337,7 +493,8 @@ export async function runExitTrap(
 
 /**
  * End a child shell whose line returned `io`: a `bash -c`, a script, a
- * `$( )`. Its EXIT action runs after what it wrote.
+ * `$( )`. Its EXIT action runs after what it wrote, then the process
+ * substitutions it kept run out, as its descriptors close.
  */
 export async function finishShell(
   executeFn: ExecuteFn | null,
@@ -347,6 +504,7 @@ export async function finishShell(
   callStack: CallStack | null = null,
 ): Promise<IOResult> {
   const cleanup = await runExitTrap(executeFn, session, io.exitCode, stdin, callStack)
+  await session.endSubstitutions()
   if (cleanup === null) return io
   const stderr = concat([await io.materializeStderr(), await cleanup.materializeStderr()])
   return new IOResult({
@@ -359,7 +517,8 @@ export async function finishShell(
 
 /**
  * Run the whole of a child shell, a pipeline stage or a job, then its EXIT
- * action. An `exit` or a fatal error that ends it carries the action's
+ * action, then let the process substitutions it kept run out. An `exit` or a
+ * fatal error that ends it carries the action's
  * output and status on out to the boundary containing it.
  */
 export async function endShell(
@@ -377,6 +536,7 @@ export async function endShell(
   } catch (err) {
     if (err instanceof ExitSignal) {
       const cleanup = await runExitTrap(executeFn, session, err.containedCode, stdin, callStack)
+      await session.endSubstitutions()
       if (cleanup !== null) {
         err.stdout = asyncChain([err.stdout, cleanup.stdout])
         err.stderr = concat([err.stderr, await cleanup.materializeStderr()])
@@ -384,6 +544,7 @@ export async function endShell(
       }
     } else if (err instanceof ReturnSignal) {
       const cleanup = await runExitTrap(executeFn, session, err.exitCode, stdin, callStack)
+      await session.endSubstitutions()
       if (cleanup !== null)
         throw new ReturnSignal(
           cleanup.exitCode,
@@ -393,9 +554,14 @@ export async function endShell(
     }
     throw err
   }
-  if (session.exitTrap === null || session.exitTrapInherited) return [stdout, io, execNode]
+  if (
+    (session.exitTrap === null || session.exitTrapInherited) &&
+    session.substitutions.length === 0
+  )
+    return [stdout, io, execNode]
   stdout = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
   const cleanup = await runExitTrap(executeFn, session, io.exitCode, stdin, callStack)
+  await session.endSubstitutions()
   if (cleanup === null) return [stdout, io, execNode]
   io = await io.merge(new IOResult({ stderr: cleanup.stderr }))
   io.exitCode = cleanup.exitCode

@@ -44,6 +44,16 @@ export function signalName(number: number): string | null {
 }
 
 /**
+ * A sigspec's decimal digits as a number, any past three significant ones
+ * read as one past every signal: bash takes leading zeros (`RTMIN+0001`)
+ * however many. Mirrors Python's _digits.
+ */
+function digits(text: string): number {
+  const significant = text.replace(/^0+/, '') || '0'
+  return significant.length <= 3 ? Number(significant) : SIGRTMAX + 1
+}
+
+/**
  * The signal a bash sigspec names, null if it names none. Measured on bash
  * 5.2: a number may lead with blanks and `+` and names any signal up to 64;
  * a name is read in any case, with or without `SIG`, `EXIT` is 0, `RTMIN+n`
@@ -55,7 +65,7 @@ export function signalNumber(spec: string): number | null {
   if (!/^[\x00-\x7f]*$/.test(spec)) return null
   const number = NUMBER.exec(spec)
   if (number !== null) {
-    const value = Number(number[1])
+    const value = digits(number[1] ?? '')
     return value <= SIGRTMAX ? value : null
   }
   let name = spec.toUpperCase()
@@ -65,10 +75,11 @@ export function signalNumber(spec: string): number | null {
   if (name === 'RTMIN') return SIGRTMIN
   if (name === 'RTMAX') return SIGRTMAX
   const above = RTMIN.exec(name)
-  if (above !== null && Number(above[1]) <= SIGRTMAX - SIGRTMIN) return SIGRTMIN + Number(above[1])
+  if (above !== null && digits(above[1] ?? '') <= SIGRTMAX - SIGRTMIN)
+    return SIGRTMIN + digits(above[1] ?? '')
   const below = RTMAX.exec(name)
   if (below !== null) {
-    const value = SIGRTMAX - Number(below[1])
+    const value = SIGRTMAX - digits(below[1] ?? '')
     return signalName(value) === name ? value : null
   }
   return null

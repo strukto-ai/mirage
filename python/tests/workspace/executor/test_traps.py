@@ -17,9 +17,13 @@ import pytest
 from mirage.io import IOResult
 from mirage.shell.call_stack import CallStack
 from mirage.workspace.executor.traps import (
+    clear_traps,
+    ignored_signals,
+    inherit_traps,
     lift_function_traps,
     restore_function_traps,
     run_exit_trap,
+    start_job_traps,
 )
 from mirage.workspace.session.session import SessionState
 
@@ -83,3 +87,42 @@ def test_a_function_lifts_err_and_return_unless_traced(
         session.err_trap, session.return_trap = body
     restore_function_traps(session, lifted)
     assert (session.err_trap, session.return_trap) == after
+
+
+@pytest.mark.parametrize(
+    "lists, monitor, traps",
+    [
+        (True, False, {15: "", 2: ""}),
+        (False, False, {15: "", 2: "echo i"}),
+        (True, True, {15: "", 2: "echo i"}),
+    ],
+)
+def test_a_job_that_runs_commands_lists_its_int_ignore(lists, monitor, traps):
+    session = make_session()
+    session.signal_traps = {15: "", 2: "echo i"}
+    session.shell_options["monitor"] = monitor
+    start_job_traps(session, lists)
+    assert session.signal_traps == traps
+    assert session.job_ignored == frozenset({2} if traps[2] == "" else ())
+
+
+def test_a_shell_outside_the_jobs_process_drops_its_int_ignore():
+    job = make_session()
+    start_job_traps(job, True)
+    start_job_traps(job, False)
+    assert (job.signal_traps, job.job_ignored) == ({}, frozenset())
+    child = make_session()
+    start_job_traps(child, True)
+    inherit_traps(child)
+    assert (child.signal_traps, child.job_ignored) == ({}, frozenset())
+    shell = make_session()
+    start_job_traps(shell, True)
+    clear_traps(shell)
+    assert (shell.signal_traps, shell.entry_ignored) == ({}, frozenset())
+
+
+def test_what_a_shell_ignores_passes_on_but_kill_and_stop():
+    session = make_session()
+    session.signal_traps = {9: "", 15: "", 19: "", 2: "", 10: "echo u"}
+    session.job_ignored = frozenset({2})
+    assert ignored_signals(session) == frozenset({15})

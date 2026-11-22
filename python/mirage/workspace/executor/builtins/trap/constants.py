@@ -14,14 +14,10 @@
 
 from mirage.workspace.executor.builtins.trap.types import TrapEvent
 
-# bash's pseudo-signals besides EXIT, ERR and RETURN: names it accepts,
-# mirage runs none.
-PSEUDO_SIGNALS = frozenset({"DEBUG"})
-
-# The events mirage runs, in the order `trap -p` lists them (bash's
-# signal numbers put EXIT (0) first and its pseudo-signals last), each
-# with its session fields: the action, and the flag a registration in
-# this scope clears.
+# The events mirage runs besides signals, each with its session fields:
+# the action, and the flag a registration in this scope clears. `trap -p`
+# lists EXIT (signal 0) first, then the signals by number, then ERR and
+# RETURN.
 RUN_EVENTS = {
     TrapEvent.EXIT: ("exit_trap", "exit_trap_inherited"),
     TrapEvent.ERR: ("err_trap", "err_trap_hidden"),

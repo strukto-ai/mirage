@@ -13,19 +13,30 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from mirage.core.dev.pipe import DevicePipe
-from mirage.vfs.dev.dev import DevVFS
+from mirage.io.async_line_iterator import AsyncLineIterator
 
 
 @dataclass
 class Substitution:
-    dev: DevVFS
+    """A process substitution's pipe at ``path`` on its session's devices,
+    the task running its command, done once that has started (``begun``),
+    and how its path is given back. A ``<( )`` its shell kept is read
+    through the line buffers in ``readers``, its path given back. A kept
+    one stays open while the jobs that copied a descriptor on it run
+    (``holds``), past the shell letting go of it (``let_go``)."""
+
     path: str
-    allocation: int
     endpoint: DevicePipe
     task: asyncio.Task[None]
+    begun: asyncio.Future[None]
+    release: Callable[[], None]
+    readers: list[AsyncLineIterator] = field(default_factory=list)
+    holds: int = 0
+    let_go: bool = False
 
 
 @dataclass

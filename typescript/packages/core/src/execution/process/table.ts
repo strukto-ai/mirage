@@ -6,7 +6,7 @@ import { PLAIN_TRAITS, type Process, type ProcessRunner, type ProcessTraits } fr
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineName, type MachineResources, ProcessId } from '../types.ts'
-import { SIGCONT, SIGHUP, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
+import { SIGCHLD, SIGCONT, SIGHUP, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 import { SignalStop } from '../../utils/abort.ts'
@@ -384,13 +384,19 @@ export class ProcessTable {
    * What a signal does to a process Mirage runs itself. It pauses at STOP and
    * goes on at CONT, taking then the signal it was sent while paused, since
    * only KILL ends a stopped program; a kept signal leaves it as it is, and
-   * any other stops it. One of a group leaves what it started to their own
+   * any other stops it unless the shell running a statement in it traps or
+   * ignores it (`catcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
    * if it ignores the signal nothing happens. Mirrors Python's `_signal_own`.
    */
   private signalOwn(handle: ProcessHandle, signal: number, group: boolean): boolean | null {
     if (KEPT_SIGNALS.has(signal)) {
+      // A kept signal the shell traps runs its action all the same
+      // (`trap ... WINCH`), CONT going on as well; STOP is never caught, and
+      // CHLD only for a child that ended.
+      if (signal !== 0 && signal !== SIGSTOP && signal !== SIGCHLD)
+        handle.catcher?.(signal, handle.record.id.pid)
       if (signal === SIGSTOP) {
         if (!asyncContextIsolatesTasks) return null
         this.pause(handle)
@@ -401,6 +407,13 @@ export class ProcessTable {
       return true
     }
     if (signal !== SIGKILL && this.holdSignal(handle, signal)) return true
+    const catcher = handle.catcher
+    if (signal !== SIGKILL && catcher !== null) {
+      // A shell's ignore of a signal its process ignores anyway leaves it to
+      // that, a group's included.
+      const caught = catcher(signal, handle.record.id.pid)
+      if (caught === true || (caught === false && !handle.ignores.has(signal))) return true
+    }
     let found = true
     if (group) deliver(handle, signal)
     else

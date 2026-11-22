@@ -27,7 +27,7 @@ from mirage.execution.types import (
     MachineResources,
     ProcessId,
 )
-from mirage.shell.constants import SIGCONT, SIGHUP, SIGKILL, SIGSTOP
+from mirage.shell.constants import SIGCHLD, SIGCONT, SIGHUP, SIGKILL, SIGSTOP
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
 
@@ -485,7 +485,9 @@ class ProcessTable:
         """What a signal does to a process Mirage runs itself. It pauses
         at STOP and goes on at CONT, taking then the signal it was sent
         while paused, since only KILL ends a stopped program; a kept
-        signal leaves it as it is, and any other stops it. One of a group
+        signal leaves it as it is, and any other stops it unless the shell
+        running a statement in it traps or ignores it (``catcher``). One of
+        a group
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
         (``_deliver``); one signalled alone stops what it started too,
@@ -500,6 +502,11 @@ class ProcessTable:
             bool: whether the process was there to signal.
         """
         if signal in KEPT_SIGNALS:
+            # A kept signal the shell traps runs its action all the same
+            # (``trap ... WINCH``), CONT going on as well; STOP is never
+            # caught, and CHLD only for a child that ended.
+            if signal not in (0, SIGSTOP, SIGCHLD) and handle.catcher:
+                handle.catcher(signal, handle.record.pid)
             if signal == SIGSTOP:
                 self.pause(handle)
             elif signal == SIGCONT:
@@ -509,6 +516,13 @@ class ProcessTable:
             return True
         if signal != SIGKILL and self.hold_signal(handle, signal):
             return True
+        catcher = handle.catcher
+        if signal != SIGKILL and catcher is not None:
+            # A shell's ignore of a signal its process ignores anyway
+            # leaves it to that, a group's included.
+            caught = catcher(signal, handle.record.pid)
+            if caught or (caught is False and signal not in handle.ignores):
+                return True
         if group:
             _deliver(handle, signal)
             found = True

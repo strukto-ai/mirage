@@ -91,6 +91,7 @@ from mirage.workspace.executor.statement import (
     redirected_body,
     reported_command,
 )
+from mirage.workspace.executor.traps import ignored_signals
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
@@ -447,7 +448,8 @@ async def _supervise(
             run=run,
             limit=session.processes.max,
             started=forked,
-            ignores=SHELL_IGNORED_SIGNALS,
+            ignores=SHELL_IGNORED_SIGNALS | ignored_signals(session),
+            program_ignores=ignored_signals(session),
             own_group=not foreground,
             one_command=True,
             traits=current_caller().traits,

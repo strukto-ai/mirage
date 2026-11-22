@@ -13,16 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DevicePipe } from '../../core/dev/pipe.ts'
-import type { DevVFS } from '../../vfs/dev/dev.ts'
+import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 
+/**
+ * A process substitution's pipe at `path` on its session's devices, the task
+ * running its command, done once that has started (`begun`), and how its path
+ * is given back. A `<( )` its shell kept is read through the line buffers in
+ * `readers`, its path given back. Mirrors Python's Substitution.
+ */
 export interface Substitution {
-  dev: DevVFS
   path: string
-  allocation: number
   endpoint: DevicePipe
+  release: () => void
   abort: AbortController
   signal: AbortSignal
   task: Promise<void>
+  begun: Promise<void>
+  done: boolean
+  readers: AsyncLineIterator[]
+  // The jobs that copied a descriptor on it, which keep it open past its
+  // shell letting go of it (`letGo`).
+  holds: number
+  letGo: boolean
   failure?: Error
 }
 

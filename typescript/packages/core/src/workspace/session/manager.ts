@@ -415,6 +415,7 @@ export class SessionManager extends SessionOwner {
         dflt.umask = stored.umask
         dflt.logicalCwd = stored.logicalCwd
         dflt.exitTrap = stored.exitTrap
+        dflt.signalTraps = stored.signalTraps
         dflt.errTrap = stored.errTrap
         dflt.returnTrap = stored.returnTrap
         dflt.generation = stored.generation
@@ -609,6 +610,7 @@ export class SessionManager extends SessionOwner {
         .filter(([id]) => id !== sessionId)
         .flatMap(([, other]) => other.openInputs())
       await releaseInputs(session.openInputs(), keep)
+      await session.endSubstitutions(false)
       this.sessions.delete(sessionId)
       this.rebase(sessionId, undefined)
       await this.sessionStore.delete([sessionId])

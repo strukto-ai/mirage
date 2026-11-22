@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
 
 import pytest
 
@@ -224,44 +223,6 @@ async def test_a_dup_is_another_descriptor_on_the_same_offset():
 
 
 @pytest.mark.asyncio
-async def test_load_rest_ends_the_source_and_reads_on_from_memory():
-    ended = []
-
-    async def source():
-        try:
-            yield b"a\nb"
-            yield b"\nc\n"
-        finally:
-            ended.append(True)
-
-    lines = AsyncLineIterator(source())
-    assert await lines.readline() == b"a"
-    await lines.load_rest()
-    assert ended == [True]
-    assert [line async for line in lines] == [b"b", b"c"]
-
-
-@pytest.mark.asyncio
-async def test_a_reader_sees_each_chunk_a_load_takes():
-    marker = asyncio.Event()
-
-    async def source() -> AsyncIterator[bytes]:
-        yield b"a\n"
-        await marker.wait()
-        yield b"b\n"
-
-    reader = AsyncLineIterator(source())
-
-    async def background() -> None:
-        assert await reader.readline() == b"a"
-        marker.set()
-
-    load = asyncio.create_task(reader.load_rest())
-    await asyncio.wait_for(asyncio.gather(load, background()), 1)
-    assert [line async for line in reader] == [b"b"]
-
-
-@pytest.mark.asyncio
 async def test_a_reader_that_stops_early_leaves_the_rest():
     shared = SharedInput(_chunks([b"a\n", b"b\n"]))
     reader = chunks(shared)
@@ -297,18 +258,6 @@ async def test_a_line_past_the_memory_budget_is_refused():
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
             MemoryBudget(8, lambda: 0), first([b"abcd", b"efgh", b"ij\n"])
-        )
-
-
-@pytest.mark.asyncio
-async def test_what_a_reader_loads_must_fit_in_the_memory_budget():
-    async def load(parts: list[bytes]) -> None:
-        await AsyncLineIterator(_chunks(parts)).load_rest()
-
-    await run_with_memory(MemoryBudget(8, lambda: 0), load([b"abcd", b"efgh"]))
-    with pytest.raises(MemoryExhausted):
-        await run_with_memory(
-            MemoryBudget(8, lambda: 0), load([b"abcd", b"efgh", b"i"])
         )
 
 
@@ -492,9 +441,8 @@ async def test_a_second_discard_during_the_close_leaves_it_to_finish():
 
 
 @pytest.mark.asyncio
-async def test_a_kept_descriptor_lets_go_of_the_rest_it_read():
+async def test_a_reader_lets_go_of_a_long_line_it_read():
     reader = AsyncLineIterator(_chunks([b"x" * (RELEASE * 2) + b"\nend\n"]))
-    await reader.load_rest()
     assert await reader.readline() == b"x" * (RELEASE * 2)
     assert len(reader._buf) - reader._pos == 4
     assert len(reader._buf) < RELEASE

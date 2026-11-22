@@ -699,7 +699,6 @@ function recurse(
     const rest = session.jobOutput ?? session.tty.jobs
     if (substitution) {
       session.terminalOutput = false
-      inheritTraps(session)
       // bash runs a substitution without `set -e` unless
       // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
       if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
@@ -775,6 +774,7 @@ function recurse(
         session,
         cmd,
         async () => {
+          inheritTraps(session)
           const io = await substitute()
           done.push(io)
           return io.exitCode

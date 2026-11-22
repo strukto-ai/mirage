@@ -126,9 +126,14 @@ it.each([
     [141, '', ''],
   ],
   ["printf 'outer\\n' | cat <(echo one) - <(echo two)", [0, 'one\nouter\ntwo\n', '']],
+  ['exec 3< <(printf a); echo st:$?; cat <&3; exec 3<&-', [0, 'st:0\na', '']],
   [
-    'exec 3< <(printf a); echo st:$?',
-    [0, 'st:2\n', 'bash: line 1: exec: a process substitution as a descriptor: not supported\n'],
+    'exec 3<> <(printf a); echo st:$?',
+    [
+      0,
+      'st:2\n',
+      'bash: line 1: exec: a process substitution opened for reading and writing: not supported\n',
+    ],
   ],
   [': <(sleep .05; echo late >&2) | cat; sleep .3; echo end', [0, 'end\n', 'late\n']],
   ['x=$( { : <(sleep .05; echo cap >&2); } 2>&1 ); echo "[$x]"', [0, '[cap]\n', '']],

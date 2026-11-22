@@ -133,9 +133,17 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  */
 export class JobTable {
   private readonly substitutions = new Map<number, ProcessHandle>()
-  // The substitutions each edge-runtime request started that still run, on
-  // the plane, so a request finds the ones its child shells started too.
-  private readonly requestSubstitutions = new WeakMap<IncomingRequest, Set<ProcessHandle>>()
+  // What each substitution still does once its process has ended: hand on
+  // the output it returned, which a `wait` waits for too. Mirrors Python's
+  // _settled.
+  private readonly settled = new Map<number, Promise<void>>()
+  // The substitutions each edge-runtime request started that still run, with
+  // what each still writes once it ends, on the plane, so a request finds
+  // the ones its child shells' tables track too.
+  private readonly requestSubstitutions = new WeakMap<
+    IncomingRequest,
+    Map<ProcessHandle, Promise<void> | undefined>
+  >()
   store: ExecutionStore
   // The id of the daemon this table runs on, which its lease names.
   readonly daemon: string
@@ -352,6 +360,8 @@ export class JobTable {
     program?: string | null
     // What the wrappers around the job changed for its process.
     traits?: ProcessTraits
+    // What its shell ignores, which the job and its program ignore too.
+    ignores?: ReadonlySet<number>
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -397,10 +407,10 @@ export class JobTable {
         init.abort.abort()
       },
       limit: init.limit ?? null,
-      ignores: IGNORED_SIGNALS,
+      ignores: new Set([...IGNORED_SIGNALS, ...(init.ignores ?? [])]),
       oneCommand: init.simple === true,
       background: true,
-      programIgnores: IGNORED_SIGNALS,
+      programIgnores: new Set([...IGNORED_SIGNALS, ...(init.ignores ?? [])]),
       ...(init.traits !== undefined ? { traits: init.traits } : {}),
     })
     const { line, group } = process.record
@@ -696,7 +706,10 @@ export class JobTable {
         this.marks.delete(sessionId)
         this.statuses.delete(sessionId)
         for (const [pid, child] of this.substitutions) {
-          if (child.record.sessionId === sessionId) this.substitutions.delete(pid)
+          if (child.record.sessionId === sessionId) {
+            this.substitutions.delete(pid)
+            this.settled.delete(pid)
+          }
         }
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
@@ -879,34 +892,43 @@ export class JobTable {
 
   /**
    * Keep how a process substitution ends under its pid, which a `wait` from
-   * the session that started it answers. Mirrors Python's
-   * `track_substitution`.
+   * the session that started it answers; `settled` is done once what it wrote
+   * has gone where it writes, which `wait` waits for as well. Mirrors
+   * Python's `track_substitution`.
    */
-  trackSubstitution(process: ProcessHandle): void {
+  trackSubstitution(process: ProcessHandle, settled?: Promise<void>): void {
     const pid = process.record.id.pid
     this.substitutions.set(pid, process)
+    if (settled !== undefined) this.settled.set(pid, settled)
     const request = currentRequest()
-    let started: Set<ProcessHandle> | undefined
+    let started: Map<ProcessHandle, Promise<void> | undefined> | undefined
     if (request !== null) {
-      started = this.plane.requestSubstitutions.get(request) ?? new Set()
-      this.plane.requestSubstitutions.set(request, started.add(process))
+      started = this.plane.requestSubstitutions.get(request) ?? new Map()
+      this.plane.requestSubstitutions.set(request, started.set(process, settled))
     }
     // Its table runs the hook that tracks it just before starting it, so it
     // has something to join a microtask later.
     queueMicrotask(() => {
-      void process.join().then((record) => {
+      void process.join().then(async (record) => {
+        // Its status stands once it ends; a `wait`, its request's included,
+        // still finds it until what it wrote has gone where it writes.
+        if (this.substitutions.get(pid) === process && record.exit !== null)
+          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
+        await settled?.catch((err: unknown) => {
+          console.debug('process substitution settled with an error:', err)
+        })
         started?.delete(process)
         if (this.substitutions.get(pid) !== process) return
         this.substitutions.delete(pid)
-        if (record.exit !== null)
-          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
+        this.settled.delete(pid)
       })
     })
   }
 
   /**
    * Wait until the process substitution `pid` the shell `shell` started
-   * ends, or each it started without one. A shell waits only for its own, as
+   * ends, and what it wrote has gone where it writes, or each it started
+   * without one. A shell waits only for its own, as
    * bash does: never for another pipeline stage's.
    */
   async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
@@ -920,19 +942,25 @@ export class JobTable {
       // would run this waiter inside it: a request waits for its own only.
       if (request !== null && this.plane.requestSubstitutions.get(request)?.has(process) !== true)
         continue
+      const settled = this.settled.get(child)
       await process.join()
+      if (settled !== undefined) await settled
     }
   }
 
   /**
-   * Wait for the substitutions `request` started to end, in child shells
-   * (`( )`, `$( )`) too. On an edge runtime one still running once its
-   * request has answered never ends, so the request waits for them first.
+   * Wait for the substitutions `request` started to end, and what they wrote
+   * to go where it writes, in child shells (`( )`, `$( )`) too. On an edge
+   * runtime one still running once its request has answered never ends, so
+   * the request waits for them first.
    */
   async joinRequest(request: IncomingRequest): Promise<void> {
-    // One started while this waits is still reached: the loop reads the set
+    // One started while this waits is still reached: the loop reads the map
     // as it changes.
-    for (const process of this.plane.requestSubstitutions.get(request) ?? []) await process.join()
+    for (const [process, settled] of this.plane.requestSubstitutions.get(request) ?? []) {
+      await process.join()
+      if (settled !== undefined) await settled
+    }
   }
 
   /**

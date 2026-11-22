@@ -356,23 +356,23 @@ class AsyncLineIterator:
         lines.holders, lines._released = self.holders, self._released
         return lines
 
-    async def load_rest(self) -> None:
-        """Read what the source has left into the buffer, for a descriptor
-        that outlives its pipe: reads go on from memory. Each chunk lands
-        as it arrives, so a reader of the same pipe never waits on the
-        rest."""
-        while not self._exhausted:
-            try:
-                await self._budget.run()
-                chunk = await self._next_chunk()
-                check_memory(len(self._buf) - self._pos + len(chunk))
-            except StopAsyncIteration:
-                self._exhausted = True
-            except BaseException as exc:
-                await self._failed(exc)
-                raise
-            else:
-                self._append(chunk)
+    def _next_width(self, delim: bytes | None) -> int:
+        """How many buffered bytes the next read needs: the character its
+        first byte starts, or the delimiter it may begin; 1 when nothing
+        is buffered.
+
+        Args:
+            delim (bytes | None): the stop, if any.
+        """
+        at = self._pos
+        if at >= len(self._buf):
+            return 1
+        need = lead_width(self._buf[at])
+        if delim is not None and delim.startswith(
+            self._buf[at : at + len(delim)]
+        ):
+            need = max(need, len(delim))
+        return need
 
     async def read_chars(
         self, count: int, delim: bytes | None
@@ -406,13 +406,15 @@ class AsyncLineIterator:
         room = memory_room()
         try:
             taken = 0
-            need = max(len(delim) if delim is not None else 1, 4)
             while taken < count:
                 await self._budget.run()
                 # One pull can split a character or a multibyte delimiter
-                # across chunks, so top the buffer up to the widest either
-                # could be before reading its first byte as a whole one.
-                if len(self._buf) - self._pos < need and not self._exhausted:
+                # across chunks, so top the buffer up to what the next
+                # one takes before reading its first byte as a whole one;
+                # no more, so a live pipe's lone `x` is read at once.
+                if not self._exhausted and len(
+                    self._buf
+                ) - self._pos < self._next_width(delim):
                     try:
                         self._append(await self._next_chunk())
                     except StopAsyncIteration:
@@ -454,10 +456,10 @@ class SharedInput:
     source, since a later command may still read it; whoever opened the
     source closes it, and a failed line discards it.
 
-    One over a live pipe names it in ``pipe`` while the substitution's
-    command runs; when that ends, its scope loads the rest for a
-    descriptor the shell still holds (``f() { exec 3<"$1"; }; f <(cmd)``)
-    and clears the name.
+    One over a live pipe names it in ``pipe``; a process substitution a
+    descriptor of the shell still names when its command ends goes on
+    with the shell (``exec 3< <(cmd)``, ``f() { exec 3<"$1"; }; f
+    <(cmd)``).
 
     Args:
         source (ByteSource | AsyncLineIterator): what the descriptor

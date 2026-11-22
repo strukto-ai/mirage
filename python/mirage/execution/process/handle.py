@@ -102,6 +102,11 @@ class ProcessHandle:
         # It runs a pipeline (``cmd | cmd &``), whose stages are the job.
         self.pipeline = False
         self.stages: tuple[ProcessHandle, ...] = ()
+        # The shell running a statement in it now, which answers a signal
+        # sent to a pid: True when it took it for its action (``trap
+        # ACTION TERM``), False when it ignores it (``trap '' TERM``),
+        # None when it leaves it to what the signal does.
+        self.catcher: Callable[[int, int], bool | None] | None = None
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.

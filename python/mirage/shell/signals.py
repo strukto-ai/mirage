@@ -32,6 +32,18 @@ _RTMAX = re.compile(r"RTMAX-([0-9]+)")
 _RTMIN_NAMED = 15
 
 
+def _digits(text: str) -> int:
+    """A sigspec's decimal digits as a number, any past three significant
+    ones read as one past every signal: bash takes leading zeros
+    (``RTMIN+0001``) however many.
+
+    Args:
+        text (str): the digits.
+    """
+    significant = text.lstrip("0") or "0"
+    return int(significant) if len(significant) <= 3 else SIGRTMAX + 1
+
+
 def signal_name(number: int) -> str | None:
     """The name bash's ``kill -l`` gives a signal, without ``SIG``: None
     for a number it names nothing (32 and 33).
@@ -67,7 +79,7 @@ def signal_number(spec: str) -> int | None:
         return None
     number = _NUMBER.fullmatch(spec)
     if number is not None:
-        value = int(number.group(1))
+        value = _digits(number.group(1))
         return value if value <= SIGRTMAX else None
     name = spec.upper()
     if name.startswith("SIG"):
@@ -82,11 +94,11 @@ def signal_number(spec: str) -> int | None:
     if name == "RTMAX":
         return SIGRTMAX
     offset = _RTMIN.fullmatch(name)
-    if offset is not None and int(offset.group(1)) <= SIGRTMAX - SIGRTMIN:
-        return SIGRTMIN + int(offset.group(1))
+    if offset is not None and _digits(offset.group(1)) <= SIGRTMAX - SIGRTMIN:
+        return SIGRTMIN + _digits(offset.group(1))
     offset = _RTMAX.fullmatch(name)
     if offset is not None:
-        value = SIGRTMAX - int(offset.group(1))
+        value = SIGRTMAX - _digits(offset.group(1))
         return value if signal_name(value) == name else None
     return None
 

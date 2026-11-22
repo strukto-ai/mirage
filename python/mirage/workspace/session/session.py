@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from collections.abc import Iterator, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
+from mirage.bridge.sync import soon
 from mirage.cache.versions import VersionHistory
+from mirage.core.dev.pipe import DevicePipe
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.waits import Hold, JobWaits
 from mirage.execution.process.config import (
@@ -65,6 +68,7 @@ from mirage.types import (
 )
 from mirage.utils.clock import SystemClock
 from mirage.utils.ids import IdSource, SystemIdSource, secure_draw
+from mirage.workspace.node.types import Substitution
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -84,6 +88,66 @@ from mirage.workspace.session.serialize import (
 from mirage.workspace.types import StatusWriter
 
 logger = logging.getLogger(__name__)
+
+
+async def close_readers(endpoint: DevicePipe) -> None:
+    """Close the streams readers opened on a pipe that ends: a later read
+    finds the end of input either way, and nothing is left open for the
+    event loop to finalize.
+
+    Args:
+        endpoint (DevicePipe): the substitution's pipe.
+    """
+    readers = list(endpoint.readers)
+    endpoint.readers.clear()
+    for reader in readers:
+        try:
+            await reader.aclose()
+        except RuntimeError:
+            # A reader still mid-pull in another task (a background job)
+            # finds the end of input once that pull returns.
+            logger.debug("a pipe reader was still reading", exc_info=True)
+
+
+def _end_pipe(child: Substitution) -> None:
+    """End a process substitution's side of its pipe: the reader of a
+    ``<( )``, the input of a ``>( )``.
+
+    Args:
+        child (Substitution): the substitution.
+    """
+    if child.endpoint.readable:
+        child.endpoint.pipe.close_reader()
+    else:
+        child.endpoint.pipe.end()
+
+
+async def _settle(child: Substitution) -> None:
+    """Give a kept process substitution's path back once it has run out.
+
+    Args:
+        child (Substitution): the substitution, its pipe ended.
+    """
+    await asyncio.gather(child.task, return_exceptions=True)
+    await close_readers(child.endpoint)
+    child.release()
+
+
+def let_go_held(held: list[Substitution]) -> None:
+    """A holder's end lets go of the substitutions it held
+    (``SessionState.hold_substitutions``): the last holder of one its shell
+    let go of ends its pipe, and goes on without waiting for its command,
+    as bash's job does not wait for a ``<( )`` it inherited.
+
+    Args:
+        held (list[Substitution]): what the holder held.
+    """
+    for child in held:
+        child.holds -= 1
+        if not child.holds and child.let_go:
+            _end_pipe(child)
+            soon(asyncio.get_running_loop(), _settle(child))
+
 
 # The file-creation mask a fresh shell starts with, as bash's.
 _FRESH_UMASK = 0o022
@@ -461,6 +525,27 @@ class SessionState:
     # child shell starts with neither running.
     err_trap_running: bool = False
     return_trap_running: bool = False
+    # The `trap ... TERM` actions by signal number, "" for an ignored
+    # signal. A child shell keeps its parent's with
+    # `signal_traps_inherited` set: it lists them, as bash's `trap -p`
+    # does there, and runs none, while one it ignores stays ignored. A
+    # new shell keeps only the ignored ones.
+    signal_traps: dict[int, str] = field(default_factory=dict)
+    signal_traps_inherited: bool = False
+    # The signals ignored as this shell started, which it can neither trap
+    # nor reset: its parent's ignored ones, and a background job's INT
+    # and QUIT.
+    entry_ignored: frozenset[int] = frozenset()
+    # The signals this shell lists as ignored because its process is a
+    # background job's, which ignores them (bash's INT, job control off):
+    # it may still trap or reset them, and a shell it forks into a process
+    # of its own lists none of them.
+    job_ignored: frozenset[int] = frozenset()
+    # The trapped signals that arrived while a command ran, whose actions
+    # run once it ends; a child shell starts with none.
+    pending_signals: set[int] = field(default_factory=set, repr=False)
+    signal_trap_running: bool = False
+    signal_arrived: asyncio.Event | None = field(default=None, repr=False)
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
@@ -551,6 +636,20 @@ class SessionState:
     # The readers a fork inherited: its parent still holds them, so the
     # fork closing one never closes the parent's.
     _borrowed: list[SharedInput] = field(default_factory=list, repr=False)
+    # The process substitutions a descriptor of this shell kept past their
+    # command (`exec 3< <(cmd)`), which it ends once none names them, or
+    # as it ends; a fork starts with none.
+    substitutions: list[Substitution] = field(default_factory=list, repr=False)
+    # The substitutions the shell that started this one kept which a
+    # descriptor this one copied still names, held open until it closes
+    # them or ends (``hold_substitutions``); a fork starts with none.
+    held_substitutions: list[Substitution] = field(
+        default_factory=list, repr=False
+    )
+    # Set as the shell ends and its descriptors close, so a child it
+    # started writes on the stream it was given whatever the shell's own
+    # last pointed at.
+    closed: bool = field(default=False, repr=False)
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)
     # The row the running parse starts on in the text that spelled it: 0
@@ -639,8 +738,170 @@ class SessionState:
 
     async def close_inputs(self) -> None:
         """Close the readers this child shell opened, as it ends; the
-        ones it inherited stay with the shell that opened them."""
+        ones it inherited stay with the shell that opened them. The
+        process substitutions it kept end with it, each run out first
+        (`exec > >(tee log)` writes all it was given) unless the shell
+        was killed."""
         await release_inputs(self.open_inputs(), self._borrowed)
+        task = asyncio.current_task()
+        await self.end_substitutions(
+            wait=task is None or not task.cancelling()
+        )
+
+    def catch_signal(self, signal: int, pid: int) -> bool | None:
+        """How this shell answers ``signal`` sent to ``pid``: True when it
+        keeps it for its action, which runs once the running command ends
+        and cuts a ``wait`` short; False when it ignores it (``trap ''
+        TERM``); None when it leaves it to what the signal does. An action
+        it only lists, its parent's, is not its own, and a signal sent to
+        the shell whose process it runs in (``$(kill $$)``) is not for it.
+
+        Args:
+            signal (int): the signal.
+            pid (int): the process it was sent to.
+        """
+        action = self.signal_traps.get(signal)
+        if (
+            action is None
+            or (action and self.signal_traps_inherited)
+            or (self.process_id is not None and pid != self.process_id)
+        ):
+            return None
+        if not action:
+            return False
+        self.pending_signals.add(signal)
+        if self.signal_arrived is not None:
+            self.signal_arrived.set()
+        return True
+
+    def keep_substitution(self, child: Substitution) -> None:
+        """Keep a process substitution a descriptor of this shell names past
+        its command. A ``<( )`` gives its path back, as bash closes the
+        pipe's own descriptor once it is duplicated: the descriptors reading
+        it go on through their line buffers (``readers``).
+
+        Args:
+            child (Substitution): the substitution.
+        """
+        if child.endpoint.readable:
+            for descriptor in self.descriptors.values():
+                source = descriptor.source
+                if (
+                    source is None
+                    or source.pipe is None
+                    or source.pipe.virtual != child.path
+                ):
+                    continue
+                if all(source.lines is not lines for lines in child.readers):
+                    child.readers.append(source.lines)
+                source.pipe = None
+            child.release()
+        self.substitutions.append(child)
+
+    def hold_substitutions(self, job: "SessionState") -> None:
+        """Hold open each process substitution this shell kept that a
+        child's copied descriptors name (``exec 3< <(cmd); cat <&3 &``, a
+        later ``>( )`` writing to ``&3``) until the child closes the last
+        of them or ends (``held_substitutions``), as a forked child's copy
+        keeps a pipe open.
+
+        Args:
+            job (SessionState): the child's shell: a job's, a substitution's.
+        """
+        held = [child for child in self.substitutions if job._names(child)]
+        for child in held:
+            child.holds += 1
+        job.held_substitutions.extend(held)
+
+    def let_go_of_held(self) -> None:
+        """Let go of every substitution this shell holds of the shell that
+        started it, as it ends (``hold_substitutions``)."""
+        held, self.held_substitutions = self.held_substitutions, []
+        let_go_held(held)
+
+    def _names(self, child: Substitution) -> bool:
+        """Whether a descriptor of this shell still reads or writes a
+        process substitution it kept.
+
+        Args:
+            child (Substitution): the substitution.
+        """
+        if not child.endpoint.readable:
+            return child.path in self.named_pipes()
+        return any(
+            descriptor.source is not None
+            and any(
+                descriptor.source.lines is lines for lines in child.readers
+            )
+            for descriptor in self.descriptors.values()
+        )
+
+    def named_pipes(self) -> set[str]:
+        """The paths of the live pipes this shell's descriptors read or
+        write."""
+        named: set[str] = set()
+        for descriptor in self.descriptors.values():
+            source = descriptor.source
+            if source is not None and source.pipe is not None:
+                named.add(source.pipe.virtual)
+            if descriptor.file is not None and descriptor.file.pipe:
+                named.add(descriptor.file.where.virtual)
+        return named
+
+    async def let_go_substitutions(self) -> None:
+        """End the input of each process substitution this shell kept that
+        no descriptor names any more (`exec 3<&-`), as closing the last
+        descriptor on a pipe does: a `<( )` finds its reader gone, a
+        `>( )` reads to the end. One that has ended gives its path back,
+        and one a job still holds is the job's to end. One of its parent's
+        this shell held and names no more it lets go of.
+        """
+        let_go_held([c for c in self.held_substitutions if not self._names(c)])
+        self.held_substitutions = [
+            c for c in self.held_substitutions if self._names(c)
+        ]
+        left: list[Substitution] = []
+        for child in self.substitutions:
+            named = self._names(child)
+            if not named and child.holds:
+                child.let_go = True
+                continue
+            if not named:
+                _end_pipe(child)
+            if named or not child.task.done():
+                left.append(child)
+            else:
+                await close_readers(child.endpoint)
+                child.release()
+        self.substitutions = left
+
+    async def end_substitutions(self, wait: bool = True) -> None:
+        """End every process substitution this shell kept, as the shell
+        ends and its descriptors close (``closed``).
+
+        One a job still holds is the job's to end, unless they are stopped.
+
+        Args:
+            wait (bool): wait for each to run out; False stops them.
+        """
+        self.closed = True
+        ending, self.substitutions = self.substitutions, []
+        if wait:
+            for child in ending:
+                child.let_go = child.let_go or bool(child.holds)
+            ending = [child for child in ending if not child.holds]
+        for child in ending:
+            _end_pipe(child)
+            if not wait:
+                child.task.cancel()
+        try:
+            await asyncio.gather(
+                *(child.task for child in ending), return_exceptions=True
+            )
+        finally:
+            for child in ending:
+                await close_readers(child.endpoint)
+                child.release()
 
     def variables_to_dict(self) -> dict[str, Any]:
         """The record's keys the variables fill: ``env``, ``arrays``,
@@ -787,6 +1048,11 @@ class SessionState:
             data["err_trap"] = self.err_trap
         if self.return_trap is not None:
             data["return_trap"] = self.return_trap
+        if self.signal_traps:
+            data["signal_traps"] = {
+                str(signal): action
+                for signal, action in sorted(self.signal_traps.items())
+            }
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -959,6 +1225,11 @@ class SessionState:
             }
         if processes is not None:
             data["processes"] = ProcessPermissions.model_validate(processes)
+        if data.get("signal_traps") is not None:
+            data["signal_traps"] = {
+                int(signal): action
+                for signal, action in data["signal_traps"].items()
+            }
         if (
             paths is not None
             or shown is not None
@@ -1219,7 +1490,8 @@ class SessionState:
         substitution, a subshell) also inherits the reader's position, the
         aliases being expanded and the local scopes, and reseeds
         ``$RANDOM`` on its first draw instead of replaying this session's
-        seed.
+        seed. It lists this session's signal actions and runs none of them
+        (``timeout`` signalling the program it runs).
 
         Args:
             records (ShellVars | None): the child's variables when a
@@ -1237,6 +1509,7 @@ class SessionState:
         child._parse_head = self._parse_head
         child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
+        child.signal_traps_inherited = any(child.signal_traps.values())
         return child
 
     def new_shell(self) -> "SessionState":

@@ -821,7 +821,7 @@ and `ps -p` take either kind.
       shuts down.
     - The shell ignores `QUIT`, which stops only the program it runs. A signal
       that stops `$$` ends the line with 128 plus the signal and leaves its jobs
-      running.
+      running, unless the shell traps it.
     - A background job ignores `INT` and `QUIT` when it is one program. A job
       that runs several commands stops only its current command, subshell or
       pipeline and goes on; a job that runs a function ends.
@@ -848,14 +848,28 @@ and `ps -p` take either kind.
       `trap 'commands' RETURN` as a function or sourced file returns. A
       function runs its caller's `ERR` and `RETURN` actions only under
       `set -E` / `set -T`.
-    - `trap -p` lists, `trap - EXIT` removes and `trap '' EXIT` turns off a
+    - `trap -p` lists `EXIT`, then the signals by number, then `ERR` and
+      `RETURN`; `trap - EXIT` removes and `trap '' EXIT` turns off a
       registration. A subshell lists its parent's but runs only its own.
     - A session outlives each `shell()` call, so a call that returns does not
       fire `EXIT`; register it inside `bash -c` to run before the call
       returns. Session stores do not keep traps.
-    - `trap` cannot catch a signal: cancellation, `kill`, timeouts and closing
-      a session end the work without cleanup. Other events (`INT`, `TERM`,
-      `DEBUG`, ...) are refused with `bash: line 1: trap: TERM: not supported`.
+    - `trap 'commands' TERM` takes any signal `kill -l` lists, by name or
+      number. The action runs once the command running when the signal
+      arrives has ended, as in Bash: a program in the foreground finishes
+      first, and `wait` returns at once with 128 plus the signal. `exit` in
+      it ends the shell and `return` the function it runs in; `$?` is the
+      command's status. `trap '' TERM` ignores the signal.
+    - A child shell keeps the signals its parent ignores and runs none of its
+      parent's actions. A new shell (`bash -c`, a script) can neither trap
+      nor reset a signal ignored as it starts, and one started in the
+      background ignores `INT` and `QUIT`. A job that runs commands of its own
+      (`{ ...; } &`) lists the `INT` it ignores as `trap -- '' SIGINT` and may
+      still trap or reset it; the subshells and shells it starts do not keep
+      it. `KILL` and `STOP` are listed but never caught.
+    - Cancellation, timeouts and closing a session end the work without
+      cleanup. `DEBUG` is refused with
+      `bash: line 1: trap: DEBUG: not supported`.
   </Accordion>
 </AccordionGroup>
 
@@ -954,5 +968,9 @@ Mirage runs a supported subset of Bash, not a full Bash installation.
   offset.
 - A process substitution's `/dev/fd/N` belongs to the command that opened
   it. An input producer can keep running after that command ends; the
-  command waits for output consumers. `exec 3> >(command)` fails with
+  command waits for output consumers. One an `exec` keeps (`exec 3<
+  <(command)`, `exec > >(tee log) 2>&1`) belongs to the shell: closing the
+  last descriptor on it ends its input, and the shell's end lets it run out
+  before the shell's caller goes on, where Bash may print its last output
+  later. `exec 3<> <(command)`, which waits forever in Bash, fails with
   status `2`.

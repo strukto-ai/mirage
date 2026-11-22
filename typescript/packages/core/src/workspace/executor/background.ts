@@ -78,7 +78,7 @@ import {
   reportedCommand,
   statementStdin,
 } from './statement.ts'
-import { inheritTraps } from './traps.ts'
+import { armSignals, ignoredSignals, inheritTraps, startJobTraps } from './traps.ts'
 import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
 import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
@@ -369,6 +369,7 @@ export async function runProgram(
   sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   currentCaller().process?.programSignaled(null)
+  armSignals(context.session)
   const shell = context.frame.shell
   if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
@@ -509,7 +510,8 @@ export function startShell(
       parent,
       limit: session.processes.max,
       ...(started === undefined ? {} : { started }),
-      ignores: SHELL_IGNORED_SIGNALS,
+      ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
+      programIgnores: ignoredSignals(session),
       oneCommand,
       stdin,
       traits: currentCaller().traits,
@@ -580,7 +582,9 @@ export async function handleBackground(
   const ends = oneCommand && !forks(command, session)
   const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)
   const heldInputs = holdInputs(bgSession.openInputs())
+  session.holdSubstitutions(bgSession)
   const dropHolds = async (): Promise<void> => {
+    bgSession.letGoOfHeld()
     let failure: { error: unknown } | undefined
     while (heldInputs.length > 0) {
       try {
@@ -593,6 +597,8 @@ export async function handleBackground(
     if (failure !== undefined) throw failure.error
   }
   inheritTraps(bgSession)
+  const body = left.type === NT.NEGATED_COMMAND ? (left.namedChildren[0] ?? left) : left
+  startJobTraps(bgSession, !simpleCommand(body))
   const output = new ForkRoute(session.jobOutput ?? session.tty.jobs, session)
   // A job is a shell of its own: what jobs it starts write into the
   // statement it runs, then where it writes.
@@ -790,6 +796,7 @@ export async function handleBackground(
       simple: oneProgram(left, session),
       program: programText(left, session),
       traits: currentCaller().traits,
+      ignores: ignoredSignals(session),
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

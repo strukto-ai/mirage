@@ -59,6 +59,12 @@ TRANSIENT_FIELDS = (
     "_alias_expansion",
     "status_writer",
     "_borrowed",
+    "substitutions",
+    "held_substitutions",
+    "closed",
+    "pending_signals",
+    "signal_trap_running",
+    "signal_arrived",
     "_positional_held",
     "_env_held",
 )

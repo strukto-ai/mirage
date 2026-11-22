@@ -157,12 +157,16 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
             (0, "one\nouter\ntwo\n", ""),
         ),
         (
-            "exec 3< <(printf a); echo st:$?",
+            "exec 3< <(printf a); echo st:$?; cat <&3; exec 3<&-",
+            (0, "st:0\na", ""),
+        ),
+        (
+            "exec 3<> <(printf a); echo st:$?",
             (
                 0,
                 "st:2\n",
-                "bash: line 1: exec: a process substitution as a descriptor: "
-                "not supported\n",
+                "bash: line 1: exec: a process substitution opened for "
+                "reading and writing: not supported\n",
             ),
         ),
         (

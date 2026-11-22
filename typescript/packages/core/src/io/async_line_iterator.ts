@@ -165,52 +165,6 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   /**
-   * Read what the source has left into the buffer, for a descriptor that
-   * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
-   */
-  async loadRest(): Promise<void> {
-    // `buf` grows in the room left at the end of `store` while it still ends
-    // there, else in a store twice the size, so a long load copies each byte
-    // a bounded number of times. The store lives only as long as the load
-    // and what `buf` still views of it.
-    let store = new Uint8Array(0)
-    let stored = 0
-    try {
-      while (!this.exhausted) {
-        const pending = this.check()
-        if (pending !== undefined) await pending
-        const result = await this.pull()
-        if (result.done === true) {
-          this.exhausted = true
-          continue
-        }
-        const chunk = result.value
-        const buf = this.buf
-        checkMemory(buf.byteLength + chunk.byteLength)
-        const end = stored + chunk.byteLength
-        if (
-          buf.buffer === store.buffer &&
-          buf.byteOffset + buf.byteLength === stored &&
-          end <= store.byteLength
-        ) {
-          store.set(chunk, stored)
-          stored = end
-          this.buf = store.subarray(buf.byteOffset, end)
-        } else {
-          store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
-          store.set(buf)
-          store.set(chunk, buf.byteLength)
-          stored = buf.byteLength + chunk.byteLength
-          this.buf = store.subarray(0, stored)
-        }
-      }
-    } catch (error) {
-      await this.failed(error)
-      throw error
-    }
-  }
-
-  /**
    * Close the source after a failed read, unless it was a reader's own abort
    * on a pipe an `exec` keeps, which stays open with `taken`, what the read
    * had taken, put back. Mirrors Python's _failed.
@@ -412,8 +366,12 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         const pending = this.check(signal)
         if (pending !== undefined) await pending
         // One pull can split a character across chunks, so top the buffer
-        // up to the widest one before reading its first byte as a whole.
-        if (this.buf.byteLength < 4 && !this.exhausted) {
+        // up to what the next one takes before reading its first byte as a
+        // whole; no more, so a live pipe's lone `x` is read at once.
+        if (
+          !this.exhausted &&
+          (this.buf.byteLength === 0 || this.buf.byteLength < leadWidth(this.buf[0] ?? 0))
+        ) {
           const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
           else this.buf = concat([this.buf, result.value])
@@ -424,9 +382,9 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           return [joined(), false]
         }
         const buf = this.buf
-        const whole = this.exhausted ? buf.byteLength : buf.byteLength - 3
         let at = 0
-        while (at < whole && taken < count && !(delim !== null && buf[at] === delim)) {
+        while (at < buf.byteLength && taken < count && !(delim !== null && buf[at] === delim)) {
+          if (!this.exhausted && at + leadWidth(buf[at] ?? 0) > buf.byteLength) break
           const width = charWidth(buf, at)
           if (room !== null && size + at + width > room) throw new MemoryExhausted()
           at += width

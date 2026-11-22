@@ -183,6 +183,9 @@ class JobTable:
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
         self._substitutions: dict[tuple[str, int], ProcessHandle] = {}
+        # What each substitution still does once its process has ended:
+        # hand on the output it returned, which a ``wait`` waits for too.
+        self._settled: dict[tuple[str, int], asyncio.Future[None]] = {}
         self._statuses: dict[str, dict[int, dict[str, int]]] = {}
         self._marks: dict[str, tuple[int | None, int | None]] = {}
         # Jobs `disown` removed from the table while they still run, and
@@ -328,6 +331,7 @@ class JobTable:
         simple: bool = False,
         program: str | None = None,
         traits: ProcessTraits = PLAIN_TRAITS,
+        ignores: frozenset[int] = frozenset(),
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -355,6 +359,8 @@ class JobTable:
                 None for the command line.
             traits (ProcessTraits): what the wrappers around the job
                 changed for its process.
+            ignores (frozenset[int]): what its shell ignores, which the
+                job and its program ignore too.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -389,9 +395,9 @@ class JobTable:
             run=execute,
             parent=parent,
             limit=limit,
-            ignores=IGNORED_SIGNALS,
+            ignores=IGNORED_SIGNALS | ignores,
             one_command=simple,
-            program_ignores=IGNORED_SIGNALS,
+            program_ignores=IGNORED_SIGNALS | ignores,
             background=True,
             traits=traits,
         )
@@ -709,6 +715,7 @@ class JobTable:
                 for key in list(self._substitutions):
                     if key[0] == session_id:
                         del self._substitutions[key]
+                        self._settled.pop(key, None)
                 self.processes.revoke_session(session_id)
                 return list(stopped.values())
         raise RuntimeError(
@@ -890,25 +897,44 @@ class JobTable:
         for pid in list(kept)[: max(0, len(kept) - SAVED_STATUSES)]:
             del kept[pid]
 
-    def track_substitution(self, process: ProcessHandle) -> None:
+    def track_substitution(
+        self,
+        process: ProcessHandle,
+        settled: asyncio.Future[None] | None = None,
+    ) -> None:
         """Keep how a process substitution ends under its pid, which a
         ``wait`` from the session that started it answers.
 
         Args:
             process (ProcessHandle): the substitution's process.
+            settled (asyncio.Future[None] | None): done once what it
+                wrote has gone where it writes, which ``wait`` waits for
+                as well.
         """
         session_id, pid = process.record.session_id, process.record.pid
         self._substitutions[(session_id, pid)] = process
+        if settled is not None:
+            self._settled[(session_id, pid)] = settled
+
+        def forget(_: asyncio.Future[None] | None = None) -> None:
+            if self._substitutions.get((session_id, pid)) is process:
+                del self._substitutions[(session_id, pid)]
+                self._settled.pop((session_id, pid), None)
 
         def finished(_: asyncio.Task[int]) -> None:
+            # Its status stands once it ends; a `wait` still finds it until
+            # what it wrote has gone where it writes.
             if self._substitutions.get((session_id, pid)) is not process:
                 return
-            del self._substitutions[(session_id, pid)]
             ended = process.record
             if ended.exit is not None:
                 self._save_status(
                     session_id, pid, ended.shown_machine, ended.exit
                 )
+            if settled is None or settled.done():
+                forget()
+            else:
+                settled.add_done_callback(forget)
 
         # Its table runs the hook that tracks it just before starting it,
         # so its task is there a turn later.
@@ -920,8 +946,9 @@ class JobTable:
         self, session_id: str, shell: int | None, pid: int | None = None
     ) -> None:
         """Wait until the process substitution ``pid`` the shell ``shell``
-        started ends, or each it started without one. A shell waits only
-        for its own, as bash does: never for another pipeline stage's.
+        started ends, and what it wrote has gone where it writes, or each it
+        started without one. A shell waits only for its own, as bash does:
+        never for another pipeline stage's.
 
         Args:
             session_id (str): the session that started them.
@@ -934,7 +961,10 @@ class JobTable:
                 and process.record.parent == shell
                 and (pid is None or child == pid)
             ):
+                settled = self._settled.get((scope, child))
                 await process.join()
+                if settled is not None:
+                    await asyncio.wait((settled,))
 
     def forget_statuses(self, session_id: str = "") -> None:
         """Drop how the jobs that left the list ended, as a bare ``wait``

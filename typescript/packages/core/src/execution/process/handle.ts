@@ -80,6 +80,11 @@ export class ProcessHandle {
   // It runs a pipeline (`cmd | cmd &`), whose stages are the job.
   pipeline = false
   stages: readonly ProcessHandle[] = []
+  // The shell running a statement in it now, which answers a signal sent to
+  // a pid: true when it took it for its action (`trap ACTION TERM`), false
+  // when it ignores it (`trap '' TERM`), null when it leaves it to what the
+  // signal does. Mirrors Python's catcher.
+  catcher: ((signal: number, pid: number) => boolean | null) | null = null
 
   constructor(
     record: Process,

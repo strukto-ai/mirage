@@ -411,6 +411,7 @@ async def _run_pipeline(
             stdin,
             call_stack,
             execute_fn,
+            deps.sink,
         )
     commands = list(stages.commands)
     stderr_flags = list(stages.stderr_flags)
@@ -598,6 +599,7 @@ async def _run_redirected(
             stdin,
             call_stack,
             execute_fn,
+            deps.sink,
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
@@ -642,14 +644,16 @@ async def _run_redirected(
     )
     if is_bare_exec(command):
         if any(
-            r.target_node is not None and _names_process_sub(r.target_node)
+            r.kind == RedirectKind.READWRITE
+            and r.target_node is not None
+            and _names_process_sub(r.target_node)
             for r in redirects
         ):
-            # A substitution lives only as long as its command, so it
-            # cannot back a descriptor `exec` keeps (`>(cat)""` too).
+            # bash opens the pipe both ways, so its reader waits on itself
+            # for an end that never comes (`exec 3<> <(cmd)`).
             err = encode_text(
-                f"{shell_voice()}exec: a process substitution as a "
-                "descriptor: not supported\n"
+                f"{shell_voice()}exec: a process substitution opened for "
+                "reading and writing: not supported\n"
             )
             return (
                 None,
@@ -1511,7 +1515,7 @@ async def _execute_node_body(
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(
-            stream, left, op, right, context, stdin, cs, execute_fn
+            stream, left, op, right, context, stdin, cs, execute_fn, sink
         )
 
     if kind == NodeKind.REDIRECT:
