@@ -513,7 +513,14 @@ def _detached_label(repo: BaseRepo, target: str, moved: bytes) -> str:
     found = refs_named(
         (decode_text(ref) for ref in repo.refs.allkeys()), target
     )
-    if target != "HEAD" and len(found) == 1:
+    # A root ref's file counts as a name too: one beside a ref makes the
+    # target ambiguous, which git names by id.
+    root = root_ref(repo, target)
+    if target != "HEAD" and root is not None and not found:
+        # A root ref such as FETCH_HEAD is named as the checkout spelled it.
+        if root == moved:
+            return target
+    elif target != "HEAD" and root is None and len(found) == 1:
         obj = repo.object_store[repo.refs[Ref(found[0].encode())]]
         while isinstance(obj, Tag):
             obj = repo.object_store[obj.object[1]]
@@ -521,9 +528,6 @@ def _detached_label(repo: BaseRepo, target: str, moved: bytes) -> str:
             return (
                 found[0].removeprefix(TAG_PREFIX).removeprefix(REMOTE_PREFIX)
             )
-    elif not found and root_ref(repo, target) == moved:
-        # A root ref such as FETCH_HEAD is named as the checkout spelled it.
-        return target
     return short(moved, abbrev_for(repo))
 
 

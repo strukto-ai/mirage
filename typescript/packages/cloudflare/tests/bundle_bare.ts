@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The package with no CLI that carries an engine, which bundle.test.ts
-// checks ships none of their modules: each joins a Worker only through
-// its `clis/` entry.
 import { RAMVFS, Workspace } from '../src/index.ts'
 
 export default {

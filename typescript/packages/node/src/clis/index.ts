@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Node bundles nothing, so every entry that builds a workspace installs
-// each CLI that carries an engine; a browser page or a Worker imports only
-// the `clis/` entries it wants.
 export { AST_GREP } from '@struktoai/mirage-core/clis/ast_grep'
 export { GH } from '@struktoai/mirage-core/clis/gh'
 export { OFFICE } from '@struktoai/mirage-core/clis/office'

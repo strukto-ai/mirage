@@ -238,13 +238,18 @@ export function refsNamed(table: { has(name: string): boolean }, name: string): 
  */
 async function namedObject(repo: Repo, spelled: string, revision: string): Promise<string> {
   const base = await expandSelector(repo, spelled, revision)
+  // git's first rule is the name in the git directory itself, so a root
+  // ref's file wins over a branch or tag of the same name.
+  const root = await rootRef(repo, base)
+  if (root !== null) {
+    await noteAmbiguity(repo, base)
+    return root
+  }
   let oid: string
   try {
     oid = await refOid(repo, base)
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
-    const root = await rootRef(repo, base)
-    if (root !== null) return root
     if (base.length < MINIMUM_ABBREV) throw new AmbiguousArgumentError(revision)
     try {
       return await expandedId(repo, base)
@@ -538,7 +543,9 @@ export async function treeId(repo: Repo, revision: string): Promise<string> {
 export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
   if (repo.ambiguous === null) return
   const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-  if (refsNamed(table, name).length > 1) {
+  // A root ref's file is one more name git's rules find, ahead of the rest.
+  const root = (await rootRef(repo, name)) === null ? 0 : 1
+  if (refsNamed(table, name).length + root > 1) {
     repo.ambiguous.push(`warning: refname '${name}' is ambiguous.\n`)
   }
 }

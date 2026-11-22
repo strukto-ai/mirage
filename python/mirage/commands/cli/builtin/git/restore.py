@@ -470,6 +470,10 @@ async def restore_paths(
             if mode == GITLINK:
                 await keep_gitlink(vfs, where)
                 continue
+            # Read before anything standing in the entry's way is
+            # removed, so a blob that cannot be read takes nothing of the
+            # working tree with it.
+            blob = await asyncio.to_thread(blob_bytes, repo, sha)
             # The write direction takes the same component the
             # other way round: the entry needs a directory where it
             # stands, so git replaces it with one rather than
@@ -495,7 +499,6 @@ async def restore_paths(
                     await remove_tree(vfs, where)
                 elif info is not None and above is None:
                     current = await read_optional(vfs, where)
-            blob = await asyncio.to_thread(blob_bytes, repo, sha)
             if current != blob:
                 updated += 1
             await restore_entry(vfs, where, mode, blob)

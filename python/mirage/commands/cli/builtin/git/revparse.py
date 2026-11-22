@@ -215,16 +215,13 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
     """
     base, ops = split_operators(revision)
     base = expand_selector(repo, base, revision)
+    # git's first rule is the name in the git directory itself, so a
+    # root ref's file wins over a branch or tag of the same name.
+    root = root_ref(repo, base)
     try:
-        commit = parse_commit(repo, base)
+        commit = parse_commit(repo, base if root is None else root)
     except (KeyError, ValueError) as exc:
-        root = root_ref(repo, base)
-        if root is None:
-            raise AmbiguousArgumentError(revision) from exc
-        try:
-            commit = parse_commit(repo, root)
-        except (KeyError, ValueError) as missed:
-            raise AmbiguousArgumentError(revision) from missed
+        raise AmbiguousArgumentError(revision) from exc
     note_ambiguity(repo, base)
     for op in ops:
         if isinstance(op, AncestryStep):
@@ -1036,7 +1033,10 @@ def note_ambiguity(repo: BaseRepo, name: str) -> None:
     if not isinstance(repo, Repo) or repo.ambiguous is None:
         return
     known = (ref.decode(errors="replace") for ref in repo.refs.allkeys())
-    if len(refs_named(known, name)) > 1:
+    # A root ref's file is one more name git's rules find, ahead of the
+    # rest.
+    root = 0 if root_ref(repo, name) is None else 1
+    if len(refs_named(known, name)) + root > 1:
         repo.ambiguous.append(f"warning: refname '{name}' is ambiguous.\n")
 
 
@@ -1079,15 +1079,19 @@ def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
     name = expand_selector(repo, name, revision)
     known = [ref.decode(errors="replace") for ref in repo.refs.allkeys()]
     named = refs_named(known, name)
-    if named:
+    # git's first rule is the name in the git directory itself, so a
+    # root ref's file wins over a branch or tag of the same name.
+    root = root_ref(repo, name)
+    if root is not None:
+        note_ambiguity(repo, name)
+        obj = _object_by_id(repo, root, revision)
+    elif named:
         try:
             sha = repo.refs[Ref(named[0].encode())]
         except KeyError as exc:
             raise AmbiguousArgumentError(revision) from exc
         note_ambiguity(repo, name)
         obj = _object_by_id(repo, ObjectID(sha), revision)
-    elif (root := root_ref(repo, name)) is not None:
-        obj = _object_by_id(repo, root, revision)
     else:
         try:
             obj = object_at(repo, name)

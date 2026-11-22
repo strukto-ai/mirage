@@ -362,14 +362,17 @@ async function detachedLabel(repo: Repo, target: string, moved: string): Promise
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const found = refsNamed(refs, target)
   const [only] = found
-  if (target !== 'HEAD' && found.length === 1 && only !== undefined) {
+  // A root ref's file counts as a name too: one beside a ref makes the
+  // target ambiguous, which git names by id.
+  const root = await rootRef(repo, target)
+  if (target !== 'HEAD' && root !== null && found.length === 0) {
+    // A root ref such as FETCH_HEAD is named as the checkout spelled it.
+    if (root === moved) return target
+  } else if (target !== 'HEAD' && root === null && found.length === 1 && only !== undefined) {
     let oid = await refOid(repo, only)
     while ((await objectType(repo, oid)) === 'tag')
       oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
     if (oid === moved) return only.replace(/^refs\/tags\//, '').replace(/^refs\/remotes\//, '')
-  } else if (found.length === 0 && (await rootRef(repo, target)) === moved) {
-    // A root ref such as FETCH_HEAD is named as the checkout spelled it.
-    return target
   }
   return short(moved, repo.abbrev)
 }
