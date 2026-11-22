@@ -781,7 +781,9 @@ const CHECKS: [string, Check][] = [
       })
       const seal = ws.createSession('seal', {
         profile: SessionProfile({
-          commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] } },
+          mounts: {
+            '/data/secret.txt': { commands: { '*': { decision: 'deny', reason: 'sealed' } } },
+          },
         }),
       })
       equal(
@@ -795,9 +797,9 @@ const CHECKS: [string, Check][] = [
       equal(await shell(ws, 'rm -f /data/*; ls /data', { sessionId: veil.sessionId }), [0, '', ''])
       equal(await shell(ws, 'readlink /data/lnk'), [0, '/data/secret.txt\n', ''])
       equal(await shell(ws, '[ -e /data/secret.txt ]; echo $?', { sessionId: seal.sessionId }), [
-        1,
+        126,
         '',
-        '[: /data/secret.txt: Permission denied\n',
+        '[: Permission denied\n',
       ])
     },
   ],
