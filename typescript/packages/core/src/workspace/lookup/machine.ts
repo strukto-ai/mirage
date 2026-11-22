@@ -66,17 +66,6 @@ function localMount(
   path: string,
   writes: boolean,
 ): MountEntry | null {
-  try {
-    if (
-      norm(links.follow(norm(path))) !== norm(path) ||
-      links.linkStatsBelow(norm(path)).length > 0
-    )
-      return null
-  } catch (err) {
-    if (!(err instanceof CycleError)) throw err
-    console.debug(`${path}: a link loop keeps it here: ${String(err)}`)
-    return null
-  }
   let entry = registry.tryMountFor(path)
   if (
     entry !== null &&
@@ -90,6 +79,19 @@ function localMount(
   if (writes && entry.mode === MountMode.READ) return null
   const below = `${rstripSlash(norm(path))}/`
   if (registry.allMounts().some((m) => m !== entry && norm(m.prefix).startsWith(below))) return null
+  // The link table is walked last: a path that is no machine's needs no look
+  // at it, and a folder of many links costs a walk of them all.
+  try {
+    if (
+      norm(links.follow(norm(path))) !== norm(path) ||
+      links.linkStatsBelow(norm(path)).length > 0
+    )
+      return null
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug(`${path}: a link loop keeps it here: ${String(err)}`)
+    return null
+  }
   return entry
 }
 

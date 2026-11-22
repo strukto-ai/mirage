@@ -80,14 +80,6 @@ def _local_mount(
         path (str): an absolute virtual path.
         writes (bool): whether the mount must take writes.
     """
-    try:
-        if norm(links.follow(norm(path))) != norm(path) or (
-            links.link_stats_below(norm(path))
-        ):
-            return None
-    except CycleError:
-        logger.debug("%s: a link loop keeps it here", path, exc_info=True)
-        return None
     entry = registry.try_mount_for(path)
     if (
         entry is not None
@@ -107,6 +99,16 @@ def _local_mount(
         m is not entry and norm(m.prefix).startswith(below)
         for m in registry.mounts()
     ):
+        return None
+    # The link table is walked last: a path that is no machine's needs no
+    # look at it, and a folder of many links costs a walk of them all.
+    try:
+        if norm(links.follow(norm(path))) != norm(path) or (
+            links.link_stats_below(norm(path))
+        ):
+            return None
+    except CycleError:
+        logger.debug("%s: a link loop keeps it here", path, exc_info=True)
         return None
     return entry
 
