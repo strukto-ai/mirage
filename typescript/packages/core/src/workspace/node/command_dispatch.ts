@@ -74,6 +74,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { guardDispatch } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
+import type { PipeWriter } from '../frame.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { divertedFile } from '../executor/builtins/exec/index.ts'
 import { flagHelp } from '../executor/builtins/help/index.ts'
@@ -1192,10 +1193,6 @@ async function runArgv(
  * nothing says, and in a workspace that runs programs on one machine, where
  * nothing is to choose. Mirrors Python's `_preferred_machine`.
  *
- * The pipe's writer is placed as it runs: by its words, through the wrappers
- * Mirage runs (`nice gen | tee log`), and one named by its path on the
- * machine holding that file (`/tmp/tool | tee log`).
- *
  * @param deps the registry, namespace and dispatcher.
  * @param context the session and current placement.
  */
@@ -1204,26 +1201,56 @@ async function preferredMachine(
   context: EvaluationContext,
 ): Promise<string | null> {
   const { session } = context
-  const { registry, namespace, dispatch } = deps
+  const { registry } = deps
   const routing = context.frame.routing
   if (routing === undefined || !severalMachines(registry)) return null
   if (routing.machine !== undefined) return routing.machine
   const fedBy = context.frame.stdinWriter
-  let writer: Runtime | null | undefined = null
-  if (fedBy !== null) {
-    const head = fedBy.words[0] ?? ''
-    if (head.includes('/'))
-      writer = await programMachine(
-        head,
-        session,
-        registry,
-        namespace.sessionLinks(session),
-        dispatch,
-        null,
-      )
-    writer ??= programRuntime(registry, fedBy.words, session, routing)
+  if (fedBy !== null && !fedBy.placed) {
+    fedBy.machine = await pipeWriterMachine(fedBy, deps, context, routing)
+    fedBy.placed = true
   }
-  return writerMachine(writer, session.cwd, registry) ?? folderMachine(session.cwd, registry)
+  return fedBy?.machine ?? folderMachine(session.cwd, registry)
+}
+
+/**
+ * The machine a pipe's writer runs on, placed as it runs, from the folder
+ * its pipeline started in: by its words, through the wrappers Mirage runs
+ * (`nice gen | tee log`), and one named by its path on the machine holding
+ * that file (`/tmp/tool | tee log`). Asked once for the pipe, so a reader
+ * that moves (`gen | (cd /srv; tee log)`) or runs many commands asks no more.
+ * Mirrors Python's `_pipe_writer_machine`.
+ *
+ * A path is looked up only when no file policy speaks for the session: the
+ * lookup asks the dispatcher before the reader is admitted, and a policy
+ * judges a call inside the command that makes it.
+ *
+ * @param fedBy the pipe's writer.
+ * @param deps the registry, namespace and dispatcher.
+ * @param context the session and current placement.
+ * @param routing the line's placement.
+ */
+async function pipeWriterMachine(
+  fedBy: PipeWriter,
+  deps: ExecuteNodeDeps,
+  context: EvaluationContext,
+  routing: RouteDecision<Runtime>,
+): Promise<string | null> {
+  const { session } = context
+  const { registry, namespace, dispatch } = deps
+  const head = fedBy.words[0] ?? ''
+  let held: Runtime | null | undefined = null
+  if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
+    held = await programMachine(
+      PathSpec.fromStrPath(head, undefined, fedBy.cwd).virtual,
+      session,
+      registry,
+      namespace.sessionLinks(session),
+      dispatch,
+      null,
+    )
+  held ??= programRuntime(registry, fedBy.words, session, routing)
+  return writerMachine(held, fedBy.cwd, registry)
 }
 
 /**

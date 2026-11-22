@@ -271,15 +271,16 @@ def writer_machine(
     runtime: RuntimeIdentity | None, cwd: str, registry: MountRegistry
 ) -> str | None:
     """The machine whose program writes a pipe, when the program can run
-    from the session's folder as far as the mounts tell: the folder is
-    ``/``, the machine's own, or Mirage's mounts are served into the
-    machine. None for a program Mirage runs itself, and for one that
-    would not start there, which writes nothing.
+    from the folder its pipeline started in as far as the mounts tell:
+    the folder is ``/``, the machine's own, or Mirage's mounts are served
+    into the machine. None for a program Mirage runs itself, and for one
+    that would not start there, which writes nothing.
 
     Args:
         runtime (RuntimeIdentity | None): the runtime the program is
             placed on.
-        cwd (str): the session's folder, an absolute virtual path.
+        cwd (str): the folder the program runs from, an absolute virtual
+            path.
         registry (MountRegistry): the workspace's mounts and machines.
     """
     if not isinstance(runtime, RemoteRuntime):
@@ -715,8 +716,9 @@ async def _new_name_runtime(
     made on, when that machine holds the link's folder too. A symbolic
     link to a name no machine holds is a new name like any other
     (``new_name_machine``). None when a path is off a machine mount, the
-    session's rules or a coded file policy speak for the mount, a
-    target's machine lacks the link's folder, another machine holds a
+    session's rules or a coded file policy speak for the mount, the copy
+    shown of a link's folder is a file, a target's machine lacks the
+    link's folder, another machine holds a
     link's name already, or the links land on different machines: the
     link is then Mirage's own, and Mirage's ``ln`` answers for a name
     that exists.
@@ -755,12 +757,10 @@ async def _new_name_runtime(
                 return None
         else:
             machine = chosen(aimed.vfs.accessor, held).machine
-            folders = {
-                one.machine
-                for one in await holders(folder.vfs.accessor, folder_of(spec))
-                if one.folder
-            }
-            if machine not in folders:
+            above = await holders(folder.vfs.accessor, folder_of(spec))
+            if not above or not chosen(folder.vfs.accessor, above).folder:
+                return None
+            if machine not in [one.machine for one in above if one.folder]:
                 return None
         named = await holders(folder.vfs.accessor, spec)
         if any(one.machine != machine for one in named):

@@ -55,6 +55,15 @@ async def test_one_machine_asks_nothing():
 
 
 @pytest.mark.asyncio
+async def test_a_new_name_on_one_machine_lands_there_unasked():
+    box = ScriptedMachine("box", holding())
+    accessor = bound(box)
+    assert await new_name_machine(accessor, spec("/d/new")) == "box"
+    assert await new_name_machine(accessor, spec("/d/e/new"), True) == "box"
+    assert box.lines == []
+
+
+@pytest.mark.asyncio
 async def test_a_name_is_read_where_it_is():
     a = ScriptedMachine("a", holding())
     b = ScriptedMachine("b", holding("/tmp/out.csv"))

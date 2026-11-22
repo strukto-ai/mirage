@@ -153,6 +153,7 @@ from mirage.workspace.expand.globs import (
     glob_options,
     resolve_globs,
 )
+from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
@@ -1276,10 +1277,6 @@ async def _preferred_machine(
     on; None when nothing says, and in a workspace that runs programs on
     one machine, where nothing is to choose.
 
-    The pipe's writer is placed as it runs: by its words, through the
-    wrappers Mirage runs (``nice gen | tee log``), and one named by its
-    path on the machine holding that file (``/tmp/tool | tee log``).
-
     Args:
         deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
         context (EvaluationContext): the session and current placement.
@@ -1292,23 +1289,56 @@ async def _preferred_machine(
     if routing.machine is not None:
         return routing.machine
     fed_by = context.frame.stdin_writer
-    writer: RuntimeIdentity | None = None
-    if fed_by is not None:
-        head = str(fed_by.words[0])
-        if "/" in head:
-            writer = await program_machine(
-                head,
-                session,
-                registry,
-                deps.namespace.session_links(session),
-                deps.dispatch,
-                None,
-            )
-        if writer is None:
-            writer = program_runtime(registry, fed_by.words, session, routing)
-    return writer_machine(writer, session.cwd, registry) or folder_machine(
-        session.cwd, registry
-    )
+    if fed_by is not None and not fed_by.placed:
+        fed_by.machine = await _pipe_writer_machine(
+            fed_by, deps, context, routing
+        )
+        fed_by.placed = True
+    writer = None if fed_by is None else fed_by.machine
+    return writer or folder_machine(session.cwd, registry)
+
+
+async def _pipe_writer_machine(
+    fed_by: PipeWriter,
+    deps: ExecuteNodeDeps,
+    context: EvaluationContext,
+    routing: RouteDecision[RuntimeIdentity],
+) -> str | None:
+    """The machine a pipe's writer runs on, placed as it runs, from the
+    folder its pipeline started in: by its words, through the wrappers
+    Mirage runs (``nice gen | tee log``), and one named by its path on
+    the machine holding that file (``/tmp/tool | tee log``). Asked once
+    for the pipe, so a reader that moves (``gen | (cd /srv; tee log)``)
+    or runs many commands asks no more.
+
+    A path is looked up only when no file policy speaks for the session:
+    the lookup asks the dispatcher before the reader is admitted, and a
+    policy judges a call inside the command that makes it.
+
+    Args:
+        fed_by (PipeWriter): the pipe's writer.
+        deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
+        context (EvaluationContext): the session and current placement.
+        routing (RouteDecision): the line's placement.
+    """
+    session = context.session
+    registry = deps.registry
+    head = str(fed_by.words[0])
+    held: RuntimeIdentity | None = None
+    if "/" in head and not (
+        await registry.policies.wants_for("pre_vfs", session.session_id)
+    ):
+        held = await program_machine(
+            PathSpec.from_str_path(head, cwd=fed_by.cwd).virtual,
+            session,
+            registry,
+            deps.namespace.session_links(session),
+            deps.dispatch,
+            None,
+        )
+    if held is None:
+        held = program_runtime(registry, fed_by.words, session, routing)
+    return writer_machine(held, fed_by.cwd, registry)
 
 
 async def _held_machine(

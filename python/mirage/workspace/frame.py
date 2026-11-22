@@ -24,7 +24,7 @@ class ProcessSubLine(Protocol):
     ) -> IOResult: ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class PipeWriter:
     """The one program writing a pipe a pipeline stage reads.
 
@@ -32,10 +32,19 @@ class PipeWriter:
         pipe (ByteSource): the pipe, as the stage is handed it.
         words (tuple[str | None, ...]): the program's words, None for
             one only known when it runs.
+        cwd (str): the folder the pipeline started in, which the program
+            runs from whatever folder its reader moves to.
+        placed (bool): whether ``machine`` has been asked, which it is
+            once for the pipe.
+        machine (str | None): the machine the program runs on; None
+            before it is asked, and for a program Mirage runs itself.
     """
 
     pipe: ByteSource
     words: tuple[str | None, ...]
+    cwd: str
+    placed: bool = False
+    machine: str | None = None
 
 
 @dataclass

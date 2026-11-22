@@ -296,7 +296,9 @@ export class MachineVFS extends BaseVFS {
         throw enotempty(dst)
     }
     const parents = several
-      ? (await holders(this.accessor, folderOf(dst))).map((one) => one.machine)
+      ? (await holders(this.accessor, folderOf(dst)))
+          .filter((one) => one.folder)
+          .map((one) => one.machine)
       : []
     for (const machine of movers) {
       await machineRename(

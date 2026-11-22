@@ -47,6 +47,8 @@ async def files_containing(
         if matched is None:
             return None
         found.append(matched)
+    if not any(found):
+        return []
     shown = None
     if len(machines) > 1:
         shown = await tree_machines(accessor, machines, path)

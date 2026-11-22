@@ -520,6 +520,19 @@ async def test_a_child_shell_reading_the_pipe_keeps_its_writer_s_machine():
 
 
 @pytest.mark.asyncio
+async def test_a_reader_that_moves_keeps_the_machine_its_writer_started_on():
+    a, b = FakeFiles({"/srv/k": b"k"}), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b, mounts={"/srv": "@a"})
+    line = "/tmp/tool | (cd /srv && tee /tmp/moved)"
+    assert (await run(ws, line))[0] == 0
+    line = "/tmp/tool | while read l; do echo $l >> /tmp/looped; done"
+    assert (await run(ws, line))[0] == 0
+    assert sorted(a.files) == ["/srv/k"]
+    assert sorted(b.files) == ["/tmp/looped", "/tmp/moved", "/tmp/tool"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_what_reads_a_path_named_program_s_pipe_writes_on_its_machine():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)
@@ -552,6 +565,14 @@ async def test_a_folder_one_machine_cannot_move_moves_on_none():
         {"/tmp/src/x": b"1"},
         ["/tmp/dst/kept", "/tmp/src/y"],
     )
+
+
+@pytest.mark.asyncio
+async def test_mv_makes_no_folder_where_another_machine_shows_a_file():
+    a, b = FakeFiles({"/tmp/src": b"x"}), FakeFiles({"/tmp/p": b"file"})
+    with pytest.raises(OSError):
+        await shared(a, b).rename(spec("/src"), spec("/p/dst"))
+    assert ("/tmp/p" in a.dirs, sorted(a.files)) == (False, ["/tmp/src"])
 
 
 @pytest.mark.asyncio

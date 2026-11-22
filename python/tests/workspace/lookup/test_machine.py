@@ -346,6 +346,25 @@ async def test_a_link_another_machine_would_break_stays_mirage_s():
 
 
 @pytest.mark.asyncio
+async def test_a_link_below_a_file_shown_over_a_folder_is_made_nowhere():
+    a = FakeFiles({"/tmp/d/kept": b"k", "/tmp/t": b"t"}, programs=("ln",))
+    b = FakeFiles({"/tmp/d": b"file"}, programs=("ln",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    b.answer("cat > /tmp/d", b"newer")
+    made = await ws.shell("ln -s /tmp/t /tmp/d/link")
+    assert made.exit_code == 1
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_link_to_another_mount_stays_mirage_s_and_reads_through():
     files = FakeFiles({"/tmp/a.py": b"x"}, programs=(*TOOLS, "ln", "readlink"))
     ws = one(files, {"/data": RAMVFS()})

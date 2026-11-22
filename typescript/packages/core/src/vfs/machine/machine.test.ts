@@ -519,6 +519,18 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('keeps the machine its writer started on for a reader that moves', async () => {
+    const a = new FakeFiles({ '/srv/k': 'k' })
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const ws = two(a, b, { '/srv': '@a' })
+    expect((await run(ws, '/tmp/tool | (cd /srv && tee /tmp/moved)'))[0]).toBe(0)
+    const looped = '/tmp/tool | while read l; do echo $l >> /tmp/looped; done'
+    expect((await run(ws, looped))[0]).toBe(0)
+    expect(Object.keys(texts(a)).sort()).toEqual(['/srv/k'])
+    expect(Object.keys(texts(b)).sort()).toEqual(['/tmp/looped', '/tmp/moved', '/tmp/tool'])
+    await ws.close()
+  })
+
   it("writes on its machine what reads a path-named program's pipe", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
@@ -538,6 +550,13 @@ describe('MachineVFS', () => {
       { '/tmp/src/x': '1' },
       ['/tmp/dst/kept', '/tmp/src/y'],
     ])
+  })
+
+  it('makes no folder where another machine shows a file on mv', async () => {
+    const a = new FakeFiles({ '/tmp/src': 'x' })
+    const b = new FakeFiles({ '/tmp/p': 'file' })
+    await expect(shared(a, b).rename(spec('/src'), spec('/p/dst'))).rejects.toThrow()
+    expect([a.dirs.has('/tmp/p'), Object.keys(texts(a)).sort()]).toEqual([false, ['/tmp/src']])
   })
 
   it('removes a folder on no machine when one still fills it', async () => {

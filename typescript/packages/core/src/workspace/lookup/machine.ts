@@ -231,13 +231,13 @@ export function folderMachine(cwd: string, registry: MountRegistry): string | nu
 
 /**
  * The machine whose program writes a pipe, when the program can run from
- * the session's folder as far as the mounts tell: the folder is `/`, the
- * machine's own, or Mirage's mounts are served into the machine. Null for a
- * program Mirage runs itself, and for one that would not start there, which
- * writes nothing. Mirrors Python's `writer_machine`.
+ * the folder its pipeline started in as far as the mounts tell: the folder
+ * is `/`, the machine's own, or Mirage's mounts are served into the machine.
+ * Null for a program Mirage runs itself, and for one that would not start
+ * there, which writes nothing. Mirrors Python's `writer_machine`.
  *
  * @param runtime the runtime the program is placed on.
- * @param cwd the session's folder, an absolute virtual path.
+ * @param cwd the folder the program runs from, an absolute virtual path.
  * @param registry the workspace's mounts and machines.
  */
 export function writerMachine(
@@ -635,7 +635,8 @@ async function holdsTargets(
  * machine holds the link's folder too. A symbolic link to a name no machine
  * holds is a new name like any other (`newNameMachine`). Null when a path
  * is off a machine mount, the session's rules or a coded file policy speak
- * for the mount, a target's machine lacks the link's folder, another
+ * for the mount, the copy shown of a link's folder is a file, a target's
+ * machine lacks the link's folder, another
  * machine holds a link's name already, or the links land on different
  * machines: the link is then Mirage's own, and Mirage's `ln` answers for a
  * name that exists. Mirrors Python's `_new_name_runtime`.
@@ -681,10 +682,9 @@ async function newNameRuntime(
       }
     } else {
       machine = chosen(aimed.vfs.accessor, held).machine
-      const folders = (await holders(folder.vfs.accessor, folderOf(spec)))
-        .filter((one) => one.folder)
-        .map((one) => one.machine)
-      if (!folders.includes(machine)) return null
+      const above = await holders(folder.vfs.accessor, folderOf(spec))
+      if (above.length === 0 || !chosen(folder.vfs.accessor, above).folder) return null
+      if (!above.some((one) => one.folder && one.machine === machine)) return null
     }
     const named = await holders(folder.vfs.accessor, spec)
     if (named.some((one) => one.machine !== machine)) return null

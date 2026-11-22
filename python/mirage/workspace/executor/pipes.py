@@ -203,7 +203,7 @@ async def handle_pipe(
                 else None
             )
             child_evaluation.frame.stdin_writer = (
-                PipeWriter(input_stream, tuple(words))
+                PipeWriter(input_stream, tuple(words), session.cwd)
                 if words and input_stream is not None
                 else None
             )

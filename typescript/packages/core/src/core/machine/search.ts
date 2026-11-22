@@ -50,6 +50,7 @@ export async function filesContaining(
     if (matched === null) return null
     found.push(matched)
   }
+  if (found.every((matched) => matched.length === 0)) return []
   const shown = machines.length > 1 ? await treeMachines(accessor, machines, path) : null
   if (machines.length > 1 && shown === null) return null
   const under = `${rstripSlash(path.virtual)}/`

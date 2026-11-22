@@ -48,4 +48,12 @@ describe('filesContaining', () => {
     expect(found?.map((p) => p.virtual)).toEqual(['/tmp/d/x'])
     expect(a.lines.some((line) => line.includes(' find '))).toBe(false)
   })
+
+  it('asks no listing when no machine matches', async () => {
+    const a = searched('a', '', '')
+    const b = searched('b', '', '')
+    const found = await filesContaining(bound([a, b]), ['a', 'b'], spec('/d'), 'needle', false)
+    expect(found).toEqual([])
+    expect([...a.lines, ...b.lines].some((line) => line.includes(' find '))).toBe(false)
+  })
 })

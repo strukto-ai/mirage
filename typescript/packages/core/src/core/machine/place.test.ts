@@ -52,6 +52,14 @@ describe('placement', () => {
     expect(machine.lines).toEqual([])
   })
 
+  it('lands a new name on one machine there, unasked', async () => {
+    const machine = new ScriptedMachine('box', holding())
+    const accessor = bound([machine])
+    expect(await newNameMachine(accessor, spec('/d/new'))).toBe('box')
+    expect(await newNameMachine(accessor, spec('/d/e/new'), true)).toBe('box')
+    expect(machine.lines).toEqual([])
+  })
+
   it('reads a name where it is', async () => {
     const accessor = bound([
       new ScriptedMachine('a', holding()),

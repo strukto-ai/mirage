@@ -288,6 +288,7 @@ class MachineVFS(BaseVFS):
             [
                 one.machine
                 for one in await place.holders(self.accessor, _folder_of(dst))
+                if one.folder
             ]
             if several
             else []

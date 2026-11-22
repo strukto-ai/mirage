@@ -307,6 +307,23 @@ describe('operand routing', () => {
     await ws.close()
   })
 
+  it('makes a link below a file shown over a folder nowhere', async () => {
+    const a = new FakeFiles({ '/tmp/d/kept': 'k', '/tmp/t': 't' }, ['ln'])
+    const b = new FakeFiles({ '/tmp/d': 'file' }, ['ln'])
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    b.answer('cat > /tmp/d', new TextEncoder().encode('newer'))
+    const made = await ws.shell('ln -s /tmp/t /tmp/d/link')
+    expect(made.exitCode).toBe(1)
+    expect([a.ran, b.ran]).toEqual([[], []])
+    await ws.close()
+  })
+
   it("keeps a link to another mount Mirage's, read through", async () => {
     const files = new FakeFiles({ '/tmp/a.py': 'x' }, [...TOOLS, 'ln', 'readlink'])
     const ws = one(files, { '/data': new RAMVFS() })

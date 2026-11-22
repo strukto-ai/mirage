@@ -17,12 +17,18 @@ export type ProcessSubLine = (
 
 /**
  * The one program writing a pipe a pipeline stage reads: the pipe, as the
- * stage is handed it, and the program's words, null for one only known when
- * it runs.
+ * stage is handed it; the program's words, null for one only known when it
+ * runs; and the folder the pipeline started in, which the program runs from
+ * whatever folder its reader moves to. `machine` is the machine the program
+ * runs on, asked once for the pipe (`placed`): null before it is asked, and
+ * for a program Mirage runs itself.
  */
 export interface PipeWriter {
   readonly pipe: ByteSource
   readonly words: readonly (string | null)[]
+  readonly cwd: string
+  placed: boolean
+  machine: string | null
 }
 
 /** Temporary state of one evaluation; never part of a session record. */

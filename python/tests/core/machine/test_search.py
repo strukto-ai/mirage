@@ -54,3 +54,13 @@ async def test_one_machine_s_matches_ask_no_listing():
     assert found is not None
     assert [p.virtual for p in found] == ["/tmp/d/x"]
     assert not any(" find " in line for line in a.lines)
+
+
+@pytest.mark.asyncio
+async def test_no_match_on_any_machine_asks_no_listing():
+    a, b = searched("a", b"", b""), searched("b", b"", b"")
+    found = await files_containing(
+        bound(a, b), ["a", "b"], spec("/d"), "needle", False
+    )
+    assert found == []
+    assert not any(" find " in line for line in [*a.lines, *b.lines])

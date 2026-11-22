@@ -152,7 +152,8 @@ async def new_name_machine(
     """The machine a new name lands on: the one the command is about,
     else the mount's default, when it holds the name's folder or no
     machine does; else the machine that holds the folder (``chosen``), so
-    a name made in a folder is listed with the folder's other names.
+    a name made in a folder is listed with the folder's other names. A
+    mount on one machine asks nothing: the name lands there.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -165,6 +166,9 @@ async def new_name_machine(
         NotADirectoryError: the copy shown of the folder is a file,
             whatever an older copy on another machine is.
     """
+    names = accessor.names()
+    if len(names) == 1:
+        return names[0]
     about = command_machine(accessor) or accessor.default_machine
     above = folder_of(path)
     while True:

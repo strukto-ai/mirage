@@ -136,7 +136,8 @@ export async function holder(accessor: MachineAccessor, path: PathSpec): Promise
  * The machine a new name lands on: the one the command is about, else the
  * mount's default, when it holds the name's folder or no machine does; else
  * the machine that holds the folder (`chosen`), so a name made in a folder
- * is listed with the folder's other names.
+ * is listed with the folder's other names. A mount on one machine asks
+ * nothing: the name lands there.
  *
  * @param accessor the mount's machines.
  * @param path the new name.
@@ -150,6 +151,9 @@ export async function newNameMachine(
   path: PathSpec,
   parents = false,
 ): Promise<string> {
+  const names = accessor.names()
+  const [only] = names
+  if (names.length === 1 && only !== undefined) return only
   const about = commandMachine(accessor) ?? accessor.defaultMachine
   let above = folderOf(path)
   let folders: Holder[] = []
