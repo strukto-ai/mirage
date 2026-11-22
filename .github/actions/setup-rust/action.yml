@@ -53,11 +53,6 @@ runs:
       with:
         workspaces: rust
         shared-key: ${{ inputs.shared-key }}
-        # The key already hashes rust-toolchain.toml, the compiler every
-        # build here uses. The environment hash adds each toolchain the
-        # runner image ships, so an image rolling out a new stable left
-        # every entry unreachable.
-        add-rust-environment-hash-key: false
         save-if: ${{ env.MIRAGE_RUST_SAVE == 'true' }}
 
     - name: Mark Rust as set up
