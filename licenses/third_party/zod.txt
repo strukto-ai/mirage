@@ -1,7 +1,6 @@
-typescript/packages/core/src/generated/pyodide_worker.ts and
-typescript/packages/core/src/generated/computation_worker.ts bundle zod 4.3.6
-(https://github.com/colinhacks/zod); typescript/packages/core/scripts/
-embed-worker.mjs builds them. @struktoai/mirage-core ships them as
+typescript/packages/core/scripts/embed-worker.mjs bundles zod 4.3.6
+(https://github.com/colinhacks/zod) into the Pyodide and computation
+workers. @struktoai/mirage-core ships them as
 dist/generated/pyodide_worker.js and dist/generated/computation_worker.js.
 zod carries this notice:
 

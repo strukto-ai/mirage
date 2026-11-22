@@ -14,6 +14,7 @@
 
 import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
+import { PipeClosed } from '../../../io/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
 import {
@@ -576,20 +577,22 @@ export async function rgGeneric(
     const out =
       pat === null
         ? listFiles(found, f, warnings, io, notes)
-        : searchAll(
-            found,
-            paths,
-            pat,
-            f,
-            stream,
-            warnings,
-            implicit,
-            ctx.cwd.virtual,
-            io,
-            stopped,
-            ctx.signal,
-            ctx.shell,
-            notes,
+        : written(
+            searchAll(
+              found,
+              paths,
+              pat,
+              f,
+              stream,
+              warnings,
+              implicit,
+              ctx.cwd.virtual,
+              io,
+              stopped,
+              ctx.signal,
+              ctx.shell,
+              notes,
+            ),
           )
     return owned(pat, [out, io])
   } catch (error) {
@@ -698,18 +701,52 @@ async function searchSingle(
   const io = new IOResult({ exitCode: 1 })
   const tally: Tally = { selected: false }
   return [
-    settled(
-      streamHaystack(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
-      f,
-      label,
-      tally,
-      io,
-      p.rawPath,
-      name,
-      pat,
+    written(
+      settled(
+        streamHaystack(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
+        f,
+        label,
+        tally,
+        io,
+        p.rawPath,
+        name,
+        pat,
+      ),
     ),
     io,
   ]
+}
+
+// A search's output as a pipe takes it. A reader that goes away has taken the
+// last chunk; the search runs on to its next write, which the closed pipe
+// refuses as ripgrep's is refused, and the search's own end settles its
+// status and what it reports. `chunks` stops at a `PipeClosed` thrown into
+// it.
+async function* written(chunks: AsyncGenerator<Uint8Array>): AsyncGenerator<Uint8Array> {
+  let pending = false
+  try {
+    for (;;) {
+      const next = await chunks.next()
+      if (next.done === true) return
+      pending = true
+      yield next.value
+      pending = false
+    }
+  } finally {
+    if (pending) await refuseNextWrite(chunks)
+    await chunks.return(undefined)
+  }
+}
+
+// Run a search on to its next write and refuse it.
+async function refuseNextWrite(chunks: AsyncGenerator<Uint8Array>): Promise<void> {
+  const next = await chunks.next()
+  if (next.done === true) return
+  try {
+    await chunks.throw(new PipeClosed())
+  } catch (err) {
+    if (!(err instanceof PipeClosed)) throw err
+  }
 }
 
 // One streamed haystack's output, headed when --heading names it, with the
@@ -728,6 +765,7 @@ async function* settled(
 ): AsyncGenerator<Uint8Array> {
   let printed = false
   let failed = false
+  let cut = false
   try {
     for await (const chunk of chunks) {
       const heading = printed ? null : lead(f, label, false, tally.binary === true, program)[1]
@@ -736,12 +774,18 @@ async function* settled(
       yield chunk
     }
   } catch (err) {
-    if (!isFsError(err)) throw err
-    // A read that fails once the stream is open is the searcher's to report,
-    // exit 2, as ripgrep reports it for any file it searches.
-    failed = true
-    io.stderr = f.noMessages ? null : ENC.encode(`${openErrorLine(shown, err)}\n`)
-    io.exitCode = 2
+    if (err instanceof PipeClosed) {
+      // ripgrep stops at the write a closed pipe refuses, and the file it
+      // was writing counts for nothing (14.1.1).
+      cut = true
+    } else {
+      if (!isFsError(err)) throw err
+      // A read that fails once the stream is open is the searcher's to
+      // report, exit 2, as ripgrep reports it for any file it searches.
+      failed = true
+      io.stderr = f.noMessages ? null : ENC.encode(`${openErrorLine(shown, err)}\n`)
+      io.exitCode = 2
+    }
   } finally {
     if (tally.error !== undefined && !failed) {
       // A -P search that gave up ends the file with PCRE2's error.
@@ -750,7 +794,7 @@ async function* settled(
       io.exitCode = 2
     }
     const listed = f.filesWithoutMatch && !f.quiet ? printed : null
-    if (!failed) io.exitCode = (listed ?? tally.selected) ? 0 : 1
+    if (!failed) io.exitCode = (listed ?? tally.selected) && !cut ? 0 : 1
   }
 }
 
@@ -835,35 +879,19 @@ export async function* haystacks(
   // does -j1 and a sort; every other line runs its parallel walker.
   const parallel = runsParallel(f)
   const several = parallel && paths.length > 1
-  // Every operand is looked up before any is searched, so one that is not
-  // there is reported even when the output's reader stops early (14.1.1).
-  const found: [PathSpec, FileStat | null, boolean][] = []
-  for (const p of paths) {
-    if (isStdin(p)) {
-      found.push([p, null, false])
-      continue
-    }
-    if (p.walkError !== null) {
-      warnings.push(walkErrorLine(p.rawPath, walkRefusal(p), several))
-      continue
-    }
-    try {
-      const s = await st(p.virtual)
-      found.push([p, s, s.type === FileType.DIRECTORY])
-    } catch (err) {
-      if (!isWalkError(err)) throw err
-      try {
-        // A directory that exists only because mounts sit under it answers
-        // readdir but not stat.
-        await rd(p.virtual)
-        found.push([p, null, true])
-      } catch (inner) {
-        if (!isWalkError(inner)) throw inner
-        warnings.push(walkErrorLine(p.rawPath, err, several))
-      }
-    }
+  // The parallel walker looks every operand up before it searches any, so one
+  // that is not there is reported even when the output's reader stops early;
+  // the one-thread walker reaches each in turn, and stops at a closed pipe
+  // before the rest (14.1.1).
+  const ahead: ([FileStat | null, boolean] | null)[] | null = parallel ? [] : null
+  if (ahead !== null) {
+    for (const p of paths) ahead.push(await lookedUp(p, st, rd, warnings, several))
   }
-  for (const [p, s, isDir] of found) {
+  for (const [index, p] of paths.entries()) {
+    const entry =
+      ahead === null ? await lookedUp(p, st, rd, warnings, several) : (ahead[index] ?? null)
+    if (entry === null) continue
+    const [s, isDir] = entry
     if (isStdin(p)) {
       yield {
         virtual: p.virtual,
@@ -904,6 +932,40 @@ export async function* haystacks(
       if (stopped.has(p.virtual)) break
     }
   }
+}
+
+// An operand's stat and whether the walk enters it, or null for one that is
+// not there, reported in `warnings`; `several` has the parallel walker word
+// the report.
+async function lookedUp(
+  p: PathSpec,
+  st: (path: string) => Promise<FileStat>,
+  rd: (path: string) => Promise<string[]>,
+  warnings: string[],
+  several: boolean,
+): Promise<[FileStat | null, boolean] | null> {
+  if (isStdin(p)) return [null, false]
+  if (p.walkError !== null) {
+    warnings.push(walkErrorLine(p.rawPath, walkRefusal(p), several))
+    return null
+  }
+  let s: FileStat
+  try {
+    s = await st(p.virtual)
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    try {
+      // A directory that exists only because mounts sit under it answers
+      // readdir but not stat.
+      await rd(p.virtual)
+    } catch (inner) {
+      if (!isWalkError(inner)) throw inner
+      warnings.push(walkErrorLine(p.rawPath, err, several))
+      return null
+    }
+    return [null, true]
+  }
+  return [s, s.type === FileType.DIRECTORY]
 }
 
 // What a search prints on stderr: the ignore files' word unless
@@ -996,7 +1058,7 @@ async function* searchAll(
   // The ignore files' word, printed ahead of the warnings with the exit
   // status untouched.
   notes: readonly string[] = [],
-): AsyncIterable<Uint8Array> {
+): AsyncGenerator<Uint8Array> {
   const multi = paths.length > 1
   let lone = !multi
   const preGlobs = new Overrides(f.preGlobs ?? [], [], false)
@@ -1004,6 +1066,7 @@ async function* searchAll(
   let printed = false
   let selected = false
   let skipped = false
+  let before = false
   let searched = 0
   const listingOrCount = f.countOnly || f.countMatches || f.filesOnly || f.filesWithoutMatch
   const records = jsonSummary(f)
@@ -1012,6 +1075,7 @@ async function* searchAll(
   try {
     for await (const h of found) {
       searched += 1
+      before = selected
       const walked = h.spec === null
       lone = lone && !walked
       const name = printedPath(h.shown, f)
@@ -1113,7 +1177,7 @@ async function* searchAll(
           const begin = formatOutput(pat, { kind: 'begin', name: latin1(name) })
           const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
           yield begin
-          yield* chunks
+          for (const chunk of chunks) yield chunk
           if (!damaged) {
             totals.add(tally, sent, elapsed)
             yield formatOutput(pat, {
@@ -1137,7 +1201,7 @@ async function* searchAll(
         const sent =
           heading.length + (listingOrCount ? 0 : chunks.reduce((sum, c) => sum + c.length, 0))
         if (gap.length + heading.length > 0) yield concat([gap, heading])
-        yield* chunks
+        for (const chunk of chunks) yield chunk
         printed = true
         if (!damaged) totals.add(tally, sent, elapsed)
       } else if (!damaged) {
@@ -1146,6 +1210,7 @@ async function* searchAll(
       // --stats and --json count every file, -q or not (14.1.1).
       if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
     }
+    before = selected
     const total = (performance.now() - started) / 1000
     if (records) yield formatOutput(pat, { kind: 'summary', totals: totalsConfig(totals), total })
     else if (f.stats === true) {
@@ -1154,6 +1219,12 @@ async function* searchAll(
       if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
       yield formatOutput(pat, { kind: 'stats', totals: totalsConfig(totals), total })
     }
+  } catch (err) {
+    if (!(err instanceof PipeClosed)) throw err
+    // ripgrep stops at the write a closed pipe refuses. One thread counts the
+    // file it was writing for nothing; the parallel searcher has counted a
+    // file's match before it prints it (14.1.1).
+    if (!(runsParallel(f) && !lone)) selected = before
   } finally {
     // ripgrep's status under --files-without-match follows the listing, not
     // the matching: 0 when a file was listed, 1 when every file matched

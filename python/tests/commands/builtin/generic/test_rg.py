@@ -657,3 +657,39 @@ async def test_rg_matches_ignore_rules_on_the_path_it_walked():
         "cd /w/L/repo && rg -L --files",
     )
     assert out[1] == ("link/b.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_rg_stops_at_the_write_a_closed_pipe_refuses():
+    # ripgrep 14.1.1: one thread reaches each operand in turn and stops at
+    # the write a closed pipe refuses, the file it was writing counting for
+    # nothing; a file whose output the pipe took counts, and its walk goes
+    # on. The parallel walker looks every operand up first.
+    gone = "No such file or directory (os error 2)\n"
+    out = await _lines(
+        "seq 200000 > /big && echo hello > /a",
+        "rg -j1 '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 '^' /nosuch /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 '^' /a /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 -c '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg '^' /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "seq 200000 | rg '^' | head -n 1; echo ${PIPESTATUS[1]}",
+    )
+    assert out[1:] == [
+        ("/big:1\n1\n", "", 0),
+        (
+            "/big:1\n2\n",
+            f"rg: /nosuch: IO error for operation on /nosuch: {gone}",
+            0,
+        ),
+        ("/a:hello\n0\n", "", 0),
+        (
+            "/big:200000\n2\n",
+            f"rg: /nosuch: IO error for operation on /nosuch: {gone}",
+            0,
+        ),
+        ("/big:1\n2\n", f"rg: /nosuch: {gone}", 0),
+        ("1\n1\n", "", 0),
+        ("1\n1\n", "", 0),
+    ]

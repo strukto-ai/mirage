@@ -78,7 +78,7 @@ async function createPort(
   // The worker starts from the bundle core embeds, not from worker_entry.js:
   // a bundler that moves this module (Vite's dependency pre-bundling) leaves
   // no file where a relative URL would look.
-  const { default: source } = await import('../generated/computation_worker.ts')
+  const { default: source } = await import('#computation-worker')
   const wasm = compiledModule()
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
   const { Worker } = globalThis

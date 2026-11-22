@@ -95,6 +95,21 @@
       "workerd": "./dist/generated/mirage_pdf.workerd.js",
       "node": "./dist/generated/mirage_pdf.node.js",
       "default": "./dist/generated/mirage_pdf.js"
+    },
+    "#computation-worker": {
+      "types": "./src/generated/computation_worker.d.ts",
+      "workerd": "./dist/generated/no_worker.js",
+      "default": "./dist/generated/computation_worker.js"
+    },
+    "#pyodide-worker": {
+      "types": "./src/generated/pyodide_worker.d.ts",
+      "workerd": "./dist/generated/no_worker.js",
+      "default": "./dist/generated/pyodide_worker.js"
+    },
+    "#wasm-worker": {
+      "types": "./src/generated/wasm_worker.d.ts",
+      "workerd": "./dist/generated/no_worker.js",
+      "default": "./dist/generated/wasm_worker.js"
     }
   },
   "files": [

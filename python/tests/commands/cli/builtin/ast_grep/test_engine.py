@@ -39,3 +39,27 @@ def test_parser_uses_the_room_available_for_each_file() -> None:
     assert process(options, dense, ceiling * 2, ceiling)["count"] == 1
     with pytest.raises(UsageError, match="parser resource limit exceeded"):
         process(options, dense, ceiling // 2, ceiling)
+
+
+def test_a_rust_file_is_outlined() -> None:
+    # Pinned against ast-grep 0.51.3, which bundles the Rust grammar and
+    # its default outline rules.
+    options: dict[str, str | bool | None] = {
+        "verb": "outline",
+        "language": "Rust",
+        "path": "s.rs",
+        "view": "auto",
+        "pub_members": False,
+        "directory": False,
+        "files_only": False,
+        "update": False,
+    }
+    source = (
+        b"pub struct S {\n    pub a: u32,\n    b: u8,\n}\n\n"
+        b"impl S {\n    fn hidden(&self) {}\n}\n\nfn f() {}\n"
+    )
+    ceiling = 32 * 1024**2
+    assert process(options, source, ceiling, ceiling)["output"] == (
+        "s.rs\n 1: pub struct S\n      field: a, b\n"
+        " 6: impl S\n      method: hidden\n10: fn f()\n"
+    )
