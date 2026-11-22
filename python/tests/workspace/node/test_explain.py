@@ -401,6 +401,52 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+@pytest.mark.parametrize(
+    ("line", "exit_code", "stdout", "stderr"),
+    [
+        ("f() { ls; }; f", 0, b"f.txt\n", b""),
+        ("f() { cat f.txt; }; f", 126, b"", b"cat: Permission denied\n"),
+        ("f() { ls; }; f; cat f.txt", 126, b"", b"cat: Permission denied\n"),
+        (
+            "echo before; f() { ls; }; f",
+            126,
+            b"",
+            b"echo: Permission denied\n",
+        ),
+        ("f; f() { ls; }", 126, b"", b"f: Permission denied\n"),
+        ("(f() { ls; }); f", 126, b"", b"f: Permission denied\n"),
+    ],
+)
+async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
+    decision, line, exit_code, stdout, stderr
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data/keep": {
+                    "commands": {"*": decision, "cd": "allow", "ls": "allow"}
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data/keep", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr or b"") == (
+        exit_code,
+        stdout,
+        stderr,
+    )
+    assert (said.exit_code, said.stderr) == (exit_code, stderr.decode())
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("test", "status"),
     [
