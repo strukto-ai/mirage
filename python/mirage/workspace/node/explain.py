@@ -810,16 +810,18 @@ def _is_verdict(expl: Judgment) -> bool:
     policy refusals, hold the line. Filesystem refusals, about a path or
     carrying an error, wait for the per-command gate, where earlier
     commands have established the live cwd and namespace.
-    Rule-less DENY results also wait, and so does a tree root's own
-    decision (``_by_default``): an unavailable head word, a command no
-    tree names (a function the line defines first, say), or words only
-    the runtime can expand fail where they occur rather than against
-    the whole line.
+    Rule-less DENY results also wait, and so does a top-level tree
+    root's own decision (``_by_default``): an unavailable head word, a
+    command no tree names (a function the line defines first, say), or
+    words only the runtime can expand fail where they occur rather than
+    against the whole line. A mount entry's root speaks about its
+    folder, as a root leaf with paths speaks about those paths, so it
+    holds the line (``_in_folder``).
 
     Args:
         expl (Judgment): one command's explanation.
     """
-    if expl.exit_code == 0 or _by_default(expl):
+    if expl.exit_code == 0 or (_by_default(expl) and not _in_folder(expl)):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
         return True
@@ -846,6 +848,16 @@ def _by_default(expl: Judgment) -> bool:
         and not rule.paths
         and rule.at.split("/")[1:2] == ["*"]
     )
+
+
+def _in_folder(expl: Judgment) -> bool:
+    """Whether the leaf that decided the command belongs to a mount
+    entry's tree, which judges only lines working inside its folder.
+
+    Args:
+        expl (Judgment): one command's explanation.
+    """
+    return expl.rule is not None and bool(expl.rule.mount)
 
 
 def _uncovered(expl: Judgment) -> bool:

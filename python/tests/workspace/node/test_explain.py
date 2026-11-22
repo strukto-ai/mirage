@@ -373,6 +373,34 @@ async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "echo before; cat /data/keep/f.txt",
+        "cat /data/keep/f.txt; echo after",
+        "f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f",
+    ],
+)
+async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data/keep": {"commands": {"*": decision}}},
+        },
+    )
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout) == (126, b"")
+    assert ran.stderr == b"cat: Permission denied\n"
+    assert (said.exit_code, said.stderr) == (126, "cat: Permission denied\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("test", "status"),
     [

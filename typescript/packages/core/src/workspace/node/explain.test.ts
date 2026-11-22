@@ -518,6 +518,30 @@ describe('explain', () => {
   })
 
   it.each([
+    ['deny', 'echo before; cat /data/keep/f.txt'],
+    ['deny', 'cat /data/keep/f.txt; echo after'],
+    ['deny', 'f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f'],
+    ['ask', 'echo before; cat /data/keep/f.txt'],
+    ['ask', 'cat /data/keep/f.txt; echo after'],
+    ['ask', 'f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f'],
+  ])("holds the whole line on a folder entry's * %s: %s", async (decision, line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data/keep': { commands: { '*': decision } } },
+      }),
+    })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+    expect(DEC.decode(ran.stderr)).toBe('cat: Permission denied\n')
+    expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
+  })
+
+  it.each([
     ['[[ ! -e /data/secret.txt ]]', '1'],
     ['[[ -e /data/a.txt && -e /data/secret.txt ]]', '0'],
     ['[ ! -e /data/secret.txt ]', '1'],

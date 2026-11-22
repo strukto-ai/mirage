@@ -1218,6 +1218,15 @@ function byDefault(expl: Judgment): boolean {
 }
 
 /**
+ * Whether the leaf that decided the command belongs to a mount entry's
+ * tree, which judges only lines working inside its folder. Mirrors the
+ * Python `_in_folder`.
+ */
+function inFolder(expl: Judgment): boolean {
+  return expl.rule !== null && (expl.rule.mount ?? '') !== ''
+}
+
+/**
  * Whether the profile refuses a command no tree names (by a root's own
  * decision, or a CLI that reaches a service, `unlistedService`), on its
  * own words, which nothing that runs before it on the line can change.
@@ -1259,14 +1268,16 @@ function asksFor(one: Judged): boolean {
  * A deny a tree states for a command it names, and command-scoped policy
  * refusals, hold the line. Operand-scoped filesystem refusals wait for
  * the per-command gate, where earlier commands have established the live
- * cwd and namespace. Rule-less DENY results also wait, and so does a tree
- * root's own decision (`byDefault`): an unavailable head word, a command
- * no tree names (a function the line defines first, say), or words only
- * the runtime can expand fail where they occur rather than against the
- * whole line.
+ * cwd and namespace. Rule-less DENY results also wait, and so does a
+ * top-level tree root's own decision (`byDefault`): an unavailable head
+ * word, a command no tree names (a function the line defines first,
+ * say), or words only the runtime can expand fail where they occur
+ * rather than against the whole line. A mount entry's root speaks about
+ * its folder, as a root leaf with paths speaks about those paths, so it
+ * holds the line (`inFolder`).
  */
 function isVerdict(expl: Judgment): boolean {
-  if (expl.exitCode === 0 || byDefault(expl)) return false
+  if (expl.exitCode === 0 || (byDefault(expl) && !inFolder(expl))) return false
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
   // Filesystem refusals use the live cwd and fail only their command.
   const denied = expl.answers.find((a): a is Deny => a.kind === 'deny')
