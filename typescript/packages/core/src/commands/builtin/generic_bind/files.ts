@@ -14,7 +14,7 @@
 
 import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { callsAs, currentCaller, sessionVisibility } from '../../../context/session_context.ts'
-import { eacces, eisdir, enoent, isDotWalkError, isEnoent } from '../../../errors/fs.ts'
+import { eacces, eisdir, enoent, isDotWalkError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { revisionFor } from '../../../observe/context.ts'
@@ -560,6 +560,25 @@ export function dirAwareStat(
   ctx: Context,
 ): (p: PathSpec) => Promise<FileStat> {
   return (p) => statRefusingDirs(files, ctx, p)
+}
+
+/**
+ * A regular file's size as its stat gives it, for a width GNU takes from
+ * `st_size` (`wc`'s columns). Null for anything but a regular file, for a
+ * size the stat does not know, and for a path the stat refuses, which the
+ * command's own read reports. Mirrors Python's `stat_size`.
+ */
+export function statSize(files: CommandFiles): (p: PathSpec) => Promise<number | null> {
+  return async (p) => {
+    try {
+      const st = await files.stat(p)
+      return st.type === FileType.FILE ? st.size : null
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`${p.virtual}: no size for a width: ${String(err)}`)
+      return null
+    }
+  }
 }
 
 /**

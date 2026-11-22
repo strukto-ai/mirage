@@ -45,6 +45,7 @@ from mirage.commands.builtin.utils.tree import ReadTree
 from mirage.commands.config import Context
 from mirage.context import session_visibility
 from mirage.context.session_context import awaits_as, current_caller
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eacces, eisdir, enoent
 from mirage.errors.types import DotWalkError, WalkDeclinedError
 from mirage.io.cooperative import chunks
@@ -683,6 +684,29 @@ def dir_aware_stat(files: CommandFiles, ctx: Context) -> StatFn:
         return await _stat_refusing_dirs(files, ctx, path)
 
     return stat
+
+
+def stat_size(
+    files: CommandFiles,
+) -> Callable[[PathSpec], Awaitable[int | None]]:
+    """A regular file's size as its stat gives it, ``size(path)``, for a
+    width GNU takes from ``st_size`` (``wc``'s columns). None for
+    anything but a regular file, for a size the stat does not know, and
+    for a path the stat refuses, which the command's own read reports.
+
+    Args:
+        files (CommandFiles): the command's files.
+    """
+
+    async def size(path: PathSpec) -> int | None:
+        try:
+            st = await files.stat(path)
+        except FS_ERRORS:
+            logger.debug("%s: no size for a width", path.virtual)
+            return None
+        return st.size if st.type == FileType.FILE else None
+
+    return size
 
 
 def file_size(

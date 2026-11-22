@@ -15,7 +15,7 @@
 import { wcGeneric } from '../../generic/wc.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, dirAwareStream, fileSize, resolveOrEmpty } from '../files.ts'
+import { commandFiles, dirAwareStream, fileSize, resolveOrEmpty, statSize } from '../files.ts'
 
 const wc: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
@@ -27,6 +27,7 @@ const wc: CommandFn = async (_accessor, paths, texts, ctx) => {
     dirAwareStream(files, ctx),
     files.answers('line_count') ? files.lineCount : undefined,
     fileSize(files, ctx),
+    statSize(files),
   )
 }
 

@@ -245,6 +245,7 @@ async function formatMulti(
   listedFrom: string | null,
   lineCount?: (p: PathSpec) => Promise<number | null>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
+  statSize?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {
   const rows: WcRow[] = []
   const records: PathRecord[] = []
@@ -266,7 +267,7 @@ async function formatMulti(
     sizeOf !== undefined
       ? sizeOf
       : null
-  let pushed = false
+  let unsized = false
   for (const [run, p] of paths.entries()) {
     if (listedFrom !== null) {
       const refusal = listedRefusal(listedFrom, p, run)
@@ -276,12 +277,16 @@ async function formatMulti(
       }
     }
     let counts: WcCounts
+    let known: number | null = null
+    let fromMount = false
     try {
       const found = counted === null || isStdin(p) ? null : await counted(p)
       const size = sized === null || isStdin(p) ? null : await sized(p)
       if (found !== null) {
         counts = { lines: found, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
-        pushed = true
+        fromMount = true
+        if (statSize !== undefined && paths.length > 1) known = await statSize(p)
+        unsized ||= known === null
       } else if (size !== null) {
         counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
       } else {
@@ -302,14 +307,14 @@ async function formatMulti(
     }
     rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
     records.push({ path: p, run, values: selectedValues(counts, parsed) })
-    sizes.push(isStdin(p) ? null : counts.bytes)
+    sizes.push(isStdin(p) ? null : fromMount ? known : counts.bytes)
     total.lines += counts.lines
     total.words += counts.words
     total.bytes += counts.bytes
     total.chars += counts.chars
     total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
   }
-  const width = pushed
+  const width = unsized
     ? null
     : listedFrom === '-'
       ? 1
@@ -333,10 +338,11 @@ async function formatMulti(
  * Run wc over resolved operands, GNU semantics. Lines counted alone are asked
  * of `lineCount` first, so a mount that can count a file's lines on its own
  * (a `COUNT(*)` on a table) does not send it; null, or no `lineCount`, reads
- * the file. A row counted that way has no byte size, so the columns are as
- * wide as the printed numbers. Bytes counted alone are asked of `sizeOf`
- * first, as GNU takes a regular file's size from its stat. Mirrors Python's
- * `wc_generic` and `format_multi`.
+ * the file. A row counted that way brings no byte size, so beside other
+ * operands its size is asked of `statSize` for the column width, and where a
+ * row has none the columns are as wide as the printed numbers. Bytes counted
+ * alone are asked of `sizeOf` first, as GNU takes a regular file's size from
+ * its stat. Mirrors Python's `wc_generic` and `format_multi`.
  */
 export async function wcGeneric(
   paths: PathSpec[],
@@ -345,6 +351,7 @@ export async function wcGeneric(
   stream: ReadStreamFn,
   lineCount?: (p: PathSpec) => Promise<number | null>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
+  statSize?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
   const parsed = parseFlags(ctx.flags)
@@ -367,7 +374,7 @@ export async function wcGeneric(
     paths = found
   }
   if (paths.length > 0 || listedFrom !== null) {
-    return formatMulti(paths, parsed, ctx, stream, listedFrom, lineCount, sizeOf)
+    return formatMulti(paths, parsed, ctx, stream, listedFrom, lineCount, sizeOf, statSize)
   }
   const counts = await wc(resolveSource(ctx.stdin), ctx, parsed)
   const values = selectedValues(counts, parsed)
