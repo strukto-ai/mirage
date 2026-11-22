@@ -599,13 +599,13 @@ class ValueRule:
     """What one value of an option decides.
 
     Args:
-        decision (tuple[RuleLeaf, ...]): what the value decides, in
-            place of its option's own decision.
+        decision (RuleLeaf | None): what the value decides, in place of
+            its option's own decision; None when it states none.
         options (Mapping[str, OptionRule]): options that must also be on
             the line, by canonical name.
     """
 
-    decision: tuple[RuleLeaf, ...] = ()
+    decision: RuleLeaf | None = None
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -620,15 +620,15 @@ class OptionRule:
     """What an option decides at its node and below it.
 
     Args:
-        decision (tuple[RuleLeaf, ...]): what the option decides on its
-            own.
+        decision (RuleLeaf | None): what the option decides on its
+            own; None when it states none.
         values (Mapping[str, ValueRule]): its values, each key a shell
             glob over the value the line gives.
         options (Mapping[str, OptionRule]): options that must also be on
             the line, by canonical name.
     """
 
-    decision: tuple[RuleLeaf, ...] = ()
+    decision: RuleLeaf | None = None
     values: Mapping[str, ValueRule] = field(default_factory=dict)
     options: Mapping[str, "OptionRule"] = field(default_factory=dict)
 
@@ -656,22 +656,22 @@ class CommandNode:
     sit only on a node without subcommands.
 
     Args:
-        decision (tuple[RuleLeaf, ...]): the node's own decision, the
-            ``"*"`` of its mapping; empty when it states none.
+        decision (RuleLeaf | None): the node's own decision, the
+            ``"*"`` of its mapping; None when it states none.
         subcommands (Mapping[str, CommandNode]): its subcommands, by
             canonical name.
         options (Mapping[str, OptionRule]): its options, by canonical
             name, applying here and below.
-        other_options (tuple[RuleLeaf, ...]): the ``"-*"`` entry, for an
+        other_options (RuleLeaf | None): the ``"-*"`` entry, for an
             option on the line that no entry on the walk names.
         operands (Mapping[str, CommandNode]): the next operand, each key
             a shell glob over the word the line gives.
     """
 
-    decision: tuple[RuleLeaf, ...] = ()
+    decision: RuleLeaf | None = None
     subcommands: Mapping[str, "CommandNode"] = field(default_factory=dict)
     options: Mapping[str, OptionRule] = field(default_factory=dict)
-    other_options: tuple[RuleLeaf, ...] = ()
+    other_options: RuleLeaf | None = None
     operands: Mapping[str, "CommandNode"] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

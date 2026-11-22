@@ -3695,10 +3695,7 @@
             "touch": "allow",
             "ls": "allow",
             "cat": "allow",
-            "head": [
-              "allow",
-              "ask"
-            ],
+            "head": "ask",
             "rm": "allow",
             "find": "allow",
             "grep": "allow",
@@ -3790,16 +3787,10 @@
                   "decision": "deny",
                   "reason": "sealed until review"
                 },
-                "rm": [
-                  {
-                    "decision": "deny",
-                    "reason": "sealed until review"
-                  },
-                  {
-                    "decision": "deny",
-                    "reason": "owner: sealed"
-                  }
-                ],
+                "rm": {
+                  "decision": "deny",
+                  "reason": "sealed until review"
+                },
                 "find": {
                   "decision": "deny",
                   "reason": "sealed until review"
@@ -3922,16 +3913,10 @@
             },
             "/scratch/both/locked": {
               "commands": {
-                "rm": [
-                  {
-                    "decision": "deny",
-                    "reason": "both: locked"
-                  },
-                  {
-                    "decision": "deny",
-                    "reason": "both: locked, second voice"
-                  }
-                ]
+                "rm": {
+                  "decision": "deny",
+                  "reason": "both: locked"
+                }
               }
             },
             "/scratch/shared": {

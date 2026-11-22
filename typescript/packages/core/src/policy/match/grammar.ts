@@ -72,7 +72,7 @@ export function leafRead(path: readonly string[], parsed: ParsedArgs): CommandRe
  * `unread_reason`.
  */
 export function unreadReason(tree: CommandNode, at: string): string | null {
-  if (tree.options.size > 0 || tree.otherOptions.length > 0)
+  if (tree.options.size > 0 || tree.otherOptions !== null)
     return `${at}: this command has no grammar here to read an option by`
   const [first] = tree.subcommands.keys()
   if (first !== undefined)
@@ -114,7 +114,6 @@ export function unreadNames(
 }
 
 function namesWords(node: CommandNode): boolean {
-  if (node.options.size > 0 || node.otherOptions.length > 0 || node.subcommands.size > 0)
-    return true
+  if (node.options.size > 0 || node.otherOptions !== null || node.subcommands.size > 0) return true
   return [...node.operands.values()].some(namesWords)
 }

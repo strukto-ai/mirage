@@ -236,13 +236,10 @@
           "p": {
             "commands": {
               "rm": {
-                "*": [
-                  "ask",
-                  {
-                    "decision": "deny",
-                    "reason": "kept"
-                  }
-                ]
+                "*": {
+                  "decision": "deny",
+                  "reason": "kept"
+                }
               }
             }
           }

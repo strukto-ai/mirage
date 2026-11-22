@@ -272,7 +272,7 @@ describe('SessionProfile', () => {
     })
     const root = profile.mounts?.get('/')
     expect(root?.paths?.hide).toEqual(['/secret', '*.pem'])
-    expect(root?.commands?.decision[0]?.reason).toBe('sealed')
+    expect(root?.commands?.decision?.reason).toBe('sealed')
   })
 })
 
@@ -514,9 +514,9 @@ it.each([
   ],
   [
     {
-      mounts: { '/d': { commands: { rm: ['allow', { decision: 'deny', paths: ['/d/keep/*'] }] } } },
+      mounts: { '/d': { commands: { rm: { decision: 'deny', paths: ['/d/keep/*'] } } } },
     },
-    'profile.mounts[/d].commands.rm[1]: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
+    'profile.mounts[/d].commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
   ],
 ])('refuses a rule with paths and names the folder entry to write: %j', (doc, message) => {
   expect(() => SessionProfile(doc)).toThrow(message)
@@ -535,7 +535,7 @@ const TREE = {
   curl: { '--request': { values: { DELETE: 'deny', POST: { '--insecure': 'deny' } } } },
   git: { '--force': 'deny', checkout: { operands: { main: 'deny', 'release/*': 'ask' } } },
   cp: {
-    '*': ['ask', { decision: 'deny', reason: 'kept' }],
+    '*': { decision: 'deny', reason: 'kept' },
     '-*': 'deny',
     '--recursive': { '--force': 'deny' },
   },
@@ -546,25 +546,23 @@ const leaf = (decision: Outcome, reason = ''): RuleLeaf => ({ decision, reason }
 describe('commandTree', () => {
   it('reads names, options, operands and values', () => {
     const tree = commandTree(TREE)
-    expect(tree.decision).toEqual([leaf(Outcome.ALLOW)])
-    expect(tree.subcommands.get('rm')?.decision).toEqual([
-      leaf(Outcome.ASK, 'Deletes need sign-off'),
-    ])
+    expect(tree.decision).toEqual(leaf(Outcome.ALLOW))
+    expect(tree.subcommands.get('rm')?.decision).toEqual(leaf(Outcome.ASK, 'Deletes need sign-off'))
     const merge = tree.subcommands.get('gh')?.subcommands.get('pr')?.subcommands.get('merge')
-    expect(merge?.options.get('--admin')?.decision).toEqual([leaf(Outcome.DENY)])
+    expect(merge?.options.get('--admin')?.decision).toEqual(leaf(Outcome.DENY))
     const request = tree.subcommands.get('curl')?.options.get('--request')
-    expect(request?.decision).toEqual([])
-    expect(request?.values.get('POST')?.options.get('--insecure')?.decision).toEqual([
+    expect(request?.decision).toBeNull()
+    expect(request?.values.get('POST')?.options.get('--insecure')?.decision).toEqual(
       leaf(Outcome.DENY),
-    ])
+    )
     const checkout = tree.subcommands.get('git')?.subcommands.get('checkout')
-    expect(checkout?.operands.get('release/*')?.decision).toEqual([leaf(Outcome.ASK)])
+    expect(checkout?.operands.get('release/*')?.decision).toEqual(leaf(Outcome.ASK))
     const cp = tree.subcommands.get('cp')
-    expect(cp?.decision).toEqual([leaf(Outcome.ASK), leaf(Outcome.DENY, 'kept')])
-    expect(cp?.otherOptions).toEqual([leaf(Outcome.DENY)])
-    expect(cp?.options.get('--recursive')?.options.get('--force')?.decision).toEqual([
+    expect(cp?.decision).toEqual(leaf(Outcome.DENY, 'kept'))
+    expect(cp?.otherOptions).toEqual(leaf(Outcome.DENY))
+    expect(cp?.options.get('--recursive')?.options.get('--force')?.decision).toEqual(
       leaf(Outcome.DENY),
-    ])
+    )
   })
 
   it('writes the block it reads from', () => {
@@ -582,7 +580,12 @@ describe('commandTree', () => {
     [{ '--force': 'deny' }, 'needs a command'],
     [{ gh: { pr: 'allow', operands: { x: 'deny' } } }, 'operands sit'],
     [{ rm: 'maybe' }, 'is no decision'],
-    [{ rm: [] }, 'lists no decision'],
+    [{ rm: [] }, 'commands.rm: a rule is one decision, not a list'],
+    [{ rm: ['deny'] }, 'commands.rm: a rule is one decision, not a list'],
+    [
+      { gh: { pr: { '--admin': ['allow', 'deny'] } } },
+      'commands.gh.pr.--admin: a rule is one decision, not a list',
+    ],
   ])('refuses a misshapen block %#', (block, message) => {
     expect(() => commandTree(block)).toThrow(message)
   })

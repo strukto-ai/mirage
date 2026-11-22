@@ -203,22 +203,14 @@ def _random_leaf(rnd: random.Random) -> Any:
     return {"decision": decision, "reason": "r"}
 
 
-def _random_entry(rnd: random.Random) -> Any:
-    if rnd.random() < 0.55:
-        return _random_leaf(rnd)
-    return [_random_leaf(rnd) for _ in range(rnd.choice([2, 2, 3]))]
-
-
 def _random_block(rnd: random.Random) -> dict[str, Any]:
     block: dict[str, Any] = {}
     if rnd.random() < 0.6:
         block["*"] = (
-            _random_entry(rnd)
-            if rnd.random() < 0.5
-            else rnd.choice(_DECISIONS)
+            _random_leaf(rnd) if rnd.random() < 0.5 else rnd.choice(_DECISIONS)
         )
     if rnd.random() < 0.9:
-        block["grep"] = _random_entry(rnd)
+        block["grep"] = _random_leaf(rnd)
     return block
 
 

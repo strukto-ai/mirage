@@ -121,21 +121,20 @@ class PolicyMatcher:
             return json.loads(self._stream.finish())
 
 
-def _leaves_wire(leaves: tuple[RuleLeaf, ...]) -> list[Wire]:
-    return [
-        {"decision": leaf.decision.value, "reason": units(leaf.reason)}
-        for leaf in leaves
-    ]
+def _leaf_wire(leaf: RuleLeaf | None) -> Wire | None:
+    if leaf is None:
+        return None
+    return {"decision": leaf.decision.value, "reason": units(leaf.reason)}
 
 
 def _option_wire(rule: OptionRule) -> Wire:
     return {
-        "decision": _leaves_wire(rule.decision),
+        "decision": _leaf_wire(rule.decision),
         "values": [
             [
                 units(word),
                 {
-                    "decision": _leaves_wire(value.decision),
+                    "decision": _leaf_wire(value.decision),
                     "options": [
                         [units(name), _option_wire(option)]
                         for name, option in value.options.items()
@@ -159,7 +158,7 @@ def tree_wire(node: CommandNode) -> Wire:
         node (CommandNode): the tree, or one node of it.
     """
     return {
-        "decision": _leaves_wire(node.decision),
+        "decision": _leaf_wire(node.decision),
         "subcommands": [
             [units(name), tree_wire(child)]
             for name, child in node.subcommands.items()
@@ -168,7 +167,7 @@ def tree_wire(node: CommandNode) -> Wire:
             [units(name), _option_wire(option)]
             for name, option in node.options.items()
         ],
-        "other_options": _leaves_wire(node.other_options),
+        "other_options": _leaf_wire(node.other_options),
         "operands": [
             [units(word), tree_wire(child)]
             for word, child in node.operands.items()

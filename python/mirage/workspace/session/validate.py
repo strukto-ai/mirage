@@ -196,7 +196,7 @@ def _plain(tree: CommandNode) -> bool:
     bare = not (
         tree.subcommands or tree.options or tree.other_options or tree.operands
     )
-    return bare and all(not leaf.reason for leaf in tree.decision)
+    return bare and (tree.decision is None or not tree.decision.reason)
 
 
 def _node(

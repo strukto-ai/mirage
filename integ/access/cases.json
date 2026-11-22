@@ -52,13 +52,10 @@
       "cat": "allow",
       "ls": "allow",
       "echo": "allow",
-      "rm": [
-        "allow",
-        {
-          "decision": "deny",
-          "reason": "no deletes here"
-        }
-      ]
+      "rm": {
+        "decision": "deny",
+        "reason": "no deletes here"
+      }
     }
    },
    "asker": {
@@ -210,7 +207,7 @@
   {
    "id": "explain",
    "op": "explain",
-   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"*": "deny", "cat": "allow", "echo": "allow", "ls": "allow", "rm": ["allow", {"decision": "ask", "reason": "removal needs sign-off"}]}, "mounts": {"/sec": {"commands": {"*": {"decision": "deny", "reason": "sealed"}, "cat": {"decision": "deny", "reason": "sealed"}, "echo": {"decision": "deny", "reason": "sealed"}, "ls": {"decision": "deny", "reason": "sealed"}, "rm": {"decision": "deny", "reason": "sealed"}}}, "/out": {"commands": {"*": {"decision": "ask", "reason": "nod"}, "cat": {"decision": "ask", "reason": "nod"}, "echo": {"decision": "ask", "reason": "nod"}, "ls": {"decision": "ask", "reason": "nod"}, "rm": {"decision": "ask", "reason": "nod"}}}}}}},
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/vault": {"vfs": "ram", "mode": "write"}, "/ro": {"vfs": "ram", "mode": "read"}}, "profiles": {"sealed": {"paths": {"hide": ["/vault"]}, "commands": {"*": "deny", "cat": "allow", "echo": "allow", "ls": "allow", "rm": {"decision": "ask", "reason": "removal needs sign-off"}}, "mounts": {"/sec": {"commands": {"*": {"decision": "deny", "reason": "sealed"}, "cat": {"decision": "deny", "reason": "sealed"}, "echo": {"decision": "deny", "reason": "sealed"}, "ls": {"decision": "deny", "reason": "sealed"}, "rm": {"decision": "deny", "reason": "sealed"}}}, "/out": {"commands": {"*": {"decision": "ask", "reason": "nod"}, "cat": {"decision": "ask", "reason": "nod"}, "echo": {"decision": "ask", "reason": "nod"}, "ls": {"decision": "ask", "reason": "nod"}, "rm": {"decision": "ask", "reason": "nod"}}}}}}},
    "session": {"id": "agent", "profile": "sealed"},
    "setup": ["mkdir /sec /out", "echo k > /sec/k", "echo key > /vault/key.txt", "echo f > /f"],
    "cases": [

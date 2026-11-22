@@ -11,36 +11,44 @@
         }
       },
       "expect": {
-        "decision": [],
+        "decision": null,
         "subcommands": {
           "rm": {
-            "decision": [
-              {
-                "decision": "allow",
-                "reason": ""
-              }
-            ],
+            "decision": {
+              "decision": "allow",
+              "reason": ""
+            },
             "subcommands": {},
             "options": {
               "--recursive": {
-                "decision": [
-                  {
-                    "decision": "deny",
-                    "reason": ""
-                  }
-                ],
+                "decision": {
+                  "decision": "deny",
+                  "reason": ""
+                },
                 "values": {},
                 "options": {}
               }
             },
-            "other_options": [],
+            "other_options": null,
             "operands": {}
           }
         },
         "options": {},
-        "other_options": [],
+        "other_options": null,
         "operands": {}
       }
+    },
+    {
+      "id": "a_rule_is_one_decision_not_a_list",
+      "op": "tree",
+      "where": "commands",
+      "value": {
+        "rm": [
+          "allow",
+          "deny"
+        ]
+      },
+      "error": "commands.rm: a rule is one decision, not a list"
     },
     {
       "id": "null_is_not_a_reason",

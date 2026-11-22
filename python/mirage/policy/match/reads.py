@@ -27,8 +27,9 @@ def has_rules(rules: AdmissionRules | None) -> bool:
 
 
 def _root_denies(scoped: ScopedTree) -> bool:
-    return not scoped.mount and any(
-        leaf.decision is Outcome.DENY for leaf in scoped.tree.decision
+    leaf = scoped.tree.decision
+    return (
+        not scoped.mount and leaf is not None and leaf.decision is Outcome.DENY
     )
 
 

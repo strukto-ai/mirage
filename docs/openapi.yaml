@@ -6647,18 +6647,9 @@ components:
       anyOf:
         - $ref: '#/components/schemas/CommandVerb'
         - $ref: '#/components/schemas/CommandLeaf'
-        - type: array
-          minItems: 1
-          items:
-            anyOf:
-              - $ref: '#/components/schemas/CommandVerb'
-              - $ref: '#/components/schemas/CommandLeaf'
-          description: Several decisions for one place. Each applies on its own, and the strictest
-            that applies wins.
       title: CommandDecision
-      description: What a place in a command tree decides. Write `allow`, `ask` or `deny`; an object
-        to add a reason; or a list of those. A decision for one folder goes in that folder's
-        `mounts` entry.
+      description: What a place in a command tree decides. Write `allow`, `ask` or `deny`, or an
+        object to add a reason. A decision for one folder goes in that folder's `mounts` entry.
     CommandLeaf:
       properties:
         decision:

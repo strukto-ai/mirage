@@ -462,7 +462,7 @@ export interface RuleLeaf {
  * name.
  */
 export interface ValueRule {
-  readonly decision: readonly RuleLeaf[]
+  readonly decision: RuleLeaf | null
   readonly options: ReadonlyMap<string, OptionRule>
 }
 
@@ -472,7 +472,7 @@ export interface ValueRule {
  * options that must also be on the line.
  */
 export interface OptionRule {
-  readonly decision: readonly RuleLeaf[]
+  readonly decision: RuleLeaf | null
   readonly values: ReadonlyMap<string, ValueRule>
   readonly options: ReadonlyMap<string, OptionRule>
 }
@@ -480,16 +480,17 @@ export interface OptionRule {
 /**
  * One node of a profile's command tree: the root, a command, a
  * subcommand, or an operand under one. The root's `subcommands` are the
- * commands and its `decision` the root `"*"`. `otherOptions` is the
+ * commands and its `decision` the root `"*"`, null when it states none.
+ * `otherOptions` is the
  * `"-*"` entry, for an option on the line no entry on the walk names;
  * `operands` keys are shell globs over the next operand, and sit only on
  * a node without subcommands.
  */
 export interface CommandNode {
-  readonly decision: readonly RuleLeaf[]
+  readonly decision: RuleLeaf | null
   readonly subcommands: ReadonlyMap<string, CommandNode>
   readonly options: ReadonlyMap<string, OptionRule>
-  readonly otherOptions: readonly RuleLeaf[]
+  readonly otherOptions: RuleLeaf | null
   readonly operands: ReadonlyMap<string, CommandNode>
 }
 

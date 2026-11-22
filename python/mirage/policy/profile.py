@@ -89,19 +89,18 @@ def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
     validate_document("under", entries, where, root=root)
 
 
-def _read_leaves(raw: list[Any]) -> tuple[RuleLeaf, ...]:
-    return tuple(
-        RuleLeaf(decision=Outcome(item["decision"]), reason=item["reason"])
-        for item in raw
-    )
+def _read_leaf(raw: Mapping[str, Any] | None) -> RuleLeaf | None:
+    if raw is None:
+        return None
+    return RuleLeaf(decision=Outcome(raw["decision"]), reason=raw["reason"])
 
 
 def _read_option(raw: Mapping[str, Any]) -> OptionRule:
     return OptionRule(
-        decision=_read_leaves(raw["decision"]),
+        decision=_read_leaf(raw["decision"]),
         values={
             word: ValueRule(
-                decision=_read_leaves(rule["decision"]),
+                decision=_read_leaf(rule["decision"]),
                 options={
                     name: _read_option(option)
                     for name, option in rule["options"].items()
@@ -118,7 +117,7 @@ def _read_option(raw: Mapping[str, Any]) -> OptionRule:
 
 def _read_node(raw: Mapping[str, Any]) -> CommandNode:
     return CommandNode(
-        decision=_read_leaves(raw["decision"]),
+        decision=_read_leaf(raw["decision"]),
         subcommands={
             name: _read_node(node) for name, node in raw["subcommands"].items()
         },
@@ -126,7 +125,7 @@ def _read_node(raw: Mapping[str, Any]) -> CommandNode:
             name: _read_option(option)
             for name, option in raw["options"].items()
         },
-        other_options=_read_leaves(raw["other_options"]),
+        other_options=_read_leaf(raw["other_options"]),
         operands={
             word: _read_node(node) for word, node in raw["operands"].items()
         },
@@ -153,22 +152,18 @@ def command_tree(raw: Any, where: str = "commands") -> CommandNode:
     return _read_node(validate_document("tree", raw, where))
 
 
-def _leaves_doc(leaves: tuple[RuleLeaf, ...]) -> Any:
-    docs = [
-        leaf.decision.value
-        if not leaf.reason
-        else {"decision": leaf.decision.value, "reason": leaf.reason}
-        for leaf in leaves
-    ]
-    return docs[0] if len(docs) == 1 else docs
+def _leaf_doc(leaf: RuleLeaf) -> Any:
+    if not leaf.reason:
+        return leaf.decision.value
+    return {"decision": leaf.decision.value, "reason": leaf.reason}
 
 
 def _value_doc(rule: ValueRule) -> Any:
     if rule.decision and not rule.options:
-        return _leaves_doc(rule.decision)
+        return _leaf_doc(rule.decision)
     doc: dict[str, Any] = {}
     if rule.decision:
-        doc["*"] = _leaves_doc(rule.decision)
+        doc["*"] = _leaf_doc(rule.decision)
     doc.update(
         {name: _option_doc(option) for name, option in rule.options.items()}
     )
@@ -177,10 +172,10 @@ def _value_doc(rule: ValueRule) -> Any:
 
 def _option_doc(rule: OptionRule) -> Any:
     if rule.decision and not rule.values and not rule.options:
-        return _leaves_doc(rule.decision)
+        return _leaf_doc(rule.decision)
     doc: dict[str, Any] = {}
     if rule.decision:
-        doc["*"] = _leaves_doc(rule.decision)
+        doc["*"] = _leaf_doc(rule.decision)
     if rule.values:
         doc["values"] = {
             word: _value_doc(value) for word, value in rule.values.items()
@@ -195,7 +190,7 @@ def _node_doc(node: CommandNode) -> Any:
     if node.decision and not (
         node.subcommands or node.options or node.other_options or node.operands
     ):
-        return _leaves_doc(node.decision)
+        return _leaf_doc(node.decision)
     return tree_doc(node)
 
 
@@ -208,9 +203,9 @@ def tree_doc(tree: CommandNode) -> dict[str, Any]:
     """
     doc: dict[str, Any] = {}
     if tree.decision:
-        doc["*"] = _leaves_doc(tree.decision)
+        doc["*"] = _leaf_doc(tree.decision)
     if tree.other_options:
-        doc["-*"] = _leaves_doc(tree.other_options)
+        doc["-*"] = _leaf_doc(tree.other_options)
     doc.update(
         {name: _option_doc(option) for name, option in tree.options.items()}
     )

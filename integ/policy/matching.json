@@ -261,21 +261,15 @@
       }
     },
     {
-      "name": "list_leaf_takes_its_strictest",
+      "name": "a_folder_leaf_judges_a_line_on_its_folder",
       "trees": [
         {
           "mount": "/repo",
           "commands": {
-            "cp": [
-              {
-                "decision": "deny",
-                "reason": "broad"
-              },
-              {
-                "decision": "ask",
-                "reason": "deep"
-              }
-            ]
+            "cp": {
+              "decision": "deny",
+              "reason": "broad"
+            }
           }
         }
       ],
@@ -299,7 +293,7 @@
       },
       "expected": {
         "outcome": "deny",
-        "at": "/cp/*/0",
+        "at": "/cp/*",
         "source": "mounts./repo",
         "asks": []
       }

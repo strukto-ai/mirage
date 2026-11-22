@@ -22,7 +22,7 @@ export function hasRules(rules: AdmissionRules | null): boolean {
 }
 
 function rootDenies(scoped: ScopedTree): boolean {
-  return !scoped.mount && scoped.tree.decision.some((leaf) => leaf.decision === Outcome.DENY)
+  return !scoped.mount && scoped.tree.decision?.decision === Outcome.DENY
 }
 
 /**

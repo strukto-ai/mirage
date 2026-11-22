@@ -1816,7 +1816,7 @@ describe('command permissions end to end', () => {
               cat: 'allow',
               rm: 'allow',
               ls: 'allow',
-              head: ['allow', { decision: 'deny', reason: 'no heads' }],
+              head: { decision: 'deny', reason: 'no heads' },
             },
             mounts: {
               '/repo/private': { commands: { cat: { decision: 'deny', reason: 'private' } } },

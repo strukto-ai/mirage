@@ -235,7 +235,7 @@ describe('MirageService', () => {
             '*': 'deny',
             cat: 'allow',
             echo: 'allow',
-            rm: ['allow', { decision: 'deny', reason: 'no removes' }],
+            rm: { decision: 'deny', reason: 'no removes' },
           },
         },
       },
@@ -311,7 +311,7 @@ describe('MirageService', () => {
           commands: {
             '*': 'deny',
             cat: 'allow',
-            rm: ['allow', { decision: 'ask', reason: 'deletes are reviewed' }],
+            rm: { decision: 'ask', reason: 'deletes are reviewed' },
           },
         },
       },

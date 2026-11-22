@@ -1192,7 +1192,7 @@
       "error": "no decision"
     },
     {
-      "name": "commands: an empty leaf list",
+      "name": "commands: an empty list is no decision",
       "config": {
         "mounts": {
           "/d": {
@@ -1207,7 +1207,54 @@
           }
         }
       },
-      "error": "lists no decision"
+      "error": "commands.rm: a rule is one decision, not a list"
+    },
+    {
+      "name": "commands: a rule is one decision, not a list",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": [
+                "allow",
+                "deny"
+              ]
+            }
+          }
+        }
+      },
+      "error": "commands.rm: a rule is one decision, not a list"
+    },
+    {
+      "name": "mount section: a rule is one decision, not a list",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "mounts": {
+              "/d/keep": {
+                "commands": {
+                  "rm": {
+                    "--force": [
+                      "deny"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "error": "mounts[/d/keep].commands.rm.--force: a rule is one decision, not a list"
     },
     {
       "name": "commands: a leaf object needs its decision",
@@ -1391,22 +1438,19 @@
             "mounts": {
               "/d": {
                 "commands": {
-                  "rm": [
-                    "allow",
-                    {
-                      "decision": "deny",
-                      "paths": [
-                        "/d/keep/*"
-                      ]
-                    }
-                  ]
+                  "rm": {
+                    "decision": "deny",
+                    "paths": [
+                      "/d/keep/*"
+                    ]
+                  }
                 }
               }
             }
           }
         }
       },
-      "error": "mounts[/d].commands.rm[1]: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
+      "error": "mounts[/d].commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
     },
     {
       "name": "profile: a mounts key is a literal path, never a glob",

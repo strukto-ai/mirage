@@ -29,15 +29,13 @@ export const DEFAULT_PROFILE = 'default'
 export const OLDER_FORMAT = new AdmissionRules([
   {
     tree: {
-      decision: [
-        {
-          decision: Outcome.DENY,
-          reason: 'rules saved in an older format; recreate the session',
-        },
-      ],
+      decision: {
+        decision: Outcome.DENY,
+        reason: 'rules saved in an older format; recreate the session',
+      },
       subcommands: new Map(),
       options: new Map(),
-      otherOptions: [],
+      otherOptions: null,
       operands: new Map(),
     },
     mount: '',

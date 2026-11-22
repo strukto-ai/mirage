@@ -1647,7 +1647,7 @@ VEILED_DOC = {
         "cat": "allow",
         "rm": "allow",
         "ls": "allow",
-        "head": ["allow", {"decision": "deny", "reason": "no heads"}],
+        "head": {"decision": "deny", "reason": "no heads"},
     },
     "mounts": {
         "/repo/private": {
@@ -3137,15 +3137,12 @@ def test_a_policy_names_its_programs_per_method():
                 "mounts": {
                     "/d": {
                         "commands": {
-                            "rm": [
-                                "allow",
-                                {"decision": "deny", "paths": ["/d/keep/*"]},
-                            ]
+                            "rm": {"decision": "deny", "paths": ["/d/keep/*"]}
                         }
                     }
                 }
             },
-            "mounts[/d].commands.rm[1]: a rule takes no paths; scope it to "
+            "mounts[/d].commands.rm: a rule takes no paths; scope it to "
             "a folder with mounts[/d/keep].commands.rm",
         ),
     ],
@@ -3218,10 +3215,7 @@ _TREE = {
         "checkout": {"operands": {"main": "deny", "release/*": "ask"}},
     },
     "cp": {
-        "*": [
-            "ask",
-            {"decision": "deny", "reason": "kept"},
-        ],
+        "*": {"decision": "deny", "reason": "kept"},
         "-*": "deny",
         "--recursive": {"--force": "deny"},
     },
@@ -3230,27 +3224,24 @@ _TREE = {
 
 def test_command_tree_reads_names_options_operands_and_values():
     tree = command_tree(_TREE)
-    assert tree.decision == (RuleLeaf(Outcome.ALLOW),)
-    assert tree.subcommands["rm"].decision == (
-        RuleLeaf(Outcome.ASK, "Deletes need sign-off"),
+    assert tree.decision == RuleLeaf(Outcome.ALLOW)
+    assert tree.subcommands["rm"].decision == RuleLeaf(
+        Outcome.ASK, "Deletes need sign-off"
     )
     merge = tree.subcommands["gh"].subcommands["pr"].subcommands["merge"]
-    assert merge.options["--admin"].decision == (RuleLeaf(Outcome.DENY),)
+    assert merge.options["--admin"].decision == RuleLeaf(Outcome.DENY)
     request = tree.subcommands["curl"].options["--request"]
-    assert request.decision == ()
-    assert request.values["POST"].options["--insecure"].decision == (
-        RuleLeaf(Outcome.DENY),
+    assert request.decision is None
+    assert request.values["POST"].options["--insecure"].decision == RuleLeaf(
+        Outcome.DENY
     )
     checkout = tree.subcommands["git"].subcommands["checkout"]
-    assert checkout.operands["release/*"].decision == (RuleLeaf(Outcome.ASK),)
+    assert checkout.operands["release/*"].decision == RuleLeaf(Outcome.ASK)
     cp = tree.subcommands["cp"]
-    assert cp.decision == (
-        RuleLeaf(Outcome.ASK),
-        RuleLeaf(Outcome.DENY, "kept"),
-    )
-    assert cp.other_options == (RuleLeaf(Outcome.DENY),)
-    assert cp.options["--recursive"].options["--force"].decision == (
-        RuleLeaf(Outcome.DENY),
+    assert cp.decision == RuleLeaf(Outcome.DENY, "kept")
+    assert cp.other_options == RuleLeaf(Outcome.DENY)
+    assert cp.options["--recursive"].options["--force"].decision == RuleLeaf(
+        Outcome.DENY
     )
 
 
@@ -3276,7 +3267,15 @@ def test_tree_doc_writes_the_block_it_reads_from():
         ({"--force": "deny"}, "needs a command"),
         ({"gh": {"pr": "allow", "operands": {"x": "deny"}}}, "operands sit"),
         ({"rm": "maybe"}, "is no decision"),
-        ({"rm": []}, "lists no decision"),
+        ({"rm": []}, "commands.rm: a rule is one decision, not a list"),
+        (
+            {"rm": ["deny"]},
+            "commands.rm: a rule is one decision, not a list",
+        ),
+        (
+            {"gh": {"pr": {"--admin": ["allow", "deny"]}}},
+            "commands.gh.pr.--admin: a rule is one decision, not a list",
+        ),
     ],
 )
 def test_command_tree_refuses_a_misshapen_block(block, message):

@@ -165,9 +165,9 @@ function plain(tree: CommandNode): boolean {
   const bare =
     tree.subcommands.size === 0 &&
     tree.options.size === 0 &&
-    tree.otherOptions.length === 0 &&
+    tree.otherOptions === null &&
     tree.operands.size === 0
-  return bare && tree.decision.every((leaf) => leaf.reason === '')
+  return bare && (tree.decision === null || tree.decision.reason === '')
 }
 
 function node(
@@ -201,7 +201,7 @@ function node(
   }
   if (tree.operands.size > 0 && spec.subcommands.length > 0)
     throw new PolicyError(`${at}: this command takes a subcommand, so its operands go under one`)
-  if (tree.otherOptions.length > 0 && passthrough)
+  if (tree.otherOptions !== null && passthrough)
     throw new PolicyError(
       `${at}.-*: this command's script reads its own words, so it has no option to name`,
     )

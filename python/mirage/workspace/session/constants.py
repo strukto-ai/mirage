@@ -32,11 +32,9 @@ OLDER_FORMAT = AdmissionRules(
     (
         ScopedTree(
             CommandNode(
-                decision=(
-                    RuleLeaf(
-                        Outcome.DENY,
-                        "rules saved in an older format; recreate the session",
-                    ),
+                decision=RuleLeaf(
+                    Outcome.DENY,
+                    "rules saved in an older format; recreate the session",
                 )
             )
         ),

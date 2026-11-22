@@ -369,7 +369,7 @@ export function unlistedService(
 
 function yieldsAllow(node: CommandNode): boolean {
   return (
-    node.decision.some((leaf) => leaf.decision === Outcome.ALLOW) ||
+    node.decision?.decision === Outcome.ALLOW ||
     [...node.subcommands.values()].some(yieldsAllow) ||
     [...node.operands.values()].some(yieldsAllow)
   )

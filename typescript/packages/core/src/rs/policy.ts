@@ -122,17 +122,17 @@ export class PolicyMatcher {
   }
 }
 
-function leavesWire(leaves: readonly RuleLeaf[]): util.JSONType[] {
-  return leaves.map((leaf) => ({ decision: leaf.decision, reason: units(leaf.reason) }))
+function leafWire(leaf: RuleLeaf | null): util.JSONType {
+  return leaf === null ? null : { decision: leaf.decision, reason: units(leaf.reason) }
 }
 
 function optionWire(rule: OptionRule): Wire {
   return {
-    decision: leavesWire(rule.decision),
+    decision: leafWire(rule.decision),
     values: [...rule.values].map(([word, value]) => [
       units(word),
       {
-        decision: leavesWire(value.decision),
+        decision: leafWire(value.decision),
         options: [...value.options].map(([name, option]) => [units(name), optionWire(option)]),
       },
     ]),
@@ -146,10 +146,10 @@ function optionWire(rule: OptionRule): Wire {
  */
 export function treeWire(node: CommandNode): Wire {
   return {
-    decision: leavesWire(node.decision),
+    decision: leafWire(node.decision),
     subcommands: [...node.subcommands].map(([name, child]) => [units(name), treeWire(child)]),
     options: [...node.options].map(([name, option]) => [units(name), optionWire(option)]),
-    other_options: leavesWire(node.otherOptions),
+    other_options: leafWire(node.otherOptions),
     operands: [...node.operands].map(([word, child]) => [units(word), treeWire(child)]),
   }
 }

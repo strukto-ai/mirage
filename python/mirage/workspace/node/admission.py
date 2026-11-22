@@ -358,7 +358,7 @@ def unlisted_service(
 
 def _yields_allow(node: CommandNode) -> bool:
     return (
-        any(leaf.decision is Outcome.ALLOW for leaf in node.decision)
+        (node.decision is not None and node.decision.decision is Outcome.ALLOW)
         or any(map(_yields_allow, node.subcommands.values()))
         or any(map(_yields_allow, node.operands.values()))
     )

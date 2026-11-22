@@ -268,36 +268,36 @@ function underMount(entries: readonly string[], root: string, where: string): vo
 }
 
 interface ValueDoc {
-  decision: RuleLeaf[]
+  decision: RuleLeaf | null
   options: Record<string, OptionDoc>
 }
 
 interface OptionDoc {
-  decision: RuleLeaf[]
+  decision: RuleLeaf | null
   values: Record<string, ValueDoc>
   options: Record<string, OptionDoc>
 }
 
 interface NodeDoc {
-  decision: RuleLeaf[]
+  decision: RuleLeaf | null
   subcommands: Record<string, NodeDoc>
   options: Record<string, OptionDoc>
-  other_options: RuleLeaf[]
+  other_options: RuleLeaf | null
   operands: Record<string, NodeDoc>
 }
 
-function readLeaves(raw: readonly RuleLeaf[]): readonly RuleLeaf[] {
-  return raw.map((item) => ({ decision: item.decision, reason: item.reason }))
+function readLeaf(raw: RuleLeaf | null): RuleLeaf | null {
+  return raw === null ? null : { decision: raw.decision, reason: raw.reason }
 }
 
 function readOption(raw: OptionDoc): OptionRule {
   return {
-    decision: readLeaves(raw.decision),
+    decision: readLeaf(raw.decision),
     values: new Map(
       Object.entries(raw.values).map(([word, rule]) => [
         word,
         {
-          decision: readLeaves(rule.decision),
+          decision: readLeaf(rule.decision),
           options: new Map(
             Object.entries(rule.options).map(([name, option]) => [name, readOption(option)]),
           ),
@@ -312,14 +312,14 @@ function readOption(raw: OptionDoc): OptionRule {
 
 function readNode(raw: NodeDoc): CommandNode {
   return {
-    decision: readLeaves(raw.decision),
+    decision: readLeaf(raw.decision),
     subcommands: new Map(
       Object.entries(raw.subcommands).map(([name, node]) => [name, readNode(node)]),
     ),
     options: new Map(
       Object.entries(raw.options).map(([name, option]) => [name, readOption(option)]),
     ),
-    otherOptions: readLeaves(raw.other_options),
+    otherOptions: readLeaf(raw.other_options),
     operands: new Map(Object.entries(raw.operands).map(([word, node]) => [word, readNode(node)])),
   }
 }
@@ -335,26 +335,23 @@ export function commandTree(raw: unknown, where = 'commands'): CommandNode {
   return readNode(validateDocument('tree', raw, where) as NodeDoc)
 }
 
-function leavesDoc(leaves: readonly RuleLeaf[]): unknown {
-  const docs = leaves.map((leaf) =>
-    leaf.reason === '' ? leaf.decision : { decision: leaf.decision, reason: leaf.reason },
-  )
-  return docs.length === 1 ? docs[0] : docs
+function leafDoc(leaf: RuleLeaf): unknown {
+  return leaf.reason === '' ? leaf.decision : { decision: leaf.decision, reason: leaf.reason }
 }
 
 function valueDoc(rule: ValueRule): unknown {
-  if (rule.decision.length > 0 && rule.options.size === 0) return leavesDoc(rule.decision)
+  if (rule.decision !== null && rule.options.size === 0) return leafDoc(rule.decision)
   const doc: [string, unknown][] = []
-  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  if (rule.decision !== null) doc.push(['*', leafDoc(rule.decision)])
   for (const [name, option] of rule.options) doc.push([name, optionDoc(option)])
   return Object.fromEntries(doc)
 }
 
 function optionDoc(rule: OptionRule): unknown {
-  if (rule.decision.length > 0 && rule.values.size === 0 && rule.options.size === 0)
-    return leavesDoc(rule.decision)
+  if (rule.decision !== null && rule.values.size === 0 && rule.options.size === 0)
+    return leafDoc(rule.decision)
   const doc: [string, unknown][] = []
-  if (rule.decision.length > 0) doc.push(['*', leavesDoc(rule.decision)])
+  if (rule.decision !== null) doc.push(['*', leafDoc(rule.decision)])
   if (rule.values.size > 0)
     doc.push([
       'values',
@@ -368,9 +365,9 @@ function nodeDoc(node: CommandNode): unknown {
   const bare =
     node.subcommands.size === 0 &&
     node.options.size === 0 &&
-    node.otherOptions.length === 0 &&
+    node.otherOptions === null &&
     node.operands.size === 0
-  if (node.decision.length > 0 && bare) return leavesDoc(node.decision)
+  if (node.decision !== null && bare) return leafDoc(node.decision)
   return treeDoc(node)
 }
 
@@ -380,8 +377,8 @@ function nodeDoc(node: CommandNode): unknown {
  */
 export function treeDoc(tree: CommandNode): Record<string, unknown> {
   const doc: [string, unknown][] = []
-  if (tree.decision.length > 0) doc.push(['*', leavesDoc(tree.decision)])
-  if (tree.otherOptions.length > 0) doc.push(['-*', leavesDoc(tree.otherOptions)])
+  if (tree.decision !== null) doc.push(['*', leafDoc(tree.decision)])
+  if (tree.otherOptions !== null) doc.push(['-*', leafDoc(tree.otherOptions)])
   for (const [name, option] of tree.options) doc.push([name, optionDoc(option)])
   for (const [name, node] of tree.subcommands) doc.push([name, nodeDoc(node)])
   if (tree.operands.size > 0)
