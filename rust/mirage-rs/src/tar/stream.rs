@@ -12,6 +12,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config.owner = read.owner;
         config.group = read.group;
         config.transforms = Mutex::new(read.transforms);
+        config.top = read.top;
     }
     Ok(task::spawn(|host| async move {
         match config.mode {

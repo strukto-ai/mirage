@@ -13,6 +13,8 @@ pub(super) struct Read {
     pub(super) owner: Option<Owner>,
     pub(super) group: Option<Owner>,
     pub(super) transforms: Transforms,
+    /// `--one-top-level`: the folder each extracted member lands under.
+    pub(super) top: Option<Vec<u8>>,
 }
 
 /// What extraction does to a file that is already there.
@@ -65,6 +67,27 @@ fn owner(text: &[u8]) -> Result<Owner, StreamError> {
     }
 }
 
+/// The folder a bare `--one-top-level` names: the archive's base name
+/// without a compression suffix, then without `.tar`. A name with neither
+/// names none.
+pub(super) fn top_of(archive: &[u8]) -> Option<Vec<u8>> {
+    const ALIASES: [&[u8]; 9] = [
+        b".tgz", b".taz", b".taZ", b".tz2", b".tbz2", b".tbz", b".tlz", b".txz", b".tzst",
+    ];
+    const CODECS: [&[u8]; 8] = [
+        b".gz", b".Z", b".bz2", b".lzma", b".lzo", b".lz", b".xz", b".zst",
+    ];
+    let base = archive.rsplit(|&b| b == b'/').next().unwrap_or(archive);
+    let stem = match ALIASES.iter().find_map(|suffix| base.strip_suffix(*suffix)) {
+        Some(stem) => stem,
+        None => match CODECS.iter().find_map(|suffix| base.strip_suffix(*suffix)) {
+            Some(stem) => stem.strip_suffix(b".tar").unwrap_or(stem),
+            None => base.strip_suffix(b".tar")?,
+        },
+    };
+    (!stem.is_empty()).then(|| stem.to_vec())
+}
+
 /// argmatch over `--sort`'s three words, a unique prefix counting.
 fn sort(text: &[u8]) -> Result<(), StreamError> {
     const WORDS: [&[u8]; 3] = [b"none", b"name", b"inode"];
@@ -103,6 +126,9 @@ pub(super) fn read(typed: &[(String, String)]) -> Result<Read, StreamError> {
     let mut archive_is_dash = false;
     let mut compressed = false;
     let mut overwrite: Option<&'static str> = None;
+    let mut archive: Option<&str> = None;
+    let mut absolute = false;
+    let mut top: Option<&str> = None;
     let mut out = Read::default();
     for (name, text) in typed {
         match name.as_str() {
@@ -117,7 +143,10 @@ pub(super) fn read(typed: &[(String, String)]) -> Result<Read, StreamError> {
             "file" => {
                 archives += 1;
                 archive_is_dash = text == "-";
+                archive = Some(text);
             }
+            "absolute_names" => absolute = true,
+            "one_top_level" => top = Some(text),
             "gzip" | "bzip2" | "xz" | "zstd" => compressed = true,
             "keep_old_files" | "overwrite" | "skip_old_files" => {
                 let (long, keep) = match name.as_str() {
@@ -169,6 +198,22 @@ pub(super) fn read(typed: &[(String, String)]) -> Result<Read, StreamError> {
     }
     if matches!(mode, "append" | "update") && (archive_is_dash || archives == 0) {
         return Err(refused(b"Options '-Aru' are incompatible with '-f -'"));
+    }
+    if let Some(top) = top {
+        if absolute {
+            return Err(refused(
+                b"'--one-top-level' cannot be used with '--absolute-names'",
+            ));
+        }
+        out.top = Some(if top.is_empty() {
+            top_of(&bytes(archive.unwrap_or_default())?).ok_or_else(|| {
+                refused(
+                    b"Cannot deduce top-level directory name; please set it explicitly with --one-top-level=DIR",
+                )
+            })?
+        } else {
+            bytes(top)?
+        });
     }
     Ok(out)
 }
@@ -234,6 +279,35 @@ mod tests {
         );
         assert_eq!(
             read(&[("create", ""), ("create", ""), ("file", "a")]),
+            Ok(0)
+        );
+    }
+
+    #[test]
+    fn one_top_level_refuses_what_gnu_tar_refuses() {
+        assert_eq!(
+            read(&[("file", "noext"), ("extract", ""), ("one_top_level", "")]),
+            refusal(
+                "tar: Cannot deduce top-level directory name; please set it explicitly with --one-top-level=DIR"
+            )
+        );
+        assert_eq!(
+            read(&[("list", ""), ("one_top_level", "")]),
+            refusal(
+                "tar: Cannot deduce top-level directory name; please set it explicitly with --one-top-level=DIR"
+            )
+        );
+        assert_eq!(
+            read(&[
+                ("file", "a.tar"),
+                ("list", ""),
+                ("absolute_names", ""),
+                ("one_top_level", "X")
+            ]),
+            refusal("tar: '--one-top-level' cannot be used with '--absolute-names'")
+        );
+        assert_eq!(
+            read(&[("file", "a.tar"), ("extract", ""), ("one_top_level", "")]),
             Ok(0)
         );
     }

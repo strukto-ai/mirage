@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from io import BytesIO
@@ -23,16 +24,20 @@ from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
     BadConfigValueError,
     BadNumericConfigError,
+    ConfigKeyError,
     ConfigUsageError,
     GitError,
 )
-from mirage.commands.cli.builtin.git.io import read_optional
+from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.session import inside
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    DOTTED_HEADER,
+    QUOTED_HEADER,
     WIDE_INT_BITS,
     command_line_config,
     config_int,
+    config_value,
     maybe_bool,
     parse_config_key,
     require_vfs,
@@ -59,6 +64,11 @@ WRITING_SUBCOMMANDS = (
     "remove-section",
     "edit",
 )
+READING_ACTIONS = ("list", "get", "get_all", "get_regexp")
+WRITING_ACTIONS = ("add", "unset")
+NOTHING_TO_CHANGE_EXIT = 5
+WRITE_KEY_EXIT = 2
+PLAIN_HEADER = re.compile(rb"\s*\[([A-Za-z0-9-]+)\s*\]")
 # The value types mirage renders; git's others paint or read dates.
 VALUE_KINDS = ("bool", "int", "bool-or-int", "path")
 OTHER_VALUE_KINDS = ("bool-or-str", "color", "expiry-date")
@@ -431,36 +441,309 @@ def _value_test(
     return matches
 
 
-async def config(
-    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
-) -> tuple[ByteSource | None, IOResult]:
-    """Read configuration: ``--list``, ``--get`` and their subcommands.
+_Block = tuple[bytes, bytes | None, bool]
 
-    Writes stay refused. Reading goes through the same scopes git has,
-    and a default read takes every file and then the command line, so
-    the last value wins across all of them.
+
+@dataclass(frozen=True, slots=True)
+class _ConfigLine:
+    """One line of a config file, as the writer reads it.
 
     Args:
-        accessor (Accessor): git reaches no service.
-        paths (list[PathSpec]): the path operands; git declares none.
-        texts (list[str]): the name and value pattern.
-        ctx (Context): the line's context.
+        start (int): its first physical line.
+        end (int): one past its last (a value continued by a backslash
+            runs on).
+        header (_Block | None): a header's
+            section (lowercased), subsection and whether that compares
+            without case (the older ``[section.sub]`` spelling).
+        noted (bool): a header with more on its line.
+        name (bytes | None): a variable's name, lowercased.
+        comment (bool): a comment line.
     """
-    fl = FlagView(ctx.flags)
-    words = list(texts)
-    action_named = any(
-        fl.as_bool(flag) for flag in ("list", "get", "get_all", "get_regexp")
+
+    start: int
+    end: int
+    header: _Block | None = None
+    noted: bool = False
+    name: bytes | None = None
+    comment: bool = False
+
+
+def _header_of(line: bytes) -> tuple[_Block, bool]:
+    """A header line's block and whether more follows it on the line.
+
+    Args:
+        line (bytes): the line, ``[`` its first character but spaces.
+    """
+    quoted = QUOTED_HEADER.match(line)
+    dotted = DOTTED_HEADER.match(line)
+    plain = PLAIN_HEADER.match(line)
+    block: _Block
+    if quoted is not None:
+        block = (
+            quoted.group(1).lower(),
+            re.sub(rb"\\(.)", rb"\1", quoted.group(2)),
+            False,
+        )
+        end = quoted.end()
+    elif dotted is not None:
+        block = (dotted.group(1).lower(), dotted.group(2).lower(), True)
+        end = dotted.end()
+    elif plain is not None:
+        block = (plain.group(1).lower(), None, False)
+        end = plain.end()
+    else:
+        return (b"", None, False), True
+    return block, bool(line[end:].strip())
+
+
+def _config_lines_of(raw: list[bytes]) -> list[_ConfigLine]:
+    """The file's lines, a continued value joined to the line it opens.
+
+    Args:
+        raw (list[bytes]): the physical lines, each with its ending.
+    """
+    out: list[_ConfigLine] = []
+    at = 0
+    while at < len(raw):
+        line = raw[at]
+        text = line.strip()
+        if text.startswith(b"["):
+            block, noted = _header_of(line)
+            out.append(_ConfigLine(at, at + 1, header=block, noted=noted))
+            at += 1
+            continue
+        if not text or text.startswith((b"#", b";")):
+            out.append(_ConfigLine(at, at + 1, comment=bool(text)))
+            at += 1
+            continue
+        end = at + 1
+        body = line.rstrip(b"\r\n")
+        while body.endswith(b"\\") and end < len(raw):
+            body = raw[end].rstrip(b"\r\n")
+            end += 1
+        name = text.partition(b"=")[0].strip().lower()
+        out.append(_ConfigLine(at, end, name=name))
+        at = end
+    return out
+
+
+def _in_block(
+    block: _Block,
+    section: bytes,
+    subsection: bytes | None,
+) -> bool:
+    """Whether a header opens the block a name lives in.
+
+    Args:
+        block (_Block): the header's block.
+        section (bytes): the name's section, lowercased.
+        subsection (bytes | None): the name's subsection, as typed.
+    """
+    name, sub, caseless = block
+    if name != section or (sub is None) != (subsection is None):
+        return False
+    if sub is None or subsection is None:
+        return True
+    return sub == (subsection.lower() if caseless else subsection)
+
+
+def _config_edit(
+    data: bytes, key: str, value: str | None, adding: bool
+) -> bytes | IOResult:
+    """The config text with one variable set, added or taken out.
+
+    A set rewrites the one line the variable has, and a new variable
+    goes after the last variable of the last block it belongs in, or in
+    a new block at the end, spelled as typed. Taking the last variable
+    out of a block takes the block too, with the blank lines around it,
+    unless a comment is there or the next block is the same one (pinned
+    against git 2.47.3).
+
+    Args:
+        data (bytes): the file as it is.
+        key (str): the name as typed.
+        value (str | None): the value to set or add; None takes it out.
+        adding (bool): add a value beside any the variable has.
+
+    Returns:
+        bytes | IOResult: the new text, or git's refusal.
+    """
+    section, _, rest = key.partition(".")
+    subsection, dot, variable = rest.rpartition(".")
+    sub = subsection.encode() if dot else None
+    wanted = (section.lower().encode(), variable.lower().encode())
+    raw = data.splitlines(keepends=True)
+    lines = _config_lines_of(raw)
+    block: _Block | None = None
+    owners: list[int] = []
+    matches: list[int] = []
+    for index, line in enumerate(lines):
+        if line.header is not None:
+            block = line.header
+            if _in_block(block, wanted[0], sub):
+                owners.append(index)
+        elif (
+            line.name == wanted[1]
+            and block is not None
+            and _in_block(block, wanted[0], sub)
+        ):
+            matches.append(index)
+    if value is None:
+        if not matches:
+            return IOResult(exit_code=NOTHING_TO_CHANGE_EXIT)
+        if len(matches) > 1:
+            return IOResult(
+                exit_code=NOTHING_TO_CHANGE_EXIT,
+                stderr=encode_text(f"warning: {key} has multiple values\n"),
+            )
+        return b"".join(_without(raw, lines, matches[0]))
+    entry = f"\t{variable} = {config_value(value)}\n".encode()
+    if matches and not adding:
+        if len(matches) > 1:
+            return IOResult(
+                exit_code=NOTHING_TO_CHANGE_EXIT,
+                stderr=encode_text(
+                    f"warning: {key} has multiple values\n"
+                    "error: cannot overwrite multiple values with a "
+                    "single value\n"
+                    f"       Use a regexp, --add or --replace-all to change "
+                    f"{key}.\n"
+                ),
+            )
+        found = lines[matches[0]]
+        return b"".join(raw[: found.start] + [entry] + raw[found.end :])
+    if owners:
+        after = lines[owners[-1]].end
+        for line in lines[owners[-1] + 1 :]:
+            if line.header is not None:
+                break
+            if line.name is not None:
+                after = line.end
+        if not raw[after - 1].endswith(b"\n"):
+            entry = b"\n" + entry
+        return b"".join(raw[:after] + [entry] + raw[after:])
+    head = (
+        f"[{section}]\n"
+        if sub is None
+        else '[{} "{}"]\n'.format(
+            section, subsection.replace("\\", "\\\\").replace('"', '\\"')
+        )
     )
-    if not action_named and words[:1] and words[0] in WRITING_SUBCOMMANDS:
-        return _read_only()
-    if not action_named and words[:1] not in (["list"], ["get"]):
-        if not words and fl.as_str("default") is None:
-            raise ConfigUsageError("no action specified")
-        if len(words) > 1:
-            return _read_only()
-    query, fewest, most = _query_of(fl, words)
-    if not fewest <= len(words) <= most:
-        raise ConfigUsageError(_usage_of(fewest, most))
+    text = data if not data or data.endswith(b"\n") else data + b"\n"
+    return text + head.encode() + entry
+
+
+def _without(
+    raw: list[bytes], lines: list[_ConfigLine], index: int
+) -> list[bytes]:
+    """The physical lines with one variable out, and its block if that
+    leaves it empty.
+
+    Args:
+        raw (list[bytes]): the physical lines.
+        lines (list[_ConfigLine]): the lines as the writer reads them.
+        index (int): the variable's line.
+    """
+    found = lines[index]
+    head = max(
+        (at for at in range(index) if lines[at].header is not None),
+        default=None,
+    )
+    drop = set(range(found.start, found.end))
+    if head is None or lines[head].noted:
+        return [line for at, line in enumerate(raw) if at not in drop]
+    after = next(
+        (
+            at
+            for at in range(head + 1, len(lines))
+            if lines[at].header is not None
+        ),
+        len(lines),
+    )
+    block = lines[head].header
+    inner = [lines[at] for at in range(head + 1, after) if at != index]
+    before = next(
+        (
+            lines[at]
+            for at in range(head - 1, -1, -1)
+            if lines[at].header is not None
+            or lines[at].name is not None
+            or lines[at].comment
+        ),
+        None,
+    )
+    if (
+        any(line.name is not None or line.comment for line in inner)
+        or (before is not None and before.comment)
+        or (after < len(lines) and lines[after].header == block)
+    ):
+        return [line for at, line in enumerate(raw) if at not in drop]
+    first = before.end if before is not None else 0
+    last = lines[after].start if after < len(lines) else len(raw)
+    return raw[:first] + raw[last:]
+
+
+async def _config_path(ctx: Context, fl: FlagView) -> PathSpec:
+    """The one file a write changes, as git picks it.
+
+    ``--global`` writes ``~/.gitconfig``, or the XDG file when only that
+    one exists.
+
+    Args:
+        ctx (Context): the line's context.
+        fl (FlagView): parsed flags.
+
+    Raises:
+        GitError: no ``$HOME`` for ``--global``, or no repository for
+            the repository's own file.
+    """
+    named = fl.as_str("file")
+    if named is not None:
+        return start_point(fl).join(named)
+    env = ctx.env or {}
+    if fl.as_bool("global"):
+        override = env.get("GIT_CONFIG_GLOBAL")
+        if override is not None:
+            return PathSpec.from_str_path(override, cwd="/")
+        home = env.get("HOME", "")
+        if not home:
+            raise GitError("$HOME not set")
+        target = PathSpec.from_str_path(
+            posixpath.join(home, ".gitconfig"), cwd="/"
+        )
+        xdg = PathSpec.from_str_path(
+            posixpath.join(
+                env.get("XDG_CONFIG_HOME") or posixpath.join(home, ".config"),
+                "git/config",
+            ),
+            cwd="/",
+        )
+        vfs = require_vfs(ctx)
+        if (
+            await read_optional(vfs, target) is None
+            and await read_optional(vfs, xdg) is not None
+        ):
+            return xdg
+        return target
+    if fl.as_bool("system"):
+        return PathSpec.from_str_path(
+            env.get("GIT_CONFIG_SYSTEM", SYSTEM_CONFIG), cwd="/"
+        )
+    location = await inside(ctx, fl)
+    if location is None:
+        raise GitError("not in a git directory")
+    return location.commondir.join("config")
+
+
+def _one_file(fl: FlagView) -> None:
+    """Refuse a line naming more than one config file.
+
+    Args:
+        fl (FlagView): parsed flags.
+
+    Raises:
+        ConfigUsageError: two scopes, or a scope and ``--file``.
+    """
     if (
         sum(
             (
@@ -474,6 +757,122 @@ async def config(
         > 1
     ):
         raise ConfigUsageError("only one config file at a time")
+
+
+async def _config_write(
+    ctx: Context, fl: FlagView, words: list[str]
+) -> tuple[ByteSource | None, IOResult] | None:
+    """A set, ``--add`` or unset, or None when the line reads.
+
+    ``set``, ``unset``, ``--add``, ``--unset`` and the two-word set
+    change one file. What else writes (a value pattern, ``--all``, a
+    type, ``--replace-all``, the section subcommands, ``edit``) stays
+    refused.
+
+    Args:
+        ctx (Context): the line's context.
+        fl (FlagView): parsed flags.
+        words (list[str]): the operands.
+    """
+    actions = fl.typed_order(*READING_ACTIONS, *WRITING_ACTIONS)
+    writes = [name for name in actions if name in WRITING_ACTIONS]
+    if writes and len(actions) > 1:
+        later, earlier = (
+            actions[-1],
+            next(name for name in actions if name != actions[-1]),
+        )
+        raise ConfigUsageError(
+            f"options '--{later.replace('_', '-')}' and "
+            f"'--{earlier.replace('_', '-')}' cannot be used together"
+        )
+    if actions and not writes:
+        return None
+    subcommand = words[0] if not actions and words else None
+    if subcommand in ("list", "get"):
+        return None
+    if subcommand in ("set", "unset"):
+        words = words[1:]
+        count = 2 if subcommand == "set" else 1
+        if len(words) != count:
+            raise ConfigUsageError(_usage_of(count, count))
+        if fl.as_bool("all") or fl.as_str("value") is not None:
+            return _read_only()
+        value = words[1] if subcommand == "set" else None
+    elif subcommand in WRITING_SUBCOMMANDS:
+        return _read_only()
+    elif writes == ["add"]:
+        if len(words) != 2:
+            raise ConfigUsageError(_usage_of(2, 2))
+        value = words[1]
+    elif writes == ["unset"]:
+        if not 1 <= len(words) <= 2:
+            raise ConfigUsageError(_usage_of(1, 2))
+        if len(words) == 2:
+            return _read_only()
+        value = None
+    elif len(words) == 2:
+        value = words[1]
+    elif len(words) > 2:
+        return _read_only()
+    else:
+        return None
+    _one_file(fl)
+    if _value_kind(fl) is not None:
+        return _read_only()
+    key = words[0]
+    try:
+        parse_config_key(key)
+    except ConfigKeyError as refusal:
+        if not str(refusal).startswith("key does not contain"):
+            raise
+        return None, IOResult(
+            exit_code=WRITE_KEY_EXIT,
+            stderr=encode_text(f"error: {refusal}\n"),
+        )
+    path = await _config_path(ctx, fl)
+    vfs = require_vfs(ctx)
+    data = await read_optional(vfs, path)
+    if data is None and value is None:
+        return None, IOResult(exit_code=NOTHING_TO_CHANGE_EXIT)
+    edited = _config_edit(data or b"", key, value, writes == ["add"])
+    if isinstance(edited, IOResult):
+        return None, edited
+    await write_file(vfs, path, edited)
+    return None, IOResult()
+
+
+async def config(
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
+    """Read configuration, or set, add and unset one variable.
+
+    Reading goes through the same scopes git has, and a default read
+    takes every file and then the command line, so the last value wins
+    across all of them. A write changes the one file its scope names.
+
+    Args:
+        accessor (Accessor): git reaches no service.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the name and value pattern.
+        ctx (Context): the line's context.
+    """
+    fl = FlagView(ctx.flags)
+    words = list(texts)
+    written = await _config_write(ctx, fl, words)
+    if written is not None:
+        return written
+    action_named = any(fl.as_bool(flag) for flag in READING_ACTIONS)
+    if (
+        not action_named
+        and words[:1] not in (["list"], ["get"])
+        and not words
+        and fl.as_str("default") is None
+    ):
+        raise ConfigUsageError("no action specified")
+    query, fewest, most = _query_of(fl, words)
+    if not fewest <= len(words) <= most:
+        raise ConfigUsageError(_usage_of(fewest, most))
+    _one_file(fl)
     kind = _value_kind(fl)
     key = words[0] if words else ""
     utf8 = utf8_locale(ctx.env)

@@ -134,6 +134,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-f', '--file'], { type: 'path' }),
       new Argument(['-C', '--directory'], { action: 'append', type: 'path' }),
       new Argument('--strip-components'),
+      // Bare, the folder is the archive's name; `=` alone is none.
+      new Argument('--one-top-level', { nargs: '?', attachedOnly: true }),
       new Argument('--exclude', { action: 'append' }),
       new Argument('--one-file-system', { action: 'store_true' }),
       new Argument('paths', {

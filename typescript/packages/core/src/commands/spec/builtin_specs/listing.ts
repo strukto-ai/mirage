@@ -20,6 +20,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-h', '--human-readable'], { action: 'store_true' }),
       new Argument(['-H', '--si'], { action: 'store_true' }),
       new Argument('-k', { action: 'store_true' }),
+      new Argument('-m', { action: 'store_true' }),
       new Argument(['-i', '--inodes'], { action: 'store_true' }),
       new Argument(['-a', '--all'], { action: 'store_true' }),
       new Argument(['-T', '--print-type'], { action: 'store_true' }),

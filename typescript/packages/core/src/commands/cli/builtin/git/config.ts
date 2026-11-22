@@ -16,19 +16,28 @@ import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { type PosixRegex, posixRegex } from '../../../../rs/regex.ts'
-import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
+import { byteView, decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { BadConfigValueError, BadNumericConfigError, ConfigUsageError, GitError } from './errors.ts'
+import {
+  BadConfigValueError,
+  BadNumericConfigError,
+  ConfigKeyError,
+  ConfigUsageError,
+  GitError,
+} from './errors.ts'
 import { configLines } from './fs.ts'
-import { readOptional } from './io.ts'
+import { readOptional, writeFile } from './io.ts'
 import { inside } from './session.ts'
 import type { RepoLocation } from './types.ts'
 import {
   commandLineConfig,
+  DOTTED_HEADER,
+  QUOTED_HEADER,
   WIDE_INT_BITS,
   configInt,
+  configValue,
   maybeBool,
   parseConfigKey,
   requireVfs,
@@ -42,6 +51,11 @@ const SCOPE_SYSTEM = 'system'
 const SCOPE_COMMAND = 'command'
 const COMMAND_LINE_ORIGIN = 'command line:'
 const WRITING_SUBCOMMANDS = ['set', 'unset', 'rename-section', 'remove-section', 'edit']
+const READING_ACTIONS = ['list', 'get', 'get_all', 'get_regexp']
+const WRITING_ACTIONS = ['add', 'unset']
+const NOTHING_TO_CHANGE_EXIT = 5
+const WRITE_KEY_EXIT = 2
+const PLAIN_HEADER = /^\s*\[([A-Za-z0-9-]+)\s*\]/
 // The value types mirage renders; git's others paint or read dates.
 const VALUE_KINDS = ['bool', 'int', 'bool-or-int', 'path']
 const OTHER_VALUE_KINDS = ['bool-or-str', 'color', 'expiry-date']
@@ -289,11 +303,308 @@ function regexRefused(message: string): CommandFnResult {
   return [null, new IOResult({ exitCode: INVALID_REGEX_EXIT, stderr: encodeText(message) })]
 }
 
+/** A header's section (lowercased), subsection and whether that compares
+ * without case (the older `[section.sub]` spelling). */
+type Block = readonly [string, string | null, boolean]
+
+/** One line of a config file, as the writer reads it: `end` is one past its
+ * last physical line, since a value continued by a backslash runs on. */
+interface ConfigLine {
+  readonly start: number
+  readonly end: number
+  readonly header?: Block
+  readonly noted?: boolean
+  readonly name?: string
+  readonly comment?: boolean
+}
+
+/** A header line's block and whether more follows it on the line. */
+function headerOf(line: string): [Block, boolean] {
+  const quoted = QUOTED_HEADER.exec(line)
+  const dotted = DOTTED_HEADER.exec(line)
+  const plain = PLAIN_HEADER.exec(line)
+  let block: Block
+  let end: number
+  if (quoted !== null) {
+    block = [(quoted[1] ?? '').toLowerCase(), (quoted[2] ?? '').replace(/\\(.)/g, '$1'), false]
+    end = quoted[0].length
+  } else if (dotted !== null) {
+    block = [(dotted[1] ?? '').toLowerCase(), (dotted[2] ?? '').toLowerCase(), true]
+    end = dotted[0].length
+  } else if (plain !== null) {
+    block = [(plain[1] ?? '').toLowerCase(), null, false]
+    end = plain[0].length
+  } else return [['', null, false], true]
+  return [block, line.slice(end).trim() !== '']
+}
+
+/** The file's lines, a continued value joined to the line it opens. */
+function configLinesOf(raw: readonly string[]): ConfigLine[] {
+  const out: ConfigLine[] = []
+  let at = 0
+  while (at < raw.length) {
+    const line = raw[at] ?? ''
+    const text = line.trim()
+    if (text.startsWith('[')) {
+      const [header, noted] = headerOf(line)
+      out.push({ start: at, end: at + 1, header, noted })
+      at += 1
+      continue
+    }
+    if (text === '' || text.startsWith('#') || text.startsWith(';')) {
+      out.push({ start: at, end: at + 1, comment: text !== '' })
+      at += 1
+      continue
+    }
+    let end = at + 1
+    let body = line.replace(/\r?\n$/, '')
+    while (body.endsWith('\\') && end < raw.length) {
+      body = (raw[end] ?? '').replace(/\r?\n$/, '')
+      end += 1
+    }
+    out.push({ start: at, end, name: (text.split('=')[0] ?? '').trim().toLowerCase() })
+    at = end
+  }
+  return out
+}
+
+/** Whether a header opens the block a name lives in. */
+function inBlock(block: Block, section: string, subsection: string | null): boolean {
+  const [name, sub, caseless] = block
+  if (name !== section || (sub === null) !== (subsection === null)) return false
+  if (sub === null || subsection === null) return true
+  return sub === (caseless ? subsection.toLowerCase() : subsection)
+}
+
 /**
- * Read configuration: `--list`, `--get` and their subcommands. Writes stay
- * refused. Reading goes through the same scopes git has, and a default read
- * takes every file and then the command line, so the last value wins across
- * all of them.
+ * The config text with one variable set, added or taken out. A set rewrites
+ * the one line the variable has, and a new variable goes after the last
+ * variable of the last block it belongs in, or in a new block at the end,
+ * spelled as typed. Taking the last variable out of a block takes the block
+ * too, with the blank lines around it, unless a comment is there or the next
+ * block is the same one (pinned against git 2.47.3).
+ */
+function configEdit(
+  text: string,
+  key: string,
+  value: string | null,
+  adding: boolean,
+): string | IOResult {
+  const dot = key.indexOf('.')
+  const section = key.slice(0, dot)
+  const rest = key.slice(dot + 1)
+  const last = rest.lastIndexOf('.')
+  const subsection = last < 0 ? null : rest.slice(0, last)
+  const variable = rest.slice(last + 1)
+  const wanted = section.toLowerCase()
+  const name = variable.toLowerCase()
+  const raw = text.split(/(?<=\n)/).filter((line) => line !== '')
+  const lines = configLinesOf(raw)
+  let block: Block | null = null
+  const owners: number[] = []
+  const matches: number[] = []
+  lines.forEach((line, index) => {
+    if (line.header !== undefined) {
+      block = line.header
+      if (inBlock(block, wanted, subsection)) owners.push(index)
+    } else if (line.name === name && block !== null && inBlock(block, wanted, subsection))
+      matches.push(index)
+  })
+  if (value === null) {
+    if (matches.length === 0) return new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })
+    if (matches.length > 1)
+      return new IOResult({
+        exitCode: NOTHING_TO_CHANGE_EXIT,
+        stderr: encodeText(`warning: ${key} has multiple values\n`),
+      })
+    return without(raw, lines, matches[0] ?? 0).join('')
+  }
+  let entry = `\t${variable} = ${configValue(value)}\n`
+  if (matches.length > 0 && !adding) {
+    if (matches.length > 1)
+      return new IOResult({
+        exitCode: NOTHING_TO_CHANGE_EXIT,
+        stderr: encodeText(
+          `warning: ${key} has multiple values\n` +
+            'error: cannot overwrite multiple values with a single value\n' +
+            `       Use a regexp, --add or --replace-all to change ${key}.\n`,
+        ),
+      })
+    const found = lines[matches[0] ?? 0]
+    if (found === undefined) return text
+    return [...raw.slice(0, found.start), entry, ...raw.slice(found.end)].join('')
+  }
+  const owner = owners.at(-1)
+  if (owner !== undefined) {
+    let after = lines[owner]?.end ?? 0
+    for (const line of lines.slice(owner + 1)) {
+      if (line.header !== undefined) break
+      if (line.name !== undefined) after = line.end
+    }
+    if (!(raw[after - 1] ?? '\n').endsWith('\n')) entry = `\n${entry}`
+    return [...raw.slice(0, after), entry, ...raw.slice(after)].join('')
+  }
+  const head =
+    subsection === null
+      ? `[${section}]\n`
+      : `[${section} "${subsection.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"]\n`
+  return (text === '' || text.endsWith('\n') ? text : `${text}\n`) + head + entry
+}
+
+/** The physical lines with one variable out, and its block if that leaves it
+ * empty. */
+function without(raw: readonly string[], lines: readonly ConfigLine[], index: number): string[] {
+  const found = lines[index]
+  if (found === undefined) return [...raw]
+  const kept = (): string[] => raw.filter((_, at) => at < found.start || at >= found.end)
+  let head = -1
+  for (let at = 0; at < index; at++) if (lines[at]?.header !== undefined) head = at
+  const opening = lines[head]
+  if (opening === undefined || opening.noted === true) return kept()
+  let after = lines.length
+  for (let at = head + 1; at < lines.length; at++)
+    if (lines[at]?.header !== undefined) {
+      after = at
+      break
+    }
+  const inner = lines.slice(head + 1, after).filter((_, at) => at + head + 1 !== index)
+  let before: ConfigLine | undefined
+  for (let at = head - 1; at >= 0; at--) {
+    const line = lines[at]
+    if (
+      line !== undefined &&
+      (line.header !== undefined || line.name !== undefined || line.comment === true)
+    ) {
+      before = line
+      break
+    }
+  }
+  const next = lines[after]?.header
+  const same =
+    next !== undefined &&
+    opening.header !== undefined &&
+    next.every((part, at) => part === opening.header?.[at])
+  if (
+    inner.some((line) => line.name !== undefined || line.comment === true) ||
+    before?.comment === true ||
+    same
+  )
+    return kept()
+  const first = before?.end ?? 0
+  const lastLine = lines[after]?.start ?? raw.length
+  return [...raw.slice(0, first), ...raw.slice(lastLine)]
+}
+
+/**
+ * The one file a write changes, as git picks it. `--global` writes
+ * `~/.gitconfig`, or the XDG file when only that one exists.
+ */
+async function configPath(ctx: Context, fl: FlagView): Promise<PathSpec> {
+  const named = fl.asStr('file')
+  if (named !== undefined) return startPoint(fl).join(named)
+  const env = ctx.env ?? {}
+  if (fl.asBool('global')) {
+    const override = env.GIT_CONFIG_GLOBAL
+    if (override !== undefined) return PathSpec.fromStrPath(override, undefined, '/')
+    const home = env.HOME ?? ''
+    if (!home) throw new GitError('$HOME not set')
+    const target = PathSpec.fromStrPath(`${home}/.gitconfig`, undefined, '/')
+    const configured = env.XDG_CONFIG_HOME ?? ''
+    const xdg = PathSpec.fromStrPath(
+      `${configured === '' ? `${home}/.config` : configured}/git/config`,
+      undefined,
+      '/',
+    )
+    const vfs = requireVfs(ctx)
+    if ((await readOptional(vfs, target)) === null && (await readOptional(vfs, xdg)) !== null)
+      return xdg
+    return target
+  }
+  if (fl.asBool('system'))
+    return PathSpec.fromStrPath(env.GIT_CONFIG_SYSTEM ?? SYSTEM_CONFIG, undefined, '/')
+  const location = await inside(ctx, fl)
+  if (location === null) throw new GitError('not in a git directory')
+  return location.commondir.join('config')
+}
+
+/** Refuse a line naming more than one config file. */
+function oneFile(fl: FlagView): void {
+  const scopes = ['global', 'system', 'local', 'worktree'].filter((flag) => fl.asBool(flag)).length
+  if (scopes + (fl.asStr('file') !== undefined ? 1 : 0) > 1)
+    throw new ConfigUsageError('only one config file at a time')
+}
+
+/**
+ * A set, `--add` or unset, or null when the line reads. `set`, `unset`,
+ * `--add`, `--unset` and the two-word set change one file. What else writes
+ * (a value pattern, `--all`, a type, `--replace-all`, the section subcommands,
+ * `edit`) stays refused.
+ */
+async function configWrite(
+  ctx: Context,
+  fl: FlagView,
+  words: string[],
+): Promise<CommandFnResult | null> {
+  const actions = fl.typedOrder(...READING_ACTIONS, ...WRITING_ACTIONS)
+  const writes = actions.filter((name) => WRITING_ACTIONS.includes(name))
+  if (writes.length > 0 && actions.length > 1) {
+    const later = actions.at(-1) ?? ''
+    const earlier = actions.find((name) => name !== later) ?? ''
+    throw new ConfigUsageError(
+      `options '--${later.replaceAll('_', '-')}' and '--${earlier.replaceAll('_', '-')}' cannot be used together`,
+    )
+  }
+  if (actions.length > 0 && writes.length === 0) return null
+  const subcommand = actions.length === 0 ? words[0] : undefined
+  if (subcommand === 'list' || subcommand === 'get') return null
+  let value: string | null
+  if (subcommand === 'set' || subcommand === 'unset') {
+    words = words.slice(1)
+    const count = subcommand === 'set' ? 2 : 1
+    if (words.length !== count) throw new ConfigUsageError(usageOf(count, count))
+    if (fl.asBool('all') || fl.asStr('value') !== undefined) return readOnly()
+    value = subcommand === 'set' ? (words[1] ?? '') : null
+  } else if (subcommand !== undefined && WRITING_SUBCOMMANDS.includes(subcommand)) return readOnly()
+  else if (writes.length === 1 && writes[0] === 'add') {
+    if (words.length !== 2) throw new ConfigUsageError(usageOf(2, 2))
+    value = words[1] ?? ''
+  } else if (writes.length === 1 && writes[0] === 'unset') {
+    if (words.length < 1 || words.length > 2) throw new ConfigUsageError(usageOf(1, 2))
+    if (words.length === 2) return readOnly()
+    value = null
+  } else if (words.length === 2) value = words[1] ?? ''
+  else if (words.length > 2) return readOnly()
+  else return null
+  oneFile(fl)
+  if (valueKind(fl) !== null) return readOnly()
+  const key = words[0] ?? ''
+  try {
+    parseConfigKey(key)
+  } catch (err) {
+    if (!(err instanceof ConfigKeyError) || !err.message.startsWith('key does not contain'))
+      throw err
+    return [
+      null,
+      new IOResult({ exitCode: WRITE_KEY_EXIT, stderr: encodeText(`error: ${err.message}\n`) }),
+    ]
+  }
+  const path = await configPath(ctx, fl)
+  const vfs = requireVfs(ctx)
+  const data = await readOptional(vfs, path)
+  if (data === null && value === null)
+    return [null, new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })]
+  const adding = writes.length === 1 && writes[0] === 'add'
+  const edited = configEdit(data === null ? '' : decodeText(data), key, value, adding)
+  if (edited instanceof IOResult) return [null, edited]
+  await writeFile(vfs, path, encodeText(edited))
+  return [null, new IOResult()]
+}
+
+/**
+ * Read configuration, or set, add and unset one variable. Reading goes
+ * through the same scopes git has, and a default read takes every file and
+ * then the command line, so the last value wins across all of them. A write
+ * changes the one file its scope names.
  */
 export async function config(
   _accessor: NOOPAccessor,
@@ -303,20 +614,21 @@ export async function config(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const words = [...texts]
-  const actionNamed = ['list', 'get', 'get_all', 'get_regexp'].some((flag) => fl.asBool(flag))
-  if (!actionNamed && words[0] !== undefined && WRITING_SUBCOMMANDS.includes(words[0]))
-    return readOnly()
-  if (!actionNamed && words[0] !== 'list' && words[0] !== 'get') {
-    if (words.length === 0 && fl.asStr('default') === undefined)
-      throw new ConfigUsageError('no action specified')
-    if (words.length > 1) return readOnly()
-  }
+  const written = await configWrite(ctx, fl, words)
+  if (written !== null) return written
+  const actionNamed = READING_ACTIONS.some((flag) => fl.asBool(flag))
+  if (
+    !actionNamed &&
+    words[0] !== 'list' &&
+    words[0] !== 'get' &&
+    words.length === 0 &&
+    fl.asStr('default') === undefined
+  )
+    throw new ConfigUsageError('no action specified')
   const [query, fewest, most] = queryOf(fl, words)
   if (words.length < fewest || words.length > most)
     throw new ConfigUsageError(usageOf(fewest, most))
-  const scopes = ['global', 'system', 'local', 'worktree'].filter((flag) => fl.asBool(flag)).length
-  if (scopes + (fl.asStr('file') !== undefined ? 1 : 0) > 1)
-    throw new ConfigUsageError('only one config file at a time')
+  oneFile(fl)
   const kind = valueKind(fl)
   const key = words[0] ?? ''
   const utf8 = utf8Locale(ctx.env)

@@ -180,6 +180,9 @@ struct Config {
     group: Option<Owner>,
     #[serde(skip)]
     transforms: Mutex<Transforms>,
+    /// The last --one-top-level, its folder named.
+    #[serde(skip)]
+    top: Option<Vec<u8>>,
     /// -P: names are stored and used as they are.
     absolute: bool,
     /// -p: an extracted file takes its member's permission bits.

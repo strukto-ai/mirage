@@ -107,6 +107,7 @@ const TYPED = [
   'owner',
   'group',
   'transform',
+  'absolute_names',
 ] as const
 const MATCHING = [
   'exclude',
@@ -137,6 +138,11 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
       name,
       name === 'file' && archive !== null ? archive.rawPath : text,
     ])
+  let top: string | null = null
+  for (const [, value] of fl.occurrences('one_top_level')) {
+    top = value === true ? '' : typeof value === 'string' && value !== '' ? value : null
+  }
+  if (top !== null) typed.push(['one_top_level', top])
   try {
     openStreamSync('tar', { typed: typedConfig(typed) }).close()
   } catch (err) {

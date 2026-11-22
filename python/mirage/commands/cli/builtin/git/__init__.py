@@ -1507,7 +1507,7 @@ GIT = CLI(
             ),
             CommandSpec(
                 name="config",
-                description="Read repository configuration",
+                description="Read and write repository configuration",
                 arguments=(
                     Argument(
                         "--global",
@@ -1634,6 +1634,16 @@ GIT = CLI(
                         action="store_true",
                         help="Get the variables whose names "
                         "match a regular expression",
+                    ),
+                    Argument(
+                        "--add",
+                        action="store_true",
+                        help="Add a value beside any the variable has",
+                    ),
+                    Argument(
+                        "--unset",
+                        action="store_true",
+                        help="Remove the variable",
                     ),
                     Argument("name", nargs="?"),
                     Argument("value", nargs="?"),

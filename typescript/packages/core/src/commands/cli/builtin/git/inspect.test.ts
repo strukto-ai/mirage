@@ -139,12 +139,72 @@ it('prints the worktree root in line order among revisions', async () => {
   expect(DEC.decode(result.stdout)).toBe(`${head}/repo\n${head}`)
 })
 
+async function freshConfig(): Promise<[Workspace, () => Promise<string>]> {
+  const fresh = await mountRepo(repoPath)
+  const read = async (): Promise<string> =>
+    DEC.decode((await fresh.shell('cat /repo/.git/config')).stdout)
+  return [fresh, read]
+}
+
+// git 2.47.3 on debian:stable-slim: a set rewrites the variable's line spelled
+// as typed, --add goes after the block's last variable, a new block takes the
+// name's case, and unset takes an emptied block with it.
+it('writes config lines as git does', async () => {
+  const [fresh, read] = await freshConfig()
+  const original = await read()
+  for (const form of [
+    'user.email a@b',
+    'user.Email c@d',
+    '--add user.email e@f',
+    'set user.phone 1',
+    'unset user.phone',
+    'remote.Origin.url X',
+    "core.x ' lead'",
+    "set sec.y 'a#b'",
+    '--unset core.x',
+    '--unset sec.y',
+  ]) {
+    const result = await fresh.shell(`git -C /repo config ${form}`)
+    expect([form, result.exitCode, DEC.decode(result.stderr)]).toEqual([form, 0, ''])
+  }
+  expect(await read()).toBe(
+    `${original}[user]\n\tEmail = c@d\n\temail = e@f\n[remote "Origin"]\n\turl = X\n`,
+  )
+  await fresh.close()
+})
+
 it.each([
-  'user.email changed@example.com',
-  "user.name ''",
-  '--global user.email changed@example.com',
+  [
+    'user.email x',
+    5,
+    'warning: user.email has multiple values\n' +
+      'error: cannot overwrite multiple values with a single value\n' +
+      '       Use a regexp, --add or --replace-all to change user.email.\n',
+  ],
+  ['--unset user.email', 5, 'warning: user.email has multiple values\n'],
+  ['--unset nope.key', 5, ''],
+  ['foo bar', 2, 'error: key does not contain a section: foo\n'],
+  ['a. c', 2, 'error: key does not contain variable name: a.\n'],
+  ['a.1b c', 1, 'error: invalid key: a.1b\n'],
+  ['--add --unset a.b c', 129, "error: options '--unset' and '--add' cannot be used together\n"],
+])('refuses config write %s as git does', async (form, code, err) => {
+  const [fresh, read] = await freshConfig()
+  for (const line of ['user.email a@b', '--add user.email c@d'])
+    await fresh.shell(`git -C /repo config ${line}`)
+  const before = await read()
+  const result = await fresh.shell(`git -C /repo config ${form}`)
+  expect(result.exitCode).toBe(code)
+  expect(DEC.decode(result.stderr).startsWith(err)).toBe(true)
+  expect(await read()).toBe(before)
+  await fresh.close()
+})
+
+it.each([
   'user.name changed old',
-])('refuses config writes explicitly: %s', async (form) => {
+  '--unset user.name old',
+  '--bool core.bare yes',
+  'rename-section core other',
+])('refuses config writes mirage lacks: %s', async (form) => {
   const before = await ws.dispatch('read', '/repo/.git/config')
   const [code, out, err] = await run(`config ${form}`)
   expect(code).toBe(1)

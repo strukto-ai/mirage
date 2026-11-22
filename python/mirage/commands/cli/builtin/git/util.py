@@ -621,15 +621,27 @@ def config_section(
     quoted = name.replace("\\", "\\\\").replace('"', '\\"')
     text = f'[{section} "{quoted}"]\n'
     for key, value in pairs:
-        body = "".join(VALUE_ESCAPES.get(ch, ch) for ch in value)
-        if (
-            value.startswith(" ")
-            or value.endswith(" ")
-            or any(ch in value for ch in ";#")
-        ):
-            body = f'"{body}"'
-        text += f"\t{key} = {body}\n"
+        text += f"\t{key} = {config_value(value)}\n"
     return text
+
+
+def config_value(value: str) -> str:
+    """A value the way git's config writer spells it.
+
+    ``"``, ``\\``, newline and tab are escaped, and the whole is quoted
+    when it starts or ends with a space or holds ``;`` or ``#``.
+
+    Args:
+        value (str): the value.
+    """
+    body = "".join(VALUE_ESCAPES.get(ch, ch) for ch in value)
+    if (
+        value.startswith(" ")
+        or value.endswith(" ")
+        or any(ch in value for ch in ";#")
+    ):
+        return f'"{body}"'
+    return body
 
 
 def without_section(

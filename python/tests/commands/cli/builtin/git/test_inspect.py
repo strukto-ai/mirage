@@ -190,19 +190,88 @@ async def test_rev_parse_prints_toplevel_in_line_order(git_ws):
 
 
 @pytest.mark.asyncio
+async def test_config_writes_lines_as_git_does(git_rw, repo_path):
+    # git 2.47.3 on debian:stable-slim: a set rewrites the variable's
+    # line spelled as typed, --add goes after the block's last variable,
+    # a new block takes the name's case, and unset takes an emptied
+    # block with it.
+    config = repo_path / ".git/config"
+    original = config.read_bytes()
+    for form in (
+        "user.email a@b",
+        "user.Email c@d",
+        "--add user.email e@f",
+        "set user.phone 1",
+        "unset user.phone",
+        "remote.Origin.url X",
+        "core.x ' lead'",
+        "set sec.y 'a#b'",
+        "--unset core.x",
+        "--unset sec.y",
+    ):
+        result = await git_rw.shell("git -C /repo config " + form)
+        assert result.exit_code == 0, form
+        assert result.stderr in (None, b""), form
+    assert config.read_bytes() == original + (
+        b'[user]\n\tEmail = c@d\n\temail = e@f\n[remote "Origin"]\n\turl = X\n'
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "form, code, err",
+    [
+        (
+            "user.email x",
+            5,
+            b"warning: user.email has multiple values\n"
+            b"error: cannot overwrite multiple values with a single value\n"
+            b"       Use a regexp, --add or --replace-all to change "
+            b"user.email.\n",
+        ),
+        (
+            "--unset user.email",
+            5,
+            b"warning: user.email has multiple values\n",
+        ),
+        ("--unset nope.key", 5, b""),
+        ("foo bar", 2, b"error: key does not contain a section: foo\n"),
+        ("a. c", 2, b"error: key does not contain variable name: a.\n"),
+        ("a.1b c", 1, b"error: invalid key: a.1b\n"),
+        (
+            "--add --unset a.b c",
+            129,
+            b"error: options '--unset' and '--add' cannot be used together\n",
+        ),
+    ],
+)
+async def test_config_write_refusals_match_git(
+    git_rw, repo_path, form, code, err
+):
+    for line in ("user.email a@b", "--add user.email c@d"):
+        await git_rw.shell("git -C /repo config " + line)
+    config = repo_path / ".git/config"
+    before = config.read_bytes()
+    result = await git_rw.shell("git -C /repo config " + form)
+    assert result.exit_code == code
+    assert (result.stderr or b"").startswith(err)
+    assert config.read_bytes() == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "form",
     [
-        "user.email changed@example.com",
-        "user.name ''",
-        "--global user.email changed@example.com",
         "user.name changed old",
+        "--unset user.name old",
+        "--bool core.bare yes",
+        "rename-section core other",
     ],
 )
-async def test_config_writes_are_explicitly_refused(git_ws, repo_path, form):
+async def test_config_writes_mirage_lacks_are_refused(git_rw, repo_path, form):
     config = repo_path / ".git/config"
     original = config.read_bytes()
-    result = await git_ws.shell("git -C /repo config " + form)
+    result = await git_rw.shell("git -C /repo config " + form)
     assert result.exit_code == 1
     assert result.stdout in (None, b"")
     assert b"git config is read-only in Mirage" in result.stderr
