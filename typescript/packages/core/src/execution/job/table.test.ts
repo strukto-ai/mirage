@@ -39,7 +39,7 @@ import { JobHandle, type JobResult, type JobRunner } from './handle.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 import { FIRST_PID } from '../process/constants.ts'
-import { inRequest } from '../../io/web/request.ts'
+import { currentRequest, inRequest } from '../../io/web/request.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -2338,6 +2338,39 @@ describe('JobTable.waitSubstitution', () => {
       settle()
       await waiting
       expect(waited).toBe(true)
+    })
+  })
+
+  it("holds its request's join until an ended substitution's output settles", async () => {
+    const jt = new JobTable()
+    let settle = (): void => undefined
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    await inRequest(async () => {
+      const process = jt.processes.start({
+        sessionId: 's',
+        command: 'sub',
+        cwd: PathSpec.fromStrPath('/'),
+        cancel: () => undefined,
+        run: () => Promise.resolve(0),
+        started: (started) => {
+          jt.trackSubstitution(started, settled)
+        },
+      })
+      const request = currentRequest()
+      if (request === null) throw new Error('no request')
+      await process.join()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      let joined = false
+      const joining = jt.joinRequest(request).then(() => {
+        joined = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(joined).toBe(false)
+      settle()
+      await joining
+      expect(joined).toBe(true)
     })
   })
 })

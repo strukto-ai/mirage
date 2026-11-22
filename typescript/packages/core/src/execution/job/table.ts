@@ -945,14 +945,19 @@ export class JobTable {
   }
 
   /**
-   * Wait for the substitutions `request` started to end, in child shells
-   * (`( )`, `$( )`) too. On an edge runtime one still running once its
-   * request has answered never ends, so the request waits for them first.
+   * Wait for the substitutions `request` started to end, and what they wrote
+   * to go where it writes, in child shells (`( )`, `$( )`) too. On an edge
+   * runtime one still running once its request has answered never ends, so
+   * the request waits for them first.
    */
   async joinRequest(request: IncomingRequest): Promise<void> {
     // One started while this waits is still reached: the loop reads the set
     // as it changes.
-    for (const process of this.plane.requestSubstitutions.get(request) ?? []) await process.join()
+    for (const process of this.plane.requestSubstitutions.get(request) ?? []) {
+      const settled = this.settled.get(process.record.id.pid)
+      await process.join()
+      if (settled !== undefined) await settled
+    }
   }
 
   /**
