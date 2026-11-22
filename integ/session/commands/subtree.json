@@ -64,9 +64,9 @@
       "command": "cat /scratch/lock*/y",
       "explain_blind": "the runtime expands the glob, so the dry run reads the pattern and not the paths it names",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/y: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -105,9 +105,9 @@
       "session": "frozen",
       "command": "rm -r /scratch/locked",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/scratch/locked': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -119,9 +119,9 @@
       "session": "frozen",
       "command": "mv /scratch/locked /scratch/moved",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "mv: cannot move '/scratch/locked' to '/scratch/moved': Permission denied\n"
+        "stderr": "mv: Permission denied\n"
       }
     },
     {
@@ -133,9 +133,9 @@
       "session": "frozen",
       "command": "mv /scratch/mv1 /scratch/locked",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "mv: cannot move '/scratch/mv1' to '/scratch/locked/mv1': Permission denied\n"
+        "stderr": "mv: Permission denied\n"
       }
     },
     {
@@ -161,9 +161,9 @@
       "session": "frozen",
       "command": "rmdir /scratch/locked",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rmdir: failed to remove '/scratch/locked': Permission denied\n"
+        "stderr": "rmdir: Permission denied\n"
       }
     },
     {

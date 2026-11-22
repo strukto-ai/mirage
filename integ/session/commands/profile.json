@@ -175,9 +175,9 @@
       "session": "frozen",
       "command": "cat /scratch/locked/x",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/x: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {

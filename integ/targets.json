@@ -850,45 +850,34 @@
       ],
       "sessions": {
         "walled": {
-          "commands": {
-            "grep": [
-              {
-                "decision": "deny",
-                "reason": "held for review",
-                "paths": [
-                  "/data/warmwalk/locked.txt"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "kept off limits",
-                "paths": [
-                  "/data/warmwalk/sealed.txt"
-                ]
+          "mounts": {
+            "/data/warmwalk/locked.txt": {
+              "commands": {
+                "grep": {
+                  "decision": "deny",
+                  "reason": "held for review"
+                },
+                "tar": {
+                  "decision": "deny",
+                  "reason": "held for review"
+                }
               }
-            ],
-            "tar": [
-              {
-                "decision": "deny",
-                "reason": "held for review",
-                "paths": [
-                  "/data/warmwalk/locked.txt"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "kept off limits",
-                "paths": [
-                  "/data/warmwalk/sealed.txt"
-                ]
+            },
+            "/data/warmwalk/sealed.txt": {
+              "commands": {
+                "grep": {
+                  "decision": "deny",
+                  "reason": "kept off limits"
+                },
+                "tar": {
+                  "decision": "deny",
+                  "reason": "kept off limits"
+                },
+                "*": {
+                  "decision": "deny",
+                  "reason": "kept off limits"
+                }
               }
-            ],
-            "*": {
-              "decision": "deny",
-              "reason": "kept off limits",
-              "paths": [
-                "/data/warmwalk/sealed.txt"
-              ]
             }
           }
         },
@@ -2011,14 +2000,22 @@
       ],
       "sessions": {
         "sealed": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "unreadable cache subtree",
-              "paths": [
-                "/repo/src/cache",
-                "/trunc/src/cache"
-              ]
+          "mounts": {
+            "/repo/src/cache": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "unreadable cache subtree"
+                }
+              }
+            },
+            "/trunc/src/cache": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "unreadable cache subtree"
+                }
+              }
             }
           }
         }
@@ -3441,13 +3438,14 @@
           }
         },
         "histrule": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "history kept",
-              "paths": [
-                "/scratch/hist/secret.txt"
-              ]
+          "mounts": {
+            "/scratch/hist/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "history kept"
+                }
+              }
             }
           }
         },
@@ -3456,34 +3454,35 @@
         "asker2": {},
         "granted": {},
         "nodder": {
-          "commands": {
-            "rm": {
-              "decision": "ask",
-              "reason": "profile nod",
-              "paths": [
-                "/scratch/both/*"
-              ]
+          "mounts": {
+            "/scratch/both": {
+              "commands": {
+                "rm": {
+                  "decision": "ask",
+                  "reason": "profile nod"
+                }
+              }
             }
           }
         },
         "frozen": {
-          "commands": {
-            "*": [
-              {
-                "decision": "deny",
-                "reason": "frozen",
-                "paths": [
-                  "/scratch/locked/*"
-                ]
-              },
-              {
-                "decision": "deny",
-                "reason": "walled",
-                "paths": [
-                  "/scratch/wk/sealed"
-                ]
+          "mounts": {
+            "/scratch/locked": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "frozen"
+                }
               }
-            ]
+            },
+            "/scratch/wk/sealed": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "walled"
+                }
+              }
+            }
           }
         },
         "veiled": {
@@ -3555,73 +3554,63 @@
           }
         },
         "carver": {
-          "commands": {
-            "rm": [
-              {
-                "decision": "deny",
-                "reason": "carve locked",
-                "paths": [
-                  "/scratch/carve/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "carve nod",
-                "paths": [
-                  "/scratch/carve/open/*"
-                ]
+          "mounts": {
+            "/scratch/carve": {
+              "commands": {
+                "rm": {
+                  "decision": "deny",
+                  "reason": "carve locked"
+                }
               }
-            ]
+            },
+            "/scratch/carve/open": {
+              "commands": {
+                "rm": {
+                  "decision": "ask",
+                  "reason": "carve nod"
+                }
+              }
+            }
           }
         },
         "courier": {
-          "commands": {
-            "cp": [
-              {
-                "decision": "deny",
-                "reason": "courier sealed",
-                "paths": [
-                  "/scratch/vaultc/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "outbox nod",
-                "paths": [
-                  "/scratch/outbox/deep/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "staging nod",
-                "paths": [
-                  "/scratch/stage/*"
-                ]
+          "mounts": {
+            "/scratch/vaultc": {
+              "commands": {
+                "cp": {
+                  "decision": "deny",
+                  "reason": "courier sealed"
+                },
+                "mv": {
+                  "decision": "deny",
+                  "reason": "courier sealed"
+                }
               }
-            ],
-            "mv": [
-              {
-                "decision": "deny",
-                "reason": "courier sealed",
-                "paths": [
-                  "/scratch/vaultc/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "outbox nod",
-                "paths": [
-                  "/scratch/outbox/deep/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "staging nod",
-                "paths": [
-                  "/scratch/stage/*"
-                ]
+            },
+            "/scratch/outbox/deep": {
+              "commands": {
+                "cp": {
+                  "decision": "ask",
+                  "reason": "outbox nod"
+                },
+                "mv": {
+                  "decision": "ask",
+                  "reason": "outbox nod"
+                }
               }
-            ]
+            },
+            "/scratch/stage": {
+              "commands": {
+                "cp": {
+                  "decision": "ask",
+                  "reason": "staging nod"
+                },
+                "mv": {
+                  "decision": "ask",
+                  "reason": "staging nod"
+                }
+              }
+            }
           }
         },
         "anchored": {
@@ -4206,26 +4195,26 @@
           },
           "commands": {
             "*": "deny",
-            "sed": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "kept behind the link",
-                "paths": [
-                  "/scratch/lw/flink"
-                ]
+            "sed": "allow",
+            "awk": "allow"
+          },
+          "mounts": {
+            "/scratch/lw/flink": {
+              "commands": {
+                "sed": {
+                  "decision": "deny",
+                  "reason": "kept behind the link"
+                }
               }
-            ],
-            "awk": [
-              "allow",
-              {
-                "decision": "deny",
-                "reason": "kept behind the link",
-                "paths": [
-                  "/scratch/lw/secret"
-                ]
+            },
+            "/scratch/lw/secret": {
+              "commands": {
+                "awk": {
+                  "decision": "deny",
+                  "reason": "kept behind the link"
+                }
               }
-            ]
+            }
           }
         },
         "auditprep": {},
@@ -4274,20 +4263,54 @@
           }
         },
         "auditrule": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "audit sealed",
-              "paths": [
-                "/scratch/audit/secret.txt",
-                "/scratch/audit/hdir",
-                "/scratch/audit/box/secret.txt",
-                "/scratch/agit/secret.txt",
-                "/scratch/agit/hdir",
-                "/vault/ax/hl",
-                "/scratch/audit/hdir/*",
-                "/scratch/agit/hdir/*"
-              ]
+          "mounts": {
+            "/scratch/audit/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
+            },
+            "/scratch/audit/hdir": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
+            },
+            "/scratch/audit/box/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
+            },
+            "/scratch/agit/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
+            },
+            "/scratch/agit/hdir": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
+            },
+            "/vault/ax/hl": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "audit sealed"
+                }
+              }
             }
           }
         },
@@ -4305,20 +4328,54 @@
           }
         },
         "auditask": {
-          "commands": {
-            "*": {
-              "decision": "ask",
-              "reason": "audit nod",
-              "paths": [
-                "/scratch/audit/secret.txt",
-                "/scratch/audit/hdir",
-                "/scratch/audit/box/secret.txt",
-                "/scratch/agit/secret.txt",
-                "/scratch/agit/hdir",
-                "/vault/ax/hl",
-                "/scratch/audit/hdir/*",
-                "/scratch/agit/hdir/*"
-              ]
+          "mounts": {
+            "/scratch/audit/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
+            },
+            "/scratch/audit/hdir": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
+            },
+            "/scratch/audit/box/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
+            },
+            "/scratch/agit/secret.txt": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
+            },
+            "/scratch/agit/hdir": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
+            },
+            "/vault/ax/hl": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "audit nod"
+                }
+              }
             }
           }
         }

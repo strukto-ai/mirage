@@ -215,9 +215,9 @@
       "session": "carver",
       "command": "rm -r /scratch/carve",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "rm: cannot remove '/scratch/carve': Permission denied\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -242,9 +242,9 @@
       "session": "courier",
       "command": "cp /scratch/vaultc/secret /scratch/outbox/deep/out",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cp: cannot open '/scratch/vaultc/secret' for reading: Permission denied\n"
+        "stderr": "cp: Permission denied\n"
       }
     },
     {
@@ -256,9 +256,9 @@
       "session": "courier",
       "command": "mv /scratch/vaultc/secret /scratch/outbox/deep/moved",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "mv: cannot move '/scratch/vaultc/secret' to '/scratch/outbox/deep/moved': Permission denied\n"
+        "stderr": "mv: Permission denied\n"
       }
     },
     {
@@ -270,9 +270,9 @@
       "session": "courier",
       "command": "mv --exchange -T /scratch/vaultc/secret /scratch/outbox/deep/moved",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "mv: cannot exchange '/scratch/vaultc/secret' and '/scratch/outbox/deep/moved': Permission denied\n"
+        "stderr": "mv: Permission denied\n"
       }
     },
     {

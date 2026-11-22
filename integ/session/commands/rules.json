@@ -139,9 +139,9 @@
       "session": "frozen",
       "command": "cat /scratch/locked/y",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/y: Permission denied\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -154,9 +154,9 @@
       "command": "find /scratch/locked -name y -delete",
       "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "find: cannot delete '/scratch/locked/y': Permission denied\n"
+        "stderr": "find: Permission denied\n"
       }
     },
     {
@@ -413,9 +413,9 @@
       "session": "frozen",
       "command": "find /scratch/locked/y",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "find: '/scratch/locked/y': Permission denied\n"
+        "stderr": "find: Permission denied\n"
       }
     },
     {
@@ -427,9 +427,9 @@
       "session": "frozen",
       "command": "du /scratch/locked/y",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "du: cannot access '/scratch/locked/y': Permission denied\n"
+        "stderr": "du: Permission denied\n"
       }
     },
     {
@@ -441,9 +441,9 @@
       "session": "frozen",
       "command": "touch /scratch/locked/new",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "touch: cannot touch '/scratch/locked/new': Permission denied\n"
+        "stderr": "touch: Permission denied\n"
       }
     },
     {

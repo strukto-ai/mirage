@@ -19,9 +19,9 @@
       "session": "walled",
       "command": "grep -r secret /data/warmwalk",
       "expect": {
-        "exit": 2,
-        "stdout": "/data/warmwalk/open.txt:secret open\n",
-        "stderr": "grep: /data/warmwalk/locked.txt: Permission denied\ngrep: /data/warmwalk/sealed.txt: Permission denied\n"
+        "exit": 126,
+        "stdout": "",
+        "stderr": "grep: Permission denied\n"
       }
     },
     {
@@ -54,9 +54,9 @@
       "session": "walled",
       "command": "grep -r secret /data/warmwalk",
       "expect": {
-        "exit": 2,
-        "stdout": "/data/warmwalk/open.txt:secret open\n",
-        "stderr": "grep: /data/warmwalk/locked.txt: Permission denied\ngrep: /data/warmwalk/sealed.txt: Permission denied\n",
+        "exit": 126,
+        "stdout": "",
+        "stderr": "grep: Permission denied\n",
         "check": "[]\n"
       },
       "check": {
