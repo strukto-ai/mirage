@@ -560,9 +560,13 @@ describe('explain', () => {
           ['f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
           ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
           ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
-          ['f; f() { ls; }', 0, '', 'f: Permission denied\n'],
+          ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
           ['g() { f; }; f() { ls; }; g', 0, 'f.txt\n', ''],
           ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
+          ['{ f() { ls; }; }; f', 0, 'f.txt\n', ''],
+          ['(f() { ls; }; f)', 0, 'f.txt\n', ''],
+          ['f() { ls; }; (f)', 0, 'f.txt\n', ''],
+          ['timeout() { ls; }; timeout 1 rm f.txt', 0, 'f.txt\n', ''],
         ] as const
       ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
     ),
@@ -589,6 +593,37 @@ describe('explain', () => {
       expect([said.exitCode, said.stderr]).toEqual([code, err])
     },
   )
+
+  it.each([
+    'printf x > /data/marker; cat f.txt; (cat() { :; })',
+    'printf x > /data/marker; cat f.txt; cat() { :; }',
+    'printf x > /data/marker; cat f.txt; v=$(cat() { :; })',
+    'printf x > /data/marker; cat f.txt; cat() { :; } | :',
+    'printf x > /data/marker; cat f.txt; { cat() { :; }; }',
+    'f() { printf x > /data/marker; cat f.txt; }; f; (cat() { :; })',
+  ])('holds a line whose word cannot see a definition of its name: %s', async (line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data/keep': { commands: { '*': 'deny', cd: 'allow', printf: 'allow', ':': 'allow' } },
+        },
+      }),
+    })
+    await w.shell('cd /data/keep', { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      126,
+      '',
+      'cat: Permission denied\n',
+    ])
+    expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
+    expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
+  })
 
   it.each([
     ['[[ ! -e /data/secret.txt ]]', '1'],
