@@ -803,8 +803,10 @@ and `ps -p` take either kind.
       jobs the command started stop too. It does not with `--foreground`,
       `-s INT` or `-s QUIT`.
     - A nested shell `timeout` runs (`timeout 5 bash -c '...'`) is the process
-      `timeout` started. One that traps the signal stops only its current
-      program, runs its action, and goes on, as in Bash.
+      `timeout` started. One that traps the signal runs its action once its
+      current program ends, and goes on, as in Bash: the group's signal ends
+      that program first, while with `--foreground` the program runs to its
+      end.
   </Accordion>
   <Accordion title="Signals">
     - `kill` takes every Linux signal `kill -l` lists, by name or number.

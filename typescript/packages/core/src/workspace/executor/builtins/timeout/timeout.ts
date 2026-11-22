@@ -670,7 +670,14 @@ async function supervise(
       return await stop(said, 137)
     }
     if (carriesOn) {
-      const late = kill.at === null ? await run : await Promise.race([run, kill.at])
+      let late: IOResult | typeof TIMED_OUT
+      try {
+        late = kill.at === null ? await run : await Promise.race([run, kill.at])
+      } catch (err) {
+        const killed = how.killedBy()
+        if (killed === null) throw err
+        return await ended(sink, held, said, signalledStatus(killed, how.preserve))
+      }
       if (late === TIMED_OUT) {
         say(SIGKILL)
         said.push(how.killed(SIGKILL))
@@ -703,11 +710,22 @@ async function supervise(
     if (onMachine && late !== null) {
       return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
     }
-    return await stop(said, how.preserve ? 128 + signal : TIMEOUT_STATUS)
+    return await stop(said, signalledStatus(how.killedBy() ?? signal, how.preserve))
   } finally {
     settled = true
     kill.cancel()
   }
+}
+
+/**
+ * timeout's status once a signal ended the command after the deadline: 128
+ * plus KILL whatever --preserve-status says, as GNU's is, 128 plus the signal
+ * that ended it under --preserve-status, and 124 otherwise; a stop that named
+ * no signal is KILL's. Mirrors Python's `_signalled_status`.
+ */
+function signalledStatus(ended: number | null, preserve: boolean): number {
+  const signal = ended ?? SIGKILL
+  return preserve || signal === SIGKILL ? 128 + signal : TIMEOUT_STATUS
 }
 
 /**

@@ -637,6 +637,54 @@ it('a group signal a shell traps still ends its program', async () => {
   ])
 })
 
+// A signal a stopped shell is sent waits for its CONT, then goes as it was
+// sent, however the CONT came: one sent to the whole group still ends the
+// program the shell runs, one sent to the shell alone leaves it running.
+it.each([true, false])('a held signal keeps how it was sent (whole: %s)', async (whole) => {
+  const processes = new ProcessTable()
+  const started = gate()
+  const finish = gate()
+  const outcome: [number | null, number | null][] = []
+  const child = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => undefined,
+    run: async () => {
+      outcome.push(
+        await child.program(
+          (stop) =>
+            new Promise<number>((resolve, reject) => {
+              started.release()
+              stop.addEventListener('abort', () => {
+                reject(stop.reason as Error)
+              })
+              void finish.promise.then(() => {
+                resolve(0)
+              })
+            }),
+        ),
+      )
+      return 0
+    },
+  })
+  child.catcher = () => true
+  const group = child.record.group
+  await started.promise
+  expect(await processes.signal(child, 19)).toBe(true)
+  if (whole) {
+    expect(await processes.signalGroup(group, 15)).toBe(true)
+    expect(await processes.signal(child, 18)).toBe(true)
+  } else {
+    expect(await processes.signal(child, 15)).toBe(true)
+    expect(await processes.signalGroup(group, 18)).toBe(true)
+  }
+  await Promise.resolve()
+  finish.release()
+  expect((await child.join()).exit).toBe(0)
+  expect(outcome).toEqual([whole ? [null, 15] : [0, null]])
+})
+
 // A pid a session's lines take in turn runs each line under it; one a live
 // runner holds is not taken twice, and later pids go on past it.
 it('takes a given pid while it is free', async () => {

@@ -102,7 +102,7 @@ class ProcessTable:
         # What ``kill -STOP`` holds, by pid, each done at the
         # ``kill -CONT``, and the signal each was sent meanwhile.
         self._pauses: dict[int, Future[None]] = {}
-        self._held_signals: dict[int, int] = {}
+        self._held_signals: dict[int, tuple[int, bool, bool]] = {}
         # The host's ceiling on any session's limit, a lifted one
         # included, whatever profile, snapshot or store set it.
         self.ceiling: int | None = None
@@ -389,24 +389,43 @@ class ProcessTable:
             int | None: the signal it was sent while held, which it
             takes now; None for none.
         """
+        held = self._resume(handle)
+        return None if held is None else held[0]
+
+    def _resume(self, handle: ProcessHandle) -> tuple[int, bool, bool] | None:
+        """Let a held process go on (``resume``), with the signal it was
+        sent while held and how it was sent: as one of a group, and to
+        the whole group.
+
+        Args:
+            handle (ProcessHandle): the process.
+        """
         pid = handle.record.pid
         with self._lock:
-            held = self._pauses.pop(pid, None)
-            signal = self._held_signals.pop(pid, None)
-        if held is not None:
-            held.set_result(None)
+            paused = self._pauses.pop(pid, None)
+            held = self._held_signals.pop(pid, None)
+        if paused is not None:
+            paused.set_result(None)
             for member in (handle, *self._under(pid)):
                 member.show_state(None)
                 member.tell_held()
-        return signal
+        return held
 
-    def hold_signal(self, handle: ProcessHandle, signal: int) -> bool:
+    def hold_signal(
+        self,
+        handle: ProcessHandle,
+        signal: int,
+        group: bool = False,
+        whole: bool = False,
+    ) -> bool:
         """Keep a signal for a held process, which takes it when it goes
-        on: only KILL ends a stopped program.
+        on, as it was sent: only KILL ends a stopped program.
 
         Args:
             handle (ProcessHandle): the process.
             signal (int): the signal.
+            group (bool): it was sent as one of a group.
+            whole (bool): it was sent to the whole group.
 
         Returns:
             bool: whether the process is held.
@@ -415,7 +434,7 @@ class ProcessTable:
         with self._lock:
             if pid not in self._pauses:
                 return False
-            self._held_signals[pid] = signal
+            self._held_signals[pid] = (signal, group, whole)
             return True
 
     def send(
@@ -488,7 +507,8 @@ class ProcessTable:
     ) -> bool:
         """What a signal does to a process Mirage runs itself. It pauses
         at STOP and goes on at CONT, taking then the signal it was sent
-        while paused, since only KILL ends a stopped program; a kept
+        while paused as it was sent, since only KILL ends a stopped
+        program; a kept
         signal leaves it as it is, and any other stops it unless the shell
         running a statement in it traps or ignores it (``catcher``). One of
         a group
@@ -519,11 +539,13 @@ class ProcessTable:
             if signal == SIGSTOP:
                 self.pause(handle)
             elif signal == SIGCONT:
-                held = self.resume(handle)
+                held = self._resume(handle)
                 if held is not None:
-                    return self._signal_own(handle, held, group, whole)
+                    return self._signal_own(handle, *held)
             return True
-        if signal != SIGKILL and self.hold_signal(handle, signal):
+        if signal != SIGKILL and self.hold_signal(
+            handle, signal, group, whole
+        ):
             return True
         catcher = handle.catcher
         if signal != SIGKILL and catcher is not None:

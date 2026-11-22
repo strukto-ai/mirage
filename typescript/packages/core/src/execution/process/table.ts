@@ -37,7 +37,10 @@ export class ProcessTable {
   private stopped = false
   // What `kill -STOP` holds, by pid, and the signal each was sent meanwhile.
   private readonly pauses = new Map<number, PauseGate>()
-  private readonly heldSignals = new Map<number, number>()
+  private readonly heldSignals = new Map<
+    number,
+    readonly [signal: number, group: boolean, whole: boolean]
+  >()
   /**
    * The host's ceiling on any session's limit, a lifted one included,
    * whatever profile, snapshot or store set it. Mirrors Python's `ceiling`.
@@ -318,30 +321,41 @@ export class ProcessTable {
    * `resume`.
    */
   resume(handle: ProcessHandle): number | null {
+    return this.resumeHeld(handle)?.[0] ?? null
+  }
+
+  /**
+   * Let a held process go on (`resume`), answering the signal it was sent
+   * while held and how it was sent: as one of a group, and to the whole
+   * group. Mirrors Python's `_resume`.
+   */
+  private resumeHeld(
+    handle: ProcessHandle,
+  ): readonly [signal: number, group: boolean, whole: boolean] | null {
     const pid = handle.record.id.pid
-    const held = this.pauses.get(pid)
-    const signal = this.heldSignals.get(pid) ?? null
+    const paused = this.pauses.get(pid)
+    const held = this.heldSignals.get(pid) ?? null
     this.pauses.delete(pid)
     this.heldSignals.delete(pid)
-    if (held !== undefined) {
-      held.resolve()
+    if (paused !== undefined) {
+      paused.resolve()
       for (const member of [handle, ...this.under(pid)]) {
         member.showState(null)
         member.tellHeld()
       }
     }
-    return signal
+    return held
   }
 
   /**
-   * Keep a signal for a held process, which takes it when it goes on: only
-   * KILL ends a stopped program. Answers whether the process is held.
-   * Mirrors Python's `hold_signal`.
+   * Keep a signal for a held process, which takes it when it goes on, as it
+   * was sent (`group`, `whole`): only KILL ends a stopped program. Answers
+   * whether the process is held. Mirrors Python's `hold_signal`.
    */
-  holdSignal(handle: ProcessHandle, signal: number): boolean {
+  holdSignal(handle: ProcessHandle, signal: number, group = false, whole = false): boolean {
     const pid = handle.record.id.pid
     if (!this.pauses.has(pid)) return false
-    this.heldSignals.set(pid, signal)
+    this.heldSignals.set(pid, [signal, group, whole])
     return true
   }
 
@@ -382,8 +396,8 @@ export class ProcessTable {
 
   /**
    * What a signal does to a process Mirage runs itself. It pauses at STOP and
-   * goes on at CONT, taking then the signal it was sent while paused, since
-   * only KILL ends a stopped program; a kept signal leaves it as it is, and
+   * goes on at CONT, taking then the signal it was sent while paused as it was
+   * sent, since only KILL ends a stopped program; a kept signal leaves it as it is, and
    * any other stops it unless the shell running a statement in it traps or
    * ignores it (`catcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
@@ -409,12 +423,12 @@ export class ProcessTable {
         if (!asyncContextIsolatesTasks) return null
         this.pause(handle)
       } else if (signal === SIGCONT) {
-        const held = this.resume(handle)
-        if (held !== null) return this.signalOwn(handle, held, group, whole)
+        const held = this.resumeHeld(handle)
+        if (held !== null) return this.signalOwn(handle, ...held)
       }
       return true
     }
-    if (signal !== SIGKILL && this.holdSignal(handle, signal)) return true
+    if (signal !== SIGKILL && this.holdSignal(handle, signal, group, whole)) return true
     const catcher = handle.catcher
     if (signal !== SIGKILL && catcher !== null) {
       // A shell's ignore of a signal its process ignores anyway leaves it to

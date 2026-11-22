@@ -684,7 +684,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 0.5 bash -c 'trap \"echo caught\" TERM; sleep 3; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "caught\nafter\nrc=124\n",
@@ -719,7 +719,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 0.3 bash -c 'trap \"\" TERM; sleep 0.6; echo after'; echo rc=$?; timeout --preserve-status 0.3 bash -c 'trap \"echo caught; exit 3\" TERM; sleep 3; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"\" TERM; sleep 1.5; echo after'; echo rc=$?; timeout --preserve-status 1 bash -c 'trap \"echo caught; exit 3\" TERM; sleep 5; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "after\nrc=124\ncaught\nrc=3\n",
@@ -754,7 +754,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout --foreground 0.3 bash -c 'trap \"echo caught\" TERM; sleep 0.6; echo after'; echo rc=$?; timeout -s USR1 0.3 bash -c 'trap \"echo usr1\" USR1; sleep 3; echo after'; echo rc=$?",
+      "command": "timeout --foreground 1 bash -c 'trap \"echo caught\" TERM; sleep 1.5; echo after'; echo rc=$?; timeout -s USR1 1 bash -c 'trap \"echo usr1\" USR1; sleep 5; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "caught\nafter\nrc=124\nusr1\nafter\nrc=124\n",
@@ -789,7 +789,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 0.3 bash -c 'trap \"echo caught\" TERM; { sleep 3; echo grp; }; echo after'; timeout 0.3 bash -c 'trap \"echo caught\" TERM; sleep 3 & wait; echo after $?'; timeout -s INT 0.3 bash -c 'trap \"echo int\" INT; sleep 3; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; { sleep 5; echo grp; }; echo after'; timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5 & wait; echo after $?'; timeout -s INT 1 bash -c 'trap \"echo int\" INT; sleep 5; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "caught\ngrp\nafter\ncaught\nafter 143\nint\nafter\nrc=124\n",
@@ -829,6 +829,41 @@
         "exit": 0,
         "stdout": "x=a rc=143\nx=t\nb rc=0\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "timeout_status_follows_the_signal_that_ended_the_command",
+      "seq": 1300108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$(timeout 1 bash -c 'trap \"kill -9 \\$\\$\" TERM; sleep 5'); echo \"rc=$?\"; x=$(timeout --preserve-status 1 bash -c 'trap \"\" TERM; sleep 1.5; kill -USR1 $$'); echo \"rc=$?\"; x=$(timeout -s CONT 0.2 bash -c 'sleep 0.5; kill $$'); echo \"rc=$?\"; x=$(timeout --preserve-status -s CONT 0.2 bash -c 'sleep 0.5; kill $$'); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=137\nrc=138\nrc=124\nrc=143\n",
+        "stderr": "Terminated\n"
       }
     }
   ]

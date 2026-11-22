@@ -703,7 +703,6 @@ async def test_a_group_signal_a_shell_traps_still_ends_its_program():
 
     async def shell() -> int:
         outcome.append(await child.program(program))
-        started.clear()
         outcome.append(await child.program(program))
         return 0
 
@@ -720,6 +719,7 @@ async def test_a_group_signal_a_shell_traps_still_ends_its_program():
     child.catcher = catcher
     async with asyncio.timeout(5):
         await started.wait()
+        started.clear()
         assert await processes.signal_group(child.record.group, 15)
         await started.wait()
         assert await processes.signal(child, 15)
@@ -727,6 +727,49 @@ async def test_a_group_signal_a_shell_traps_still_ends_its_program():
         assert (await child.join()).exit == 0
     assert caught == [15, 15]
     assert outcome == [(None, 15), (0, None)]
+
+
+# A signal a stopped shell is sent waits for its CONT, then goes as it was
+# sent, however the CONT came: one sent to the whole group still ends the
+# program the shell runs, one sent to the shell alone leaves it running.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("whole", [True, False])
+async def test_a_held_signal_keeps_how_it_was_sent(whole):
+    processes = ProcessTable()
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        return 0
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = lambda signal, pid: True
+    group = child.record.group
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal(child, 19)
+        if whole:
+            assert await processes.signal_group(group, 15)
+            assert await processes.signal(child, 18)
+        else:
+            assert await processes.signal(child, 15)
+            assert await processes.signal_group(group, 18)
+        await asyncio.sleep(0)
+        finish.set()
+        assert (await child.join()).exit == 0
+    assert outcome == [(None, 15) if whole else (0, None)]
 
 
 # A pid a session's lines take in turn runs each line under it; one a live

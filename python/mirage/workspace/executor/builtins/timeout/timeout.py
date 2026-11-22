@@ -642,11 +642,11 @@ async def _deadline(
         say(SIGKILL)
         said.append(killed(SIGKILL))
         return await _ended(console, held, said, 137)
-    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored:
-        code = task.result() if preserve else TIMEOUT_STATUS
-        return await _ended(console, held, said, code, finished=True)
-    if signal in SELF_KILLING_SIGNALS and (
-        not foreground or signal == SIGKILL
+    carried = signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored
+    if (
+        not carried
+        and signal in SELF_KILLING_SIGNALS
+        and (not foreground or signal == SIGKILL)
     ):
         said.append(killed(signal))
         return await _ended(console, held, said, 128 + signal)
@@ -654,8 +654,23 @@ async def _deadline(
         code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
     return await _ended(
-        console, held, said, 128 + signal if preserve else TIMEOUT_STATUS
+        console, held, said, _signalled_status(process.signal, preserve)
     )
+
+
+def _signalled_status(ended: int | None, preserve: bool) -> int:
+    """timeout's status once a signal ended the command after the
+    deadline: 128 plus KILL whatever --preserve-status says, as GNU's
+    is, 128 plus the signal that ended it under --preserve-status, and
+    124 otherwise.
+
+    Args:
+        ended (int | None): the signal that ended the command; None
+            for a stop that named none, KILL's.
+        preserve (bool): --preserve-status.
+    """
+    signal = ended or SIGKILL
+    return 128 + signal if preserve or signal == SIGKILL else TIMEOUT_STATUS
 
 
 def _killed_report(
